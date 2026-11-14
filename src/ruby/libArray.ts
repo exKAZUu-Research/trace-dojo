@@ -2,11 +2,11 @@
 import {
   combinedStringEncoding,
   compareValues,
+  comparisonSign,
   inspect,
   inspectArray,
   rEql,
   rEquals,
-  spaceship,
   toIndex,
   toIndexExact,
   toInt,
@@ -273,9 +273,10 @@ def('Array', '<=>', 1, function* (self: RArray, [other]) {
   if (!compared) return NIL;
   const length = Math.min(self.items.length, compared.items.length);
   for (let index = 0; index < length; index++) {
-    const order = yield* spaceship(self.items[index] ?? NIL, compared.items[index] ?? NIL);
+    const result = yield* callMethod(self.items[index] ?? NIL, '<=>', [compared.items[index] ?? NIL]);
+    const order = yield* comparisonSign(result);
     if (order === undefined) return NIL;
-    if (order !== 0) return BigInt(order);
+    if (order !== 0) return result;
   }
   return BigInt(Math.sign(self.items.length - compared.items.length));
 });
@@ -440,6 +441,7 @@ def('Array', 'compact!', 0, function* (self: RArray) {
 
 function* flatten(items: Value[], depth: number, seen: Set<RArray>): Gen<Value[]> {
   const result: Value[] = [];
+  rt().heldArrays.push(result);
   const stack: { items: Value[]; index: number; depth: number; owner?: RArray }[] = [{ items, index: 0, depth }];
   try {
     while (stack.length > 0) {
@@ -468,6 +470,7 @@ function* flatten(items: Value[], depth: number, seen: Set<RArray>): Gen<Value[]
   } finally {
     for (const frame of stack) if (frame.owner) seen.delete(frame.owner);
     for (let index = 0; index < stack.length - 1; index++) rt().held.pop();
+    rt().heldArrays.pop();
   }
   return result;
 }

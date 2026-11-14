@@ -442,6 +442,24 @@ test('join keeps converted Array elements reachable through earlier to_s callbac
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
+test('flatten keeps accumulated elements reachable during later conversions', () => {
+  for (const method of ['flatten', 'flatten!']) {
+    const program = `class A;def to_ary;[Turtle.new];end;end;class B;def to_ary;x=1;[];end;end;a=[A.new,B.new].${method}`;
+    expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+  }
+});
+
+test('Set symmetric difference roots a temporary operand during source callbacks', () => {
+  const program = 'class E;include Enumerable;def each;yield Turtle.new;x=1;yield 2;end;end;s=Set[] ^ E.new';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
+test('ArithmeticSequence keeps keyword arguments reachable', () => {
+  const program =
+    'class A;def initialize;@t=Turtle.new;end;def coerce(x);$v=@t;[x,3];end;end;e=1.step(to:A.new);x=1;e.first';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
 test('converted Hash sources keep later Turtle values alive during insertion', () => {
   for (const operation of ['h={**A.new}', 'h={}.merge(A.new)']) {
     const program = `class K; def hash; x=1; 0; end; end; class A; def to_hash; {K.new=>1, 2=>Turtle.new}; end; end; ${operation}`;

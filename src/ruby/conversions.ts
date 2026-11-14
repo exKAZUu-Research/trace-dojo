@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 411 -- The conversions module keeps one concern's cases together.
+// code-gauge-allow-file fileNcss 517 -- The conversions module keeps one concern's cases together.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { argumentError, implicitConversionError, rangeError, rubyError, typeError } from './errors';
 import { hashGet } from './hashes';
@@ -322,8 +322,8 @@ export function className(cls: RClass): string {
 }
 
 /** A String's inspect: double-quoted, escaping quotes, backslashes, `#{`, and characters that do not print. */
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of value Ruby converts or compares.
-// code-gauge-allow functionNcss 53 -- One case per kind of value Ruby converts or compares.
+// code-gauge-allow functionCognitiveComplexity 23 -- Ruby String inspection has distinct escapes for control, Unicode, and interpolation bytes.
+// code-gauge-allow functionNcss 59 -- Ruby String inspection keeps its escape cases in one pass.
 export function strInspect(text: string): string {
   let result = '"';
   for (let index = 0; index < text.length; index++) {
@@ -443,6 +443,7 @@ export function symInspect(name: string): string {
 // Comparisons ---------------------------------------------------------------------------------------------------------
 
 /** `a == b`, with the library's own types compared without calling methods unless the program redefined them. */
+// code-gauge-allow functionCognitiveComplexity 23 -- Equality dispatch covers numeric, String, container, and custom Ruby values.
 export function* rEquals(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = new Map()): Gen<boolean> {
   rt().spend();
   if (a === b) return typeof a !== 'number' || !Number.isNaN(a);
@@ -456,14 +457,7 @@ export function* rEquals(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = n
   }
   if (typeof a !== 'object' || a === NIL || a instanceof RSymbol) return false;
   if (a instanceof RString) return b instanceof RString && truthy(yield* callMethod(a, '==', [b]));
-  if (a instanceof RArray) {
-    if (!(b instanceof RArray) || a.items.length !== b.items.length) return false;
-    return yield* eqlContainer(a, b, pairs, function* () {
-      for (let index = 0; index < a.items.length; index++)
-        if (!(yield* rEquals(a.items[index], b.items[index], pairs))) return false;
-      return true;
-    });
-  }
+  if (a instanceof RArray) return b instanceof RArray && (yield* equalsArrays(a, b, pairs));
   if (a instanceof RHash)
     return b instanceof RHash && (yield* eqlContainer(a, b, pairs, () => hashEquals(a, b, pairs)));
   if (a instanceof RRange) {
@@ -483,6 +477,19 @@ export function* rEquals(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = n
     return truthy(yield* callMethod(a, '==', [b]));
   }
   return false;
+}
+
+function* equalsArrays(a: RArray, b: RArray, pairs: Map<RBasic, Set<RBasic>>): Gen<boolean> {
+  if (a.items.length !== b.items.length) return false;
+  return yield* eqlContainer(a, b, pairs, function* () {
+    const length = a.items.length;
+    for (let index = 0; index < length; index++) {
+      if (a.items.length !== length || b.items.length !== length) return false;
+      if (!(yield* rEquals(a.items[index], b.items[index], pairs))) return false;
+      if (a.items.length !== length || b.items.length !== length) return false;
+    }
+    return true;
+  });
 }
 
 function* hashEquals(a: RHash, b: Value, pairs: Map<RBasic, Set<RBasic>>): Gen<boolean> {
@@ -579,7 +586,6 @@ export function comparisonFailed(a: Value, b: Value): unknown {
 }
 
 /** `a <=> b` as a number, or `undefined` when it is nil. */
-// code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of value Ruby converts or compares.
 export function* spaceship(a: Value, b: Value): Gen<number | undefined> {
   if (
     (typeof a === 'bigint' || typeof a === 'number') &&
@@ -591,6 +597,10 @@ export function* spaceship(a: Value, b: Value): Gen<number | undefined> {
     return compareRubyStrings(a, b);
   }
   const result = yield* callMethod(a, '<=>', [b]);
+  return yield* comparisonSign(result);
+}
+
+export function* comparisonSign(result: Value): Gen<number | undefined> {
   if (result === NIL) return undefined;
   if (typeof result === 'bigint') return Number(result > 0n ? 1n : result < 0n ? -1n : 0n);
   if (typeof result === 'number') return Math.sign(result);

@@ -2349,6 +2349,26 @@ test('Kernel Integer accepts negative radices and source prefixes', () => {
   expect(run('begin;p "10".to_i(-1);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'ArgumentError\n' });
 });
 
+test('ArithmeticSequence size converts custom limits for Float receivers', () => {
+  expect(run('class A;def to_f;puts :converted;3.0;end;end;p 1.0.step(A.new,1).size')).toMatchObject({
+    stdout: 'converted\n3\n',
+  });
+});
+
+test('Array equality observes shrinkage during element callbacks', () => {
+  expect(run('class X;def ==(v);$b.clear;true;end;end;$a=[X.new,1];$b=[0,1];p $a==$b')).toMatchObject({
+    stdout: 'false\n',
+  });
+  expect(run('class X;def ==(v);$a.clear;true;end;end;$a=[X.new,1];$b=[0,1];p $a==$b')).toMatchObject({
+    stdout: 'false\n',
+  });
+});
+
+test('Array spaceship returns the element comparison value', () => {
+  expect(run('class X;def <=>(x);42;end;end;p [X.new]<=>[0]')).toMatchObject({ stdout: '42\n' });
+  expect(run('class X;def <=>(x);Float::NAN;end;end;p [X.new]<=>[0]')).toMatchObject({ stdout: 'NaN\n' });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(

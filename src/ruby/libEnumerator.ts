@@ -46,7 +46,7 @@ export function makeEnumerator(recv: Value, method: string, args: Value[], keywo
     arithmetic,
     size: () => enumeratorSize(recv, method, args, keywords),
     held() {
-      return [this.recv, ...this.args];
+      return this.keywords ? [this.recv, ...this.args, this.keywords] : [this.recv, ...this.args];
     },
   };
   enumerator.data = source;
@@ -138,7 +138,7 @@ function* stepSize(recv: Value, args: Value[], keywords?: RHash): Gen<Value> {
     originalEnd !== NIL &&
     typeof originalEnd !== 'bigint' &&
     typeof originalEnd !== 'number' &&
-    typeof step === 'number'
+    (typeof start === 'number' || typeof step === 'number')
       ? yield* toStepFloat(originalEnd)
       : originalEnd;
   if (

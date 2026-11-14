@@ -141,20 +141,26 @@ def('Set', ['-', 'difference'], 1, function* (self: RObject, [value]) {
 def('Set', '^', 1, function* (self: RObject, [value]) {
   const result = new RObject(self.cls);
   result.data = (self.data as SetData).copy();
-  const right = value instanceof RObject && value.data instanceof SetData ? value : yield* setFromEnumerable(value);
-  for (const entry of membersOf(right).map.values()) {
-    if (yield* hashSet(membersOf(result), entry.key, true)) yield* hashDelete(membersOf(result), entry.key);
-  }
-  return result;
+  return yield* whileHeld(result, function* () {
+    const right = value instanceof RObject && value.data instanceof SetData ? value : yield* setFromEnumerable(value);
+    return yield* whileHeld(right, function* () {
+      for (const entry of membersOf(right).map.values()) {
+        if (yield* hashSet(membersOf(result), entry.key, true)) yield* hashDelete(membersOf(result), entry.key);
+      }
+      return result;
+    });
+  });
 });
 
 function* setFromEnumerable(value: Value): Gen<RObject> {
   if (value === NIL || typeof value !== 'object') throw typeError('value must be enumerable');
   const result = yield* newSet([]);
-  yield* iterate(value, function* (item) {
-    yield* hashSet(membersOf(result), item, true);
+  return yield* whileHeld(result, function* () {
+    yield* iterate(value, function* (item) {
+      yield* hashSet(membersOf(result), item, true);
+    });
+    return result;
   });
-  return result;
 }
 
 function* subset(small: RObject, large: RObject): Gen<boolean> {
