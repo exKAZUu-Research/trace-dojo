@@ -3,6 +3,7 @@ import {
   floatToInt,
   formatFloat,
   inspectValue,
+  toInt,
   toRubyInt,
   toStrValue,
   toSValue,
@@ -10,7 +11,7 @@ import {
 import { argumentError, floatDomainError, rangeError, rubyError, typeError } from './errors';
 import { rubyDtoa } from './floatFormat';
 import { hashGet } from './hashes';
-import { callMethod, type Gen } from './interp';
+import { callMethod, type Gen, respondsTo } from './interp';
 import { kernelFloat, kernelInteger } from './libNumeric';
 import { NIL, RHash, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
@@ -208,7 +209,7 @@ function encodeCodePoints(text: string): Uint8Array {
   return Uint8Array.from(bytes);
 }
 
-// code-gauge-allow functionNcss 43 -- Ruby's format directives and flags.
+// code-gauge-allow functionNcss 37 -- Ruby's format directives and flags are dispatched together.
 function* directive(type: string, spec: Spec, arg: () => Value): Gen<string | RString> {
   switch (type) {
     case 'd':
@@ -247,23 +248,7 @@ function* directive(type: string, spec: Spec, arg: () => Value): Gen<string | RS
       return padStringValue(inspected.binary ? exportBinaryInspect(inspected) : inspected, spec);
     }
     case 'c': {
-      const value = arg();
-      let text: string;
-      if (value instanceof RString)
-        return padStringValue(stringCharacters(value)[0] ?? stringFromBytes(new Uint8Array()), {
-          ...spec,
-          precision: undefined,
-        });
-      else {
-        const point = yield* intArg(value);
-        if (point < -0x80_00_00_00_00_00_00_00n || point > 0x7f_ff_ff_ff_ff_ff_ff_ffn)
-          throw rangeError("bignum too big to convert into 'long'");
-        if (point < -2_147_483_648n) throw rangeError(`integer ${point} too small to convert to 'int'`);
-        if (point > 2_147_483_647n) throw rangeError(`integer ${point} too big to convert to 'int'`);
-        if (point < 0n || point > 0x10_ff_ffn) throw argumentError('invalid character');
-        text = String.fromCodePoint(Number(point));
-      }
-      return pad(text, spec, false);
+      return yield* characterDirective(arg(), spec);
     }
     case '\n':
     case '\0': {
@@ -273,6 +258,30 @@ function* directive(type: string, spec: Spec, arg: () => Value): Gen<string | RS
       throw argumentError(`malformed format string - %${type}`);
     }
   }
+}
+
+function* characterDirective(value: Value, spec: Spec): Gen<string | RString> {
+  let string = value instanceof RString ? value : undefined;
+  if (!string && respondsTo(value, 'to_str', true)) {
+    const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
+    if (converted instanceof RString) string = converted;
+    else if (converted !== NIL) {
+      const name = realClassOf(value).name;
+      throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
+    }
+  }
+  if (string)
+    return padStringValue(stringCharacters(string)[0] ?? stringFromBytes(new Uint8Array()), {
+      ...spec,
+      precision: undefined,
+    });
+  const point = yield* toInt(value);
+  if (point < -0x80_00_00_00_00_00_00_00n || point > 0x7f_ff_ff_ff_ff_ff_ff_ffn)
+    throw rangeError("bignum too big to convert into 'long'");
+  if (point < -2_147_483_648n) throw rangeError(`integer ${point} too small to convert to 'int'`);
+  if (point > 2_147_483_647n) throw rangeError(`integer ${point} too big to convert to 'int'`);
+  if (point < 0n || point > 0x10_ff_ffn) throw argumentError('invalid character');
+  return pad(String.fromCodePoint(Number(point)), spec, false);
 }
 
 function padStringValue(value: RString, spec: Spec): RString {

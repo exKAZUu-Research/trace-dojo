@@ -160,6 +160,7 @@ export function* hashSet(hash: RHash, key: Value, value: Value): Gen<boolean> {
   try {
     if (hash.frozen) throw frozenError(hash, yield* inspect(hash));
     const { base, slot, entry } = yield* findEntry(hash, key);
+    if (hash.frozen) throw frozenError(hash, yield* inspect(hash));
     if (entry) {
       entry.value = value;
       hash.map.version++;

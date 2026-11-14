@@ -2369,6 +2369,17 @@ test('Array spaceship returns the element comparison value', () => {
   expect(run('class X;def <=>(x);Float::NAN;end;end;p [X.new]<=>[0]')).toMatchObject({ stdout: 'NaN\n' });
 });
 
+test('Hash assignment rechecks freezing after key callbacks', () => {
+  expect(
+    run('class K;def hash;$h.freeze;0;end;end;$h={};begin;$h[K.new]=1;rescue=>e;p e.class;end;p $h.size')
+  ).toMatchObject({ stdout: 'FrozenError\n0\n' });
+});
+
+test('character formatting uses implicit String and Integer conversions', () => {
+  expect(run('class A;private;def to_str;"x";end;end;p format("%c",A.new)')).toMatchObject({ stdout: '"x"\n' });
+  expect(run('class A;private;def to_int;65;end;end;p format("%c",A.new)')).toMatchObject({ stdout: '"A"\n' });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(
