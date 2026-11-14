@@ -177,11 +177,11 @@ function* addIntersectionMembers(self: RObject, value: Value, result: RObject): 
     const scanned = scanSelf ? self : value;
     const lookup = scanSelf ? value : self;
     yield* eachEntry(membersOf(scanned), function* (entry) {
-      if (yield* hashGet(membersOf(lookup), entry.key)) yield* callMethod(result, 'add', [entry.key]);
+      if (truthy(yield* callMethod(lookup, 'include?', [entry.key]))) yield* callMethod(result, 'add', [entry.key]);
     });
   } else {
     yield* eachOther(value, function* (item) {
-      if (yield* hashGet(membersOf(self), item)) yield* callMethod(result, 'add', [item]);
+      if (truthy(yield* callMethod(self, 'include?', [item]))) yield* callMethod(result, 'add', [item]);
     });
   }
 }

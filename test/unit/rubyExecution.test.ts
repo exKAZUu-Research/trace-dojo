@@ -1996,6 +1996,12 @@ test('Set intersection avoids rehashing unrelated receiver members', () => {
   expect(run(source)).toMatchObject({ stdout: '0\n0\n' });
 });
 
+test('Set intersection dispatches overridden membership checks', () => {
+  expect(run('class S<Set;def include?(x);puts :inc;true;end;end;s=S[1];p (s & Set[2]).to_a')).toMatchObject({
+    stdout: 'inc\n[2]\n',
+  });
+});
+
 test('Set subclasses use overridden insertion and deletion methods', () => {
   expect(
     run(
