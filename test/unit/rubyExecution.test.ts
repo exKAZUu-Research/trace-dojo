@@ -39,6 +39,9 @@ test('unsupported regexp syntax fails explicitly', () => {
   expect(run(String.raw`p "g".match?(/[\H]/)`)).toMatchObject({
     uncaughtException: String.raw`正規表現の文字クラス内の\H は、この採点環境では使えません。`,
   });
+  expect(run(String.raw`p "g".match?(/[\S]/)`)).toMatchObject({
+    uncaughtException: String.raw`正規表現の文字クラス内の\S は、この採点環境では使えません。`,
+  });
 });
 
 test('regexp splitting and MatchData slicing match Ruby output', () => {
@@ -5549,6 +5552,11 @@ test('Time retains fractional offset values and formats rounded zones', () => {
   expect(
     run('t=Time.new(2024,1,1,0,0,0,Rational(1,3));p t.strftime("%F %T"),t.nsec,Time.new(2024,1,1,0,0,0,0.0001).nsec')
   ).toMatchObject({ stdout: '"2024-01-01 00:00:00"\n666666666\n999899999\n' });
+  expect(run('p Time.at(0).getlocal(Rational(-1,3)),Time.at(0).getlocal(Rational(-2,5)).strftime("%z")')).toMatchObject(
+    {
+      stdout: '1969-12-31 23:59:59 +0000\n"+0000"\n',
+    }
+  );
   expect(run('p Time.at(0,0.0009)>Time.at(0),Time.at(0,0.0009)==Time.at(0),Time.at(0.3).nsec')).toMatchObject({
     stdout: 'true\nfalse\n299999999\n',
   });
@@ -6523,6 +6531,12 @@ test('Lazy preserves source yield argument lists', () => {
 test('regexp replacement expands the last participating capture', () => {
   expect(run(String.raw`p "abc".sub(/(a)(b)?/, "\\+"), "a".sub(/(a)(b)?/, "\\+")`)).toMatchObject({
     stdout: '"bc"\n"a"\n',
+  });
+});
+
+test('regexp replacement resolves Unicode named captures', () => {
+  expect(run(String.raw`p "ab".sub(/(?<名前>a)/, "\\k<名前>"),"ab".sub(/(?<όνομα>a)/, "\\k<όνομα>")`)).toMatchObject({
+    stdout: '"ab"\n"ab"\n',
   });
 });
 

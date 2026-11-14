@@ -313,7 +313,7 @@ function translateEscape(
       return inClass ? '0-9a-fA-F' : '[0-9a-fA-F]';
     }
     case 'H': {
-      if (inClass) throw unsupportedSyntax(String.raw`文字クラス内の\H`);
+      if (inClass) throw unsupportedClassEscape(String.raw`\H`);
       return '[^0-9a-fA-F]';
     }
     case 'G': {
@@ -325,7 +325,7 @@ function translateEscape(
       return `(?:(?<=${word})(?!${word})|(?<!${word})(?=${word}))`;
     }
     case 'B': {
-      if (inClass) throw unsupportedSyntax(String.raw`文字クラス内の\B`);
+      if (inClass) throw unsupportedClassEscape(String.raw`\B`);
       const word = `[${POSIX_CLASSES.word}]`;
       return `(?:(?<=${word})(?=${word})|(?<!${word})(?!${word}))`;
     }
@@ -342,7 +342,7 @@ function translateEscape(
       return inClass ? String.raw` \t\r\n\f\v` : String.raw`[ \t\r\n\f\v]`;
     }
     case 'S': {
-      if (inClass) throw unsupportedSyntax(String.raw`文字クラス内の\S`);
+      if (inClass) throw unsupportedClassEscape(String.raw`\S`);
       return String.raw`[^ \t\r\n\f\v]`;
     }
     case 'p':
@@ -376,6 +376,10 @@ function translateEscape(
 
 function unsupportedSyntax(feature: string): unknown {
   return new UnsupportedFeatureError(`正規表現の${feature}`);
+}
+
+function unsupportedClassEscape(escape: string): unknown {
+  return unsupportedSyntax(`文字クラス内の${escape}`);
 }
 
 export function makeRegexp(
@@ -974,7 +978,7 @@ function expand(replacement: string, state: MatchState, limit: number): string {
     parts.push(part);
   };
   let position = 0;
-  for (const match of replacement.matchAll(/\\(k<(\w+)>|[0-9&+\\`'])/g)) {
+  for (const match of replacement.matchAll(/\\(k<([\p{ID_Start}_][\p{ID_Continue}_]*)>|[0-9&+\\`'])/gu)) {
     append(replacement.slice(position, match.index));
     const [, code, name] = match;
     let part: string;

@@ -333,8 +333,8 @@ function isoWeek(date: Date): { year: number; week: number } {
 }
 
 function offsetText(offset: number, colon: boolean, includeSeconds = false): string {
-  const sign = offset < 0 ? '-' : '+';
   const magnitude = Math.round(Math.abs(offset));
+  const sign = magnitude === 0 || offset >= 0 ? '+' : '-';
   const hours = String(Math.floor(magnitude / 3600)).padStart(2, '0');
   const minutes = String(Math.floor((magnitude % 3600) / 60)).padStart(2, '0');
   const seconds = magnitude % 60;
