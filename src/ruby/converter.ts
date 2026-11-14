@@ -24,7 +24,7 @@ import type {
 } from './ast';
 import { decodeDoubleQuoted, decodeSingleQuoted } from './escapes';
 import { translate } from './libRegexp';
-import { regexpCaptureNames } from './regexpCaptureNames';
+import { regexpCaptureNames, regexpHasNumberedBackref } from './regexpCaptureNames';
 import { UnsupportedFeatureError } from './runtime';
 
 /** The local variables of one scope; a block's scope sees its parents' variables. */
@@ -642,8 +642,11 @@ export class Converter {
     }
     if (literal) parts.push(literal);
     if (parts.every((part) => typeof part === 'string')) {
+      const source = parts.join('');
+      if (regexpCaptureNames(source, flags.includes('x')).length > 0 && regexpHasNumberedBackref(source))
+        this.fail(node, '名前付きキャプチャと番号付き後方参照は一緒に使えません。');
       try {
-        new RegExp(translate(parts.join(''), flags.includes('x')), 'u');
+        new RegExp(translate(source, flags.includes('x'), flags.includes('m')), 'u');
       } catch (error) {
         if (!(error instanceof UnsupportedFeatureError)) this.fail(node, '正規表現の書き方に誤りがあります。');
       }
@@ -1003,7 +1006,7 @@ export class Converter {
       left.k === 'regex' &&
       left.parts.every((part) => typeof part === 'string')
     ) {
-      const names = regexpCaptureNames(left.parts.join('')).map((name) => {
+      const names = regexpCaptureNames(left.parts.join(''), left.flags.includes('x')).map((name) => {
         this.checkReservedBinding(leftNode, name);
         return { k: 'lvar' as const, name, depth: this.ctx.scope.declare(name) };
       });

@@ -27,10 +27,10 @@ const POSIX_CLASSES: Record<string, string> = {
   alnum: String.raw`\p{L}\p{M}\p{Nd}`,
   upper: String.raw`\p{Lu}`,
   lower: String.raw`\p{Ll}`,
-  space: String.raw`\s`,
+  space: String.raw` \t\r\n\f\v`,
   punct: String.raw`\p{P}`,
   xdigit: '0-9A-Fa-f',
-  word: String.raw`\w`,
+  word: String.raw`\p{L}\p{M}\p{N}_`,
   cntrl: String.raw`\p{Cc}`,
   print: String.raw`\P{C}`,
   graph: String.raw`\p{L}\p{M}\p{N}\p{P}\p{S}`,
@@ -56,12 +56,13 @@ const PROPERTY_NAMES: Record<string, string> = {
 const SYNTAX = String.raw`^$\.*+?()[]{}|/-`;
 
 /** Translates a Ruby (Onigmo) expression into JavaScript's syntax, rejecting what has no counterpart. */
-export function translate(source: string, extended: boolean): string {
+export function translate(source: string, extended: boolean, multiline = false): string {
+  rejectNestedRepetition(source);
   let out = '';
   let inClass = 0;
   let atomStart = 0;
   const groupStarts: number[] = [];
-  const namedCaptures = regexpCaptureNames(source).length > 0;
+  const namedCaptures = regexpCaptureNames(source, extended).length > 0;
   for (let index = 0; index < source.length; index++) {
     const char = source[index];
     if (extended && inClass === 0) {
@@ -88,7 +89,7 @@ export function translate(source: string, extended: boolean): string {
           continue;
         }
       }
-      if (/^[0-7]$/.test(next)) {
+      if (next === '0' || (/^[1-7]$/.test(next) && /^[0-7]{2}/.test(source.slice(index + 1)))) {
         const octal = /^[0-7]{0,2}/.exec(source.slice(index + 1))?.[0] ?? '';
         out += `\\x${Number.parseInt(next + octal, 8)
           .toString(16)
@@ -168,13 +169,29 @@ export function translate(source: string, extended: boolean): string {
       if (interval) {
         const quantified = out.slice(atomStart) + interval[0].replace('{,', '{0,');
         const next = source[index + interval[0].length];
-        out = `${out.slice(0, atomStart)}${next && '*+?{'.includes(next) ? `(?:${quantified})` : quantified}`;
+        const repeated =
+          next !== undefined &&
+          ('*+{'.includes(next) || (next === '?' && source[index + interval[0].length + 1] === '?'));
+        out = `${out.slice(0, atomStart)}${repeated ? `(?:${quantified})` : quantified}`;
         index += interval[0].length - 1;
         continue;
       }
     }
     if (inClass === 0 && char === '+' && /[*+?]/.test(source[index - 1] ?? '') && source[index - 2] !== '\\') {
       throw unsupportedSyntax('強欲な量指定子（*+ など）');
+    }
+    if (inClass === 0 && char === '.') {
+      atomStart = out.length;
+      out += multiline ? String.raw`[\s\S]` : String.raw`[^\n]`;
+      continue;
+    }
+    if (inClass === 0 && char === '^') {
+      out += String.raw`(?<![^\n])`;
+      continue;
+    }
+    if (inClass === 0 && char === '$') {
+      out += String.raw`(?![^\n])`;
+      continue;
     }
     if (inClass === 0 && !'*+?)}|'.includes(char)) {
       atomStart = out.length;
@@ -187,6 +204,37 @@ export function translate(source: string, extended: boolean): string {
     out += char;
   }
   return out;
+}
+
+function rejectNestedRepetition(source: string): void {
+  const groups: boolean[] = [];
+  let inClass = false;
+  let closedGroupRepeated = false;
+  for (let index = 0; index < source.length; index++) {
+    const char = source[index];
+    if (char === '\\') {
+      index++;
+      closedGroupRepeated = false;
+      continue;
+    }
+    if (char === '[') inClass = true;
+    if (char === ']') inClass = false;
+    if (inClass) continue;
+    if (char === '(') {
+      groups.push(false);
+      closedGroupRepeated = false;
+      continue;
+    }
+    if (char === ')') {
+      closedGroupRepeated = groups.pop() ?? false;
+      if (closedGroupRepeated && groups.length > 0) groups[groups.length - 1] = true;
+      continue;
+    }
+    const unbounded = char === '+' || char === '*' || (char === '{' && /^\{\d+,\}/.test(source.slice(index)));
+    if (unbounded && closedGroupRepeated) throw unsupportedSyntax('入れ子の繰り返し');
+    if (unbounded && groups.length > 0) groups[groups.length - 1] = true;
+    if (!'?*+{}'.includes(char)) closedGroupRepeated = false;
+  }
 }
 
 // code-gauge-allow functionNcss 35 -- Ruby's method takes these argument forms, which the branches mirror.
@@ -225,6 +273,13 @@ function translateEscape(
     case 'a': {
       return String.raw`\x07`;
     }
+    case 's': {
+      return inClass ? String.raw` \t\r\n\f\v` : String.raw`[ \t\r\n\f\v]`;
+    }
+    case 'S': {
+      if (inClass) throw unsupportedSyntax(String.raw`文字クラス内の\S`);
+      return String.raw`[^ \t\r\n\f\v]`;
+    }
     case 'p':
     case 'P': {
       const property = /^\{(\^?)(\w+)\}/.exec(source.slice(index + 1));
@@ -253,7 +308,7 @@ export function makeRegexp(
   options: { ignoreCase?: boolean; multiline?: boolean; extended?: boolean }
 ): RObject {
   const regexp = new RObject(rt().c.Regexp);
-  const translated = translate(source, options.extended ?? false);
+  const translated = translate(source, options.extended ?? false, options.multiline ?? false);
   let js: RegExp;
   try {
     js = new RegExp(translated, `dgmu${options.ignoreCase ? 'i' : ''}${options.multiline ? 's' : ''}`);
@@ -268,7 +323,6 @@ export function makeRegexp(
     js,
   };
   regexp.data = data;
-  regexp.frozen = true;
   return regexp;
 }
 
@@ -318,8 +372,8 @@ export function execAt(regexp: RObject, text: string, start: number): MatchState
   const namedGroups: Record<string, number> = {};
   const nameOrder = regexpCaptureNames(js.source);
   for (const [position, name] of nameOrder.entries()) {
-    names.push(name);
-    namedGroups[name] = position + 1;
+    if (!(name in namedGroups)) names.push(name);
+    if (!(name in namedGroups) || result.indices[position + 1] !== undefined) namedGroups[name] = position + 1;
   }
   return { text, groups: [...result.indices], names, namedGroups, regexp };
 }
@@ -327,7 +381,6 @@ export function execAt(regexp: RObject, text: string, start: number): MatchState
 function matchData(state: MatchState): RObject {
   const match = new RObject(rt().c.MatchData);
   match.data = state;
-  match.frozen = true;
   return match;
 }
 
@@ -346,6 +399,20 @@ function setLastMatch(state: MatchState | undefined): Value {
   const match = state ? matchData(state) : NIL;
   frame.extra.lastMatch = match;
   return match;
+}
+
+export function setLiteralMatch(text: string, target: string, from: number): void {
+  if (from < 0) {
+    setLastMatch(undefined);
+    return;
+  }
+  setLastMatch({
+    text,
+    groups: [[from, from + target.length]],
+    names: [],
+    namedGroups: {},
+    regexp: makeRegexp(escapeRegexpSource(target), {}),
+  });
 }
 
 function callerFrame(): Frame {

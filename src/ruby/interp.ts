@@ -433,11 +433,13 @@ export function* ev(e: Expr, frame: Frame): Gen {
           source += yield* toS(value);
         }
       }
-      return makeRegexp(source, {
+      const regexp = makeRegexp(source, {
         ignoreCase: e.flags.includes('i'),
         multiline: e.flags.includes('m'),
         extended: e.flags.includes('x'),
       });
+      regexp.frozen = true;
+      return regexp;
     }
     case 'matchWrite': {
       const result = yield* ev(e.match, frame);

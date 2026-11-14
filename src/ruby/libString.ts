@@ -35,6 +35,7 @@ import { hashDefault, hashGet, stringKeyEquals, stringKeyHash } from './hashes';
 import { callBlock, callMethod, type Gen, invoke, nativeProc, requireBlock } from './interp';
 import { makeEnumerator } from './libEnumerator';
 import { parseFloatLenient, parseIntegerLenient } from './libNumeric';
+import { setLiteralMatch } from './libRegexp';
 import { NIL, RArray, RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { successorBytes, transformInvalid } from './stringTransforms';
@@ -1208,6 +1209,7 @@ function* substitute(
     const mode = stringTextMode(self);
     const foundByte = textByteLength(text.slice(0, found), mode);
     matched = true;
+    setLiteralMatch(text, target, found);
     const piece = yield* substitutionPiece(self, target, replacement, block, text, found, foundByte);
     if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
     const modified = (global || mutating) && self.s !== text;
@@ -1228,6 +1230,7 @@ function* substitute(
     if (!global) break;
     rt().spend();
   }
+  if (!matched) setLiteralMatch(text, target, -1);
   if (positionByte <= sourceLength) append(active.slice(positionByte));
   return { value: stringFromBytes(joinChunks(chunks, length), resultBinary), matched };
 }
@@ -1317,6 +1320,7 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
   for (;;) {
     const index = text.indexOf(target, position);
     if (index === -1) break;
+    setLiteralMatch(text, target, index);
     const mode = stringTextMode(self);
     const foundByte = textByteLength(text.slice(0, index), mode);
     const match = textResult(self, target);
@@ -1331,6 +1335,7 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
     position = modified ? textIndexAtByte(text, nextByte, mode) : index + target.length;
     if (position > text.length) break;
   }
+  if (found.length === 0 && !block) setLiteralMatch(text, target, -1);
   if (!block) return arr(found);
   return self;
 });
@@ -1343,6 +1348,7 @@ function* scanEmpty(self: RString, block: RProc | undefined): Gen<Value> {
     const first = bytes[offset];
     const width = self.binary || first < 0xc2 || first >= 0xf5 ? 1 : first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
     const match = textResult(self, '');
+    setLiteralMatch(self.s, '', textIndexAtByte(self.s, offset, stringTextMode(self)));
     if (block) {
       yield* callBlock(block, [match], false);
       if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');

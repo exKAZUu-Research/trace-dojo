@@ -5517,6 +5517,53 @@ test('Regexp repeats complete escaped and Unicode atoms', () => {
   expect(run(String.raw`p "AAAA"[/\x41{2}+/];p "aaaa"[/a{2}*/];p "aaaa"[/a{2}{2}/];p "AA"[/\101{2}+/]`)).toMatchObject({
     stdout: '"AAAA"\n"aaaa"\n"aaaa"\n"AA"\n',
   });
+  expect(run(String.raw`p "aa"[/(a)\1/];p "1234"[/\d{2,4}?/]`)).toMatchObject({
+    stdout: '"aa"\n"12"\n',
+  });
+});
+
+test('Regexp rejects nested unbounded repetition before native matching', () => {
+  expect(run(String.raw`p(/^(a+)+$|!/.match?("a"*30+"!"))`)).toMatchObject({
+    uncaughtException: expect.stringContaining('は、この採点環境では使えません。'),
+  });
+});
+
+test('Regexp line boundaries and character classes follow Ruby semantics', () => {
+  expect(
+    run(
+      String.raw`p(/a$/.match?("a\r\n"));p "\u3000" =~ /\s/;p "a\rb" =~ /a.b/;p "a\rb".scan(/^./);p(/[[:word:]]/.match?("é"))`
+    )
+  ).toMatchObject({ stdout: 'false\nnil\n0\n["a"]\ntrue\n' });
+});
+
+test('Regexp literals freeze while constructed regexps and matches remain mutable', () => {
+  expect(
+    run(
+      'p /a/.frozen?,Regexp.new("a").frozen?,"a".match(/a/).frozen?;r=Regexp.new("a");r.instance_variable_set(:@label,"x");p r.instance_variable_get(:@label)'
+    )
+  ).toMatchObject({ stdout: 'true\nfalse\nfalse\n"x"\n' });
+});
+
+test('String substitution patterns update the current match', () => {
+  expect(run('p "hello".gsub("l"){$&};p "hello".sub("l"){$~[0]+"!"};"hello".sub("ell","x");p $~[0]')).toMatchObject({
+    stdout: '"hello"\n"hel!lo"\n"ell"\n',
+  });
+});
+
+test('Regexp capture names follow comments, Unicode and duplicate alternatives', () => {
+  expect(run('/(a) # (?<fake>b)\n/x =~ "a";p $1')).toMatchObject({ stdout: '"a"\n' });
+  const name = String.fromCodePoint(21_517, 21_069);
+  expect(run(`/(?<${name}>a)/ =~ "a";p ${name};p /(?<${name}>a)/.match("a")[:${name}]`)).toMatchObject({
+    stdout: '"a"\n"a"\n',
+  });
+  expect(run(String.raw`p /(?<x>a)|(?<x>b)/.match("a")[:x];p /(?<x>a)|(?<x>b)/.match("b")[:x]`)).toMatchObject({
+    stdout: '"a"\n"b"\n',
+  });
+});
+
+test('Regexp literals reject numbered backreferences beside named captures', () => {
+  expect(run(String.raw`puts :before;m=/((a)|z)(?<x>b)\1/.match("aba")`)).toMatchObject({ kind: 'compileError' });
+  expect(run(String.raw`p Regexp.new("((a)|z)(?<x>b)\\1").class`)).toMatchObject({ stdout: 'Regexp\n' });
 });
 
 test('anonymous forwarding resolves only method parameters', () => {
