@@ -1044,10 +1044,11 @@ def('Enumerable', 'uniq', 0, function* (self, _args, block) {
   return arr(yield* uniqCollect(self, block));
 });
 
-export function* uniqValues(items: Value[], block: RProc | undefined): Gen<Value[]> {
-  return yield* uniqCollect(items, block);
+export function* uniqValues(source: Value[] | RArray, block: RProc | undefined): Gen<Value[]> {
+  return yield* uniqCollect(source, block);
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Uniqueness streams Enumerable values and follows live Array storage with the same rooted result.
 function* uniqCollect(source: Value[] | Value, block: RProc | undefined): Gen<Value[]> {
   const seen = newHash();
   const result: Value[] = [];
@@ -1060,7 +1061,9 @@ function* uniqCollect(source: Value[] | Value, block: RProc | undefined): Gen<Va
         if (!(yield* hashSet(seen, key, true))) result.push(value);
       };
       if (Array.isArray(source)) for (const value of source) yield* add(value);
-      else yield* iterate(source, add);
+      else if (source instanceof RArray) {
+        for (let index = 0; index < source.items.length; index++) yield* add(source.items[index]);
+      } else yield* iterate(source, add);
       return result;
     });
   } finally {

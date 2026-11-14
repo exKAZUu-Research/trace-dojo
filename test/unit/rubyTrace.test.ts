@@ -33,6 +33,15 @@ test('values_at keeps earlier Turtle selections reachable through later conversi
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
+test('Array conversion results stay reachable during transpose and product', () => {
+  const transpose =
+    'class A;def to_ary;[Turtle.new];end;end;class B;def to_ary;x=1;[1];end;end;a=[A.new,B.new].transpose';
+  expect(traceProgram('ruby', transpose, transpose).finalTurtles).toHaveLength(1);
+  const product =
+    'class A;def to_ary;[Turtle.new];end;end;class B;def to_ary;x=1;[1];end;end;a=[1].product(A.new,B.new)';
+  expect(traceProgram('ruby', product, product).finalTurtles).toHaveLength(1);
+});
+
 test('pending expression values remain visible in Turtle traces', () => {
   const programs = [
     'def v;x=1;42;end;h={Turtle.new=>v}',

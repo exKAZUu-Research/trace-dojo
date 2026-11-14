@@ -1680,6 +1680,24 @@ test('Enumerable uniq interleaves callbacks and hashes keys once', () => {
   expect(run('p [1].uniq{puts :block;1}')).toMatchObject({ stdout: '[1]\n' });
 });
 
+test('Array uniqueness follows callback replacement', () => {
+  expect(run('$a=[1,2,3];p $a.uniq{|x|$a.replace([8]) if x==1;x},$a')).toMatchObject({
+    stdout: '[1]\n[8]\n',
+  });
+  expect(run('$a=[1,2,3];p $a.uniq!{|x|$a.replace([8]) if x==1;x},$a')).toMatchObject({
+    stdout: 'nil\n[8]\n',
+  });
+});
+
+test('Array product and set operations read receivers after operand conversion', () => {
+  expect(run('class X;def to_ary;$a.replace([8]);[9];end;end;$a=[1,2];$a.product(X.new){|x|p x}')).toMatchObject({
+    stdout: '[8, 9]\n',
+  });
+  expect(run('class X;def to_ary;$a.replace([8]);[9];end;end;$a=[1,2];p $a|X.new,$a')).toMatchObject({
+    stdout: '[8, 9]\n[8]\n',
+  });
+});
+
 test('Array delete retains contents when an equality callback raises', () => {
   expect(
     run(
