@@ -1892,11 +1892,12 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
     }
     const used = e.used === 1 || (e.used === 2 && frame.resultUsed);
     rt().currentRow = e.row;
-    if (!e.block) return yield* invoke(superMethod, home.self, args, keywords, block, used);
+    const missingVcall = method.name === 'method_missing' ? home.extra.missingCallVcall : undefined;
+    if (!e.block) return yield* invoke(superMethod, home.self, args, keywords, block, used, missingVcall);
     const proc = block as RProc;
     if (proc.callSiteState) proc.callSiteState.active = true;
     try {
-      return yield* invoke(superMethod, home.self, args, keywords, proc, used);
+      return yield* invoke(superMethod, home.self, args, keywords, proc, used, missingVcall);
     } catch (error) {
       if (error instanceof BreakSignal && error.tag === proc.breakTag) return error.value;
       throw error;

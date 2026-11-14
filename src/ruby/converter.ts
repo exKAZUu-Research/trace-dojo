@@ -40,6 +40,12 @@ class LocalScope {
     readonly parent?: LocalScope
   ) {}
 
+  enclosingBlock(): LocalScope | undefined {
+    let parent = this.parent;
+    while (parent?.kind === 'end') parent = parent.parent;
+    return parent?.kind === 'block' ? parent : undefined;
+  }
+
   private self(): LocalScope {
     return this;
   }
@@ -594,7 +600,7 @@ export class Converter {
 
   private checkNumberedUse(node: Node, scope: LocalScope, depth: number): void {
     if (scope.innerNumberedUsed) this.fail(node, '内側のブロックで番号付き引数が既に使われています。');
-    for (let parent = scope.parent; parent?.kind === 'block'; parent = parent.parent)
+    for (let parent = scope.enclosingBlock(); parent; parent = parent.enclosingBlock())
       if (parent.numberedUsed) this.fail(node, '外側のブロックで番号付き引数が既に使われています。');
     if (this.ctx.implicit === undefined && depth < 0) this.fail(node, '明示的な引数と番号付き引数は一緒に使えません。');
     scope.numberedUsed = true;
@@ -1385,7 +1391,12 @@ export class Converter {
       return { params, locals: scope.names, body, row: node.startPosition.row, isLambdaLiteral };
     } finally {
       if (scope.numberedUsed || scope.innerNumberedUsed)
-        for (let parent: LocalScope | undefined = outer.scope; parent?.kind === 'block'; parent = parent.parent)
+        for (
+          let parent: LocalScope | undefined =
+            outer.scope.kind === 'block' ? outer.scope : outer.scope.enclosingBlock();
+          parent;
+          parent = parent.enclosingBlock()
+        )
           parent.innerNumberedUsed = true;
       this.ctx = outer;
     }

@@ -840,14 +840,15 @@ sdef('Enumerator', 'produce', [0, 1], function* (_self, args, block) {
 
 // Lazy -----------------------------------------------------------------------------------------------------------------
 
-type LazyStep =
+type LazyStep = (
   | { kind: 'map' | 'select' | 'reject' | 'take_while' | 'drop_while' | 'filter_map' | 'flat_map'; block: RProc }
   | { kind: 'take' | 'drop'; count: number }
   | { kind: 'compact' }
   | { kind: 'with_index'; offset: bigint; block?: RProc }
   | { kind: 'grep' | 'grep_v'; pattern: Value; block?: RProc }
   | { kind: 'uniq'; block?: RProc }
-  | { kind: 'zip'; others: Value[] };
+  | { kind: 'zip'; others: Value[] }
+) & { label?: string; args?: Value[] };
 
 interface LazyData {
   source: Value;
@@ -876,7 +877,7 @@ function nextLazySize(size: Value, step: LazyStep): Value {
     if (isRubyFloat(size)) return Math.max(0, Number(size) - step.count);
     return size;
   }
-  return step.kind === 'map' || step.kind === 'with_index' ? size : NIL;
+  return step.kind === 'map' || step.kind === 'with_index' || step.kind === 'zip' ? size : NIL;
 }
 
 function makeLazy(source: Value, steps: LazyStep[]): RObject {
@@ -888,6 +889,7 @@ function makeLazy(source: Value, steps: LazyStep[]): RObject {
       return [
         this.source,
         ...this.steps.flatMap((step) => ('block' in step && step.block ? [step.block] : [])),
+        ...this.steps.flatMap((step) => step.args ?? []),
         ...this.steps.flatMap((step) => ('pattern' in step ? [step.pattern] : 'others' in step ? step.others : [])),
         ...cursorRoots(this.enumerator?.cursor),
       ];
@@ -923,13 +925,13 @@ for (const kind of [
           : kind === 'collect_concat'
             ? 'flat_map'
             : kind;
-    return makeLazy(data.source, [...data.steps, { kind: normalized, block: requireBlock(block) }]);
+    return makeLazy(data.source, [...data.steps, { kind: normalized, block: requireBlock(block), label: kind }]);
   });
 }
 for (const kind of ['grep', 'grep_v'] as const) {
   def('Enumerator::Lazy', kind, 1, (self: RObject, [pattern], block) => {
     const data = self.data as LazyData;
-    return makeLazy(data.source, [...data.steps, { kind, pattern, block }]);
+    return makeLazy(data.source, [...data.steps, { kind, pattern, block, args: [pattern] }]);
   });
 }
 def('Enumerator::Lazy', 'uniq', 0, (self: RObject, _args, block) => {
@@ -942,14 +944,14 @@ def('Enumerator::Lazy', 'zip', [0, -1], function* (self: RObject, others, block)
     if (!(other instanceof RArray) && !respondsTo(other, 'each', true))
       throw typeError(`wrong argument type ${realClassOf(other).name} (must respond to :each)`);
   const data = self.data as LazyData;
-  return makeLazy(data.source, [...data.steps, { kind: 'zip', others }]);
+  return makeLazy(data.source, [...data.steps, { kind: 'zip', others, args: others }]);
 });
 for (const kind of ['take', 'drop'] as const) {
   def('Enumerator::Lazy', kind, 1, function* (self: RObject, [count]) {
     const data = self.data as LazyData;
     const n = Number(yield* toInt(count));
     if (n < 0) throw argumentError(`attempt to ${kind} negative size`);
-    return makeLazy(data.source, [...data.steps, { kind, count: n }]);
+    return makeLazy(data.source, [...data.steps, { kind, count: n, args: [count] }]);
   });
 }
 def('Enumerator::Lazy', 'compact', 0, (self: RObject) => {
@@ -959,7 +961,7 @@ def('Enumerator::Lazy', 'compact', 0, (self: RObject) => {
 def('Enumerator::Lazy', 'with_index', [0, 1], function* (self: RObject, args, block) {
   const data = self.data as LazyData;
   const offset = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : 0n;
-  return makeLazy(data.source, [...data.steps, { kind: 'with_index', offset, block }]);
+  return makeLazy(data.source, [...data.steps, { kind: 'with_index', offset, block, args }]);
 });
 def('Enumerator::Lazy', 'each_with_index', 0, function* (self: RObject, _args, block) {
   if (!block) return yield* callMethod(self, 'with_index', []);
@@ -1148,8 +1150,10 @@ def('Enumerator::Lazy', ['inspect', 'to_s'], 0, function* (self: RObject) {
   const data = self.data as LazyData;
   let text = `#<Enumerator::Lazy: ${yield* inspect(data.source)}>`;
   for (const step of data.steps) {
-    const argument = step.kind === 'take' || step.kind === 'drop' ? `(${step.count})` : '';
-    text = `#<Enumerator::Lazy: ${text}:${step.kind}${argument}>`;
+    const argumentsText: string[] = [];
+    for (const argument of step.args ?? []) argumentsText.push(yield* inspect(argument));
+    const suffix = argumentsText.length > 0 ? `(${argumentsText.join(', ')})` : '';
+    text = `#<Enumerator::Lazy: ${text}:${step.label ?? step.kind}${suffix}>`;
   }
   return str(text);
 });

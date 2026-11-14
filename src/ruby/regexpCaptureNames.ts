@@ -64,6 +64,10 @@ export function regexpCommentEnd(source: string, start: number): number {
 
 export function regexpLineCommentEnd(source: string, start: number): number {
   for (let index = start; index < source.length; index++) {
+    if (source[index] === '\\' && source[index + 1] === '\\') {
+      index++;
+      continue;
+    }
     if (source[index] === '\\' && source[index + 1] === '\n') {
       index++;
       continue;

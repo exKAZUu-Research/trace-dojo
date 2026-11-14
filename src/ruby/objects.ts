@@ -288,31 +288,56 @@ export class RClass extends RBasic {
     const active = new Set<RClass>();
     const superAncestors = this.superclass ? this.superclass.ancestors() : [];
     const inSuper = new Set(superAncestors);
-    const prependChain = (module: RClass, visited = new Set<RClass>()): RClass[] => {
+    const mergedPrepends = (modules: RClass[], inherited = new Set<RClass>()): RClass[] => {
+      const chains = modules.map((module) => prependChain(module, new Set(inherited)));
+      const prerequisites = new Map<RClass, Set<RClass>>();
+      const ranks = new Map<RClass, number>();
+      const addEdge = (before: RClass, after: RClass): void => {
+        if (before !== after) prerequisites.get(after)?.add(before);
+      };
+      for (const chain of chains) {
+        for (const [index, item] of chain.entries()) {
+          if (!prerequisites.has(item)) {
+            prerequisites.set(item, new Set());
+            ranks.set(item, ranks.size);
+          }
+          if (index > 0) addEdge(chain[index - 1], item);
+        }
+      }
+      for (let index = 1; index < modules.length; index++) addEdge(modules[index - 1], modules[index]);
+      const result: RClass[] = [];
+      const emitted = new Set<RClass>();
+      while (emitted.size < prerequisites.size) {
+        const ready = [...prerequisites].filter(
+          ([item, before]) => !emitted.has(item) && [...before].every((prior) => emitted.has(prior))
+        );
+        const unblocked = ready.filter(([item]) =>
+          chains.every((chain, index) => {
+            const root = modules[index];
+            return emitted.has(root) || chain.indexOf(item) <= chain.indexOf(root) || !chain.includes(item);
+          })
+        );
+        const candidates =
+          unblocked.length > 0
+            ? unblocked
+            : ready.length > 0
+              ? ready
+              : [...prerequisites].filter(([item]) => !emitted.has(item));
+        const choice = candidates.toSorted(
+          ([left], [right]) => (ranks.get(left) ?? 0) - (ranks.get(right) ?? 0)
+        )[0]?.[0];
+        if (!choice) throw new Error('Missing prepend ancestor');
+        emitted.add(choice);
+        result.push(choice);
+      }
+      return result;
+    };
+    const prependChain = (module: RClass, visited: Set<RClass>): RClass[] => {
       if (visited.has(module)) return [];
       visited.add(module);
-      return [
-        ...module.prepends.flatMap((item) => prependChain(item, visited)),
-        module,
-        ...module.includes.flatMap((item) => prependChain(item, visited)),
-      ];
-    };
-    const mergedPrepends = (modules: RClass[]): RClass[] => {
-      const merged: RClass[] = [];
-      for (const module of modules) {
-        let pending: RClass[] = [];
-        for (const item of prependChain(module)) {
-          const position = merged.indexOf(item);
-          if (position === -1) {
-            pending.push(item);
-          } else {
-            merged.splice(position, 0, ...pending);
-            pending = [];
-          }
-        }
-        merged.push(...pending);
-      }
-      return merged;
+      const prepended = mergedPrepends(module.prepends, visited);
+      for (const item of prepended) visited.add(item);
+      return [...prepended, module, ...module.includes.flatMap((item) => prependChain(item, visited))];
     };
     const addModule = (module: RClass, placement: 'prepend' | 'body' = 'body'): void => {
       const visited = placement === 'prepend' ? seenPrepended : seen;

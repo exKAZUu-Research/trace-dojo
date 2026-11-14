@@ -26,7 +26,11 @@ export interface RegexpData {
   extended: boolean;
   /** The translated expression; its `lastIndex` is set before each use. */
   js: RegExp;
+  safeNative: boolean;
+  context?: vm.Context;
 }
+
+const MATCH_SCRIPT = new vm.Script('regexp.exec(input)');
 
 const POSIX_CLASSES: Record<string, string> = {
   alpha: String.raw`\p{L}\p{M}`,
@@ -37,7 +41,7 @@ const POSIX_CLASSES: Record<string, string> = {
   space: String.raw` \t\r\n\f\v`,
   punct: String.raw`\p{P}`,
   xdigit: '0-9A-Fa-f',
-  word: String.raw`\p{L}\p{M}\p{Nd}\p{Pc}`,
+  word: String.raw`\p{L}\p{M}\p{Nd}\p{Nl}\p{Pc}`,
   cntrl: String.raw`\p{Cc}`,
   print: String.raw`\P{C}`,
   graph: String.raw`\p{L}\p{M}\p{N}\p{P}\p{S}`,
@@ -387,9 +391,26 @@ export function makeRegexp(
     multiline: options.multiline ?? false,
     extended: options.extended ?? false,
     js,
+    safeNative: triviallyLinearRegexp(source),
   };
   regexp.data = data;
   return regexp;
+}
+
+function triviallyLinearRegexp(source: string): boolean {
+  let inClass = false;
+  for (let index = 0; index < source.length; index++) {
+    const char = source[index];
+    if (char === '\\') {
+      const next = source[++index];
+      if (next && /[1-9kg]/.test(next)) return false;
+      continue;
+    }
+    if (char === '[') inClass = true;
+    else if (char === ']') inClass = false;
+    else if (!inClass && /[()*+?{|]/.test(char)) return false;
+  }
+  return true;
 }
 
 export function isRegexp(value: Value): value is RObject {
@@ -430,22 +451,24 @@ function unitIndex(text: string, char: number): number {
 /** Runs a regexp from a character position, returning the match's state or undefined. */
 export function execAt(regexp: RObject, text: string, start: number): MatchState | undefined {
   if (start < 0 || start > charIndex(text, text.length)) return undefined;
-  const { js } = dataOf(regexp);
+  const data = dataOf(regexp);
+  const { js } = data;
   rt().spend(Math.ceil(text.length / 64));
   js.lastIndex = unitIndex(text, start);
-  const remaining = rt().budget.remainingMilliseconds;
-  if (remaining === 0) throw new ExecutionLimitError('time');
   let result: RegExpExecArray | null;
-  try {
-    result = vm.runInNewContext(
-      'regexp.exec(input)',
-      { regexp: js, input: text },
-      { timeout: remaining }
-    ) as RegExpExecArray | null;
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT')
-      throw new ExecutionLimitError('time');
-    throw error;
+  if (data.safeNative) result = js.exec(text);
+  else {
+    const remaining = rt().budget.remainingMilliseconds;
+    if (remaining === 0) throw new ExecutionLimitError('time');
+    const context = (data.context ??= vm.createContext({ regexp: js, input: text }));
+    context.input = text;
+    try {
+      result = MATCH_SCRIPT.runInContext(context, { timeout: remaining }) as RegExpExecArray | null;
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT')
+        throw new ExecutionLimitError('time');
+      throw error;
+    }
   }
   if (!result?.indices) return undefined;
   const names: string[] = [];

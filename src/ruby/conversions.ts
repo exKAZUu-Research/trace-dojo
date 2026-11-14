@@ -91,11 +91,12 @@ function* respondsToConversion(value: Value, name: string): Gen<boolean> {
 }
 
 export function* tryImplicitConversion(value: Value, name: string): Gen<Value | undefined> {
-  if (!(yield* respondsToConversion(value, name))) return undefined;
+  const resolved = classOf(value).findMethod(name);
+  if (!resolved && !(yield* respondsToConversion(value, name))) return undefined;
   try {
     return yield* callMethod(value, name, [], undefined, undefined, { fcall: true });
   } catch (error) {
-    if (error instanceof RubyError && error.exception.cls === rt().c.NoMethodError) return undefined;
+    if (!resolved && error instanceof RubyError && isA(error.exception, rt().c.NoMethodError)) return undefined;
     throw error;
   }
 }

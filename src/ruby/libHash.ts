@@ -1,4 +1,4 @@
-import { inspect, inspectHash, rEql, rEquals, toIndexExact } from './conversions';
+import { inspect, inspectHash, rEql, rEquals, toIndexExact, tryImplicitConversion } from './conversions';
 import { def, sdef } from './define';
 import {
   argumentError,
@@ -35,8 +35,8 @@ function* modify(self: RHash): Gen<void> {
 
 function* toHash(value: Value): Gen<RHash> {
   if (value instanceof RHash) return value;
-  if (respondsTo(value, 'to_hash', true)) {
-    const converted = yield* callMethod(value, 'to_hash', [], undefined, undefined, { fcall: true });
+  const converted = yield* tryImplicitConversion(value, 'to_hash');
+  if (converted !== undefined) {
     if (converted instanceof RHash) return converted;
     const name = realClassOf(value).name;
     throw typeError(`can't convert ${name} to Hash (${name}#to_hash gives ${realClassOf(converted).name})`);
@@ -125,16 +125,18 @@ sdef('Hash', '[]', [0, -1], function* (self, args) {
 
 function* hashLiteralSource(value: Value): Gen<RHash | RArray | undefined> {
   if (value instanceof RHash || value instanceof RArray) return value;
-  if (respondsTo(value, 'to_hash', true)) {
-    const converted = yield* callMethod(value, 'to_hash', [], undefined, undefined, { fcall: true });
+  const hashValue = yield* tryImplicitConversion(value, 'to_hash');
+  if (hashValue !== undefined) {
+    const converted = hashValue;
     if (converted instanceof RHash) return converted;
     if (converted !== NIL)
       throw typeError(
         `can't convert ${realClassOf(value).name} to Hash (${realClassOf(value).name}#to_hash gives ${realClassOf(converted).name})`
       );
   }
-  if (respondsTo(value, 'to_ary', true)) {
-    const converted = yield* callMethod(value, 'to_ary', [], undefined, undefined, { fcall: true });
+  const arrayValue = yield* tryImplicitConversion(value, 'to_ary');
+  if (arrayValue !== undefined) {
+    const converted = arrayValue;
     if (converted instanceof RArray) return converted;
     if (converted !== NIL)
       throw typeError(

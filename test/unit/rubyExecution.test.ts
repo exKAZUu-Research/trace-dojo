@@ -5975,3 +5975,77 @@ test('Struct and Data singleton constructors follow their super chains', () => {
     uncaughtException: expect.stringContaining("super: no superclass method 'new'"),
   });
 });
+
+test('conversion failures preserve resolved method errors and dynamic fallback errors', () => {
+  expect(run('class A;def to_str;nil.foo;end;end;begin;"p"+A.new;rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'NoMethodError\n',
+  });
+  expect(
+    run(
+      'class E<NoMethodError;end;class A;def method_missing(n,*);raise E,"custom";end;end;begin;"p"+A.new;rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({
+    stdout: 'TypeError\n',
+  });
+  expect(
+    run('class A;def respond_to_missing?(n,*)=n==:to_ary;def method_missing(n,*)=[1,2];end;p [0]+A.new')
+  ).toMatchObject({
+    stdout: '[0, 1, 2]\n',
+  });
+  expect(
+    run('class A;def respond_to_missing?(n,*)=n==:to_str;def method_missing(n,*)="converted";end;p String(A.new)')
+  ).toMatchObject({
+    stdout: '"converted"\n',
+  });
+  expect(
+    run('class A;def respond_to_missing?(n,*)=n==:to_hash;def method_missing(n,*)={a:1};end;p({}.merge(A.new))')
+  ).toMatchObject({
+    stdout: '{a: 1}\n',
+  });
+});
+
+test('regexp matching stays fast for ordinary literal patterns', () => {
+  expect(run('n=0;20000.times{n+=1 if "abc".match?(/b/)};p n')).toMatchObject({ stdout: '20000\n' });
+  expect(run('p(/[[:word:]]/.match?("Ⅻ"))')).toMatchObject({ stdout: 'true\n' });
+});
+
+test('nested method_missing and lazy descriptions keep their call context', () => {
+  expect(
+    run(
+      'class A;def method_missing(n,*a) = super;end;class B<A;def method_missing(n,*a) = super;def t = zork;end;B.new.t'
+    )
+  ).toMatchObject({
+    uncaughtException: expect.stringContaining('(NameError)'),
+  });
+  expect(run('p (1..3).lazy.zip(4..6),(1..3).lazy.zip(4..6).size,(1..3).lazy.find_all(&:odd?)')).toMatchObject({
+    stdout:
+      '#<Enumerator::Lazy: #<Enumerator::Lazy: 1..3>:zip(4..6)>\n3\n#<Enumerator::Lazy: #<Enumerator::Lazy: 1..3>:find_all>\n',
+  });
+});
+
+test('prepend merges shared descendants across direct and nested chains', () => {
+  expect(
+    run(
+      'module N;end;module O;end;module M;include N,O;end;module P;include N;end;module Q;include O;end;class B;prepend Q,P,M;end;p B.ancestors.take(6)'
+    )
+  ).toMatchObject({
+    stdout: '[Q, P, M, N, O, B]\n',
+  });
+  expect(
+    run(
+      'module N;end;module P;include N;end;module Q;include N;end;module M;prepend P,Q;end;class B;prepend M;end;p B.ancestors.take(5)'
+    )
+  ).toMatchObject({
+    stdout: '[P, Q, N, M, B]\n',
+  });
+});
+
+test('numbered block arguments remain exclusive across END frames', () => {
+  for (const source of ['p [1].map{_1;END{[2].map{_1}}}', 'p [1].map{END{[2].map{_1}};_1}'])
+    expect(run(source)).toMatchObject({ kind: 'compileError' });
+});
+
+test('extended regexp comments end after even backslash runs', () => {
+  const source = String.raw`p(/(a)# ignored \\` + '\n' + String.raw`(?<real>b)/x.match("ab").to_a)`;
+  expect(run(source)).toMatchObject({ stdout: '["ab", "b"]\n' });
+});

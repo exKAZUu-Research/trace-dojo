@@ -540,8 +540,9 @@ def(
   1,
   function* (_self, [value]) {
     if (value instanceof RString) return value;
-    if (respondsTo(value, 'to_str', true)) {
-      const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
+    const stringValue = yield* tryImplicitConversion(value, 'to_str');
+    if (stringValue !== undefined) {
+      const converted = stringValue;
       if (converted instanceof RString) return converted;
       if (converted !== NIL)
         throw typeError(

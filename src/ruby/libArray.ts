@@ -13,6 +13,7 @@ import {
   toIndexExact,
   toStrValue,
   toSValue,
+  tryImplicitConversion,
 } from './conversions';
 import { def, sdef } from './define';
 import {
@@ -67,8 +68,8 @@ function* toAry(value: Value): Gen<RArray> {
 
 export function* tryAry(value: Value): Gen<RArray | undefined> {
   if (value instanceof RArray) return value;
-  if (respondsTo(value, 'to_ary', true)) {
-    const converted = yield* callMethod(value, 'to_ary', [], undefined, undefined, { fcall: true });
+  const converted = yield* tryImplicitConversion(value, 'to_ary');
+  if (converted !== undefined) {
     if (converted instanceof RArray) return converted;
     if (converted !== NIL)
       throw typeError(
