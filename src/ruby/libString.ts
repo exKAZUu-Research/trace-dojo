@@ -36,7 +36,7 @@ import { callBlock, callMethod, type Gen, invoke, nativeProc, requireBlock } fro
 import { makeEnumerator } from './libEnumerator';
 import { parseFloatLenient, parseIntegerLenient } from './libNumeric';
 import { setLiteralMatch } from './libRegexp';
-import { NIL, RArray, RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
+import { NIL, RArray, RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { successorBytes, transformInvalid } from './stringTransforms';
 import {
@@ -198,14 +198,37 @@ def(
   'String',
   'initialize',
   [0, 1],
-  function* (self: RString, args) {
+  function* (self: RString, args, _block, keywords) {
+    if (args.length === 0) self.binary = true;
     if (args.length > 0) {
       const source = yield* toStrValue(args[0]);
       setBytes(self, stringBytes(source), source.binary);
     }
+    if (keywords)
+      for (const entry of keywords.map.values()) {
+        const key = entry.key instanceof RSymbol ? entry.key.name : undefined;
+        if (key === 'capacity') {
+          const capacity = yield* toIndex(entry.value);
+          if (capacity < 0) throw argumentError('negative string size');
+          if (capacity > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+        } else if (key === 'encoding') {
+          const encoding =
+            entry.value instanceof RString
+              ? entry.value.s
+              : entry.value instanceof RObject && entry.value.cls === rt().c.Encoding
+                ? (entry.value.data as string)
+                : yield* toStr(entry.value);
+          if (encoding === 'ASCII-8BIT' || encoding === 'BINARY') self.binary = true;
+          // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby spells the encoding name UTF-8.
+          else if (encoding === 'UTF-8' || encoding === 'US-ASCII') {
+            self.binary = false;
+            self.usAscii = encoding === 'US-ASCII';
+          } else throw new UnsupportedFeatureError(`String.new の文字コード ${encoding}`);
+        } else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
+      }
     return NIL;
   },
-  { visibility: 'private' }
+  { visibility: 'private', keywords: true }
 );
 sdef(
   'String',

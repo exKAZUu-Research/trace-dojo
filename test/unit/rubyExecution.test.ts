@@ -5462,7 +5462,7 @@ test('DATA each_line returns an enumerator without consuming the cursor', () => 
 
 test('Integer chr preserves ASCII encoding metadata', () => {
   expect(run('p 65.chr.encoding,0.chr.encoding,255.chr.encoding')).toMatchObject({
-    stdout: '#<Encoding:US-ASCII>\n#<Encoding:US-ASCII>\n#<Encoding:ASCII-8BIT (BINARY)>\n',
+    stdout: '#<Encoding:US-ASCII>\n#<Encoding:US-ASCII>\n#<Encoding:BINARY (ASCII-8BIT)>\n',
   });
 });
 
@@ -6460,4 +6460,51 @@ test('Rational equality delegates to custom objects', () => {
   expect(run('class N; def ==(x); p x; true; end;end; p Rational(1,2)==N.new')).toMatchObject({
     stdout: '(1/2)\ntrue\n',
   });
+});
+
+test('POSIX and Word regexp classes follow Unicode properties', () => {
+  const program = String.raw`p "　".match?(/[[:space:]]/), " ".match?(/[[:blank:]]/), "٣".match?(/[[:digit:]]/), "Ⅻ".match?(/[[:alnum:]]/), "́".match?(/[[:alpha:]]/), "+".match?(/[[:punct:]]/), "1_".scan(/\p{Word}/)`;
+  expect(run(program)).toMatchObject({ stdout: 'true\ntrue\ntrue\ntrue\nfalse\ntrue\n["1", "_"]\n' });
+});
+
+test('public_method_defined? excludes protected methods', () => {
+  expect(
+    run(
+      'class A; protected def f;end;end;p A.method_defined?(:f),A.public_method_defined?(:f),A.protected_method_defined?(:f)'
+    )
+  ).toMatchObject({
+    stdout: 'true\nfalse\ntrue\n',
+  });
+});
+
+test('String.new accepts supported options and defaults to binary encoding', () => {
+  expect(
+    run(
+      'p String.new.encoding, String.new(capacity:10).encoding, String.new(encoding:"UTF-8").encoding, String.new("abc",capacity:5)'
+    )
+  ).toMatchObject({
+    stdout: '#<Encoding:BINARY (ASCII-8BIT)>\n#<Encoding:BINARY (ASCII-8BIT)>\n#<Encoding:UTF-8>\n"abc"\n',
+  });
+});
+
+test('MatchData holds one frozen source snapshot', () => {
+  expect(run('m=/a/.match("abc");p m.string.frozen?,m.string.equal?(m.string)')).toMatchObject({
+    stdout: 'true\ntrue\n',
+  });
+});
+
+test('Time strftime echoes unknown directives and getlocal retains UTC identity', () => {
+  expect(
+    run('p Time.new(2024).strftime("%Q %q %J %K"); t=Time.at(0).getlocal("UTC"); p t.utc?,t.zone,t')
+  ).toMatchObject({
+    stdout: '"%Q %q %J %K"\ntrue\n"UTC"\n1970-01-01 00:00:00 UTC\n',
+  });
+});
+
+test('regexp split clears an unrelated prior match', () => {
+  expect(run('/a/=~"a";"abc".split(/b/);p $&')).toMatchObject({ stdout: 'nil\n' });
+});
+
+test('Rational text accepts decimal denominators', () => {
+  expect(run('p Rational("1/2.5"), "1/2.5".to_r')).toMatchObject({ stdout: '(2/5)\n(2/5)\n' });
 });

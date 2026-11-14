@@ -29,7 +29,7 @@ export function installEncodings(runtime: Runtime): void {
 
 def('Encoding', ['to_s', 'name'], 0, (self: RObject) => str(self.data as string));
 def('Encoding', 'inspect', 0, (self: RObject) =>
-  str(`#<Encoding:${self.data as string}${self.data === 'ASCII-8BIT' ? ' (BINARY)' : ''}>`)
+  str(self.data === 'ASCII-8BIT' ? '#<Encoding:BINARY (ASCII-8BIT)>' : `#<Encoding:${self.data as string}>`)
 );
 def(
   'String',

@@ -167,6 +167,10 @@ function exactOffset(value: Value): Value | undefined {
   return undefined;
 }
 
+function zoneFromOffset(value: Value): TimeData['zone'] {
+  return value instanceof RString && (value.s === 'UTC' || value.s === 'Z') ? 'utc' : 'fixed';
+}
+
 function* buildTime(args: Value[], offset: number, zone: TimeData['zone'], microseconds?: Value, exact?: Value): Gen {
   const { fields, seconds } = yield* fieldArgs(args);
   const [year, month, day, hour, minute] = fields;
@@ -229,7 +233,7 @@ sdef(
       return yield* buildTime(
         args.slice(0, 6),
         yield* parseOffset(args[6]),
-        args[6] instanceof RString && (args[6].s === 'UTC' || args[6].s === 'Z') ? 'utc' : 'fixed',
+        zoneFromOffset(args[6]),
         undefined,
         exactOffset(args[6])
       );
@@ -363,11 +367,11 @@ function strftime(data: TimeData, format: string): string {
       };
       const width = widthText ? Number(widthText) : undefined;
       if (width !== undefined && width > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
-      if (colons && directive !== 'z') throw new UnsupportedFeatureError(`Time#strftime(${whole})`);
       const flag = /([-_0])[^-_0]*$/.exec(flags)?.[1] ?? '';
       const rendered =
         calendarDirective(data, date, directive, flag) ?? clockDirective(data, date, directive, flag, colons, whole);
-      if (rendered === undefined) throw new UnsupportedFeatureError(`Time#strftime(${whole})`);
+      if (rendered === undefined) return finish(whole);
+      if (colons && directive !== 'z') throw new UnsupportedFeatureError(`Time#strftime(${whole})`);
       if ((directive === 'N' || directive === 'L') && width !== undefined) {
         chargePrecision(width);
         return finish(fractionDigits(data, width));
@@ -669,7 +673,7 @@ def('Time', 'getlocal', [0, 1], function* (self: RObject, args) {
     ? makeTime(
         data.nanoseconds,
         yield* parseOffset(args[0]),
-        'fixed',
+        zoneFromOffset(args[0]),
         exactOffset(args[0]),
         data.remainderNumerator,
         data.remainderDenominator
@@ -680,7 +684,7 @@ def('Time', 'localtime', [0, 1], function* (self: RObject, args) {
   if (args.length === 0 || args[0] === NIL) return changeZone(self, LOCAL_OFFSET, 'local');
   const offset = yield* parseOffset(args[0]);
   if (self.frozen) throw frozenError(self, timeText(dataOf(self), true));
-  return changeZone(self, offset, 'fixed', exactOffset(args[0]));
+  return changeZone(self, offset, zoneFromOffset(args[0]), exactOffset(args[0]));
 });
 
 function changeZone(self: RObject, offset: number, zone: TimeData['zone'], exact?: Value): RObject {

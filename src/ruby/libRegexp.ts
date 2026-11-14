@@ -44,19 +44,19 @@ export interface RegexpData {
 const MATCH_SCRIPT = new vm.Script('regexp.exec(input)');
 
 const POSIX_CLASSES: Record<string, string> = {
-  alpha: String.raw`\p{L}\p{M}`,
-  digit: '0-9',
-  alnum: String.raw`\p{L}\p{M}\p{Nd}`,
+  alpha: String.raw`\p{Alphabetic}`,
+  digit: String.raw`\p{Nd}`,
+  alnum: String.raw`\p{Alphabetic}\p{Nd}`,
   upper: String.raw`\p{Lu}`,
   lower: String.raw`\p{Ll}`,
-  space: String.raw` \t\r\n\f\v`,
-  punct: String.raw`\p{P}`,
+  space: String.raw`\p{White_Space}`,
+  punct: String.raw`\p{P}\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E`,
   xdigit: '0-9A-Fa-f',
   word: String.raw`\p{L}\p{M}\p{Nd}\p{Nl}\p{Pc}\u200C\u200D`,
   cntrl: String.raw`\p{Cc}`,
   print: String.raw`\P{C}`,
   graph: String.raw`\p{L}\p{M}\p{N}\p{P}\p{S}`,
-  blank: String.raw` \t`,
+  blank: String.raw`\p{Zs}\t`,
 };
 
 const PROPERTY_NAMES: Record<string, string> = {
@@ -71,7 +71,7 @@ const PROPERTY_NAMES: Record<string, string> = {
   upper: 'Lu',
   lower: 'Ll',
   space: 'White_Space',
-  word: 'L',
+  word: 'Word',
   punct: 'P',
 };
 
@@ -140,9 +140,16 @@ export function translate(source: string, extended: boolean, multiline = false):
         index++;
         continue;
       }
-      out += translateEscape(next, source, index, inClass > 0, (count) => {
-        index += count;
-      });
+      out += translateEscape(
+        next,
+        source,
+        index,
+        inClass > 0,
+        (count) => {
+          index += count;
+        },
+        (body) => negatedClassBodies.push(body)
+      );
       continue;
     }
     if (char === '[') {
@@ -329,7 +336,8 @@ function translateEscape(
   source: string,
   index: number,
   inClass: boolean,
-  skip: (count: number) => void
+  skip: (count: number) => void,
+  addNegatedClass: (body: string) => void
 ): string {
   switch (next) {
     case 'A': {
@@ -384,6 +392,14 @@ function translateEscape(
       const name = PROPERTY_NAMES[property[2].toLowerCase()] ?? property[2];
       skip(property[0].length);
       const negated = (next === 'P') !== (property[1] === '^');
+      if (name === 'Word') {
+        const body = POSIX_CLASSES.word;
+        if (inClass && negated) {
+          addNegatedClass(body);
+          return '';
+        }
+        return inClass ? body : `[${negated ? '^' : ''}${body}]`;
+      }
       return `\\${negated ? 'P' : 'p'}{${name}}`;
     }
     case 'k': {
@@ -476,6 +492,7 @@ function dataOf(regexp: RObject): RegexpData {
 
 export interface MatchState {
   text: string;
+  snapshot?: RString;
   literal?: boolean;
   groups: (readonly [number, number] | undefined)[];
   names: string[];
@@ -533,6 +550,10 @@ export function execAt(regexp: RObject, text: string, start: number): MatchState
 }
 
 function matchData(state: MatchState): RObject {
+  if (!state.snapshot) {
+    state.snapshot = str(state.text);
+    state.snapshot.frozen = true;
+  }
   const match = new RObject(rt().c.MatchData);
   match.data = state;
   return match;
@@ -897,7 +918,7 @@ def('MatchData', 'values_at', [0, -1], function* (self: RObject, args) {
   }
   return arr(values);
 });
-def('MatchData', 'string', 0, (self: RObject) => str(stateOf(self).text));
+def('MatchData', 'string', 0, (self: RObject) => stateOf(self).snapshot as RString);
 def('MatchData', 'regexp', 0, (self: RObject) => stateOf(self).regexp);
 def('MatchData', 'inspect', 0, (self: RObject) => str(matchDataInspect(self)));
 
@@ -1096,6 +1117,7 @@ wrapFirst('scan', function* (self, args, block) {
 wrapFirst('split', function* (self, args) {
   const text = self.s;
   const limit = args.length > 1 ? yield* toIndex(args[1]) : 0;
+  if (limit !== 1) setLastMatch(undefined);
   const parts: string[] = [];
   let fields = 0;
   let position = 0;

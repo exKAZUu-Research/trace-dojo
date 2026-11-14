@@ -777,3 +777,9 @@ test('exit handlers keep captured turtles reachable through final recording', ()
   const result = traceProgram('ruby', program, program);
   expect(result.finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
 });
+
+test('Method#to_proc retains its bound receiver in trace roots', () => {
+  const program = 'cb=Turtle.new.method(:forward).to_proc\nx=1\ncb.call';
+  const result = traceProgram('ruby', program, program);
+  expect(result.finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
+});

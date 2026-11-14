@@ -308,12 +308,25 @@ function* rationalOf(value: Value): Gen<RObject> {
 
 function parseRationalText(text: string, exact: boolean): RObject | undefined {
   const digits = String.raw`\d(?:_?\d)*`;
+  const component = `(?:${digits}(?:\\.${digits})?|\\.${digits})`;
   const pattern = new RegExp(
-    `^([+-]?)(${digits}(?:\\.${digits})?|\\.${digits})(?:[eE]([+-]?${digits}))?(?:/([+-]?${digits}))?`
+    `^([+-]?)(${component})(?:[eE]([+-]?${digits}))?(?:/([+-]?)(${component})(?:[eE]([+-]?${digits}))?)?`
   );
   const match = pattern.exec(text);
   if (!match || (exact && match[0].length !== text.length)) return undefined;
-  const [, sign, decimal, exponentText, denominatorText] = match;
+  const [, sign, decimal, exponentText, denominatorSign, denominatorDecimal, denominatorExponent] = match;
+  const numerator = decimalComponent(sign, decimal, exponentText);
+  const denominator = denominatorDecimal
+    ? decimalComponent(denominatorSign, denominatorDecimal, denominatorExponent)
+    : { numerator: 1n, denominator: 1n };
+  return makeRational(numerator.numerator * denominator.denominator, numerator.denominator * denominator.numerator);
+}
+
+function decimalComponent(
+  sign: string,
+  decimal: string,
+  exponentText: string | undefined
+): { numerator: bigint; denominator: bigint } {
   const [whole, fraction = ''] = decimal.replaceAll('_', '').split('.');
   let numerator = BigInt(`${whole || '0'}${fraction}`);
   if (sign === '-') numerator = -numerator;
@@ -321,11 +334,10 @@ function parseRationalText(text: string, exact: boolean): RObject | undefined {
   if (!Number.isSafeInteger(exponent)) throw new ExecutionLimitError('operations');
   chargePowerOfTen(BigInt(Math.abs(exponent)));
   const scale = fraction.length - exponent;
-  const denominator = BigInt(denominatorText?.replaceAll('_', '') ?? '1');
-  return makeRational(
-    scale < 0 ? numerator * 10n ** BigInt(-scale) : numerator,
-    (scale > 0 ? 10n ** BigInt(scale) : 1n) * denominator
-  );
+  return {
+    numerator: scale < 0 ? numerator * 10n ** BigInt(-scale) : numerator,
+    denominator: scale > 0 ? 10n ** BigInt(scale) : 1n,
+  };
 }
 
 function chargePowerOfTen(magnitude: bigint): void {

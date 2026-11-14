@@ -167,11 +167,13 @@ def(
 );
 def('Method', 'to_proc', 0, (self: RObject) => {
   const { recv, method } = self.data as MethodData;
-  return nativeProc(
+  const proc = nativeProc(
     methodArity(method),
     (args, block, _used, keywords) => invoke(method, recv, args, keywords, block, true),
     true
   );
+  proc.captured = [recv, method.owner, ...(method.body.kind === 'proc' ? [method.body.proc] : [])];
+  return proc;
 });
 def('Method', 'receiver', 0, (self: RObject) => (self.data as MethodData).recv);
 def('Method', 'unbind', 0, (self: RObject) => {
@@ -446,9 +448,12 @@ function reflectedMethod(self: RClass, name: string, inherit: boolean): RMethod 
   return method?.body.kind === 'undefined' ? undefined : method;
 }
 
-def('Module', ['method_defined?', 'public_method_defined?'], [1, 2], function* (self: RClass, args) {
+def('Module', 'method_defined?', [1, 2], function* (self: RClass, args) {
   const method = reflectedMethod(self, yield* nameOf(args[0]), args.length < 2 || truthy(args[1]));
   return method !== undefined && method.visibility !== 'private';
+});
+def('Module', 'public_method_defined?', [1, 2], function* (self: RClass, args) {
+  return reflectedMethod(self, yield* nameOf(args[0]), args.length < 2 || truthy(args[1]))?.visibility === 'public';
 });
 def('Module', 'private_method_defined?', [1, 2], function* (self: RClass, args) {
   return reflectedMethod(self, yield* nameOf(args[0]), args.length < 2 || truthy(args[1]))?.visibility === 'private';
