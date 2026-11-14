@@ -392,6 +392,7 @@ def('Array', 'slice!', [1, 2], function* (self: RArray, args) {
   return value;
 });
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Filtering checks freezing only when a callback's result would write.
 function* filterInPlace(self: RArray, block: RProc, keep: (result: boolean) => boolean): Gen<boolean> {
   yield* modify(self);
   let changed = false;
@@ -400,11 +401,19 @@ function* filterInPlace(self: RArray, block: RProc, keep: (result: boolean) => b
   try {
     for (; read < self.items.length; read++) {
       const item = self.items[read];
-      if (keep(truthy(yield* call(block, item)))) self.items[write++] = item;
-      else changed = true;
+      if (keep(truthy(yield* call(block, item)))) {
+        if (write < read) {
+          if (self.frozen) throw frozenError(self, yield* inspectArray(self));
+          self.items[write] = item;
+        }
+        write++;
+      } else {
+        if (self.frozen) throw frozenError(self, yield* inspectArray(self));
+        changed = true;
+      }
     }
   } finally {
-    if (write < read) self.items = [...self.items.slice(0, write), ...self.items.slice(read)];
+    if (write < read && !self.frozen) self.items = [...self.items.slice(0, write), ...self.items.slice(read)];
   }
   return changed;
 }
@@ -433,6 +442,7 @@ def('Array', ['map!', 'collect!'], 0, function* (self: RArray, _args, block) {
   for (let index = 0; index < self.items.length; index++) {
     const value = yield* call(block, self.items[index]);
     grow(index + 1, self);
+    yield* modify(self);
     while (self.items.length <= index) self.items.push(NIL);
     self.items[index] = value;
   }
@@ -493,16 +503,20 @@ def('Array', 'flatten!', [0, 1], function* (self: RArray, args) {
   const flattened = yield* flatten(self, depth, new Set([self]));
   const changed = flattened.length !== self.items.length || flattened.some((item, index) => item !== self.items[index]);
   grow(flattened.length, self);
+  yield* modify(self);
   self.items = flattened;
   return changed ? self : NIL;
 });
 def('Array', 'uniq', 0, function* (self: RArray, _args, block) {
+  if (self.items.length < 2) return arr([...self.items]);
   return arr(yield* uniqValues(self.items, block));
 });
 def('Array', 'uniq!', 0, function* (self: RArray, _args, block) {
   yield* modify(self);
+  if (self.items.length < 2) return NIL;
   const unique = yield* uniqValues(self.items, block);
   if (unique.length === self.items.length) return NIL;
+  yield* modify(self);
   self.items = unique;
   return self;
 });
@@ -536,13 +550,17 @@ def('Array', 'sort', 0, function* (self: RArray, _args, block) {
 });
 def('Array', 'sort!', 0, function* (self: RArray, _args, block) {
   yield* modify(self);
-  self.items = yield* sortValues(self.items, block);
+  const sorted = yield* sortValues(self.items, block);
+  yield* modify(self);
+  self.items = sorted;
   return self;
 });
 def('Array', 'sort_by!', 0, function* (self: RArray, _args, block) {
   if (!block) return sizedEnumerator(self, 'sort_by!', [], () => BigInt(self.items.length));
   yield* modify(self);
-  self.items = yield* sortBy(self.items, block);
+  const sorted = yield* sortBy(self.items, block);
+  yield* modify(self);
+  self.items = sorted;
   return self;
 });
 // code-gauge-allow functionCognitiveComplexity 28 -- fill combines value, start, length, Range, and block forms with shared growth validation.
@@ -575,6 +593,7 @@ def('Array', 'fill', [0, 3], function* (self: RArray, args, block) {
   for (let index = start; index < end && index < self.items.length; index++) {
     const next = block ? yield* call(block, BigInt(index)) : (value as Value);
     if (index >= self.items.length) break;
+    yield* modify(self);
     self.items[index] = next;
   }
   return self;

@@ -1659,6 +1659,27 @@ test('Array reads current contents after conversion callbacks', () => {
   });
 });
 
+test('Array mutation callbacks respect receiver freezing', () => {
+  expect(run('$a=[2,1];begin;$a.map!{|x|$a.freeze;x+1};rescue=>e;p e.class;end;p $a')).toMatchObject({
+    stdout: 'FrozenError\n[2, 1]\n',
+  });
+  expect(run('$a=[2,1];begin;$a.sort!{|x,y|$a.freeze;x<=>y};rescue=>e;p e.class;end;p $a')).toMatchObject({
+    stdout: 'FrozenError\n[2, 1]\n',
+  });
+});
+
+test('Enumerable uniq interleaves callbacks and hashes keys once', () => {
+  expect(
+    run('class E;include Enumerable;def each;puts :before;yield 1;puts :after;end;end;E.new.uniq{|x|puts :block;x}')
+  ).toMatchObject({
+    stdout: 'before\nblock\nafter\n',
+  });
+  expect(run('class K;def hash;puts :hash;0;end;end;[K.new,K.new].uniq')).toMatchObject({
+    stdout: 'hash\nhash\n',
+  });
+  expect(run('p [1].uniq{puts :block;1}')).toMatchObject({ stdout: '[1]\n' });
+});
+
 test('Array delete retains contents when an equality callback raises', () => {
   expect(
     run(

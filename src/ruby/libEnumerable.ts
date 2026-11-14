@@ -1041,25 +1041,30 @@ def('Enumerable', 'tally', [0, 1], function* (self, args) {
   });
 });
 def('Enumerable', 'uniq', 0, function* (self, _args, block) {
-  return arr(yield* uniqValues(yield* toArray(self), block));
+  return arr(yield* uniqCollect(self, block));
 });
 
 export function* uniqValues(items: Value[], block: RProc | undefined): Gen<Value[]> {
+  return yield* uniqCollect(items, block);
+}
+
+function* uniqCollect(source: Value[] | Value, block: RProc | undefined): Gen<Value[]> {
   const seen = newHash();
   const result: Value[] = [];
-  rt().heldArrays.push(items, result);
+  rt().heldArrays.push(result);
+  if (Array.isArray(source)) rt().heldArrays.push(source);
   try {
     return yield* whileHeld(seen, function* () {
-      for (const value of items) {
+      const add = function* (value: Value): Gen<void> {
         const key = block ? yield* call(block, value) : value;
-        if (yield* hashGet(seen, key)) continue;
-        yield* hashSet(seen, key, true);
-        result.push(value);
-      }
+        if (!(yield* hashSet(seen, key, true))) result.push(value);
+      };
+      if (Array.isArray(source)) for (const value of source) yield* add(value);
+      else yield* iterate(source, add);
       return result;
     });
   } finally {
-    rt().heldArrays.length -= 2;
+    rt().heldArrays.length -= Array.isArray(source) ? 2 : 1;
   }
 }
 
