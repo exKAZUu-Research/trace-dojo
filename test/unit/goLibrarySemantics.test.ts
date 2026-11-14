@@ -336,3 +336,180 @@ test('compact hexadecimal literals respect normalized signed exponent bounds', (
     uncaughtException: undefined,
   });
 });
+
+test('nil pull iterators remain lazy until next and can be stopped unused', () => {
+  const source = `package main
+import("fmt";"iter")
+func main(){_,stop:=iter.Pull[int](nil);stop();_,stop2:=iter.Pull2[int,int](nil);stop2();next,end:=iter.Pull[int](nil);defer end();defer func(){fmt.Println("recovered",recover()!=nil)}();fmt.Println("created");next()}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'created\nrecovered true\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('range iterators cannot swallow a loop-body panic', () => {
+  const source = `package main
+import "fmt"
+func seq(yield func()bool){defer func(){recover()}();yield()}
+func main(){defer func(){fmt.Println("outer",recover())}();for range seq{panic("boom")};fmt.Println("continued")}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'outer runtime error: range function recovered a loop body panic and did not resume panicking\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('string sequence prefixes do not materialize their unconsumed tails', () => {
+  const source = `package main
+import("fmt";"strings")
+func main(){s:=strings.Repeat(",",100000);lines:=strings.Repeat("\\n",100000);for range 3000{for range strings.SplitSeq(s,","){break};for range strings.SplitAfterSeq(s,","){break};for range strings.Lines(lines){break}};fmt.Println("ok");for _,input:=range []string{"","a,",",a","a,b"}{fmt.Printf("%q %q\\n",collect(strings.SplitSeq(input,",")),collect(strings.SplitAfterSeq(input,",")))};for part:=range strings.SplitSeq("a日",""){fmt.Printf("%q ",part)};fmt.Println()}
+func collect(seq func(func(string)bool))[]string{var out []string;for x:=range seq{out=append(out,x)};return out}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: 'ok\n[""] [""]\n["a" ""] ["a," ""]\n["" "a"] ["," "a"]\n["a" "b"] ["a," "b"]\n"a" "日" \n',
+  });
+});
+
+test('slice collection retains yielded turtles through callbacks and sorting', () => {
+  const source = `package main
+import("fmt";"slices")
+func seq(yield func(*Turtle)bool){yield(NewTurtle(0,1));p:=NewTurtle(0,0);fmt.Println(p.CanMoveForward());yield(p)}
+func main(){a:=slices.Collect(seq);a[0].Forward();fmt.Println(len(a))}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'false\n2\n',
+    uncaughtException: undefined,
+  });
+  const sorted = `package main
+import("fmt";"slices")
+func seq(yield func(*Turtle)bool){yield(NewTurtle(2,2));yield(NewTurtle(3,3));yield(NewTurtle(0,1))}
+func main(){a:=slices.SortedFunc(seq,func(a,b *Turtle)int{p:=NewTurtle(0,0);fmt.Println(p.CanMoveForward());return 0});fmt.Println(len(a))}`;
+  expect(executeProgram('go', sorted)).toMatchObject({
+    kind: 'executed',
+    stdout: 'false\nfalse\n3\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('AppendSeq updates the original backing array after each yield', () => {
+  const source = `package main
+import("fmt";"slices")
+func main(){s:=make([]int,1,3);s[0]=9;out:=slices.AppendSeq(s,func(yield func(int)bool){yield(1);fmt.Println(s[:2]);yield(2)});fmt.Println(out,cap(out))}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[9 1]\n[9 1 2] 3\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('AsType shares custom and multi-error traversal with As', () => {
+  const source = `package main
+import("fmt";"errors")
+type E struct{N int}
+func(e *E)Error()string{return "e"}
+type Custom struct{}
+func(Custom)Error()string{return "custom"}
+func(Custom)As(target any)bool{p,ok:=target.(**E);if ok{*p=&E{7}};return ok}
+func main(){for _,err:=range []error{nil,errors.New("x"),errors.Join(errors.New("x"),fmt.Errorf("wrap: %w",&E{3})),Custom{}}{v,ok:=errors.AsType[*E](err);if ok{fmt.Println(v.N)}else{fmt.Println(ok)}}}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'false\nfalse\n3\n7\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('modular inverse and bit queries use Go boundary behavior', () => {
+  const source = `package main
+import("fmt";"math/big")
+func main(){for _,g:=range []int64{0,1,3,-1}{func(){defer func(){if p:=recover();p!=nil{fmt.Println(p)}}();fmt.Println(new(big.Int).ModInverse(big.NewInt(g),big.NewInt(0)))}()};func(){defer func(){fmt.Println(recover())}();fmt.Println(big.NewInt(3).Bit(-1))}()}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '<nil>\n1\n<nil>\ndivision by zero\nnegative bit index\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('method aliases resolve to local defined receiver types', () => {
+  const source =
+    'package main;import "fmt";type T struct{};type A=T;func(A)M(){fmt.Println("method")};func main(){A{}.M()}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'method\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('generic len cap indexing and slicing validate each constraint term', () => {
+  const source =
+    'package main;import "fmt";type Bytes interface{~string|~[]byte};func count[T Bytes](x T,b byte)int{n:=0;for i:=0;i<len(x);i++{if x[i]==b{n++}};fmt.Println(string(x[1:]));return n};func numbers[T ~[]int|~[3]int](x T)int{x[0]++;return cap(x)+len(x)+x[0]};func pointer[T ~*[2]int|~*[3]int](x T)int{return len(x)+x[0]};func main(){fmt.Println(count("banana",\'a\'),count([]byte("ab"),\'b\'));fmt.Println(numbers([]int{2}),numbers([3]int{4}),pointer(&[2]int{7}))}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'anana\nb\n3 1\n5 11 9\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('already due timer channels are ready before select defaults', () => {
+  const source =
+    'package main;import("fmt";"time");func main(){for _,d:=range []time.Duration{0,-1}{select{case <-time.After(d):fmt.Println("timer");default:fmt.Println("default")};t:=time.NewTimer(d);fmt.Println(len(t.C),cap(t.C),t.Stop());t.Reset(d);select{case <-t.C:fmt.Println("reset");default:fmt.Println("default")}}}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'timer\n0 0 true\nreset\ntimer\n0 0 true\nreset\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('JSON tags use Go quoted strings and stop at malformed tag syntax', () => {
+  const source =
+    'package main;import("fmt";"encoding/json");func main(){s:=struct{A int `json:"\\x41"`;B int `json:"\\102"`;C int `json:"日"`;D int `broken json:"wrong"`;E int `json:"\\q"`;F int `other:"x" json:"Ff"`}{1,2,3,4,5,6};b,e:=json.Marshal(s);fmt.Println(string(b),e);var t struct{A int `json:"\\x41"`;C int `json:"日"`};e=json.Unmarshal(b,&t);fmt.Println(t.A,t.C,e)}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '{"A":1,"B":2,"日":3,"D":4,"E":5,"Ff":6} <nil>\n1 3 <nil>\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('binary integer readers scale with consumed widths', () => {
+  const source =
+    'package main;import("fmt";"encoding/binary");func main(){data:=make([]byte,80000);var sum uint64;for i:=0;i<len(data);i+=8{sum+=binary.LittleEndian.Uint64(data[i:]);sum+=uint64(binary.BigEndian.Uint32(data[i:]));sum+=uint64(binary.LittleEndian.Uint16(data[i:]))};fmt.Println(sum);func(){defer func(){fmt.Println(recover()!=nil)}();binary.BigEndian.Uint64(data[:7])}()}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '0\ntrue\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('invalid receiver aliases, dot imports, recover calls and iterator signatures produce diagnostics', () => {
+  for (const body of [
+    'type A=int;func(A)M(){};func main(){}',
+    'type A=[]int;func(A)M(){};func main(){}',
+    'import "time";type A=time.Duration;func(A)M(){};func main(){}',
+    'import(. "fmt";. "log");func main(){Println(1)}',
+    'import(. "log";. "fmt");func main(){Println(1)}',
+    'func main(){defer recover(1)}',
+    'func main(){go recover(1)}',
+    'type B bool;func seq(yield func()B){yield()};func main(){for range seq{}}',
+    'func f[T ~string|~[]byte](x T)int{return cap(x)};func main(){}',
+    'func f[T ~[]int|~[]byte](x T){_=x[0]};func main(){}',
+    'func f[T ~[]int|~[3]int](x T){_=x[:]};func main(){}',
+    'func f[T ~string|~[]byte](x T){_=x[0:1:1]};func main(){}',
+    'func f[T ~string|~[]byte](x T){x[0]=1};func main(){}',
+  ])
+    expect(executeProgram('go', 'package main;' + body)).toMatchObject({ kind: 'compileError' });
+});
+
+test('rational strings support base prefixes, decimal and binary exponents and reject malformed forms', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import("fmt";"math/big");func main(){for _,s:=range []string{"0","00","012","0b101","0o17","0x1f","0b1.1","0o1.2","0x1.f","1p3","1.2p3","1e2","0x1p-2","0b1e2","0o7e2","1_2.3_4","0x_1.f","0x.8","1.","+1/02","-01/0x10","1/+2","1/-2","1/0","1/2/3",".","1__2","1._2","1_.2","1e_2","1e2_","0e9223372036854775807","0e9223372036854775808","1e9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999"}{v,ok:=new(big.Rat).SetString(s);fmt.Println(v,ok)}}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '0/1 true\n0/1 true\n12/1 true\n5/1 true\n15/1 true\n31/1 true\n3/2 true\n5/4 true\n31/16 true\n8/1 true\n48/5 true\n100/1 true\n1/4 true\n100/1 true\n700/1 true\n617/50 true\n31/16 true\n1/2 true\n1/1 true\n1/2 true\n-1/16 true\n<nil> false\n<nil> false\n<nil> false\n<nil> false\n<nil> false\n<nil> false\n<nil> false\n<nil> false\n<nil> false\n<nil> false\n0/1 true\n<nil> false\n<nil> false\n',
+    uncaughtException: undefined,
+  });
+});

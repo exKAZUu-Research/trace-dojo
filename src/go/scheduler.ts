@@ -41,6 +41,10 @@ export class Scheduler {
     return goroutine;
   }
 
+  transferCallRoots(): void {
+    if (this.current) this.current.callRoots = [];
+  }
+
   /** Makes a blocked goroutine able to run, handing it `value` as the result of what it waited for. */
   ready(goroutine: Goroutine, value?: unknown): void {
     goroutine.resumeWith = value;
@@ -91,6 +95,13 @@ export class Scheduler {
     const timer: Timer = { when: this.now + (delay > 0n ? delay : 0n), seq: this.nextTimerSeq++, fire, channel, roots };
     this.timers.push(timer);
     return timer;
+  }
+
+  pollTimer(channel: Channel): void {
+    const timer = this.timers.find((candidate) => candidate.channel === channel && candidate.when <= this.now);
+    if (!timer) return;
+    this.removeTimer(timer);
+    timer.fire();
   }
 
   /** Stops a timer, telling whether it was still pending. */
@@ -233,6 +244,7 @@ function trySend(channel: Channel, value: Value): boolean {
 
 /** Receives without blocking when it can, giving the value and whether a send gave it, or undefined. */
 function tryReceive(channel: Channel): [Value, boolean] | undefined {
+  if (channel.timer) scheduler().pollTimer(channel);
   if (channel.buffer.length > 0) {
     const value = channel.buffer.shift();
     const sender = takeWaiter(channel.senders);

@@ -222,10 +222,11 @@ export class Runtime implements TracedRuntime<Frame> {
   /** The frames of the running goroutine. */
   frames: Frame[] = [];
   /** Runs the goroutines when the program uses them. */
-  scheduler: { roots(): unknown[]; now: bigint } | undefined;
+  scheduler: { roots(): unknown[]; now: bigint; transferCallRoots(): void } | undefined;
   /** The package-level variables, which pointers may refer to. */
   globals: Cell[] = [];
   private allocated = 0;
+  private readonly nativeRoots = new Set<readonly unknown[]>();
   private readonly stdoutDecoder = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
   private readonly stderrDecoder = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
 
@@ -305,6 +306,7 @@ export class Runtime implements TracedRuntime<Frame> {
       frame.locals[slot] = boxed ? new Cell(args[index]) : args[index];
     const frames = this.frames;
     frames.push(frame);
+    this.scheduler?.transferCallRoots();
     try {
       yield* this.runBody(frame);
     } finally {
@@ -358,10 +360,30 @@ export class Runtime implements TracedRuntime<Frame> {
     (frame.defers ??= []).push({ run, values, resume });
   }
 
+  withRoots<T>(roots: readonly unknown[], run: () => T): T {
+    const scope = [...roots];
+    this.nativeRoots.add(scope);
+    try {
+      return run();
+    } finally {
+      this.nativeRoots.delete(scope);
+    }
+  }
+
+  *resumeWithRoots<T>(roots: readonly unknown[], run: Suspending<T>): Suspending<T> {
+    const scope = [...roots];
+    this.nativeRoots.add(scope);
+    try {
+      return yield* run;
+    } finally {
+      this.nativeRoots.delete(scope);
+    }
+  }
+
   /** Removes the turtles that no variable, temporary value, or pending deferred call reaches. */
   collectGarbage(): void {
     const reached = new Set<unknown>();
-    const stack: unknown[] = [];
+    const stack: unknown[] = [...this.nativeRoots];
     for (const cell of this.globals) stack.push(cell);
     if (this.scheduler) stack.push(...this.scheduler.roots());
     else pushFrameRoots(this.frames, stack);

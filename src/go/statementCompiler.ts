@@ -34,6 +34,7 @@ import { runesOf } from './literals';
 import { dynamicMethod, invokeMethod, POINTER_METHOD, receiverFor, resumeDynamicMethod, resumeMethod } from './methods';
 import { keyedFields, type Operand, type SsaConstant } from './operand';
 import { arithmetic } from './operators';
+import { RangeProtocol } from './rangeProtocol';
 import {
   BREAK,
   breaks,
@@ -57,7 +58,7 @@ import {
   UNASSIGNED,
   withTemporary,
 } from './runtime';
-import { nilPointerPanic, panicNilValue, runtimeErrorPanic } from './runtimeErrors';
+import { nilPointerPanic, panicNilValue } from './runtimeErrors';
 import { runtimePrint } from './runtimePrint';
 import { closeChannel, goroutineFunction, receive, scheduler, select, type SelectOp, send } from './scheduler';
 import { sizeOf } from './sliceOps';
@@ -1125,31 +1126,24 @@ export abstract class StatementCompiler extends CallCompiler {
     return function* (frame) {
       const fn = iterator.hoists ? yield* evaluatePart(frame, iterator) : iterator.value(frame);
       if (!(fn instanceof GoFunc)) nilPointerPanic();
-      let state: 'running' | 'stopped' | 'exited' = 'running';
+      const protocol = new RangeProtocol();
       let exit: Completion | undefined;
       const runBody = function* (args: Value[]): Suspending<Value> {
-        if (state === 'stopped')
-          runtimeErrorPanic('range function continued iteration after function for loop body returned false');
-        if (state === 'exited') runtimeErrorPanic('range function continued iteration after whole loop exit');
+        protocol.enter();
         frame.runtime.spend();
         bind.assign(frame, args[0], args[1]);
         frame.runtime.steps.stepBinding(row, bind.answered);
-        let completion: Completion | void;
-        try {
-          completion = yield* body(frame);
-        } catch (error) {
-          state = 'stopped';
-          throw error;
-        }
+        const completion = yield* body(frame);
         if (breaks(completion, label)) {
-          state = 'stopped';
+          protocol.complete(false);
           return false;
         }
         if (completion && !continues(completion, label)) {
-          state = 'stopped';
+          protocol.complete(false);
           exit = completion;
           return false;
         }
+        protocol.complete(true);
         return true;
       };
       const yieldFunction = new GoFunc(
@@ -1161,9 +1155,10 @@ export abstract class StatementCompiler extends CallCompiler {
       try {
         if (fn.resume) yield* fn.resume([yieldFunction], statement.row);
         else fn.call([yieldFunction], statement.row);
+        protocol.returned();
       } finally {
         frame.temporaries.pop();
-        state = 'exited';
+        protocol.exit();
       }
       return exit;
     };
@@ -1253,7 +1248,7 @@ export abstract class StatementCompiler extends CallCompiler {
 
   /** Declares or resolves a range loop's targets, and tells whether one stores a value learners answer. */
   // code-gauge-allow functionCognitiveComplexity 22 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
-  // code-gauge-allow functionNcss 40 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss 43 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private rangeTargets(
     statement: Extract<Statement, { kind: 'range' }>,
     keyType: Type,
@@ -1305,10 +1300,15 @@ export abstract class StatementCompiler extends CallCompiler {
     return {
       answered,
       assign: (frame, key, value) => {
-        const writeKey = prepareKey?.(frame);
-        const writeValue = prepareValue?.(frame);
-        writeKey?.(key);
-        writeValue?.(value);
+        frame.temporaries.push(key, value);
+        try {
+          const writeKey = prepareKey?.(frame);
+          const writeValue = prepareValue?.(frame);
+          writeKey?.(key);
+          writeValue?.(value);
+        } finally {
+          frame.temporaries.length -= 2;
+        }
       },
     };
   }
@@ -1835,8 +1835,8 @@ export abstract class StatementCompiler extends CallCompiler {
     return (frame) => receiverFor(read(frame), path, POINTER_METHOD);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
-  // code-gauge-allow functionNcss 34 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss 38 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private launchedBuiltin(
     statement: Extract<Statement, { kind: 'defer' | 'go' }>,
     call: Extract<Expression, { kind: 'call' }>,
@@ -1893,6 +1893,8 @@ export abstract class StatementCompiler extends CallCompiler {
       };
     }
     if (name === 'recover') {
+      for (const argument of call.args) this.expression(argument);
+      if (call.args.length > 0 || call.spread) this.error(call, 'recover の引数の数が合いません。');
       // A recover that the deferred mechanism calls directly is not called by a deferred function, so it stops nothing.
       return (frame) => launch(frame, () => {}, undefined, []);
     }
@@ -2330,7 +2332,7 @@ function iteratorYield(type: FuncType): FuncType | undefined {
   if (type.params.length !== 1 || type.results.length > 0 || type.variadic) return undefined;
   const yieldType = coreType(type.params[0]);
   if (yieldType?.kind !== 'func' || yieldType.params.length > 2 || yieldType.variadic) return undefined;
-  if (yieldType.results.length !== 1 || !isBoolean(yieldType.results[0])) return undefined;
+  if (yieldType.results.length !== 1 || !identical(yieldType.results[0], BASIC.bool)) return undefined;
   return yieldType;
 }
 

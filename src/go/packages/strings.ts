@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 485 -- Groups related string operations with their shared UTF-8 byte and rune helpers.
+// code-gauge-allow-file fileNcss 499 -- Groups related string operations with their shared UTF-8 byte and rune helpers.
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { LIMITS } from '../../interpreter/limits';
 import { roundUpToSizeClass } from '../conversions';
@@ -36,9 +36,30 @@ import { SPECIAL_CASE, specialCaseMapper } from './unicodeRanges';
 import { isSpace, mapRunes, simpleFold, toLower, toTitle, toUpper } from './unicodeSupport';
 
 const STRINGS = sliceOf(STRING);
-function sequence(pieces: string[]): GoFunc {
+function splitSequence(text: string, separator: string, after: boolean): GoFunc {
   return iteratorOf(function* () {
-    for (const piece of pieces) yield [piece];
+    if (separator === '') {
+      for (let at = 0; at < text.length;) {
+        const { size } = decodeRune(text, at);
+        spendFor(size);
+        yield [text.slice(at, at + size)];
+        at += size;
+      }
+      return;
+    }
+    let start = 0;
+    for (;;) {
+      const index = text.indexOf(separator, start);
+      if (index === -1) {
+        spendFor(text.length - start);
+        yield [text.slice(start)];
+        return;
+      }
+      const next = index + separator.length;
+      spendFor(next - start);
+      yield [text.slice(start, after ? next : index)];
+      start = next;
+    }
   });
 }
 
@@ -59,19 +80,17 @@ function fieldSequence(s: string, isSeparator: (rune: number) => boolean, captur
 }
 
 /** `strings.Lines`: the lines of a text, each with its newline, the last one without when the text lacks one. */
-function lines(s: string): string[] {
-  const result: string[] = [];
-  let start = 0;
-  while (start < s.length) {
-    const end = s.indexOf('\n', start);
-    if (end === -1) {
-      result.push(s.slice(start));
-      break;
+function lines(text: string): GoFunc {
+  return iteratorOf(function* () {
+    let start = 0;
+    while (start < text.length) {
+      const index = text.indexOf('\n', start);
+      const end = index === -1 ? text.length : index + 1;
+      spendFor(end - start);
+      yield [text.slice(start, end)];
+      start = end;
     }
-    result.push(s.slice(start, end + 1));
-    start = end + 1;
-  }
-  return result;
+  });
 }
 
 const RUNE_PREDICATE = funcType([RUNE], [BOOL]);
@@ -837,16 +856,16 @@ const members: Record<string, Entity> = {
   }),
   NewReader: nativeFunction('NewReader', fn([STRING], [pointerTo(READER)]), ([s]) => newReader(s as string)),
   SplitSeq: nativeFunction('SplitSeq', fn([STRING, STRING], [seqOf(STRING)]), ([s, sep]) =>
-    sequence(split(s as string, sep as string, false, -1))
+    splitSequence(s as string, sep as string, false)
   ),
   SplitAfterSeq: nativeFunction('SplitAfterSeq', fn([STRING, STRING], [seqOf(STRING)]), ([s, sep]) =>
-    sequence(split(s as string, sep as string, true, -1))
+    splitSequence(s as string, sep as string, true)
   ),
   FieldsSeq: nativeFunction('FieldsSeq', fn([STRING], [seqOf(STRING)]), ([s]) => fieldSequence(s as string, isSpace)),
   FieldsFuncSeq: nativeFunction('FieldsFuncSeq', fn([STRING, RUNE_PREDICATE], [seqOf(STRING)]), ([s, predicate]) =>
     fieldSequence(s as string, (rune) => callFunction(predicate, [BigInt(rune)]) === true, [predicate])
   ),
-  Lines: nativeFunction('Lines', fn([STRING], [seqOf(STRING)]), ([s]) => sequence(lines(s as string))),
+  Lines: nativeFunction('Lines', fn([STRING], [seqOf(STRING)]), ([s]) => lines(s as string)),
   Split: nativeFunction(
     'Split',
     fn([STRING, STRING], [STRINGS]),

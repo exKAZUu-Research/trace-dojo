@@ -1,5 +1,5 @@
+// code-gauge-allow-file fileNcss 599 -- Groups the related generic collection adapters and their shared type constructors.
 // code-gauge-allow-file duplicateLines 26 -- Each map iterator adapter has a distinct yield signature but the same generic registration protocol.
-// code-gauge-allow-file fileNcss 591 -- Groups the related generic collection adapters and their shared type constructors.
 import { LIMITS } from '../../interpreter/limits';
 import type { Entity } from '../entities';
 import { equalityOf, mapKeyOf } from '../equality';
@@ -10,6 +10,7 @@ import {
   fn,
   genericFunction,
   namedType,
+  nativeFunc,
   nativeFunction,
   typeEntity,
   typeParam,
@@ -31,7 +32,7 @@ import {
   type TypeParamType,
   underlying,
 } from '../types';
-import { Cell, copyValue, GoFunc, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
+import { Cell, copyValue, type GoFunc, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 import { iteratorOf, seq2Of, seqOf } from './iter';
 import { zeroValue } from './reflection';
 import { pdqsort, type SortData, stableSort } from './sorting';
@@ -394,13 +395,26 @@ const SEQ = (element: Type): Type => seqOf(element);
 /** Collects the values an iterator yields, by calling it with a yield function that accepts every value. */
 function collect(seq: Value): Value[] {
   const values: Value[] = [];
-  callFunction(seq, [
-    new GoFunc(([value]) => {
-      values.push(value);
-      return true;
-    }),
-  ]);
-  return values;
+  return currentRuntime().withRoots([seq, values], () => {
+    callFunction(seq, [
+      nativeFunc(
+        ([value]) => {
+          values.push(copyValue(value));
+          return true;
+        },
+        [values]
+      ),
+    ]);
+    return values;
+  });
+}
+
+function sortCollected(seq: Value, less: (a: Value, b: Value) => boolean, stable = false): Value {
+  const slice = newSlice(collect(seq));
+  return currentRuntime().withRoots([slice], () => {
+    sortSlice(slice, less, stable);
+    return slice.length === 0 ? undefined : slice;
+  });
 }
 
 const slicesMembers: Record<string, Entity> = {
@@ -761,7 +775,7 @@ const SEQ2 = (key: Type, value: Type): Type => seq2Of(key, value);
 
 function insertPairs(map: GoMap | undefined, seq: Value): void {
   callFunction(seq, [
-    new GoFunc(
+    nativeFunc(
       ([key, value]) => {
         if (!map) plainPanic('assignment to entry in nil map');
         const hash = map.keyOf(key);
@@ -780,6 +794,29 @@ function pairIterator(pairs: () => Iterable<[Value, Value]>, captured: Value[] =
 }
 
 Object.assign(slicesMembers, {
+  AppendSeq: sliceGeneric(
+    'AppendSeq',
+    EMPTY_INTERFACE,
+    (s, e) => ({ params: [s, SEQ(e)], results: [s] }),
+    (types) =>
+      ([slice, seq]) => {
+        let result = slice as Slice | undefined;
+        const roots: unknown[] = [result, seq];
+        return currentRuntime().withRoots([roots], () => {
+          callFunction(seq, [
+            nativeFunc(
+              ([value]) => {
+                result = appendValues(result, [value], types[1], () => zeroValue(types[1]), allocate);
+                roots[0] = result;
+                return true;
+              },
+              [roots]
+            ),
+          ]);
+          return result;
+        });
+      }
+  ),
   Compare: sliceGeneric(
     'Compare',
     ORDERED,
@@ -905,9 +942,7 @@ Object.assign(slicesMembers, {
   Sorted: (() => {
     const e = typeParam('E', ORDERED);
     return genericFunction('Sorted', [e], funcType([SEQ(e)], [sliceOf(e)]), () => ([seq]) => {
-      const slice = newSlice(collect(seq));
-      sortSlice(slice, less);
-      return slice.length === 0 ? undefined : slice;
+      return sortCollected(seq, less);
     });
   })(),
   Collect: (() => {
@@ -997,10 +1032,8 @@ Object.assign(slicesMembers, {
       funcType([SEQ(e), funcType([e, e], [INT])], [sliceOf(e)]),
       () =>
         ([seq, cmpFn]) => {
-          const slice = newSlice(collect(seq));
           const order = cmpResult(cmpFn);
-          sortSlice(slice, (a, b) => order(a, b) < 0);
-          return slice.length === 0 ? undefined : slice;
+          return sortCollected(seq, (a, b) => order(a, b) < 0);
         }
     );
   })(),
@@ -1012,10 +1045,8 @@ Object.assign(slicesMembers, {
       funcType([SEQ(e), funcType([e, e], [INT])], [sliceOf(e)]),
       () =>
         ([seq, cmpFn]) => {
-          const slice = newSlice(collect(seq));
           const order = cmpResult(cmpFn);
-          sortSlice(slice, (a, b) => order(a, b) < 0, true);
-          return slice.length === 0 ? undefined : slice;
+          return sortCollected(seq, (a, b) => order(a, b) < 0, true);
         }
     );
   })(),
@@ -1025,7 +1056,7 @@ export const SLICES_PACKAGE = definePackage(
   'slices',
   slicesMembers,
 
-  ['All', 'AppendSeq', 'Backward', 'Chunk', 'Collect', 'Sorted', 'SortedFunc', 'SortedStableFunc', 'Values']
+  ['All', 'Backward', 'Chunk', 'Collect', 'Sorted', 'SortedFunc', 'SortedStableFunc', 'Values']
 );
 
 // maps ------------------------------------------------------------------------------------------------------------

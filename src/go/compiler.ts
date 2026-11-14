@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 811 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+// code-gauge-allow-file fileNcss 817 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
 // oxlint-disable require-yield -- Statements that never block are generators like the others, so that all run alike.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { assignFailure, represent } from './assignability';
@@ -159,13 +159,13 @@ export class ProgramCompiler extends StatementCompiler {
 
   // Imports -------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
-  // code-gauge-allow functionNcss 31 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionCognitiveComplexity 27 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionNcss 33 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private declareImports(): void {
     for (const spec of this.file.imports) {
       const pkg = lookupPackage(spec.path);
       if (!pkg) {
-        if (STANDARD_PACKAGES.has(spec.path)) {
+        if (spec.path === 'C' || STANDARD_PACKAGES.has(spec.path)) {
           this.unsupported(spec, `パッケージ ${spec.path}`);
           // Its uses then report nothing more, as the import already says why the program cannot run.
           const name = spec.alias ?? spec.path.split('/').at(-1) ?? spec.path;
@@ -183,10 +183,12 @@ export class ProgramCompiler extends StatementCompiler {
         const entity: PackageEntity = { kind: 'package', name: pkg.name, package: pkg, span: spec, used: false };
         this.dotImports.push(entity);
         for (const [member, memberEntity] of pkg.members) {
-          if (!this.fileScope.entities.has(member)) {
-            this.fileScope.entities.set(member, memberEntity);
-            this.dotMembers.set(memberEntity, entity);
+          if (this.fileScope.entities.has(member)) {
+            this.error(spec, `${member} はこのファイルですでに宣言されています。`);
+            continue;
           }
+          this.fileScope.entities.set(member, memberEntity);
+          this.dotMembers.set(memberEntity, entity);
         }
         continue;
       }
@@ -503,7 +505,7 @@ export class ProgramCompiler extends StatementCompiler {
 
   private readonly genericMethodDeclarations = new Map<Method, FunctionDeclaration>();
 
-  // code-gauge-allow functionNcss 46 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionNcss 50 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private attachMethods(): void {
     for (const [typeName, declarations] of this.methodSpecs) {
       const entity = this.packageScope.entities.get(typeName);
@@ -515,7 +517,18 @@ export class ProgramCompiler extends StatementCompiler {
         for (const declaration of declarations) this.error(declaration.receiver as Span, message);
         continue;
       }
-      const shell = entity.type as NamedType;
+      const shell = entity.type;
+      if (
+        shell.kind !== 'named' ||
+        ![...this.typeStates].some(([candidate, state]) => candidate.type === shell && !state.spec.alias)
+      ) {
+        for (const declaration of declarations)
+          this.error(
+            declaration.receiver as Span,
+            `${typeName} はこのパッケージで宣言した型ではないので、メソッドを付けられません。`
+          );
+        continue;
+      }
       if (underlying(shell).kind === 'pointer' || underlying(shell).kind === 'interface') {
         for (const declaration of declarations) {
           this.error(

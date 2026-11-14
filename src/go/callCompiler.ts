@@ -1063,10 +1063,21 @@ export abstract class CallCompiler extends CompositeCompiler {
     return operand.type;
   }
 
-  // code-gauge-allow functionNcss 32 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   private lengthBuiltin(expression: Extract<Expression, { kind: 'call' }>, name: 'len' | 'cap'): Operand {
     const { result: operand, hasRuntimeCall } = this.withRuntimeCallTracking(() => this.value(expression.args[0]));
     if (this.isInvalid(operand)) return operand;
+    return this.lengthOperand(expression, name, operand, hasRuntimeCall);
+  }
+
+  // code-gauge-allow functionNcss 32 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
+  private lengthOperand(
+    expression: Extract<Expression, { kind: 'call' }>,
+    name: 'len' | 'cap',
+    operand: Operand,
+    hasRuntimeCall: boolean
+  ): Operand {
+    const parameter = this.lengthTypeParameter(expression, name, operand);
+    if (parameter) return parameter;
     const tracking = this.understandSlice(expression.args[0]);
     if (name === 'cap') tracking?.capReads.push(() => true);
     let type = coreType(operand.type) ?? operand.type;
@@ -1127,6 +1138,18 @@ export abstract class CallCompiler extends CompositeCompiler {
     return this.invalid(expression);
   }
 
+  private lengthTypeParameter(
+    expression: Extract<Expression, { kind: 'call' }>,
+    name: 'len' | 'cap',
+    operand: Operand
+  ): Operand | undefined {
+    if (operand.type.kind !== 'typeParam') return undefined;
+    const terms = operand.type.constraint.typeSet?.terms;
+    if (!terms || terms.length === 0) return undefined;
+    const results = terms.map((term) => this.lengthOperand(expression, name, { ...operand, type: term.type }, true));
+    if (results.some((result) => this.isInvalid(result))) return this.invalid(expression);
+    return { ...results[0], mode: 'value', constant: undefined };
+  }
   // code-gauge-allow functionNcss 31 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   private appendBuiltin(expression: Extract<Expression, { kind: 'call' }>): Operand {
     const [first, ...rest] = expression.args;

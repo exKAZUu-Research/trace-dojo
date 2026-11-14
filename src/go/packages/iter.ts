@@ -1,5 +1,5 @@
 import type { Entity } from '../entities';
-import { currentRuntime, definePackage, genericFunction, genericNamedType, typeParam } from '../native';
+import { currentRuntime, definePackage, genericFunction, genericNamedType, nativeFunc, typeParam } from '../native';
 import { type Frame, runToEnd, type Suspending } from '../runtime';
 import { nilPointerPanic } from '../runtimeErrors';
 import { BASIC, EMPTY_INTERFACE, funcType, type NamedType, type Type } from '../types';
@@ -32,16 +32,15 @@ interface Pulled {
  * `iter.Pull`: runs the iterator as a coroutine with frames of its own, which `next` resumes until the iterator's
  * yield hands over the next values; `stop` makes yield return false and lets the iterator finish.
  */
-// code-gauge-allow functionCognitiveComplexity 28 -- The next, stop and frame-switching closures share one iterator coroutine lifecycle.
-// code-gauge-allow functionNcss 50 -- The next, stop and frame-switching closures share one iterator coroutine lifecycle.
+// code-gauge-allow functionCognitiveComplexity 29 -- The next, stop and frame-switching closures share one iterator coroutine lifecycle.
+// code-gauge-allow functionNcss 51 -- The next, stop and frame-switching closures share one iterator coroutine lifecycle.
 function pull(sequence: Value, zeros: (() => Value)[]): Value[] {
-  if (!(sequence instanceof GoFunc)) nilPointerPanic();
   const runtime = currentRuntime();
   const frames: Frame[] = [];
   let coroutine: Suspending<unknown> | undefined;
   let done = false;
   const finished = (): Value[] => [...zeros.map((zero) => zero()), false];
-  const yieldFunction = new GoFunc(
+  const yieldFunction = nativeFunc(
     () => {
       throw new Error('iter.Pull resumes its iterator as a coroutine');
     },
@@ -65,6 +64,10 @@ function pull(sequence: Value, zeros: (() => Value)[]): Value[] {
   };
   const resumeNext = function* (): Suspending<Value[]> {
     if (done) return finished();
+    if (!(sequence instanceof GoFunc)) {
+      done = true;
+      nilPointerPanic();
+    }
     let send: unknown = coroutine ? true : undefined;
     coroutine ??= sequence.resume
       ? sequence.resume([yieldFunction])
@@ -99,12 +102,12 @@ function pull(sequence: Value, zeros: (() => Value)[]): Value[] {
     return undefined;
   };
   return [
-    new GoFunc(
+    nativeFunc(
       () => runToEnd(resumeNext()),
       [sequence, frames],
       () => resumeNext()
     ),
-    new GoFunc(
+    nativeFunc(
       () => runToEnd(stop()),
       [sequence, frames],
       () => stop()
@@ -149,5 +152,5 @@ export function iteratorOf(iterate: () => Iterable<Value[]>, captured: Value[] =
     }
     return undefined;
   };
-  return new GoFunc((args) => runToEnd(resume(args)), captured, resume);
+  return nativeFunc((args) => runToEnd(resume(args)), captured, resume);
 }

@@ -87,6 +87,17 @@ export function namedType(pkg: string, name: string, underlyingType: Type): Name
   return type;
 }
 
+export function nativeFunc(call: GoFunc['call'], captured: readonly unknown[] = [], resume?: GoFunc['resume']): GoFunc {
+  return new GoFunc(
+    (args, row, deferredFor, stackBuffers) =>
+      currentRuntime().withRoots([captured, args], () => call(args, row, deferredFor, stackBuffers)),
+    captured,
+    resume &&
+      ((args, row, deferredFor, stackBuffers) =>
+        currentRuntime().resumeWithRoots([captured, args], resume(args, row, deferredFor, stackBuffers)))
+  );
+}
+
 /** Adds a library method to a type; the implementation receives the receiver first. */
 export function addMethod(
   type: NamedType,
@@ -95,7 +106,15 @@ export function addMethod(
   impl: (receiver: Value, args: Value[]) => Value | Value[],
   pointerReceiver = false
 ): Method {
-  const method: Method = { name, pointerReceiver, type: signature, code: { call: impl as never } };
+  const method: Method = {
+    name,
+    pointerReceiver,
+    type: signature,
+    code: {
+      call: ((receiver: Value, args: Value[]) =>
+        currentRuntime().withRoots([receiver, args], () => impl(receiver, args))) as never,
+    },
+  };
   type.methods.push(method);
   return method;
 }
@@ -116,7 +135,8 @@ export function addBlockingMethod(
     (receiver, args) => runToEnd(resume(receiver, args)) as Value | Value[],
     pointerReceiver
   );
-  (method.code as NonNullable<Method['code']>).resume = resume as never;
+  (method.code as NonNullable<Method['code']>).resume = ((receiver: Value, args: Value[]) =>
+    currentRuntime().resumeWithRoots([receiver, args], resume(receiver, args))) as never;
   return method;
 }
 
@@ -128,20 +148,20 @@ export function blockingFunction(
   resume: (args: Value[]) => Suspending<Value | Value[] | void>
 ): FuncEntity {
   const call = (args: Value[]): Value | Value[] => runToEnd(resume(args)) as Value | Value[];
-  const value = new GoFunc(call, [], (args) => resume(args) as Suspending<Value | Value[]>);
+  const value = nativeFunc(call, [], (args) => resume(args) as Suspending<Value | Value[]>);
   return {
     kind: 'func',
     name,
     type: signature,
     value: () => value,
-    direct: call,
-    directResume: (args) => resume(args) as Suspending<Value | Value[]>,
+    direct: value.call,
+    directResume: (args) => (value.resume as NonNullable<GoFunc['resume']>)(args),
   };
 }
 
 export function nativeFunction(name: string, signature: FuncType, impl: NativeImpl): FuncEntity {
-  const value = new GoFunc((args) => impl(args));
-  return { kind: 'func', name, type: signature, value: () => value, direct: (args) => impl(args) };
+  const value = nativeFunc((args) => impl(args));
+  return { kind: 'func', name, type: signature, value: () => value, direct: value.call };
 }
 
 /** Builds a package from its members. */
@@ -221,7 +241,7 @@ export function genericFunction(
       type: signature,
       instantiate: (args) => {
         const run = impl(args);
-        return new GoFunc((values) => run(values));
+        return nativeFunc((values) => run(values));
       },
     },
     value: () => new GoFunc(() => {}),

@@ -1,6 +1,7 @@
+// code-gauge-allow-file fileNcss 575 -- Keeps template control evaluation and its shared callback context together.
 import { Printer } from '../fmt';
 import { compareMapKeys } from '../mapOrder';
-import { addMethod, currentRuntime, fn, namedType } from '../native';
+import { addMethod, currentRuntime, fn, namedType, nativeFunc } from '../native';
 import { nilPointerPanic } from '../runtimeErrors';
 import {
   BASIC,
@@ -13,7 +14,7 @@ import {
   typeString,
   underlying,
 } from '../types';
-import { Complex, GoFunc, type GoMap, GoStruct, Iface, Slice, type Value } from '../values';
+import { Complex, type GoFunc, type GoMap, GoStruct, Iface, Slice, type Value } from '../values';
 import { errorf } from './fmt';
 import { callMethod, errorText } from './support';
 import {
@@ -323,7 +324,7 @@ class State {
     }
     let ran = false;
     const [first, second] = yieldType.params;
-    const yieldFunc = new GoFunc((args) => {
+    const yieldFunc = nativeFunc((args) => {
       ran = true;
       const key: RV = { type: first, value: args[0] };
       if (yieldType.params.length === 1) oneIteration(undefined, key);

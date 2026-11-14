@@ -121,3 +121,13 @@ test('constraint contexts do not allow type sets inside ordinary nested types', 
     kind: 'compileError',
   });
 });
+
+test('range yield results may alias the predeclared bool', () => {
+  const source =
+    'package main;import "fmt";type B=bool;func seq(yield func()B){yield()};func main(){for range seq{fmt.Println("ok")}}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'ok\n',
+    uncaughtException: undefined,
+  });
+});

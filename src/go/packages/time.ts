@@ -657,5 +657,5 @@ const members: Record<string, Entity> = {
   }),
 };
 
-/** The time package, without what needs the time zone database files or goroutines and channels. */
+/** The time package, without operations that need time zone database files. */
 export const TIME_PACKAGE = definePackage('time', members, ['LoadLocation', 'LoadLocationFromTZData']);

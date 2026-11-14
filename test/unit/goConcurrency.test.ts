@@ -313,3 +313,55 @@ func main(){time.Sleep(105*24*time.Hour);start:=time.Now();time.Sleep(time.Nanos
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ['*Turtle', 'NewTurtle(0,1)'],
+  ['[]*Turtle', '[]*Turtle{NewTurtle(0,1)}'],
+])('Go frames release cleared launch arguments of type %s', (type, initial) => {
+  const source = `package main
+import("fmt";"runtime")
+var held ${type}
+func main(){held=${initial};p:=NewTurtle(0,0);done:=make(chan bool);go func(t ${type}){held=nil;t=nil;fmt.Println(p.CanMoveForward());done<-true}(held);runtime.Gosched();<-done}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('WaitGroup.Go retains queued task captures', () => {
+  const source = `package main
+import("fmt";"sync")
+func launch(w *sync.WaitGroup){t:=NewTurtle(0,1);w.Go(func(){t.Forward()})}
+func main(){var w sync.WaitGroup;launch(&w);p:=NewTurtle(0,0);fmt.Println(p.CanMoveForward());w.Wait()}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'false\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('sync.Map hashes keys and performs conditional updates atomically', () => {
+  const source = `package main
+import("fmt";"sync")
+func main(){var m sync.Map;for i:=0;i<20000;i++{m.Store(i,i)};fmt.Println(m.Load(19999));fmt.Println(m.CompareAndSwap(1,1,7),m.CompareAndSwap(1,1,8));fmt.Println(m.CompareAndDelete(1,1),m.CompareAndDelete(1,7));fmt.Println(m.Load(1));m.Store("slice",[]int{1});func(){defer func(){fmt.Println(recover()!=nil)}();m.CompareAndSwap("slice",[]int{1},2)}()}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '19999 true\ntrue false\nfalse true\n<nil> false\ntrue\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('channel range retains received values through indexed destination preparation', () => {
+  for (const buffered of [true, false]) {
+    const source = `package main
+import "fmt"
+func idx()int{p:=NewTurtle(0,0);fmt.Println(p.CanMoveForward());return 0}
+func main(){c:=make(chan *Turtle,${buffered ? 1 : 0});${buffered ? 'c<-NewTurtle(0,1);close(c)' : 'go func(){c<-NewTurtle(0,1);close(c)}()'};a:=make([]*Turtle,1);for a[idx()]=range c{};a[0].Forward()}`;
+    expect(executeProgram('go', source)).toMatchObject({
+      kind: 'executed',
+      stdout: 'false\n',
+      uncaughtException: undefined,
+    });
+  }
+});

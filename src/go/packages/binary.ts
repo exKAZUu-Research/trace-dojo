@@ -25,11 +25,10 @@ const UINT32 = BASIC.uint32;
 const UINT64 = BASIC.uint64;
 
 function readBytes(slice: Value, count: number): bigint[] {
-  const values = (slice as Slice | undefined)?.values() ?? [];
-  if (values.length < count) {
-    indexPanic(count - 1, values.length);
-  }
-  return values.slice(0, count) as bigint[];
+  const source = slice as Slice | undefined;
+  const length = source?.length ?? 0;
+  if (length < count) indexPanic(count - 1, length);
+  return Array.from({ length: count }, (_, index) => (source as Slice).get(index) as bigint);
 }
 
 function writeBytes(slice: Value, bytes: bigint[]): void {

@@ -1943,6 +1943,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  // code-gauge-allow functionNcss 31 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private index(expression: Extract<Expression, { kind: 'index' }>): Operand {
     const genericType = this.genericTypeIndex(expression);
     if (genericType) return genericType;
@@ -1971,6 +1973,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return this.invalid(expression);
     }
     const [indexExpression] = expression.indices;
+    return this.indexOperand(expression, operand, indexExpression);
+  }
+
+  // code-gauge-allow functionNcss 43 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  private indexOperand(
+    expression: Extract<Expression, { kind: 'index' }>,
+    operand: Operand,
+    indexExpression: Expression
+  ): Operand {
+    const parameter = this.indexTypeParameter(expression, operand, indexExpression);
+    if (parameter) return parameter;
     const { type, read, viaPointer } = throughArrayPointer(operand);
     if (type.kind === 'map') return this.mapIndex(expression, operand, type.key, type.value);
     if (isString(type) && type.kind === 'basic') return this.stringIndex(expression, operand, indexExpression);
@@ -2029,6 +2042,38 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     this.error(expression, `${describeType(operand.type)} 型の値には添字を付けられません。`);
     return this.invalid(expression);
+  }
+
+  private indexTypeParameter(
+    expression: Extract<Expression, { kind: 'index' }>,
+    operand: Operand,
+    indexExpression: Expression
+  ): Operand | undefined {
+    if (operand.type.kind !== 'typeParam') return undefined;
+    const terms = operand.type.constraint.typeSet?.terms;
+    if (!terms || terms.length === 0) return undefined;
+    const results = terms.map((term) =>
+      this.indexOperand(expression, { ...operand, type: term.type }, indexExpression)
+    );
+    const first = results[0];
+    const maps = terms.map((term) => underlying(term.type));
+    const firstMap = maps[0];
+    if (firstMap.kind === 'map' && maps.some((type) => type.kind !== 'map' || !identical(type.key, firstMap.key))) {
+      this.error(expression, '型集合の map のキーはすべて同じ型でなければなりません。');
+      return this.invalid(expression);
+    }
+    if (results.some((result) => this.isInvalid(result))) return this.invalid(expression);
+    if (
+      results.some(
+        (result) => !identical(result.type, first.type) || (result.mode === 'mapIndex') !== (first.mode === 'mapIndex')
+      )
+    ) {
+      this.error(expression, '型集合のすべての型で添字と要素の型が同じでなければなりません。');
+      return this.invalid(expression);
+    }
+    if (results.some((result) => result.mode === 'value'))
+      return { mode: 'value', type: first.type, span: expression, eval: first.eval };
+    return first;
   }
 
   /** `s[i]`, a byte of a string, which is never a constant even when both are constants. */
@@ -2115,10 +2160,16 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  // code-gauge-allow functionNcss 47 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private sliceExpression(expression: Extract<Expression, { kind: 'slice' }>): Operand {
     const operand = this.value(expression.operand);
     if (this.isInvalid(operand)) return operand;
+    return this.sliceOperand(expression, operand);
+  }
+
+  // code-gauge-allow functionNcss 47 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  private sliceOperand(expression: Extract<Expression, { kind: 'slice' }>, operand: Operand): Operand {
+    const parameter = this.sliceTypeParameter(expression, operand);
+    if (parameter) return parameter;
     const { type, read, viaPointer } = throughArrayPointer(operand);
     if (type.kind === 'array' && !viaPointer && operand.mode !== 'variable') {
       this.error(expression, 'アドレスを取れない配列はスライスにできません。');
@@ -2190,6 +2241,24 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     this.error(expression, `${describeType(operand.type)} 型の値はスライスにできません。`);
     return this.invalid(expression);
+  }
+
+  private sliceTypeParameter(
+    expression: Extract<Expression, { kind: 'slice' }>,
+    operand: Operand
+  ): Operand | undefined {
+    if (operand.type.kind !== 'typeParam') return undefined;
+    const terms = operand.type.constraint.typeSet?.terms;
+    if (!terms || terms.length === 0) return undefined;
+    const types = terms.map((term) => underlying(term.type));
+    const normalized = types.map((type): Type => (isString(type) ? { kind: 'slice', element: BASIC.uint8 } : type));
+    if (!normalized.every((type) => identical(type, normalized[0]))) {
+      this.error(expression, '型集合のすべての型でスライス式の型が同じでなければなりません。');
+      return this.invalid(expression);
+    }
+    const representative = types.find((type) => isString(type)) ?? types[0];
+    const result = this.sliceOperand(expression, { ...operand, type: representative });
+    return this.isInvalid(result) ? result : { ...result, type: operand.type };
   }
 
   /** `a[low:high:max]`, whose result has the capacity max - low; strings cannot take a third index. */

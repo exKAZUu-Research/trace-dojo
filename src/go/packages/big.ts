@@ -10,6 +10,7 @@ import { GoPanic } from '../runtime';
 import { nilPointerPanic } from '../runtimeErrors';
 import { BASIC, pointerTo, RUNE, type Type } from '../types';
 import { Cell, GoStruct, Iface, Pointer, type Value } from '../values';
+import { parseRational } from './bigRatParser';
 import { STATE } from './fmt';
 import { BOOL, byteSlice, INT, STRING } from './support';
 
@@ -332,10 +333,11 @@ const methods: [string, Type[], Type[], (z: Value, args: Value[]) => Value | Val
     [INT_POINTER],
     (z, [g, n]) => {
       const modulus = intOf(n) < 0n ? -intOf(n) : intOf(n);
-      const value = ((intOf(g) % modulus) + modulus) % modulus;
+      const input = intOf(g);
+      const value = input < 0n ? divMod(input, modulus)[1] : input;
       const [d, s] = extendedGcd(value, modulus);
       if (d !== 1n) return;
-      return setInt(z, ((s % modulus) + modulus) % modulus);
+      return setInt(z, s < 0n ? s + modulus : s);
     },
   ],
   [
@@ -366,7 +368,15 @@ const methods: [string, Type[], Type[], (z: Value, args: Value[]) => Value | Val
   ['IsInt64', [], [BOOL], (x) => BigInt.asIntN(64, intOf(x)) === intOf(x)],
   ['IsUint64', [], [BOOL], (x) => intOf(x) >= 0n && BigInt.asUintN(64, intOf(x)) === intOf(x)],
   ['BitLen', [], [INT], (x) => BigInt(bitLength(intOf(x)))],
-  ['Bit', [INT], [BASIC.uint], (x, [i]) => (intOf(x) >> (i as bigint)) & 1n],
+  [
+    'Bit',
+    [INT],
+    [BASIC.uint],
+    (x, [i]) => {
+      if ((i as bigint) < 0n) throw new GoPanic(new Iface(BASIC.string, 'negative bit index'));
+      return (intOf(x) >> (i as bigint)) & 1n;
+    },
+  ],
   [
     'TrailingZeroBits',
     [],
@@ -574,22 +584,8 @@ const ratMethods: [string, Type[], Type[], (z: Value, args: Value[]) => Value | 
     [STRING],
     [RAT_POINTER, BOOL],
     (z, [s]) => {
-      const source = s as string;
-      const slash = /^([+-]?\d+)\/(\d+)$/.exec(source);
-      if (slash) {
-        if (BigInt(slash[2]) === 0n) return [undefined, false];
-        return [setRat(z, normalize(BigInt(slash[1]), BigInt(slash[2]))), true];
-      }
-      const decimal = /^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/.exec(source);
-      if (!decimal || (decimal[2] === '' && (decimal[3] ?? '') === '')) return [undefined, false];
-      const [, sign, whole, fraction = '', exponentText = '0'] = decimal;
-      let num = BigInt(`${whole}${fraction}` || '0');
-      let den = 10n ** BigInt(fraction.length);
-      const exponent = Number(exponentText);
-      chargeBits(BigInt(Math.abs(exponent)) * 4n + BigInt(bitLength(num)));
-      if (exponent >= 0) num *= 10n ** BigInt(exponent);
-      else den *= 10n ** BigInt(-exponent);
-      return [setRat(z, normalize(sign === '-' ? -num : num, den)), true];
+      const value = parseRational(s as string, parseInt, chargeBits);
+      return value ? [setRat(z, normalize(value.num, value.den)), true] : [undefined, false];
     },
   ],
   ['Neg', [RAT_POINTER], [RAT_POINTER], (z, [x]) => setRat(z, { num: -ratOf(x).num, den: ratOf(x).den })],

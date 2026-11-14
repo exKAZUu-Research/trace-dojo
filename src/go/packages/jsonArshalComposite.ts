@@ -3,6 +3,7 @@
 import { mapKeyOf } from '../equality';
 import { currentRuntime, fn, namedType } from '../native';
 import { grownCapacity } from '../sliceOps';
+import { lookupStructTag } from '../structTags';
 import {
   ANY,
   BASIC,
@@ -249,7 +250,7 @@ function collectFields(entry: QueueEntry, queue: QueueEntry[], seen: Set<string>
   const struct = structOf(entry.type);
   if (!struct) return;
   for (const [i, field] of struct.fields.entries()) {
-    const tag = jsonTag(field.tag);
+    const tag = lookupStructTag(field.tag, 'json');
     if (tag === '-') continue;
     const [tagName = '', ...options] = (tag ?? '').split(',');
     const tagged = tagName.length > 0;
@@ -619,13 +620,6 @@ function marshalNilPointerWithMethod(enc: EncoderState, iface: Iface, marshaler:
   const [text, err] = callValueMethod(iface.type, undefined, method, args) as [Value, Value];
   if (err !== undefined) return new MarshalerError(iface.type, goError(err), method);
   return enc.appendRaw('"', bytesOf(text));
-}
-
-function jsonTag(tag: string | undefined): string | undefined {
-  if (!tag) return undefined;
-  const match = /(?:^| )json:("(?:[^"\\]|\\.)*")/.exec(tag);
-  if (!match) return undefined;
-  return JSON.parse(match[1]) as string;
 }
 
 function emptyJsonValue(value: Value, type: Type): boolean {

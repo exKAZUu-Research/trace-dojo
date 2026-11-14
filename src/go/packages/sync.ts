@@ -1,6 +1,6 @@
 import type { Entity } from '../entities';
 import { equalityOf, mapKeyOf } from '../equality';
-import { addBlockingMethod, addMethod, definePackage, fn, namedType, typeEntity } from '../native';
+import { addBlockingMethod, addMethod, currentRuntime, definePackage, fn, namedType, typeEntity } from '../native';
 import { GoFatal, GoPanic, type Suspending } from '../runtime';
 import { nilPointerPanic } from '../runtimeErrors';
 import { type Goroutine, scheduler } from '../scheduler';
@@ -100,14 +100,17 @@ addMethod(
   (receiver, [task]) => {
     const state = waitGroupOf(receiver);
     state.add(1);
-    scheduler().spawn(function* () {
-      try {
-        yield* callFunction(task, []);
-      } finally {
-        state.add(-1);
-      }
-      return;
-    });
+    scheduler().spawn(
+      function* () {
+        try {
+          yield* callFunction(task, []);
+        } finally {
+          state.add(-1);
+        }
+        return;
+      },
+      [task]
+    );
     return;
   },
   true
@@ -355,27 +358,37 @@ addBlockingMethod(ONCE, 'Do', fn([fn([], [])], []), function* (receiver, [task])
 // Map -----------------------------------------------------------------------------------------------------------------
 
 class MapState {
-  roots(): unknown[] {
-    return this.entries.flatMap(({ key, value }) => [key, value]);
-  }
+  entries = new Map<unknown, { key: Value; value: Value }>();
+  private readonly keyOf = mapKeyOf(ANY);
 
-  entries: { key: Value; value: Value }[] = [];
+  roots(): unknown[] {
+    return [...this.entries.values()].flatMap(({ key, value }) => [key, value]);
+  }
 
   clone(): MapState {
     const copy = new MapState();
-    copy.entries = this.entries.map((entry) => ({ ...entry }));
+    copy.entries = new Map([...this.entries].map(([hash, entry]) => [hash, { ...entry }]));
     return copy;
   }
 
   find(key: Value): { key: Value; value: Value } | undefined {
-    mapKeyOf(ANY)(key);
-    const equal = equalityOf(ANY);
-    return this.entries.find((entry) => equal(entry.key, key));
+    return this.entries.get(this.keyOf(key));
+  }
+
+  store(key: Value, value: Value): void {
+    const hash = this.keyOf(key);
+    const found = this.entries.get(hash);
+    if (found) found.value = value;
+    else {
+      currentRuntime().allocate(2);
+      this.entries.set(hash, { key, value });
+    }
   }
 
   remove(key: Value): { key: Value; value: Value } | undefined {
-    const found = this.find(key);
-    if (found) this.entries.splice(this.entries.indexOf(found), 1);
+    const hash = this.keyOf(key);
+    const found = this.entries.get(hash);
+    this.entries.delete(hash);
     return found;
   }
 }
@@ -384,6 +397,26 @@ const SYNC_MAP = namedType('sync', 'Map', { kind: 'struct', fields: [] });
 const mapOf = (receiver: Value): MapState => stateOf(receiver, 'syncMap', () => new MapState());
 
 const mapMethods: [string, FuncType, (state: MapState, args: Value[]) => Value | Value[]][] = [
+  [
+    'CompareAndSwap',
+    fn([ANY, ANY, ANY], [BOOL]),
+    (state, [key, old, value]) => {
+      const found = state.find(key);
+      if (!found || !equalityOf(ANY)(found.value, old)) return false;
+      found.value = value;
+      return true;
+    },
+  ],
+  [
+    'CompareAndDelete',
+    fn([ANY, ANY], [BOOL]),
+    (state, [key, old]) => {
+      const found = state.find(key);
+      if (!found || !equalityOf(ANY)(found.value, old)) return false;
+      state.remove(key);
+      return true;
+    },
+  ],
   [
     'Load',
     fn([ANY], [ANY, BOOL]),
@@ -398,7 +431,7 @@ const mapMethods: [string, FuncType, (state: MapState, args: Value[]) => Value |
     (state, [key, value]) => {
       const found = state.find(key);
       if (found) found.value = value;
-      else state.entries.push({ key, value });
+      else state.store(key, value);
       return;
     },
   ],
@@ -408,7 +441,7 @@ const mapMethods: [string, FuncType, (state: MapState, args: Value[]) => Value |
     (state, [key, value]) => {
       const found = state.find(key);
       if (found) return [found.value, true];
-      state.entries.push({ key, value });
+      state.store(key, value);
       return [value, false];
     },
   ],
@@ -438,7 +471,7 @@ const mapMethods: [string, FuncType, (state: MapState, args: Value[]) => Value |
         found.value = value;
         return [previous, true];
       }
-      state.entries.push({ key, value });
+      state.store(key, value);
       return [undefined, false];
     },
   ],
@@ -446,7 +479,7 @@ const mapMethods: [string, FuncType, (state: MapState, args: Value[]) => Value |
     'Clear',
     NO_ARGS,
     (state) => {
-      state.entries = [];
+      state.entries.clear();
       return;
     },
   ],
@@ -458,8 +491,8 @@ for (const [name, signature, impl] of mapMethods) {
 addBlockingMethod(SYNC_MAP, 'Range', fn([fn([ANY, ANY], [BOOL])], []), function* (receiver, [visit]) {
   // The entries stored when Range began, of which the deleted ones are skipped.
   const snapshot = [...mapOf(receiver).entries];
-  for (const entry of snapshot) {
-    if (!mapOf(receiver).entries.includes(entry)) continue;
+  for (const [hash, entry] of snapshot) {
+    if (mapOf(receiver).entries.get(hash) !== entry) continue;
     if ((yield* callFunction(visit, [entry.key, entry.value])) === false) break;
   }
   return;
