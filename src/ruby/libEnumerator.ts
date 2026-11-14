@@ -39,12 +39,20 @@ export interface EnumeratorSource {
   keywords?: RHash;
   size?: () => Value | Gen<Value>;
   arithmetic?: boolean;
+  sizeBlock?: RProc;
   generatorAddress?: string;
   iterate?: (block: RProc) => Gen;
   held: () => Value[];
 }
 
-export function makeEnumerator(recv: Value, method: string, args: Value[], keywords?: RHash): RObject {
+export function makeEnumerator(
+  recv: Value,
+  method: string,
+  args: Value[],
+  keywords?: RHash,
+  explicit?: { sizeBlock?: RProc }
+): RObject {
+  const sizeBlock = explicit?.sizeBlock;
   const spec = method === 'step' || method === '%' ? arithmeticSpec(recv, args, keywords) : undefined;
   const arithmetic =
     spec !== undefined &&
@@ -58,9 +66,20 @@ export function makeEnumerator(recv: Value, method: string, args: Value[], keywo
     args,
     keywords,
     arithmetic,
-    size: () => enumeratorSize(recv, method, args, keywords),
+    sizeBlock,
+    size:
+      explicit === undefined
+        ? () => enumeratorSize(recv, method, args, keywords)
+        : sizeBlock === undefined
+          ? () => NIL
+          : () => callProc(sizeBlock, args),
     held() {
-      return this.keywords ? [this.recv, ...this.args, this.keywords] : [this.recv, ...this.args];
+      return [
+        this.recv,
+        ...this.args,
+        ...(this.keywords ? [this.keywords] : []),
+        ...(this.sizeBlock ? [this.sizeBlock] : []),
+      ];
     },
   };
   enumerator.data = source;

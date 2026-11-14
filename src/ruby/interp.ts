@@ -1343,19 +1343,25 @@ function* evalCall(e: Call, frame: Frame): Gen {
     let block: RProc | undefined;
     if (e.block) block = makeBlock(e.block, frame);
     else if (e.blockArg) block = yield* toBlock(yield* ev(e.blockArg, frame));
+    const previousLiteralAtCall = block?.literalAtCall;
+    if (block) block.literalAtCall = e.block !== undefined;
     const used = e.used === 1 || (e.used === 2 && frame.resultUsed);
     rt().currentRow = e.row;
-    if (!e.block)
-      return yield* callMethod(recv, e.name, args, keywords, block, { fcall: e.fcall, vcall: e.vcall, used });
-    const proc = block as RProc;
-    proc.callSiteActive = true;
     try {
-      return yield* callMethod(recv, e.name, args, keywords, proc, { fcall: e.fcall, vcall: e.vcall, used });
-    } catch (error) {
-      if (error instanceof BreakSignal && error.tag === proc.breakTag) return error.value;
-      throw error;
+      if (!e.block)
+        return yield* callMethod(recv, e.name, args, keywords, block, { fcall: e.fcall, vcall: e.vcall, used });
+      const proc = block as RProc;
+      proc.callSiteActive = true;
+      try {
+        return yield* callMethod(recv, e.name, args, keywords, proc, { fcall: e.fcall, vcall: e.vcall, used });
+      } catch (error) {
+        if (error instanceof BreakSignal && error.tag === proc.breakTag) return error.value;
+        throw error;
+      } finally {
+        proc.callSiteActive = false;
+      }
     } finally {
-      proc.callSiteActive = false;
+      if (block) block.literalAtCall = previousLiteralAtCall;
     }
   } finally {
     frame.temporaries.length = mark;
@@ -1645,6 +1651,7 @@ declare module './objects' {
   interface RProc {
     /** Whether the call that received this block literal is still running, so that `break` can leave it. */
     callSiteActive?: boolean;
+    literalAtCall?: boolean;
   }
 }
 

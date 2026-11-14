@@ -38,6 +38,7 @@ import {
   RArray,
   RBasic,
   RClass,
+  RFloat,
   RHash,
   RObject,
   RProc,
@@ -182,7 +183,7 @@ def(
 // code-gauge-allow functionCognitiveComplexity 18 -- Object copying preserves each value kind, singleton methods, copy hooks, and clone freeze options.
 // code-gauge-allow functionNcss 39 -- Object copying preserves each value kind, singleton methods, copy hooks, and clone freeze options.
 function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
-  if (!(self instanceof RBasic)) {
+  if (!(self instanceof RBasic) || self instanceof RFloat) {
     if (clone && freezeOption === false) throw argumentError(`can't unfreeze ${realClassOf(self).name}`);
     return self;
   }
@@ -274,7 +275,7 @@ function copyData(data: unknown): unknown {
 }
 
 def('Kernel', 'extend', [1, -1], function* (self, modules) {
-  if (!(self instanceof RBasic)) throw typeError("can't define singleton");
+  if (!(self instanceof RBasic) || self instanceof RFloat) throw typeError("can't define singleton");
   for (const module of modules) {
     if (!(module instanceof RClass) || !module.isModule) {
       throw typeError(`wrong argument type ${realClassOf(module).name} (expected Module)`);
@@ -291,11 +292,11 @@ def('Kernel', 'display', [0, 1], function* (self, args) {
   yield* callMethod(stream, 'write', [self]);
   return NIL;
 });
-def('Kernel', ['to_enum', 'enum_for'], [0, -1], function* (self, args) {
+def('Kernel', ['to_enum', 'enum_for'], [0, -1], function* (self, args, block) {
   const [method = sym('each'), ...rest] = args;
-  if (method instanceof RSymbol) return makeEnumerator(self, method.name, rest);
+  if (method instanceof RSymbol) return makeEnumerator(self, method.name, rest, undefined, { sizeBlock: block });
   if (method instanceof RString || respondsTo(method, 'to_str', true))
-    return makeEnumerator(self, (yield* toStrValue(method)).s, rest);
+    return makeEnumerator(self, (yield* toStrValue(method)).s, rest, undefined, { sizeBlock: block });
   throw typeError(`${yield* inspect(method)} is not a symbol nor a string`);
 });
 
@@ -336,6 +337,7 @@ def(
   0,
   (_self, _args, block) => {
     const proc = requireProcBlock(block);
+    if (!proc.literalAtCall) throw argumentError('lambda requires a literal block');
     if (proc.body.kind === 'block' && proc.callSiteActive !== undefined) proc.isLambda = true;
     return proc;
   },
@@ -376,8 +378,10 @@ export function* makeRaise(args: Value[], keywords?: RHash): Gen<RubyError> {
     exception = yield* callMethod(runtime.c.RuntimeError, 'new', [args[0]]);
   } else {
     const [target, message] = args;
-    if (!respondsTo(target, 'exception')) throw typeError('exception class/object expected');
-    exception = yield* callMethod(target, 'exception', message === undefined ? [] : [message]);
+    if (!respondsTo(target, 'exception', true)) throw typeError('exception class/object expected');
+    exception = yield* callMethod(target, 'exception', message === undefined ? [] : [message], undefined, undefined, {
+      fcall: true,
+    });
     if (!(exception instanceof RObject) || !exception.exception) throw typeError('exception object expected');
   }
   const object = exception as RObject;

@@ -5,6 +5,7 @@ import {
   RArray,
   RBasic,
   RClass,
+  RFloat,
   RHash,
   RObject,
   RProc,
@@ -218,7 +219,7 @@ export function realClassOf(value: Value): RClass {
 /** The singleton class of an object, created on first use; a class's chains to its superclass's. */
 export function singletonClassOf(value: Value): RClass {
   const { c } = rt();
-  if (!(value instanceof RBasic)) {
+  if (!(value instanceof RBasic) || value instanceof RFloat) {
     throw new TypeError('A singleton class of an immediate value');
   }
   if (value.singleton) return value.singleton;

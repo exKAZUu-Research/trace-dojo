@@ -1804,6 +1804,37 @@ test('Set operations use each added to immediate classes', () => {
   });
 });
 
+test('boxed Floats keep immutable clone and singleton rules', () => {
+  expect(
+    run(
+      'begin;Float::MAX.clone(freeze:false);rescue=>e;p e.class;end;module M;end;begin;Float::MAX.extend(M);rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({
+    stdout: 'ArgumentError\nTypeError\n',
+  });
+});
+
+test('lambda requires a literal block', () => {
+  expect(run('p=proc{|x|x};begin;q=lambda(&p);p p.lambda?;rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'ArgumentError\n',
+  });
+  expect(run('p lambda{|x|x}.lambda?')).toMatchObject({ stdout: 'true\n' });
+});
+
+test('to_enum uses only its supplied size block', () => {
+  expect(run('e=[1,2].to_enum(:each){puts :size;7};p e.size,[1,2].to_enum(:each).size')).toMatchObject({
+    stdout: 'size\n7\nnil\n',
+  });
+});
+
+test('raise invokes private exception conversion', () => {
+  expect(
+    run('class A;private;def exception;RuntimeError.new("x");end;end;begin;raise A.new;rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'RuntimeError\n',
+  });
+});
+
 test('shuffle detects receiver changes from its randomizer', () => {
   expect(
     run(
