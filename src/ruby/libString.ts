@@ -80,8 +80,7 @@ function modify(self: RString): void {
 
 function setText(self: RString, text: string): void {
   modify(self);
-  if (text.length > 1_000_000) throw rangeError('string size too big');
-  rt().spend(Math.floor(text.length / 256));
+  rt().checkStringLength(text.length);
   const value = str(text);
   self.s = value.s;
   self.rawBytes = value.rawBytes;
@@ -349,7 +348,7 @@ def('String', '*', 1, function* (self: RString, [count]) {
   if (times < 0) throw argumentError('negative argument');
   const source = stringBytes(self);
   if (source.length === 0) return stringFromBytes(source, self.binary, self.usAscii);
-  if (source.length * times > 1_000_000) throw argumentError('argument too big');
+  rt().checkStringLength(source.length * times);
   rt().spend(Math.floor((source.length * times) / 256));
   const repeated = new Uint8Array(source.length * times);
   for (let index = 0; index < times; index++) repeated.set(source, index * source.length);

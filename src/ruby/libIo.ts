@@ -196,7 +196,7 @@ def(
   function* (_self, args, _block, keywords) {
     yield* validateWarnKeywords(keywords, args.length > 0);
     if (args.length > 0 && warnCategoryEnabled(keywords)) {
-      const parts: WarningParts = { chunks: [], binary: false, ascii: true, length: 0, started: false };
+      const parts: WarningParts = { chunks: [], binary: false, usAscii: false, ascii: true, length: 0, started: false };
       yield* emitPuts(
         args,
         function* (part) {
@@ -214,18 +214,28 @@ def(
 interface WarningParts {
   chunks: Uint8Array[];
   binary: boolean;
+  usAscii: boolean;
   ascii: boolean;
   length: number;
   started: boolean;
 }
 
 function appendWarningPart(parts: WarningParts, part: RString): void {
-  parts.binary = parts.started ? combinedStringEncoding(parts.binary, parts.ascii, part) : part.binary;
-  parts.started = true;
   const bytes = stringBytes(part);
+  const rightAscii = bytes.every((byte) => byte < 0x80);
+  if (!parts.started) {
+    parts.binary = part.binary;
+    parts.usAscii = part.usAscii;
+  } else if (parts.usAscii) {
+    if (!rightAscii) {
+      parts.binary = part.binary;
+      parts.usAscii = part.usAscii;
+    }
+  } else if (!part.usAscii) parts.binary = combinedStringEncoding(parts.binary, parts.ascii, part);
+  parts.started = true;
   parts.length += bytes.length;
   if (parts.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
-  if (parts.ascii) parts.ascii = bytes.every((byte) => byte < 0x80);
+  if (parts.ascii) parts.ascii = rightAscii;
   rt().spend(Math.ceil(bytes.length / 256));
   parts.chunks.push(bytes);
 }
@@ -237,7 +247,7 @@ function combineWarningParts(parts: WarningParts): RString {
     joined.set(chunk, offset);
     offset += chunk.length;
   }
-  return stringFromBytes(joined, parts.binary);
+  return stringFromBytes(joined, parts.binary, parts.usAscii);
 }
 
 function warnCategoryEnabled(keywords: RHash | undefined): boolean {

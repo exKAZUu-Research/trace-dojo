@@ -397,6 +397,7 @@ def('Hash', 'rassoc', 1, function* (self: RHash, [value]) {
 def('Hash', 'flatten', [0, 1], function* (self: RHash, args) {
   const pairs = arr(snapshot(self.map.values()).map((entry) => arr([entry.key, entry.value])));
   const depth = args.length > 0 ? args[0] : 1n;
+  if (depth === NIL) throw implicitConversionError(depth, 'Integer');
   return yield* nativeFlatten(pairs, depth);
 });
 def('Hash', 'to_proc', 0, (self: RHash) => {

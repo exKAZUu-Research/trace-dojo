@@ -13,6 +13,7 @@ import {
   type RMethod,
   type RObject,
   type RProc,
+  type RString,
   type RSymbol,
   type Value,
   type Visibility,
@@ -152,6 +153,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly frames: Frame[] = [];
   readonly globals = new Map<string, Value>();
   readonly symbols = new Map<string, RSymbol>();
+  readonly coreStrings = new Map<string, RString>();
   /** Values native code holds while it calls back into the program, such as the array `each` iterates. */
   readonly held: Value[] = [];
   currentNumericReceiver?: Value;

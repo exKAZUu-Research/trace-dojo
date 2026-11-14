@@ -34,6 +34,17 @@ export function asciiString(s: string): RString {
   return value;
 }
 
+export function frozenCoreString(text: string): RString {
+  const runtime = rt();
+  let value = runtime.coreStrings.get(text);
+  if (!value) {
+    value = asciiString(text);
+    value.frozen = true;
+    runtime.coreStrings.set(text, value);
+  }
+  return value;
+}
+
 export function stringBytes(value: RString): Uint8Array {
   if (value.rawBytes) return value.rawBytes;
   return value.binary

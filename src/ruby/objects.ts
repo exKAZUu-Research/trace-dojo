@@ -243,6 +243,7 @@ export class RClass extends RBasic {
   attached?: Value;
   /** The module whose constant first named this one, for names such as `Outer::Inner`. */
   lexicalParent?: RClass;
+  nameString?: { text: string; value: RString };
   private ancestorCache?: { version: number; list: RClass[] };
   private methodCache?: { version: number; map: Map<string, RMethod | undefined> };
   /** Whether the program defined this class rather than the library, which decides what the trace shows. */

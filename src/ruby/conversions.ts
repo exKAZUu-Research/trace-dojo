@@ -19,7 +19,7 @@ import {
   type Value,
 } from './objects';
 import { rt } from './runtime';
-import { asciiString, classOf, isA, realClassOf, str, stringBytes, truthy } from './values';
+import { asciiString, classOf, frozenCoreString, isA, realClassOf, str, stringBytes, truthy } from './values';
 
 // Numbers -------------------------------------------------------------------------------------------------------------
 
@@ -177,8 +177,10 @@ export function* toS(value: Value): Gen<string> {
 export function* toSValue(value: Value): Gen<RString> {
   if (value instanceof RString) return value;
   const fast = fastToS(value);
-  if (fast !== undefined && !isOverridden(value, 'to_s'))
+  if (fast !== undefined && !isOverridden(value, 'to_s')) {
+    if (value === NIL || typeof value === 'boolean') return frozenCoreString(fast);
     return /^[\u0000-\u007F]*$/.test(fast) ? asciiString(fast) : str(fast);
+  }
   const converted = yield* callMethod(value, 'to_s', [], undefined, undefined, { fcall: true });
   if (converted instanceof RString) return converted;
   return str(anyToS(value));
@@ -234,8 +236,10 @@ export function* inspect(value: Value): Gen<string> {
 
 export function* inspectValue(value: Value): Gen<RString> {
   const fast = fastInspect(value);
-  if (fast !== undefined && !isOverridden(value, 'inspect'))
+  if (fast !== undefined && !isOverridden(value, 'inspect')) {
+    if (typeof value === 'boolean') return frozenCoreString(fast);
     return !(value instanceof RString) && /^[\u0000-\u007F]*$/.test(fast) ? asciiString(fast) : str(fast);
+  }
   const converted = yield* callMethod(value, 'inspect', [], undefined, undefined, { fcall: true });
   return converted instanceof RString ? converted : yield* toSValue(converted);
 }
@@ -487,10 +491,13 @@ export function symInspect(name: string): string {
 // code-gauge-allow functionCognitiveComplexity 23 -- Equality dispatch covers numeric, String, container, and custom Ruby values.
 export function* rEquals(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = new Map()): Gen<boolean> {
   rt().spend();
-  if (a === b) return typeof a !== 'number' || !Number.isNaN(a);
+  if (a === b) return !isRubyFloat(a) || !Number.isNaN(Number(a));
   if (isOverridden(a, '==')) return truthy(yield* callMethod(a, '==', [b]));
-  if (typeof a === 'bigint' || typeof a === 'number') {
-    if (typeof b === 'bigint' || typeof b === 'number') return numericEquals(a, b);
+  if (typeof a === 'bigint' || isRubyFloat(a)) {
+    if (typeof b === 'bigint' || isRubyFloat(b)) {
+      if (b instanceof RFloat && isOverridden(b, '==')) return truthy(yield* callMethod(b, '==', [a]));
+      return numericEquals(typeof a === 'bigint' ? a : Number(a), typeof b === 'bigint' ? b : Number(b));
+    }
     if (isOverridden(b, '==')) {
       return truthy(yield* callMethod(b, '==', [a]));
     }

@@ -54,6 +54,7 @@ import {
   arr,
   asciiString,
   classOf,
+  frozenCoreString,
   isA,
   newHash,
   realClassOf,
@@ -661,7 +662,15 @@ for (const [name, feature] of [
 
 // Module and Class ----------------------------------------------------------------------------------------------------
 
-def('Module', ['name'], 0, (self: RClass) => (self.name === undefined ? NIL : str(self.name)));
+def('Module', ['name'], 0, (self: RClass) => {
+  const name = self.name;
+  if (name === undefined) return NIL;
+  if (self.nameString?.text === name) return self.nameString.value;
+  const value = /^[\u0000-\u007F]*$/.test(name) ? asciiString(name) : str(name);
+  value.frozen = true;
+  self.nameString = { text: name, value };
+  return value;
+});
 def('Module', ['to_s', 'inspect'], 0, (self: RClass) => str(className(self)));
 def('Module', '===', 1, (self: RClass, [value]) => isA(value, self));
 def('Module', '==', 1, (self, [other]) => self === other);
@@ -978,7 +987,7 @@ sdef('Module', 'new', 0, () => {
 
 // nil, true, false ----------------------------------------------------------------------------------------------------
 
-def('NilClass', 'to_s', 0, () => asciiString(''));
+def('NilClass', 'to_s', 0, () => frozenCoreString(''));
 def('NilClass', 'to_a', 0, () => arr([]));
 def('NilClass', 'to_h', 0, () => newHash());
 def('NilClass', 'to_i', 0, () => 0n);
@@ -987,12 +996,12 @@ def('NilClass', 'inspect', 0, () => str('nil'));
 def('NilClass', '&', 1, () => false);
 def('NilClass', '|', 1, (_self, [other]) => truthy(other));
 def('NilClass', 'nil?', 0, () => true);
-def('TrueClass', ['to_s', 'inspect'], 0, () => asciiString('true'));
+def('TrueClass', ['to_s', 'inspect'], 0, () => frozenCoreString('true'));
 def('TrueClass', '&', 1, (_self, [other]) => truthy(other));
 def('TrueClass', '|', 1, () => true);
 def('TrueClass', '^', 1, (_self, [other]) => !truthy(other));
 def('TrueClass', '!', 0, () => false);
-def('FalseClass', ['to_s', 'inspect'], 0, () => asciiString('false'));
+def('FalseClass', ['to_s', 'inspect'], 0, () => frozenCoreString('false'));
 def('FalseClass', '&', 1, () => false);
 def('FalseClass', '|', 1, (_self, [other]) => truthy(other));
 def('FalseClass', '^', 1, (_self, [other]) => truthy(other));

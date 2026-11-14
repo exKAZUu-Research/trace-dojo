@@ -2496,6 +2496,10 @@ test('Hash compact preserves subclass instance state', () => {
   ).toMatchObject({ stdout: '[H, 2, {a: 1}]\n' });
 });
 
+test('Hash flatten rejects explicit nil depth', () => {
+  expect(run('begin;p({a:[1]}.flatten(nil));rescue=>e;p e.class;end')).toMatchObject({ stdout: 'TypeError\n' });
+});
+
 test('Hash default_proc assignment clears stored default values', () => {
   expect(
     run('h=Hash.new(3);h.default_proc=nil;p h.default,h[:a];h.default_proc=proc{|h,k|4};p h.default,h[:a]')
@@ -2562,6 +2566,49 @@ test('Array Hash and Symbol inspection retain Ruby encodings', () => {
   ).toMatchObject({
     stdout:
       '[91, 49, 93, 128]\n[123, 125, 128]\n[123, 97, 58, 32, 49, 125, 128]\n[91, 58, 120, 93, 128]\n[58, 120, 128]\n[91, 34, 97, 34, 93, 194, 128]\n',
+  });
+});
+
+test('boxed Floats compare equally across numeric representations', () => {
+  expect(run('p [0]==[-0.0],[-0.0]==[0],[0.0]==[-0.0],[0].include?(-0.0)')).toMatchObject({
+    stdout: 'true\ntrue\ntrue\ntrue\n',
+  });
+});
+
+test('oversized String repetition and in-place expansion stop at storage limits', () => {
+  expect(run('begin;"a"*1000001;rescue=>e;p e.class;end;p :after')).toEqual({
+    kind: 'limitExceeded',
+    limit: 'storage',
+  });
+  expect(run('begin;s="ΐ"*400000;s.upcase!;rescue=>e;p e.class;end;p :after')).toEqual({
+    kind: 'limitExceeded',
+    limit: 'storage',
+  });
+});
+
+test('warning assembly retains US-ASCII output encoding', () => {
+  expect(
+    run(
+      'class W;def write(x);$v<<x;end;end;$v=[];$stderr=W.new;warn 1.to_s;warn 1.to_s.clear;$stderr=STDERR;$v.each{|s|s<<128;p s.bytes}'
+    )
+  ).toMatchObject({ stdout: '[49, 10, 128]\n[10, 128]\n' });
+});
+
+test('Module name returns a stable frozen String', () => {
+  expect(
+    run('class A;end;p A.name.frozen?,A.name.equal?(A.name);begin;A.name<<"x";rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'true\ntrue\nFrozenError\n',
+  });
+});
+
+test('nil and Boolean conversions reuse frozen String values', () => {
+  expect(
+    run(
+      'p nil.to_s.frozen?,nil.to_s.equal?(nil.to_s),true.to_s.frozen?,true.to_s.equal?(true.inspect),false.to_s.frozen?'
+    )
+  ).toMatchObject({
+    stdout: 'true\ntrue\ntrue\ntrue\ntrue\n',
   });
 });
 
