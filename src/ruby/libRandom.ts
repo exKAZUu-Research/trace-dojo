@@ -12,8 +12,13 @@ export class MersenneTwister {
   private index = 625;
   seed: bigint;
 
-  constructor(seed: bigint) {
+  constructor(seed: bigint, copied?: MersenneTwister) {
     this.seed = seed;
+    if (copied) {
+      this.state.set(copied.state);
+      this.index = copied.index;
+      return;
+    }
     const magnitude = seed < 0n ? -seed : seed;
     const words: number[] = [];
     const digits = magnitude.toString(16);
@@ -29,10 +34,7 @@ export class MersenneTwister {
   }
 
   copy(): MersenneTwister {
-    const copied = new MersenneTwister(this.seed);
-    copied.state.set(this.state);
-    copied.index = this.index;
-    return copied;
+    return new MersenneTwister(this.seed, this);
   }
 
   private initGenrand(seed: number): void {

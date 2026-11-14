@@ -2407,6 +2407,14 @@ test('warn suppresses disabled categories and writes each warning once', () => {
   ).toMatchObject({ stdout: '["b\\n", "c\\nd\\n"]\n' });
 });
 
+test('warn preserves binary bytes and skips disabled warning level conversion', () => {
+  expect(
+    run(
+      'class W;def write(s);$v<<s.bytes;end;end;class L;def to_int;puts :called;0;end;end;$v=[];$stderr=W.new;warn 255.chr;warn "x",category: :deprecated,uplevel:L.new;$stderr=STDERR;p $v'
+    )
+  ).toMatchObject({ stdout: '[[255, 10]]\n' });
+});
+
 test('Range cover excludes empty Range arguments', () => {
   expect(run('p (1..3).cover?(2...2),(1..3).cover?(3..2),(1..3).cover?(2..2)')).toMatchObject({
     stdout: 'false\nfalse\ntrue\n',
@@ -2444,6 +2452,18 @@ test('Set identity equality skips member hash callbacks', () => {
   expect(run('class K;def hash;puts :hash;0;end;end;s=Set[K.new];puts :start;p s==s,s.eql?(s)')).toMatchObject({
     stdout: 'hash\nstart\ntrue\ntrue\n',
   });
+});
+
+test('Range cover dispatches the receiver endpoint comparison', () => {
+  expect(
+    run(
+      'class A;attr_reader :n;def initialize(n);@n=n;end;def <=>(x);return -1 if @n==5 && x.n==4;@n<=>x.n;end;end;a=A.new(1)..A.new(5);b=A.new(2)..A.new(4);p a.cover?(b)'
+    )
+  ).toMatchObject({ stdout: 'false\n' });
+});
+
+test('Random copies large seeded state without reseeding', () => {
+  expect(run('r=Random.new(2**5000000);3.times{r.dup};puts :ok')).toMatchObject({ stdout: 'ok\n' });
 });
 
 test('recursive Sets inspect with a cycle marker', () => {

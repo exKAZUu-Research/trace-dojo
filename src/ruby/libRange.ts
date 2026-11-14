@@ -283,10 +283,10 @@ def('Range', 'cover?', 1, function* (self: RRange, [value]) {
     if (!coversBegin) return false;
     if (value.end === NIL) return self.end === NIL;
     if (self.end === NIL) return true;
-    const order = yield* spaceship(value.end, self.end);
+    const order = yield* spaceship(self.end, value.end);
     if (order === undefined) return false;
-    if (self.exclusive && !value.exclusive) return order < 0;
-    return order <= 0;
+    if (self.exclusive && !value.exclusive) return order > 0;
+    return order >= 0;
   }
   return yield* rangeCovers(self, value);
 });

@@ -1,5 +1,5 @@
 import type { OutputChannel } from '../interpreter/programIo';
-import { inspectValue, toIndexExact, toInt, toSValue } from './conversions';
+import { combinedStringEncoding, inspectValue, toIndexExact, toInt, toSValue } from './conversions';
 import { def } from './define';
 import { argumentError, frozenError, typeError } from './errors';
 import { exportBinaryInspect, formatString } from './format';
@@ -190,16 +190,38 @@ def(
     yield* validateWarnKeywords(keywords, args.length > 0);
     if (args.length > 0 && warnCategoryEnabled(keywords)) {
       const target = rt().globals.get('$stderr') ?? NIL;
-      const parts: string[] = [];
+      const parts: RString[] = [];
       yield* emitPuts(args, function* (part) {
-        parts.push(part instanceof RString ? part.s : part);
+        parts.push(part instanceof RString ? part : str(part));
       });
-      yield* write(target, parts.join(''));
+      yield* write(target, combineWarningParts(parts));
     }
     return NIL;
   },
   { ...PRIVATE, keywords: true }
 );
+
+function combineWarningParts(parts: RString[]): RString {
+  let binary = false;
+  let ascii = true;
+  let length = 0;
+  const chunks: Uint8Array[] = [];
+  for (const part of parts) {
+    binary = combinedStringEncoding(binary, ascii, part);
+    const bytes = stringBytes(part);
+    if (ascii) ascii = bytes.every((byte) => byte < 0x80);
+    length += bytes.length;
+    rt().checkStringLength(length);
+    chunks.push(bytes);
+  }
+  const joined = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return stringFromBytes(joined, binary);
+}
 
 function warnCategoryEnabled(keywords: RHash | undefined): boolean {
   if (!keywords) return true;
@@ -222,6 +244,7 @@ function* validateWarnKeywords(keywords: RHash | undefined, hasMessages: boolean
   }
   for (const entry of entries)
     if (entry.key instanceof RSymbol && entry.key.name === 'category') validateWarnCategory(entry.value);
+  if (!warnCategoryEnabled(keywords)) return;
   for (const entry of entries) {
     const name = entry.key instanceof RSymbol ? entry.key.name : '';
     if (name === 'uplevel') {
