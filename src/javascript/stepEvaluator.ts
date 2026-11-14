@@ -11,6 +11,7 @@ import {
   isObject,
   JsFunction,
   type JsObject,
+  type Key,
   toBoolean,
   type Value,
 } from './values';
@@ -21,7 +22,7 @@ import {
  * `yield` anywhere else.
  */
 export abstract class StepEvaluator extends ExpressionEvaluator {
-  // code-gauge-allow functionNcss 50 -- One case per kind of expression that a `yield` may sit in.
+  // code-gauge-allow functionNcss 51 -- One case per kind of expression that a `yield` may sit in.
   *evaluateSteps(expression: Expression): Steps<Value> {
     if (!expression.suspends) return this.evaluate(expression);
     const { runtime } = this;
@@ -75,6 +76,12 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
       }
       case 'assign': {
         return yield* this.assignSteps(expression);
+      }
+      case 'update': {
+        const { target } = expression;
+        const reference =
+          target.kind === 'member' ? yield* this.assignmentReferenceSteps(target) : this.reference(target);
+        return this.runtime.hold(referenceBase(reference), () => this.updateReference(reference, expression));
       }
       case 'call': {
         const value = yield* this.callSteps(expression);
@@ -137,6 +144,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
   }
 
   /** Evaluates elements or arguments in order, holding the values so far; an elision leaves a hole. */
+  // code-gauge-allow duplicateLines 25 -- Mirrors the synchronous version in expressionEvaluator.ts, as a generator that suspends at yield and await.
   private *elementSteps(elements: (Argument | undefined)[]): Steps<Element[]> {
     const { runtime } = this;
     const values: Element[] = [];
@@ -206,23 +214,24 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
   private *referenceSteps(target: MemberExpression): Steps<Reference | typeof SHORT_CIRCUIT> {
     const { runtime } = this;
     const { object, property } = target;
-    const computedKey = (base: Value, key: Expression): Steps<Value> =>
-      this.holdingSteps([base], () => this.evaluateSteps(key));
+    // The base stays held through the key's conversion too, which may run the program's toString.
+    const computedKey = (base: Value, key: Expression): Steps<Key> =>
+      this.holdingSteps(
+        [base],
+        function* (this: StepEvaluator): Steps<Key> {
+          return runtime.toPropertyKey(yield* this.evaluateSteps(key));
+        }.bind(this)
+      );
     if (object.kind === 'super') {
       const thisValue = this.thisValue();
       const key =
-        property.kind === 'computed'
-          ? runtime.toPropertyKey(yield* computedKey(thisValue, property.expression))
-          : this.propertyKey(property);
+        property.kind === 'computed' ? yield* computedKey(thisValue, property.expression) : this.propertyKey(property);
       return { kind: 'super', key, thisValue };
     }
     const base = yield* this.chainSteps(object);
     if (base === SHORT_CIRCUIT || (target.optional && (base === undefined || base === null))) return SHORT_CIRCUIT;
     if (property.kind === 'private') return { kind: 'private', base, name: this.privateKey(property.name) };
-    const key =
-      property.kind === 'computed'
-        ? runtime.toPropertyKey(yield* computedKey(base, property.expression))
-        : property.key;
+    const key = property.kind === 'computed' ? yield* computedKey(base, property.expression) : property.key;
     return { kind: 'property', base, key };
   }
 
@@ -233,7 +242,6 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
   }
 
   private *objectMemberSteps(object: JsObject, members: ObjectMember[]): Steps<void> {
-    const { runtime } = this;
     for (const member of members) {
       if (!memberSuspends(member)) {
         this.defineObjectMember(object, member);
@@ -243,25 +251,34 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
         const prototype = yield* this.evaluateSteps(member.value);
         if (prototype === null || isObject(prototype)) object.proto = prototype;
       } else {
-        const key =
-          member.key.kind === 'computed'
-            ? runtime.toPropertyKey(yield* this.evaluateSteps(member.key.expression))
-            : this.propertyKey(member.key);
-        if (member.kind === 'property') {
-          // A method keeps the object as its home, and a function takes a computed key as its name, as when defined at once.
-          const { value: valueExpression } = member;
-          const value =
-            valueExpression.kind === 'functionExpression' && valueExpression.fn.kind === 'method'
-              ? this.createFunction(valueExpression.fn, runtime.frame.scope, object)
-              : yield* this.evaluateSteps(valueExpression);
-          if (member.key.kind === 'computed' && value instanceof JsFunction) nameFunction(runtime, value, key);
-          runtime.createDataProperty(object, key, value);
-        } else {
-          const accessor = this.createFunction(member.fn, runtime.frame.scope, object);
-          defineAccessor(runtime, object, key, member.kind, accessor, true);
-        }
+        yield* this.keyedMemberSteps(object, member);
       }
     }
+  }
+
+  /** Defines a property or an accessor whose key or value suspends. */
+  private *keyedMemberSteps(
+    object: JsObject,
+    member: Exclude<ObjectMember, { kind: 'spread' | 'prototype' }>
+  ): Steps<void> {
+    const { runtime } = this;
+    const key =
+      member.key.kind === 'computed'
+        ? runtime.toPropertyKey(yield* this.evaluateSteps(member.key.expression))
+        : this.propertyKey(member.key);
+    if (member.kind !== 'property') {
+      const accessor = this.createFunction(member.fn, runtime.frame.scope, object);
+      defineAccessor(runtime, object, key, member.kind, accessor, true);
+      return;
+    }
+    // A method keeps the object as its home, and a function takes a computed key as its name, as when defined at once.
+    const { value: valueExpression } = member;
+    const value =
+      valueExpression.kind === 'functionExpression' && valueExpression.fn.kind === 'method'
+        ? this.createFunction(valueExpression.fn, runtime.frame.scope, object)
+        : yield* this.evaluateSteps(valueExpression);
+    if (member.key.kind === 'computed' && value instanceof JsFunction) nameFunction(runtime, value, key);
+    runtime.createDataProperty(object, key, value);
   }
 
   /** The reference an assignment writes to, whose member target cannot be an optional chain. */
@@ -270,6 +287,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
     return (yield* this.referenceSteps(target)) as Reference;
   }
 
+  // code-gauge-allow duplicateLines 18 -- Mirrors the synchronous version in expressionEvaluator.ts, as a generator that suspends at yield and await.
   private *assignSteps(expression: Extract<Expression, { kind: 'assign' }>): Steps<Value> {
     const { runtime } = this;
     const { operator, target } = expression;

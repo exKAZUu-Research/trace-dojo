@@ -26,7 +26,7 @@ import { isA } from './values';
 
 import './library';
 
-// code-gauge-allow duplicateLines 15 -- The similar lines handle different Ruby methods or values.
+// code-gauge-allow duplicateLines 15 -- The interpreter entry points mirror the other languages so callers use one contract.
 export function executeRubyProgram(source: string, input?: ProgramInput): ProgramExecution {
   let program: Program;
   try {
@@ -48,11 +48,12 @@ export function executeRubyProgram(source: string, input?: ProgramInput): Progra
  *
  * @param onEnd Called when the program ends, while its frame still holds its variables.
  */
-// code-gauge-allow duplicateLines 17 -- The similar lines handle different Ruby methods or values.
+// code-gauge-allow duplicateLines 23 -- The interpreter entry points mirror the other languages so callers use one contract.
 export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: Frame) => void): ProgramRun {
   return withRuntime(runtime, () => {
     bootstrap(runtime);
     const frame = new Frame('main', runtime.mainObject, new Scope(), [runtime.c.Object], undefined, false, false, {});
+    frame.defaultVisibility = 'private';
     runtime.pushFrame(frame);
     try {
       let uncaughtException: string | undefined;
@@ -76,6 +77,7 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: F
         ...runtime.io.output(),
       };
     } finally {
+      frame.extra.finished = true;
       runtime.popFrame();
     }
   });

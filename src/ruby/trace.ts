@@ -1,13 +1,28 @@
+import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { formatFloat, strInspect, symInspect } from './conversions';
-import { NIL, RArray, RBasic, RClass, RHash, RObject, RProc, RRange, RString, RSymbol, type Value } from './objects';
+import {
+  type HashEntry,
+  NIL,
+  RArray,
+  RBasic,
+  RClass,
+  RFloat,
+  RHash,
+  RObject,
+  RProc,
+  RRange,
+  RString,
+  RSymbol,
+  type Value,
+} from './objects';
 import { parseRuby } from './parse';
 import { runProgram } from './run';
-import { type Frame, Runtime, type Scope } from './runtime';
+import { type Frame, rt, Runtime, type Scope } from './runtime';
 
 export function traceRubyProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const parsed = parseRuby(program, trace);
@@ -30,7 +45,7 @@ export function traceRubyProgram(program: string, trace: TraceOptions, input?: P
  * then, when `withContext`, the instance variables of `self` (as Java's `this.x`), the class variables of the
  * program's classes (as Java's static fields), and the global variables.
  */
-// code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of value the trace shows.
+// code-gauge-allow functionCognitiveComplexity 16 -- Trace collection follows Ruby scope and object kinds while matching the shared trace format.
 function variablesOf(runtime: Runtime, frame: Frame, withContext: boolean): TraceVariables {
   const variables: TraceVariables = { vars: {}, referenceVars: {} };
   for (const [name, value] of visibleLocals(frame)) addVariable(variables, name, value);
@@ -77,21 +92,38 @@ function isVariableValue(value: Value): boolean {
   return !(value instanceof RProc || value instanceof RClass);
 }
 
+const MAX_SCALAR_EXPANSION = 10_000;
+const MAX_DISPLAY_EXPANSION = 2000;
+
 function addVariable(variables: TraceVariables, name: string, value: Value): void {
   if (!isVariableValue(value)) return;
-  const scalar = scalarOf(value, new Set());
-  if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
+  const scalar = scalarOf(value, new Set(), { remaining: MAX_SCALAR_EXPANSION });
+  if (scalar !== NOT_SCALAR)
+    Object.defineProperty(variables.vars, name, {
+      value: scalar,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
   // Arrays also appear as references so that learners can expand their elements.
   if (scalar !== NOT_SCALAR && !(value instanceof RArray)) return;
-  const node = displayNodeOf(value, new Set());
-  if (node) variables.referenceVars[name] = node;
+  const node = displayNodeOf(value, new Set(), { remaining: MAX_DISPLAY_EXPANSION });
+  if (node)
+    Object.defineProperty(variables.referenceVars, name, {
+      value: node,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
 }
 
 const NOT_SCALAR = Symbol('notScalar');
 type Scalar = TraceItemVariable[string];
 
-// code-gauge-allow duplicateLines 21 -- The similar lines handle different Ruby methods or values.
-function scalarOf(value: Value, seen: Set<object>): Scalar | typeof NOT_SCALAR {
+// code-gauge-allow duplicateLines 21 -- Trace collection follows Ruby scope and object kinds while matching the shared trace format.
+function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }): Scalar | typeof NOT_SCALAR {
+  if (budget.remaining-- <= 0) throw new ExecutionLimitError('trace');
+  rt().spend();
   switch (typeof value) {
     case 'bigint': {
       return traceIntOf(value);
@@ -103,13 +135,15 @@ function scalarOf(value: Value, seen: Set<object>): Scalar | typeof NOT_SCALAR {
   }
   // oxlint-disable-next-line unicorn/no-null -- The trace format shows nil as null.
   if (value === NIL) return null;
+  if (value instanceof RFloat) return value.value;
   if (value instanceof RString) return value.s;
   if (value instanceof RSymbol) return symInspect(value.name);
   if (!(value instanceof RArray) || seen.has(value)) return NOT_SCALAR;
+  if (seen.size >= 256) throw new ExecutionLimitError('trace');
   seen.add(value);
   const items: Scalar[] = [];
   for (const item of value.items) {
-    const scalar = scalarOf(item, seen);
+    const scalar = scalarOf(item, seen, budget);
     if (scalar === NOT_SCALAR) return NOT_SCALAR;
     items.push(scalar);
   }
@@ -126,13 +160,17 @@ function traceIntOf(value: bigint): number | bigint {
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 /** The node showing a value as learners see it, or `undefined` for a value the trace hides. */
-function displayNodeOf(value: Value, seen: Set<object>): DisplayNode | undefined {
+function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: number }): DisplayNode | undefined {
+  if (budget.remaining-- <= 0) return { kind: 'value', value: '…' };
+  rt().spend();
   if (typeof value === 'bigint') return { kind: 'value', value: traceIntOf(value) };
   if (typeof value !== 'object') return { kind: 'value', value };
   if (value === NIL) return NULL_NODE;
+  if (value instanceof RFloat) return { kind: 'value', value: value.value };
   if (value instanceof RString) return { kind: 'value', value: value.s };
   if (value instanceof RSymbol) return { kind: 'value', value: symInspect(value.name) };
   if (!isVariableValue(value) || seen.has(value)) return undefined;
+  if (seen.size >= 256) return { kind: 'value', value: '…' };
   if (value instanceof RRange) return { kind: 'value', value: rangeText(value) };
   if (value instanceof RObject && value.turtle) {
     if (!value.turtle.isAlive) return undefined;
@@ -144,7 +182,7 @@ function displayNodeOf(value: Value, seen: Set<object>): DisplayNode | undefined
   if (value instanceof RObject && value.data !== undefined) return undefined;
   seen.add(value);
   try {
-    return containerNodeOf(value as RBasic, seen);
+    return containerNodeOf(value as RBasic, seen, budget);
   } finally {
     seen.delete(value);
   }
@@ -159,27 +197,67 @@ function rangeText(value: RRange): string {
   return `${end(value.begin)}${value.exclusive ? '...' : '..'}${end(value.end)}`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of value the trace shows.
-function containerNodeOf(value: RBasic, seen: Set<object>): DisplayNode {
+// code-gauge-allow functionCognitiveComplexity 16 -- Trace collection follows Ruby scope and object kinds while matching the shared trace format.
+function containerNodeOf(value: RBasic, seen: Set<object>, budget: { remaining: number }): DisplayNode {
   const entries: Record<string, DisplayNode> = {};
   if (value instanceof RArray) {
-    for (const [index, item] of value.items.entries()) entries[index] = displayNodeOf(item, seen) ?? NULL_NODE;
+    for (const [index, item] of value.items.entries()) {
+      entries[index] = displayNodeOf(item, seen, budget) ?? NULL_NODE;
+      if (budget.remaining <= 0) {
+        if (index + 1 < value.items.length) markTruncated(entries, String(index + 1));
+        break;
+      }
+    }
     return { kind: 'array', entries };
   }
   if (value instanceof RHash) {
-    const ordered = [...value.map.values()];
+    const ordered: HashEntry[] = [];
+    for (const entry of value.map.values()) {
+      if (ordered.length >= Math.max(1, budget.remaining)) break;
+      ordered.push(entry);
+    }
     const labels = keyLabels(ordered.map((entry) => entry.key));
     for (const [index, entry] of ordered.entries()) {
-      entries[labels[index]] = displayNodeOf(entry.value, seen) ?? NULL_NODE;
+      Object.defineProperty(entries, labels[index], {
+        value: displayNodeOf(entry.value, seen, budget) ?? NULL_NODE,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+      if (budget.remaining <= 0) {
+        if (index + 1 < value.map.size) {
+          let marker = '…';
+          while (Object.hasOwn(entries, marker)) marker += '…';
+          markTruncated(entries, marker);
+        }
+        break;
+      }
     }
-  } else {
-    for (const [key, item] of value.ivars ?? []) {
-      if (key.startsWith('@__') || !isVariableValue(item)) continue;
-      const node = displayNodeOf(item, seen);
-      if (node) entries[key] = node;
-    }
-  }
+  } else addInstanceEntries(entries, value, seen, budget);
   return { kind: 'object', entries };
+}
+
+function addInstanceEntries(
+  entries: Record<string, DisplayNode>,
+  value: RBasic,
+  seen: Set<object>,
+  budget: { remaining: number }
+): void {
+  for (const [key, item] of value.ivars ?? []) {
+    if (key.startsWith('@__') || !isVariableValue(item)) continue;
+    const node = displayNodeOf(item, seen, budget);
+    if (node) entries[key] = node;
+    if (budget.remaining <= 0) break;
+  }
+}
+
+function markTruncated(entries: Record<string, DisplayNode>, key: string): void {
+  Object.defineProperty(entries, key, {
+    value: { kind: 'value', value: '…' },
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
 }
 
 /**
@@ -202,12 +280,38 @@ function keyLabels(keys: Value[]): string[] {
 }
 
 /** A hash key as text, quoting strings and marking symbols when `quoted`, without running the program's methods. */
-function keyText(key: Value, quoted: boolean): string {
-  if (key instanceof RString) return quoted ? strInspect(key.s) : key.s;
+function keyText(key: Value, quoted: boolean, seen = new Set<RArray>(), memo = new WeakMap<RArray, string>()): string {
+  rt().spend();
+  if (key instanceof RString) return boundedKeyText(quoted ? strInspect(key.s) : key.s);
   if (key instanceof RSymbol) return quoted ? symInspect(key.name) : key.name;
   if (typeof key === 'boolean' || typeof key === 'bigint') return String(key);
-  if (typeof key === 'number') return formatFloat(key);
+  if (typeof key === 'number' || key instanceof RFloat) return formatFloat(Number(key));
   if (key === NIL) return 'nil';
-  if (key instanceof RArray) return `[${key.items.map((item) => keyText(item, true)).join(', ')}]`;
+  if (key instanceof RArray) {
+    if (seen.has(key)) return '[...]';
+    const cached = memo.get(key);
+    if (cached) return cached;
+    seen.add(key);
+    try {
+      let text = '[';
+      for (const [index, item] of key.items.entries()) {
+        const part = keyText(item, true, seen, memo);
+        if (text.length + part.length + 2 > 4096) {
+          text += `… (${key.items.length} items)`;
+          break;
+        }
+        text += `${index > 0 ? ', ' : ''}${part}`;
+      }
+      text += ']';
+      memo.set(key, text);
+      return text;
+    } finally {
+      seen.delete(key);
+    }
+  }
   return `#<${(key as RBasic).cls.name}>`;
+}
+
+function boundedKeyText(text: string): string {
+  return text.length <= 4096 ? text : `${text.slice(0, 2048)}…${text.slice(-2048)} (${text.length} chars)`;
 }

@@ -303,11 +303,12 @@ export class Converter {
       case 'while_modifier':
       case 'until_modifier': {
         const bodyNode = required(node.childForFieldName('body'));
-        const cond = this.valueExpr(required(node.childForFieldName('condition')));
-        const doWhile = bodyNode.type === 'begin' && !namedChildren(bodyNode).some((c) => RESCUE_CLAUSES.has(c.type));
+        const doWhile = bodyNode.type === 'begin';
+        const flattenBegin = doWhile && !namedChildren(bodyNode).some((c) => RESCUE_CLAUSES.has(c.type));
         const body = this.loopBody(() =>
-          doWhile ? this.body(namedChildren(bodyNode), 0) : [this.statement(bodyNode, 0)]
+          flattenBegin ? this.body(namedChildren(bodyNode), 0) : [this.statement(bodyNode, 0)]
         );
+        const cond = this.valueExpr(required(node.childForFieldName('condition')));
         return { k: 'while', cond, body, until: node.type === 'until_modifier', doWhile };
       }
       case 'for': {
@@ -333,7 +334,8 @@ export class Converter {
       case 'yield': {
         if (!this.ctx.inDef) this.fail(node, 'yield は、メソッドの中でしか使えません。');
         const list = namedChildren(node).find((child) => child.type === 'argument_list');
-        const { args } = list ? this.argumentList(list) : { args: [] };
+        const { args, blockArg } = list ? this.argumentList(list) : { args: [], blockArg: undefined };
+        if (list && blockArg) this.fail(list, 'yield にブロック引数を渡せません。');
         return { k: 'yield', args, used: use, row: node.startPosition.row };
       }
       case 'super': {
@@ -365,7 +367,7 @@ export class Converter {
         return { k: 'lambda', block: this.block(node, true) };
       }
       case 'splat_argument': {
-        return { k: 'splat', e: this.expr(onlyNamedChild(node)) };
+        return { k: 'splat', e: this.valueExpr(onlyNamedChild(node)) };
       }
       case 'regex': {
         return this.regex(node);
@@ -501,7 +503,7 @@ export class Converter {
     if (name.type !== 'constant') {
       return {
         k: 'call',
-        recv: scope ? this.expr(scope) : undefined,
+        recv: scope ? this.valueExpr(scope) : undefined,
         name: name.text,
         args: [],
         safe: false,
@@ -512,7 +514,7 @@ export class Converter {
       };
     }
     return scope
-      ? { k: 'const', scope: this.expr(scope), name: name.text, row: node.startPosition.row }
+      ? { k: 'const', scope: this.valueExpr(scope), name: name.text, row: node.startPosition.row }
       : { k: 'const', top: true, name: name.text, row: node.startPosition.row };
   }
 
@@ -580,7 +582,10 @@ export class Converter {
       } else if (child.type === 'escape_sequence') {
         literal += child.text;
       } else if (child.type === 'interpolation') {
-        if (literal) parts.push(this.decode(node, literal));
+        if (literal) {
+          const decoded = this.decode(node, literal);
+          parts.push(decoded.bytes ? { text: decoded.text, bytes: decoded.bytes } : decoded.text);
+        }
         literal = '';
         const statements = this.body(namedChildren(child), 1);
         parts.push(
@@ -594,11 +599,14 @@ export class Converter {
         this.unsupportedNode(child);
       }
     }
-    if (literal) parts.push(this.decode(node, literal));
+    if (literal) {
+      const decoded = this.decode(node, literal);
+      parts.push(decoded.bytes ? { text: decoded.text, bytes: decoded.bytes } : decoded.text);
+    }
     return parts;
   }
 
-  private decode(node: Node, text: string): string {
+  private decode(node: Node, text: string): { text: string; binary: boolean; bytes?: number[] } {
     const decoded = decodeDoubleQuoted(text);
     if (decoded === undefined) this.fail(node, '文字列のエスケープの書き方に誤りがあります。');
     return decoded;
@@ -613,6 +621,7 @@ export class Converter {
         pairs.push(node);
         continue;
       }
+      if (pairs.length > 0) this.fail(node, 'Hash の要素の後に配列の要素は書けません。');
       items.push(this.argument(node));
     }
     if (pairs.length > 0) items.push({ k: 'hash', items: this.hashItems(pairs), braces: false });
@@ -650,7 +659,7 @@ export class Converter {
         : this.stringParts(keyNode);
       key = { k: 'dsym', parts };
     } else {
-      key = this.expr(keyNode);
+      key = this.valueExpr(keyNode);
     }
     if (valueNode) return { key, value: this.valueExpr(valueNode) };
     // `{x:}` takes the value of the variable or method of that name.
@@ -676,42 +685,7 @@ export class Converter {
   }
 
   private argumentList(node: Node): { args: Expr[]; blockArg?: Expr } {
-    const args: Expr[] = [];
-    const pairs: Node[] = [];
-    let blockArg: Expr | undefined;
-    for (const child of namedChildren(node)) {
-      switch (child.type) {
-        case 'comment': {
-          break;
-        }
-        case 'pair':
-        case 'hash_splat_argument': {
-          pairs.push(child);
-          break;
-        }
-        case 'block_argument': {
-          blockArg = this.anonymousOr(child, FORWARD_BLOCK);
-          break;
-        }
-        case 'forward_argument': {
-          if (this.ctx.scope.depthOf(FORWARD_ALL) < 0)
-            this.fail(child, '引数を転送する ... は、... を受け取るメソッドの中でしか使えません。');
-          const reference = (name: string): Expr => ({ k: 'lvar', name, depth: this.ctx.scope.depthOf(name) });
-          args.push({ k: 'splat', e: reference(FORWARD_REST) });
-          pairs.push(child);
-          blockArg = reference(FORWARD_BLOCK);
-          break;
-        }
-        default: {
-          if (pairs.length > 0 && child.type !== 'splat_argument') {
-            args.push({ k: 'hash', items: this.hashItems(pairs.splice(0)), braces: false });
-          }
-          args.push(this.argument(child));
-        }
-      }
-    }
-    if (pairs.length > 0) args.push({ k: 'hash', items: this.hashItems(pairs), braces: false });
-    return { args, blockArg };
+    return this.argumentListFrom(namedChildren(node));
   }
 
   // Assignments -------------------------------------------------------------------------------------------------------
@@ -766,6 +740,7 @@ export class Converter {
     for (const child of namedChildren(node)) {
       if (child.type === 'comment') continue;
       if (child.type === 'rest_assignment') {
+        if (splat !== undefined) this.fail(child, '* の代入先は1つしか書けません。');
         splat = items.length;
         const inner = namedChildren(child)[0];
         items.push(inner ? this.target(inner) : { k: 'mlhs', items: [] });
@@ -801,15 +776,16 @@ export class Converter {
         const scope = node.childForFieldName('scope');
         const name = required(node.childForFieldName('name')).text;
         return scope
-          ? { k: 'const', scope: this.expr(scope), name, row: node.startPosition.row }
+          ? { k: 'const', scope: this.valueExpr(scope), name, row: node.startPosition.row }
           : { k: 'const', top: true, name, row: node.startPosition.row };
       }
       case 'element_reference': {
         const object = required(node.childForFieldName('object'));
+        const recv = this.valueExpr(object);
         const args = namedChildren(node)
           .filter((child) => child.id !== object.id && child.type !== 'comment')
           .map((child) => this.argument(child));
-        return { k: 'index', recv: this.expr(object), args, row: node.startPosition.row };
+        return { k: 'index', recv, args, row: node.startPosition.row };
       }
       case 'call': {
         const receiver = node.childForFieldName('receiver');
@@ -818,7 +794,7 @@ export class Converter {
         const operator = node.childForFieldName('operator')?.text;
         return {
           k: 'attr',
-          recv: this.expr(receiver),
+          recv: this.valueExpr(receiver),
           name: method.text,
           safe: operator === '&.',
           row: node.startPosition.row,
@@ -851,6 +827,7 @@ export class Converter {
     const argumentsNode = node.childForFieldName('arguments');
     const blockNode = node.childForFieldName('block');
     const operator = node.childForFieldName('operator')?.text;
+    const recv = receiverNode ? this.valueExpr(receiverNode) : undefined;
     const { args, blockArg } = argumentsNode ? this.argumentList(argumentsNode) : { args: [], blockArg: undefined };
     if (methodNode?.type === 'super') {
       const block = blockNode ? this.block(blockNode, false) : undefined;
@@ -858,7 +835,6 @@ export class Converter {
       return { k: 'super', args, blockArg, block, used: use, row: node.startPosition.row };
     }
     const name = methodNode ? methodNode.text : 'call';
-    const recv = receiverNode ? this.valueExpr(receiverNode) : undefined;
     const block = blockNode ? this.block(blockNode, false) : undefined;
     if (block && blockArg) this.fail(node, 'ブロックと & 引数を同時に渡すことはできません。');
     const call: Call = {
@@ -880,20 +856,57 @@ export class Converter {
   private elementReference(node: Node, use: Use): Expr {
     const object = required(node.childForFieldName('object'));
     const rest = namedChildren(node).filter((child) => child.id !== object.id && child.type !== 'comment');
+    const recv = this.valueExpr(object);
     const { args, blockArg } = this.argumentListFrom(rest);
-    return { ...this.plainCall(node, this.valueExpr(object), '[]', args, use), blockArg };
+    return {
+      k: 'call',
+      recv,
+      name: '[]',
+      args,
+      blockArg,
+      safe: false,
+      fcall: recv.k === 'self',
+      vcall: false,
+      used: use,
+      row: node.startPosition.row,
+    };
   }
 
   private argumentListFrom(nodes: Node[]): { args: Expr[]; blockArg?: Expr } {
     const args: Expr[] = [];
     const pairs: Node[] = [];
+    let blockArg: Expr | undefined;
     for (const child of nodes) {
-      if (child.type === 'pair' || child.type === 'hash_splat_argument') pairs.push(child);
-      else if (child.type === 'block_argument') this.unsupported(child, '[] への & 引数');
-      else args.push(this.argument(child));
+      if (child.type === 'comment') continue;
+      if (blockArg) this.fail(child, '& 引数の後に引数は書けません。');
+      switch (child.type) {
+        case 'pair':
+        case 'hash_splat_argument': {
+          pairs.push(child);
+          break;
+        }
+        case 'block_argument': {
+          blockArg = this.anonymousOr(child, FORWARD_BLOCK);
+          break;
+        }
+        case 'forward_argument': {
+          if (this.ctx.scope.depthOf(FORWARD_ALL) < 0)
+            this.fail(child, '引数を転送する ... は、... を受け取るメソッドの中でしか使えません。');
+          if (pairs.length > 0) this.fail(child, 'キーワード引数の後に位置引数は書けません。');
+          const reference = (name: string): Expr => ({ k: 'lvar', name, depth: this.ctx.scope.depthOf(name) });
+          args.push({ k: 'splat', e: reference(FORWARD_REST) });
+          pairs.push(child);
+          blockArg = reference(FORWARD_BLOCK);
+          break;
+        }
+        default: {
+          if (pairs.length > 0) this.fail(child, 'キーワード引数の後に位置引数は書けません。');
+          args.push(this.argument(child));
+        }
+      }
     }
     if (pairs.length > 0) args.push({ k: 'hash', items: this.hashItems(pairs), braces: false });
-    return { args };
+    return { args, blockArg };
   }
 
   private binary(node: Node): Expr {
@@ -934,7 +947,7 @@ export class Converter {
       name,
       args,
       safe: false,
-      fcall: false,
+      fcall: recv.k === 'self',
       vcall: false,
       used,
       row: node.startPosition.row,
@@ -947,7 +960,7 @@ export class Converter {
     const operandNode = required(node.childForFieldName('operand'));
     if (operator === 'defined?') return { k: 'defined', e: this.expr(operandNode) };
     if ((operator === '-' || operator === '+') && (operandNode.type === 'integer' || operandNode.type === 'float')) {
-      const operand = this.expr(operandNode);
+      const operand = this.valueExpr(operandNode);
       const sign = operator === '-' && !/^\s/.test(this.source.slice(node.startIndex + 1, operandNode.startIndex));
       if (sign || operator === '+') {
         if (operator === '+') return operand;
@@ -1008,7 +1021,7 @@ export class Converter {
     const patternNode = required(node.childForFieldName('pattern'));
     const target = this.target(patternNode);
     const inNode = required(node.childForFieldName('value'));
-    const iter = this.expr(onlyNamedChild(inNode));
+    const iter = this.valueExpr(onlyNamedChild(inNode));
     const body = this.loopBody(() => this.bodyOf(node.childForFieldName('body'), 0));
     return { k: 'for', target, iter, body, row: node.startPosition.row };
   }
@@ -1040,7 +1053,8 @@ export class Converter {
   private jumpValue(node: Node): Expr | undefined {
     const list = namedChildren(node).find((child) => child.type === 'argument_list');
     if (!list) return undefined;
-    const { args } = this.argumentList(list);
+    const { args, blockArg } = this.argumentList(list);
+    if (blockArg) this.fail(list, `${node.type} にブロック引数を渡せません。`);
     if (args.length === 1 && args[0].k !== 'splat') return args[0];
     return { k: 'array', items: args };
   }
@@ -1105,44 +1119,62 @@ export class Converter {
       this.ctx.scope.declareOwn(name);
       return name;
     };
+    const blockLocals = new Set<number>();
+    let phase = 0;
+    const advance = (child: Node, next: number): void => {
+      if (next < phase) this.fail(child, '引数の並び順に誤りがあります。');
+      phase = next;
+    };
+    for (let index = 0; index < node.childCount; index++)
+      if (node.fieldNameForChild(index) === 'locals') blockLocals.add(required(node.child(index)).id);
     for (const child of namedChildren(node)) {
+      if (blockLocals.has(child.id)) continue;
       switch (child.type) {
         case 'comment': {
           break;
         }
         case 'identifier': {
+          advance(child, params.rest !== undefined || params.optional.length > 0 ? 3 : 0);
           const target: ParamTarget = declare(child, child.text);
           (params.rest === undefined && params.optional.length === 0 ? params.required : params.post).push(target);
           break;
         }
         case 'optional_parameter': {
+          advance(child, 1);
           const name = declare(child, required(child.childForFieldName('name')).text);
           params.optional.push({ name, value: this.valueExpr(required(child.childForFieldName('value'))) });
           break;
         }
         case 'splat_parameter': {
+          advance(child, 2);
           if (params.rest !== undefined) this.fail(child, '* の引数は1つしか書けません。');
           const nameNode = child.childForFieldName('name');
           params.rest = declare(child, nameNode ? nameNode.text : FORWARD_REST);
           break;
         }
         case 'hash_splat_parameter': {
+          advance(child, 5);
+          if (params.keywordRest !== undefined) this.fail(child, '** の引数は1つしか書けません。');
           const nameNode = child.childForFieldName('name');
           params.keywordRest = declare(child, nameNode ? nameNode.text : FORWARD_KEYWORDS);
           break;
         }
         case 'keyword_parameter': {
+          advance(child, 4);
           const name = declare(child, required(child.childForFieldName('name')).text);
           const valueNode = child.childForFieldName('value');
           params.keywords.push({ name, value: valueNode ? this.valueExpr(valueNode) : undefined });
           break;
         }
         case 'block_parameter': {
+          advance(child, 6);
+          if (params.block !== undefined) this.fail(child, '& の引数は1つしか書けません。');
           const nameNode = child.childForFieldName('name');
           params.block = declare(child, nameNode ? nameNode.text : FORWARD_BLOCK);
           break;
         }
         case 'destructured_parameter': {
+          advance(child, params.rest !== undefined || params.optional.length > 0 ? 3 : 0);
           const target = this.destructuredParameter(child, declare);
           (params.rest === undefined && params.optional.length === 0 ? params.required : params.post).push(target);
           break;
@@ -1165,6 +1197,7 @@ export class Converter {
     }
     const lastToken = node.children.at(-2);
     if (isBlock && lastToken?.type === ',') params.trailingComma = true;
+    for (const child of namedChildren(node)) if (blockLocals.has(child.id)) declare(child, child.text);
     return params;
   }
 
@@ -1177,6 +1210,7 @@ export class Converter {
       if (child.type === 'identifier') {
         items.push({ k: 'lvar', name: declare(child, child.text), depth: 0 });
       } else if (child.type === 'splat_parameter') {
+        if (splat !== undefined) this.fail(child, '* の引数は1つしか書けません。');
         splat = items.length;
         const nameNode = child.childForFieldName('name');
         items.push(nameNode ? { k: 'lvar', name: declare(child, nameNode.text), depth: 0 } : { k: 'mlhs', items: [] });
@@ -1198,7 +1232,6 @@ export class Converter {
       let params: Params | undefined;
       if (parametersNode) {
         params = this.params(parametersNode, !isLambdaLiteral);
-        this.declareBlockLocals(parametersNode, scope);
       }
       let bodyNode = node.childForFieldName('body');
       if (isLambdaLiteral && bodyNode && (bodyNode.type === 'block' || bodyNode.type === 'do_block')) {
@@ -1213,20 +1246,12 @@ export class Converter {
     }
   }
 
-  private declareBlockLocals(parametersNode: Node, scope: LocalScope): void {
-    for (let index = 0; index < parametersNode.childCount; index++) {
-      if (parametersNode.fieldNameForChild(index) !== 'locals') continue;
-      const local = parametersNode.child(index);
-      if (local) scope.declareOwn(local.text);
-    }
-  }
-
   private classNode(node: Node): Expr {
     if (this.ctx.inDef) this.fail(node, 'メソッドの中ではクラスを定義できません。');
     const nameNode = required(node.childForFieldName('name'));
     const path = this.constantPath(nameNode);
     const superclassNode = node.childForFieldName('superclass');
-    const superclass = superclassNode ? this.expr(onlyNamedChild(superclassNode)) : undefined;
+    const superclass = superclassNode ? this.valueExpr(onlyNamedChild(superclassNode)) : undefined;
     const body = this.classBody(node);
     return { k: 'class', ...path, superclass, body, row: node.startPosition.row };
   }
@@ -1242,7 +1267,7 @@ export class Converter {
     if (node.type !== 'scope_resolution') this.fail(node, 'クラス・モジュールの名前は大文字で始めてください。');
     const scope = node.childForFieldName('scope');
     const name = required(node.childForFieldName('name')).text;
-    return scope ? { scope: this.expr(scope), name } : { top: true, name };
+    return scope ? { scope: this.valueExpr(scope), name } : { top: true, name };
   }
 
   private classBody(node: Node): Body {
@@ -1588,12 +1613,11 @@ function stepKindOf(e: Expr): StepKind {
  */
 function classBodyStepKind(e: Expr, step: StepKind): StepKind {
   if (step === 'call' || step === 'expr' || step === 'value') return 'none';
-  if (step === 'assign' && (e.k === 'asgn' || e.k === 'opasgn') && e.k === 'asgn' && isLiteral(e.value))
-    return 'constant';
+  if (step === 'assign' && e.k === 'asgn' && isLiteral(e.value)) return 'constant';
   return step;
 }
 
-/** Whether an expression is made of literals and operators over them, which nothing a program does can change. */
+/** Whether an expression uses only literals and operators on them. */
 function isLiteral(e: Expr): boolean {
   switch (e.k) {
     case 'nil':
@@ -1605,7 +1629,7 @@ function isLiteral(e: Expr): boolean {
       return true;
     }
     case 'str': {
-      return e.parts.every((part) => typeof part === 'string');
+      return e.parts.every((part) => typeof part === 'string' || ('text' in part && 'bytes' in part));
     }
     case 'array': {
       return e.items.every((item) => isLiteral(item));
@@ -1733,6 +1757,11 @@ function voidKindOf(value: Expr): string | undefined {
       return last ? voidKindOf(last.e) : undefined;
     }
     case 'begin': {
+      const ensured = value.ensure?.at(-1);
+      if (ensured) {
+        const kind = voidKindOf(ensured.e);
+        if (kind) return kind;
+      }
       // A `rescue` clause gives the expression a value even when its body has none.
       if (value.rescues.length > 0) return undefined;
       const last = value.body.at(-1);

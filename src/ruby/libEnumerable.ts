@@ -1,12 +1,43 @@
-// code-gauge-allow-file fileNcss 675 -- The libEnumerable module keeps one concern's cases together.
-import { caseEquals, compareValues, inspect, rEquals, spaceship, toIndex, toInt } from './conversions';
+// code-gauge-allow-file fileNcss 677 -- The libEnumerable module keeps one concern's cases together.
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import {
+  caseEquals,
+  compareValues,
+  comparisonFailed,
+  inspect,
+  rEquals,
+  spaceship,
+  toIndex,
+  toIndexExact,
+  toStrValue,
+} from './conversions';
 import { def } from './define';
-import { argumentError, typeError } from './errors';
-import { eachEntry, hashGet, hashKeyOf, hashSet } from './hashes';
-import { callBlock, callMethod, callProc, type Gen, nativeProc, respondsTo } from './interp';
-import { iterateEnumerator, makeEnumerator, sizedEnumerator } from './libEnumerator';
-import { NIL, RArray, RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
-import { rt } from './runtime';
+import { argumentCountError, argumentError, runtimeError, typeError } from './errors';
+import { eachEntryUntil, hashGetOrInsert, hashSet, hashUpdateEntry } from './hashes';
+import { callBlock, callMethod, callProc, flattenGenerator, type Gen, nativeProc, respondsTo } from './interp';
+import { tryAry } from './libArray';
+import {
+  customEnumerator,
+  type EnumeratorSource,
+  iterateEnumerator,
+  makeEnumerator,
+  receiverSize,
+  sizedEnumerator,
+} from './libEnumerator';
+import {
+  isRubyFloat,
+  isRubyNumber,
+  NIL,
+  RArray,
+  RHash,
+  RObject,
+  type RProc,
+  RRange,
+  RString,
+  RSymbol,
+  type Value,
+} from './objects';
+import { rt, whileHeld } from './runtime';
 import { isUniformKey, platformSort, uniformSort } from './sorting';
 import { arr, newHash, realClassOf, truthy } from './values';
 
@@ -21,25 +52,23 @@ type Visit = (value: Value) => Gen<unknown>;
  * `[key, value]` pairs, a Range's members, or whatever `each` yields (several values packed into an array). The
  * visitor returns {@link STOP} to end the iteration.
  */
-export function* iterate(collection: Value, visit: Visit): Gen<void> {
+export function* iterate(collection: Value, visit: Visit, args: Value[] = []): Gen<void> {
   const runtime = rt();
-  if (collection instanceof RArray && !isOverridden(collection)) {
+  if (args.length === 0 && collection instanceof RArray && !isOverridden(collection)) {
     for (let index = 0; index < collection.items.length; index++) {
       runtime.spend();
       if ((yield* visit(collection.items[index])) === STOP) return;
     }
     return;
   }
-  if (collection instanceof RHash && !isOverridden(collection)) {
-    let stopped = false;
-    yield* eachEntry(collection, function* (entry) {
-      if (stopped) return;
+  if (args.length === 0 && collection instanceof RHash && !isOverridden(collection)) {
+    yield* eachEntryUntil(collection, function* (entry) {
       runtime.spend();
-      if ((yield* visit(arr([entry.key, entry.value]))) === STOP) stopped = true;
+      return (yield* visit(arr([entry.key, entry.value]))) === STOP;
     });
     return;
   }
-  if (collection instanceof RRange && !isOverridden(collection)) {
+  if (args.length === 0 && collection instanceof RRange && !isOverridden(collection)) {
     const { iterateRange } = rangeHelpers;
     yield* iterateRange(collection, visit);
     return;
@@ -52,13 +81,13 @@ export function* iterate(collection: Value, visit: Visit): Gen<void> {
     return NIL;
   });
   try {
-    yield* collection instanceof RObject && collection.cls === runtime.c.Enumerator
+    yield* args.length === 0 && collection instanceof RObject && collection.cls.isSubclassOf(runtime.c.Enumerator)
       ? iterateEnumerator(collection, function* (value) {
           runtime.spend();
           if ((yield* visit(value)) === STOP) throw signal;
           return NIL;
         })
-      : callMethod(collection, 'each', [], undefined, block);
+      : callMethod(collection, 'each', args, undefined, block, { fcall: true });
   } catch (error) {
     if (error !== signal) throw error;
   }
@@ -76,14 +105,30 @@ function isOverridden(collection: RArray | RHash | RRange): boolean {
   return method !== undefined && method.body.kind !== 'native';
 }
 
-export function* toArray(collection: Value): Gen<Value[]> {
-  if (collection instanceof RArray && !isOverridden(collection)) return [...collection.items];
+export function* toArray(collection: Value, args: Value[] = []): Gen<Value[]> {
+  if (args.length === 0 && collection instanceof RArray && !isOverridden(collection)) return [...collection.items];
   const items: Value[] = [];
-  yield* iterate(collection, function* (value) {
-    items.push(value);
-    yield* [];
-  });
+  yield* collectInto(
+    collection,
+    [items],
+    function* (value) {
+      items.push(value);
+      yield* [];
+    },
+    args
+  );
   return items;
+}
+
+function* collectInto(collection: Value, arrays: Value[][], visit: Visit, args: Value[] = []): Gen<void> {
+  const held = rt().heldArrays;
+  const mark = held.length;
+  for (const array of arrays) held.push(array);
+  try {
+    yield* iterate(collection, visit, args);
+  } finally {
+    held.length = mark;
+  }
 }
 
 /** Calls a block with one element, splatting an array over several parameters as `yield` does. */
@@ -91,13 +136,13 @@ function call(block: RProc, value: Value, used = true): Gen {
   return callBlock(block, [value], used);
 }
 
-def('Enumerable', ['to_a', 'entries'], [0, -1], function* (self) {
-  return arr(yield* toArray(self));
+def('Enumerable', ['to_a', 'entries'], [0, -1], function* (self, args) {
+  return arr(yield* toArray(self, args));
 });
 def('Enumerable', ['map', 'collect'], 0, function* (self, _args, block) {
   if (!block) return sizedEnumerator(self, 'map', [], () => sizeOf(self));
   const results: Value[] = [];
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [results], function* (value) {
     results.push(yield* call(block, value));
   });
   return arr(results);
@@ -105,9 +150,13 @@ def('Enumerable', ['map', 'collect'], 0, function* (self, _args, block) {
 def('Enumerable', ['flat_map', 'collect_concat'], 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'flat_map', []);
   const results: Value[] = [];
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [results], function* (value) {
     const mapped = yield* call(block, value);
-    if (mapped instanceof RArray) results.push(...mapped.items);
+    const converted = yield* tryAry(mapped);
+    const added = converted ? converted.items.length : 1;
+    if (results.length + added > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+    rt().spend(Math.ceil(added / 64));
+    if (converted) for (const item of converted.items) results.push(item);
     else results.push(mapped);
   });
   return arr(results);
@@ -115,15 +164,26 @@ def('Enumerable', ['flat_map', 'collect_concat'], 0, function* (self, _args, blo
 def('Enumerable', ['select', 'filter', 'find_all'], 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'select', []);
   const results: Value[] = [];
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [results], function* (value) {
     if (truthy(yield* call(block, value))) results.push(value);
   });
   return arr(results);
 });
+for (const [name, inverted] of [
+  ['grep', false],
+  ['grep_v', true],
+] as const)
+  def('Enumerable', name, 1, function* (self, [pattern], block) {
+    const matches: Value[] = [];
+    yield* collectInto(self, [matches], function* (value) {
+      if ((yield* caseEquals(pattern, value)) !== inverted) matches.push(block ? yield* call(block, value) : value);
+    });
+    return arr(matches);
+  });
 def('Enumerable', 'filter_map', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'filter_map', []);
   const results: Value[] = [];
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [results], function* (value) {
     const mapped = yield* call(block, value);
     if (truthy(mapped)) results.push(mapped);
   });
@@ -132,7 +192,7 @@ def('Enumerable', 'filter_map', 0, function* (self, _args, block) {
 def('Enumerable', 'reject', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'reject', []);
   const results: Value[] = [];
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [results], function* (value) {
     if (!truthy(yield* call(block, value))) results.push(value);
   });
   return arr(results);
@@ -141,7 +201,7 @@ def('Enumerable', 'partition', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'partition', []);
   const accepted: Value[] = [];
   const rejected: Value[] = [];
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [accepted, rejected], function* (value) {
     (truthy(yield* call(block, value)) ? accepted : rejected).push(value);
   });
   return arr([arr(accepted), arr(rejected)]);
@@ -177,9 +237,13 @@ def('Enumerable', 'find_index', [0, 1], function* (self, args, block) {
 def('Enumerable', 'each_with_index', [0, -1], function* (self, args, block) {
   if (!block) return makeEnumerator(self, 'each_with_index', args);
   let index = 0n;
-  yield* iterate(self, function* (value) {
-    yield* callBlock(block, [value, index++], false);
-  });
+  yield* iterate(
+    self,
+    function* (value) {
+      yield* callBlock(block, [value, index++], false);
+    },
+    args
+  );
   return self;
 });
 def('Enumerable', 'each_with_object', 1, function* (self, [memo], block) {
@@ -189,22 +253,33 @@ def('Enumerable', 'each_with_object', 1, function* (self, [memo], block) {
   });
   return memo;
 });
-def('Enumerable', 'each_entry', [0, -1], function* (self, _args, block) {
-  if (!block) return makeEnumerator(self, 'each_entry', []);
-  yield* iterate(self, function* (value) {
-    yield* callBlock(block, [value], false);
-  });
+def('Enumerable', 'each_entry', [0, -1], function* (self, args, block) {
+  if (!block) return makeEnumerator(self, 'each_entry', args);
+  yield* iterate(
+    self,
+    function* (value) {
+      yield* callBlock(block, [value], false);
+    },
+    args
+  );
   return self;
 });
-def('Enumerable', 'reverse_each', [0, -1], function* (self, _args, block) {
-  if (!block) return makeEnumerator(self, 'reverse_each', []);
-  const items = yield* toArray(self);
-  for (let index = items.length - 1; index >= 0; index--) yield* callBlock(block, [items[index]], false);
-  return self;
+def('Enumerable', 'reverse_each', [0, -1], function* (self, args, block) {
+  if (!block) return makeEnumerator(self, 'reverse_each', args);
+  const items = yield* toArray(self, args);
+  rt().heldArrays.push(items);
+  try {
+    for (let index = items.length - 1; index >= 0; index--) yield* callBlock(block, [items[index]], false);
+    return self;
+  } finally {
+    rt().heldArrays.pop();
+  }
 });
 
 /** `inject`/`reduce`: folds with a block or with the method a symbol names, from an initial value or the first. */
 export function* inject(self: Value, args: Value[], block: RProc | undefined): Gen {
+  if (args.length > 2) throw argumentCountError(args.length, 1, 2);
+  if (args.length === 0 && !block) throw argumentCountError(0, 1, 2);
   let accumulator: Value | undefined;
   let operator: string | undefined;
   if (args.length === 2) {
@@ -215,22 +290,28 @@ export function* inject(self: Value, args: Value[], block: RProc | undefined): G
   } else if (args.length === 1) {
     accumulator = args[0];
   }
-  yield* iterate(self, function* (value) {
-    if (accumulator === undefined) {
-      accumulator = value;
-      return;
-    }
-    accumulator =
-      operator === undefined
-        ? yield* callBlock(block as RProc, [accumulator, value])
-        : yield* fastOperator(accumulator, operator, value);
-  });
-  return accumulator ?? NIL;
+  const mark = rt().held.length;
+  rt().held.push(accumulator ?? NIL);
+  try {
+    yield* iterate(self, function* (value) {
+      if (accumulator === undefined) accumulator = value;
+      else
+        accumulator =
+          operator === undefined
+            ? yield* callBlock(block as RProc, [accumulator, value])
+            : yield* fastOperator(accumulator, operator, value);
+      rt().held[mark] = accumulator;
+    });
+    return accumulator ?? NIL;
+  } finally {
+    rt().held.length = mark;
+  }
 }
 
 function* operatorName(value: Value): Gen<string> {
   if (value instanceof RSymbol) return value.name;
   if (value instanceof RString) return value.s;
+  if (respondsTo(value, 'to_str', true)) return (yield* toStrValue(value)).s;
   throw typeError(`${yield* inspect(value)} is not a symbol nor a string`);
 }
 
@@ -238,54 +319,63 @@ function* fastOperator(left: Value, operator: string, right: Value): Gen {
   return yield* callMethod(left, operator, [right]);
 }
 
-def('Enumerable', ['inject', 'reduce'], [0, 2], (self, args, block) => inject(self, args, block));
+def('Enumerable', ['inject', 'reduce'], [0, -1], (self, args, block) => inject(self, args, block));
 
 /** `sum`, adding Integers exactly and Floats with Kahan-Babuska compensation as Ruby does. */
 export function* sum(self: Value, args: Value[], block: RProc | undefined): Gen {
   let total: Value = args.length > 0 ? args[0] : 0n;
-  const items: Value[] = [];
-  yield* iterate(self, function* (value) {
-    items.push(block ? yield* call(block, value) : value);
-  });
-  if (items.length === 0) return total;
-  const initIsFloat = typeof total === 'number';
-  const initial = total;
-  let index = 0;
-  if (typeof total === 'bigint' || initIsFloat) {
-    let exact = initIsFloat ? 0n : (total as bigint);
-    for (; index < items.length && typeof items[index] === 'bigint'; index++) exact += items[index] as bigint;
-    total = exact;
-    if (index === items.length) return initIsFloat ? (initial as number) + Number(exact) : exact;
-    if (initIsFloat || typeof items[index] === 'number') {
-      let f = initIsFloat && typeof items[index] !== 'number' ? (initial as number) + Number(exact) : Number(exact);
-      let c = 0;
-      if (initIsFloat && typeof items[index] === 'number') f += initial as number;
-      for (; index < items.length; index++) {
-        const item = items[index];
-        if (typeof item !== 'number' && typeof item !== 'bigint') {
-          total = f;
-          break;
+  const mark = rt().held.length;
+  rt().held.push(total);
+  const initial = isRubyFloat(total) ? Number(total) : undefined;
+  let exact = typeof total === 'bigint' ? total : 0n;
+  let floating: number | undefined;
+  let compensation = 0;
+  let sawValue = false;
+  let generic = false;
+  try {
+    yield* iterate(self, function* (value) {
+      const item = block ? yield* call(block, value) : value;
+      sawValue = true;
+      if (!generic && floating === undefined && (typeof total === 'bigint' || initial !== undefined)) {
+        if (typeof item === 'bigint') {
+          exact += item;
+          total = exact;
+          rt().held[mark] = total;
+          return;
         }
-        const x = Number(item);
-        if (Number.isNaN(f)) continue;
-        if (Number.isNaN(x)) {
-          f = x;
-          continue;
+        if (isRubyFloat(item) || initial !== undefined) {
+          floating = initial === undefined ? Number(exact) : initial + Number(exact);
         }
-        if (!Number.isFinite(x)) {
-          f = !Number.isFinite(f) && Math.sign(x) !== Math.sign(f) ? Number.NaN : x;
-          continue;
-        }
-        if (!Number.isFinite(f)) continue;
-        const t = f + x;
-        c += Math.abs(f) >= Math.abs(x) ? f - t + x : x - t + f;
-        f = t;
       }
-      if (index === items.length) return f + c;
-    }
+      if (floating !== undefined) {
+        if (isRubyNumber(item)) {
+          const x = Number(item);
+          if (Number.isNaN(floating)) return;
+          if (Number.isNaN(x)) floating = x;
+          else if (!Number.isFinite(x))
+            floating = !Number.isFinite(floating) && Math.sign(x) !== Math.sign(floating) ? Number.NaN : x;
+          else if (Number.isFinite(floating)) {
+            const next = floating + x;
+            compensation += Math.abs(floating) >= Math.abs(x) ? floating - next + x : x - next + floating;
+            floating = next;
+          }
+          return;
+        }
+        total = floating;
+        rt().held[mark] = total;
+        floating = undefined;
+      }
+      generic = true;
+      total = yield* callMethod(total, '+', [item]);
+      rt().held[mark] = total;
+    });
+    if (!sawValue) return total;
+    if (floating !== undefined) return floating + compensation;
+    if (!generic && initial !== undefined && typeof total === 'bigint') return initial + Number(exact);
+    return total;
+  } finally {
+    rt().held.length = mark;
   }
-  for (; index < items.length; index++) total = yield* callMethod(total, '+', [items[index]]);
-  return total;
 }
 
 def('Enumerable', 'sum', [0, 1], (self, args, block) => sum(self, args, block));
@@ -384,7 +474,7 @@ def('Enumerable', 'first', [0, 1], function* (self, args) {
   if (count < 0) throw argumentError('attempt to take negative size');
   const items: Value[] = [];
   if (count === 0) return arr([]);
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [items], function* (value) {
     items.push(value);
     if (items.length >= count) return STOP;
   });
@@ -395,7 +485,7 @@ def('Enumerable', 'take', 1, function* (self, [countValue]) {
   if (count < 0) throw argumentError('attempt to take negative size');
   const items: Value[] = [];
   if (count === 0) return arr([]);
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [items], function* (value) {
     items.push(value);
     if (items.length >= count) return STOP;
   });
@@ -404,7 +494,7 @@ def('Enumerable', 'take', 1, function* (self, [countValue]) {
 def('Enumerable', 'take_while', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'take_while', []);
   const items: Value[] = [];
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [items], function* (value) {
     if (!truthy(yield* call(block, value))) return STOP;
     items.push(value);
   });
@@ -419,7 +509,7 @@ def('Enumerable', 'drop_while', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'drop_while', []);
   const items: Value[] = [];
   let dropping = true;
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [items], function* (value) {
     if (dropping && truthy(yield* call(block, value))) return;
     dropping = false;
     items.push(value);
@@ -429,9 +519,9 @@ def('Enumerable', 'drop_while', 0, function* (self, _args, block) {
 
 // Ordering ------------------------------------------------------------------------------------------------------------
 
-function* blockCompare(block: RProc, a: Value, b: Value): Gen<number> {
+export function* blockCompare(block: RProc, a: Value, b: Value): Gen<number> {
   const result = yield* callBlock(block, [a, b]);
-  if (result === NIL) throw argumentError(`comparison of ${className(a)} with ${className(b)} failed`);
+  if (result === NIL) throw comparisonFailed(a, b);
   if (typeof result === 'bigint') return result > 0n ? 1 : result < 0n ? -1 : 0;
   if (typeof result === 'number') return Math.sign(result);
   if (truthy(yield* callMethod(result, '>', [0n]))) return 1;
@@ -446,14 +536,35 @@ function className(value: Value): string {
 /** Sorts values as `sort` does: by `<=>`, or by the block's comparison. */
 export function* sortValues(items: Value[], block: RProc | undefined): Gen<Value[]> {
   const sorted = [...items];
-  yield* platformSort(sorted, block ? (a, b) => blockCompare(block, a, b) : compareValues);
-  return sorted;
+  rt().heldArrays.push(sorted);
+  try {
+    yield* platformSort(sorted, block ? (a, b) => blockCompare(block, a, b) : compareValues);
+    return sorted;
+  } finally {
+    rt().heldArrays.pop();
+  }
 }
 
 /** Sorts values by keys a block computes, as `sort_by` does. */
-export function* sortBy(items: Value[], block: RProc): Gen<Value[]> {
+export function* sortBy(source: RArray, block: RProc): Gen<Value[]> {
   const pairs: { key: Value; value: Value }[] = [];
-  for (const value of items) pairs.push({ key: yield* call(block, value), value });
+  const roots: Value[] = [];
+  rt().heldArrays.push(roots);
+  try {
+    for (let index = 0; index < source.items.length; index++) {
+      const value = source.items[index];
+      roots.push(value);
+      const key = yield* call(block, value);
+      roots.push(key);
+      pairs.push({ key, value });
+    }
+    return yield* sortKeyed(pairs);
+  } finally {
+    rt().heldArrays.pop();
+  }
+}
+
+function* sortKeyed(pairs: { key: Value; value: Value }[]): Gen<Value[]> {
   if (pairs.length > 1 && pairs.every((pair) => isUniformKey(pair.key))) {
     uniformSort(pairs);
   } else {
@@ -467,7 +578,20 @@ def('Enumerable', 'sort', 0, function* (self, _args, block) {
 });
 def('Enumerable', 'sort_by', 0, function* (self, _args, block) {
   if (!block) return sizedEnumerator(self, 'sort_by', [], () => sizeOf(self));
-  return arr(yield* sortBy(yield* toArray(self), block));
+  const pairs: { key: Value; value: Value }[] = [];
+  const roots: Value[] = [];
+  rt().heldArrays.push(roots);
+  try {
+    yield* iterate(self, function* (value) {
+      roots.push(value);
+      const key = yield* call(block, value);
+      roots.push(key);
+      pairs.push({ key, value });
+    });
+    return arr(yield* sortKeyed(pairs));
+  } finally {
+    rt().heldArrays.pop();
+  }
 });
 
 /** The n smallest (or largest with `reverse`) elements, as Ruby's `rb_nmin_run` selects and orders them. */
@@ -478,9 +602,15 @@ export function* nmin(
   block: RProc | undefined,
   reverse: boolean
 ): Gen<Value> {
-  const n = yield* toIndex(countValue);
-  if (n < 0) throw argumentError(`negative size (${n})`);
+  const { number: n, integer } = yield* toIndexExact(countValue);
+  if (integer < 0n) throw argumentError(`negative size (${integer})`);
   if (n === 0) return arr([]);
+  if (integer > 9_223_372_036_854_775_807n / 4n / (by ? 2n : 1n)) throw argumentError('too big size');
+  const heldArrays = rt().heldArrays;
+  const mark = heldArrays.length;
+  let roots: Value[] = [];
+  heldArrays.push(roots);
+  if (Array.isArray(items)) heldArrays.push(items);
   const compare = function* (a: Value, b: Value): Gen<number> {
     return block && !by ? yield* blockCompare(block, a, b) : yield* compareValues(a, b);
   };
@@ -528,60 +658,87 @@ export function* nmin(
     }
     limit = buffer[storeIndex].key;
     buffer = buffer.slice(0, n);
+    roots = [...buffer.flatMap((entry) => [entry.key, entry.value]), limit];
+    heldArrays[mark] = roots;
   };
   const add = function* (value: Value): Gen<void> {
+    roots.push(value);
     const key = by ? yield* call(by, value) : value;
+    roots.push(key);
     if (limit !== undefined) {
       let c = yield* compare(key, limit);
       if (reverse) c = -c;
-      if (c >= 0) return;
+      if (c >= 0) {
+        roots.length -= 2;
+        return;
+      }
     }
     buffer.push({ key, value });
     if (buffer.length === bufferMax) yield* filter();
   };
-  if (Array.isArray(items)) {
-    for (const value of items) yield* add(value);
-  } else {
-    yield* iterate(items as Value, function* (value) {
-      yield* add(value);
-    });
+  try {
+    if (Array.isArray(items)) {
+      for (const value of items) yield* add(value);
+    } else {
+      yield* iterate(items as Value, function* (value) {
+        yield* add(value);
+      });
+    }
+    yield* filter();
+    yield* platformSort(buffer, (a, b) => compare(a.key, b.key));
+    if (reverse) buffer.reverse();
+    return arr(buffer.map((entry) => entry.value));
+  } finally {
+    heldArrays.length = mark;
   }
-  yield* filter();
-  yield* platformSort(buffer, (a, b) => compare(a.key, b.key));
-  if (reverse) buffer.reverse();
-  return arr(buffer.map((entry) => entry.value));
 }
 
 function* extreme(self: Value, block: RProc | undefined, wantMax: boolean): Gen {
   let result: Value | undefined;
-  yield* iterate(self, function* (value) {
-    if (result === undefined) {
-      result = value;
-      return;
-    }
-    const order = block ? yield* blockCompare(block, value, result) : yield* compareValues(value, result);
-    if (wantMax ? order > 0 : order < 0) result = value;
-  });
-  return result ?? NIL;
+  const held = rt().held;
+  const mark = held.length;
+  held.push(NIL, NIL);
+  try {
+    yield* iterate(self, function* (value) {
+      held[mark + 1] = value;
+      if (result === undefined) result = value;
+      else {
+        const order = block ? yield* blockCompare(block, value, result) : yield* compareValues(value, result);
+        if (wantMax ? order > 0 : order < 0) result = value;
+      }
+      held[mark] = result;
+    });
+    return result ?? NIL;
+  } finally {
+    held.length = mark;
+  }
 }
 
 function* extremeBy(self: Value, block: RProc, wantMax: boolean): Gen {
   let result: Value = NIL;
   let best: Value | undefined;
-  yield* iterate(self, function* (value) {
-    const key = yield* call(block, value);
-    if (best === undefined) {
-      best = key;
-      result = value;
-      return;
-    }
-    const order = yield* compareValues(key, best);
-    if (wantMax ? order > 0 : order < 0) {
-      best = key;
-      result = value;
-    }
-  });
-  return result;
+  const held = rt().held;
+  const mark = held.length;
+  held.push(NIL, NIL, NIL, NIL);
+  try {
+    yield* iterate(self, function* (value) {
+      held[mark + 2] = value;
+      const key = yield* call(block, value);
+      held[mark + 3] = key;
+      if (
+        best === undefined ||
+        (wantMax ? (yield* compareValues(key, best)) > 0 : (yield* compareValues(key, best)) < 0)
+      ) {
+        best = key;
+        result = value;
+        held[mark] = result;
+        held[mark + 1] = best;
+      }
+    });
+    return result;
+  } finally {
+    held.length = mark;
+  }
 }
 
 def('Enumerable', 'min', [0, 1], function* (self, args, block) {
@@ -602,27 +759,92 @@ def('Enumerable', 'max_by', [0, 1], function* (self, args, block) {
   if (args.length > 0 && args[0] !== NIL) return yield* nmin(self, args[0], block, undefined, true);
   return yield* extremeBy(self, block, true);
 });
-def('Enumerable', 'minmax', 0, function* (self, _args, block) {
+def('Enumerable', 'minmax', 0, (self, _args, block) => minmax(self, block));
+
+export function* minmax(self: Value, block: RProc | undefined): Gen {
   let min: Value | undefined;
   let max: Value | undefined;
-  yield* iterate(self, function* (value) {
-    if (min === undefined || max === undefined) {
-      min = value;
-      max = value;
-      return;
+  let pending: Value | undefined;
+  const held = rt().held;
+  const mark = held.length;
+  held.push(NIL, NIL, NIL, NIL);
+  try {
+    yield* iterate(self, function* (value) {
+      if (pending === undefined) {
+        pending = value;
+        held[mark + 2] = value;
+        return;
+      }
+      const first = pending;
+      pending = undefined;
+      held[mark + 3] = value;
+      const order = yield* orderOf(block, first, value);
+      const smaller = order <= 0 ? first : value;
+      const larger = order >= 0 ? first : value;
+      if (min === undefined || max === undefined) {
+        min = smaller;
+        max = larger;
+      } else {
+        if ((yield* orderOf(block, smaller, min)) < 0) min = smaller;
+        if ((yield* orderOf(block, larger, max)) > 0) max = larger;
+      }
+      held[mark] = min;
+      held[mark + 1] = max;
+      held[mark + 2] = NIL;
+      held[mark + 3] = NIL;
+    });
+    if (pending !== undefined) {
+      if (min === undefined || max === undefined) min = max = pending;
+      else {
+        if ((yield* orderOf(block, pending, min)) < 0) min = pending;
+        if ((yield* orderOf(block, pending, max)) > 0) max = pending;
+      }
     }
-    if ((yield* orderOf(block, value, min)) < 0) min = value;
-    if ((yield* orderOf(block, value, max)) > 0) max = value;
-  });
-  return arr([min ?? NIL, max ?? NIL]);
-});
+    return arr([min ?? NIL, max ?? NIL]);
+  } finally {
+    held.length = mark;
+  }
+}
 function orderOf(block: RProc | undefined, a: Value, b: Value): Gen<number> {
   return block ? blockCompare(block, a, b) : compareValues(a, b);
 }
 
 def('Enumerable', 'minmax_by', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'minmax_by', []);
-  return arr([yield* extremeBy(self, block, false), yield* extremeBy(self, block, true)]);
+  let min: Value | undefined;
+  let max: Value | undefined;
+  let minKey: Value | undefined;
+  let maxKey: Value | undefined;
+  const held = rt().held;
+  const mark = held.length;
+  held.push(NIL, NIL, NIL, NIL, NIL, NIL);
+  try {
+    yield* iterate(self, function* (value) {
+      held[mark + 4] = value;
+      const key = yield* call(block, value);
+      held[mark + 5] = key;
+      if (minKey === undefined || maxKey === undefined) {
+        min = max = value;
+        minKey = maxKey = key;
+      } else {
+        if ((yield* compareValues(key, minKey)) < 0) {
+          min = value;
+          minKey = key;
+        }
+        if ((yield* compareValues(key, maxKey)) > 0) {
+          max = value;
+          maxKey = key;
+        }
+      }
+      held[mark] = min ?? NIL;
+      held[mark + 1] = max ?? NIL;
+      held[mark + 2] = minKey ?? NIL;
+      held[mark + 3] = maxKey ?? NIL;
+    });
+    return arr([min ?? NIL, max ?? NIL]);
+  } finally {
+    held.length = mark;
+  }
 });
 
 // Grouping ------------------------------------------------------------------------------------------------------------
@@ -630,38 +852,105 @@ def('Enumerable', 'minmax_by', 0, function* (self, _args, block) {
 def('Enumerable', 'group_by', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'group_by', []);
   const groups = newHash();
-  yield* iterate(self, function* (value) {
-    const key = yield* call(block, value);
-    const entry = yield* hashGet(groups, key);
-    if (entry) (entry.value as RArray).items.push(value);
-    else yield* hashSet(groups, key, arr([value]));
+  return yield* whileHeld(groups, function* () {
+    yield* iterate(self, function* (value) {
+      yield* whileHeld(value, function* () {
+        const key = yield* call(block, value);
+        const { entry } = yield* hashGetOrInsert(groups, key, () => arr([]));
+        rt().chargeSlots(1);
+        (entry.value as RArray).items.push(value);
+      });
+    });
+    return groups;
   });
-  return groups;
 });
 def('Enumerable', 'chunk_while', 0, function* (self, _args, block) {
-  return arr(yield* chunks(self, block as RProc, false));
+  if (!block) throw argumentError('tried to create Proc object without a block');
+  return chunkEnumerator(self, block, false);
 });
 def('Enumerable', 'slice_when', 0, function* (self, _args, block) {
-  return arr(yield* chunks(self, block as RProc, true));
+  if (!block) throw argumentError('tried to create Proc object without a block');
+  return chunkEnumerator(self, block, true);
 });
 
-function* chunks(self: Value, block: RProc, splitWhenTrue: boolean): Gen<Value[]> {
-  const result: Value[] = [];
-  let current: Value[] = [];
-  let previous: Value | undefined;
-  yield* iterate(self, function* (value) {
-    if (previous !== undefined) {
-      const split = truthy(yield* callBlock(block, [previous, value])) === splitWhenTrue;
-      if (split) {
-        result.push(arr(current));
-        current = [];
-      }
-    }
-    current.push(value);
-    previous = value;
+for (const [name, before] of [
+  ['slice_before', true],
+  ['slice_after', false],
+] as const)
+  def('Enumerable', name, [0, 1], function* (self, args, predicate) {
+    if (args.length + Number(!!predicate) !== 1)
+      throw argumentCountError(args.length, predicate ? 0 : 1, predicate ? 0 : 1);
+    const pattern = args[0];
+    return customEnumerator(self, name, predicate ? [predicate] : [pattern], (consumer) =>
+      sliceAt(self, pattern, predicate, before, consumer)
+    );
   });
-  if (current.length > 0) result.push(arr(current));
-  return result;
+
+function* sliceAt(
+  self: Value,
+  pattern: Value | undefined,
+  predicate: RProc | undefined,
+  before: boolean,
+  consumer: RProc
+): Gen {
+  let current: Value[] = [];
+  const arrays = rt().heldArrays;
+  const mark = arrays.length;
+  arrays.push(current);
+  try {
+    yield* iterate(self, function* (value) {
+      yield* whileHeld(value, function* () {
+        const boundary = predicate ? truthy(yield* call(predicate, value)) : yield* caseEquals(pattern as Value, value);
+        if (before && boundary && current.length > 0) {
+          yield* callBlock(consumer, [arr(current)], false);
+          current = [];
+          arrays[mark] = current;
+        }
+        current.push(value);
+        if (!before && boundary) {
+          yield* callBlock(consumer, [arr(current)], false);
+          current = [];
+          arrays[mark] = current;
+        }
+      });
+    });
+    if (current.length > 0) yield* callBlock(consumer, [arr(current)], false);
+    return self;
+  } finally {
+    arrays.length = mark;
+  }
+}
+
+function chunkEnumerator(self: Value, predicate: RProc, splitWhenTrue: boolean): RObject {
+  return customEnumerator(self, splitWhenTrue ? 'slice_when' : 'chunk_while', [predicate], function* (block) {
+    const held = rt().heldArrays;
+    let current: Value[] = [];
+    let previous: Value | undefined;
+    const mark = held.length;
+    held.push(current);
+    try {
+      yield* iterate(self, function* (value) {
+        const rootMark = rt().held.length;
+        rt().held.push(value);
+        if (previous !== undefined) rt().held.push(previous);
+        try {
+          if (previous !== undefined && truthy(yield* callBlock(predicate, [previous, value])) === splitWhenTrue) {
+            yield* callBlock(block, [arr(current)], false);
+            current = [];
+            held[mark] = current;
+          }
+          current.push(value);
+          previous = value;
+        } finally {
+          rt().held.length = rootMark;
+        }
+      });
+      if (current.length > 0) yield* callBlock(block, [arr(current)], false);
+      return self;
+    } finally {
+      held.length = mark;
+    }
+  });
 }
 
 def('Enumerable', 'each_slice', 1, function* (self, [sizeValue], block) {
@@ -669,23 +958,31 @@ def('Enumerable', 'each_slice', 1, function* (self, [sizeValue], block) {
   if (size <= 0) throw argumentError('invalid slice size');
   if (!block) return makeEnumerator(self, 'each_slice', [sizeValue]);
   let current: Value[] = [];
-  yield* iterate(self, function* (value) {
-    current.push(value);
-    if (current.length === size) {
-      const slice = arr(current);
-      current = [];
-      yield* callBlock(block, [slice], false);
-    }
-  });
-  if (current.length > 0) yield* callBlock(block, [arr(current)], false);
-  return self;
+  const held = rt().heldArrays;
+  const mark = held.length;
+  held.push(current);
+  try {
+    yield* iterate(self, function* (value) {
+      current.push(value);
+      if (current.length === size) {
+        const slice = arr(current);
+        current = [];
+        held[mark] = current;
+        yield* callBlock(block, [slice], false);
+      }
+    });
+    if (current.length > 0) yield* callBlock(block, [arr(current)], false);
+    return self;
+  } finally {
+    held.length = mark;
+  }
 });
 def('Enumerable', 'each_cons', 1, function* (self, [sizeValue], block) {
   const size = yield* toIndex(sizeValue);
   if (size <= 0) throw argumentError('invalid size');
   if (!block) return makeEnumerator(self, 'each_cons', [sizeValue]);
   const window: Value[] = [];
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [window], function* (value) {
     window.push(value);
     if (window.length > size) window.shift();
     if (window.length === size) yield* callBlock(block, [arr([...window])], false);
@@ -694,101 +991,256 @@ def('Enumerable', 'each_cons', 1, function* (self, [sizeValue], block) {
 });
 def('Enumerable', 'chunk', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'chunk', []);
-  const result: Value[] = [];
+  return customEnumerator(self, 'chunk', [block], (consumer) => chunkByKey(self, block, consumer));
+});
+
+function* chunkByKey(self: Value, classifier: RProc, consumer: RProc): Gen {
   let currentKey: Value | undefined;
   let current: Value[] = [];
-  yield* iterate(self, function* (value) {
-    const key = yield* call(block, value);
-    if (key === NIL || (key instanceof RSymbol && key.name === '_separator')) {
-      if (current.length > 0) result.push(arr([currentKey as Value, arr(current)]));
-      current = [];
-      currentKey = undefined;
-      return;
-    }
-    if (currentKey !== undefined && !(yield* rEquals(currentKey, key))) {
-      result.push(arr([currentKey, arr(current)]));
-      current = [];
-    }
-    currentKey = key;
-    current.push(value);
-  });
-  if (current.length > 0) result.push(arr([currentKey as Value, arr(current)]));
-  return arr(result);
-});
+  const heldArrays = rt().heldArrays;
+  const arrayMark = heldArrays.length;
+  const keyMark = rt().held.length;
+  heldArrays.push(current);
+  rt().held.push(NIL);
+  try {
+    yield* iterate(self, function* (value) {
+      const valueMark = rt().held.length;
+      rt().held.push(value);
+      try {
+        const key = yield* call(classifier, value);
+        rt().held.push(key);
+        if (key === NIL || (key instanceof RSymbol && key.name === '_separator')) {
+          if (current.length > 0) yield* callBlock(consumer, [arr([currentKey as Value, arr(current)])], false);
+          current = [];
+          heldArrays[arrayMark] = current;
+          currentKey = undefined;
+          rt().held[keyMark] = NIL;
+          return;
+        }
+        if (key instanceof RSymbol && key.name === '_alone') {
+          if (current.length > 0) yield* callBlock(consumer, [arr([currentKey as Value, arr(current)])], false);
+          yield* callBlock(consumer, [arr([key, arr([value])])], false);
+          current = [];
+          heldArrays[arrayMark] = current;
+          currentKey = undefined;
+          rt().held[keyMark] = NIL;
+          return;
+        }
+        if (key instanceof RSymbol && key.name.startsWith('_'))
+          throw runtimeError('symbols beginning with an underscore are reserved');
+        if (currentKey !== undefined && !(yield* rEquals(currentKey, key))) {
+          yield* callBlock(consumer, [arr([currentKey, arr(current)])], false);
+          current = [];
+          heldArrays[arrayMark] = current;
+        }
+        if (current.length === 0) {
+          currentKey = key;
+          rt().held[keyMark] = key;
+        }
+        current.push(value);
+      } finally {
+        rt().held.length = valueMark;
+      }
+    });
+    if (current.length > 0) yield* callBlock(consumer, [arr([currentKey as Value, arr(current)])], false);
+    return self;
+  } finally {
+    heldArrays.length = arrayMark;
+    rt().held.length = keyMark;
+  }
+}
 def('Enumerable', 'tally', [0, 1], function* (self, args) {
-  const counts = args.length > 0 && args[0] instanceof RHash ? args[0] : newHash();
-  yield* iterate(self, function* (value) {
-    const entry = yield* hashGet(counts, value);
-    yield* hashSet(counts, value, entry ? yield* callMethod(entry.value, '+', [1n]) : 1n);
+  let counts: RHash;
+  if (args.length === 0) counts = newHash();
+  else if (args[0] instanceof RHash) counts = args[0];
+  else if (respondsTo(args[0], 'to_hash', true)) {
+    const converted = yield* callMethod(args[0], 'to_hash', [], undefined, undefined, { fcall: true });
+    if (!(converted instanceof RHash)) {
+      const name = realClassOf(args[0]).name;
+      throw typeError(`can't convert ${name} to Hash (${name}#to_hash gives ${realClassOf(converted).name})`);
+    }
+    counts = converted;
+  } else throw typeError(`no implicit conversion of ${realClassOf(args[0]).name} into Hash`);
+  return yield* whileHeld(counts, function* () {
+    yield* iterate(self, function* (value) {
+      const { entry } = yield* hashGetOrInsert(counts, value, () => 0n, false);
+      const previous = entry.value;
+      if (typeof previous !== 'bigint' || previous < 0n)
+        throw typeError(`wrong argument type ${realClassOf(previous).name} (expected Integer)`);
+      hashUpdateEntry(counts, entry, previous + 1n);
+    });
+    return counts;
   });
-  return counts;
 });
 def('Enumerable', 'uniq', 0, function* (self, _args, block) {
-  return arr(yield* uniqValues(yield* toArray(self), block));
+  return arr(yield* uniqCollect(self, block));
 });
 
-export function* uniqValues(items: Value[], block: RProc | undefined): Gen<Value[]> {
-  const seen = new Set<string>();
-  const result: Value[] = [];
-  for (const value of items) {
-    const key = yield* hashKeyOf(block ? yield* call(block, value) : value);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(value);
-  }
-  return result;
+export function* uniqValues(source: Value[] | RArray, block: RProc | undefined): Gen<Value[]> {
+  return yield* uniqCollect(source, block);
 }
 
-def('Enumerable', 'to_h', [0, -1], function* (self, _args, block) {
+// code-gauge-allow functionCognitiveComplexity 20 -- Uniqueness streams Enumerable values and roots live Array items through hashing.
+function* uniqCollect(source: Value[] | Value, block: RProc | undefined): Gen<Value[]> {
+  const seen = newHash();
+  const result: Value[] = [];
+  rt().heldArrays.push(result);
+  if (Array.isArray(source)) rt().heldArrays.push(source);
+  try {
+    return yield* whileHeld(seen, function* () {
+      const add = function* (value: Value): Gen<void> {
+        yield* whileHeld(value, function* () {
+          const key = block ? yield* call(block, value) : value;
+          if (!(yield* hashSet(seen, key, true))) result.push(value);
+        });
+      };
+      if (Array.isArray(source)) for (const value of source) yield* add(value);
+      else if (source instanceof RArray) {
+        for (let index = 0; index < source.items.length; index++) yield* add(source.items[index]);
+      } else yield* iterate(source, add);
+      return result;
+    });
+  } finally {
+    rt().heldArrays.length -= Array.isArray(source) ? 2 : 1;
+  }
+}
+
+def('Enumerable', 'to_h', [0, -1], function* (self, args, block) {
   const hash = newHash();
-  yield* iterate(self, function* (value) {
-    const pair = block ? yield* call(block, value) : value;
-    if (!(pair instanceof RArray)) {
-      throw typeError(`wrong element type ${className(pair)} (expected array)`);
-    }
-    if (pair.items.length !== 2) {
-      throw argumentError(`element has wrong array length (expected 2, was ${pair.items.length})`);
-    }
-    yield* hashSet(hash, pair.items[0], pair.items[1]);
+  return yield* whileHeld(hash, function* () {
+    yield* iterate(
+      self,
+      function* (value) {
+        const item = block ? yield* call(block, value) : value;
+        const pair = yield* tryAry(item);
+        if (!pair) {
+          throw typeError(`wrong element type ${className(item)} (expected array)`);
+        }
+        if (pair.items.length !== 2) {
+          throw argumentError(`element has wrong array length (expected 2, was ${pair.items.length})`);
+        }
+        yield* hashSet(hash, pair.items[0], pair.items[1]);
+      },
+      args
+    );
+    return hash;
   });
-  return hash;
 });
 def('Enumerable', 'zip', [0, -1], function* (self, others, block) {
-  const lists: Value[][] = [];
-  for (const other of others) lists.push(yield* toArray(other));
-  const results: Value[] = [];
-  let index = 0;
-  yield* iterate(self, function* (value) {
-    const tuple = arr([value, ...lists.map((list) => list[index] ?? NIL)]);
-    index++;
-    if (block) yield* callBlock(block, [tuple], false);
-    else results.push(tuple);
-  });
-  return block ? NIL : arr(results);
+  return yield* zipCollections(self, others, block);
 });
+
+export function* zipCollections(self: Value, others: Value[], block: RProc | undefined): Gen<Value> {
+  const inputs: Value[] = [];
+  const emptyArray = self instanceof RArray && self.items.length === 0;
+  const arrays = rt().heldArrays;
+  const arrayMark = arrays.length;
+  arrays.push(inputs);
+  try {
+    for (const other of others) {
+      const input = (yield* tryAry(other)) ?? other;
+      if (!emptyArray && !(input instanceof RArray) && !respondsTo(input, 'each', true))
+        throw typeError(`wrong argument type ${realClassOf(input).name} (must respond to :each)`);
+      inputs.push(input);
+    }
+    const iterators = inputs.map((other) =>
+      other instanceof RArray
+        ? undefined
+        : flattenGenerator(
+            (function* (): Gen<void> {
+              yield* iterate(other, function* (value) {
+                yield value;
+              });
+            })()
+          )
+    );
+    const results: Value[] = [];
+    arrays.push(results);
+    let index = 0;
+    try {
+      yield* iterate(self, function* (value) {
+        const tuple: Value[] = [value];
+        const tupleMark = arrays.length;
+        arrays.push(tuple);
+        try {
+          for (const [position, other] of inputs.entries()) {
+            const iterator = iterators[position];
+            const next = iterator?.next();
+            tuple.push(
+              other instanceof RArray ? (other.items[index] ?? NIL) : next?.done ? NIL : (next?.value as Value)
+            );
+          }
+          index++;
+          if (block) yield* callBlock(block, [arr(tuple)], false);
+          else results.push(arr(tuple));
+        } finally {
+          arrays.length = tupleMark;
+        }
+      });
+      return block ? NIL : arr(results);
+    } finally {
+      for (const iterator of iterators) iterator?.return();
+    }
+  } finally {
+    arrays.length = arrayMark;
+  }
+}
 def('Enumerable', 'cycle', [0, 1], function* (self, args, block) {
   if (!block) return makeEnumerator(self, 'cycle', args);
-  const items = yield* toArray(self);
-  if (items.length === 0) return NIL;
-  const times = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : -1n;
-  for (let round = 0n; times < 0n || round < times; round++) {
-    for (const item of items) yield* callBlock(block, [item], false);
+  const times = args.length > 0 && args[0] !== NIL ? (yield* toIndexExact(args[0])).integer : undefined;
+  if (times !== undefined && times <= 0n) return NIL;
+  const items: Value[] = [];
+  const held = rt().heldArrays;
+  const mark = held.length;
+  held.push(items);
+  try {
+    yield* iterate(self, function* (value) {
+      items.push(value);
+      yield* callBlock(block, [value], false);
+    });
+    if (items.length === 0) return NIL;
+    for (let round = 1n; times === undefined || round < times; round++) {
+      for (const item of items) yield* callBlock(block, [item], false);
+    }
+    return NIL;
+  } finally {
+    held.length = mark;
   }
-  return NIL;
+});
+def('Enumerable', 'chain', [0, -1], (self, others) => {
+  const sources = [self, ...others];
+  const enumerator = customEnumerator(self, 'chain', others, function* (block) {
+    for (const source of sources)
+      yield* iterate(source, function* (value) {
+        yield* callBlock(block, [value], false);
+      });
+    return enumerator;
+  });
+  enumerator.cls = rt().c['Enumerator::Chain'];
+  (enumerator.data as EnumeratorSource).size = () => {
+    let total: bigint | number = 0n;
+    for (const source of sources) {
+      const size = receiverSize(source);
+      if (size === NIL) return NIL;
+      if (size === Number.POSITIVE_INFINITY) return size;
+      total =
+        typeof size === 'number' || typeof total === 'number' ? Number(total) + Number(size) : total + (size as bigint);
+    }
+    return total;
+  };
+  return enumerator;
 });
 def('Enumerable', 'compact', 0, function* (self) {
   return arr((yield* toArray(self)).filter((value) => value !== NIL));
 });
 
-def('Enumerable', 'to_set', 0, function* (self) {
-  return yield* callMethod(rt().c.Set, 'new', [self]);
+def('Enumerable', 'to_set', [0, -1], function* (self, args, block) {
+  return yield* callMethod(args[0] ?? rt().c.Set, 'new', [self, ...args.slice(1)], undefined, block);
 });
 
 /** The size of a collection when it can tell without iterating, for an enumerator's `size`. */
 export function sizeOf(collection: Value): Value {
-  if (collection instanceof RArray) return BigInt(collection.items.length);
-  if (collection instanceof RHash) return BigInt(collection.map.size);
-  return NIL;
+  return receiverSize(collection);
 }
 
 export { callProc, respondsTo, spaceship };

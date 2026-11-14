@@ -1,4 +1,4 @@
-import { ExecutionBudget, LIMITS } from '../interpreter/limits';
+import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
@@ -6,7 +6,18 @@ import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { BlockDef, MethodDef } from './ast';
 import type { CoreClasses } from './bootstrap';
 import { collectGarbage } from './garbageCollection';
-import { NIL, type RClass, type RMethod, type RObject, type RProc, type Value, type Visibility } from './objects';
+import {
+  NIL,
+  type RArray,
+  type RClass,
+  type RMethod,
+  type RObject,
+  type RProc,
+  type RString,
+  type RSymbol,
+  type Value,
+  type Visibility,
+} from './objects';
 
 /** The local variables of a method, class body, program, or block; a block's scope reaches its parent's. */
 export class Scope {
@@ -42,7 +53,7 @@ export class Frame implements TracedFrame {
   /** The exception being handled by a `rescue` of this frame, which a bare `raise` re-raises. */
   handling: RObject[] = [];
 
-  // code-gauge-allow functionParameterCount 8 -- One case per kind of Ruby rule this module handles.
+  // code-gauge-allow functionParameterCount 8 -- A frame carries the call context needed by Ruby method, block, and class execution.
   constructor(
     readonly kind: FrameKind,
     readonly self: Value,
@@ -62,7 +73,12 @@ export class Frame implements TracedFrame {
   }
 }
 
+export function rootValues(frame: Frame, values: readonly Value[]): void {
+  for (const value of values) frame.temporaries.push(value);
+}
+
 export interface FrameExtra {
+  definitionTarget?: RClass;
   /** The running method. */
   method?: RMethod;
   def?: MethodDef;
@@ -142,20 +158,31 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly io: ProgramIO;
   readonly frames: Frame[] = [];
   readonly globals = new Map<string, Value>();
+  readonly symbols = new Map<string, RSymbol>();
+  readonly coreStrings = new Map<string, RString>();
   /** Values native code holds while it calls back into the program, such as the array `each` iterates. */
   readonly held: Value[] = [];
+  currentNumericReceiver?: Value;
+  readonly heldArrays: Value[][] = [];
   /** The tags of the `catch` blocks running now, innermost last, which `throw` must match. */
   readonly catchTags: Value[] = [];
   /** The blocks `at_exit` and `END` registered, which run when the program ends, the last first. */
   readonly atExit: RProc[] = [];
+  readonly comparablePairs = new Map<Value, Set<Value>>();
+  readonly arrayComparisonPairs = new Map<RArray, Set<RArray>>();
+  arrayComparisonDepth = 0;
   /** The row of the statement running now, which a call records as its frame's call row. */
   currentRow = 0;
+  containerVersion = 0;
+  userCallVersion = 0;
+  setInspectDepth = 0;
   /** The fake addresses `inspect` shows for objects, assigned in the order the program shows them. */
   readonly addresses = new Map<object, number>();
   c!: CoreClasses;
   mainObject!: RObject;
   /** The state of the default random number generator, which `srand` reseeds. */
   random: unknown;
+  private allocatedSlots = 0;
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
@@ -163,6 +190,16 @@ export class Runtime implements TracedRuntime<Frame> {
 
   spend(cost = 1): void {
     this.budget.spend(cost);
+  }
+
+  chargeSlots(count: number): void {
+    this.allocatedSlots += count;
+    if (this.allocatedSlots > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+  }
+
+  checkStringLength(length: number): void {
+    if (length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+    this.spend(Math.ceil(length / 256));
   }
 
   pushFrame(frame: Frame): void {
@@ -195,6 +232,18 @@ let current: Runtime | undefined;
 export function rt(): Runtime {
   if (!current) throw new Error('No Ruby runtime is running');
   return current;
+}
+
+export function* whileHeld<T>(
+  value: Value,
+  action: () => Generator<unknown, T, unknown>
+): Generator<unknown, T, unknown> {
+  rt().held.push(value);
+  try {
+    return yield* action();
+  } finally {
+    rt().held.pop();
+  }
 }
 
 export function withRuntime<T>(runtime: Runtime, run: () => T): T {

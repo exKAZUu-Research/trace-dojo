@@ -58,7 +58,7 @@ function* fieldArgs(args: Value[]): Gen<{ fields: number[]; seconds: number }> {
     fields.push(value);
   }
   while (fields.length < 5) fields.push(fields.length < 3 ? 1 : 0);
-  const seconds = args.length > 5 && args[5] !== NIL ? toFloat(args[5]) : 0;
+  const seconds = args.length > 5 && args[5] !== NIL ? yield* toFloat(args[5]) : 0;
   if (fields[1] < 1 || fields[1] > 12) throw argumentError('mon out of range');
   if (fields[2] < 1 || fields[2] > 31) throw argumentError('mday out of range');
   if (fields[3] < 0 || fields[3] > 24) throw argumentError('hour out of range');
@@ -96,7 +96,7 @@ sdef('Time', ['utc', 'gm'], [1, 7], (_self, args) => buildTime(args, 0, 'utc'));
 sdef('Time', 'at', [1, 2], function* (_self, [seconds]) {
   if (typeof seconds === 'bigint') return makeTime(seconds * 1_000_000_000n);
   if (seconds instanceof RObject && seconds.data instanceof TimeData) return makeTime(seconds.data.nanoseconds);
-  return makeTime(BigInt(Math.round(toFloat(seconds) * 1e9)));
+  return makeTime(BigInt(Math.round((yield* toFloat(seconds)) * 1e9)));
 });
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -325,18 +325,19 @@ def('Time', 'round', [0, 1], function* (self: RObject, args) {
   const rounded = floorDivide(data.nanoseconds + unit / 2n, unit) * unit;
   return makeTime(rounded, data.offset, data.zone);
 });
-def('Time', '+', 1, (self: RObject, [seconds]) => {
+def('Time', '+', 1, function* (self: RObject, [seconds]) {
   if (seconds instanceof RObject && seconds.data instanceof TimeData) throw typeError('time + time?');
   const data = dataOf(self);
-  const delta = typeof seconds === 'bigint' ? seconds * 1_000_000_000n : BigInt(Math.round(toFloat(seconds) * 1e9));
+  const delta =
+    typeof seconds === 'bigint' ? seconds * 1_000_000_000n : BigInt(Math.round((yield* toFloat(seconds)) * 1e9));
   return makeTime(data.nanoseconds + delta, data.offset, data.zone);
 });
-def('Time', '-', 1, (self: RObject, [other]) => {
+def('Time', '-', 1, function* (self: RObject, [other]) {
   const data = dataOf(self);
   if (other instanceof RObject && other.data instanceof TimeData) {
     return Number(data.nanoseconds - other.data.nanoseconds) / 1e9;
   }
-  const delta = typeof other === 'bigint' ? other * 1_000_000_000n : BigInt(Math.round(toFloat(other) * 1e9));
+  const delta = typeof other === 'bigint' ? other * 1_000_000_000n : BigInt(Math.round((yield* toFloat(other)) * 1e9));
   return makeTime(data.nanoseconds - delta, data.offset, data.zone);
 });
 def('Time', '<=>', 1, (self: RObject, [other]) => {
@@ -358,9 +359,9 @@ def(
   'Kernel',
   'sleep',
   [0, 1],
-  (_self, args) => {
+  function* (_self, args) {
     const runtime = rt() as unknown as { slept?: number };
-    const seconds = args.length > 0 ? toFloat(args[0]) : 0;
+    const seconds = args.length > 0 ? yield* toFloat(args[0]) : 0;
     if (seconds < 0) throw argumentError('time interval must not be negative');
     runtime.slept = (runtime.slept ?? 0) + seconds;
     return BigInt(Math.round(seconds));

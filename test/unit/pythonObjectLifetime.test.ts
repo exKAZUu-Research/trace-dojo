@@ -1,0 +1,372 @@
+import { expect, test } from 'vitest';
+
+import { executeProgram } from '../../src/interpreter/program';
+import { parsePython } from '../../src/python/parse';
+import { runModule } from '../../src/python/run';
+import { Runtime } from '../../src/python/runtime';
+
+/** Runs a program that raises when a value it computes differs from what CPython 3.14.10 computes for it. */
+function expectSameAsCPython(program: string): void {
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+}
+
+test('suspended generators close when reference counting would free them, not when a cycle keeps them', () => {
+  expectSameAsCPython(`import gc
+log = []
+def gen(tag):
+    try:
+        yield 1
+    finally:
+        log.append(tag)
+def opened(tag):
+    g = gen(tag)
+    next(g)
+    return g
+def take(it):
+    return next(it)
+def raiser(tag):
+    g = opened(tag)
+    raise KeyError(tag)
+g = opened('rebound')
+g = None
+log.append('-')
+x = take(gen('argument'))
+log.append('-')
+items = [opened('item')]
+items.pop()
+log.append('-')
+box = {'k': opened('value')}
+box['k'] = 0
+log.append('-')
+try:
+    raiser('traceback')
+except KeyError:
+    log.append('handler')
+log.append('-')
+class Node:
+    pass
+a, b = Node(), Node()
+a.other, b.other, a.g = b, a, opened('cycle')
+a = b = None
+log.append('dropped cycle')
+gc.collect()
+expected = ['rebound', '-', 'argument', '-', 'item', '-', 'value', '-', 'handler', 'traceback', '-', 'dropped cycle', 'cycle']
+if log != expected:
+    raise AssertionError(log)
+`);
+});
+
+test('objects keep one live __dict__, and builtin methods have the types CPython gives them', () => {
+  expectSameAsCPython(`class B:
+    pass
+b = B()
+d = b.__dict__
+d['x'] = 1
+replacement = {'y': 2}
+b.__dict__ = replacement
+b.z = 3
+results = (d is not b.__dict__, b.__dict__ is replacement, replacement, type(B.__dict__).__name__)
+if results != (True, True, {'y': 2, 'z': 3}, 'mappingproxy'):
+    raise AssertionError(results)
+kinds = [type(value).__name__ for value in (str.upper, 'x'.upper, int.__add__, (1).__add__, len, object.__new__)]
+expected = ['method_descriptor', 'builtin_function_or_method', 'wrapper_descriptor', 'method-wrapper',
+            'builtin_function_or_method', 'builtin_function_or_method']
+if kinds != expected:
+    raise AssertionError(kinds)
+texts = [repr(value) for value in (str.upper, int.__add__, len)]
+if texts != ["<method 'upper' of 'str' objects>", "<slot wrapper '__add__' of 'int' objects>", '<built-in function len>']:
+    raise AssertionError(texts)
+`);
+});
+
+/** The text a program writes, with how it ended. */
+function outputOf(program: string): string {
+  const run = runModule(new Runtime(), parsePython(program));
+  return `${run.stdout}=== ${run.uncaughtException ?? 'ok'}\n`;
+}
+
+test('__del__ runs when reference counting would free the object, and at the end in the order CPython clears it', () => {
+  // The expected text is what CPython 3.14.10 prints.
+  expect(
+    outputOf(`import gc, sys, weakref
+class A:
+    def __init__(self, n, *kids): self.n = n; self.kids = list(kids)
+    def __del__(self): print('del', self.n)
+a = A(1); a = None
+def f(p, q):
+    r = A('r'); s = A('s')
+    del p
+    return 0
+f(A('p'), A('q'))
+x = [A('l1'), A('l2')]; x.clear()
+d = {1: A('d1'), 2: A('d2')}; d.clear()
+n = A('n', A('n1'), A('n2')); n = None
+try:
+    raise ValueError(A('exc'))
+except ValueError as e:
+    print('handler')
+c1 = A('c1'); c2 = A('c2'); c1.o = c2; c2.o = c1
+c1 = c2 = None
+print('cycle dropped')
+gc.collect()
+saved = []
+class R:
+    def __del__(self): print('R del'); saved.append(self)
+r = R(); r = None; saved.clear()
+w = A('w')
+weakref.finalize(w, print, 'finalize')
+r1 = weakref.ref(w, lambda ref: print('cb1'))
+r2 = weakref.ref(w, lambda ref: print('cb2'))
+w = None
+class E:
+    def __del__(self): raise ValueError('boom')
+sys.unraisablehook = lambda u: print('hook', u.exc_type.__name__, u.err_msg.split(' at ')[0])
+e = E(); e = None
+sys.unraisablehook = sys.__unraisablehook__
+print('end')
+z = [A('z1'), A('z2')]
+q = A('q')
+`)
+  ).toBe(
+    `${[
+      'del 1',
+      'del p',
+      'del s',
+      'del r',
+      'del q',
+      'del l2',
+      'del l1',
+      'del d1',
+      'del d2',
+      'del n',
+      'del n2',
+      'del n1',
+      'handler',
+      'del exc',
+      'cycle dropped',
+      'del c1',
+      'del c2',
+      'R del',
+      'del w',
+      'cb2',
+      'cb1',
+      'finalize',
+      'hook ValueError Exception ignored while calling deallocator <function E.__del__',
+      'end',
+      'del q',
+      'del z2',
+      'del z1',
+    ].join('\n')}\n=== ok\n`
+  );
+});
+
+test('async generator hooks run when an async generator is first iterated and when it is freed unfinished', () => {
+  expectSameAsCPython(`import sys
+log = []
+async def agen():
+    yield 1
+    yield 2
+sys.set_asyncgen_hooks(lambda g: log.append('first'), lambda g: log.append('finalizer'))
+g = agen()
+log.append('created')
+try:
+    g.__anext__().send(None)
+except StopIteration as e:
+    log.append(e.value)
+g = None
+unstarted = agen()
+unstarted = None
+sys.set_asyncgen_hooks(None, None)
+if log != ['created', 'first', 1, 'finalizer'] or sys.get_asyncgen_hooks() != (None, None):
+    raise AssertionError(log)
+`);
+});
+
+test('cyclic garbage with __del__ that the automatic collector would free at an unknown time stops the program', () => {
+  expect(
+    outputOf(`class A:
+    def __del__(self): print('del')
+a = A(); a.self = a; a = None
+for i in range(1000):
+    b = [i]
+`)
+  ).toContain('この採点環境では使えません');
+});
+
+test('freeing objects with __del__ costs what is dropped, not every object the program holds', () => {
+  expectSameAsCPython(`class R:
+    count = 0
+    def __init__(self, n): self.n = n
+    def __del__(self): R.count += 1
+    def get(self): return self.n
+data = [[i] for i in range(100000)]
+for i in range(1000):
+    r = R(i)
+    r.get()
+objs = [R(i) for i in range(500)]
+while objs:
+    objs.pop()
+d = {i: R(i) for i in range(200)}
+for i in range(200):
+    d[i] = R(-i)
+for k in list(d):
+    del d[k]
+if R.count != 1899:
+    raise AssertionError(R.count)
+`);
+});
+
+test('atexit and codec registrations and the globals of exec functions keep objects alive as CPython does', () => {
+  const program = `import atexit, codecs, gc, weakref
+class A:
+    def __init__(self, n): self.n = n
+    def __del__(self): print('del', self.n)
+    def close(self, *args, **kwargs): print('close', self.n)
+atexit.register(A(1).close, A(2), key=A(3))
+atexit.register(A(4).close, A(5))
+a = A(6); atexit.register(a.close); atexit.unregister(a.close); del a
+def make_handler():
+    held = A(7)
+    return lambda error: (str(held.n), error.end), weakref.ref(held)
+handler, held = make_handler()
+codecs.register_error('lifetime', handler); del handler
+gc.collect()
+print(held() is not None, 'é'.encode('ascii', 'lifetime'))
+namespace = {'A': A}
+exec('kept = A(8)\\ndef get(): return kept', namespace)
+get = namespace['get']; del namespace
+gc.collect()
+print(get().n)
+del get
+gc.collect()
+print('end')
+`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: "del 6\nTrue b'7'\n8\ndel 8\nend\nclose 4\nclose 1\ndel 3\ndel 2\ndel 1\ndel 5\ndel 4\n",
+  });
+});
+
+test('slot and builtin subclass fields, augmented targets, and threaded calls free objects as CPython does', () => {
+  const program = `import datetime
+class A:
+    def __init__(self, n): self.n = n
+    def __del__(self): print('del', self.n)
+    def __add__(self, other): return 0
+class Slotted:
+    __slots__ = ('x', 'y')
+class Listed(list): pass
+s = Slotted(); s.x = A('slot'); del s
+l = Listed(); l.x = A('list attr'); del l
+s = Slotted(); s.x = A('overwritten'); s.x = None
+s.y = A('deleted'); del s.y
+setattr(s, 'x', A('setattr')); setattr(s, 'x', 0)
+s.y = A('delattr'); delattr(s, 'y')
+class OwnDel(list):
+    def __del__(self): print('del OwnDel')
+class IntDel(int):
+    def __del__(self): print('del IntDel')
+class DateDel(datetime.date):
+    def __del__(self): print('del DateDel')
+o = OwnDel(); del o
+i = IntDel(3); del i
+d = DateDel(2020, 1, 1); del d
+class Box: pass
+b = Box(); b.items = [A('attr item')]
+b.items *= 0
+m = {'k': [A('key item')]}
+m['k'] *= 0
+b.a = A('augmented attr')
+b.a += 1
+def local():
+    v = A('local')
+local()
+def annotated(x: int): pass
+print(annotated.__annotate__(1))
+def drop(p):
+    del p
+    print('dropped param')
+drop(A('param'))
+q = [A('cleared')]
+q.clear()
+print('end')
+`;
+  // CPython 3.14.10 prints the same with or without threading, whose import makes every call suspendable here.
+  const expected = `${[
+    'del slot',
+    'del list attr',
+    'del overwritten',
+    'del deleted',
+    'del setattr',
+    'del delattr',
+    'del OwnDel',
+    'del IntDel',
+    'del DateDel',
+    'del attr item',
+    'del key item',
+    'del augmented attr',
+    'del local',
+    "{'x': <class 'int'>}",
+    'del param',
+    'dropped param',
+    'del cleared',
+    'end',
+  ].join('\n')}\n`;
+  for (const prefix of ['', 'import threading\n']) {
+    expect(executeProgram('python', `${prefix}${program}`)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: undefined,
+      stdout: expected,
+    });
+  }
+});
+
+test('a finished generator or coroutine frees its locals at once, as CPython clears a finished frame', () => {
+  const program = `import asyncio, weakref, gc
+class A:
+    def __init__(self, n): self.n = n
+    def __del__(self): print('del', self.n)
+def gen():
+    a = A('gen')
+    yield 1
+for _ in gen(): pass
+print('after gen')
+def gen2():
+    a = A('ret')
+    return a
+    yield
+g = gen2()
+try: next(g)
+except StopIteration as e: v = e.value
+print('got', v.n); del v
+print('after gen2')
+refs = []
+async def f():
+    a = A('coro'); refs.append(weakref.ref(a))
+    await asyncio.sleep(0)
+asyncio.run(f())
+print(refs[0]() is None)
+def gen3():
+    a = A('raise')
+    yield 1
+    raise ValueError
+try:
+    for _ in gen3(): pass
+except ValueError: pass
+print('after gen3')
+def outer():
+    x = A('cell')
+    def g():
+        yield x
+    return g
+gf = outer(); list(gf()); print('cell kept'); del gf
+print('end')
+`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      'del gen\nafter gen\ngot ret\ndel ret\nafter gen2\ndel coro\nTrue\ndel raise\nafter gen3\ncell kept\ndel cell\nend\n',
+  });
+});

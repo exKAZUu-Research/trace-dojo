@@ -10,7 +10,7 @@ import { CompileError, type SourceDiagnostic } from './diagnostics';
 const requireFromRoot = createRequire(path.join(process.cwd(), 'package.json'));
 // Copying into this realm's Uint8Array passes the runtime's `instanceof` check, which a Buffer from another realm
 // (as under jsdom) fails.
-const readWasm = (specifier: string): Uint8Array => Uint8Array.from(readFileSync(requireFromRoot.resolve(specifier)));
+const readWasm = (specifier: string): Uint8Array => new Uint8Array(readFileSync(requireFromRoot.resolve(specifier)));
 await Parser.init({
   wasmBinary: readWasm('@willbooster/web-tree-sitter/web-tree-sitter.wasm').buffer as ArrayBuffer,
 });
@@ -31,16 +31,21 @@ export function parseSource<T>(
   parser: Parser,
   source: string,
   missingTokenNames: Record<string, string>,
-  convert: (root: Node) => T
+  convert: (root: Node) => T,
+  {
+    maxNestingDepth = MAX_NESTING_DEPTH,
+    tooDeepMessage = '括弧やブロックなどの入れ子が深すぎます。',
+    locateErrors = (_root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] => errors,
+  } = {}
 ): T {
   const tree = parser.parse(source);
   if (!tree) throw new Error('The parser returned no tree');
   try {
-    const tooDeep = findTooDeepNode(tree.rootNode);
+    const tooDeep = findTooDeepNode(tree.rootNode, maxNestingDepth);
     if (tooDeep) {
-      throw new CompileError([{ row: tooDeep.startPosition.row, message: '括弧やブロックなどの入れ子が深すぎます。' }]);
+      throw new CompileError([{ row: tooDeep.startPosition.row, message: tooDeepMessage }]);
     }
-    const syntaxErrors = collectSyntaxErrors(tree.rootNode, missingTokenNames, false);
+    const syntaxErrors = locateErrors(tree.rootNode, collectSyntaxErrors(tree.rootNode, missingTokenNames, false));
     if (syntaxErrors.length > 0) throw new CompileError(syntaxErrors);
     const converted = convert(tree.rootNode);
     // The converter's own checks name the errors it recognizes better than an error only the tree's flags show.
@@ -67,17 +72,35 @@ export function findSyntaxErrors(
   }
 }
 
+/** The `comment` tokens of `source`, in source order. */
+export function commentTokens(parser: Parser, source: string): { index: number; text: string }[] {
+  const tree = parser.parse(source);
+  if (!tree) throw new Error('The parser returned no tree');
+  try {
+    return tree.rootNode.descendantsOfType('comment').map((node) => ({ index: node.startIndex, text: node.text }));
+  } finally {
+    tree.delete();
+  }
+}
+
 /** Converting, compiling, and running recurse into nested constructs, so deeper nesting would exhaust the stack. */
 const MAX_NESTING_DEPTH = 300;
 
-function findTooDeepNode(root: Node): Node | undefined {
+function findTooDeepNode(root: Node, maxDepth: number): Node | undefined {
+  if (maxDepth === Number.POSITIVE_INFINITY) return;
   const cursor = root.walk();
+  // The cursor's own `currentDepth` takes time in proportion to the depth, which deep nesting makes quadratic.
+  let depth = 0;
   try {
     for (;;) {
-      if (cursor.currentDepth > MAX_NESTING_DEPTH) return cursor.currentNode;
-      if (cursor.gotoFirstChild()) continue;
+      if (depth > maxDepth) return cursor.currentNode;
+      if (cursor.gotoFirstChild()) {
+        depth++;
+        continue;
+      }
       while (!cursor.gotoNextSibling()) {
         if (!cursor.gotoParent()) return;
+        depth--;
       }
     }
   } finally {
@@ -104,7 +127,7 @@ function collectSyntaxErrors(
     }
     if (!node.hasError) return;
     const found = errors.length;
-    for (const child of node.children) if (child) visit(child);
+    for (const child of node.children) visit(child);
     if (includeHidden && errors.length === found) {
       errors.push({ row: hiddenErrorRow(node), message: '書き方に誤りがあります。' });
     }
@@ -126,9 +149,9 @@ function ownError(node: Node, missingTokenNames: Record<string, string>): Source
  * nothing between them, as two statements do when the newline between them is missing, or else the node's own row.
  */
 function hiddenErrorRow(node: Node): number {
-  const parts = node.children.filter((child): child is Node => child !== null);
-  for (const [index, part] of parts.slice(1).entries()) {
-    const previous = parts[index];
+  const { children } = node;
+  for (const [index, part] of children.slice(1).entries()) {
+    const previous = children[index];
     if (previous.isNamed && part.isNamed && previous.endPosition.row === part.startPosition.row) {
       return part.startPosition.row;
     }

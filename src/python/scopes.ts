@@ -11,18 +11,30 @@ export class ScopeBuilder {
   readonly bound = new Map<string, number>();
   readonly parameters = new Set<string>();
   readonly declarations = new Map<string, Declaration>();
+  /** The rows of the `global` and `nonlocal` statements, where errors about them are reported. */
+  readonly declarationRows = new Map<string, number>();
   /** The rows of the first use of each name, to reject a later `global` of it. */
   readonly used = new Map<string, number>();
   readonly refs: NameRef[] = [];
   /** Comprehension iteration variables, which an assignment expression must not rebind. */
   readonly iterationVariables = new Set<string>();
+  /** The type parameters a scope of type parameters binds, which a nested `nonlocal` must not rebind. */
+  readonly typeParameters = new Set<string>();
+  /** Whether this comprehension scope is a generator expression, which an `await` makes an async generator. */
+  isGeneratorExpression = false;
+
+  /** Whether a module's names live in its own namespace, as in code `exec` runs with separate globals and locals. */
+  readonly namesInLocals: boolean;
+  /** Whether CPython compiles this comprehension inline in its enclosing scope (a list, set, or dict comprehension). */
+  readonly isInlined: boolean;
 
   constructor(
     kind: ScopeInfo['kind'],
     readonly parent: ScopeBuilder | undefined,
-    /** Whether CPython compiles this comprehension inline in its enclosing scope (a list, set, or dict comprehension). */
-    readonly isInlined = false
+    options: { namesInLocals?: boolean; isInlined?: boolean } = {}
   ) {
+    this.namesInLocals = options.namesInLocals ?? false;
+    this.isInlined = options.isInlined ?? false;
     this.info = { kind, locals: [], cells: [], frees: [], isGenerator: false };
     parent?.children.push(this);
   }
@@ -52,6 +64,7 @@ export class ScopeBuilder {
       fail(row, 'nonlocal 宣言はモジュールの最上位では使えません。');
     }
     this.declarations.set(name, declaration);
+    this.declarationRows.set(name, row);
   }
 
   /** Whether this scope owns `name` as a variable of its own, which nested functions may capture. */
@@ -65,17 +78,18 @@ export function fail(row: number, message: string): never {
 }
 
 /** Settles how every name of the program is accessed, once all scopes have been collected. */
-export function resolveScopes(module: ScopeBuilder): void {
+export function resolveScopes(module: ScopeBuilder, futureFeatures: readonly string[] = []): void {
   checkNonlocals(module);
-  resolve(module);
+  resolve(module, futureFeatures);
 }
 
 function checkNonlocals(scope: ScopeBuilder): void {
   for (const [name, declaration] of scope.declarations) {
-    if (declaration === 'nonlocal' && !ownerOf(scope, name)) {
-      const row = scope.refs.find((ref) => ref.name === name)?.row ?? 0;
-      fail(row, `nonlocal で宣言した ${name} が、外側の関数に見つかりません。`);
-    }
+    if (declaration !== 'nonlocal') continue;
+    const owner = ownerOf(scope, name);
+    const row = scope.declarationRows.get(name) ?? 0;
+    if (!owner) fail(row, `nonlocal で宣言した ${name} が、外側の関数に見つかりません。`);
+    if (owner.typeParameters.has(name)) fail(row, `型引数 ${name} は、nonlocal 宣言できません。`);
   }
   for (const child of scope.children) checkNonlocals(child);
 }
@@ -102,18 +116,30 @@ function ownerOf(scope: ScopeBuilder, name: string): ScopeBuilder | undefined {
   return undefined;
 }
 
-function resolve(scope: ScopeBuilder): void {
+function resolve(scope: ScopeBuilder, futureFeatures: readonly string[]): void {
   const { info } = scope;
+  if (futureFeatures.length > 0) info.futureFeatures = futureFeatures;
   info.locals = [...scope.bound.keys()].filter((name) => !scope.declarations.has(name));
   for (const ref of scope.refs) ref.access = accessOf(scope, ref.name);
-  for (const child of scope.children) resolve(child);
+  for (const child of scope.children) resolve(child, futureFeatures);
+  if (scope.info.kind !== 'comprehension') {
+    const inlined = inlinedComprehensions(scope).flatMap((child) => child.info.cells);
+    if (inlined.length > 0) info.inlinedCells = inlined;
+  }
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows CPython's rules for resolving a name to local, cell, free, or global.
+/** The comprehensions CPython compiles into the code of `scope`: all but generator expressions, however nested. */
+function inlinedComprehensions(scope: ScopeBuilder): ScopeBuilder[] {
+  return scope.children.flatMap((child) =>
+    child.info.kind === 'comprehension' && !child.isGeneratorExpression ? [child, ...inlinedComprehensions(child)] : []
+  );
+}
+
+// code-gauge-allow functionCognitiveComplexity 18 -- Follows CPython's rules for resolving a name to local, cell, free, or global.
 function accessOf(scope: ScopeBuilder, name: string): NameRef['access'] {
   const declaration = scope.declarations.get(name);
   if (declaration === 'global') return 'global';
-  if (scope.info.kind === 'module') return 'global';
+  if (scope.info.kind === 'module') return scope.namesInLocals ? 'name' : 'global';
   if (declaration !== 'nonlocal' && scope.owns(name)) {
     if (scope.info.kind === 'class') return 'name';
     return capturedBelow(scope, name) ? markCell(scope, name) : 'local';

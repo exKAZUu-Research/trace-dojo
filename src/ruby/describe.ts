@@ -1,6 +1,6 @@
-import { toS } from './conversions';
 import { callMethod, runToEnd } from './interp';
-import type { RObject } from './objects';
+import { type RObject, RString } from './objects';
+import { RubyError } from './runtime';
 import { realClassOf } from './values';
 
 /**
@@ -9,9 +9,16 @@ import { realClassOf } from './values';
  */
 export function describeException(exception: RObject): string {
   const name = realClassOf(exception).name ?? '';
-  const message = runToEnd(toS(runToEnd(callMethod(exception, 'message', []))));
-  if (message === '') return name;
+  let message: string;
+  try {
+    const result = runToEnd(callMethod(exception, 'message', []));
+    if (!(result instanceof RString)) return name;
+    message = result.s;
+  } catch (error) {
+    if (error instanceof RubyError) return name;
+    throw error;
+  }
+  if (message === '') return name === 'RuntimeError' ? 'unhandled exception' : name;
   const [first, ...rest] = message.split('\n');
-  if (first === name) return [`${first} (${name})`, ...rest].join('\n');
   return [`${first} (${name})`, ...rest].join('\n');
 }

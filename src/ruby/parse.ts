@@ -1,8 +1,6 @@
-import type { Node } from '@willbooster/web-tree-sitter';
-
 import { CompileError } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../interpreter/traceAnnotations';
-import { loadParser, parseSource } from '../interpreter/treeSitter';
+import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from './ast';
 import { Converter } from './converter';
 
@@ -40,20 +38,9 @@ export function parseRuby(source: string, trace?: TraceOptions): Program {
 const RUBY_ANNOTATION_PATTERN = /#[ \t]*atomic[ \t]*$/;
 
 /** The `# atomic` annotations of a program, read from its comment tokens. */
-// code-gauge-allow duplicateLines 16 -- The similar lines handle different Ruby methods or values.
 export function findRubyTraceAnnotations(source: string): TraceAnnotation[] {
-  const tree = parser.parse(source);
-  if (!tree) throw new Error('The Ruby parser returned no tree');
-  try {
-    const comments: TraceAnnotation[] = [];
-    const visit = (node: Node): void => {
-      if (node.type === 'comment' && node.text.startsWith('#'))
-        comments.push({ index: node.startIndex, text: node.text });
-      for (const child of node.children) if (child) visit(child);
-    };
-    visit(tree.rootNode);
-    return traceAnnotationsIn(comments, RUBY_ANNOTATION_PATTERN);
-  } finally {
-    tree.delete();
-  }
+  return traceAnnotationsIn(
+    commentTokens(parser, source).filter((comment) => comment.text.startsWith('#')),
+    RUBY_ANNOTATION_PATTERN
+  );
 }

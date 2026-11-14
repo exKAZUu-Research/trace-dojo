@@ -2,6 +2,7 @@ import type { Params } from './ast';
 import { className, inspect, toStr } from './conversions';
 import { def } from './define';
 import { argumentError, nameError, typeError } from './errors';
+import { hashGet } from './hashes';
 import {
   addMethod,
   callMethod,
@@ -189,8 +190,8 @@ def(
   'Proc',
   'parameters',
   0,
-  (self: RProc, _args, _block, keywords) => {
-    const asLambda = keywords?.map.get('ylambda')?.value;
+  function* (self: RProc, _args, _block, keywords) {
+    const asLambda = keywords ? (yield* hashGet(keywords, sym('lambda')))?.value : undefined;
     const isLambda = asLambda === undefined || asLambda === NIL ? self.isLambda : truthy(asLambda);
     if (self.body.kind === 'native') return nativeParameterList(self.body.arity);
     return self.body.def.params ? parameterList(self.body.def.params, isLambda) : arr([]);

@@ -1,7 +1,7 @@
+import { bytesLikeData, latin1Text } from './bytesValues';
 import { complexRepr, newComplex } from './complexNumbers';
 import { pyRepr } from './conversions';
 import { method } from './define';
-import { defineUnsupportedAttributes } from './descriptors';
 import { formatComplex } from './formatComplex';
 import { frexp, hashFloat, hashInt } from './hashing';
 import { argument, checkArgs } from './nativeArgs';
@@ -30,11 +30,13 @@ import {
   newTuple,
   None,
   pyError,
+  stringValue,
   typeError,
   typeName,
+  unbox,
   valueError,
 } from './types';
-import { PyComplex, type PyValue } from './values';
+import { PyComplex, PyInstance, type PyValue } from './values';
 
 // int ---------------------------------------------------------------------------------------------------------------
 
@@ -51,20 +53,25 @@ intClass.construct = (cls, args, kwargs) => {
   if (base !== undefined) {
     const radix = Number(toIndex(base));
     if (radix !== 0 && (radix < 2 || radix > 36)) throw valueError('int() base must be >= 2 and <= 36, or 0');
-    if (typeof value !== 'string') throw typeError("int() can't convert non-string with explicit base");
-    return parseIntOrThrow(value, radix);
+    const text = unbox(value);
+    if (typeof text === 'string') return parseIntOrThrow(text, radix);
+    const data = bytesLikeData(value);
+    if (data === undefined) throw typeError("int() can't convert non-string with explicit base");
+    return parseIntOrThrow(latin1Text(data), radix, pyRepr(value));
   }
   void cls;
   return toInt(value);
 };
 
 /** `int(value)` for a value without a base. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows int() for each kind of argument.
+// code-gauge-allow functionCognitiveComplexity 21 -- Follows int() for each kind of argument.
 export function toInt(value: PyValue): bigint {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'boolean') return value ? 1n : 0n;
   if (typeof value === 'number') return floatToInt(value);
   if (typeof value === 'string') return parseIntOrThrow(value, 10);
+  const data = bytesLikeData(value);
+  if (data !== undefined) return parseIntOrThrow(latin1Text(data), 10, pyRepr(value));
   for (const name of ['__int__', '__index__']) {
     const special = lookupSpecial(value, name);
     if (special === undefined) continue;
@@ -73,14 +80,15 @@ export function toInt(value: PyValue): bigint {
     if (typeof result === 'boolean') return result ? 1n : 0n;
     throw typeError(`${name} returned non-int (type ${typeName(result)})`);
   }
+  if (value instanceof PyInstance && typeof value.primitive === 'string') return parseIntOrThrow(value.primitive, 10);
   throw typeError(`int() argument must be a string, a bytes-like object or a real number, not '${typeName(value)}'`);
 }
 
-function parseIntOrThrow(text: string, base: number): bigint {
+function parseIntOrThrow(text: string, base: number, shown?: string): bigint {
   const result = parseIntText(text, base);
   if (result === undefined)
     throw valueError(
-      `invalid literal for int() with base ${base}: ${strRepr(text.length > 200 ? `${text.slice(0, 200)}` : text)}`
+      `invalid literal for int() with base ${base}: ${shown ?? strRepr(text.length > 200 ? `${text.slice(0, 200)}` : text)}`
     );
   return result;
 }
@@ -109,7 +117,6 @@ method(intClass, 'as_integer_ratio', 'none', 0, 0, (self) => newTuple([intLike(s
 method(intClass, 'is_integer', 'none', 0, 0, () => true);
 method(intClass, 'conjugate', 'none', 0, 0, (self) => intLike(self));
 method(intClass, '__round__', 'expected', 0, 1, (self, [digits]) => roundInt(intLike(self), digits));
-defineUnsupportedAttributes(intClass, { to_bytes: 'int.to_bytes()（bytes 型）' });
 
 /** `round(n, digits)` for an int, rounding halves to even. */
 export function roundInt(value: bigint, digits: PyValue | undefined): bigint {
@@ -144,7 +151,8 @@ floatClass.construct = (_cls, args, kwargs) => {
 };
 
 /** `float(value)`. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows float() for each kind of argument.
+// code-gauge-allow functionCognitiveComplexity 22 -- Follows float() for each kind of argument.
+// code-gauge-allow functionNcss 31 -- Follows float() for each kind of argument.
 export function toFloat(value: PyValue): number {
   if (typeof value === 'number') return value;
   if (typeof value === 'bigint') return intToFloat(value);
@@ -152,6 +160,12 @@ export function toFloat(value: PyValue): number {
   if (typeof value === 'string') {
     const result = parseFloatText(value);
     if (result === undefined) throw valueError(`could not convert string to float: ${strRepr(value)}`);
+    return result;
+  }
+  const data = bytesLikeData(value);
+  if (data !== undefined) {
+    const result = parseFloatText(latin1Text(data));
+    if (result === undefined) throw valueError(`could not convert string to float: ${pyRepr(value)}`);
     return result;
   }
   for (const name of ['__float__', '__index__']) {
@@ -162,6 +176,7 @@ export function toFloat(value: PyValue): number {
     if (name === '__index__' && (typeof result === 'bigint' || typeof result === 'boolean')) return toFloat(result);
     throw typeError(`${typeName(value)}.${name} returned non-float (type ${typeName(result)})`);
   }
+  if (value instanceof PyInstance && typeof value.primitive === 'string') return toFloat(value.primitive);
   throw typeError(`float() argument must be a string or a real number, not '${typeName(value)}'`);
 }
 
@@ -198,10 +213,26 @@ function floatRatio(value: number): PyValue {
   return newTuple([numerator, denominator]);
 }
 
+const GCD_SMALL_INT = 1n << 64n;
+const GCD_BITS_PER_OPERATION = 1 << 13;
+
 export function gcd(a: bigint, b: bigint): bigint {
   let x = a < 0n ? -a : a;
   let y = b < 0n ? -b : b;
-  while (y) [x, y] = [y, x % y];
+  if (x < GCD_SMALL_INT && y < GCD_SMALL_INT) {
+    while (y) [x, y] = [y, x % y];
+    return x;
+  }
+  const bits = Math.max(x.toString(16).length, y.toString(16).length) * 4;
+  let work = 0;
+  while (y) {
+    work += bits;
+    if (work >= GCD_BITS_PER_OPERATION) {
+      currentRuntime().spend(Math.floor(work / GCD_BITS_PER_OPERATION));
+      work %= GCD_BITS_PER_OPERATION;
+    }
+    [x, y] = [y, x % y];
+  }
   return x;
 }
 
@@ -253,14 +284,15 @@ interface ComplexPart {
 
 /** `complex(value)`: a string is parsed, and any other value converts as a number. */
 function complexOf(value: PyValue): PyComplex {
-  if (typeof value === 'string') return parseComplex(value);
+  const text = stringValue(value);
+  if (text !== undefined) return parseComplex(text);
   const part = complexPartOf(value, true);
   if (!part) throw typeError(`complex() argument must be a string or a number, not ${typeName(value)}`);
   return newComplex(part.real, part.imag);
 }
 
 function namedPart(value: PyValue, name: 'real' | 'imag'): ComplexPart {
-  const part = typeof value === 'string' ? undefined : complexPartOf(value, name === 'real');
+  const part = stringValue(value) !== undefined ? undefined : complexPartOf(value, name === 'real');
   if (!part) throw typeError(`complex() argument '${name}' must be a real number, not ${typeName(value)}`);
   return part;
 }
@@ -315,6 +347,7 @@ function imagPart(text: string): number {
 
 method(complexClass, '__repr__', 'none', 0, 0, (self) => complexRepr(self as PyComplex));
 method(complexClass, '__format__', 'one', 1, 1, (self, [spec]) => {
+  spec = stringValue(spec) ?? spec;
   if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${argumentTypeName(spec)}`);
   return formatComplex(self as PyComplex, spec);
 });

@@ -45,21 +45,25 @@ export class StepTracker {
     return result;
   }
 
-  /**
-   * Marks the start of a statement for {@link completeStatement}, for an evaluator that cannot pass the statement's run
-   * as a function, such as one whose statements are generators.
-   */
   statementMark(): number {
     return this.recordedSteps;
   }
 
-  /** Records the step of a statement that started at `mark`, by the rule of {@link runStatement}. */
   completeStatement(row: number | undefined, onlyCalls: boolean | (() => boolean), mark: number): void {
+    this.finishStatement(row, typeof onlyCalls === 'function' ? onlyCalls() : onlyCalls, mark);
+  }
+
+  /** How many steps have been recorded, which a statement that cannot run as a callback reads before it runs. */
+  get stepCount(): number {
+    return this.recordedSteps;
+  }
+
+  /**
+   * Records the step of a statement that ran since `stepCount` was `begun`, as `runStatement` does after running one.
+   */
+  finishStatement(row: number | undefined, onlyCalls: boolean, begun: number): void {
     const callsShowedIt =
-      (typeof onlyCalls === 'function' ? onlyCalls() : onlyCalls) &&
-      this.recordedSteps !== mark &&
-      !this.atomicCallUnshown &&
-      this.recorder?.showsState() === true;
+      onlyCalls && this.recordedSteps !== begun && !this.atomicCallUnshown && this.recorder?.showsState() === true;
     if (!callsShowedIt) this.step(row);
   }
 

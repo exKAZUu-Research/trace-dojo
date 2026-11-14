@@ -1,6 +1,8 @@
 import type { Parameter } from './ast';
+import { keywordEntries } from './callArguments';
 import { bestSuggestion } from './describe';
-import { newDict, newTuple, typeError } from './types';
+import { equals } from './operators';
+import { newDict, newTuple, stringValue, typeError } from './types';
 import type { Kwargs, PyDict, PyFunction, PyValue } from './values';
 
 /** What binding needs of a function, which a native function that CPython's library writes in Python also gives. */
@@ -33,12 +35,13 @@ export function bindArguments(fn: Signature, args: readonly PyValue[], kwargs: K
 function bindKeywords(fn: Signature, kwargs: Kwargs, bound: Map<string, PyValue>, extra: PyDict | undefined): void {
   const { params } = fn.def;
   const positionalOnlyAsKeyword: string[] = [];
-  for (const [key, value] of kwargs ?? []) {
+  for (const [rawKey, value] of keywordEntries(kwargs)) {
+    const key = stringValue(rawKey) as string;
     const param = params.find(
-      (candidate) => candidate.name === key && candidate.kind !== 'varArgs' && candidate.kind !== 'varKeywords'
+      (candidate) => equals(rawKey, candidate.name) && candidate.kind !== 'varArgs' && candidate.kind !== 'varKeywords'
     );
     if (param?.kind === 'positionalOnly' || !param) {
-      if (extra) extra.store.set(key, value);
+      if (extra) extra.store.set(rawKey, value);
       else if (param) positionalOnlyAsKeyword.push(key);
       else throw unexpectedKeyword(fn, key);
       continue;

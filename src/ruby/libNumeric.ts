@@ -8,23 +8,39 @@ import {
   numericEquals,
   toFloat,
   toInt,
+  toRubyInt,
+  toStepFloat,
   toStr,
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, floatDomainError, rangeError, rubyError, typeError, zeroDivisionError } from './errors';
 import { roundFloatDigits, roundHalfAway } from './floatFormat';
+import {
+  bigintRatio,
+  floatFraction,
+  floatStepCount,
+  frexpDouble,
+  fusedMultiplyAdd,
+  ldexpDouble,
+  roundedDouble,
+} from './floatMath';
 import { exactFloatPower } from './floatPower';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { makeRational } from './libRational';
-import { NIL, RArray, type RHash, type RProc, RString, RSymbol, type Value } from './objects';
-import { rt, UnsupportedFeatureError } from './runtime';
-import { arr, realClassOf, str, truthy } from './values';
+import { boxFloat, NIL, RArray, RFloat, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
+import { platformGamma, platformLog2, platformLog10, platformLogGamma } from './platformMath';
+import { rt, RubyError, UnsupportedFeatureError } from './runtime';
+import { arr, asciiString, classOf, realClassOf, str, truthy } from './values';
 
 type Num = bigint | number;
 
 function isNum(value: Value): value is Num {
   return typeof value === 'bigint' || typeof value === 'number';
+}
+
+function callbackReceiver(self: Num): Value {
+  return rt().currentNumericReceiver ?? self;
 }
 
 /** The error for an operand that is not a number: "String can't be coerced into Integer". */
@@ -34,18 +50,18 @@ function coerceError(value: Value, into: string): unknown {
 }
 
 /** Applies an operator to a number and a value that is not one, through the value's `coerce`. */
-function* coerceBinary(self: Num, other: Value, op: string): Gen {
-  if (respondsTo(other, 'coerce')) {
-    const pair = yield* callMethod(other, 'coerce', [self]);
+function* coerceBinary(self: Num, other: Value, op: string, target?: string): Gen {
+  if (respondsTo(other, 'coerce', true)) {
+    const pair = yield* callMethod(other, 'coerce', [callbackReceiver(self)], undefined, undefined, { fcall: true });
     if (!(pair instanceof RArray) || pair.items.length !== 2) throw typeError('coerce must return [x, y]');
     return yield* callMethod(pair.items[0], op, [pair.items[1]]);
   }
-  throw coerceError(other, typeof self === 'bigint' ? 'Integer' : 'Float');
+  throw coerceError(other, target ?? (typeof self === 'bigint' ? 'Integer' : 'Float'));
 }
 
 function* coerceCompare(self: Num, other: Value, op: string): Gen {
-  if (respondsTo(other, 'coerce')) {
-    const pair = yield* callMethod(other, 'coerce', [self]);
+  if (respondsTo(other, 'coerce', true)) {
+    const pair = yield* callMethod(other, 'coerce', [callbackReceiver(self)], undefined, undefined, { fcall: true });
     if (pair instanceof RArray && pair.items.length === 2) return yield* callMethod(pair.items[0], op, [pair.items[1]]);
   }
   throw comparisonFailed(self, other);
@@ -65,6 +81,7 @@ export function floorMod(a: bigint, b: bigint): bigint {
 }
 
 function floatMod(x: number, y: number): number {
+  if (y === 0) throw zeroDivisionError();
   const remainder = x % y;
   if (y * remainder < 0) return remainder + y;
   return remainder;
@@ -89,25 +106,40 @@ function intPow(base: bigint, exponent: bigint): Value {
     if (base === 0n) throw zeroDivisionError();
     return makeRational(1n, base ** -exponent);
   }
-  const bits = BigInt(base < 0n ? -base : base).toString(2).length;
-  if (base !== 0n && base !== 1n && base !== -1n && BigInt(bits) * exponent > 32_000_000n) {
-    throw argumentError('exponent is too large');
-  }
-  rt().spend(Number((BigInt(bits) * exponent) / 4096n));
+  if (exponent === 0n) return 1n;
+  if (base === 0n || base === 1n) return base;
+  if (base === -1n) return exponent % 2n === 0n ? 1n : -1n;
+  const bits = integerBits(base);
+  const magnitude = base < 0n ? -base : base;
+  const outputBits = BigInt((magnitude & (magnitude - 1n)) === 0n ? bits - 1 : bits) * exponent + 1n;
+  chargeIntegerResult(Number(outputBits), Number(outputBits));
   return base ** exponent;
 }
 
+function integerBits(value: bigint): number {
+  return (value < 0n ? -value : value).toString(2).length;
+}
+
+function chargeIntegerResult(bits: number, cost: number): void {
+  rt().spend(Math.ceil(bits / 256) + Math.ceil(cost / 4096));
+}
+
 function floatPow(base: number, exponent: number): Value {
-  if (base < 0 && !Number.isInteger(exponent) && Number.isFinite(exponent)) {
+  if (base === 1 || (base === -1 && !Number.isNaN(exponent) && !Number.isFinite(exponent))) return 1;
+  if (base < 0 && (Number.isNaN(exponent) || (!Number.isInteger(exponent) && Number.isFinite(exponent)))) {
     throw new UnsupportedFeatureError('負の数の小数乗（結果が複素数になるもの）');
   }
   return exactFloatPower(base, exponent) ?? base ** exponent;
 }
 
-// code-gauge-allow functionNcss 31 -- Ruby's method takes these argument forms, which the branches mirror.
-// code-gauge-allow duplicateLines 18 -- The similar lines handle different Ruby methods or values.
+// code-gauge-allow duplicateLines 18 -- Ruby integer and float arithmetic use matching operator cases with different numeric representations.
+// code-gauge-allow functionNcss 31 -- Arithmetic dispatches Integer and Float operands across Ruby operators and zero-division rules.
 function arithmetic(op: string, a: Num, b: Num): Value {
   if (typeof a === 'bigint' && typeof b === 'bigint') {
+    const bitsA = integerBits(a);
+    const bitsB = integerBits(b);
+    if (op === '+' || op === '-') chargeIntegerResult(Math.max(bitsA, bitsB) + 1, bitsA + bitsB);
+    if (op === '*') chargeIntegerResult(bitsA + bitsB, (bitsA * bitsB) / 1024);
     switch (op) {
       case '+': {
         return a + b;
@@ -172,19 +204,20 @@ for (const owner of ['Integer', 'Float']) {
   def(owner, '+@', 0, (self: Num) => self);
   def(owner, ['==', '==='], 1, function* (self: Num, [other]) {
     if (isNum(other)) return numericEquals(self, other);
+    if (classOf(other).findMethod('==')?.body.kind === 'user')
+      return truthy(yield* callMethod(other, '==', [callbackReceiver(self)]));
     if (other === NIL || typeof other === 'boolean' || other instanceof RString || other instanceof RSymbol)
       return false;
-    return truthy(yield* callMethod(other, '==', [self]));
+    return truthy(yield* callMethod(other, '==', [callbackReceiver(self)]));
   });
   def(owner, 'eql?', 1, (self: Num, [other]) => typeof self === typeof other && numericEquals(self, other as Num));
-  def(owner, 'equal?', 1, (self: Num, [other]) => typeof self === typeof other && numericEquals(self, other as Num));
   def(owner, '<=>', 1, function* (self: Num, [other]) {
     if (isNum(other)) {
       const order = numericCompare(self, other);
       return order === undefined ? NIL : BigInt(order);
     }
-    if (respondsTo(other, 'coerce')) {
-      const pair = yield* callMethod(other, 'coerce', [self]);
+    if (respondsTo(other, 'coerce', true)) {
+      const pair = yield* callMethod(other, 'coerce', [callbackReceiver(self)], undefined, undefined, { fcall: true });
       if (pair instanceof RArray && pair.items.length === 2)
         return yield* callMethod(pair.items[0], '<=>', pair.items.slice(1));
     }
@@ -218,16 +251,24 @@ for (const owner of ['Integer', 'Float']) {
     if (typeof self === 'bigint' && typeof other === 'bigint') return floorDiv(self, other);
     return floatToInt(floatDivmod(Number(self), Number(other))[0]);
   });
-  def(owner, 'fdiv', 1, (self: Num, [other]) => {
-    if (!isNum(other)) throw coerceError(other, typeof self === 'bigint' ? 'Integer' : 'Float');
+  def(owner, 'fdiv', 1, function* (self: Num, [other]) {
+    if (!isNum(other)) return yield* coerceBinary(self, other, 'fdiv');
+    return typeof self === 'bigint' && typeof other === 'bigint'
+      ? bigintRatio(self, other)
+      : Number(self) / Number(other);
+  });
+  def(owner, 'quo', 1, (self: Num, [other]) => {
+    if (!isNum(other)) return coerceBinary(self, other, 'quo', typeof self === 'bigint' ? 'Rational' : 'Float');
+    if (typeof self === 'bigint' && typeof other === 'bigint') return makeRational(self, other);
     return Number(self) / Number(other);
   });
-  def(owner, 'remainder', 1, (self: Num, [other]) => {
-    if (!isNum(other)) throw coerceError(other, typeof self === 'bigint' ? 'Integer' : 'Float');
+  def(owner, 'remainder', 1, function* (self: Num, [other]) {
+    if (!isNum(other)) return yield* coerceBinary(self, other, 'remainder');
     if (typeof self === 'bigint' && typeof other === 'bigint') {
       if (other === 0n) throw zeroDivisionError();
       return self % other;
     }
+    if (other === 0 || other === 0n) throw zeroDivisionError();
     return Number(self) % Number(other);
   });
   def(owner, ['abs', 'magnitude'], 0, (self: Num) =>
@@ -258,8 +299,42 @@ for (const owner of ['Integer', 'Float']) {
     },
     { keywords: true }
   );
-  def(owner, 'clone', [0, 1], (self) => self);
   def(owner, 'dup', 0, (self) => self);
+}
+def('Integer', 'ceildiv', 1, function* (self: bigint, [other]) {
+  const quotient = yield* callMethod(-self, 'div', [other]);
+  return typeof quotient === 'bigint' ? -quotient : -Number(quotient);
+});
+
+for (const owner of ['Integer', 'Float']) {
+  def(owner, 'real?', 0, () => true);
+  def(owner, 'real', 0, (self: Num) => self);
+  def(owner, ['imag', 'imaginary'], 0, () => 0n);
+  def(owner, 'i', 0, () => {
+    throw new UnsupportedFeatureError('Numeric#i（複素数）');
+  });
+  def(owner, 'abs2', 0, (self: Num) => numericAbs2(self));
+  def(owner, ['conj', 'conjugate'], 0, (self: Num) => self);
+  def(owner, ['arg', 'angle', 'phase'], 0, (self: Num) => numericArg(self));
+  def(owner, ['rect', 'rectangular'], 0, (self: Num) => arr([self, 0n]));
+  def(owner, 'polar', 0, (self: Num) =>
+    arr([typeof self === 'bigint' ? (self < 0n ? -self : self) : Math.abs(self), numericArg(self)])
+  );
+  def(owner, 'numerator', 0, (self: Num) => (typeof self === 'bigint' ? self : floatFraction(self).numerator));
+  def(owner, 'denominator', 0, (self: Num) => (typeof self === 'bigint' ? 1n : floatFraction(self).denominator));
+}
+
+function numericArg(value: Num): Num {
+  if (typeof value === 'bigint') return value < 0n ? Math.PI : 0n;
+  if (Number.isNaN(value)) return Number.NaN;
+  return value < 0 || Object.is(value, -0) ? Math.PI : 0n;
+}
+
+function numericAbs2(value: Num): Num {
+  if (typeof value === 'number') return value * value;
+  const bits = integerBits(value);
+  chargeIntegerResult(2 * bits, (bits * bits) / 1024);
+  return value * value;
 }
 
 function* modPow(self: Num, exponent: Value, modulus: Value): Gen {
@@ -268,15 +343,25 @@ function* modPow(self: Num, exponent: Value, modulus: Value): Gen {
   }
   if (exponent < 0n) throw rangeError('Integer#pow() 1st argument cannot be negative when 2nd argument specified');
   if (modulus === 0n) throw zeroDivisionError();
+  const arithmeticCost = Math.max(2, Math.ceil((modulus < 0n ? -modulus : modulus).toString(16).length / 256));
   let result = 1n;
+  rt().spend(arithmeticCost);
   let base = floorMod(self, modulus);
+  rt().spend(arithmeticCost);
   let power = exponent;
   while (power > 0n) {
-    if (power & 1n) result = floorMod(result * base, modulus);
+    rt().spend();
+    if (power & 1n) {
+      rt().spend(arithmeticCost);
+      result = floorMod(result * base, modulus);
+      rt().spend(arithmeticCost);
+    }
+    rt().spend(arithmeticCost);
     base = floorMod(base * base, modulus);
+    rt().spend(arithmeticCost);
     power >>= 1n;
-    yield* [];
   }
+  rt().spend(arithmeticCost);
   return floorMod(result, modulus);
 }
 
@@ -285,19 +370,33 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
   if (keywords) {
     for (const entry of keywords.map.values()) {
       const name = entry.key instanceof RSymbol ? entry.key.name : '';
-      if (name === 'to') limit = entry.value;
-      else if (name === 'by') step = entry.value;
-      else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
+      if (name === 'to') {
+        if (args.length > 0) throw argumentError('to is given twice');
+        limit = entry.value instanceof RFloat ? entry.value.value : entry.value;
+      } else if (name === 'by') {
+        if (args.length > 1) throw argumentError('step is given twice');
+        step = entry.value instanceof RFloat ? entry.value.value : entry.value;
+      } else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
     }
   }
-  if (!isNum(step)) throw typeError(`no implicit conversion of ${realClassOf(step).name} into Integer`);
-  if (step === 0n || step === 0) {
-    if (!block) throw argumentError("step can't be 0");
+  if (step === 0n || step === 0 || (!isNum(step) && truthy(yield* callMethod(step, '==', [0n]))))
     throw argumentError("step can't be 0");
-  }
-  if (limit !== NIL && !isNum(limit)) throw comparisonFailed(self, limit);
+  if (!isNum(step) && !respondsTo(step, 'coerce', true))
+    throw typeError(`no implicit conversion of ${realClassOf(step).name} into Integer`);
   if (!block) return makeEnumerator(self, 'step', args, keywords);
+  if (!isNum(step)) return yield* stepCustomNumeric(self, limit, step, block);
   const useFloat = typeof self === 'number' || typeof limit === 'number' || typeof step === 'number';
+  if (useFloat && limit !== NIL && !isNum(limit)) limit = yield* toStepFloat(limit);
+  if (!useFloat && limit !== NIL && !isNum(limit)) {
+    let value: Num = self;
+    const ascending = Number(step) > 0;
+    for (;;) {
+      if (yield* pastStepLimit(value, limit, ascending)) break;
+      yield* callBlock(block, [value], false);
+      value = arithmetic('+', value, step) as Num;
+    }
+    return self;
+  }
   if (!useFloat) {
     const begin = self as bigint;
     const by = step as bigint;
@@ -313,20 +412,40 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
   const begin = Number(self);
   const by = Number(step);
   const end = limit === NIL ? (by > 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY) : Number(limit);
-  const count = Math.floor((end - begin) / by + 1e-9 * Math.abs((end - begin) / by) + 1e-15);
+  const count = floatStepCount(begin, end, by);
+  if (Number.isNaN(count)) return self;
   if (!Number.isFinite(count)) {
-    for (let index = 0; ; index++) yield* callBlock(block, [begin + index * by], false);
+    for (let index = 0; ; index++) yield* callBlock(block, [fusedMultiplyAdd(index, by, begin)], false);
   }
-  for (let index = 0; index <= count; index++) yield* callBlock(block, [begin + index * by], false);
+  for (let index = 0; index < count; index++) {
+    const value = fusedMultiplyAdd(index, by, begin);
+    yield* callBlock(block, [by > 0 ? Math.min(value, end) : Math.max(value, end)], false);
+  }
   return self;
+}
+
+function* stepCustomNumeric(self: Num, limit: Value, step: Value, block: RProc): Gen<Value> {
+  const ascending = truthy(yield* callMethod(step, '>', [0n]));
+  let value: Value = self;
+  for (;;) {
+    if (limit !== NIL && (yield* pastStepLimit(value, limit, ascending))) break;
+    yield* callBlock(block, [value], false);
+    value = yield* callMethod(value, '+', [step]);
+  }
+  return self;
+}
+
+function* pastStepLimit(value: Value, limit: Value, ascending: boolean): Gen<boolean> {
+  return truthy(yield* callMethod(value, ascending ? '>' : '<', [limit]));
 }
 
 // Integer -------------------------------------------------------------------------------------------------------------
 
 def('Integer', ['to_s', 'inspect'], [0, 1], function* (self: bigint, args) {
-  const base = args.length > 0 ? Number(yield* toInt(args[0])) : 10;
+  const base = args.length > 0 ? yield* toRubyInt(args[0]) : 10;
   if (base < 2 || base > 36) throw argumentError(`invalid radix ${base}`);
-  return str(self.toString(base));
+  rt().checkStringLength(Math.ceil(integerBits(self) / Math.log2(base)) + 1);
+  return asciiString(self.toString(base));
 });
 def('Integer', ['to_i', 'to_int'], 0, (self) => self);
 def('Integer', 'hash', 0, (self: bigint) => self);
@@ -350,18 +469,42 @@ def('Integer', '>>', 1, function* (self: bigint, [other]) {
 });
 
 function shift(value: bigint, amount: bigint): bigint {
+  if (value === 0n) return 0n;
   if (amount >= 0n) {
-    if (amount > 32_000_000n) throw rangeError('shift width too big');
+    const bits = Number(BigInt(integerBits(value)) + amount);
+    chargeIntegerResult(bits, bits);
     return value << amount;
   }
   return value >> -amount;
 }
 
-def('Integer', '[]', 1, function* (self: bigint, [index]) {
-  const bit = yield* toInt(index);
-  if (bit < 0n) return 0n;
-  return (self >> bit) & 1n;
+def('Integer', '[]', [1, 2], function* (self: bigint, args) {
+  if (args.length === 1 && args[0] instanceof RRange) {
+    const range = args[0];
+    if (range.begin === NIL) {
+      if (self === 0n) return 0n;
+      throw argumentError('The beginless range for Integer#[] results in infinity');
+    }
+    const start = yield* toInt(range.begin);
+    if (range.end === NIL) return shift(self, -start);
+    const end = yield* toInt(range.end);
+    const length = end - start + BigInt(!range.exclusive);
+    return length <= 0n && !(range.exclusive && length === 0n) ? shift(self, -start) : bitSlice(self, start, length);
+  }
+  const start = yield* toInt(args[0]);
+  if (args.length === 2) return bitSlice(self, start, yield* toInt(args[1]));
+  if (start < 0n) return 0n;
+  return (self >> start) & 1n;
 });
+
+function bitSlice(value: bigint, start: bigint, length: bigint): bigint {
+  const shifted = shift(value, -start);
+  if (length < 0n) return shifted;
+  if (length === 0n || shifted === 0n) return 0n;
+  if (shifted > 0n && BigInt(shifted.toString(2).length) <= length) return shifted;
+  chargeIntegerResult(Number(length), Number(length));
+  return shifted & ((1n << length) - 1n);
+}
 def('Integer', 'times', 0, function* (self: bigint, _args, block) {
   if (!block) return sizedEnumerator(self, 'times', [], () => (self > 0n ? self : 0n));
   for (let index = 0n; index < self; index++) yield* callBlock(block, [index], false);
@@ -370,20 +513,30 @@ def('Integer', 'times', 0, function* (self: bigint, _args, block) {
 def('Integer', 'upto', 1, function* (self: bigint, [limit], block) {
   if (!block) return makeEnumerator(self, 'upto', [limit]);
   if (typeof limit === 'number') {
-    for (let index = self; Number(index) <= limit; index++) yield* callBlock(block, [index], false);
+    for (let index = self; Number.isNaN(limit) || (numericCompare(index, limit) ?? 1) <= 0; index++)
+      yield* callBlock(block, [index], false);
     return self;
   }
-  if (typeof limit !== 'bigint') throw comparisonFailed(self, limit);
+  if (typeof limit !== 'bigint') {
+    for (let index = self; !truthy(yield* callMethod(index, '>', [limit])); index++)
+      yield* callBlock(block, [index], false);
+    return self;
+  }
   for (let index = self; index <= limit; index++) yield* callBlock(block, [index], false);
   return self;
 });
 def('Integer', 'downto', 1, function* (self: bigint, [limit], block) {
   if (!block) return makeEnumerator(self, 'downto', [limit]);
   if (typeof limit === 'number') {
-    for (let index = self; Number(index) >= limit; index--) yield* callBlock(block, [index], false);
+    for (let index = self; Number.isNaN(limit) || (numericCompare(index, limit) ?? -1) >= 0; index--)
+      yield* callBlock(block, [index], false);
     return self;
   }
-  if (typeof limit !== 'bigint') throw comparisonFailed(self, limit);
+  if (typeof limit !== 'bigint') {
+    for (let index = self; !truthy(yield* callMethod(index, '<', [limit])); index--)
+      yield* callBlock(block, [index], false);
+    return self;
+  }
   for (let index = self; index >= limit; index--) yield* callBlock(block, [index], false);
   return self;
 });
@@ -399,7 +552,7 @@ def('Integer', 'chr', [0, 1], (self: bigint, args) => {
   return char;
 });
 def('Integer', 'ord', 0, (self) => self);
-def('Integer', 'size', 0, () => 8n);
+def('Integer', 'size', 0, (self: bigint) => BigInt(Math.max(8, Math.ceil(integerBits(self) / 8))));
 def('Integer', 'bit_length', 0, (self: bigint) => {
   const value = self < 0n ? -self - 1n : self;
   return value === 0n ? 0n : BigInt(value.toString(2).length);
@@ -411,7 +564,10 @@ def('Integer', 'digits', [0, 1], function* (self: bigint, args) {
   if (self < 0n) throw rubyError(rt().c['Math::DomainError'], 'out of domain');
   if (self === 0n) return arr([0n]);
   const digits: Value[] = [];
-  for (let value = self; value > 0n; value /= base) digits.push(value % base);
+  for (let value = self; value > 0n; value /= base) {
+    rt().spend();
+    digits.push(value % base);
+  }
   return arr(digits);
 });
 def('Integer', 'gcd', 1, (self: bigint, [other]) => {
@@ -434,7 +590,11 @@ def('Integer', 'gcdlcm', 1, (self: bigint, [other]) => {
 function gcd(a: bigint, b: bigint): bigint {
   let x = a < 0n ? -a : a;
   let y = b < 0n ? -b : b;
-  while (y !== 0n) [x, y] = [y, x % y];
+  const cost = 1 + Math.ceil(Math.max(integerBits(x), integerBits(y)) / 4096);
+  while (y !== 0n) {
+    rt().spend(cost);
+    [x, y] = [y, x % y];
+  }
   return x;
 }
 
@@ -451,26 +611,42 @@ def('Integer', ['nobits?'], 1, function* (self: bigint, [mask]) {
 
 function* roundingMode(keywords: RHash | undefined): Gen<'up' | 'even' | 'down'> {
   if (!keywords) return 'up';
+  let mode: Value | undefined;
   for (const entry of keywords.map.values()) {
     if (!(entry.key instanceof RSymbol) || entry.key.name !== 'half') {
       throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
     }
-    const mode = entry.value;
-    if (mode === NIL) return 'up';
-    const name = mode instanceof RSymbol ? mode.name : mode instanceof RString ? mode.s : undefined;
-    if (name === 'up' || name === 'even' || name === 'down') return name;
-    throw argumentError(`invalid rounding mode: ${name ?? (yield* inspect(mode))}`);
+    mode = entry.value;
   }
-  return 'up';
+  if (mode === undefined || mode === NIL) return 'up';
+  const name = yield* roundingName(mode);
+  const normalized = name?.toLowerCase();
+  if (normalized === 'up' || normalized === 'even' || normalized === 'down') return normalized;
+  throw argumentError(`invalid rounding mode: ${name ?? (yield* inspect(mode))}`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Ruby's method takes these argument forms, which the branches mirror.
+function* roundingName(mode: Value): Gen<string | undefined> {
+  if (mode instanceof RSymbol) return mode.name;
+  if (mode instanceof RString) return mode.s;
+  if (!respondsTo(mode, 'to_str', true)) return undefined;
+  const converted = yield* callMethod(mode, 'to_str', [], undefined, undefined, { fcall: true });
+  if (converted === NIL) return undefined;
+  if (converted instanceof RString) return converted.s;
+  const name = realClassOf(mode).name;
+  throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
+}
+
+// code-gauge-allow functionCognitiveComplexity 19 -- Integer rounding applies floor, ceil, truncate, and three half-tie policies to signed values.
 function roundInteger(
   value: bigint,
   digits: bigint,
   mode: 'up' | 'even' | 'down' | 'floor' | 'ceil' | 'truncate'
 ): bigint {
   if (digits >= 0n) return value;
+  if (digits < -9_223_372_036_854_775_807n) throw rangeError("bignum too big to convert into 'long'");
+  const smallResult = roundedWithoutUnit(value, digits, mode);
+  if (smallResult !== undefined) return smallResult;
+  if (-digits > 32_000_000n) rt().spend(1_000_001);
   const unit = 10n ** -digits;
   const remainder = floorMod(value, unit);
   const down = value - remainder;
@@ -493,19 +669,27 @@ function roundInteger(
   return value < 0n ? down : down + unit;
 }
 
+function roundedWithoutUnit(value: bigint, digits: bigint, mode: string): bigint | undefined {
+  if (value === 0n) return 0n;
+  if (-digits <= BigInt((value < 0n ? -value : value).toString().length)) return undefined;
+  if (mode === 'floor') return value > 0n ? 0n : undefined;
+  if (mode === 'ceil') return value < 0n ? 0n : undefined;
+  return 0n;
+}
+
 def(
   'Integer',
   'round',
   [0, 1],
   function* (self: bigint, args, _block, keywords) {
-    const digits = args.length > 0 ? yield* toInt(args[0]) : 0n;
+    const digits = args.length > 0 ? BigInt(yield* toRubyInt(args[0])) : 0n;
     return roundInteger(self, digits, yield* roundingMode(keywords));
   },
   { keywords: true }
 );
 for (const mode of ['floor', 'ceil', 'truncate'] as const) {
   def('Integer', mode, [0, 1], function* (self: bigint, args) {
-    const digits = args.length > 0 ? yield* toInt(args[0]) : 0n;
+    const digits = args.length > 0 ? BigInt(yield* toRubyInt(args[0])) : 0n;
     return roundInteger(self, digits, mode);
   });
 }
@@ -517,16 +701,24 @@ sdef('Integer', 'sqrt', 1, function* (_self, [value]) {
 
 function isqrt(n: bigint): bigint {
   if (n < 2n) return n;
-  let x = BigInt(Math.floor(Math.sqrt(Number(n))));
-  while (x * x > n) x--;
-  while ((x + 1n) * (x + 1n) <= n) x++;
-  return x;
+  const bits = integerBits(n);
+  let estimate = 1n << BigInt(Math.ceil(bits / 2));
+  for (;;) {
+    rt().spend(Math.ceil(bits / 4096));
+    const next = (estimate + n / estimate) >> 1n;
+    if (next >= estimate) return estimate;
+    estimate = next;
+  }
 }
 
 // Float ---------------------------------------------------------------------------------------------------------------
 
-def('Float', ['to_s', 'inspect'], 0, (self: number) => str(formatFloat(self)));
-def('Float', 'hash', 0, (self: number) => BigInt(Math.floor(self * 1000)));
+def('Float', ['to_s', 'inspect'], 0, (self: number) => asciiString(formatFloat(self)));
+def('Float', 'hash', 0, (self: number) => {
+  const bits = new DataView(new ArrayBuffer(8));
+  bits.setFloat64(0, self === 0 ? 0 : self);
+  return bits.getBigUint64(0);
+});
 def('Float', ['to_i', 'to_int'], 0, (self: number) => floatToInt(self));
 def('Float', 'nan?', 0, (self: number) => Number.isNaN(self));
 def('Float', 'next_float', 0, (self: number) => nextFloat(self, 1));
@@ -534,6 +726,7 @@ def('Float', 'prev_float', 0, (self: number) => nextFloat(self, -1));
 
 function nextFloat(value: number, direction: number): number {
   if (Number.isNaN(value)) return value;
+  if (!Number.isFinite(value) && Math.sign(value) === Math.sign(direction)) return value;
   if (value === 0) return direction * Number.MIN_VALUE;
   const view = new DataView(new ArrayBuffer(8));
   view.setFloat64(0, value);
@@ -552,7 +745,7 @@ def(
   'round',
   [0, 1],
   function* (self: number, args, _block, keywords) {
-    const digits = args.length > 0 ? Number(yield* toInt(args[0])) : 0;
+    const digits = args.length > 0 ? yield* toRubyInt(args[0]) : 0;
     const mode = yield* roundingMode(keywords);
     if (digits > 0) {
       if (!Number.isFinite(self)) return self;
@@ -572,19 +765,19 @@ def(
   { keywords: true }
 );
 def('Float', 'floor', [0, 1], function* (self: number, args) {
-  const digits = args.length > 0 ? Number(yield* toInt(args[0])) : 0;
+  const digits = args.length > 0 ? yield* toRubyInt(args[0]) : 0;
   if (digits > 0) return floorCeilDigits(self, digits, Math.floor);
   checkFinite(self);
   return roundInteger(BigInt(Math.floor(self)), BigInt(digits), 'floor');
 });
 def('Float', 'ceil', [0, 1], function* (self: number, args) {
-  const digits = args.length > 0 ? Number(yield* toInt(args[0])) : 0;
+  const digits = args.length > 0 ? yield* toRubyInt(args[0]) : 0;
   if (digits > 0) return floorCeilDigits(self, digits, Math.ceil);
   checkFinite(self);
   return roundInteger(BigInt(Math.ceil(self)), BigInt(digits), 'ceil');
 });
 def('Float', 'truncate', [0, 1], function* (self: number, args) {
-  const digits = args.length > 0 ? Number(yield* toInt(args[0])) : 0;
+  const digits = args.length > 0 ? yield* toRubyInt(args[0]) : 0;
   if (digits > 0) return floorCeilDigits(self, digits, self > 0 ? Math.floor : Math.ceil);
   checkFinite(self);
   return roundInteger(BigInt(Math.trunc(self)), BigInt(digits), 'truncate');
@@ -593,6 +786,7 @@ def('Float', 'truncate', [0, 1], function* (self: number, args) {
 function floorCeilDigits(value: number, digits: number, rounding: (x: number) => number): number {
   if (!Number.isFinite(value)) return value;
   const scale = 10 ** digits;
+  if (!Number.isFinite(scale) || !Number.isFinite(value * scale)) return value;
   const scaled = rounding(value * scale);
   const isFloor = rounding === Math.floor;
   const candidate = (isFloor ? scaled + 1 : scaled - 1) / scale;
@@ -604,69 +798,116 @@ function floorCeilDigits(value: number, digits: number, rounding: (x: number) =>
 
 function* exceptionOption(keywords: RHash | undefined): Gen<boolean> {
   if (!keywords) return true;
+  let selected = true;
   for (const entry of keywords.map.values()) {
-    if (entry.key instanceof RSymbol && entry.key.name === 'exception') return truthy(entry.value);
-    throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
+    if (entry.key instanceof RSymbol && entry.key.name === 'exception') selected = truthy(entry.value);
+    else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
   }
-  return true;
+  return selected;
 }
 
 export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen {
   const raise = yield* exceptionOption(keywords);
   const [value, baseValue] = args;
+  const base = baseValue === undefined ? undefined : yield* toRubyInt(baseValue);
+  const invalidBase = base !== undefined && (base < -36 || base > 36 || base === 1);
+  let parsedString = false;
   try {
     if (value instanceof RString) {
-      const base = baseValue === undefined ? undefined : Number(yield* toInt(baseValue));
-      const parsed = parseIntegerStrict(value.s, base);
-      if (parsed === undefined) throw argumentError(`invalid value for Integer(): ${JSON.stringify(value.s)}`);
-      return parsed;
+      parsedString = true;
+      if (invalidBase) throw argumentError(`invalid radix ${base}`);
+      return parseIntegerValue(value, base);
     }
-    if (baseValue !== undefined) throw argumentError('base specified for non string value');
-    if (typeof value === 'bigint') return value;
-    if (typeof value === 'number') return floatToInt(value);
-    if (value === NIL) throw typeError("can't convert nil into Integer");
-    if (respondsTo(value, 'to_int')) return yield* callMethod(value, 'to_int', []);
-    if (respondsTo(value, 'to_i')) return yield* callMethod(value, 'to_i', []);
+    if (baseValue === undefined && typeof value === 'bigint') return value;
+    if (baseValue === undefined && typeof value === 'number') return floatToInt(value);
+    if (value === NIL && baseValue === undefined) throw typeError("can't convert nil into Integer");
+    if (baseValue === undefined && respondsTo(value, 'to_int', true)) {
+      const converted = yield* callMethod(value, 'to_int', [], undefined, undefined, { fcall: true });
+      if (typeof converted === 'bigint') return converted;
+    }
+    let convertedString: Value = NIL;
+    if (respondsTo(value, 'to_str', true)) {
+      convertedString = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
+      if (convertedString instanceof RString) {
+        parsedString = true;
+        if (invalidBase) throw argumentError(`invalid radix ${base}`);
+        return parseIntegerValue(convertedString, base);
+      }
+    }
+    if (baseValue !== undefined) {
+      if (convertedString !== NIL) throw integerStringConversionError(value, convertedString);
+      throw argumentError('base specified for non string value');
+    }
+    if (convertedString !== NIL) throw integerStringConversionError(value, convertedString);
+    if (respondsTo(value, 'to_i', true)) {
+      const converted = yield* callMethod(value, 'to_i', [], undefined, undefined, { fcall: true });
+      if (typeof converted === 'bigint') return converted;
+      throw typeError(
+        `can't convert ${realClassOf(value).name} to Integer (${realClassOf(value).name}#to_i gives ${realClassOf(converted).name})`
+      );
+    }
     throw typeError(`can't convert ${realClassOf(value).name} into Integer`);
   } catch (error) {
-    if (!raise) return NIL;
+    if (!raise && !(parsedString && invalidBase) && error instanceof RubyError) return NIL;
     throw error;
   }
 }
 
+function parseIntegerValue(value: RString, base: number | undefined): bigint {
+  const parsed = parseIntegerStrict(value.s, base, true);
+  if (parsed === undefined) throw argumentError(`invalid value for Integer(): ${JSON.stringify(value.s)}`);
+  return parsed;
+}
+
+function integerStringConversionError(value: Value, converted: Value): RubyError {
+  const name = realClassOf(value).name;
+  return typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
+}
+
 /** Parses an Integer as `Integer()` does: prefixes, underscores between digits, and surrounding blanks. */
-// code-gauge-allow functionNcss 33 -- Ruby's method takes these argument forms, which the branches mirror.
-export function parseIntegerStrict(text: string, base?: number): bigint | undefined {
+// code-gauge-allow functionNcss 33 -- Strict Integer parsing validates radix prefixes, signs, underscores, and surrounding whitespace.
+export function parseIntegerStrict(text: string, base?: number, allowNegativeBase = false): bigint | undefined {
+  if (base !== undefined && (base < -36 || base > 36 || base === 1 || (!allowNegativeBase && base < 0))) {
+    throw argumentError(`invalid radix ${base}`);
+  }
   const match = /^[\t\n\v\f\r ]*([+-]?)(0[xXbBoOdD]?)?([\dA-Za-z]+(?:_[\dA-Za-z]+)*)[\t\n\v\f\r ]*$/.exec(text);
   if (!match) {
     if (/^[\t\n\v\f\r ]*[+-]?0[\t\n\v\f\r ]*$/.test(text)) return 0n;
     return undefined;
   }
   const [, sign, prefix = '', body] = match;
-  let radix = base ?? 10;
+  let radix = base === undefined || base === 0 || base === -1 ? 10 : Math.abs(base);
   const lower = prefix.toLowerCase();
   if (lower === '0x') radix = check(16, base);
   else if (lower === '0b') radix = check(2, base);
   else if (lower === '0o') radix = check(8, base);
   else if (lower === '0d') radix = check(10, base);
-  else if (lower === '0') radix = base ?? 8;
+  else if (lower === '0') radix = base === undefined || base === 0 || base < 0 ? 8 : base;
   if (radix === -1) return undefined;
-  const digits = (lower === '0' && base !== undefined && base !== 8 ? `0${body}` : body).replaceAll('_', '');
+  const digits = (lower === '0' && base !== undefined && base > 0 && base !== 8 ? `0${body}` : body).replaceAll(
+    '_',
+    ''
+  );
   const valid = '0123456789abcdefghijklmnopqrstuvwxyz'.slice(0, radix);
   if (![...digits.toLowerCase()].every((char) => valid.includes(char))) return undefined;
   let result = 0n;
-  for (const char of digits.toLowerCase()) result = result * BigInt(radix) + BigInt(valid.indexOf(char));
+  let position = 0;
+  for (const char of digits.toLowerCase()) {
+    if (position++ % 64 === 0) rt().spend();
+    result = result * BigInt(radix) + BigInt(valid.indexOf(char));
+  }
   return sign === '-' ? -result : result;
 }
 
 function check(radix: number, base: number | undefined): number {
-  return base === undefined || base === radix ? radix : -1;
+  return base === undefined || base <= 0 || base === radix ? radix : -1;
 }
 
 export function* kernelFloat(value: Value, keywords: RHash | undefined): Gen {
   const raise = yield* exceptionOption(keywords);
   try {
     if (typeof value === 'number') return value;
+    if (value instanceof RFloat) return value;
     if (typeof value === 'bigint') return Number(value);
     if (value instanceof RString) {
       const parsed = parseFloatStrict(value.s);
@@ -674,30 +915,47 @@ export function* kernelFloat(value: Value, keywords: RHash | undefined): Gen {
       return parsed;
     }
     if (value === NIL) throw typeError("can't convert nil into Float");
-    if (respondsTo(value, 'to_f')) return yield* callMethod(value, 'to_f', []);
+    if (respondsTo(value, 'to_f', true)) {
+      const converted = yield* callMethod(value, 'to_f', [], undefined, undefined, { fcall: true });
+      if (typeof converted === 'number' || converted instanceof RFloat) return converted;
+      throw typeError(
+        `can't convert ${realClassOf(value).name} to Float (${realClassOf(value).name}#to_f gives ${realClassOf(converted).name})`
+      );
+    }
     throw typeError(`can't convert ${realClassOf(value).name} into Float`);
   } catch (error) {
-    if (!raise) return NIL;
+    if (!raise && error instanceof RubyError) return NIL;
     throw error;
   }
 }
 
 function parseFloatStrict(text: string): number | undefined {
   const trimmed = text.replaceAll(/^[\t\n\v\f\r ]+|[\t\n\v\f\r ]+$/g, '');
-  if (/^[+-]?0[xX][\da-fA-F]+(?:_[\da-fA-F]+)*$/.test(trimmed)) return Number(parseIntegerStrict(trimmed));
-  if (
-    !/^[+-]?(?:\d+(?:_\d+)*)(?:\.\d+(?:_\d+)*)?(?:[eE][+-]?\d+(?:_\d+)*)?$/.test(trimmed) &&
-    !/^[+-]?\.\d+(?:_\d+)*(?:[eE][+-]?\d+)?$/.test(trimmed)
-  ) {
+  const hex =
+    /^([+-]?)0[xX]([\da-fA-F]+(?:_[\da-fA-F]+)*)?(?:\.([\da-fA-F]+(?:_[\da-fA-F]+)*)?)?(?:[pP]([+-]?\d+(?:_\d+)*))?$/.exec(
+      trimmed
+    );
+  if (hex && (hex[2] || hex[3])) return parseHexFloat(hex);
+  if (!/^[+-]?(?:\d+(?:_\d+)*(?:\.(?:\d+(?:_\d+)*)?)?|\.\d+(?:_\d+)*)(?:[eE][+-]?\d+(?:_\d+)*)?$/.test(trimmed))
     return undefined;
-  }
   return Number(trimmed.replaceAll('_', ''));
 }
 
+function parseHexFloat(match: RegExpExecArray): number {
+  const fraction = (match[3] ?? '').replaceAll('_', '');
+  const coefficient = BigInt(`0x${((match[2] ?? '') + fraction).replaceAll('_', '')}`);
+  const sign = match[1] === '-' ? -1n : 1n;
+  if (coefficient === 0n) return sign < 0n ? -0 : 0;
+  const exponent = Number((match[4] ?? '0').replaceAll('_', '')) - fraction.length * 4;
+  const leading = exponent + coefficient.toString(2).length - 1;
+  if (leading < -1075) return sign < 0n ? -0 : 0;
+  if (leading > 1023) return sign < 0n ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+  return roundedDouble(sign * coefficient, exponent);
+}
+
 /** The leading number of a string, as `String#to_i` reads it: invalid text ends it, giving 0 when nothing came. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionCognitiveComplexity 17 -- Lenient Integer parsing scans optional sign and radix prefix until the first invalid digit.
 export function parseIntegerLenient(text: string, base = 10): bigint {
-  const valid = '0123456789abcdefghijklmnopqrstuvwxyz'.slice(0, base);
   let index = 0;
   while (index < text.length && /[\t\n\v\f\r ]/.test(text[index])) index++;
   let negative = false;
@@ -706,12 +964,17 @@ export function parseIntegerLenient(text: string, base = 10): bigint {
     index++;
   }
   const prefix = text.slice(index, index + 2).toLowerCase();
+  if (base === 0) {
+    base = prefix === '0x' ? 16 : prefix === '0b' ? 2 : prefix === '0o' || text[index] === '0' ? 8 : 10;
+  }
+  const valid = '0123456789abcdefghijklmnopqrstuvwxyz'.slice(0, base);
   if ((base === 16 && prefix === '0x') || (base === 2 && prefix === '0b') || (base === 8 && prefix === '0o')) {
     index += 2;
   }
   let result = 0n;
   let lastWasDigit = false;
   for (; index < text.length; index++) {
+    if (index % 64 === 0) rt().spend();
     const char = text[index].toLowerCase();
     if (char === '_' && lastWasDigit && valid.includes(text[index + 1]?.toLowerCase() ?? '')) {
       lastWasDigit = false;
@@ -726,9 +989,9 @@ export function parseIntegerLenient(text: string, base = 10): bigint {
 }
 
 export function parseFloatLenient(text: string): number {
-  const match = /^[\t\n\v\f\r ]*([+-]?(?:\d+(?:_\d+)*)?(?:\.\d+(?:_\d+)*)?(?:[eE][+-]?\d+)?)/.exec(text);
+  const match = /^[\t\n\v\f\r ]*([+-]?(?:\d+(?:_\d+)*)?(?:\.(?:\d+(?:_\d+)*)?)?(?:[eE][+-]?\d+(?:_\d+)*)?)/.exec(text);
   const body = match?.[1].replaceAll('_', '') ?? '';
-  if (!/\d/.test(body) || /^[+-]?\./.test(body)) {
+  if (!/\d/.test(body)) {
     const leading = /^[\t\n\v\f\r ]*([+-]?\d+(?:_\d+)*)/.exec(text);
     return leading ? Number(leading[1].replaceAll('_', '')) : 0;
   }
@@ -759,32 +1022,71 @@ const MATH_FUNCTIONS: [string, number, (...args: number[]) => number, ((...args:
   ['acosh', 1, Math.acosh, (x) => x >= 1 || Number.isNaN(x)],
   ['atanh', 1, Math.atanh, (x) => (x >= -1 && x <= 1) || Number.isNaN(x)],
   ['exp', 1, Math.exp],
+  ['expm1', 1, Math.expm1],
+  ['log1p', 1, Math.log1p, (x) => x >= -1 || Number.isNaN(x)],
   ['log2', 1, Math.log2, (x) => x >= 0 || Number.isNaN(x)],
   ['log10', 1, Math.log10, (x) => x >= 0 || Number.isNaN(x)],
   ['hypot', 2, Math.hypot],
   ['erf', 1, erf],
-  ['erfc', 1, (x) => 1 - erf(x)],
+  ['erfc', 1, erfc],
 ];
 
 for (const [name, arity, fn, valid] of MATH_FUNCTIONS) {
-  sdef('Math', name, arity, (_self, args) => {
-    const values = args.map((arg) => toFloat(arg));
+  sdef('Math', name, arity, function* (_self, args) {
+    const values: number[] = [];
+    for (const arg of args) values.push(yield* toFloat(arg));
     if (valid) domainCheck(name, valid(...values));
+    if ((name === 'log2' || name === 'log10') && typeof args[0] === 'bigint' && !Number.isFinite(values[0]))
+      return largeIntegerLog(args[0], name);
     return fn(...values);
   });
 }
-sdef('Math', 'log', [1, 2], (_self, args) => {
-  const x = mathArgument(args[0]);
+sdef('Math', 'log', [1, 2], function* (_self, args) {
+  const x = yield* toFloat(args[0]);
   domainCheck('log', x >= 0 || Number.isNaN(x));
   if (args.length === 1) return mathLog(args[0], x);
-  const base = toFloat(args[1]);
+  const base = yield* toFloat(args[1]);
   domainCheck('log', base >= 0 || Number.isNaN(base));
-  return mathLog(args[0], x) / Math.log(base);
+  const input = mathLogSplit(args[0], x);
+  const radix = mathLogSplit(args[1], base);
+  if (input.mantissa === 0) return radix.mantissa ? Number.NEGATIVE_INFINITY : Number.NaN;
+  if (radix.mantissa === 0) return -0;
+  const denominator = Math.log2(radix.mantissa);
+  // Ruby's size_t subtraction wraps when the base has more shifted bits than the input.
+  return (
+    Math.log2(input.mantissa) / denominator +
+    Number(BigInt.asUintN(64, BigInt(input.shift) - BigInt(radix.shift))) / denominator
+  );
 });
-
-function mathArgument(value: Value): number {
-  return toFloat(value);
-}
+sdef('Math', 'frexp', 1, function* (_self, [value]) {
+  const number = yield* toFloat(value);
+  const [fraction, exponent] = frexpDouble(number);
+  return arr([fraction, BigInt(exponent)]);
+});
+sdef('Math', 'ldexp', 2, function* (_self, [value, exponent]) {
+  return ldexpDouble(yield* toFloat(value), yield* toRubyInt(exponent));
+});
+sdef('Math', 'gamma', 1, function* (_self, [value]) {
+  const number = yield* toFloat(value);
+  if (number === Number.NEGATIVE_INFINITY) domainCheck('gamma', false);
+  if (number < 0 && Number.isInteger(number)) domainCheck('gamma', false);
+  if (number === 0) return Object.is(number, -0) ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+  if (Number.isInteger(number) && number > 0 && number <= 23) {
+    let factorial = 1n;
+    for (let index = 2; index < number; index++) factorial *= BigInt(index);
+    return Number(factorial);
+  }
+  return platformGamma(number);
+});
+sdef('Math', 'lgamma', 1, function* (_self, [value]) {
+  const number = yield* toFloat(value);
+  if (number === Number.NEGATIVE_INFINITY) domainCheck('lgamma', false);
+  if (Number.isNaN(number)) return arr([Number.NaN, 1n]);
+  if (number === Number.POSITIVE_INFINITY) return arr([number, 1n]);
+  if (number === 0) return arr([Number.POSITIVE_INFINITY, Object.is(number, -0) ? -1n : 1n]);
+  const [logarithm, sign] = platformLogGamma(number);
+  return arr([logarithm, BigInt(sign)]);
+});
 
 /** The natural logarithm, exact for big Integers whose Float conversion would overflow. */
 function mathLog(value: Value, x: number): number {
@@ -795,30 +1097,92 @@ function mathLog(value: Value, x: number): number {
   return Math.log(x);
 }
 
-function erf(x: number): number {
-  // Abramowitz and Stegun 7.1.26 is not exact; use a series that converges for the values learners use.
-  const sign = x < 0 ? -1 : 1;
-  const ax = Math.abs(x);
-  if (ax > 6) return sign;
-  let sum = ax;
-  let term = ax;
-  for (let n = 1; n < 200; n++) {
-    term *= (-ax * ax) / n;
-    const next = term / (2 * n + 1);
-    sum += next;
-    if (Math.abs(next) < 1e-17 * Math.abs(sum)) break;
+function mathLogSplit(value: Value, converted: number): { mantissa: number; shift: number } {
+  if (typeof value === 'bigint' && value > 0n) {
+    const bits = integerBits(value);
+    if (bits >= 1024) {
+      const shift = bits - 53;
+      return { mantissa: Number(value >> BigInt(shift)), shift };
+    }
   }
-  return (sign * 2 * sum) / Math.sqrt(Math.PI);
+  return { mantissa: converted, shift: 0 };
 }
+
+function largeIntegerLog(value: bigint, base: 'log2' | 'log10'): number {
+  const bits = value.toString(2).length;
+  const shift = bits - 53;
+  const mantissa = Number(value >> BigInt(shift));
+  return base === 'log2'
+    ? platformLog2(mantissa) + shift
+    : fusedMultiplyAdd(shift, platformLog10(2), platformLog10(mantissa));
+}
+
+function erf(x: number): number {
+  if (Math.abs(x) > 1) return 1 - erfc(x);
+  const z = x * x;
+  return (x * polynomial(z, ERF_T)) / polynomialWithLeadingOne(z, ERF_U);
+}
+
+function erfc(x: number): number {
+  const ax = Math.abs(x);
+  if (ax < 1) return 1 - erf(x);
+  if (!Number.isFinite(ax)) return Number.isNaN(ax) ? Number.NaN : x < 0 ? 2 : 0;
+  if (ax * ax > 745) return x < 0 ? 2 : 0;
+  const tail =
+    ax < 8
+      ? polynomial(ax, ERFC_P) / polynomialWithLeadingOne(ax, ERFC_Q)
+      : polynomial(ax, ERFC_R) / polynomialWithLeadingOne(ax, ERFC_S);
+  const result = Math.exp(-ax * ax) * tail;
+  return x < 0 ? 2 - result : result;
+}
+
+function polynomial(x: number, coefficients: readonly number[]): number {
+  let result = 0;
+  for (const coefficient of coefficients) result = result * x + coefficient;
+  return result;
+}
+
+function polynomialWithLeadingOne(x: number, coefficients: readonly number[]): number {
+  let result = x + coefficients[0];
+  for (let i = 1; i < coefficients.length; i++) result = result * x + coefficients[i];
+  return result;
+}
+
+// Cephes double-precision erf/erfc rational approximations (Stephen L. Moshier, netlib.org/cephes).
+const ERF_T = [
+  9.60497373987051638749, 9.00260197203842689217e1, 2.23200534594684319226e3, 7.00332514112805075473e3,
+  5.55923013010394962768e4,
+];
+const ERF_U = [
+  3.35617141647503099647e1, 5.21357949780152679795e2, 4.59432382970980127987e3, 2.26290000613890934246e4,
+  4.92673942608635921086e4,
+];
+const ERFC_P = [
+  2.46196981473530512524e-10, 5.64189564831068821977e-1, 7.46321056442269912687, 4.86371970985681366614e1,
+  1.96520832956077098242e2, 5.26445194995477358631e2, 9.3452852717195760754e2, 1.02755188689515710272e3,
+  5.57535335369399327526e2,
+];
+const ERFC_Q = [
+  1.32281951154744992508e1, 8.67072140885989742329e1, 3.54937778887819891062e2, 9.75708501743205489753e2,
+  1.82390916687909736289e3, 2.24633760818710981792e3, 1.65666309194161350182e3, 5.57535340817727675546e2,
+];
+const ERFC_R = [
+  5.64189583547755073984e-1, 1.27536670759978104416, 5.01905042251180477414, 6.16021097993053585195,
+  7.4097426995044893916, 2.9788666537210024067,
+];
+const ERFC_S = [
+  2.2605286322011727659, 9.39603524938001434673, 1.20489539808096656605e1, 1.70814450747565897222e1,
+  9.60896809063285878198, 3.3690764510008151605,
+];
 
 export function installMathConstants(): void {
   const { c } = rt();
   c.Math.constants.set('PI', Math.PI);
   c.Math.constants.set('E', Math.E);
-  c.Float.constants.set('INFINITY', Number.POSITIVE_INFINITY);
-  c.Float.constants.set('NAN', Number.NaN);
+  c.Float.constants.set('INFINITY', boxFloat(Number.POSITIVE_INFINITY));
+  c.Float.constants.set('NAN', boxFloat(Number.NaN));
   c.Float.constants.set('EPSILON', Number.EPSILON);
-  c.Float.constants.set('MAX', Number.MAX_VALUE);
+  c.Float.constants.set('MAX', boxFloat(Number.MAX_VALUE));
   c.Float.constants.set('MIN', 2.2250738585072014e-308);
   c.Float.constants.set('DIG', 15n);
   c.Float.constants.set('MANT_DIG', 53n);

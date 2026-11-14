@@ -3,7 +3,7 @@ import { DONE, type HostIterator, stepHostIterator } from './iteration';
 import type { RealmBuilder } from './realm';
 import { receiverText } from './realmCollections';
 import type { Runtime } from './runtime';
-import { JsArray, JsObject, type Value } from './values';
+import { JsArray, JsObject, unboxed, type Value } from './values';
 
 /** The well-known symbols the interpreter's builtins look up, which the program reads as `Symbol.iterator` and so on. */
 export const WELL_KNOWN_SYMBOLS = {
@@ -137,19 +137,33 @@ function defineSymbol(builder: RealmBuilder): void {
       return runtime.throwError('TypeError', `${runtime.describe(symbol)} is not a symbol`);
     return registeredKeyOf(runtime, symbol);
   });
-  builder.method(symbolPrototype, 'toString', 0, ({ runtime, thisValue }) => thisSymbol(runtime, thisValue).toString());
-  builder.method(symbolPrototype, 'valueOf', 0, ({ runtime, thisValue }) => thisSymbol(runtime, thisValue));
+  builder.method(symbolPrototype, 'toString', 0, ({ runtime, thisValue }) =>
+    thisSymbol(runtime, thisValue, 'Symbol.prototype.toString').toString()
+  );
+  builder.method(symbolPrototype, 'valueOf', 0, ({ runtime, thisValue }) =>
+    thisSymbol(runtime, thisValue, 'Symbol.prototype.valueOf')
+  );
+  const toPrimitive = builder.method(symbolPrototype, WELL_KNOWN_SYMBOLS.toPrimitive, 1, ({ runtime, thisValue }) =>
+    thisSymbol(runtime, thisValue, 'Symbol.prototype [ @@toPrimitive ]')
+  );
+  symbolPrototype.properties.set(WELL_KNOWN_SYMBOLS.toPrimitive, {
+    value: toPrimitive,
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  });
   builder.getter(
     symbolPrototype,
     'description',
-    ({ runtime, thisValue }) => thisSymbol(runtime, thisValue).description
+    ({ runtime, thisValue }) => thisSymbol(runtime, thisValue, 'Symbol.prototype.description').description
   );
   builder.constant(symbolPrototype, WELL_KNOWN_SYMBOLS.toStringTag, 'Symbol');
 }
 
-function thisSymbol(runtime: Runtime, value: Value): symbol {
-  if (typeof value === 'symbol') return value;
-  return runtime.throwError('TypeError', `${runtime.describe(value)} is not a symbol`);
+function thisSymbol(runtime: Runtime, value: Value, method: string): symbol {
+  const primitive = unboxed(value);
+  if (typeof primitive === 'symbol') return primitive;
+  return runtime.throwError('TypeError', `${method} requires that 'this' be a Symbol`);
 }
 
 /** The key `Symbol.for` registered a symbol under in this run, or undefined for a symbol it did not register. */

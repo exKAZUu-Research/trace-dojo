@@ -16,3 +16,4 @@ import './libRegexp';
 import './libTime';
 import './libRational';
 import './libEncoding';
+import './libUnsupported';

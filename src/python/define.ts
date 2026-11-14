@@ -1,6 +1,7 @@
 import { type ArgStyle, bindPythonArgs, checkArgs, pythonSignature } from './nativeArgs';
-import { defineMethod, nativeFunction, typeClass } from './types';
-import { type Kwargs, type NativeBinding, PyBuiltinFunction, PyClass, type PyValue } from './values';
+import { defineMethod, nativeFunction, staticmethodClass, typeClass } from './types';
+import { UnsupportedFeatureError } from './unsupported';
+import { type Kwargs, type NativeBinding, PyBuiltinFunction, PyClass, PyDescriptor, type PyValue } from './values';
 
 interface Options {
   keywords?: readonly string[];
@@ -74,7 +75,7 @@ export function method(
     name,
     (self, args, kwargs, boundTo) => {
       // A static method receives no instance, so what arrives as `self` is its first argument.
-      const all = options.binding === 'static' && self !== undefined ? [self, ...args] : args;
+      const all = options.binding !== 'static' ? args : self === undefined ? [] : [self, ...args];
       // A metaclass method read from a class is named after that class, as a builtin bound to a type is in CPython;
       // whether `cls` is a metaclass is asked here, since `type` is still being set up when its methods are defined.
       const named =
@@ -90,6 +91,9 @@ export function method(
       ownerName: options.ownerName,
     }
   );
+  // As in CPython, a builtin type's static method is a staticmethod wrapping the function in the type's dictionary.
+  const fn = cls.dict.get(name);
+  if (options.binding === 'static' && fn) cls.dict.set(name, new PyDescriptor(staticmethodClass, fn));
 }
 
 /**
@@ -175,4 +179,19 @@ export function pythonFunction(
 ): PyBuiltinFunction {
   const signature = pythonSignature(name, parameters);
   return nativeFunction(name, (args, kwargs) => run(bindPythonArgs(signature, args, kwargs), kwargs), owner);
+}
+
+/** Defines a method without arguments that raises the unsupported error for `feature`. */
+export function unsupportedMethod(cls: PyClass, name: string, feature: string): void {
+  method(cls, name, 'none', 0, 0, () => {
+    throw new UnsupportedFeatureError(feature);
+  });
+}
+
+/** CPython's finalizer, which only its garbage collector should call. */
+export const FINALIZER_FEATURE = 'オブジェクトの後始末（__del__）を直接呼ぶこと（__del__）';
+
+/** Defines `__sizeof__` of a type whose objects' sizes CPython counts by fields this grader's objects lack. */
+export function unsupportedSizeof(cls: PyClass): void {
+  unsupportedMethod(cls, '__sizeof__', `${cls.name} オブジェクトの大きさ（__sizeof__）`);
 }

@@ -1,16 +1,16 @@
 import type { Params, ParamTarget } from './ast';
 import { inspect } from './conversions';
-import { argumentError, expectedArity } from './errors';
-import { hashSet } from './hashes';
-import { destructure, ev, type Gen } from './interp';
+import { argumentError, expectedArity, typeError } from './errors';
+import { hashSetStored } from './hashes';
+import { callMethod, destructure, ev, type Gen, respondsTo } from './interp';
 import { NIL, RArray, type RHash, RSymbol, type Value } from './objects';
-import type { Frame } from './runtime';
-import { arr, newHash } from './values';
+import { type Frame, rootValues } from './runtime';
+import { arr, newHash, realClassOf } from './values';
 
 type BindMode = 'method' | 'lambda' | 'proc';
 
-// code-gauge-allow functionNcss 43 -- Ruby's rules for binding each kind of parameter.
-// code-gauge-allow functionCognitiveComplexity 29 -- Ruby's rules for binding each kind of parameter.
+// code-gauge-allow functionCognitiveComplexity 29 -- Ruby parameter forms share arity and binding paths, which this function keeps in source order.
+// code-gauge-allow functionNcss 42 -- Ruby parameter forms share arity and binding paths, which this function keeps in source order.
 export function* bindParams(
   params: Params,
   frame: Frame,
@@ -29,7 +29,19 @@ export function* bindParams(
   const required = params.required.length + params.post.length;
   const optional = params.optional.length;
   if (mode === 'proc') {
-    if (args.length === 1 && args[0] instanceof RArray && autoSplats(params)) args = [...args[0].items];
+    if (args.length === 1 && autoSplats(params)) {
+      const value = args[0];
+      let array = value instanceof RArray ? value : undefined;
+      if (!array && respondsTo(value, 'to_ary', true)) {
+        const converted = yield* callMethod(value, 'to_ary', [], undefined, undefined, { fcall: true });
+        if (converted instanceof RArray) array = converted;
+        else if (converted !== NIL)
+          throw typeError(
+            `can't convert ${realClassOf(value).name} to Array (${realClassOf(value).name}#to_ary gives ${realClassOf(converted).name})`
+          );
+      }
+      if (array) args = [...array.items];
+    }
   } else if (args.length < required || (params.rest === undefined && args.length > required + optional)) {
     const missingKeywords = params.keywords.filter((keyword) => !keyword.value).map((keyword) => keyword.name);
     const max = params.rest === undefined ? required + optional : -1;
@@ -39,23 +51,30 @@ export function* bindParams(
     }
     throw argumentError(`${message})`);
   }
-  let index = 0;
-  for (const param of params.required) yield* bindParam(param, args[index++] ?? NIL, frame);
-  const available = Math.max(0, args.length - required);
-  const optionalCount = Math.min(optional, available);
-  for (const [position, param] of params.optional.entries()) {
-    if (position < optionalCount) scope.vars.set(param.name, args[index++]);
-    else scope.vars.set(param.name, yield* ev(param.value, frame));
+  const mark = frame.temporaries.length;
+  rootValues(frame, args);
+  if (keywords) frame.temporaries.push(keywords);
+  try {
+    let index = 0;
+    for (const param of params.required) yield* bindParam(param, args[index++] ?? NIL, frame);
+    const available = Math.max(0, args.length - required);
+    const optionalCount = Math.min(optional, available);
+    for (const [position, param] of params.optional.entries()) {
+      if (position < optionalCount) scope.vars.set(param.name, args[index++]);
+      else scope.vars.set(param.name, yield* ev(param.value, frame));
+    }
+    if (params.rest !== undefined) {
+      const restCount = Math.max(0, args.length - index - params.post.length);
+      const rest = arr(args.slice(index, index + restCount));
+      if (params.rest !== '') scope.vars.set(params.rest, rest);
+      index += restCount;
+    }
+    for (const param of params.post) yield* bindParam(param, args[index++] ?? NIL, frame);
+    if (takesKeywords) yield* bindKeywords(params, frame, keywords);
+    if (params.block !== undefined) scope.vars.set(params.block, frame.extra.block ?? NIL);
+  } finally {
+    frame.temporaries.length = mark;
   }
-  if (params.rest !== undefined) {
-    const restCount = Math.max(0, args.length - index - params.post.length);
-    const rest = arr(args.slice(index, index + restCount));
-    scope.vars.set(params.rest, rest);
-    index += restCount;
-  }
-  for (const param of params.post) yield* bindParam(param, args[index++] ?? NIL, frame);
-  if (takesKeywords) yield* bindKeywords(params, frame, keywords);
-  if (params.block !== undefined) scope.vars.set(params.block, frame.extra.block ?? NIL);
 }
 
 function* bindParam(param: ParamTarget, value: Value, frame: Frame): Gen<void> {
@@ -68,20 +87,20 @@ function autoSplats(params: Params): boolean {
   return positional > 1 || params.trailingComma || (params.rest !== undefined && positional > 0);
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Ruby's rules for binding each kind of parameter.
+// code-gauge-allow functionCognitiveComplexity 22 -- Ruby parameter forms share arity and binding paths, which this function keeps in source order.
 function* bindKeywords(params: Params, frame: Frame, keywords: RHash | undefined): Gen<void> {
   const { scope } = frame;
   const given = new Map<string, Value>();
   const extra = newHash();
   if (keywords) {
-    for (const entry of keywords.map.values()) {
+    for (const [slot, entry] of keywords.map) {
       if (
         entry.key instanceof RSymbol &&
         params.keywords.some((keyword) => keyword.name === (entry.key as RSymbol).name)
       ) {
         given.set(entry.key.name, entry.value);
       } else {
-        yield* hashSet(extra, entry.key, entry.value);
+        yield* hashSetStored(extra, slot, entry);
       }
     }
   }

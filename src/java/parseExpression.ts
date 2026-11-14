@@ -162,9 +162,7 @@ const TYPE_NODES = new Set([
 ]);
 
 function convertMethodReference(node: Node): Expression {
-  const parts = node.children.filter(
-    (child): child is Node => !!child && (child.isNamed || child.type === 'new') && !isComment(child)
-  );
+  const parts = node.children.filter((child) => (child.isNamed || child.type === 'new') && !isComment(child));
   const [targetNode] = parts;
   const argumentsNode = parts.find((part) => part.type === 'type_arguments');
   const nameNode = parts.at(-1) as Node;
@@ -259,7 +257,7 @@ function convertFieldAccess(node: Node): Expression {
     return { kind: 'this', qualifier, ...span(node) };
   }
   // `Outer.super.field` writes the type where the object goes and `super` after it.
-  if (node.children.some((child) => child?.type === 'super' && child.startIndex !== object.startIndex)) {
+  if (node.children.some((child) => child.type === 'super' && child.startIndex !== object.startIndex)) {
     const superQualifier = expressionAsTypeSyntax(object) ?? unsupported(node, '修飾された super');
     return { kind: 'fieldAccess', object: 'super', superQualifier, name: name.text, ...span(node) };
   }
@@ -283,13 +281,13 @@ function convertMethodInvocation(node: Node): Expression {
   const object = node.childForFieldName('object');
   // `Type.super.m()` writes the type where the object goes and `super` after it.
   const superQualifier =
-    object && node.children.some((child) => child?.type === 'super' && child.startIndex !== object.startIndex)
+    object && node.children.some((child) => child.type === 'super' && child.startIndex !== object.startIndex)
       ? expressionAsTypeSyntax(object)
       : undefined;
   if (
     object &&
     !superQualifier &&
-    node.children.some((child) => child?.type === 'super' && child.startIndex !== object.startIndex)
+    node.children.some((child) => child.type === 'super' && child.startIndex !== object.startIndex)
   ) {
     unsupported(node, '修飾された super');
   }
@@ -313,7 +311,8 @@ function convertMethodInvocation(node: Node): Expression {
 function convertObjectCreation(node: Node): Expression {
   const typeArgs = node.childForFieldName('type_arguments');
   const typeNode = field(node, 'type');
-  const parts = namedChildren(node);
+  // Type-use annotations of the created type precede it, so only an expression first is the enclosing instance.
+  const parts = namedChildren(node).filter((child) => !isAnnotation(child));
   const outerNode = [typeNode, typeArgs].some((child) => child?.startIndex === parts[0]?.startIndex)
     ? undefined
     : parts[0];
@@ -353,7 +352,7 @@ function convertArrayCreation(node: Node): Expression {
 
 function convertUpdate(node: Node): Expression {
   const operand = namedChildren(node)[0];
-  const operator = node.children.find((child) => child?.type === '++' || child?.type === '--');
+  const operator = node.children.find((child) => child.type === '++' || child.type === '--');
   if (!operator) throw new Error('An update expression without its operator');
   return {
     kind: 'update',
@@ -385,7 +384,7 @@ function convertInstanceOf(node: Node): Expression {
     type: pattern?.kind === 'recordPattern' ? pattern.type : convertType(field(node, 'right')),
     pattern: pattern?.kind === 'recordPattern' ? pattern : undefined,
     binding: name
-      ? { name: name.text, isFinal: node.children.some((child) => child?.type === 'final'), ...span(name) }
+      ? { name: name.text, isFinal: node.children.some((child) => child.type === 'final'), ...span(name) }
       : undefined,
     ...span(node),
   };

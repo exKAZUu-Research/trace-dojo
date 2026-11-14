@@ -1,10 +1,10 @@
-import { inspectRange, toFloat, toInt } from './conversions';
+import { inspect, inspectRange, toFloat, toInt, toStepFloat } from './conversions';
 import { def, sdef } from './define';
-import { argumentError, rangeError, rubyError } from './errors';
-import { callMethod, type Gen } from './interp';
-import { NIL, RObject, RRange, type Value } from './objects';
-import { rt } from './runtime';
-import { realClassOf } from './values';
+import { argumentError, frozenError, rangeError, rubyError } from './errors';
+import { callMethod, type Gen, invoke, respondsTo } from './interp';
+import { isRubyFloat, isRubyNumber, NIL, RFloat, RObject, RRange, type Value } from './objects';
+import { rt, UnsupportedFeatureError } from './runtime';
+import { classOf } from './values';
 
 /** Ruby's Mersenne Twister (MT19937), seeded and drawn from as `random.c` does. */
 export class MersenneTwister {
@@ -12,13 +12,29 @@ export class MersenneTwister {
   private index = 625;
   seed: bigint;
 
-  constructor(seed: bigint) {
+  constructor(seed: bigint, copied?: MersenneTwister) {
     this.seed = seed;
+    if (copied) {
+      this.state.set(copied.state);
+      this.index = copied.index;
+      return;
+    }
     const magnitude = seed < 0n ? -seed : seed;
     const words: number[] = [];
-    for (let rest = magnitude; rest > 0n; rest >>= 32n) words.push(Number(rest & 0xff_ff_ff_ffn));
+    const digits = magnitude.toString(16);
+    for (let end = digits.length; end > 0; end -= 8) {
+      words.push(Number.parseInt(digits.slice(Math.max(0, end - 8), end), 16));
+      if (words.length % 256 === 0) rt().spend(256);
+    }
     if (words.length <= 1) this.initGenrand(words[0] ?? 0);
-    else this.initByArray(words);
+    else {
+      if (words.at(-1) === 1) words.pop();
+      this.initByArray(words);
+    }
+  }
+
+  copy(): MersenneTwister {
+    return new MersenneTwister(this.seed, this);
   }
 
   private initGenrand(seed: number): void {
@@ -37,6 +53,7 @@ export class MersenneTwister {
     let i = 1;
     let j = 0;
     for (let k = Math.max(624, key.length); k > 0; k--) {
+      if (k % 256 === 0) rt().spend(256);
       const previous = mt[i - 1] ^ (mt[i - 1] >>> 30);
       mt[i] = ((mt[i] ^ Math.imul(previous, 1_664_525)) + key[j] + j) >>> 0;
       i++;
@@ -91,28 +108,37 @@ export class MersenneTwister {
   // code-gauge-allow functionCognitiveComplexity 22 -- Transcribed from Ruby's random.c, whose draws decide the numbers.
   limited(limit: bigint): bigint {
     if (limit === 0n) return 0n;
+    if (limit > 0xff_ff_ff_ffn) return this.limitedLarge(limit);
     const mask = maskOf(limit);
-    if (limit > 0xff_ff_ff_ffn) {
-      for (;;) {
-        let value = 0n;
-        let retry = false;
-        const words = (mask.toString(2).length + 31) >> 5;
-        for (let i = words - 1; i >= 0; i--) {
-          if (((mask >> BigInt(i * 32)) & 0xff_ff_ff_ffn) !== 0n) {
-            value |= BigInt(this.int32()) << BigInt(i * 32);
-            value &= mask;
-            if (limit < value) {
-              retry = true;
-              break;
-            }
-          }
-        }
-        if (!retry) return value;
-      }
-    }
     for (;;) {
       const value = BigInt(this.int32()) & mask;
       if (value <= limit) return value;
+    }
+  }
+
+  private limitedLarge(limit: bigint): bigint {
+    const hex = limit.toString(16);
+    const firstWidth = hex.length % 8 || 8;
+    const bounds: number[] = [Number.parseInt(hex.slice(0, firstWidth), 16)];
+    for (let index = firstWidth; index < hex.length; index += 8)
+      bounds.push(Number.parseInt(hex.slice(index, index + 8), 16));
+    const mask = 2 ** (32 - Math.clz32(bounds[0])) - 1;
+    for (;;) {
+      rt().spend();
+      const drawn: number[] = [];
+      let equal = true;
+      let rejected = false;
+      for (const [index, bound] of bounds.entries()) {
+        rt().spend();
+        const word = index === 0 ? (this.int32() & mask) >>> 0 : this.int32();
+        if (equal && word > bound) {
+          rejected = true;
+          break;
+        }
+        if (word < bound) equal = false;
+        drawn.push(word);
+      }
+      if (!rejected) return BigInt(`0x${drawn.map((word) => word.toString(16).padStart(8, '0')).join('')}`);
     }
   }
 }
@@ -147,7 +173,7 @@ export function* randomIndex(randomizer: Value | undefined, count: number): Gen<
 }
 
 function domainError(): never {
-  throw rubyError(rt().c['Math::DomainError'], 'Numerical argument out of domain');
+  throw rubyError(rt().c['Errno::EDOM'], 'Numerical argument out of domain');
 }
 
 // code-gauge-allow functionNcss 34 -- Transcribed from Ruby's random.c, whose draws decide the numbers.
@@ -160,10 +186,7 @@ function* randomRange(generator: MersenneTwister, range: RRange): Gen<Value | un
     if (max < 0n) return NIL;
     return begin + generator.limited(max);
   }
-  if (
-    (typeof begin === 'number' || typeof begin === 'bigint') &&
-    (typeof end === 'number' || typeof end === 'bigint')
-  ) {
+  if (isRubyNumber(begin) && isRubyNumber(end)) {
     const low = Number(begin);
     let max = Number(end) - low;
     let scale = 1;
@@ -186,7 +209,53 @@ function* randomRange(generator: MersenneTwister, range: RRange): Gen<Value | un
     if (max === 0 && !exclusive) return 0 + low;
     return NIL;
   }
-  throw argumentError(`invalid argument - ${realClassOf(begin).name}`);
+  return yield* randomArithmeticRange(generator, begin, end, exclusive);
+}
+
+function* randomArithmeticRange(generator: MersenneTwister, begin: Value, end: Value, exclusive: boolean): Gen<Value> {
+  let distance = yield* callMethod(end, '-', [begin]);
+  if (typeof distance !== 'bigint' && !isRubyFloat(distance)) {
+    if (respondsTo(distance, 'to_int', true)) distance = yield* toInt(distance);
+    else if (respondsTo(distance, 'to_f', true)) distance = yield* toStepFloat(distance);
+    else return NIL;
+  }
+  if (typeof distance === 'bigint') {
+    const max = distance - (exclusive ? 1n : 0n);
+    return max < 0n ? NIL : yield* callMethod(begin, '+', [generator.limited(max)]);
+  }
+  return yield* randomFloatArithmeticRange(generator, begin, end, Number(distance), exclusive);
+}
+
+function* randomFloatArithmeticRange(
+  generator: MersenneTwister,
+  begin: Value,
+  end: Value,
+  distance: number,
+  exclusive: boolean
+): Gen<Value> {
+  if (Number.isNaN(distance)) domainError();
+  if (!Number.isFinite(distance)) {
+    const low = yield* randomEndpointFloat(begin);
+    const high = yield* randomEndpointFloat(end);
+    if (!Number.isFinite(low) || !Number.isFinite(high)) domainError();
+    const halfLow = low / 2;
+    const halfHigh = high / 2;
+    const span = halfHigh - halfLow;
+    if (span > 0) return (generator.real(exclusive) - 0.5) * span * 2 + (halfHigh + halfLow);
+    return span === 0 && !exclusive ? low : NIL;
+  }
+  if (distance < 0 || (distance === 0 && exclusive)) return NIL;
+  const offset = distance === 0 ? 0 : generator.real(exclusive) * distance;
+  return yield* addRandomFloatOffset(begin, offset);
+}
+
+function* addRandomFloatOffset(begin: Value, offset: number): Gen<Value> {
+  if (isRubyNumber(begin) || respondsTo(begin, 'to_f', true)) return (yield* randomEndpointFloat(begin)) + offset;
+  return yield* callMethod(begin, '+', [offset]);
+}
+
+function* randomEndpointFloat(value: Value): Gen<number> {
+  return isRubyNumber(value) ? Number(value) : yield* toStepFloat(value);
 }
 
 /** `Random#rand` and `Random.rand`: a Float below 1 or below a Float, an Integer below an Integer, or one in a range. */
@@ -199,10 +268,12 @@ function* randomValue(generator: MersenneTwister, args: Value[]): Gen {
     if (value === NIL) throw argumentError(`invalid argument - ${yield* inspectRange(max)}`);
     return value as Value;
   }
-  if (typeof max === 'number') {
-    if (!Number.isFinite(max)) domainError();
-    if (max <= 0) throw argumentError(`invalid argument - ${max}`);
-    return generator.real() * max;
+  if (typeof max === 'number' || max instanceof RFloat) {
+    const limit = Number(max);
+    if (!Number.isFinite(limit)) domainError();
+    if (limit === 0) return generator.real();
+    if (limit < 0) throw argumentError(`invalid argument - ${limit}`);
+    return generator.real() * limit;
   }
   const limit = yield* toInt(max);
   if (limit <= 0n) throw argumentError(`invalid argument - ${limit}`);
@@ -241,11 +312,24 @@ def(
   },
   { visibility: 'private' }
 );
-sdef('Random', 'new', [0, 1], function* (self, args) {
+def(
+  'Random',
+  'initialize',
+  [0, 1],
+  function* (self: RObject, args) {
+    if (self.frozen) throw frozenError(self, yield* inspect(self));
+    self.data = new MersenneTwister(
+      args.length > 0 ? yield* toInt(args[0]) : BigInt(Math.floor(Math.random() * 2 ** 52))
+    );
+    return NIL;
+  },
+  { visibility: 'private' }
+);
+sdef('Random', 'new', [0, -1], function* (self, args, block) {
   const random = new RObject(self);
-  random.data = new MersenneTwister(
-    args.length > 0 ? yield* toInt(args[0]) : BigInt(Math.floor(Math.random() * 2 ** 52))
-  );
+  random.data = new MersenneTwister(BigInt(Math.floor(Math.random() * 2 ** 52)));
+  const initialize = classOf(random).findMethod('initialize');
+  if (initialize) yield* invoke(initialize, random, args, undefined, block, false);
   return random;
 });
 sdef('Random', 'rand', [0, 1], (_self, args) => randomValue(defaultGenerator(), args));
@@ -253,10 +337,12 @@ sdef('Random', 'new_seed', 0, () => BigInt(Math.floor(Math.random() * 2 ** 52)))
 sdef('Random', 'srand', [0, 1], function* (self, args) {
   return yield* callMethod(rt().mainObject, 'srand', args, undefined, undefined, { fcall: true });
 });
-def('Random', 'rand', [0, 1], (self: RObject, args) => randomValue(self.data as MersenneTwister, args));
+def('Random', ['rand', 'random_number'], [0, 1], (self: RObject, args) =>
+  randomValue(self.data as MersenneTwister, args)
+);
 def('Random', 'seed', 0, (self: RObject) => (self.data as MersenneTwister).seed);
 def('Random', 'bytes', 1, () => {
-  throw rubyError(rt().c.NotImplementedError, 'Random#bytes');
+  throw new UnsupportedFeatureError('Random#bytes');
 });
 
 export { toFloat };

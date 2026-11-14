@@ -1,6 +1,7 @@
 import { numericCompare } from './conversions';
 import type { Gen } from './interp';
-import type { Value } from './objects';
+import { isRubyFloat, type Value } from './objects';
+import { classOf } from './values';
 
 /**
  * Sorts in place as Ruby's `ruby_qsort` does on the reference platform, which calls the C library's BSD `qsort_r`
@@ -94,12 +95,13 @@ export function* platformSort<T>(items: T[], compare: (a: T, b: T) => Gen<number
 
 /** A key of `sort_by` that Ruby compares directly: a fixnum-sized Integer or a Float. */
 export function isUniformKey(value: Value): boolean {
-  if (typeof value === 'number') return true;
-  return typeof value === 'bigint' && value >= -(2n ** 62n) && value < 2n ** 62n;
+  if (isRubyFloat(value) && Number.isNaN(Number(value))) return false;
+  if (typeof value === 'bigint' && (value < -(2n ** 62n) || value >= 2n ** 62n)) return false;
+  return (isRubyFloat(value) || typeof value === 'bigint') && classOf(value).findMethod('<=>')?.body.kind === 'native';
 }
 
 function less(a: Value, b: Value): boolean {
-  return numericCompare(a as bigint | number, b as bigint | number) === -1;
+  return numericCompare(typeof a === 'bigint' ? a : Number(a), typeof b === 'bigint' ? b : Number(b)) === -1;
 }
 
 /** `sort_by` for keys that are all Integers or Floats: Ruby's introsort over (key, value) pairs. */

@@ -1,3 +1,4 @@
+import { keywordEntries } from '../callArguments';
 import { getItem, setItem } from '../items';
 import { callValue, getAttributeOrUndefined, iterate } from '../objects';
 import { currentRuntime } from '../runtimeContext';
@@ -9,7 +10,7 @@ export function updateOrderedDict(self: PyValue, args: readonly PyValue[], kwarg
   if (args.length > 1) throw typeError(`update() takes at most 1 positional argument (${args.length} given)`);
   if (args.length > 0) updateFrom(self, args[0]);
   if (kwargs && kwargs.size > 0)
-    addPairs(self, newList([...kwargs].map(([key, value]) => currentRuntime().tuple([key, value]))));
+    addPairs(self, newList(keywordEntries(kwargs).map(([key, value]) => currentRuntime().tuple([key, value]))));
 }
 
 function updateFrom(self: PyValue, other: PyValue): void {

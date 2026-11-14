@@ -26,16 +26,18 @@ export function newDate(runtime: Runtime, time: number, prototype: JsObject): Js
 
 /**
  * Defines Date, whose calendar arithmetic, parsing, and formatting the host's Date performs on the time value. Local
- * time is the host's time zone, as it is Node.js's, and `Date.now()` advances with the event loop's simulated clock.
+ * time is the host's time zone, as it is Node.js's, and `Date.now()` reads the event loop's simulated clock.
  */
 export function defineDateBuiltins(builder: RealmBuilder): void {
   const prototype = builder.realm.datePrototype;
   const startTime = Date.now();
-  const now = (runtime: Runtime): number => startTime + runtime.eventLoop.time;
+  const now = (runtime: Runtime): number => startTime + runtime.eventLoop.readClock();
   const dateConstructor = builder.defineClass('Date', 7, prototype, (call) => {
     const { runtime, newTarget } = call;
     if (!newTarget) return new Date(now(runtime)).toString();
-    return newDate(runtime, constructedTime(call, now(runtime)), runtime.prototypeFor(newTarget, prototype));
+    // Only `new Date()` reads the clock, which moves it.
+    const time = call.args.length === 0 ? now(runtime) : constructedTime(call);
+    return newDate(runtime, time, runtime.prototypeFor(newTarget, prototype));
   });
   builder.method(dateConstructor, 'now', 0, ({ runtime }) => now(runtime));
   builder.method(dateConstructor, 'parse', 1, ({ runtime, args }) => Date.parse(runtime.toString(args[0])));
@@ -48,9 +50,8 @@ export function defineDateBuiltins(builder: RealmBuilder): void {
   defineConversions(builder, prototype);
 }
 
-/** The time value `new Date(...args)` gives. */
-function constructedTime({ runtime, args }: NativeCall, now: number): number {
-  if (args.length === 0) return now;
+/** The time value `new Date(...args)` gives for at least one argument. */
+function constructedTime({ runtime, args }: NativeCall): number {
   if (args.length === 1) {
     const [value] = args;
     const time = dateValueOf(value);

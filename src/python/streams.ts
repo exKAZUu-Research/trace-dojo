@@ -1,13 +1,25 @@
+import { defineAttribute } from './attributeDescriptors';
 import { method } from './define';
-import { defineGetSet, defineUnsupportedAttributes } from './descriptors';
+import { builtinClassesWithDict, ownDict } from './descriptors';
 import { checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
 import { callValue, getAttribute, iterate } from './objects';
 import type { Runtime } from './runtime';
 import { strLength } from './strings';
-import { argumentTypeName, builtinClass, defineMethod, None, pyError, typeError, typeName, valueError } from './types';
+import {
+  argumentTypeName,
+  builtinClass,
+  defineMethod,
+  None,
+  pyError,
+  stringValue,
+  typeError,
+  typeName,
+  valueError,
+} from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { AttributeMap, DONE, type Kwargs, PyOpaque, type PyValue } from './values';
+import { registerUnsupportedClassAttributes } from './unsupportedAttributes';
+import { DONE, type Kwargs, PyOpaque, type PyValue } from './values';
 
 interface StreamState {
   write: (text: string) => void;
@@ -19,7 +31,8 @@ interface StreamState {
 
 const textIOClass = builtinClass('TextIOWrapper');
 textIOClass.module = '_io';
-textIOClass.tpName = '_io.TextIOWrapper';
+textIOClass.typeName = '_io.TextIOWrapper';
+builtinClassesWithDict.add(textIOClass);
 
 const stateOf = (self: PyValue): StreamState => (self as PyOpaque).data as StreamState;
 
@@ -34,11 +47,12 @@ export function createStream(runtime: Runtime, name: 'stdout' | 'stderr'): PyVal
     lineBuffering: !isStdout,
     writeThrough: false,
   } satisfies StreamState);
-  stream.attributes = new AttributeMap([['mode', 'w']]);
+  ownDict(stream)?.set('mode', 'w');
   return stream;
 }
 
 method(textIOClass, 'write', 'one', 1, 1, (self, [text]) => {
+  text = stringValue(text) ?? text;
   if (typeof text !== 'string') throw typeError(`write() argument must be str, not ${argumentTypeName(text)}`);
   stateOf(self).write(text);
   return BigInt(strLength(text));
@@ -67,24 +81,24 @@ method(
   (self) => `<_io.TextIOWrapper name='<${(self as PyOpaque).text}>' mode='w' encoding='${stateOf(self).encoding}'>`
 );
 
-defineGetSet(textIOClass, 'encoding', (self) => stateOf(self).encoding, { member: true });
-defineGetSet(textIOClass, 'line_buffering', (self) => stateOf(self).lineBuffering, { member: true });
-defineGetSet(textIOClass, 'write_through', (self) => stateOf(self).writeThrough, { member: true });
+defineAttribute(textIOClass, 'encoding', (self) => stateOf(self).encoding, { kind: 'member' });
+defineAttribute(textIOClass, 'line_buffering', (self) => stateOf(self).lineBuffering, { kind: 'member' });
+defineAttribute(textIOClass, 'write_through', (self) => stateOf(self).writeThrough, { kind: 'member' });
 defineReadOnly('errors', (self) => stateOf(self).errors);
 defineReadOnly('closed', () => false);
 defineReadOnly('name', (self) => `<${(self as PyOpaque).text}>`);
 defineReadOnly('newlines', () => None);
 
 function defineReadOnly(name: string, get: (self: PyValue) => PyValue): void {
-  defineGetSet(textIOClass, name, get, {
+  defineAttribute(textIOClass, name, get, {
     set: () => {
       throw pyError('AttributeError', `attribute '${name}' of '_io.TextIOWrapper' objects is not writable`);
     },
   });
 }
 
-defineUnsupportedAttributes(
-  textIOClass,
+registerUnsupportedClassAttributes(
+  '_io.TextIOWrapper',
   Object.fromEntries(
     [
       'buffer',
@@ -136,8 +150,9 @@ function reconfigure(self: PyValue, _args: PyValue[], kwargs: Kwargs): PyValue {
 }
 
 function textOption(kwargs: Kwargs, name: string): string | undefined {
-  const value = kwargs?.get(name) ?? None;
-  if (value === None) return undefined;
+  const rawValue = kwargs?.get(name) ?? None;
+  if (rawValue === None) return undefined;
+  const value = stringValue(rawValue) ?? rawValue;
   if (typeof value !== 'string') {
     throw typeError(`reconfigure() argument '${name}' must be str or None, not ${typeName(value)}`);
   }

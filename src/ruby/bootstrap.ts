@@ -5,7 +5,7 @@ import { installMathConstants } from './libNumeric';
 import { defineMainObject } from './libObject';
 import { NIL, RClass, RObject, type Value } from './objects';
 import { type Runtime, stackTooDeepFactory } from './runtime';
-import { singletonClassOf } from './values';
+import { singletonClassOf, str } from './values';
 
 const EXCEPTION_TREE: [string, string][] = [
   ['NoMemoryError', 'Exception'],
@@ -129,12 +129,19 @@ export function bootstrap(runtime: Runtime): void {
   const exception = defineClass('Exception', object);
   exception.instanceKind = 'exception';
   for (const [name, parent] of EXCEPTION_TREE) defineClass(name, c[parent]);
+  const encoding = defineClass('Encoding', object);
+  encoding.instanceKind = 'none';
+  defineClass('CompatibilityError', c.EncodingError, encoding);
   const math = defineModule('Math');
   defineClass('DomainError', c.ArgumentError, math);
+  const errno = defineModule('Errno');
+  defineClass('EDOM', c.SystemCallError, errno);
   defineClass('Random', object);
   defineClass('Turtle', object);
   const enumerator = defineClass('Enumerator', object);
   enumerator.includes.push(c.Enumerable);
+  defineClass('ArithmeticSequence', enumerator, enumerator);
+  defineClass('Chain', enumerator, enumerator);
   defineClass('Yielder', object, enumerator);
   defineClass('Generator', object, enumerator);
   defineClass('Lazy', enumerator, enumerator);
@@ -147,7 +154,6 @@ export function bootstrap(runtime: Runtime): void {
   defineClass('MatchData', object);
   defineClass('Time', object).includes.push(c.Comparable);
   defineClass('Rational', numeric).instanceKind = 'none';
-  defineClass('Encoding', object).instanceKind = 'none';
   defineClass('NoMatchingPatternError', c.StandardError);
   defineClass('NoMatchingPatternKeyError', c.NoMatchingPatternError);
   defineClass('File', c.IO);
@@ -170,7 +176,9 @@ export function bootstrap(runtime: Runtime): void {
   object.constants.set('STDERR', runtime.globals.get('$stderr') as Value);
   runtime.globals.set('$!', NIL);
   runtime.globals.set('$,', NIL);
-  runtime.globals.set('$/', NIL);
+  const inputSeparator = str('\n');
+  inputSeparator.frozen = true;
+  runtime.globals.set('$/', inputSeparator);
   stackTooDeepFactory.create = () => rubyError(runtime.c.SystemStackError, 'stack level too deep');
 }
 
