@@ -726,10 +726,9 @@ export class Converter {
     const pairs: Node[] = [];
     let blockArg: Expr | undefined;
     for (const child of nodes) {
+      if (child.type === 'comment') continue;
+      if (blockArg) this.fail(child, '& 引数の後に引数は書けません。');
       switch (child.type) {
-        case 'comment': {
-          break;
-        }
         case 'pair':
         case 'hash_splat_argument': {
           pairs.push(child);

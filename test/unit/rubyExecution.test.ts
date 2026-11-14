@@ -3841,6 +3841,16 @@ test('invalid trailing Array elements and repeated rest targets fail before exec
     expect(run(source).kind).toBe('compileError');
 });
 
+test('arguments after a block argument fail before execution', () => {
+  for (const source of [
+    'def f(*x);p x;end;f(&proc{},1)',
+    'def f(**x);p x;end;f(a:1,&proc{},b:2)',
+    'def f;end;f(&proc{},&proc{})',
+    'a=[1];p a[&proc{},0]',
+  ])
+    expect(run(source).kind).toBe('compileError');
+});
+
 test('duplicate block-local names fail before execution', () => {
   for (const source of ['[1].each{|a;a|p a}', '[1].each{|;a,a|p 1}']) expect(run(source).kind).toBe('compileError');
 });
