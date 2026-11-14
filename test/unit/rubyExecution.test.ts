@@ -2144,6 +2144,48 @@ test('Math logarithms retain very large Integer magnitudes', () => {
   expect(run('p Math.log2(10**400),Math.log10(10**400),Math.log2(2**1024)')).toMatchObject({
     stdout: '1328.771237954945\n400.0\n1024.0\n',
   });
+  expect(run('(310..318).each{|n|p Math.log10(10**n)==n.to_f};p Math.log2(10**314)')).toMatchObject({
+    stdout: 'true\n'.repeat(9) + '1043.0854217946319\n',
+  });
+});
+
+test('Hash merge follows source deletions and guards insertion', () => {
+  expect(run('h={a:1,b:2};x={a:0}.merge(h){|k,x,y|h.clear;y};p x,h')).toMatchObject({
+    stdout: '{a: 1}\n{}\n',
+  });
+  expect(run('h={a:1};begin;{a:0}.merge(h){|k,x,y|h[:c]=3;y};rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'RuntimeError\n',
+  });
+});
+
+test('String concat defers encoding-specific bounds until prior compatibility', () => {
+  const source =
+    'class A;def to_str;puts :convert;"x";end;end;begin;255.chr.concat("é",256,A.new);rescue=>e;p e.class;end';
+  expect(run(source)).toMatchObject({ stdout: 'convert\nEncoding::CompatibilityError\n' });
+});
+
+test('String line iteration validates every keyword', () => {
+  expect(run('begin;"a".lines(chomp:true,foo:1);rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'ArgumentError\n"unknown keyword: :foo"\n',
+  });
+  expect(run('begin;"a".each_line(foo:1).to_a;rescue=>e;p e.class;end')).toMatchObject({ stdout: 'ArgumentError\n' });
+});
+
+test('numeric option methods validate keywords after recognized options', () => {
+  expect(
+    run(
+      'begin;2.5.round(half: :up,foo:1);rescue=>e;p e.class;end;begin;Integer("12",exception:false,foo:1);rescue=>e;p e.class;end;begin;Float("1",exception:false,foo:1);rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({
+    stdout: 'ArgumentError\n'.repeat(3),
+  });
+});
+
+test('pretty printing deeply nested Arrays stays inside execution limits', () => {
+  const source = 'def mk # atomic\n a=1\n 20000.times{a=[a]}\n a\nend\npp mk';
+  expect(run(source).kind).toBe('limitExceeded');
+  const hashes = 'def mk # atomic\n a=1\n 20000.times{a={x:a}}\n a\nend\npp mk';
+  expect(run(hashes).kind).toBe('limitExceeded');
 });
 
 test('visibility changes apply before later name conversion errors', () => {

@@ -250,6 +250,7 @@ function showsItself(value: Value): boolean {
 
 function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = false): Gen<Doc> {
   rt().spend();
+  if (seen.size >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
   if (++budget.nodes > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
   if (defer && showsItself(value)) return { kind: 'text', text: '', deferred: value };
   if (value instanceof RArray && !showsItself(value)) {
@@ -324,8 +325,9 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = fa
   return text(yield* inspect(value), budget);
 }
 
-function inspectionCallbackCount(value: Value, seen: Set<object>, budget: BuildBudget): number {
+function inspectionCallbackCount(value: Value, seen: Set<object>, budget: BuildBudget, depth = 0): number {
   rt().spend();
+  if (depth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
   if (++budget.nodes > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
   if (showsItself(value)) return 1;
   if (!(value instanceof RBasic) || seen.has(value)) return 0;
@@ -333,18 +335,18 @@ function inspectionCallbackCount(value: Value, seen: Set<object>, budget: BuildB
   let count = 0;
   if (value instanceof RArray) {
     for (const item of value.items) {
-      count += inspectionCallbackCount(item, seen, budget);
+      count += inspectionCallbackCount(item, seen, budget, depth + 1);
       if (count >= 2) return 2;
     }
   } else if (value instanceof RHash) {
     for (const entry of value.map.values()) {
-      count += inspectionCallbackCount(entry.key, seen, budget);
-      count += inspectionCallbackCount(entry.value, seen, budget);
+      count += inspectionCallbackCount(entry.key, seen, budget, depth + 1);
+      count += inspectionCallbackCount(entry.value, seen, budget, depth + 1);
       if (count >= 2) return 2;
     }
   } else {
     for (const item of value.ivars?.values() ?? []) {
-      count += inspectionCallbackCount(item, seen, budget);
+      count += inspectionCallbackCount(item, seen, budget, depth + 1);
       if (count >= 2) return 2;
     }
   }

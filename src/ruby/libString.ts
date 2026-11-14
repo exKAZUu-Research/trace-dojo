@@ -339,7 +339,7 @@ def('String', '-@', 0, (self: RString) => {
 def('String', '+@', 0, (self: RString) => (self.frozen ? stringFromBytes(stringBytes(self), self.binary) : self));
 def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
   modify(self);
-  const converted = yield* convertedConcatArgs(self, args);
+  const converted = yield* convertedConcatArgs(args);
   const chunks: Uint8Array[] = [stringBytes(self)];
   let length = chunks[0].length;
   let binary = self.binary;
@@ -373,22 +373,13 @@ def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
   self.rawBytes = result.rawBytes;
   return self;
 });
-function* convertedConcatArgs(self: RString, args: Value[]): Gen<(RString | bigint)[]> {
+function* convertedConcatArgs(args: Value[]): Gen<(RString | bigint)[]> {
   const converted: (RString | bigint)[] = [];
-  let validationBinary = self.binary;
-  let validationAscii = stringBytes(self).every((byte) => byte < 0x80);
   for (const arg of args) {
     if (typeof arg === 'bigint') {
-      validateConcatCodepoint(arg, validationBinary);
-      if (arg > 0x7fn) validationAscii = false;
+      validateConcatCodepoint(arg, false);
       converted.push(arg);
-    } else {
-      const string = yield* stringArgValue(arg);
-      const stringAscii = stringBytes(string).every((byte) => byte < 0x80);
-      if (validationAscii && !stringAscii) validationBinary = string.binary;
-      validationAscii &&= stringAscii;
-      converted.push(string);
-    }
+    } else converted.push(yield* stringArgValue(arg));
   }
   return converted;
 }
@@ -646,10 +637,11 @@ function* lineOptions(
   const selected = args.length > 0 ? args[0] : (rt().globals.get('$/') ?? NIL);
   const separator = selected === NIL ? undefined : yield* stringArg(selected);
   let chomp = false;
-  if (keywords) {
-    const entry = yield* hashGet(keywords, sym('chomp'));
-    chomp = entry ? truthy(entry.value) : false;
-  }
+  if (keywords)
+    for (const entry of keywords.map.values()) {
+      if (entry.key instanceof RSymbol && entry.key.name === 'chomp') chomp = truthy(entry.value);
+      else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
+    }
   return { separator, chomp };
 }
 

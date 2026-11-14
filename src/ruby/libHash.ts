@@ -393,11 +393,16 @@ function* merge(target: RHash, others: Value[], block: RProc | undefined): Gen<R
     for (const other of others) {
       const source = yield* toHash(other);
       yield* whileHeld(source, function* () {
-        for (const entry of snapshot(source.map.values())) {
-          const existing = block ? yield* hashGet(target, entry.key) : undefined;
-          const value =
-            existing && block ? yield* callBlock(block, [entry.key, existing.value, entry.value]) : entry.value;
-          yield* hashSet(target, entry.key, value);
+        source.iterating++;
+        try {
+          for (const entry of source.map.values()) {
+            const existing = block ? yield* hashGet(target, entry.key) : undefined;
+            const value =
+              existing && block ? yield* callBlock(block, [entry.key, existing.value, entry.value]) : entry.value;
+            yield* hashSet(target, entry.key, value);
+          }
+        } finally {
+          source.iterating--;
         }
       });
     }

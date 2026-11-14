@@ -28,7 +28,7 @@ import { exactFloatPower } from './floatPower';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { boxFloat, NIL, RArray, RFloat, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
-import { platformGamma, platformLogGamma } from './platformMath';
+import { platformGamma, platformLog2, platformLog10, platformLogGamma } from './platformMath';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
 import { arr, classOf, realClassOf, str, truthy } from './values';
 
@@ -608,18 +608,22 @@ def('Integer', ['nobits?'], 1, function* (self: bigint, [mask]) {
 
 function* roundingMode(keywords: RHash | undefined): Gen<'up' | 'even' | 'down'> {
   if (!keywords) return 'up';
+  let selected: 'up' | 'even' | 'down' = 'up';
   for (const entry of keywords.map.values()) {
     if (!(entry.key instanceof RSymbol) || entry.key.name !== 'half') {
       throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
     }
     const mode = entry.value;
-    if (mode === NIL) return 'up';
+    if (mode === NIL) continue;
     const name = yield* roundingName(mode);
     const normalized = name?.toLowerCase();
-    if (normalized === 'up' || normalized === 'even' || normalized === 'down') return normalized;
+    if (normalized === 'up' || normalized === 'even' || normalized === 'down') {
+      selected = normalized;
+      continue;
+    }
     throw argumentError(`invalid rounding mode: ${name ?? (yield* inspect(mode))}`);
   }
-  return 'up';
+  return selected;
 }
 
 function* roundingName(mode: Value): Gen<string | undefined> {
@@ -795,11 +799,12 @@ function floorCeilDigits(value: number, digits: number, rounding: (x: number) =>
 
 function* exceptionOption(keywords: RHash | undefined): Gen<boolean> {
   if (!keywords) return true;
+  let selected = true;
   for (const entry of keywords.map.values()) {
-    if (entry.key instanceof RSymbol && entry.key.name === 'exception') return truthy(entry.value);
-    throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
+    if (entry.key instanceof RSymbol && entry.key.name === 'exception') selected = truthy(entry.value);
+    else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
   }
-  return true;
+  return selected;
 }
 
 export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen {
@@ -1032,10 +1037,8 @@ for (const [name, arity, fn, valid] of MATH_FUNCTIONS) {
     const values: number[] = [];
     for (const arg of args) values.push(yield* toFloat(arg));
     if (valid) domainCheck(name, valid(...values));
-    if (name === 'log2' && typeof args[0] === 'bigint' && !Number.isFinite(values[0]))
-      return mathLog(args[0], values[0]) / Math.LN2;
-    if (name === 'log10' && typeof args[0] === 'bigint' && !Number.isFinite(values[0]))
-      return mathLog(args[0], values[0]) / Math.LN10;
+    if ((name === 'log2' || name === 'log10') && typeof args[0] === 'bigint' && !Number.isFinite(values[0]))
+      return largeIntegerLog(args[0], name);
     return fn(...values);
   });
 }
@@ -1084,6 +1087,15 @@ function mathLog(value: Value, x: number): number {
     return Math.log(Number(value >> BigInt(digits - 53))) + (digits - 53) * Math.LN2;
   }
   return Math.log(x);
+}
+
+function largeIntegerLog(value: bigint, base: 'log2' | 'log10'): number {
+  const bits = value.toString(2).length;
+  const shift = bits - 53;
+  const mantissa = Number(value >> BigInt(shift));
+  return base === 'log2'
+    ? platformLog2(mantissa) + shift
+    : fusedMultiplyAdd(shift, platformLog10(2), platformLog10(mantissa));
 }
 
 function erf(x: number): number {
