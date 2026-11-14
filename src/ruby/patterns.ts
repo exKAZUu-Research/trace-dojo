@@ -47,6 +47,8 @@ export function guardFailed(): void {
 export function* matchPattern(pattern: Pattern, value: Value, frame: Frame, cache?: DeconstructionCache): Gen<boolean> {
   rt().spend();
   const mark = frame.temporaries.length;
+  const arraysMark = rt().heldArrays.length;
+  const heldMark = rt().held.length;
   frame.temporaries.push(value);
   try {
     switch (pattern.k) {
@@ -79,6 +81,8 @@ export function* matchPattern(pattern: Pattern, value: Value, frame: Frame, cach
     }
   } finally {
     frame.temporaries.length = mark;
+    rt().heldArrays.length = arraysMark;
+    rt().held.length = heldMark;
   }
 }
 
@@ -93,7 +97,10 @@ function* classMatches(cls: Expr | undefined, value: Value, frame: Frame): Gen<b
 
 function* deconstruct(value: Value, cache: DeconstructionCache | undefined): Gen<Value[] | undefined> {
   if (cache?.subject === value && cache.attempted) {
-    if (cache.items !== undefined) return cache.items;
+    if (cache.items !== undefined) {
+      rt().heldArrays.push(cache.items);
+      return cache.items;
+    }
     yield* fail(function* () {
       return `${yield* inspect(value)} does not respond to #deconstruct`;
     });
@@ -108,6 +115,7 @@ function* deconstruct(value: Value, cache: DeconstructionCache | undefined): Gen
   }
   const result = yield* callMethod(value, 'deconstruct', []);
   if (!(result instanceof RArray)) throw typeError('deconstruct must return Array');
+  rt().heldArrays.push(result.items);
   if (cache?.subject === value) cache.items = result.items;
   return result.items;
 }
@@ -178,6 +186,7 @@ function* matchHash(pattern: Extract<Pattern, { k: 'hash' }>, value: Value, fram
     pattern.rest === undefined && pattern.pairs.length > 0 ? arr(pattern.pairs.map((pair) => sym(pair.key))) : NIL;
   const hash = yield* callMethod(value, 'deconstruct_keys', [keys]);
   if (!(hash instanceof RHash)) throw typeError('deconstruct_keys must return Hash');
+  rt().held.push(hash);
   for (const pair of pattern.pairs) {
     const entry = yield* hashGet(hash, sym(pair.key));
     if (!entry) {

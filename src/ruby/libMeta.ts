@@ -22,6 +22,7 @@ import {
 import { procArity } from './libObject';
 import {
   invalidateMethodCaches,
+  type MethodBody,
   NIL,
   RBasic,
   RClass,
@@ -137,6 +138,10 @@ function methodIdentity(value: object): number {
     runtime.methodHashIds.set(value, id);
   }
   return id;
+}
+
+function methodBodyIdentity(body: MethodBody): object {
+  return body.kind === 'native' ? body.fn : body;
 }
 
 function* findForMethodObject(self: Value, name: string, publicOnly = false): Gen<RMethod> {
@@ -295,7 +300,9 @@ for (const owner of ['Method', 'UnboundMethod']) {
     const left = self.data as MethodData;
     const right = other.data as MethodData;
     return (
-      left.recv === right.recv && left.method.owner === right.method.owner && left.method.body === right.method.body
+      left.recv === right.recv &&
+      left.method.owner === right.method.owner &&
+      methodBodyIdentity(left.method.body) === methodBodyIdentity(right.method.body)
     );
   });
   def(owner, 'hash', 0, (self: RObject) => {
@@ -306,7 +313,9 @@ for (const owner of ['Method', 'UnboundMethod']) {
         : typeof recv === 'bigint' || typeof recv === 'number' || typeof recv === 'boolean'
           ? `${typeof recv}:${recv}`
           : 'nil';
-    return BigInt(`0x${digest(`${receiver}:${methodIdentity(method.owner)}:${methodIdentity(method.body)}`)}`);
+    return BigInt(
+      `0x${digest(`${receiver}:${methodIdentity(method.owner)}:${methodIdentity(methodBodyIdentity(method.body))}`)}`
+    );
   });
   def(owner, 'arity', 0, (self: RObject) => BigInt(methodArity((self.data as MethodData).method)));
   def(owner, 'parameters', 0, (self: RObject) => {

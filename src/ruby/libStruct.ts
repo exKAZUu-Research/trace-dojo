@@ -143,11 +143,7 @@ function* newStructClass(superclass: RClass, members: string[], layout: Omit<Lay
     visibility: 'public',
     body: {
       kind: 'native',
-      fn: (self) => {
-        const object = new RObject(self as RClass);
-        object.data = new StructValues(layoutOf(self as RClass).members.map(() => NIL));
-        return object;
-      },
+      fn: (self) => allocateStruct(self as RClass),
       min: 0,
       max: 0,
       takesKeywords: false,
@@ -157,8 +153,14 @@ function* newStructClass(superclass: RClass, members: string[], layout: Omit<Lay
   return cls;
 }
 
+function allocateStruct(cls: RClass): RObject {
+  const object = new RObject(cls);
+  object.data = new StructValues(layoutOf(cls).members.map(() => NIL));
+  return object;
+}
+
 function* constructStruct(self: RClass, args: Value[], block: RProc | undefined, keywords?: RHash): Gen<RObject> {
-  const object = (yield* callMethod(self, 'allocate', [])) as RObject;
+  const object = allocateStruct(self);
   const initialize = self.findMethod('initialize');
   if (initialize) yield* invoke(initialize, object, args, keywords, block, false);
   return object;
@@ -359,7 +361,7 @@ function* constructData(self: RClass, args: Value[], block: RProc | undefined, k
   }
   const hash: RHash = keywords ?? newHash();
   for (const [index, value] of args.entries()) yield* hashSet(hash, sym(members[index]), value);
-  const object = (yield* callMethod(self, 'allocate', [])) as RObject;
+  const object = allocateStruct(self);
   const initialize = self.findMethod('initialize');
   if (initialize) yield* invoke(initialize, object, [], hash.map.size > 0 ? hash : undefined, block, false);
   object.frozen = true;

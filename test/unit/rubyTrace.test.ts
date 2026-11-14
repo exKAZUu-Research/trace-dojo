@@ -802,3 +802,15 @@ test('pattern subjects stay rooted while pins run', () => {
   const result = traceProgram('ruby', program, program);
   expect(result.finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
 });
+
+test('nested pattern callbacks retain pending deconstructed turtles', () => {
+  for (const program of [
+    'class A;def deconstruct;[Turtle.new(1,0),Turtle.new(2,0)];end;end;def check;x=1;Turtle;end;A.new=>[^(check)=>a,b];a.forward;b.forward',
+    'class A;def deconstruct_keys(ks);{a:Turtle.new(1,0),b:Turtle.new(2,0)};end;end;def check;x=1;Turtle;end;A.new=>{a:^(check)=>a,b:b};a.forward;b.forward',
+  ]) {
+    expect(traceProgram('ruby', program, program).finalTurtles).toMatchObject([
+      { x: 1, y: 1 },
+      { x: 2, y: 1 },
+    ]);
+  }
+});

@@ -1219,7 +1219,8 @@ function* definedText(e: Expr, frame: Frame): Gen {
     case 'super': {
       const method = frame.home.extra.method;
       return text(
-        method && classOf(frame.home.self).findSuperMethod(method.name, method.owner, method.lookupIndex)
+        method &&
+          classOf(frame.home.self).findSuperMethod(method.superName ?? method.name, method.owner, method.lookupIndex)
           ? 'super'
           : undefined
       );

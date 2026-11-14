@@ -1046,6 +1046,7 @@ function* substituteRegexp(
   let last: MatchState | undefined;
   while (state) {
     const [from, to] = state.groups[0] as readonly [number, number];
+    setLastMatch(state);
     let piece: string;
     if (replacement instanceof RHash) {
       const key = str(text.slice(from, to));
@@ -1054,7 +1055,6 @@ function* substituteRegexp(
     } else if (replacement !== undefined) {
       piece = expand(yield* toStr(replacement), state, LIMITS.maxStringLength - length - (from - position));
     } else {
-      setLastMatch(state);
       piece = yield* toS(yield* callBlock(block as RProc, [str(text.slice(from, to))]));
     }
     if (stringBytes(self).length !== sourceLength) throw rubyError(rt().c.RuntimeError, 'string modified');

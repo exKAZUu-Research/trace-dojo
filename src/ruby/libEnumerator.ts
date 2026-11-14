@@ -791,8 +791,7 @@ sdef('Enumerator', 'new', [0, 1], function* (_self, args, block) {
       const previousHeld = source.held?.bind(source);
       source.held = () => [...(previousHeld?.() ?? []), size];
     } else {
-      const normalized =
-        size === NIL || (isRubyFloat(size) && !Number.isFinite(Number(size))) ? size : yield* toInt(size);
+      const normalized = size === NIL || (isRubyFloat(size) && Number(size) === Infinity) ? size : yield* toInt(size);
       source.size = () => normalized;
     }
   }
@@ -1041,8 +1040,9 @@ function* runLazy(self: RObject, visit: (value: Value, yielded?: Value[]) => Gen
     const result = yield* iterateYielded(
       data.source,
       function* (yielded) {
-        const value = yielded.length === 1 ? yielded[0] : arr(yielded);
-        return yield* streamLazyStep(data.steps, states, 0, value, visitWithStop, yielded);
+        const value = yielded.length === 0 ? NIL : yielded.length === 1 ? yielded[0] : arr(yielded);
+        const args = yielded.length === 0 && data.steps.length > 0 ? [NIL] : yielded;
+        return yield* streamLazyStep(data.steps, states, 0, value, visitWithStop, args);
       },
       args
     );
@@ -1125,12 +1125,12 @@ function* streamLazyStep(
     case 'with_index': {
       const index = state.index++;
       if (step.block) yield* callProc(step.block, [item, index]);
-      return yield* next(step.block ? item : arr([item, index]));
+      return step.block ? yield* next(item, yielded) : yield* next(arr([item, index]), [item, index]);
     }
     case 'grep':
     case 'grep_v': {
       if (truthy(yield* caseEquals(step.pattern, item)) !== (step.kind === 'grep')) return;
-      return yield* next(step.block ? yield* callProc(step.block, [item]) : item);
+      return step.block ? yield* next(yield* callProc(step.block, [item])) : yield* next(item, yielded);
     }
     case 'uniq': {
       const key = step.block ? yield* callProc(step.block, [item]) : item;
@@ -1140,7 +1140,7 @@ function* streamLazyStep(
       }
       if (yield* hashGet(state.keys, key)) return;
       yield* hashSet(state.keys, key, true);
-      return yield* next(item);
+      return yield* next(item, yielded);
     }
     case 'zip': {
       state.iterators ??= step.others.map((other) =>
@@ -1187,7 +1187,7 @@ function* streamLazyStep(
       return yield* next(item);
     }
     case 'each_with_object': {
-      return yield* next(arr([item, step.memo]));
+      return yield* next(arr([item, step.memo]), [item, step.memo]);
     }
   }
 }

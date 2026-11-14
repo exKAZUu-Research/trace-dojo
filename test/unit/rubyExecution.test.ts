@@ -6526,6 +6526,16 @@ test('Lazy preserves source yield argument lists', () => {
   ).toMatchObject({
     stdout: '[[1, 2]]\n[]\n',
   });
+  expect(
+    run(
+      'e=Enumerator.new{|y|y.yield};p e.lazy.force,e.lazy.map{|*a|a}.force,e.lazy.take(1).force,e.lazy.each_entry.force,e.lazy.compact.force'
+    )
+  ).toMatchObject({ stdout: '[nil]\n[[nil]]\n[nil]\n[nil]\n[]\n' });
+  expect(
+    run(
+      'e=Enumerator.new{|y|y.yield 1,2};p e.lazy.uniq.map{|*a|a}.force,e.lazy.grep(Array).map{|*a|a}.force,e.lazy.with_index.map{|*a|a}.force,e.lazy.each_with_object(nil).map{|*a|a}.force'
+    )
+  ).toMatchObject({ stdout: '[[1, 2]]\n[[1, 2]]\n[[[1, 2], 0]]\n[[[1, 2], nil]]\n' });
 });
 
 test('regexp replacement expands the last participating capture', () => {
@@ -6624,6 +6634,12 @@ test('Struct and Data allocate nil-filled member storage', () => {
   expect(run('S=Struct.new(:x);D=Data.define(:x);p S.allocate,D.allocate')).toMatchObject({
     stdout: '#<struct S x=nil>\n#<data D x=nil>\n',
   });
+  expect(run('S=Struct.new(:x);def S.allocate;puts :custom;super;end;p S.new(1)')).toMatchObject({
+    stdout: '#<struct S x=1>\n',
+  });
+  expect(run('D=Data.define(:x);def D.allocate;puts :custom;super;end;p D.new(1)')).toMatchObject({
+    stdout: '#<data D x=1>\n',
+  });
 });
 
 test('String.new retains UTF-8 bytes when choosing binary encoding', () => {
@@ -6640,10 +6656,16 @@ test('Enumerator.new normalizes numeric size and calls size Procs', () => {
   expect(run('p Enumerator.new(-> {3}){|y|y<<1}.size, Enumerator.new(2.5){|y|}.size')).toMatchObject({
     stdout: '3\n2\n',
   });
+  expect(
+    run('[Float::NAN,-Float::INFINITY].each{|s|begin;Enumerator.new(s){};rescue=>e;p e.class,e.message;end}')
+  ).toMatchObject({ stdout: 'FloatDomainError\n"NaN"\nFloatDomainError\n"-Infinity"\n' });
 });
 
 test('regexp replacement Hash uses its default callback', () => {
   expect(run('h=Hash.new{|_,k|k.upcase};p "abc".gsub(/./,h)')).toMatchObject({ stdout: '"ABC"\n' });
+  expect(run('h=Hash.new{|_,k|p $&;k.upcase};p "abc".gsub(/./,h)')).toMatchObject({
+    stdout: '"a"\n"b"\n"c"\n"ABC"\n',
+  });
 });
 
 test('define_method gives break method-body control flow', () => {
@@ -6664,6 +6686,11 @@ test('renamed Method bodies retain their source super name', () => {
   ).toMatchObject({
     stdout: '"AAB"\n',
   });
+  expect(
+    run(
+      'class Base;def f;"B";end;end;class A<Base;def f;[defined?(super),super];end;end;class C<A;define_method(:g,A.instance_method(:f));end;p C.new.g'
+    )
+  ).toMatchObject({ stdout: '["super", ["super", "B"]]\n' });
 });
 
 test('Method and UnboundMethod wrappers compare by binding and body', () => {
@@ -6673,6 +6700,9 @@ test('Method and UnboundMethod wrappers compare by binding and body', () => {
     )
   ).toMatchObject({
     stdout: 'true\ntrue\n:hit\n',
+  });
+  expect(run('s="a";p s.method(:size)==s.method(:length),{s.method(:size)=>:hit}[s.method(:length)]')).toMatchObject({
+    stdout: 'true\n:hit\n',
   });
 });
 
