@@ -1,14 +1,27 @@
-import { mappingEntries } from './callArguments';
+// code-gauge-allow-file fileNcss 436 -- The list, tuple, and dict types keep their methods together.
+import { keywordEntries, mappingEntries } from './callArguments';
 import { pyRepr } from './conversions';
 import { method } from './define';
 import { reversedDictIterator } from './dictReversal';
 import { DictStore } from './dictStore';
-import { NATIVE_HASHES, pyHash } from './hashing';
-import { keyError } from './items';
+import { pyHash } from './hashing';
+import { builtinGetItem, keyError } from './items';
+import { clamp, reduction, withState } from './iteratorStates';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
-import { callValue, getItem, getIterator, isTruthy, iterate, lookupSpecial, toArray } from './objects';
-import { contains, countEqual, equals, extendList, lessThan } from './operators';
+import {
+  builtinIterator,
+  callValue,
+  getAttributeOrUndefined,
+  getItem,
+  getIterator,
+  isTruthy,
+  iterate,
+  setItem,
+  toArray,
+  withRemaining,
+} from './objects';
+import { builtinContains, contains, countEqual, equals, extendList, lessThan } from './operators';
 import { currentRuntime } from './runtimeContext';
 import {
   addToTable,
@@ -27,6 +40,7 @@ import {
 } from './setOperations';
 import { SetTable } from './setTable';
 import { StringBuilder } from './stringBuilder';
+import { TemporaryScope } from './temporaryScope';
 import { timsort } from './timsort';
 import {
   addNote,
@@ -100,9 +114,9 @@ method(listClass, '__repr__', 'none', 0, 0, (self) =>
   containerRepr(self as PyObject, '[...]', () => `[${joinReprs(listOf(self).items)}]`)
 );
 method(listClass, '__len__', 'none', 0, 0, (self) => BigInt(listOf(self).items.length));
-method(listClass, '__contains__', 'one', 1, 1, (self, [item]) => contains(self, item));
-method(listClass, '__getitem__', 'one', 1, 1, (self, [key]) => getItem(self, key));
-method(listClass, '__iter__', 'none', 0, 0, (self) => getIterator(self));
+method(listClass, '__contains__', 'one', 1, 1, (self, [item]) => builtinContains(self, item));
+method(listClass, '__getitem__', 'one', 1, 1, (self, [key]) => builtinGetItem(self, key));
+method(listClass, '__iter__', 'none', 0, 0, (self) => builtinIterator(self));
 method(listClass, '__reversed__', 'none', 0, 0, (self) => reversedIterator(listOf(self), 'list_reverseiterator'));
 method(listClass, 'append', 'one', 1, 1, (self, [item]) => {
   listOf(self).append(item);
@@ -207,24 +221,65 @@ function indexBound(value: PyValue | undefined, fallback: number, length: number
 
 /** Sorts a list in place, stably, with keys computed once each, as `list.sort` does. */
 export function sortList(list: PyList, key: PyValue, reverse: boolean): void {
-  let modified = false;
-  // CPython also reports a list that was filled and emptied again during the sort, which the final length hides.
-  const itemsDuringSort = new Proxy<PyValue[]>([], {
-    set(target, property, value: unknown) {
-      if (property !== 'length') modified = true;
+  const sorting = new DetachedListSort(list);
+  try {
+    sortDetachedItems(sorting.items, key, reverse);
+  } catch (error) {
+    throw sorting.capture(error);
+  } finally {
+    sorting.restore();
+  }
+  sorting.checkMutation();
+}
+
+export class DetachedListSort {
+  readonly items: PyValue[];
+  private modified = false;
+  private readonly scope = new TemporaryScope(currentRuntime().frame.temporaries);
+  private readonly temporaryItems = new Proxy<PyValue[]>([], {
+    set: (target, property, value: unknown) => {
+      if (property !== 'length') this.modified = true;
       return Reflect.set(target, property, value);
     },
   });
-  const items = list.replaceItems(itemsDuringSort);
-  // The list no longer holds its items while the key function and the comparisons run.
-  currentRuntime().handToNative(items);
-  try {
-    sortDetachedItems(items, key, reverse);
-    modified ||= list.items !== itemsDuringSort;
-  } finally {
-    list.replaceItems(items);
+
+  constructor(private readonly list: PyList) {
+    this.items = list.replaceItems(this.temporaryItems);
+    currentRuntime().handToNative(this.items);
   }
-  if (modified) throw valueError('list modified during sort');
+
+  capture(error: unknown): unknown {
+    return this.scope.capture(error);
+  }
+
+  restore(): void {
+    this.modified ||= this.list.items !== this.temporaryItems;
+    const discarded = this.list.replaceItems(this.items);
+    this.scope.release(discarded);
+  }
+
+  checkMutation(): void {
+    if (this.modified) throw valueError('list modified during sort');
+  }
+}
+
+/** Sorts detached list items by precomputed keys, restoring their current order even when comparison raises. */
+export function sortByKeys(original: PyValue[], keys: PyValue[], reverse: boolean): void {
+  const runtime = currentRuntime();
+  const values = [...original];
+  const order = original.map((_, index) => index);
+  try {
+    timsort(
+      order,
+      (left: number, right: number) => {
+        runtime.spend();
+        return lessThan(keys[left], keys[right]);
+      },
+      reverse
+    );
+  } finally {
+    for (const [index, source] of order.entries()) original[index] = values[source];
+  }
 }
 
 function sortDetachedItems(items: PyValue[], key: PyValue, reverse: boolean): void {
@@ -255,16 +310,23 @@ function sortDetachedItems(items: PyValue[], key: PyValue, reverse: boolean): vo
 
 function reversedIterator(sequence: PyList | PyTuple, name: string): PyIterator {
   let index = sequence.items.length - 1;
-  const iterator = new PyIterator(
-    iteratorClass(name),
+  const next = withRemaining(
     () => {
       if (index >= sequence.items.length) index = -1;
       return index >= 0 ? sequence.items[index--] : DONE;
     },
-    () => [sequence]
+    () => (index >= 0 && index < sequence.items.length ? index + 1 : 0)
   );
-  iterator.lengthHint = () => (index < sequence.items.length ? index + 1 : 0);
-  return iterator;
+  withState(next, {
+    reduce: () =>
+      index >= 0 && index < sequence.items.length
+        ? reduction('reversed', [sequence], BigInt(index))
+        : reduction('reversed', [sequence instanceof PyList ? newList([]) : newTuple([])]),
+    setState: (state) => {
+      if (index >= 0) index = clamp(state, -1, sequence.items.length - 1);
+    },
+  });
+  return new PyIterator(iteratorClass(name), next, () => [sequence]);
 }
 
 // tuple -------------------------------------------------------------------------------------------------------------
@@ -289,7 +351,7 @@ method(tupleClass, '__contains__', 'one', 1, 1, (self, [item]) =>
   tupleOf(self).items.some((element) => equals(element, item))
 );
 method(tupleClass, '__getitem__', 'one', 1, 1, (self, [key]) => getItem(newTuple(tupleOf(self).items), key));
-method(tupleClass, '__iter__', 'none', 0, 0, (self) => getIterator(newTuple(tupleOf(self).items)));
+method(tupleClass, '__iter__', 'none', 0, 0, (self) => builtinIterator(tupleOf(self)));
 method(tupleClass, 'index', 'expected', 1, 3, (self, [item, start, stop]) => {
   const index = sequenceIndex(tupleOf(self).items, item, start, stop);
   if (index === -1) throw valueError('tuple.index(x): x not in tuple');
@@ -317,7 +379,7 @@ method(rangeClass, '__repr__', 'none', 0, 0, (self) => {
 method(rangeClass, '__len__', 'none', 0, 0, (self) => rangeOf(self).length);
 method(rangeClass, '__contains__', 'one', 1, 1, (self, [item]) => contains(self, item));
 method(rangeClass, '__getitem__', 'one', 1, 1, (self, [key]) => getItem(self, key));
-method(rangeClass, '__iter__', 'none', 0, 0, (self) => getIterator(self));
+method(rangeClass, '__iter__', 'none', 0, 0, (self) => builtinIterator(self));
 method(rangeClass, '__reversed__', 'none', 0, 0, (self) => {
   const { start, step, length } = rangeOf(self);
   return getIterator(new PyRange(rangeClass, start + (length - 1n) * step, start - step, -step));
@@ -360,12 +422,12 @@ const dictOf = (self: PyValue): PyDict => self as PyDict;
 function updateFromArguments(qualified: string, dict: PyDict, args: PyValue[], kwargs: Kwargs): void {
   checkArgs({ qualified, min: 0, max: 1, style: 'expected', keywords: [...(kwargs?.keys() ?? [])] }, args, kwargs);
   if (args.length > 0) updateDict(dict, args[0]);
-  for (const [key, value] of kwargs ?? []) dict.store.set(key, value);
+  for (const [key, value] of keywordEntries(kwargs)) dict.store.set(key, value);
 }
 
 export function updateDict(dict: PyDict, source: PyValue): void {
   const runtime = currentRuntime();
-  if (source instanceof PyDict || lookupSpecial(source, 'keys') !== undefined) {
+  if (source instanceof PyDict || getAttributeOrUndefined(source, 'keys') !== undefined) {
     for (const [key, value] of mappingEntries(source)) {
       runtime.spend();
       dict.store.set(key, value);
@@ -376,12 +438,17 @@ export function updateDict(dict: PyDict, source: PyValue): void {
   let index = 0;
   for (let item = next(); item !== DONE; item = next(), index++) {
     runtime.spend();
-    const pair = updatePair(item, index);
-    if (pair.length !== 2) {
-      throw valueError(`dictionary update sequence element #${index} has length ${pair.length}; 2 is required`);
-    }
-    dict.store.set(pair[0], pair[1]);
+    addUpdatePair(dict, item, index);
   }
+}
+
+/** Adds the item at `index` of the pairs `dict.update` reads, which must be a sequence of a key and a value. */
+export function addUpdatePair(dict: PyDict, item: PyValue, index: number): void {
+  const pair = updatePair(item, index);
+  if (pair.length !== 2) {
+    throw valueError(`dictionary update sequence element #${index} has length ${pair.length}; 2 is required`);
+  }
+  dict.store.set(pair[0], pair[1]);
 }
 
 /** An element of a dict's update sequence as a sequence, failing as dict_merge_from_seq2's PySequence_Fast does. */
@@ -411,7 +478,7 @@ export function dictBody(dict: PyDict): string {
 
 method(dictClass, '__len__', 'none', 0, 0, (self) => BigInt(dictOf(self).store.size));
 method(dictClass, '__contains__', 'one', 1, 1, (self, [key]) => dictOf(self).store.has(key));
-method(dictClass, '__getitem__', 'one', 1, 1, (self, [key]) => getItem(self, key));
+method(dictClass, '__getitem__', 'one', 1, 1, (self, [key]) => builtinGetItem(self, key));
 method(dictClass, '__setitem__', 'expected', 2, 2, (self, [key, value]) => {
   dictOf(self).store.set(key, value);
   return None;
@@ -420,7 +487,7 @@ method(dictClass, '__delitem__', 'one', 1, 1, (self, [key]) => {
   if (!dictOf(self).store.delete(key)) throw keyError(key);
   return None;
 });
-method(dictClass, '__iter__', 'none', 0, 0, (self) => getIterator(new PyDictView(dictKeysClass, dictOf(self), 'keys')));
+method(dictClass, '__iter__', 'none', 0, 0, (self) => builtinIterator(dictOf(self)));
 method(dictClass, '__reversed__', 'none', 0, 0, (self) => reversedDictIterator(dictOf(self), 'keys'));
 method(dictClass, 'keys', 'none', 0, 0, (self) => new PyDictView(dictKeysClass, dictOf(self), 'keys'));
 method(dictClass, 'values', 'none', 0, 0, (self) => new PyDictView(dictValuesClass, dictOf(self), 'values'));
@@ -454,8 +521,8 @@ method(dictClass, 'clear', 'none', 0, 0, (self) => {
   return None;
 });
 method(dictClass, 'copy', 'none', 0, 0, (self) => {
-  const copy = new PyDict(dictOf(self).cls, new DictStore(dictOf(self).store.plainWrites), dictOf(self).defaultFactory);
-  for (const entry of dictOf(self).store.ordered()) copy.store.set(entry.key, entry.value);
+  const copy = new PyDict(dictClass, new DictStore());
+  updateDict(copy, self);
   return copy;
 });
 method(
@@ -465,13 +532,19 @@ method(
   1,
   2,
   (cls, [iterable, value]) => {
-    const dict = callValue(cls, []) as PyDict;
-    for (const key of toArray(iterable)) dict.store.set(key, value ?? None);
+    const dict = callValue(cls, []);
+    for (const key of toArray(iterable)) {
+      if (dict instanceof PyDict && dict.cls === dictClass) dict.store.set(key, value ?? None);
+      else setItem(dict, key, value ?? None);
+    }
     return dict;
   },
   { binding: 'class' }
 );
 dictClass.dict.set('__hash__', None);
+// The views of keys and items compare like sets, so they are unhashable as CPython's are.
+dictKeysClass.dict.set('__hash__', None);
+dictItemsClass.dict.set('__hash__', None);
 
 for (const [cls, view] of [
   [dictKeysClass, 'keys'],
@@ -482,7 +555,7 @@ for (const [cls, view] of [
     containerRepr(self as PyObject, '...', () => `${(self as PyObject).cls.name}([${joinReprs(toArray(self))}])`)
   );
   method(cls, '__len__', 'none', 0, 0, (self) => BigInt((self as PyDictView).dict.store.size));
-  method(cls, '__iter__', 'none', 0, 0, (self) => getIterator(self));
+  method(cls, '__iter__', 'none', 0, 0, (self) => builtinIterator(self));
   method(cls, '__contains__', 'one', 1, 1, (self, [item]) => contains(self, item));
   method(cls, '__reversed__', 'none', 0, 0, (self) => reversedDictIterator((self as PyDictView).dict, view));
   if (view !== 'values') {
@@ -529,7 +602,7 @@ for (const cls of [setClass, frozensetClass]) {
   method(cls, '__repr__', 'none', 0, 0, setRepr);
   method(cls, '__len__', 'none', 0, 0, (self) => BigInt(setOf(self).table.size));
   method(cls, '__contains__', 'one', 1, 1, (self, [item]) => lookupSetKey(item, (key) => setOf(self).table.has(key)));
-  method(cls, '__iter__', 'none', 0, 0, (self) => getIterator(self));
+  method(cls, '__iter__', 'none', 0, 0, (self) => builtinIterator(self));
   method(cls, 'copy', 'none', 0, 0, (self) => (isExactFrozenset(self) ? self : setUnion(setOf(self), [])));
   method(cls, 'union', 'expected', 0, Number.POSITIVE_INFINITY, (self, others) => setUnion(setOf(self), others));
   method(cls, 'intersection', 'expected', 0, Number.POSITIVE_INFINITY, (self, others) =>
@@ -569,7 +642,6 @@ function someItem(iterable: PyValue, test: (item: PyValue) => boolean): boolean 
 }
 
 method(frozensetClass, '__hash__', 'none', 0, 0, (self) => pyHash(self));
-NATIVE_HASHES.add(frozensetClass.dict.get('__hash__') as PyValue);
 setClass.dict.set('__hash__', None);
 method(setClass, 'add', 'one', 1, 1, (self, [item]) => {
   addToTable(setOf(self).table, item);

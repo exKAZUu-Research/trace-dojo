@@ -647,10 +647,12 @@ export class Converter {
           throw new CompileError([{ row: node.startPosition.row, message: '宣言の書き方に誤りがあります。' }]);
         return this.declaration(declaration, leading.type);
       },
-      (_root, errors) => {
-        if (errors.length > 0)
-          throw new CSyntaxError(node, errors[0].message, { row: errors[0].row, offset: node.endIndex });
-        return errors;
+      {
+        locateErrors: (_root, errors) => {
+          if (errors.length > 0)
+            throw new CSyntaxError(node, errors[0].message, { row: errors[0].row, offset: node.endIndex });
+          return errors;
+        },
       }
     );
   }

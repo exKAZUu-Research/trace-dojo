@@ -10,7 +10,7 @@ import { CompileError, type SourceDiagnostic } from './diagnostics';
 const requireFromRoot = createRequire(path.join(process.cwd(), 'package.json'));
 // Copying into this realm's Uint8Array passes the runtime's `instanceof` check, which a Buffer from another realm
 // (as under jsdom) fails.
-const readWasm = (specifier: string): Uint8Array => Uint8Array.from(readFileSync(requireFromRoot.resolve(specifier)));
+const readWasm = (specifier: string): Uint8Array => new Uint8Array(readFileSync(requireFromRoot.resolve(specifier)));
 await Parser.init({
   wasmBinary: readWasm('@willbooster/web-tree-sitter/web-tree-sitter.wasm').buffer as ArrayBuffer,
 });
@@ -32,14 +32,18 @@ export function parseSource<T>(
   source: string,
   missingTokenNames: Record<string, string>,
   convert: (root: Node) => T,
-  locateErrors: (root: Node, errors: SourceDiagnostic[]) => SourceDiagnostic[] = (_root, errors) => errors
+  {
+    maxNestingDepth = MAX_NESTING_DEPTH,
+    tooDeepMessage = '括弧やブロックなどの入れ子が深すぎます。',
+    locateErrors = (_root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] => errors,
+  } = {}
 ): T {
   const tree = parser.parse(source);
   if (!tree) throw new Error('The parser returned no tree');
   try {
-    const tooDeep = findTooDeepNode(tree.rootNode);
+    const tooDeep = findTooDeepNode(tree.rootNode, maxNestingDepth);
     if (tooDeep) {
-      throw new CompileError([{ row: tooDeep.startPosition.row, message: '括弧やブロックなどの入れ子が深すぎます。' }]);
+      throw new CompileError([{ row: tooDeep.startPosition.row, message: tooDeepMessage }]);
     }
     const syntaxErrors = locateErrors(tree.rootNode, collectSyntaxErrors(tree.rootNode, missingTokenNames, false));
     if (syntaxErrors.length > 0) throw new CompileError(syntaxErrors);
@@ -82,14 +86,21 @@ export function commentTokens(parser: Parser, source: string): { index: number; 
 /** Converting, compiling, and running recurse into nested constructs, so deeper nesting would exhaust the stack. */
 const MAX_NESTING_DEPTH = 300;
 
-function findTooDeepNode(root: Node): Node | undefined {
+function findTooDeepNode(root: Node, maxDepth: number): Node | undefined {
+  if (maxDepth === Number.POSITIVE_INFINITY) return;
   const cursor = root.walk();
+  // The cursor's own `currentDepth` takes time in proportion to the depth, which deep nesting makes quadratic.
+  let depth = 0;
   try {
     for (;;) {
-      if (cursor.currentDepth > MAX_NESTING_DEPTH) return cursor.currentNode;
-      if (cursor.gotoFirstChild()) continue;
+      if (depth > maxDepth) return cursor.currentNode;
+      if (cursor.gotoFirstChild()) {
+        depth++;
+        continue;
+      }
       while (!cursor.gotoNextSibling()) {
         if (!cursor.gotoParent()) return;
+        depth--;
       }
     }
   } finally {

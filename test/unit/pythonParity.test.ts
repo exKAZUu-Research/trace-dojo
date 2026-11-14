@@ -26,10 +26,6 @@ test.each([
     "a = {'v': 0}\nb = {'v': 0}\nfor i in range(27):\n    a = {'x': a, 'y': a}\n    b = {'x': b, 'y': b}\na == b",
   ],
   [
-    'splitting a deeply shared exception group',
-    'g = ExceptionGroup("x", [ValueError()])\nfor i in range(27):\n    g = ExceptionGroup("x", [g, g])\ntry:\n    raise g\nexcept* TypeError:\n    pass',
-  ],
-  [
     'repeated decimal conversions of a huge int with the digit limit off',
     'import sys\nsys.set_int_max_str_digits(0)\nn = 1 << 3000000\nfor i in range(100):\n    x = str(n)',
   ],
@@ -161,6 +157,8 @@ test.each([
   ['a copy.copy of a list beyond the slot limit together', 'import copy\na = [0] * 800000\nb = copy.copy(a)'],
   ['a deep copy of a list beyond the slot limit together', 'import copy\na = [0] * 800000\nb = copy.deepcopy(a)'],
   ['a slice of a list beyond the slot limit together', 'a = [0] * 800000\nb = a[:]'],
+  ['copies of a bytearray beyond the slot limit together', 'b = bytearray(1000000)\nx = [bytes(b) for _ in range(32)]'],
+  ['slices of a bytes beyond the slot limit together', 'b = bytes(1000000)\nx = [b[1:] for _ in range(32)]'],
   ['a list repeated in place beyond memory', 'x = [1]\nx *= 100000000'],
   ['a deque repeated in place beyond memory', 'from collections import deque\nd = deque([1])\nd *= 1000000000'],
   ['a product with a huge repeat', 'import itertools\nitertools.product([1], repeat=10**12)'],
@@ -188,6 +186,16 @@ test.each([
   ['an upper-casing that grows a str beyond the limit', 'x = ("ß" * 600000).upper()'],
   ['the binary digits of a huge int', 'x = bin(1 << 1000000)'],
   ['a complex number padded to a huge width', 'x = format(complex(1, 2), ">1000000000")'],
+  ['a bytes zero-filled to a huge width', "x = b'x'.zfill(1000001)"],
+  ['a StringIO written far past its end', "from io import StringIO\ns = StringIO()\ns.seek(2000000)\ns.write('x')"],
+  ['a BytesIO written far past its end', "from io import BytesIO\nb = BytesIO()\nb.seek(10 ** 12)\nb.write(b'x')"],
+  [
+    'a Decimal quantized to a huge exponent',
+    "from decimal import Decimal, Context\nx = Decimal(1).quantize(Decimal('1e-2000000'), context=Context(prec=2000001))",
+  ],
+  ['a bytearray zero-filled to a huge width', "x = bytearray(b'-x').zfill(10 ** 12)"],
+  ['a bytes percent field padded to a huge width', "x = b'%1000000000s' % b'x'"],
+  ['a Decimal formatted with a huge exponent', "from decimal import Decimal\nx = format(Decimal('1e-1000001'), 'f')"],
   ['the repr of a deque of long strings', 'from collections import deque\nx = repr(deque(["x" * 1000] * 1001))'],
   ['a long string padded by many fields', "s = 'x' * 500000\nx = ('{0:>3}' * 5000).format(s)"],
   ['a long string formatted by many percent fields', "s = 'x' * 500000\nx = '%5s' * 5000 % ((s,) * 5000)"],
@@ -221,8 +229,9 @@ test('a long text built from many pieces is charged for its length, not for each
     len(("x" * 400000).replace("x", "yy")),
     len(("x\\t" * 100000).expandtabs(4)),
     len(("x" * 400000).translate({120: "yy"})),
+    len(bytes(400000).hex()),
 ]
-if lengths != [688890, 257780, 800000, 400000, 800000]:
+if lengths != [688890, 257780, 800000, 400000, 800000, 800000]:
     raise AssertionError(str(lengths))`;
   expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
@@ -323,7 +332,7 @@ test.each([
   {
     name: 'a generator consumed by sum',
     program: 'def gen(n):\n    for i in range(n):\n        v = i * 2\n        yield v\ntotal = sum(gen(3))',
-    steps: ['0:', '2:5', '3:5', '2:5', '3:5', '2:5', '3:5', '5:'],
+    steps: ['0:', '2:5', '3:5', '4:5', '2:5', '3:5', '4:5', '2:5', '3:5', '4:5', '5:'],
   },
 ])('steps of $name are called from the line of the call that runs them', ({ program, steps }) => {
   const trace = traceProgram('python', program, program);

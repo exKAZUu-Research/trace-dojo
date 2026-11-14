@@ -2,11 +2,11 @@ import { LIMITS } from '../../interpreter/limits';
 import { pyRepr } from '../conversions';
 import { builtin } from '../define';
 import { builtinMemberValue } from '../enums';
-import { runLibrarySource } from '../librarySource';
-import { registerHiddenAttributes, registerModule, registerUnsupportedAttributes } from '../modules';
+import { registerModule, registerUnsupportedAttributes } from '../modules';
 import { floatRepr, intToString, parseIntText, toIndex } from '../numbers';
 import { callValue, getAttribute, isTruthy, toArray } from '../objects';
 import { currentRuntime } from '../runtimeContext';
+import { runModuleSource } from '../sourceModules';
 import { repeatText } from '../stringBuilder';
 import { iterStr } from '../strings';
 import {
@@ -19,12 +19,14 @@ import {
   newTuple,
   None,
   pyError,
+  stringValue,
   typeError,
   typeName,
+  unbox,
   valueError,
 } from '../types';
 import { PyDict, PyError, type PyInstance, PyList, type PyObject, PyTuple, type PyValue } from '../values';
-import { JSON_SOURCE } from './jsonSource';
+import { JSON_MODULE_SOURCE, JSON_SOURCE } from './jsonSource';
 
 interface DumpOptions {
   indent?: string;
@@ -99,7 +101,7 @@ function write(state: EncodeState, text: string): void {
 
 function encode(member: PyValue, options: DumpOptions, level: number, state: EncodeState): void {
   currentRuntime().spend();
-  const value = builtinMemberValue(member);
+  const value = builtinMemberValue(unbox(member));
   if (value instanceof PyList || value instanceof PyTuple) return encodeArray(value, options, level, state);
   if (value instanceof PyDict) return encodeObject(value, options, level, state);
   const text = scalarText(value, options, state);
@@ -179,7 +181,7 @@ function writeNewline(options: DumpOptions, depth: number, state: EncodeState): 
 
 /** The text of a dict key, or undefined for a key that `skipkeys` skips. */
 function keyText(member: PyValue, options: DumpOptions): string | undefined {
-  const key = builtinMemberValue(member);
+  const key = builtinMemberValue(unbox(member));
   if (typeof key === 'string') return key;
   if (typeof key === 'number') return floatText(key, options);
   if (key === true) return 'true';
@@ -389,42 +391,54 @@ class Decoder {
 
 registerUnsupportedAttributes('json', {
   __author__: 'json.__author__（作者の情報）',
-  codecs: 'モジュール codecs',
-  decoder: 'モジュール json.decoder',
-  encoder: 'モジュール json.encoder',
-  scanner: 'モジュール json.scanner',
-  detect_encoding: 'json.detect_encoding()（bytes 型）',
 });
 
-registerHiddenAttributes('json', [
-  'INFINITY',
-  'NaN',
-  'NegInf',
-  'PosInf',
-  'encode_basestring',
-  'encode_basestring_ascii',
-]);
+/** The names the Python part defines for itself, which CPython keeps in json.decoder and json.encoder. */
+const PRIVATE_NAMES = new Set(['INFINITY', 'NaN', 'NegInf', 'PosInf', 'encode_basestring', 'encode_basestring_ascii']);
 
-registerModule('json', (runtime) => {
-  const namespace = new Map<string, PyValue>();
-  const encodeAscii = builtin('encode_basestring_ascii', 'one', 1, 1, ([text]) => quoteAlone(text as string, true));
-  const encodeText = builtin('encode_basestring', 'one', 1, 1, ([text]) => quoteAlone(text as string, false));
+registerModule('json', (runtime, moduleNamespace) => {
+  // Encoder and decoder classes retain their implementation globals; public functions use the module's globals.
+  const namespace = new Map<string, PyValue>([['__name__', 'json']]);
+  const encodeAscii = jsonStringEncoder(true);
+  const encodeText = jsonStringEncoder(false);
   for (const [name, value] of [
     ['encode_basestring_ascii', encodeAscii],
     ['encode_basestring', encodeText],
     [
       '_skip_whitespace',
-      builtin('_skip_whitespace', 'expected', 2, 2, ([text, index]) => skipWhitespace(text as string, index)),
+      builtin('_skip_whitespace', 'expected', 2, 2, ([text, index]) => skipWhitespace(textArgument(text), index)),
     ],
     ['_make_scanner', builtin('_make_scanner', 'one', 1, 1, ([decoder]) => makeScanner(decoder, namespace))],
     ['_c_make_encoder', builtin('_c_make_encoder', 'expected', 9, 9, (args) => makeEncoder(args, encodeAscii))],
-    ['dump', unsupportedBuiltin(runtime, 'dump', 'ファイルへの書き込み（json.dump）')],
-    ['load', unsupportedBuiltin(runtime, 'load', 'ファイルからの読み込み（json.load）')],
   ] as const) {
     namespace.set(name, value);
   }
-  return runLibrarySource('json', JSON_SOURCE, namespace);
+  runModuleSource(runtime, namespace, JSON_SOURCE);
+  for (const [name, value] of namespace) {
+    if (!PRIVATE_NAMES.has(name) && (!name.startsWith('_') || name.startsWith('_default_'))) {
+      moduleNamespace.set(name, value);
+    }
+  }
+  for (const name of ['__version__', '__all__']) moduleNamespace.set(name, namespace.get(name) as PyValue);
+  runModuleSource(runtime, moduleNamespace, JSON_MODULE_SOURCE);
+  // A decoder imports json.decoder, whose code imports names from the json module, which hold them only from here on.
+  const decoder = callValue(
+    namespace.get('JSONDecoder') as PyValue,
+    [],
+    new Map([
+      ['object_hook', None],
+      ['object_pairs_hook', None],
+    ])
+  );
+  moduleNamespace.set('_default_decoder', decoder);
+  return new Map();
 });
+
+export function jsonStringEncoder(ensureAscii: boolean): PyValue {
+  return builtin(ensureAscii ? 'encode_basestring_ascii' : 'encode_basestring', 'one', 1, 1, ([text]) =>
+    quoteAlone(textArgument(text), ensureAscii)
+  );
+}
 
 function quoteAlone(text: string, ensureAscii: boolean): string {
   currentRuntime().buildString(text.length);
@@ -432,20 +446,6 @@ function quoteAlone(text: string, ensureAscii: boolean): string {
   currentRuntime().buildString(quoted.length);
   return quoted;
 }
-
-function unsupportedBuiltin(runtime: { unsupported(feature: string): Error }, name: string, feature: string): PyValue {
-  return builtin(
-    name,
-    'expected',
-    0,
-    Number.POSITIVE_INFINITY,
-    () => {
-      throw runtime.unsupported(feature);
-    },
-    { keywords: [] }
-  );
-}
-
 function skipWhitespace(text: string, indexValue: PyValue): bigint {
   const chars = iterStr(text);
   let index = Number(indexValue);
@@ -457,9 +457,9 @@ function skipWhitespace(text: string, indexValue: PyValue): bigint {
 function makeEncoder(args: PyValue[], encodeAscii: PyValue): PyValue {
   const [markers, defaultFn, encoder, indent, keySeparator, itemSeparator, sortKeys, skipKeys, allowNan] = args;
   const options: DumpOptions = {
-    indent: indent === None ? undefined : (indent as string),
-    keySeparator: keySeparator as string,
-    itemSeparator: itemSeparator as string,
+    indent: indent === None ? undefined : (unbox(indent) as string),
+    keySeparator: unbox(keySeparator) as string,
+    itemSeparator: unbox(itemSeparator) as string,
     sortKeys: isTruthy(sortKeys),
     skipKeys: isTruthy(skipKeys),
     allowNan: isTruthy(allowNan),
@@ -479,7 +479,7 @@ function makeEncoder(args: PyValue[], encodeAscii: PyValue): PyValue {
 /** `scanner.make_scanner(decoder)`: decodes one value at an index, raising StopIteration where none starts. */
 function makeScanner(decoder: PyValue, namespace: Map<string, PyValue>): PyValue {
   return builtin('scan_once', 'expected', 2, 2, ([text, index]) => {
-    if (typeof text !== 'string') throw typeError(`first argument must be a string, not ${typeName(text)}`);
+    const source = textArgument(text);
     const hooks: DecodeHooks = {
       objectHook: getAttribute(decoder, 'object_hook'),
       objectPairsHook: getAttribute(decoder, 'object_pairs_hook'),
@@ -489,10 +489,16 @@ function makeScanner(decoder: PyValue, namespace: Map<string, PyValue>): PyValue
       strict: isTruthy(getAttribute(decoder, 'strict')),
       error: namespace.get('JSONDecodeError') as PyValue,
     };
-    const scanner = new Decoder(text, hooks, Number(toIndex(index)));
+    const scanner = new Decoder(source, hooks, Number(toIndex(index)));
     const value = scanner.scanOnce();
     return newTuple([value, BigInt(scanner.position)]);
   });
+}
+
+function textArgument(value: PyValue): string {
+  const text = stringValue(value);
+  if (text === undefined) throw typeError(`first argument must be a string, not ${typeName(value)}`);
+  return text;
 }
 
 export { pyRepr };

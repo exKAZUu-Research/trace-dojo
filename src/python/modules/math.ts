@@ -1,4 +1,5 @@
 import { moduleBuiltin } from '../define';
+import { vectorNorm } from '../floatArithmetic';
 import { floatPower } from '../floatPower';
 import { frexp } from '../hashing';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
@@ -7,10 +8,11 @@ import { floatRepr, intToFloat, toIndex } from '../numbers';
 import { bindValue, callValue, isTruthy, lookupSpecial, toArray } from '../objects';
 import { binaryOp } from '../operators';
 import { currentRuntime } from '../runtimeContext';
+import { gcd } from '../typeNumbers';
 import { newTuple, pyError, typeError, typeName, valueError } from '../types';
-import type { Kwargs, PyValue } from '../values';
+import { type Kwargs, PyInstance, type PyValue } from '../values';
 import { fma, fusedMultiplyAdd } from './mathFma';
-import { fsum } from './mathFsum';
+import { fsum as fsumWith } from './mathFsum';
 import { type GammaResult, lgamma, tgamma } from './mathGamma';
 import { sumprod } from './mathSumprod';
 
@@ -21,12 +23,15 @@ export function realArgument(value: PyValue): number {
   if (typeof value === 'number') return value;
   if (typeof value === 'bigint') return intToFloat(value);
   if (typeof value === 'boolean') return value ? 1 : 0;
-  const special = lookupSpecial(value, '__float__') ?? lookupSpecial(value, '__index__');
-  if (special !== undefined) {
-    const result = callValue(bindValue(special, value), []);
+  if (value instanceof PyInstance && typeof value.primitive === 'number') return value.primitive;
+  const floatSpecial = lookupSpecial(value, '__float__');
+  if (floatSpecial !== undefined) {
+    const result = callValue(bindValue(floatSpecial, value), []);
     if (typeof result === 'number') return result;
-    if (typeof result === 'bigint') return intToFloat(result);
+    if (result instanceof PyInstance && typeof result.primitive === 'number') return result.primitive;
+    throw typeError(`${typeName(value)}.__float__ returned non-float (type ${typeName(result)})`);
   }
+  if (lookupSpecial(value, '__index__') !== undefined) return intToFloat(toIndex(value));
   throw typeError(`must be real number, not ${typeName(value)}`);
 }
 
@@ -143,31 +148,6 @@ function factorial(value: PyValue): bigint {
   return result;
 }
 
-const SMALL_INT = 1n << 64n;
-/** The bits of operand that one remainder step of Euclid's algorithm handles for one unit of the budget. */
-const BITS_PER_OPERATION = 1 << 13;
-
-function gcdOf(a: bigint, b: bigint): bigint {
-  let x = a < 0n ? -a : a;
-  let y = b < 0n ? -b : b;
-  if (x < SMALL_INT && y < SMALL_INT) {
-    while (y) [x, y] = [y, x % y];
-    return x;
-  }
-  // The steps of large operands are too many and too slow to leave uncharged.
-  const bits = Math.max(x.toString(16).length, y.toString(16).length) * 4;
-  let work = 0;
-  while (y) {
-    work += bits;
-    if (work >= BITS_PER_OPERATION) {
-      currentRuntime().spend(Math.floor(work / BITS_PER_OPERATION));
-      work %= BITS_PER_OPERATION;
-    }
-    [x, y] = [y, x % y];
-  }
-  return x;
-}
-
 /**
  * CPython's adaptive-precision integer square root (Modules/mathmodule.c): each step doubles the number of correct
  * bits of `a`, so the whole costs about one division of full size.
@@ -220,54 +200,14 @@ function perm(nValue: PyValue, kValue: PyValue | undefined): bigint {
   return result;
 }
 
-function hypot(values: number[]): number {
-  currentRuntime().scan(values.length);
-  const magnitudes = values.map(Math.abs);
-  let max = 0;
-  for (const magnitude of magnitudes) if (magnitude > max) max = magnitude;
-  return vectorNorm(magnitudes, max);
+/** `math.fsum`: the exact sum of the floats, rounded once. */
+export function fsum(iterable: PyValue): number {
+  return fsumWith(iterable, realArgument);
 }
 
-const DBL_MIN = 2 ** -1022;
-
-/**
- * CPython's vector_norm (Modules/mathmodule.c): the square root of the sum of the squares of non-negative `values`,
- * the largest of which is `max`. The values are scaled by a power of two so that the largest is in [0.5, 1), their
- * squares are summed without loss into `csum` (which starts at 1 so that every addition is of a smaller term) plus
- * the two error sums, and one differential correction is applied to the square root.
- */
-function vectorNorm(values: number[], max: number): number {
-  if (max === Number.POSITIVE_INFINITY) return max;
-  if (values.some((value) => Number.isNaN(value))) return Number.NaN;
-  if (max === 0 || values.length <= 1) return max;
-  const maxExponent = frexp(max).exponent;
-  if (maxExponent < -1023) {
-    // The scale below would overflow, so subnormals are made normal first.
-    return (
-      DBL_MIN *
-      vectorNorm(
-        values.map((value) => value / DBL_MIN),
-        max / DBL_MIN
-      )
-    );
-  }
-  const scale = 2 ** -maxExponent;
-  let csum = 1;
-  let frac1 = 0;
-  let frac2 = 0;
-  const addProduct = (x: number, y: number): void => {
-    const high = x * y;
-    const low = fma(x, y, -high);
-    const sum = csum + high;
-    frac2 += csum - sum + high;
-    csum = sum;
-    frac1 += low;
-  };
-  for (const value of values) addProduct(value * scale, value * scale);
-  let h = Math.sqrt(csum - 1 + (frac1 + frac2));
-  addProduct(-h, h);
-  h += (csum - 1 + (frac1 + frac2)) / (2 * h);
-  return h / scale;
+function hypot(values: number[]): number {
+  currentRuntime().scan(values.length);
+  return vectorNorm(values);
 }
 
 /** CPython's m_remainder (Modules/mathmodule.c), every step of which is exact. */
@@ -348,7 +288,7 @@ function lcm(values: bigint[]): bigint {
     if (result === 0n || value === 0n) return 0n;
     currentRuntime().chargeBigint(result, value);
     const product = result * value;
-    result = (product < 0n ? -product : product) / gcdOf(result, value);
+    result = (product < 0n ? -product : product) / gcd(result, value);
   }
   return result;
 }
@@ -414,14 +354,14 @@ registerModule('math', () => {
     ['gamma', gammaFunction('gamma', tgamma)],
     ['lgamma', gammaFunction('lgamma', lgamma)],
     ['factorial', builtin('factorial', 'one', 1, 1, ([value]) => factorial(value))],
-    ['gcd', builtin('gcd', 'expected', 0, Number.POSITIVE_INFINITY, (args) => gcd(args.map(integerArgument)))],
+    ['gcd', builtin('gcd', 'expected', 0, Number.POSITIVE_INFINITY, (args) => gcdOfAll(args.map(integerArgument)))],
     ['lcm', builtin('lcm', 'expected', 0, Number.POSITIVE_INFINITY, (args) => lcm(args.map(integerArgument)))],
     ['comb', builtin('comb', 'expected', 2, 2, ([n, k]) => comb(n, k))],
     ['perm', builtin('perm', 'expected', 1, 2, ([n, k]) => perm(n, k))],
     ['pow', two('pow', pow)],
     ['hypot', builtin('hypot', 'expected', 0, Number.POSITIVE_INFINITY, (args) => hypot(args.map(realArgument)))],
     ['dist', builtin('dist', 'expected', 2, 2, ([p, q]) => dist(p, q))],
-    ['fsum', builtin('fsum', 'one', 1, 1, ([iterable]) => fsum(iterable, realArgument))],
+    ['fsum', builtin('fsum', 'one', 1, 1, ([iterable]) => fsum(iterable))],
     ['prod', builtin('prod', 'takes', 1, 1, product, { keywords: ['start'] })],
     ['sumprod', builtin('sumprod', 'expected', 2, 2, ([p, q]) => sumprod(p, q))],
     ['isclose', builtin('isclose', 'takes', 2, 2, isclose, { keywords: ['a', 'b', 'rel_tol', 'abs_tol'], named: 2 })],
@@ -450,7 +390,7 @@ function sqrt(x: number): number {
   return Math.sqrt(x);
 }
 
-function log(value: PyValue, base: PyValue | undefined): number {
+export function log(value: PyValue, base: PyValue | undefined): number {
   const numerator = logOf(value, Math.log);
   if (base === undefined) return numerator;
   const denominator = logOf(base, Math.log);
@@ -458,9 +398,9 @@ function log(value: PyValue, base: PyValue | undefined): number {
   return numerator / denominator;
 }
 
-function gcd(values: bigint[]): bigint {
+function gcdOfAll(values: bigint[]): bigint {
   let result = 0n;
-  for (const value of values) result = gcdOf(result, value);
+  for (const value of values) result = gcd(result, value);
   return result;
 }
 
@@ -468,7 +408,7 @@ function dist(p: PyValue, q: PyValue): number {
   const a = toArray(p).map(realArgument);
   const b = toArray(q).map(realArgument);
   if (a.length !== b.length) throw valueError('both points must have the same number of dimensions');
-  return hypot(a.map((value, index) => value - b[index]));
+  return vectorNorm(a.map((value, index) => value - b[index]));
 }
 
 function isInfinite(x: number): boolean {

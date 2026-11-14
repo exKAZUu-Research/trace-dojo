@@ -6,6 +6,7 @@ import { exactParts } from './binaryFloat';
  */
 
 /** The exact decimal digits of a finite positive double, and the power of ten of the first digit. */
+// code-gauge-allow duplicateLines 16 -- Numeric conversions preserve their reference language's zero representation and coefficient normalization.
 function exactDigits(value: number): { digits: string; exponent: number } {
   const { mantissa, exponent } = exactParts(value);
   let digits: string;

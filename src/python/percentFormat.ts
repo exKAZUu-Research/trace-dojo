@@ -5,7 +5,17 @@ import { callValue, getItem, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { repeatText } from './stringBuilder';
 import { iterStr, strLength } from './strings';
-import { exceptionClassNamed, floatClass, intClass, None, pyError, typeError, typeName, valueError } from './types';
+import {
+  exceptionClassNamed,
+  floatClass,
+  intClass,
+  None,
+  pyError,
+  typeError,
+  typeName,
+  unbox,
+  valueError,
+} from './types';
 import { PyComplex, PyError, PyInstance, PyTuple, type PyValue } from './values';
 
 const MAX_SSIZE = (1n << 63n) - 1n;
@@ -13,13 +23,15 @@ const MAX_INT = (1n << 31n) - 1n;
 
 /** The `%` operator on a string. */
 export function formatPercent(template: string, argument: PyValue): string {
-  const args = argument instanceof PyTuple && !(argument instanceof PyInstance) ? [...argument.items] : [argument];
-  const isTupleArgument = argument instanceof PyTuple;
-  const mapping =
-    !isTupleArgument && typeof argument !== 'string' && lookupSpecial(argument, '__getitem__') !== undefined
-      ? argument
-      : undefined;
-  const reader = new TemplateReader(iterStr(template), args, mapping);
+  const isMapping =
+    !(argument instanceof PyTuple) &&
+    typeof unbox(argument) !== 'string' &&
+    lookupSpecial(argument, '__getitem__') !== undefined;
+  return renderPercent(new TemplateReader(iterStr(template), argument, isMapping), 'string');
+}
+
+/** Formats a template with its reader, raising CPython's error for arguments the template leaves unused. */
+export function renderPercent(reader: TemplateReader, kind: 'string' | 'bytes'): string {
   const runtime = currentRuntime();
   let result = '';
   while (!reader.done) {
@@ -27,23 +39,29 @@ export function formatPercent(template: string, argument: PyValue): string {
     result += char === '%' ? reader.convert() : char;
     runtime.ensureStringFits(result.length);
   }
-  if (reader.hasUnusedArguments && mapping === undefined) {
-    throw typeError('not all arguments converted during string formatting');
+  if (reader.hasUnusedArguments && reader.mapping === undefined) {
+    throw typeError(`not all arguments converted during ${kind} formatting`);
   }
   runtime.buildString(result.length);
   return result;
 }
 
 /** Reads a `%` template, taking the arguments its conversion specifiers consume. */
-class TemplateReader {
+export class TemplateReader {
   private index = 0;
   private nextArgument = 0;
+  private readonly args: readonly PyValue[];
+  /** The mapping that `%(key)` specifiers look their values up in, when the argument is one. */
+  readonly mapping: PyValue | undefined;
 
   constructor(
     private readonly chars: readonly string[],
-    private readonly args: readonly PyValue[],
-    private readonly mapping: PyValue | undefined
-  ) {}
+    argument: PyValue,
+    isMapping: boolean
+  ) {
+    this.args = argument instanceof PyTuple && !(argument instanceof PyInstance) ? [...argument.items] : [argument];
+    this.mapping = isMapping ? argument : undefined;
+  }
 
   get done(): boolean {
     return this.index >= this.chars.length;
@@ -86,7 +104,29 @@ class TemplateReader {
     this.index++;
     if (type === undefined) throw valueError('incomplete format');
     value ??= this.take();
-    return convertOne(type, value, flags, width === 0n ? '' : String(width), precision, this.index - 1);
+    return this.convertSpecifier(type, value, flags, width === 0n ? '' : String(width), precision, this.index - 1);
+  }
+
+  /** Converts the value of one specifier, as bytes formatting does differently for some types. */
+  protected convertSpecifier(
+    type: string,
+    value: PyValue,
+    flags: string,
+    width: string,
+    precision: number | undefined,
+    position: number
+  ): string {
+    const converted = 'eEfFgG'.includes(type) ? this.floatValue(value) : value;
+    return convertOne(type, converted, flags, width, precision, position);
+  }
+
+  protected floatValue(value: PyValue): number {
+    return percentFloat(value, 'must be real number');
+  }
+
+  /** The key of a `%(key)` specifier, which bytes formatting looks up as bytes. */
+  protected mappingKey(key: string): PyValue {
+    return key;
   }
 
   private peek(): string | undefined {
@@ -111,7 +151,7 @@ class TemplateReader {
       if (depth > 0) key += c;
     }
     if (depth > 0) throw valueError('incomplete format key');
-    return getItem(this.mapping, key);
+    return getItem(this.mapping, this.mappingKey(key));
   }
 
   /** Reads a width or a precision: digits, or `*` taking it from the arguments as the C type CPython stores it in. */
@@ -169,7 +209,7 @@ function convertOne(
   if ('eEfFgG'.includes(type)) {
     const { zero, align, sign, alternate } = conversion;
     const precisionText = `.${precision ?? 6}`;
-    return pyFormat(toFloat(value), `${zero ? '0=' : align}${sign}${alternate}${width}${precisionText}${type}`);
+    return pyFormat(value, `${zero ? '0=' : align}${sign}${alternate}${width}${precisionText}${type}`);
   }
   throw valueError(
     `unsupported format character '${type}' (0x${(type.codePointAt(0) as number).toString(16)}) at index ${position}`
@@ -181,19 +221,27 @@ function textOf(type: string, value: PyValue, precision: number | undefined): st
   return precision === undefined ? text : truncateStr(text, precision);
 }
 
-function charOf(value: PyValue): string {
-  if (typeof value === 'string') {
-    currentRuntime().scan(value.length);
-    const length = strLength(value);
+function charOf(argument: PyValue): string {
+  const unboxed = unbox(argument);
+  if (typeof unboxed === 'string') {
+    currentRuntime().scan(unboxed.length);
+    const length = strLength(unboxed);
     if (length !== 1) throw typeError(`%c requires an int or a unicode character, not a string of length ${length}`);
-    return value;
+    return unboxed;
   }
-  if (typeof value === 'bigint' || typeof value === 'boolean') {
-    const code = BigInt(value);
+  if (
+    typeof unboxed === 'bigint' ||
+    typeof unboxed === 'boolean' ||
+    lookupSpecial(argument, '__index__') !== undefined
+  ) {
+    const code = toIndex(argument);
+    if (code > MAX_SSIZE || code < -MAX_SSIZE - 1n) {
+      throw pyError('OverflowError', 'Python int too large to convert to C long');
+    }
     if (code < 0n || code > 0x10_ff_ffn) throw pyError('OverflowError', '%c arg not in range(0x110000)');
     return String.fromCodePoint(Number(code));
   }
-  throw typeError(`%c requires an int or a unicode character, not ${typeName(value)}`);
+  throw typeError(`%c requires an int or a unicode character, not ${typeName(argument)}`);
 }
 
 /** Lays an integer out as CPython's `_PyUnicode_FormatLong` and `unicode_format_arg_output` do. */
@@ -215,14 +263,15 @@ function padNumber(signAndPrefix: string, digits: string, { align, zero, width }
 
 /** The integer a `%d`-like conversion formats, as mainformatlong of CPython's unicodeobject.c converts it. */
 function toInteger(type: string, value: PyValue): bigint {
-  if (typeof value === 'bigint') return value;
-  if (typeof value === 'boolean') return value ? 1n : 0n;
+  const unboxed = unbox(value);
+  if (typeof unboxed === 'bigint') return unboxed;
+  if (typeof unboxed === 'boolean') return unboxed ? 1n : 0n;
   const isDecimal = 'diu'.includes(type);
   const wrongType = (): Error =>
     typeError(`%${type} format: ${isDecimal ? 'a real number' : 'an integer'} is required, not ${typeName(value)}`);
   if (!isNumber(value)) throw wrongType();
   try {
-    return isDecimal ? (callValue(intClass, [value]) as bigint) : toIndex(value);
+    return isDecimal ? (unbox(callValue(intClass, [value])) as bigint) : toIndex(value);
   } catch (error) {
     if (error instanceof PyError && error.exception.cls.isSubclassOf(exceptionClassNamed('TypeError')))
       throw wrongType();
@@ -231,17 +280,19 @@ function toInteger(type: string, value: PyValue): bigint {
 }
 
 /** The float a `%f`-like conversion formats, as PyFloat_AsDouble converts it. */
-function toFloat(value: PyValue): number {
-  if (typeof value === 'string' || !isNumber(value) || value instanceof PyComplex) {
-    throw typeError(`must be real number, not ${typeName(value)}`);
+export function percentFloat(value: PyValue, message: string): number {
+  const unboxed = unbox(value);
+  if (typeof unboxed === 'string' || !isNumber(value) || unboxed instanceof PyComplex) {
+    throw typeError(`${message}, not ${typeName(value)}`);
   }
-  return callValue(floatClass, [value]) as number;
+  return unbox(callValue(floatClass, [value])) as number;
 }
 
 /** CPython's PyNumber_Check: a value with an int, index, or float conversion, or a complex number. */
 function isNumber(value: PyValue): boolean {
-  if (typeof value === 'number' || typeof value === 'bigint' || typeof value === 'boolean') return true;
-  if (typeof value === 'string' || value === None) return false;
-  if (value instanceof PyComplex) return true;
+  const unboxed = unbox(value);
+  if (typeof unboxed === 'number' || typeof unboxed === 'bigint' || typeof unboxed === 'boolean') return true;
+  if (typeof unboxed === 'string' || value === None) return false;
+  if (unboxed instanceof PyComplex) return true;
   return ['__index__', '__int__', '__float__'].some((name) => lookupSpecial(value, name) !== undefined);
 }

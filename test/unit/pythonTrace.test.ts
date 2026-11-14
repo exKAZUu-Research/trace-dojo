@@ -186,7 +186,7 @@ p = pairwise(gen())
 first = next(p)[0]
 second = next(p)[1]
 second.forward()`,
-    expected: ['', '', '0,0 1,0', '0,0 2,0', '0,0 2,1'],
+    expected: ['', '', '0,0', '0,0 1,0', '0,0 1,0', '0,0 2,0', '0,0 2,1'],
   },
 ])('a turtle that only $name reaches stays visible', ({ program, expected }) => {
   const trace = traceProgram('python', program, program);
@@ -233,6 +233,44 @@ merged = list(heapq.merge([1], [2], key=lambda v: -v))`;
     [9, []],
   ]);
   expect(trace.traceItems.at(-1)?.vars).toMatchObject({ merged: [2, 1] });
+});
+
+test('a function called from a comprehension or generator expression counts one call, as in a loop', () => {
+  const program = `def sq(v):
+    r = v * v
+    return r
+a = [sq(i) for i in range(2)]
+b = {k: sq(k) for k in range(1)}
+g = sum(sq(j) for j in range(1))`;
+  const trace = traceProgram('python', program, program);
+  expect(trace.traceItems.map(({ line, callLines }) => [line, callLines])).toEqual([
+    [0, []],
+    [2, [4]],
+    [2, [4]],
+    [4, []],
+    [2, [5]],
+    [5, []],
+    [2, [6]],
+    [6, []],
+  ]);
+});
+
+test("showing a value whose repr reaches the program's own __repr__ runs none of its code", () => {
+  const program = `class Obj:
+    def __repr__(self):
+        print('repr called')
+        return 'Obj'
+e = ValueError(Obj())
+x = 1
+print('end')`;
+  const trace = traceProgram('python', program, program);
+  expect(trace.traceItems.map(({ line, callLines }) => [line, callLines])).toEqual([
+    [0, []],
+    [5, []],
+    [6, []],
+    [7, []],
+  ]);
+  expect(trace.stdout).toBe('end\n');
 });
 
 test('integers a number cannot hold exactly keep every digit in the variables', () => {
@@ -371,3 +409,29 @@ function varsOf(language: 'java' | 'python', program: string): unknown[] {
     Object.fromEntries(Object.entries(vars).map(([name, value]) => [name.replace(/^self\./, 'this.'), value]))
   );
 }
+
+test('bare yield statements record a step on resumption like JavaScript generators', () => {
+  const python = `def gen():
+    a = 1
+    yield a
+    b = 2
+    yield b
+
+g = gen()
+x = next(g)
+y = next(g)
+print(x, y)`;
+  const javascript = `function* gen() {
+  let a = 1;
+  yield a;
+  let b = 2;
+  yield b;
+}
+const g = gen();
+const x = g.next().value;
+const y = g.next().value;
+console.log(x, y);`;
+  const lines = traceProgram('python', python, python).traceItems.map(({ line }) => line);
+  expect(lines).toEqual([0, 7, 2, 8, 3, 4, 9, 10]);
+  expect(lines).toEqual(traceProgram('javascript', javascript, javascript).traceItems.map(({ line }) => line));
+});

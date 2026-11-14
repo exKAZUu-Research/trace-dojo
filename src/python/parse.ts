@@ -1,10 +1,16 @@
+import type { Node } from '@willbooster/web-tree-sitter';
+
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../interpreter/traceAnnotations';
 import { commentTokens, findSyntaxErrors, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Module } from './ast';
+import { findBlockNestingError } from './blockNesting';
 import { findFirstSyntaxError } from './headerColons';
+import { deepNestingError, isHostStackOverflow } from './hostStack';
 import { findIndentationError, logicalLines } from './indentation';
 import { ProgramConverter } from './programConverter';
+import { currentRuntime, runningProgram } from './runtimeContext';
+import { SyntaxStorage } from './syntaxStorage';
 
 const parser = await loadParser('@willbooster/tree-sitter-python/tree-sitter-python.wasm');
 
@@ -20,22 +26,126 @@ const MISSING_TOKEN_NAMES: Record<string, string> = {
  * Parses a module, throwing a `CompileError` for the errors CPython reports before running and for unsupported syntax.
  *
  * @param trace Makes the statements that record steps report their rows, for a model program.
+ * @param library Parses a standard library module written in Python, whose imports this grader checks when they run.
  */
-export function parsePython(original: string, trace?: TraceOptions): Module {
-  const source = normalizeIdentifiers(original);
-  const lines = logicalLines(source);
-  const indentationError = findIndentationError(source, lines);
+export function parsePython(source: string, trace?: TraceOptions, library = false): Module {
+  return parseModule(source, trace, { library, namesInLocals: false });
+}
+
+/** Parses code that `exec`, `eval`, or `compile` runs, which starts with the `__future__` features it inherits. */
+export function parseDynamicCode(
+  source: string,
+  futureFeatures: readonly string[] = [],
+  allowsTopLevelAwait = false,
+  optimize = 0
+): Module {
+  return parseModule(source, undefined, {
+    library: false,
+    namesInLocals: true,
+    futureFeatures,
+    allowsTopLevelAwait,
+    optimize,
+  });
+}
+
+function parseModule(
+  original: string,
+  trace: TraceOptions | undefined,
+  {
+    library,
+    namesInLocals,
+    futureFeatures = [],
+    allowsTopLevelAwait = false,
+    optimize = 0,
+  }: {
+    library: boolean;
+    namesInLocals: boolean;
+    futureFeatures?: readonly string[];
+    allowsTopLevelAwait?: boolean;
+    optimize?: number;
+  }
+): Module {
+  const source = library ? original : normalizeIdentifiers(original);
+  const { lines, limitError } = library ? { lines: [], limitError: undefined } : logicalLines(source);
+  const indentationError = library ? undefined : findIndentationError(source, lines, limitError);
   if (indentationError) {
     const first = findFirstSyntaxError(source, lines, syntaxErrorsOf, indentationError);
     throw new CompileError(first ?? [indentationError.diagnostic]);
   }
   try {
-    return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) =>
-      new ProgramConverter(source, trace).convert(root)
-    );
+    return parseSourceModule(source, trace, { library, namesInLocals, futureFeatures, allowsTopLevelAwait, optimize });
   } catch (error) {
-    const first = error instanceof CompileError ? findFirstSyntaxError(source, lines, syntaxErrorsOf) : undefined;
-    throw first ? new CompileError(first) : error;
+    if (!library && error instanceof CompileError) {
+      const first = findFirstSyntaxError(source, lines, syntaxErrorsOf);
+      if (first) throw new CompileError(first);
+    }
+    // CPython parses up to thousands of nested levels, which converting and checking here recurse through.
+    if (!isHostStackOverflow(error)) throw error;
+    const row = withPythonTree(source, (root) => deepestNode(root).row);
+    throw new CompileError([{ row, message: deepNestingError().message }]);
+  }
+}
+
+function parseSourceModule(
+  source: string,
+  trace: TraceOptions | undefined,
+  options: {
+    library: boolean;
+    namesInLocals: boolean;
+    futureFeatures: readonly string[];
+    allowsTopLevelAwait: boolean;
+    optimize: number;
+  }
+): Module {
+  const { library, namesInLocals, futureFeatures, allowsTopLevelAwait, optimize } = options;
+  return parseSource(
+    parser,
+    source,
+    MISSING_TOKEN_NAMES,
+    (root) => {
+      const converter = new ProgramConverter(
+        source,
+        trace,
+        namesInLocals,
+        library,
+        futureFeatures,
+        allowsTopLevelAwait,
+        optimize
+      );
+      if (namesInLocals && runningProgram()) converter.syntaxStorage = new SyntaxStorage(currentRuntime());
+      const module = converter.convert(root);
+      const nestingError = library ? undefined : findBlockNestingError(root);
+      if (nestingError) throw new CompileError([nestingError]);
+      // The standard library's sources, which are known to nest little, skip the walks that measure the nesting.
+      const parsed = library ? { ...module, source } : { ...module, source, nestingDepth: deepestNode(root).depth };
+      return converter.syntaxStorage?.account(parsed, true) ?? parsed;
+    },
+    // Past the deepest nesting CPython's parser and compiler accept, which a long chain such as `a.b.c...` reaches,
+    // converting would only take long before the host's stack ran out.
+    { maxNestingDepth: library ? Number.POSITIVE_INFINITY : 24_000, tooDeepMessage: deepNestingError().message }
+  );
+}
+
+/** The depth of the deepest node of a syntax tree, and its row. */
+function deepestNode(root: Node): { depth: number; row: number } {
+  const cursor = root.walk();
+  let deepest = { depth: 0, row: 0 };
+  // The cursor's own `currentDepth` takes time in proportion to the depth, which deep nesting makes quadratic.
+  let depth = 0;
+  try {
+    for (;;) {
+      if (depth > deepest.depth) deepest = { depth, row: cursor.startPosition.row };
+      if (cursor.gotoFirstChild()) {
+        depth++;
+        continue;
+      }
+      while (!cursor.gotoNextSibling()) {
+        if (!cursor.gotoParent()) return deepest;
+        depth--;
+      }
+    }
+  } finally {
+    cursor.delete();
   }
 }
 
@@ -112,4 +222,15 @@ const PYTHON_ANNOTATION_PATTERN = /#[ \t]*atomic[ \t]*$/;
 /** The `# atomic` annotations of a module, read from its comment tokens. */
 export function findPythonTraceAnnotations(source: string): TraceAnnotation[] {
   return traceAnnotationsIn(commentTokens(parser, source), PYTHON_ANNOTATION_PATTERN);
+}
+
+/** Parses source text and hands its syntax tree to `use` while the tree is alive. */
+export function withPythonTree<T>(source: string, use: (root: Node) => T): T {
+  const tree = parser.parse(source);
+  if (!tree) throw new Error('The Python parser returned no tree');
+  try {
+    return use(tree.rootNode);
+  } finally {
+    tree.delete();
+  }
 }

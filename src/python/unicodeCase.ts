@@ -193,8 +193,8 @@ export function isLowerText(text: string): boolean {
 
 /** `str.istitle()`: uppercase and titlecase characters only start words, lowercase ones only follow cased ones. */
 export function isTitleText(text: string): boolean {
-  let cased = false;
   let previousCased = false;
+  let cased = false;
   const complete = everyCode(text, (code) => {
     const isCapital = isUpperCode(code) || isTitleCode(code);
     if (isCapital || isLowerCode(code)) {
@@ -207,6 +207,30 @@ export function isTitleText(text: string): boolean {
     return true;
   });
   return complete && cased;
+}
+
+/** Whether a text is titlecased: uppercase only after uncased characters and lowercase only after cased ones. */
+export function isTitleSequence<T>(
+  chars: Iterable<T>,
+  isUpper: (char: T) => boolean,
+  isLower: (char: T) => boolean
+): boolean {
+  let previousCased = false;
+  let sawCased = false;
+  for (const char of chars) {
+    if (isUpper(char)) {
+      if (previousCased) return false;
+      previousCased = true;
+      sawCased = true;
+    } else if (isLower(char)) {
+      if (!previousCased) return false;
+      previousCased = true;
+      sawCased = true;
+    } else {
+      previousCased = false;
+    }
+  }
+  return sawCased;
 }
 
 /**

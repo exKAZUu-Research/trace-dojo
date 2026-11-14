@@ -1,24 +1,51 @@
-// code-gauge-allow-file fileNcss 432 -- The methods and attributes of the builtin types it defines belong together.
-import { isSubclassOfClass } from './builtins';
-import { pyRepr } from './conversions';
+// code-gauge-allow-file fileNcss 563 -- The methods and attributes of the builtin types it defines belong together.
+import { pyRepr, pyStr } from './conversions';
 import { method } from './define';
-import { defineGetSet } from './descriptors';
 import { pyHash } from './hashing';
-import { callValue, getAttributeOrUndefined } from './objects';
+import { definePythonLevelNew } from './instances';
+import { defineProperty } from './modules/numberSupport';
+import {
+  attributeError,
+  attributeName,
+  callValue,
+  getAttribute,
+  getIterator,
+  isTruthy,
+  setAttribute,
+  toArray,
+} from './objects';
 import { equals } from './operators';
 import { currentRuntime } from './runtimeContext';
+import { genericClass, PyTypeParam, PyTypingAlias } from './typeParams';
 import {
   builtinClass,
   classOf,
+  defineMethod,
   Ellipsis,
   newList,
   newTuple,
   None,
   noneClass,
   NotImplemented,
+  objectClass,
+  stringValue,
+  tupleClass,
+  typeClass,
   typeError,
 } from './types';
-import { type Kwargs, PyBuiltinFunction, PyClass, PyFunction, PyList, PyOpaque, PyTuple, type PyValue } from './values';
+import { cachedTyping } from './typingCache';
+import {
+  type Kwargs,
+  PyBuiltinFunction,
+  PyClass,
+  PyError,
+  PyFunction,
+  PyInstance,
+  PyList,
+  PyOpaque,
+  PyTuple,
+  type PyValue,
+} from './values';
 
 /**
  * The objects of type hints: `list[int]` (types.GenericAlias), `int | str` (typing.Union), and the aliases and special
@@ -32,6 +59,8 @@ export interface AliasData {
   name?: string;
   /** Whether calling the alias creates an instance of its origin. */
   inst?: boolean;
+  /** Whether a types.GenericAlias is unpacked, as `*tuple[int]`, which iterating over an alias gives. */
+  starred?: boolean;
 }
 
 /** A typing alias that is not yet specialized, such as `typing.List`. */
@@ -53,24 +82,59 @@ function typingClass(name: string, base?: PyClass): PyClass {
 
 export const genericAliasClass = builtinClass('GenericAlias');
 genericAliasClass.module = 'types';
-genericAliasClass.tpName = 'types.GenericAlias';
+genericAliasClass.typeName = 'types.GenericAlias';
 export const unionClass = typingClass('Union');
-unionClass.tpName = 'typing.Union';
+unionClass.typeName = 'typing.Union';
 // CPython writes typing.Union in C, unlike the other classes of typing.
 unionClass.isWrittenInPython = false;
 export const typingAliasClass = typingClass('_GenericAlias');
 const callableAliasClass = typingClass('_CallableGenericAlias', typingAliasClass);
 const literalAliasClass = typingClass('_LiteralGenericAlias', typingAliasClass);
-const annotatedAliasClass = typingClass('_AnnotatedAlias', typingAliasClass);
+export const annotatedAliasClass = typingClass('_AnnotatedAlias', typingAliasClass);
 export const specialAliasClass = typingClass('_SpecialGenericAlias');
 const tupleTypeClass = typingClass('_TupleType', specialAliasClass);
 const callableTypeClass = typingClass('_CallableType', specialAliasClass);
 export const specialFormClass = typingClass('_SpecialForm');
 const typedCacheSpecialFormClass = typingClass('_TypedCacheSpecialForm', specialFormClass);
-const anyMetaClass = typingClass('_AnyMeta');
-export const forwardRefClass = builtinClass('ForwardRef');
-forwardRefClass.module = 'annotationlib';
-forwardRefClass.isWrittenInPython = true;
+const anyMetaClass = typingClass('_AnyMeta', typeClass);
+anyMetaClass.isBaseType = true;
+
+type AttributeHook = (self: PyOpaque, name: string) => PyValue | undefined;
+type ClassCheck = (self: PyOpaque, cls: PyClass, caller: string) => boolean;
+
+/** Gives the objects of a class the attributes `attribute` computes, as CPython's getattro of the type does. */
+function opaqueAttributes(cls: PyClass, attribute: AttributeHook): void {
+  method(cls, '__getattr__', 'one', 1, 1, (self, [name]) => {
+    const value = attribute(self as PyOpaque, name as string);
+    if (value === undefined) throw attributeError(self, name as string);
+    return value;
+  });
+}
+
+/** Gives the objects of a C type the attributes `attribute` computes, as the type's own `__getattribute__` does. */
+function cTypeAttributes(cls: PyClass, attribute: AttributeHook): void {
+  cls.missingAttribute = (self, name) => attribute(self as PyOpaque, name);
+  defineGetattribute(cls);
+}
+
+/** The `__getattribute__` of a C type that defines its own tp_getattro, which reads attributes as lookup does. */
+function defineGetattribute(cls: PyClass): void {
+  method(cls, '__getattribute__', 'one', 1, 1, (self, [name]) => {
+    name = attributeName(name);
+    return getAttribute(self, name);
+  });
+}
+
+/** Makes `isinstance` and `issubclass` with an object of a class ask `check`. */
+function classChecks(cls: PyClass, check: ClassCheck): void {
+  method(cls, '__instancecheck__', 'one', 1, 1, (self, [value]) =>
+    check(self as PyOpaque, classOf(value), 'isinstance')
+  );
+  method(cls, '__subclasscheck__', 'one', 1, 1, (self, [value]) => {
+    if (!(value instanceof PyClass)) throw typeError('issubclass() arg 1 must be a class');
+    return check(self as PyOpaque, value, 'issubclass');
+  });
+}
 
 const aliasOf = (value: PyValue): AliasData => (value as PyOpaque).data as AliasData;
 const specialOf = (value: PyValue): SpecialAliasData => (value as PyOpaque).data as SpecialAliasData;
@@ -90,7 +154,7 @@ function qualifiedNameOf(value: PyValue): string | undefined {
   if (value instanceof PyClass)
     return value.module === 'builtins' ? value.qualifiedName : `${value.module}.${value.qualifiedName}`;
   if (value instanceof PyFunction)
-    return value.module === 'builtins' ? value.qualifiedName : `${value.module}.${value.qualifiedName}`;
+    return value.module === 'builtins' ? value.qualifiedName : `${pyStr(value.module)}.${value.qualifiedName}`;
   if (value instanceof PyBuiltinFunction) return value.qualifiedName;
   return undefined;
 }
@@ -106,7 +170,8 @@ function genericAliasRepr(alias: AliasData): string {
   const items = alias.args.map((arg) =>
     arg instanceof PyList ? `[${arg.items.map(argumentRepr).join(', ')}]` : argumentRepr(arg)
   );
-  return `${argumentRepr(alias.origin)}[${items.length === 0 ? '()' : items.join(', ')}]`;
+  const text = `${argumentRepr(alias.origin)}[${items.length === 0 ? '()' : items.join(', ')}]`;
+  return alias.starred ? `*${text}` : text;
 }
 
 function typingAliasRepr(self: PyOpaque): string {
@@ -158,6 +223,15 @@ export function isAlias(value: PyValue): value is PyOpaque {
   );
 }
 
+export function unpackedType(value: PyValue): PyValue | undefined {
+  if (value instanceof PyTypingAlias && value.isUnpack) return value.origin;
+  if (!isAlias(value)) return undefined;
+  const { origin, args } = aliasOf(value);
+  return origin instanceof PyOpaque && origin.cls.isSubclassOf(specialFormClass) && formOf(origin).name === 'Unpack'
+    ? args[0]
+    : undefined;
+}
+
 /** Whether `int | other` makes a union, as unionobject.c's is_unionable decides; typing's objects make their own. */
 function isUnionable(value: PyValue): boolean {
   return (
@@ -190,9 +264,15 @@ function convertNone(value: PyValue): PyValue {
 }
 
 /** `typing._type_convert`: None is NoneType and a string is a forward reference. */
-function typeConvert(value: PyValue): PyValue {
+export function typeConvert(value: PyValue): PyValue {
   if (value === None) return noneClass;
-  if (typeof value === 'string') return newForwardRef(value);
+  if (stringValue(value) !== undefined) {
+    const forwardRef = currentRuntime().importModule('annotationlib').dict.get('ForwardRef') as PyValue;
+    const created = callValue(forwardRef, [value]);
+    // As CPython's typing, which compiles the reference at once so that a syntax error shows here.
+    getAttribute(created, '__forward_code__');
+    return created;
+  }
   return value;
 }
 
@@ -305,7 +385,13 @@ method(specialFormClass, '__repr__', 'none', 0, 0, (self) => `typing.${formOf(se
 method(specialFormClass, '__getitem__', 'one', 1, 1, (self, [key]) => {
   const { getitem } = formOf(self);
   if (!getitem) throw typeError(`${pyRepr(self)} is not subscriptable`);
-  return getitem(self as PyOpaque, key);
+  return cachedTyping(
+    'specialForm',
+    self,
+    key,
+    () => getitem(self as PyOpaque, key),
+    classOf(self) === typedCacheSpecialFormClass
+  );
 });
 method(
   specialFormClass,
@@ -318,43 +404,72 @@ method(
   },
   { keywords: [] }
 );
-specialFormClass.opaqueAttribute = (self, name) => {
+const specialFormAttribute: AttributeHook = (self, name) => {
   if (name === '__name__' || name === '_name') return formOf(self).name;
   if (name === '__module__') return 'typing';
   return;
 };
-specialFormClass.subclassCheck = (self, _cls, caller) => {
+const specialFormCheck: ClassCheck = (self, _cls, caller) => {
   throw typeError(`${pyRepr(self)} cannot be used with ${caller}()`);
 };
-typedCacheSpecialFormClass.opaqueAttribute = specialFormClass.opaqueAttribute;
-typedCacheSpecialFormClass.subclassCheck = specialFormClass.subclassCheck;
+for (const cls of [specialFormClass, typedCacheSpecialFormClass]) {
+  opaqueAttributes(cls, specialFormAttribute);
+  classChecks(cls, specialFormCheck);
+}
 
 // Any ---------------------------------------------------------------------------------------------------------------
 
-export const anyType = new PyOpaque(anyMetaClass, 'Any');
-method(anyMetaClass, '__repr__', 'none', 0, 0, () => 'typing.Any');
-method(anyMetaClass, '__getitem__', 'one', 1, 1, () => {
-  throw typeError("type 'Any' is not subscriptable");
+/** `typing.Any`, a class of the metaclass `_AnyMeta`, which programs may derive from but not instantiate. */
+export const anyType = new PyClass('Any', [objectClass], anyMetaClass);
+anyType.mro = [anyType, objectClass];
+anyType.isBaseType = true;
+anyType.module = 'typing';
+definePythonLevelNew(anyType, (cls) => {
+  if (cls === anyType) throw typeError('Any cannot be instantiated');
+  return new PyInstance(cls);
 });
-method(
-  anyMetaClass,
-  '__call__',
-  'expected',
-  0,
-  Number.POSITIVE_INFINITY,
-  () => {
-    throw typeError('Any cannot be instantiated');
-  },
-  { keywords: [] }
+method(anyMetaClass, '__repr__', 'none', 0, 0, (self) =>
+  self === anyType ? 'typing.Any' : `<class '${(self as PyClass).module}.${(self as PyClass).qualifiedName}'>`
 );
-anyMetaClass.opaqueAttribute = (_self, name) => {
-  if (name === '__name__' || name === '__qualname__') return 'Any';
-  if (name === '__module__') return 'typing';
-  return;
-};
-anyMetaClass.subclassCheck = (_self, _cls, caller) => {
-  throw typeError(`typing.Any cannot be used with ${caller}()`);
-};
+method(anyMetaClass, '__instancecheck__', 'one', 1, 1, (self, [value]) => {
+  if (self === anyType) throw typeError('typing.Any cannot be used with isinstance()');
+  return classOf(value).isSubclassOf(self as PyClass);
+});
+method(anyMetaClass, '__subclasscheck__', 'one', 1, 1, (self, [value]) => {
+  if (self === anyType) throw typeError('typing.Any cannot be used with issubclass()');
+  if (!(value instanceof PyClass)) throw typeError('issubclass() arg 1 must be a class');
+  return value.isSubclassOf(self as PyClass);
+});
+
+// Typing objects as bases -------------------------------------------------------------------------------------------
+
+/**
+ * `__mro_entries__` of typing's objects: an alias stands for its origin, followed by Generic unless a later base
+ * brings it, as `_BaseGenericAlias.__mro_entries__` gives them; a union and a special form cannot be bases. Undefined
+ * for other objects.
+ */
+export function typingBaseEntries(base: PyValue, _className: string, bases: readonly PyValue[]): PyValue[] | undefined {
+  if (!(base instanceof PyOpaque)) return undefined;
+  if (base.cls === unionClass || base.cls.isSubclassOf(specialFormClass)) {
+    throw typeError(`Cannot subclass ${pyRepr(base)}`);
+  }
+  let origin: PyValue;
+  if (base.cls.isSubclassOf(specialAliasClass)) origin = specialOf(base).origin;
+  else if (base.cls === annotatedAliasClass) origin = aliasOf(base).args[0];
+  else if (base.cls.isSubclassOf(typingAliasClass)) origin = aliasOf(base).origin;
+  else return undefined;
+  const entries = bases.includes(origin) ? [] : [origin];
+  const later = bases.slice(bases.indexOf(base) + 1);
+  const bringsGeneric = later.some(
+    (other) =>
+      (other instanceof PyOpaque &&
+        (other.cls.isSubclassOf(typingAliasClass) || other.cls.isSubclassOf(specialAliasClass))) ||
+      other instanceof PyTypingAlias ||
+      (other instanceof PyClass && other.isSubclassOf(genericClass))
+  );
+  if (!bringsGeneric) entries.push(genericClass);
+  return entries;
+}
 
 // typing's aliases --------------------------------------------------------------------------------------------------
 
@@ -376,71 +491,73 @@ export function newSpecialAlias(
 
 for (const cls of [specialAliasClass, tupleTypeClass, callableTypeClass]) {
   method(cls, '__repr__', 'none', 0, 0, (self) => `typing.${specialOf(self).name}`);
-  method(
-    cls,
-    '__call__',
-    'expected',
-    0,
-    Number.POSITIVE_INFINITY,
-    (self, args, kwargs) => callAlias(specialOf(self), args, kwargs),
-    { keywords: [] }
-  );
+  defineMethod(cls, '__call__', (self, args, kwargs) => callAlias(specialOf(self), args, kwargs));
   method(cls, '__or__', 'one', 1, 1, (self, [other]) => unionOf([self, other]));
   method(cls, '__ror__', 'one', 1, 1, (self, [other]) => unionOf([other, self]));
-  cls.opaqueAttribute = (self, name) => {
+  opaqueAttributes(cls, (self, name) => {
     const data = specialOf(self);
     if (name === '__origin__') return data.origin;
     if (name === '__name__' || name === '__qualname__' || name === '_name') return data.name;
     if (name === '__module__') return 'typing';
     return;
-  };
-  cls.subclassCheck = (self, cls) => isSubclassOfOrigin(cls, specialOf(self).origin);
+  });
+  classChecks(cls, (self, cls) => isSubclassOfOrigin(cls, specialOf(self).origin));
 }
 
 method(specialAliasClass, '__getitem__', 'one', 1, 1, (self, [key]) => {
-  const data = specialOf(self);
-  let params = tupleItems(key).map((param) => typeCheck(param, 'Parameters to generic types must be types.'));
-  const { nparams, defaults } = data;
-  if (defaults.length > 0 && params.length < nparams && params.length + defaults.length >= nparams) {
-    params = [...params, ...defaults.slice(params.length - nparams + defaults.length)];
-  }
-  if (params.length !== nparams) {
-    if (nparams === 0) throw typeError(`${pyRepr(self)} is not a generic class`);
-    const expected = defaults.length > 0 ? `at least ${nparams - defaults.length}` : String(nparams);
-    throw typeError(
-      `Too ${params.length > nparams ? 'many' : 'few'} arguments for ${pyRepr(self)}; actual ${params.length}, expected ${expected}`
-    );
-  }
-  return newTypingAlias(data.origin, params, data.name, data.inst);
+  return cachedTyping('specialAlias', self, key, () => {
+    const data = specialOf(self);
+    let params = tupleItems(key).map((param) => typeCheck(param, 'Parameters to generic types must be types.'));
+    const { nparams, defaults } = data;
+    if (defaults.length > 0 && params.length < nparams && params.length + defaults.length >= nparams) {
+      params = [...params, ...defaults.slice(params.length - nparams + defaults.length)];
+    }
+    if (params.length !== nparams) {
+      if (nparams === 0) throw typeError(`${pyRepr(self)} is not a generic class`);
+      const expected = defaults.length > 0 ? `at least ${nparams - defaults.length}` : String(nparams);
+      throw typeError(
+        `Too ${params.length > nparams ? 'many' : 'few'} arguments for ${pyRepr(self)}; actual ${params.length}, expected ${expected}`
+      );
+    }
+    return newTypingAlias(data.origin, params, data.name, data.inst);
+  });
 });
 
 method(tupleTypeClass, '__getitem__', 'one', 1, 1, (self, [key]) => {
-  const data = specialOf(self);
-  const items = key instanceof PyTuple && classOf(key).isBuiltin ? [...key.items] : [key];
-  if (items.length === 2 && items[1] === Ellipsis) {
-    return newTypingAlias(
-      data.origin,
-      [typeCheck(items[0], 'Tuple[t, ...]: t must be a type.'), Ellipsis],
-      'Tuple',
-      false
-    );
-  }
-  const params = items.map((item) => typeCheck(item, 'Tuple[t0, t1, ...]: each t must be a type.'));
-  return newTypingAlias(data.origin, params, 'Tuple', false);
+  return cachedTyping('tupleType', self, key, () => {
+    const data = specialOf(self);
+    const items = key instanceof PyTuple && classOf(key).isBuiltin ? [...key.items] : [key];
+    if (items.length === 2 && items[1] === Ellipsis) {
+      return newTypingAlias(
+        data.origin,
+        [typeCheck(items[0], 'Tuple[t, ...]: t must be a type.'), Ellipsis],
+        'Tuple',
+        false
+      );
+    }
+    const params = items.map((item) => typeCheck(item, 'Tuple[t0, t1, ...]: each t must be a type.'));
+    return newTypingAlias(data.origin, params, 'Tuple', false);
+  });
 });
 
 method(callableTypeClass, '__getitem__', 'one', 1, 1, (self, [key]) => {
-  const data = specialOf(self);
-  if (!(key instanceof PyTuple && classOf(key).isBuiltin) || key.items.length !== 2) {
-    throw typeError('Callable must be used as Callable[[arg, ...], result].');
-  }
-  const [parameters, result] = key.items;
-  const returns = typeCheck(result, 'Callable[args, result]: result must be a type.');
-  if (parameters === Ellipsis)
-    return newTypingAlias(data.origin, [Ellipsis, returns], 'Callable', true, callableAliasClass);
-  const items = parameters instanceof PyList ? parameters.items : tupleItems(parameters);
-  const args = items.map((item) => typeCheck(item, 'Callable[[arg, ...], result]: each arg must be a type.'));
-  return newTypingAlias(data.origin, [...args, returns], 'Callable', true, callableAliasClass);
+  const cacheKey =
+    key instanceof PyTuple && key.items[0] instanceof PyList
+      ? newTuple([newTuple(key.items[0].items), ...key.items.slice(1)])
+      : key;
+  return cachedTyping('callableType', self, cacheKey, () => {
+    const data = specialOf(self);
+    if (!(key instanceof PyTuple && classOf(key).isBuiltin) || key.items.length !== 2) {
+      throw typeError('Callable must be used as Callable[[arg, ...], result].');
+    }
+    const [parameters, result] = key.items;
+    const returns = typeCheck(result, 'Callable[args, result]: result must be a type.');
+    if (parameters === Ellipsis)
+      return newTypingAlias(data.origin, [Ellipsis, returns], 'Callable', true, callableAliasClass);
+    const items = parameters instanceof PyList ? parameters.items : tupleItems(parameters);
+    const args = items.map((item) => typeCheck(item, 'Callable[[arg, ...], result]: each arg must be a type.'));
+    return newTypingAlias(data.origin, [...args, returns], 'Callable', true, callableAliasClass);
+  });
 });
 
 /**
@@ -466,44 +583,66 @@ function callAlias(
 
 /** `issubclass(cls, origin)` for the class or abstract base class a typing alias stands for. */
 function isSubclassOfOrigin(cls: PyClass, origin: PyValue): boolean {
-  return origin instanceof PyClass && isSubclassOfClass(cls, origin);
+  return (
+    origin instanceof PyClass &&
+    isTruthy(callValue(currentRuntime().builtins.get('issubclass') as PyValue, [cls, origin]))
+  );
 }
 
 for (const cls of [typingAliasClass, callableAliasClass, literalAliasClass, annotatedAliasClass]) {
   method(cls, '__repr__', 'none', 0, 0, (self) => typingAliasRepr(self as PyOpaque));
-  method(cls, '__getitem__', 'one', 1, 1, (self) => {
-    throw typeError(`${pyRepr(self)} is not a generic class`);
-  });
-  method(
-    cls,
-    '__call__',
-    'expected',
-    0,
-    Number.POSITIVE_INFINITY,
-    (self, args, kwargs) => callAlias({ ...aliasOf(self), origin: originOf(self as PyOpaque) }, args, kwargs),
-    { keywords: [] }
+  method(cls, '__getitem__', 'one', 1, 1, (self, [key]) =>
+    unpackedType(self) instanceof PyTypeParam ? key : substituteAlias(self as PyOpaque, key)
   );
+  defineMethod(cls, '__call__', (self, args, kwargs) => {
+    const result = callAlias({ ...aliasOf(self), origin: originOf(self as PyOpaque) }, args, kwargs);
+    // `_BaseGenericAlias.__call__` records the alias on the instance where it can.
+    try {
+      setAttribute(result, '__orig_class__', self);
+    } catch (error) {
+      if (!(error instanceof PyError)) throw error;
+    }
+    return result;
+  });
   method(cls, '__or__', 'one', 1, 1, (self, [other]) => unionOf([self, other]));
   method(cls, '__ror__', 'one', 1, 1, (self, [other]) => unionOf([other, self]));
+  // The same alias with other arguments; an Annotated alias keeps its metadata.
+  method(cls, 'copy_with', 'one', 1, 1, (self, [params]) => {
+    const alias = aliasOf(self);
+    const items = toArray(params);
+    const { cls } = self as PyOpaque;
+    const args = cls === annotatedAliasClass ? [items[0], ...alias.args.slice(1)] : items;
+    return new PyOpaque(cls, '', { ...alias, args } satisfies AliasData);
+  });
   method(cls, '__eq__', 'one', 1, 1, (self, [other]) => aliasEquals(self, other));
   method(cls, '__hash__', 'none', 0, 0, (self) =>
     pyHash(newTuple([aliasOf(self).origin, newTuple(aliasOf(self).args)]))
   );
-  cls.opaqueAttribute = (self, name) => {
+  // code-gauge-allow functionCognitiveComplexity 20 -- Alias attributes share origin, arguments and unpack state; splitting only moves the cases.
+  opaqueAttributes(cls, (self, name) => {
     const alias = aliasOf(self);
     const isAnnotated = self.cls === annotatedAliasClass;
     if (name === '__origin__') return originOf(self);
+    const unpacked = unpackedType(self);
+    if (name === '__typing_is_unpacked_typevartuple__' && unpacked !== undefined)
+      return unpacked instanceof PyTypeParam && unpacked.kind === 'TypeVarTuple';
+    if (name === '__typing_unpacked_tuple_args__' && unpacked !== undefined) {
+      if (!isAlias(unpacked)) return None;
+      const inner = aliasOf(unpacked);
+      if (inner.origin !== tupleClass) throw typeError('Unpack[...] must be used with a tuple type');
+      return newTuple(inner.args);
+    }
     if (name === '__args__') return newTuple(isAnnotated ? alias.args.slice(0, 1) : alias.args);
-    if (name === '__parameters__') return newTuple([]);
+    if (name === '__parameters__') return newTuple(collectParameters(alias.args));
     if (name === '__metadata__' && isAnnotated) return newTuple(alias.args.slice(1));
     if ((name === '__name__' || name === '__qualname__' || name === '_name') && alias.name !== undefined)
       return alias.name;
     if (name === '__module__') return 'typing';
     return;
-  };
-  cls.subclassCheck = () => {
+  });
+  classChecks(cls, () => {
     throw typeError('Subscripted generics cannot be used with class and instance checks');
-  };
+  });
 }
 
 function aliasEquals(self: PyValue, other: PyValue): PyValue {
@@ -520,9 +659,7 @@ function aliasEquals(self: PyValue, other: PyValue): PyValue {
 // types.GenericAlias ------------------------------------------------------------------------------------------------
 
 method(genericAliasClass, '__repr__', 'none', 0, 0, (self) => genericAliasRepr(aliasOf(self)));
-method(genericAliasClass, '__getitem__', 'one', 1, 1, (self) => {
-  throw typeError(`${pyRepr(self)} is not a generic class`);
-});
+method(genericAliasClass, '__getitem__', 'one', 1, 1, (self, [key]) => substituteAlias(self as PyOpaque, key));
 method(
   genericAliasClass,
   '__call__',
@@ -539,6 +676,7 @@ method(genericAliasClass, '__eq__', 'one', 1, 1, (self, [other]) => {
   const a = aliasOf(self);
   const b = aliasOf(other);
   return (
+    Boolean(a.starred) === Boolean(b.starred) &&
     equals(a.origin, b.origin) &&
     a.args.length === b.args.length &&
     a.args.every((arg, index) => equals(arg, b.args[index]))
@@ -571,29 +709,42 @@ const GENERIC_ALIAS_OWN = new Set([
   '__copy__',
   '__deepcopy__',
 ]);
-genericAliasClass.opaqueAttribute = (self, name) => {
+const genericAliasAttribute: AttributeHook = (self, name) => {
   const alias = aliasOf(self);
   if (name === '__origin__') return alias.origin;
   if (name === '__args__') return newTuple(alias.args);
-  if (name === '__parameters__') return newTuple([]);
-  if (name === '__unpacked__') return false;
-  if (name === '__typing_unpacked_tuple_args__') return None;
+  if (name === '__parameters__') return newTuple(collectParameters(alias.args));
+  if (name === '__unpacked__') return Boolean(alias.starred);
+  if (name === '__typing_unpacked_tuple_args__') {
+    return alias.starred && alias.origin === tupleClass ? newTuple(alias.args) : None;
+  }
   if (GENERIC_ALIAS_OWN.has(name)) return;
-  return getAttributeOrUndefined(alias.origin, name);
+  return getAttribute(alias.origin, name);
 };
-genericAliasClass.dirNames = (self) => [
-  ...currentRuntime().dirNames(aliasOf(self).origin),
-  '__origin__',
-  '__args__',
-  '__unpacked__',
-  '__parameters__',
-  '__typing_unpacked_tuple_args__',
-  '__mro_entries__',
-];
-method(genericAliasClass, '__mro_entries__', 'one', 1, 1, (self) => newTuple([aliasOf(self).origin]));
-genericAliasClass.subclassCheck = (_self, _cls, caller) => {
+const genericAliasCheck: ClassCheck = (_self, _cls, caller) => {
   throw typeError(`${caller}() argument 2 cannot be a parameterized generic`);
 };
+cTypeAttributes(genericAliasClass, genericAliasAttribute);
+classChecks(genericAliasClass, genericAliasCheck);
+method(genericAliasClass, '__dir__', 'none', 0, 0, (self) => {
+  const names = toArray(callValue(currentRuntime().builtins.get('dir') as PyValue, [aliasOf(self).origin]));
+  return newList([
+    ...names,
+    '__origin__',
+    '__args__',
+    '__unpacked__',
+    '__parameters__',
+    '__typing_unpacked_tuple_args__',
+    '__mro_entries__',
+  ]);
+});
+method(genericAliasClass, '__iter__', 'none', 0, 0, (self) =>
+  getIterator(newTuple([new PyOpaque(genericAliasClass, '', { ...aliasOf(self), starred: true } satisfies AliasData)]))
+);
+method(genericAliasClass, '__mro_entries__', 'one', 1, 1, (self) => newTuple([aliasOf(self).origin]));
+method(genericAliasClass, '__reduce__', 'none', 0, 0, (self) =>
+  newTuple([genericAliasClass, newTuple([aliasOf(self).origin, newTuple(aliasOf(self).args)])])
+);
 
 // collections.abc.Callable[...] -----------------------------------------------------------------------------------
 
@@ -622,8 +773,8 @@ method(callableGenericAliasClass, '__repr__', 'none', 0, 0, (self) => {
   const parameters = alias.args.slice(0, -1).map(typeRepr).join(', ');
   return `collections.abc.Callable[[${parameters}], ${typeRepr(alias.args.at(-1) as PyValue)}]`;
 });
-callableGenericAliasClass.opaqueAttribute = genericAliasClass.opaqueAttribute;
-callableGenericAliasClass.subclassCheck = genericAliasClass.subclassCheck;
+opaqueAttributes(callableGenericAliasClass, genericAliasAttribute);
+classChecks(callableGenericAliasClass, genericAliasCheck);
 
 function isParameterExpression(value: PyValue): boolean {
   return value === Ellipsis || value instanceof PyList;
@@ -650,19 +801,22 @@ method(unionClass, '__hash__', 'none', 0, 0, (self) => {
 for (const [name, get] of [
   ['__args__', (self: PyValue) => newTuple((self as PyOpaque).data as PyValue[])],
   ['__origin__', () => unionClass],
-  ['__parameters__', () => newTuple([])],
+  ['__parameters__', (self: PyValue) => newTuple(collectParameters((self as PyOpaque).data as PyValue[]))],
   ['__name__', () => 'Union'],
   ['__qualname__', () => 'Union'],
 ] as const) {
-  defineGetSet(unionClass, name, get);
+  defineProperty(unionClass, name, get);
 }
-method(unionClass, '__getitem__', 'one', 1, 1, (self) => {
-  throw typeError(`${pyRepr(self)} is not a generic class`);
+method(unionClass, '__getitem__', 'one', 1, 1, (self, [key]) => {
+  const members = (self as PyOpaque).data as PyValue[];
+  const map = substitutionOf(self, collectParameters(members), key);
+  return unionOf(members.map((member) => substituted(member, map)));
 });
 method(unionClass, '__mro_entries__', 'one', 1, 1, (self) => {
   throw typeError(`Cannot subclass ${pyRepr(self)}`);
 });
 method(unionClass, '__class_getitem__', 'one', 1, 1, (_owner, [key]) => unionGetItem(key), { binding: 'class' });
+defineGetattribute(unionClass);
 unionClass.construct = () => {
   throw typeError("cannot create 'typing.Union' instances");
 };
@@ -674,27 +828,10 @@ export function unionGetItem(key: PyValue): PyValue {
   return unionOf(items.map(typeConvert));
 }
 
-// ForwardRef --------------------------------------------------------------------------------------------------------
-
-/** A forward reference to `text`, which an annotation of `owner`'s body read as FORWARDREF names. */
-export function newForwardRef(text: string, owner?: PyClass): PyOpaque {
-  return new PyOpaque(forwardRefClass, text, owner);
-}
-
-method(forwardRefClass, '__repr__', 'none', 0, 0, (self) => {
-  const { text, data: owner } = self as PyOpaque;
-  return owner === undefined
-    ? `ForwardRef(${pyRepr(text)})`
-    : `ForwardRef(${pyRepr(text)}, is_class=True, owner=${pyRepr(owner as PyClass)})`;
-});
-method(forwardRefClass, '__eq__', 'one', 1, 1, (self, [other]) =>
-  other instanceof PyOpaque && other.cls === forwardRefClass ? other.text === (self as PyOpaque).text : NotImplemented
-);
-method(forwardRefClass, '__hash__', 'none', 0, 0, (self) => pyHash((self as PyOpaque).text));
-forwardRefClass.opaqueAttribute = (self, name) => (name === '__forward_arg__' ? self.text : undefined);
-
+// typing.get_args and typing.get_origin ---------------------------------------------------------------------------
 /** The arguments `typing.get_args` gives, unflattening a Callable's parameters into a list. */
 export function typingArgs(value: PyValue): PyValue {
+  if (value instanceof PyTypingAlias) return newTuple(value.args);
   if (value instanceof PyOpaque && value.cls === annotatedAliasClass) return newTuple(aliasOf(value).args);
   if (value instanceof PyOpaque && value.cls === unionClass) return newTuple(value.data as PyValue[]);
   if (!isAlias(value)) return newTuple([]);
@@ -707,8 +844,8 @@ export function typingArgs(value: PyValue): PyValue {
 }
 
 /** The origin `typing.get_origin` gives. */
-export function typingOrigin(value: PyValue, annotated: PyValue): PyValue {
-  if (value instanceof PyOpaque && value.cls === annotatedAliasClass) return annotated;
+export function typingOrigin(value: PyValue): PyValue {
+  if (value instanceof PyTypingAlias) return value.origin;
   if (isAlias(value)) return aliasOf(value).origin;
   if (value instanceof PyOpaque && specialAliasOrigin(value) !== undefined) return specialAliasOrigin(value) as PyValue;
   if (value instanceof PyOpaque && value.cls === unionClass) return unionClass;
@@ -717,4 +854,56 @@ export function typingOrigin(value: PyValue, annotated: PyValue): PyValue {
 
 function specialAliasOrigin(value: PyOpaque): PyValue | undefined {
   return value.cls.isSubclassOf(specialAliasClass) ? specialOf(value).origin : undefined;
+}
+
+// Type parameters ---------------------------------------------------------------------------------------------------
+
+/** The type parameters that the arguments of an alias mention, in order and without repeats, as typing collects them. */
+export function collectParameters(args: readonly PyValue[]): PyValue[] {
+  const found: PyValue[] = [];
+  for (const arg of args) {
+    for (const param of parametersIn(arg)) if (!found.includes(param)) found.push(param);
+  }
+  return found;
+}
+
+function parametersIn(value: PyValue): readonly PyValue[] {
+  if (value instanceof PyTypeParam) return [value];
+  if (value instanceof PyTypingAlias) return value.parameters;
+  if (value instanceof PyList) return collectParameters(value.items);
+  if (value instanceof PyOpaque && value.cls === unionClass) return collectParameters(value.data as PyValue[]);
+  if (isAlias(value)) return collectParameters(aliasOf(value).args);
+  return [];
+}
+
+/** `alias[key]` for an alias whose arguments mention type parameters, which it replaces with the types given. */
+function substituteAlias(self: PyOpaque, key: PyValue): PyValue {
+  const alias = aliasOf(self);
+  const map = substitutionOf(self, collectParameters(alias.args), key);
+  return new PyOpaque(self.cls, '', { ...alias, args: alias.args.map((arg) => substituted(arg, map)) });
+}
+
+function substitutionOf(self: PyValue, params: PyValue[], key: PyValue): Map<PyValue, PyValue> {
+  if (params.length === 0) throw typeError(`${pyRepr(self)} is not a generic class`);
+  const items = tupleItems(key);
+  if (items.length !== params.length) {
+    throw typeError(
+      `Too ${items.length > params.length ? 'many' : 'few'} arguments for ${pyRepr(self)}; actual ${items.length}, expected ${params.length}`
+    );
+  }
+  return new Map(params.map((param, index) => [param, items[index]]));
+}
+
+function substituted(value: PyValue, map: Map<PyValue, PyValue>): PyValue {
+  const replacement = map.get(value);
+  if (replacement !== undefined) return replacement;
+  if (value instanceof PyList) return newList(value.items.map((item) => substituted(item, map)));
+  if (value instanceof PyOpaque && value.cls === unionClass) {
+    return unionOf((value.data as PyValue[]).map((item) => substituted(item, map)));
+  }
+  if (isAlias(value)) {
+    const alias = aliasOf(value);
+    return new PyOpaque(value.cls, '', { ...alias, args: alias.args.map((arg) => substituted(arg, map)) });
+  }
+  return value;
 }

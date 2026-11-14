@@ -1,68 +1,68 @@
+import { currentRuntime } from './runtimeContext';
 import { classOf } from './types';
 import { type PyClass, PyDeque, PyDict, PyList, PyRange, PyTuple, type PyValue } from './values';
 
 type CollectionKind = 'sequence' | 'mapping';
 
-// The values of Py_TPFLAGS_SEQUENCE and Py_TPFLAGS_MAPPING, which collections.abc sets through `__abc_tpflags__`.
-const KIND_OF_FLAG = new Map<PyValue, CollectionKind>([
-  [1n << 5n, 'sequence'],
-  [1n << 6n, 'mapping'],
-]);
-
 /**
- * The classes a program can change that a match statement treats as sequences or mappings: the ABCs Sequence and
- * Mapping, and the classes registered with them. Their subclasses inherit the kind, as they do the type flag in
- * CPython.
+ * The kinds that CPython's SEQUENCE and MAPPING flags give each run's classes: an ABC's `__abc_tpflags__`, and the
+ * classes registered with it, which their subclasses inherit through their MRO.
  */
-const kinds = new WeakMap<PyClass, CollectionKind>();
+const runKinds = new WeakMap<object, Map<PyClass, CollectionKind>>();
+
+const BUILTIN_KINDS: Record<string, CollectionKind> = {
+  list: 'sequence',
+  tuple: 'sequence',
+  range: 'sequence',
+  deque: 'sequence',
+  memoryview: 'sequence',
+  array: 'sequence',
+  dict: 'mapping',
+  mappingproxy: 'mapping',
+};
 
 /** Whether a match statement's sequence pattern may match a value: a list, tuple, range, deque, or Sequence, but not a string. */
 export function isSequenceForMatch(value: PyValue): boolean {
-  return kindOf(value) === 'sequence';
+  if (value instanceof PyList || value instanceof PyTuple || value instanceof PyRange || value instanceof PyDeque) {
+    return true;
+  }
+  return collectionKind(classOf(value)) === 'sequence';
 }
 
 /** Whether a match statement's mapping pattern may match a value: a dict, mappingproxy, or Mapping. */
 export function isMapping(value: PyValue): boolean {
-  return kindOf(value) === 'mapping';
+  return value instanceof PyDict || collectionKind(classOf(value)) === 'mapping';
 }
 
-function kindOf(value: PyValue): CollectionKind | undefined {
-  if (value instanceof PyList || value instanceof PyTuple || value instanceof PyRange || value instanceof PyDeque) {
-    return 'sequence';
-  }
-  if (value instanceof PyDict) return 'mapping';
-  const cls = classOf(value);
-  return cls.isBuiltin && cls.name === 'mappingproxy' ? 'mapping' : inheritedKind(cls);
+/** `__abc_tpflags__` of an ABC, as `_abc_init` reads it: 1 << 5 for a sequence, 1 << 6 for a mapping. */
+export function setCollectionFlags(cls: PyClass, flags: PyValue): void {
+  if (typeof flags !== 'bigint') return;
+  if (flags & (1n << 5n)) kindsOfRun().set(cls, 'sequence');
+  else if (flags & (1n << 6n)) kindsOfRun().set(cls, 'mapping');
 }
 
-function inheritedKind(cls: PyClass): CollectionKind | undefined {
+/** Gives a class registered with an ABC the ABC's kind, unless it is a builtin type or has a kind of its own. */
+export function inheritCollectionKind(abc: PyClass, registered: PyClass): void {
+  const kind = collectionKind(abc);
+  if (kind === undefined || registered.isBuiltin || collectionKind(registered) !== undefined) return;
+  kindsOfRun().set(registered, kind);
+}
+
+function collectionKind(cls: PyClass): CollectionKind | undefined {
+  const kinds = kindsOfRun();
   for (const each of cls.mro) {
-    const kind = kinds.get(each);
+    const kind = kinds.get(each) ?? (each.isBuiltin ? BUILTIN_KINDS[each.name] : undefined);
     if (kind !== undefined) return kind;
   }
   return undefined;
 }
 
-/** Reads the `__abc_tpflags__` of a new abstract base class, which ABCMeta takes out of the class as it applies it. */
-export function applyCollectionFlags(cls: PyClass): void {
-  const kind = KIND_OF_FLAG.get(cls.dict.get('__abc_tpflags__') ?? 0n);
-  if (kind !== undefined) kinds.set(cls, kind);
-  cls.dict.delete('__abc_tpflags__');
-}
-
-/** Gives a class registered with a sequence or mapping ABC, and its subclasses, that kind, as `ABCMeta.register` does. */
-export function registerCollectionKind(
-  abc: PyClass,
-  subclass: PyClass,
-  subclassesOf: (cls: PyClass) => PyClass[]
-): void {
-  const kind = inheritedKind(abc);
-  if (kind === undefined) return;
-  const pending = [subclass];
-  for (let cls = pending.pop(); cls !== undefined; cls = pending.pop()) {
-    // CPython leaves its immutable builtin types as they are.
-    if (cls.isBuiltin || kinds.get(cls) === kind) continue;
-    kinds.set(cls, kind);
-    pending.push(...subclassesOf(cls));
+function kindsOfRun(): Map<PyClass, CollectionKind> {
+  const runtime = currentRuntime();
+  let kinds = runKinds.get(runtime);
+  if (!kinds) {
+    kinds = new Map();
+    runKinds.set(runtime, kinds);
   }
+  return kinds;
 }

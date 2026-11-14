@@ -1,0 +1,81 @@
+// The opcodes, position codes, categories, and flags of CPython's `re._constants`, with the same numbers.
+
+export const OP = {
+  FAILURE: 0,
+  SUCCESS: 1,
+  ANY: 2,
+  ANY_ALL: 3,
+  ASSERT: 4,
+  ASSERT_NOT: 5,
+  AT: 6,
+  BRANCH: 7,
+  CATEGORY: 8,
+  GROUPREF: 11,
+  GROUPREF_EXISTS: 12,
+  IN: 13,
+  JUMP: 15,
+  LITERAL: 16,
+  MARK: 17,
+  MAX_UNTIL: 18,
+  MIN_UNTIL: 19,
+  NOT_LITERAL: 20,
+  REPEAT: 23,
+  REPEAT_ONE: 24,
+  MIN_REPEAT_ONE: 26,
+  ATOMIC_GROUP: 27,
+  POSSESSIVE_REPEAT: 28,
+  POSSESSIVE_REPEAT_ONE: 29,
+  GROUPREF_IGNORE: 30,
+  IN_IGNORE: 31,
+  LITERAL_IGNORE: 32,
+  NOT_LITERAL_IGNORE: 33,
+  GROUPREF_UNI_IGNORE: 38,
+  IN_UNI_IGNORE: 39,
+  LITERAL_UNI_IGNORE: 40,
+  NOT_LITERAL_UNI_IGNORE: 41,
+} as const;
+
+export const AT = {
+  BEGINNING: 0,
+  BEGINNING_LINE: 1,
+  BEGINNING_STRING: 2,
+  BOUNDARY: 3,
+  NON_BOUNDARY: 4,
+  END: 5,
+  END_LINE: 6,
+  END_STRING: 7,
+  UNI_BOUNDARY: 10,
+  UNI_NON_BOUNDARY: 11,
+} as const;
+
+export const CATEGORY = {
+  DIGIT: 0,
+  NOT_DIGIT: 1,
+  SPACE: 2,
+  NOT_SPACE: 3,
+  WORD: 4,
+  NOT_WORD: 5,
+  UNI_DIGIT: 10,
+  UNI_NOT_DIGIT: 11,
+  UNI_SPACE: 12,
+  UNI_NOT_SPACE: 13,
+  UNI_WORD: 14,
+  UNI_NOT_WORD: 15,
+} as const;
+
+export const FLAG = {
+  TEMPLATE: 1,
+  IGNORECASE: 2,
+  LOCALE: 4,
+  MULTILINE: 8,
+  DOTALL: 16,
+  UNICODE: 32,
+  VERBOSE: 64,
+  DEBUG: 128,
+  ASCII: 256,
+} as const;
+
+export const TYPE_FLAGS = FLAG.ASCII | FLAG.LOCALE | FLAG.UNICODE;
+
+export const MAXREPEAT = 4_294_967_295;
+export const MAXGROUPS = 1_073_741_823;

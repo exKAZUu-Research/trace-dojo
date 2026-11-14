@@ -1,7 +1,9 @@
 import type { BinaryOperator, Constant, Expression } from './ast';
+import { newBytes, PyBytes } from './bytesValues';
 import { newComplex } from './complexNumbers';
 import { getItem, isTruthy } from './objects';
 import { binaryOp, unaryOp } from './operators';
+import { withoutCharge } from './runtimeContext';
 import { strLength } from './strings';
 import { Ellipsis, newTuple, None, sliceClass } from './types';
 import { PyError, PySlice, PyTuple, type PyValue } from './values';
@@ -87,6 +89,10 @@ export function constantValue(constant: Constant): PyValue {
     case 'imaginary': {
       return newComplex(0, constant.value);
     }
+    case 'bytes': {
+      // CPython creates a bytes literal once when it compiles the program, so evaluating one stores nothing new.
+      return withoutCharge(() => newBytes(constant.value));
+    }
   }
 }
 
@@ -135,6 +141,7 @@ function isSafeToFold(operator: BinaryOperator, left: PyValue, right: PyValue): 
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- One limit per kind of operand a repetition may multiply.
 function isSafeProduct(left: PyValue, right: PyValue): boolean {
   const [a, b] = [intOf(left), intOf(right)];
   if (a !== undefined && b !== undefined) {
@@ -149,8 +156,8 @@ function isSafeProduct(left: PyValue, right: PyValue): boolean {
     if (count < 0n || count > MAX_COLLECTION_SIZE / size) return false;
     return count === 0n || itemsWithin(repeated, MAX_TOTAL_ITEMS / count) >= 0n;
   }
-  if (typeof repeated === 'string') {
-    const size = BigInt(strLength(repeated));
+  if (typeof repeated === 'string' || repeated instanceof PyBytes) {
+    const size = BigInt(typeof repeated === 'string' ? strLength(repeated) : repeated.length);
     return size === 0n || (count >= 0n && count <= MAX_STR_SIZE / size);
   }
   return true;
