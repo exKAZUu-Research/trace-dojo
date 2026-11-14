@@ -303,10 +303,11 @@ export function* sum(self: Value, args: Value[], block: RProc | undefined): Gen 
   let floating: number | undefined;
   let compensation = 0;
   let sawValue = false;
+  let generic = false;
   yield* iterate(self, function* (value) {
     const item = block ? yield* call(block, value) : value;
     sawValue = true;
-    if (floating === undefined && (typeof total === 'bigint' || initial !== undefined)) {
+    if (!generic && floating === undefined && (typeof total === 'bigint' || initial !== undefined)) {
       if (typeof item === 'bigint') {
         exact += item;
         total = exact;
@@ -333,11 +334,12 @@ export function* sum(self: Value, args: Value[], block: RProc | undefined): Gen 
       total = floating;
       floating = undefined;
     }
+    generic = true;
     total = yield* callMethod(total, '+', [item]);
   });
   if (!sawValue) return total;
   if (floating !== undefined) return floating + compensation;
-  if (initial !== undefined && typeof total === 'bigint') return initial + Number(exact);
+  if (!generic && initial !== undefined && typeof total === 'bigint') return initial + Number(exact);
   return total;
 }
 

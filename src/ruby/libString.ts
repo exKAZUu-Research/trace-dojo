@@ -330,11 +330,13 @@ def('String', '-@', 0, (self: RString) => {
 def('String', '+@', 0, (self: RString) => (self.frozen ? stringFromBytes(stringBytes(self), self.binary) : self));
 def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
   modify(self);
+  const converted: (RString | bigint)[] = [];
+  for (const arg of args) converted.push(typeof arg === 'bigint' ? arg : yield* stringArgValue(arg));
   const chunks: Uint8Array[] = [stringBytes(self)];
   let length = chunks[0].length;
   let binary = self.binary;
   let ascii = chunks[0].every((byte) => byte < 0x80);
-  for (const arg of args) {
+  for (const arg of converted) {
     let chunk: Uint8Array;
     if (typeof arg === 'bigint') {
       if (arg < 0n) throw rangeError(`${arg} out of char range`);
@@ -348,9 +350,8 @@ def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
           ? Uint8Array.of(Number(arg))
           : new TextEncoder().encode(String.fromCodePoint(Number(arg)));
     } else {
-      const source = yield* stringArgValue(arg);
-      binary = combinedStringEncoding(binary, ascii, source);
-      chunk = stringBytes(source);
+      binary = combinedStringEncoding(binary, ascii, arg);
+      chunk = stringBytes(arg);
     }
     length += chunk.length;
     rt().checkStringLength(length);
@@ -398,13 +399,12 @@ def('String', 'insert', 2, function* (self: RString, [index, other]) {
 def('String', 'prepend', [0, -1], function* (self: RString, args) {
   modify(self);
   const values: RString[] = [];
+  for (const arg of args) values.push(yield* stringArgValue(arg));
   let binary = self.binary;
   let ascii = stringBytes(self).every((byte) => byte < 0x80);
-  for (const arg of args) {
-    const value = yield* stringArgValue(arg);
+  for (const value of values) {
     binary = combinedStringEncoding(binary, ascii, value);
     ascii &&= stringBytes(value).every((byte) => byte < 0x80);
-    values.push(value);
   }
   values.push(self);
   setBytes(self, stringBytes(joinStringCharacters(values, binary)), binary);

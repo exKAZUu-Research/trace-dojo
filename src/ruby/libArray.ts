@@ -634,15 +634,13 @@ function* join(self: RArray, separator: RString, seen = new Set<RArray>()): Gen<
 }
 
 function* preflightJoinFirst(self: RArray): Gen<void> {
-  const first = self.items[0];
-  if (
-    first !== undefined &&
-    !(first instanceof RString) &&
-    !(first instanceof RArray) &&
-    respondsTo(first, 'to_str', true)
-  ) {
-    const converted = yield* callMethod(first, 'to_str', [], undefined, undefined, { fcall: true });
-    if (!(converted instanceof RString) && converted !== NIL) throw joinStringConversionError(first, converted);
+  for (const first of self.items) {
+    if (first instanceof RString) continue;
+    if (respondsTo(first, 'to_str', true)) {
+      const converted = yield* callMethod(first, 'to_str', [], undefined, undefined, { fcall: true });
+      if (!(converted instanceof RString) && converted !== NIL) throw joinStringConversionError(first, converted);
+    }
+    break;
   }
 }
 
@@ -653,12 +651,12 @@ def('Array', 'join', [0, 1], function* (self: RArray, args) {
 
 function* joinValue(value: Value, separator: RString, seen: Set<RArray>): Gen<RString> {
   if (value instanceof RString) return value;
-  if (value instanceof RArray) return yield* join(value, separator, seen);
   if (respondsTo(value, 'to_str', true)) {
     const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
     if (converted instanceof RString) return converted;
     if (converted !== NIL) throw joinStringConversionError(value, converted);
   }
+  if (value instanceof RArray) return yield* join(value, separator, seen);
   const converted = yield* tryAry(value);
   return converted ? yield* join(converted, separator, seen) : yield* toSValue(value);
 }

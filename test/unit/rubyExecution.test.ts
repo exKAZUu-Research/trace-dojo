@@ -2405,6 +2405,42 @@ test('Array join follows receiver mutation during element conversion', () => {
   expect(run('class A;def to_str;puts :str;1;end;end;begin;p [A.new].join;rescue=>e;p e.class;end')).toMatchObject({
     stdout: 'str\nTypeError\n',
   });
+  expect(run('class A;def to_str;puts :str;"x";end;end;p ["a","b",A.new].join(",")')).toMatchObject({
+    stdout: 'str\nstr\n"a,b,x"\n',
+  });
+  expect(
+    run('class A<Array;def to_str;puts :str;1;end;end;begin;p ["a",A.new([1])].join;rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'str\nTypeError\n',
+  });
+});
+
+test('format checks encoding before later conversion callbacks', () => {
+  expect(
+    run('class A;def to_s;puts :side;"x";end;end;begin;p format("é%s%s",255.chr,A.new);rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'Encoding::CompatibilityError\n',
+  });
+});
+
+test('String concat and prepend convert all arguments before encoding checks', () => {
+  for (const method of ['concat', 'prepend']) {
+    expect(
+      run(
+        `class A;def to_str;puts :side;"a";end;end;s="é";begin;s.${method}(255.chr,A.new);rescue=>e;p e.class;end;p s`
+      )
+    ).toMatchObject({
+      stdout: 'side\nEncoding::CompatibilityError\n"é"\n',
+    });
+  }
+});
+
+test('Enumerable sum stays generic after Float coercion returns an object', () => {
+  expect(
+    run('class A;def coerce(x);[self,self];end;def +(x);puts :add;self;end;end;p [A.new,2].sum(0.5).class')
+  ).toMatchObject({
+    stdout: 'add\nadd\nA\n',
+  });
 });
 
 test('Array structural hash stops after callback removes later elements', () => {

@@ -26,27 +26,14 @@ interface Spec {
   precision?: number;
 }
 
-interface FormatPart {
-  value: string | RString;
-  literal: boolean;
-}
-
 /** Formats as `format`/`sprintf` and `String#%` do. */
 export function* format(formatValue: Value, args: Value[]): Gen<string> {
   return (yield* formatString(formatValue, args)).s;
 }
 
 export function* formatString(formatValue: Value, args: Value[]): Gen<RString> {
-  const { parts, source } = yield* formatParts(formatValue, args);
-  let binary = source.binary;
-  let ascii = true;
-  const chunks = parts.map(({ value, literal }) => {
-    const part = value instanceof RString ? value : stringFromBytes(encodeCodePoints(value));
-    if (!literal) binary = combinedStringEncoding(binary, ascii, part);
-    const bytes = stringBytes(part);
-    ascii &&= bytes.every((byte) => byte < 0x80);
-    return bytes;
-  });
+  const { parts, binary } = yield* formatParts(formatValue, args);
+  const chunks = parts.map(stringBytes);
   const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
   rt().checkStringLength(length);
   const bytes = new Uint8Array(length);
@@ -58,17 +45,20 @@ export function* formatString(formatValue: Value, args: Value[]): Gen<RString> {
   return stringFromBytes(bytes, binary);
 }
 
-function* formatParts(formatValue: Value, args: Value[]): Gen<{ parts: FormatPart[]; source: RString }> {
+function* formatParts(formatValue: Value, args: Value[]): Gen<{ parts: RString[]; binary: boolean }> {
   const source = yield* toStrValue(formatValue);
   const templateBytes = stringBytes(source);
   const template = new TextDecoder('latin1').decode(templateBytes);
   let result = '';
   let literal: number[] = [];
-  const parts: FormatPart[] = [];
+  const parts: RString[] = [];
+  let binary = source.binary;
+  let ascii = true;
   const flush = (): void => {
     if (literal.length > 0) {
       const value = stringFromBytes(Uint8Array.from(literal), source.binary);
-      parts.push({ value, literal: true });
+      parts.push(value);
+      ascii &&= stringBytes(value).every((byte) => byte < 0x80);
       result += value.s;
       rt().checkStringLength(result.length);
     }
@@ -76,7 +66,10 @@ function* formatParts(formatValue: Value, args: Value[]): Gen<{ parts: FormatPar
   };
   const append = (part: string | RString): void => {
     flush();
-    parts.push({ value: part, literal: false });
+    const value = part instanceof RString ? part : stringFromBytes(encodeCodePoints(part));
+    binary = combinedStringEncoding(binary, ascii, value);
+    parts.push(value);
+    ascii &&= stringBytes(value).every((byte) => byte < 0x80);
     result += part instanceof RString ? part.s : part;
     rt().checkStringLength(result.length);
   };
@@ -193,7 +186,7 @@ function* formatParts(formatValue: Value, args: Value[]): Gen<{ parts: FormatPar
     append(yield* directive(type, spec, arg));
   }
   flush();
-  return { parts, source };
+  return { parts, binary };
 }
 
 function encodeCodePoints(text: string): Uint8Array {
