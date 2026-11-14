@@ -217,6 +217,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (this.hoists) {
       this.hoists.push({
         slot,
+        // oxlint-disable-next-line require-yield -- Synchronous first-pass values use the same generator protocol as blocking hoists.
         *run(frame) {
           return evaluate(frame);
         },
