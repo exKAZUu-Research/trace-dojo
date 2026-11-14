@@ -32,7 +32,7 @@ import {
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { randomIndex } from './libRandom';
 import { rangeBounds } from './libString';
-import { NIL, RArray, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
+import { NIL, RArray, RFloat, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { arr, newHash, realClassOf, str, stringBytes, stringFromBytes, truthy } from './values';
 
@@ -1024,8 +1024,8 @@ function* arrayBsearch(self: RArray, block: RProc, indexOnly: boolean): Gen {
       high = middle;
     } else if (result === false || result === NIL) {
       low = middle + 1;
-    } else if (typeof result === 'bigint' || typeof result === 'number') {
-      if (typeof result === 'number' && Number.isNaN(result)) throw comparisonFailed(result, 0n);
+    } else if (typeof result === 'bigint' || typeof result === 'number' || result instanceof RFloat) {
+      if (Number.isNaN(Number(result))) throw comparisonFailed(result, 0n);
       if (Number(result) === 0)
         return middle >= self.items.length ? NIL : indexOnly ? BigInt(middle) : self.items[middle];
       if (Number(result) < 0) high = middle;

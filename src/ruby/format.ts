@@ -13,7 +13,7 @@ import { rubyDtoa } from './floatFormat';
 import { hashGet } from './hashes';
 import { callMethod, type Gen, respondsTo } from './interp';
 import { kernelFloat, kernelInteger } from './libNumeric';
-import { NIL, RHash, RString, RSymbol, type Value } from './objects';
+import { NIL, RFloat, RHash, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
 import { joinStringCharacters, realClassOf, stringBytes, stringCharacters, stringFromBytes } from './values';
 
@@ -343,13 +343,14 @@ function* intArg(value: Value): Gen<bigint> {
 
 function* floatArg(value: Value): Gen<number> {
   if (typeof value === 'number') return value;
+  if (value instanceof RFloat) return value.value;
   if (typeof value === 'bigint') return Number(value);
   if (value instanceof RString) {
     return (yield* kernelFloat(value, undefined)) as number;
   }
   if (value === NIL) throw typeError("can't convert nil into Float");
   const converted = yield* callMethod(value, 'to_f', [], undefined, undefined, { fcall: true });
-  if (typeof converted === 'number') return converted;
+  if (typeof converted === 'number' || converted instanceof RFloat) return Number(converted);
   throw typeError(`can't convert ${realClassOf(value).name} into Float`);
 }
 

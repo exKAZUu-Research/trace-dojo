@@ -42,6 +42,31 @@ export abstract class RBasic {
   constructor(public cls: RClass) {}
 }
 
+export class RFloat extends RBasic {
+  frozen = true;
+
+  constructor(
+    cls: RClass,
+    readonly value: number
+  ) {
+    super(cls);
+  }
+
+  valueOf(): number {
+    return this.value;
+  }
+}
+
+const floatBits = new DataView(new ArrayBuffer(8));
+
+export function boxFloat(value: number): number | RFloat {
+  floatBits.setFloat64(0, value);
+  const bits = floatBits.getBigUint64(0);
+  const selector = Number((bits >> 60n) & 7n);
+  if (bits === 0n || (bits !== 0x30_00_00_00_00_00_00_00n && (selector === 3 || selector === 4))) return value;
+  return new RFloat(rt().c.Float, value);
+}
+
 export class RObject extends RBasic {
   turtle?: TurtleState;
   exception?: ExceptionState;

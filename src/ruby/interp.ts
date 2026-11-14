@@ -27,11 +27,13 @@ import {
 } from './errors';
 import { hashGet, hashSet } from './hashes';
 import {
+  boxFloat,
   invalidateMethodCaches,
   NIL,
   RArray,
   RBasic,
   RClass,
+  RFloat,
   RHash,
   type RMethod,
   RObject,
@@ -169,7 +171,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
       return e.v;
     }
     case 'float': {
-      return e.v;
+      return boxFloat(e.v);
     }
     case 'nil': {
       return NIL;
@@ -1452,8 +1454,15 @@ export function* invoke(
       for (const arg of actual) runtime.held.push(arg);
       if (block) runtime.held.push(block);
       try {
-        const result = body.fn(recv, actual, block, body.takesKeywords ? keywords : undefined);
-        return isGenerator(result) ? yield* result : result;
+        const numericMethod =
+          method.owner === runtime.c.Float || method.owner === runtime.c.Integer || method.owner === runtime.c.Numeric;
+        const nativeRecv = numericMethod && recv instanceof RFloat ? recv.value : recv;
+        const nativeArgs = numericMethod ? actual.map((arg) => (arg instanceof RFloat ? arg.value : arg)) : actual;
+        const result = body.fn(nativeRecv, nativeArgs, block, body.takesKeywords ? keywords : undefined);
+        const value = isGenerator(result) ? yield* result : result;
+        if (recv instanceof RFloat && value === recv.value && (method.name === 'to_f' || method.name === 'dup'))
+          return recv;
+        return typeof value === 'number' ? boxFloat(value) : value;
       } finally {
         runtime.held.length = held;
       }
@@ -1676,7 +1685,8 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
       throw argumentCountError(args.length, body.arity, body.arity);
     }
     const result = body.call(args, options.block, options.used ?? true);
-    return isGenerator(result) ? yield* result : result;
+    const value = isGenerator(result) ? yield* result : result;
+    return typeof value === 'number' ? boxFloat(value) : value;
   }
   const { def } = body;
   const outer = proc.outer as unknown as Frame;

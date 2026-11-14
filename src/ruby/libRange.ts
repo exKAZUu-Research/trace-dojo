@@ -20,7 +20,7 @@ import { callBlock, callMethod, type Gen, invoke, makeRange, nativeProc, respond
 import { rangeHelpers, STOP, sum, toArray } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { kernelFloat } from './libNumeric';
-import { NIL, type RProc, RRange, RString, type Value } from './objects';
+import { NIL, RFloat, type RProc, RRange, RString, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { successorBytes } from './stringTransforms';
 import { arr, realClassOf, str, stringBytes, stringFromBytes } from './values';
@@ -228,12 +228,13 @@ export function rangeSize(range: RRange): Value {
       const size = end - begin + (exclusive ? 0n : 1n);
       return size > 0n ? size : 0n;
     }
-    if (typeof end === 'number') {
-      if (end === Number.POSITIVE_INFINITY) return end;
-      if (end === Number.NEGATIVE_INFINITY) return 0n;
-      const last = Math.floor(end);
+    if (typeof end === 'number' || end instanceof RFloat) {
+      const limit = Number(end);
+      if (limit === Number.POSITIVE_INFINITY) return end;
+      if (limit === Number.NEGATIVE_INFINITY) return 0n;
+      const last = Math.floor(limit);
       let size = BigInt(last) - begin + 1n;
-      if (exclusive && last === end) size -= 1n;
+      if (exclusive && last === limit) size -= 1n;
       return size > 0n ? size : 0n;
     }
   }
@@ -421,8 +422,9 @@ function* bsearchDecision(block: RProc, value: Value): Gen<'left' | 'right' | 'f
   const result = yield* callBlock(block, [value]);
   if (result === true) return 'left';
   if (result === false || result === NIL) return 'right';
-  if (typeof result === 'number' && Number.isNaN(result)) throw comparisonFailed(result, 0n);
-  if (typeof result === 'bigint' || typeof result === 'number')
+  if ((typeof result === 'number' || result instanceof RFloat) && Number.isNaN(Number(result)))
+    throw comparisonFailed(result, 0n);
+  if (typeof result === 'bigint' || typeof result === 'number' || result instanceof RFloat)
     return Number(result) === 0 ? 'found' : Number(result) < 0 ? 'left' : 'right';
   throw typeError(`wrong argument type ${yield* inspect(result)} (must be numeric, true, false or nil)`);
 }
@@ -446,9 +448,15 @@ for (const method of ['step', '%'])
       typeof self.begin !== 'bigint' &&
       typeof self.begin !== 'number' &&
       !(self.begin instanceof RString);
-    if (typeof step !== 'bigint' && typeof step !== 'number' && !customBegin && !respondsTo(step, 'coerce', true))
+    if (
+      typeof step !== 'bigint' &&
+      typeof step !== 'number' &&
+      !(step instanceof RFloat) &&
+      !customBegin &&
+      !respondsTo(step, 'coerce', true)
+    )
       throw typeError('no implicit conversion of String into Integer');
-    if (typeof step === 'bigint' || typeof step === 'number') {
+    if (typeof step === 'bigint' || typeof step === 'number' || step instanceof RFloat) {
       if (Number(step) < 0) throw argumentError("step can't be negative");
       if (Number(step) === 0) throw argumentError("step can't be 0");
     }
@@ -463,7 +471,7 @@ function* stepRange(self: RRange, step: Value, block: RProc): Gen {
   }
   if (
     (typeof begin === 'bigint' || typeof begin === 'number') &&
-    (typeof step === 'bigint' || typeof step === 'number') &&
+    (typeof step === 'bigint' || typeof step === 'number' || step instanceof RFloat) &&
     (typeof end === 'bigint' || typeof end === 'number' || end === NIL)
   ) {
     return yield* stepNumericRange(self, Number(begin), Number(step), block);

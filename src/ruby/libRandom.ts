@@ -2,7 +2,7 @@ import { inspectRange, toFloat, toInt, toStepFloat } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, rangeError, rubyError } from './errors';
 import { callMethod, type Gen, invoke, respondsTo } from './interp';
-import { NIL, RObject, RRange, type Value } from './objects';
+import { NIL, RFloat, RObject, RRange, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { classOf } from './values';
 
@@ -241,11 +241,12 @@ function* randomValue(generator: MersenneTwister, args: Value[]): Gen {
     if (value === NIL) throw argumentError(`invalid argument - ${yield* inspectRange(max)}`);
     return value as Value;
   }
-  if (typeof max === 'number') {
-    if (!Number.isFinite(max)) domainError();
-    if (max === 0) return generator.real();
-    if (max < 0) throw argumentError(`invalid argument - ${max}`);
-    return generator.real() * max;
+  if (typeof max === 'number' || max instanceof RFloat) {
+    const limit = Number(max);
+    if (!Number.isFinite(limit)) domainError();
+    if (limit === 0) return generator.real();
+    if (limit < 0) throw argumentError(`invalid argument - ${limit}`);
+    return generator.real() * limit;
   }
   const limit = yield* toInt(max);
   if (limit <= 0n) throw argumentError(`invalid argument - ${limit}`);

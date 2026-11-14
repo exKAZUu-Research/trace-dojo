@@ -1,4 +1,5 @@
 import {
+  boxFloat,
   invalidateMethodCaches,
   NIL,
   RArray,
@@ -156,7 +157,10 @@ export function joinStringCharacters(characters: RString[], binary = false): RSt
 
 export function arr(items: Value[]): RArray {
   rt().spend(Math.floor(items.length / 64));
-  return new RArray(rt().c.Array, items);
+  return new RArray(
+    rt().c.Array,
+    items.map((item) => (typeof item === 'number' ? boxFloat(item) : item))
+  );
 }
 
 export function newHash(): RHash {

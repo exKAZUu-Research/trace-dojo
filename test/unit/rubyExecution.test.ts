@@ -2755,6 +2755,18 @@ test('Numeric step validates custom zero increments', () => {
   ).toMatchObject({ stdout: 'ArgumentError\n' });
 });
 
+test('allocated Floats preserve separate object identities', () => {
+  expect(run('a=Float::NAN;b=0.0/0.0;p a.equal?(b),a.object_id==b.object_id,a.equal?(a)')).toMatchObject({
+    stdout: 'false\nfalse\ntrue\n',
+  });
+  expect(run('a=Float::INFINITY;b=1.0/0.0;p a.equal?(b),a.object_id==b.object_id')).toMatchObject({
+    stdout: 'false\nfalse\n',
+  });
+  expect(run('a=Float::MAX;b=Float::MAX*1;p a.equal?(b),a.object_id==b.object_id')).toMatchObject({
+    stdout: 'false\nfalse\n',
+  });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(

@@ -3,7 +3,20 @@ import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { argumentError, implicitConversionError, rangeError, rubyError, typeError } from './errors';
 import { hashGet } from './hashes';
 import { callMethod, callProc, type Gen, respondsTo, runToEnd } from './interp';
-import { NIL, RArray, RBasic, RClass, RHash, RObject, RProc, RRange, RString, RSymbol, type Value } from './objects';
+import {
+  NIL,
+  RArray,
+  RBasic,
+  RClass,
+  RFloat,
+  RHash,
+  RObject,
+  RProc,
+  RRange,
+  RString,
+  RSymbol,
+  type Value,
+} from './objects';
 import { rt } from './runtime';
 import { classOf, isA, realClassOf, str, stringBytes, truthy } from './values';
 
@@ -119,12 +132,13 @@ export function toStrSync(value: Value): string {
 /** The Float a numeric argument stands for, as `Math` functions convert their arguments. */
 export function* toFloat(value: Value): Gen<number> {
   if (typeof value === 'number') return value;
+  if (value instanceof RFloat) return value.value;
   if (typeof value === 'bigint') return intToFloat(value);
   if (value === NIL) throw typeError("can't convert nil into Float");
   if (value instanceof RString) throw typeError("can't convert String into Float");
   if (isA(value, rt().c.Numeric) && respondsTo(value, 'to_f', true)) {
     const converted = yield* callMethod(value, 'to_f', [], undefined, undefined, { fcall: true });
-    if (typeof converted === 'number') return converted;
+    if (typeof converted === 'number' || converted instanceof RFloat) return Number(converted);
     throw typeError(
       `can't convert ${realClassOf(value).name} to Float (${realClassOf(value).name}#to_f gives ${realClassOf(converted).name})`
     );
@@ -136,11 +150,11 @@ export function* toStepFloat(value: Value): Gen<number> {
   if (value instanceof RString) throw typeError('no implicit conversion to float from string');
   if (!respondsTo(value, 'to_f', true)) throw typeError(`can't convert ${realClassOf(value).name} into Float`);
   const converted = yield* callMethod(value, 'to_f', [], undefined, undefined, { fcall: true });
-  if (typeof converted !== 'number') {
+  if (typeof converted !== 'number' && !(converted instanceof RFloat)) {
     const name = realClassOf(value).name;
     throw typeError(`can't convert ${name} to Float (${name}#to_f gives ${realClassOf(converted).name})`);
   }
-  return converted;
+  return Number(converted);
 }
 
 // Strings -------------------------------------------------------------------------------------------------------------

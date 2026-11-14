@@ -29,7 +29,7 @@ import {
 import { exactFloatPower } from './floatPower';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
-import { NIL, RArray, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
+import { boxFloat, NIL, RArray, RFloat, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { platformGamma, platformLogGamma } from './platformMath';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
 import { arr, classOf, realClassOf, str, truthy } from './values';
@@ -209,13 +209,6 @@ for (const owner of ['Integer', 'Float']) {
     return truthy(yield* callMethod(other, '==', [self]));
   });
   def(owner, 'eql?', 1, (self: Num, [other]) => typeof self === typeof other && numericEquals(self, other as Num));
-  def(
-    owner,
-    'equal?',
-    1,
-    (self: Num, [other]) =>
-      typeof self === typeof other && (typeof self === 'number' ? Object.is(self, other) : self === other)
-  );
   def(owner, '<=>', 1, function* (self: Num, [other]) {
     if (isNum(other)) {
       const order = numericCompare(self, other);
@@ -900,6 +893,7 @@ export function* kernelFloat(value: Value, keywords: RHash | undefined): Gen {
   const raise = yield* exceptionOption(keywords);
   try {
     if (typeof value === 'number') return value;
+    if (value instanceof RFloat) return value;
     if (typeof value === 'bigint') return Number(value);
     if (value instanceof RString) {
       const parsed = parseFloatStrict(value.s);
@@ -909,7 +903,7 @@ export function* kernelFloat(value: Value, keywords: RHash | undefined): Gen {
     if (value === NIL) throw typeError("can't convert nil into Float");
     if (respondsTo(value, 'to_f', true)) {
       const converted = yield* callMethod(value, 'to_f', [], undefined, undefined, { fcall: true });
-      if (typeof converted === 'number') return converted;
+      if (typeof converted === 'number' || converted instanceof RFloat) return converted;
       throw typeError(
         `can't convert ${realClassOf(value).name} to Float (${realClassOf(value).name}#to_f gives ${realClassOf(converted).name})`
       );
@@ -1140,10 +1134,10 @@ export function installMathConstants(): void {
   const { c } = rt();
   c.Math.constants.set('PI', Math.PI);
   c.Math.constants.set('E', Math.E);
-  c.Float.constants.set('INFINITY', Number.POSITIVE_INFINITY);
-  c.Float.constants.set('NAN', Number.NaN);
+  c.Float.constants.set('INFINITY', boxFloat(Number.POSITIVE_INFINITY));
+  c.Float.constants.set('NAN', boxFloat(Number.NaN));
   c.Float.constants.set('EPSILON', Number.EPSILON);
-  c.Float.constants.set('MAX', Number.MAX_VALUE);
+  c.Float.constants.set('MAX', boxFloat(Number.MAX_VALUE));
   c.Float.constants.set('MIN', 2.2250738585072014e-308);
   c.Float.constants.set('DIG', 15n);
   c.Float.constants.set('MANT_DIG', 53n);
