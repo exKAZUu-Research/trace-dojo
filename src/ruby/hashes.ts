@@ -1,6 +1,6 @@
 import { inspect, toInt } from './conversions';
 import { frozenError, runtimeError } from './errors';
-import { callMethod, callProc, type Gen, runToEnd } from './interp';
+import { callMethod, callProc, type Gen, isGenerator, runToEnd } from './interp';
 import { type HashEntry, RArray, RBasic, RHash, RRange, RString, type Value } from './objects';
 import { rt } from './runtime';
 import { classOf, snapshot, str, stringBytes, truthy } from './values';
@@ -161,14 +161,15 @@ export function* hashGet(hash: RHash, key: Value): Gen<HashEntry | undefined> {
   return (yield* findEntry(hash, key)).entry;
 }
 
-export function* hashGetOrInsert(hash: RHash, key: Value, create: () => Gen): Gen<HashEntry> {
+export function* hashGetOrInsert(hash: RHash, key: Value, create: () => Value | Gen): Gen<HashEntry> {
   const held = rt().held.length;
   rt().held.push(hash, key);
   try {
     if (hash.frozen) throw frozenError(hash, yield* inspect(hash));
     const { base, slot, entry } = yield* findEntry(hash, key);
     if (entry) return entry;
-    const value = yield* create();
+    const created = create();
+    const value = isGenerator(created) ? yield* created : created;
     rt().held.push(value);
     if (hash.frozen) throw frozenError(hash, yield* inspect(hash));
     const stored = key instanceof RString && key.cls === rt().c.String && !key.frozen ? frozenCopy(key) : key;
@@ -214,9 +215,7 @@ function* hashPut(
     const { base, slot, entry } = yield* locate();
     if (hash.frozen) throw frozenError(hash, yield* inspect(hash));
     if (entry) {
-      entry.value = value;
-      hash.map.version++;
-      rt().containerVersion++;
+      hashUpdateEntry(hash, entry, value);
       return true;
     }
     insertHashEntry(hash, base, slot, storedKey(), value);
@@ -224,6 +223,12 @@ function* hashPut(
   } finally {
     rt().held.length = held;
   }
+}
+
+export function hashUpdateEntry(hash: RHash, entry: HashEntry, value: Value): void {
+  entry.value = value;
+  hash.map.version++;
+  rt().containerVersion++;
 }
 
 function insertHashEntry(hash: RHash, base: string, slot: string, key: Value, value: Value): HashEntry {

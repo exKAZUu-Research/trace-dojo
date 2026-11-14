@@ -6,6 +6,7 @@ import {
   compareBytes,
   compareRubyStrings,
   compareStrings,
+  compareValues,
   inspect,
   rangeCovers,
   strInspect,
@@ -107,8 +108,14 @@ function* stringArgValue(value: Value): Gen<RString> {
   return yield* toStrValue(value);
 }
 
-function* patternText(value: Value, kind: 'characters' | 'regexp'): Gen<string> {
+function* patternText(value: Value, kind: 'characters' | 'regexp', self?: RString): Gen<string> {
   const pattern = yield* stringArgValue(value);
+  if (self)
+    combinedStringEncoding(
+      self.binary,
+      stringBytes(self).every((byte) => byte < 0x80),
+      pattern
+    );
   if (pattern.rawBytes && !pattern.binary) {
     if (kind === 'characters') throw argumentError('invalid byte sequence in UTF-8');
     throw rubyError(
@@ -1135,7 +1142,7 @@ function* substitute(
 ): Gen<{ value: RString; matched: boolean }> {
   const [pattern, replacement] = args;
   regexpUnsupported(pattern);
-  const target = yield* patternText(pattern, 'regexp');
+  const target = yield* patternText(pattern, 'regexp', self);
   if (replacement === undefined && !block) {
     if (global) throw new UnsupportedFeatureError('ブロックを渡さない gsub（Enumerator）');
     throw argumentError('wrong number of arguments (given 1, expected 2)');
@@ -1264,7 +1271,7 @@ def('String', 'gsub!', [1, 2], function* (self: RString, args, block) {
 def('String', 'scan', 1, function* (self: RString, [pattern], block) {
   if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   regexpUnsupported(pattern);
-  const target = yield* patternText(pattern, 'regexp');
+  const target = yield* patternText(pattern, 'regexp', self);
   if (target.length === 0) return yield* scanEmpty(self, block);
   const found: Value[] = [];
   let text = self.s;
@@ -1604,7 +1611,7 @@ def('String', 'split', [0, 2], function* (self: RString, args, block) {
   if (isNil(pattern) || (pattern instanceof RString && pattern.s === ' ')) {
     parts = splitWhitespace(text, limit);
   } else {
-    const separator = yield* patternText(pattern, 'characters');
+    const separator = yield* patternText(pattern, 'characters', self);
     parts = separator === '' ? splitChars(text, limit) : splitString(text, separator, limit);
   }
   if (limit === 0) while (parts.length > 0 && parts.at(-1) === '') parts.pop();
@@ -1655,7 +1662,7 @@ function splitString(text: string, separator: string, limit: number): string[] {
 
 def('String', 'partition', 1, function* (self: RString, [separator]) {
   regexpUnsupported(separator);
-  const needle = yield* stringArgValue(separator);
+  const needle = yield* searchString(self, separator);
   if (needle.rawBytes && !needle.binary)
     return arr([textResult(self, self.s), textResult(self, ''), textResult(self, '')]);
   const text = needle.s;
@@ -1665,7 +1672,7 @@ def('String', 'partition', 1, function* (self: RString, [separator]) {
 });
 def('String', 'rpartition', 1, function* (self: RString, [separator]) {
   regexpUnsupported(separator);
-  const needle = yield* stringArgValue(separator);
+  const needle = yield* searchString(self, separator);
   if (needle.rawBytes && !needle.binary)
     return arr([textResult(self, ''), textResult(self, ''), textResult(self, self.s)]);
   const text = needle.s;
@@ -1694,7 +1701,7 @@ for (const name of [
 }
 def('String', 'ascii_only?', 0, (self: RString) => !/[^\u0000-\u007F]/.test(self.s));
 def('String', 'between?', 2, function* (self: RString, [min, max]) {
-  return compareStrings(self.s, yield* stringArg(min)) >= 0 && compareStrings(self.s, yield* stringArg(max)) <= 0;
+  return (yield* compareValues(self, min)) >= 0 && (yield* compareValues(self, max)) <= 0;
 });
 
 // Symbol --------------------------------------------------------------------------------------------------------------

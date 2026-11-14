@@ -149,7 +149,8 @@ def('Set', 'delete?', 1, function* (self: RObject, [value]) {
 def('Set', ['include?', 'member?', '===', 'contain?'], 1, function* (self: RObject, [value]) {
   return (yield* hashGet(membersOf(self), value)) !== undefined;
 });
-def('Set', ['size', 'length', 'count'], [0, 1], function* (self: RObject, args, block) {
+def('Set', ['size', 'length'], 0, (self: RObject) => BigInt(membersOf(self).map.size));
+def('Set', 'count', [0, 1], function* (self: RObject, args, block) {
   if (args.length === 0 && !block) return BigInt(membersOf(self).map.size);
   let count = 0n;
   yield* eachEntry(membersOf(self), function* (entry) {
@@ -159,7 +160,10 @@ def('Set', ['size', 'length', 'count'], [0, 1], function* (self: RObject, args, 
 });
 def('Set', 'empty?', 0, (self: RObject) => membersOf(self).map.size === 0);
 def('Set', 'to_a', 0, (self: RObject) => arr([...membersOf(self).map.values()].map((entry) => entry.key)));
-def('Set', 'to_set', 0, (self) => self);
+def('Set', 'to_set', [0, -1], function* (self: RObject, args, block) {
+  if (args.length === 0 && !block && self.cls === rt().c.Set) return self;
+  return yield* callMethod(args[0] ?? rt().c.Set, 'new', [self, ...args.slice(1)], undefined, block);
+});
 def('Set', ['inspect', 'to_s'], 0, function* (self: RObject) {
   return str(yield* inspectSet(self));
 });

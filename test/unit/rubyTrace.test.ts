@@ -173,6 +173,11 @@ test('Set flatten roots pending members through subclass insertion callbacks', (
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
+test('Enumerable group_by roots pending values while hashing keys', () => {
+  const program = 'class K;def hash;q=1;0;end;end;a=[Turtle.new,2];h=a.group_by{|x|a.clear;K.new}';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
 test('Array concat roots early conversion results', () => {
   const program =
     'class A;def to_ary;[Turtle.new];end;end;class B;def to_ary;q=1;[];end;end;a=[];a.concat(A.new,B.new)';

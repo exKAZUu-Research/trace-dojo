@@ -7,11 +7,13 @@ import {
   rEquals,
   spaceship,
   toIndex,
+  toIndexExact,
   toInt,
+  toStrValue,
 } from './conversions';
 import { def } from './define';
 import { argumentCountError, argumentError, runtimeError, typeError } from './errors';
-import { eachEntry, hashGet, hashSet } from './hashes';
+import { eachEntry, hashGetOrInsert, hashSet, hashUpdateEntry } from './hashes';
 import { callBlock, callMethod, callProc, flattenGenerator, type Gen, nativeProc, respondsTo } from './interp';
 import { tryAry } from './libArray';
 import {
@@ -308,6 +310,7 @@ export function* inject(self: Value, args: Value[], block: RProc | undefined): G
 function* operatorName(value: Value): Gen<string> {
   if (value instanceof RSymbol) return value.name;
   if (value instanceof RString) return value.s;
+  if (respondsTo(value, 'to_str', true)) return (yield* toStrValue(value)).s;
   throw typeError(`${yield* inspect(value)} is not a symbol nor a string`);
 }
 
@@ -598,9 +601,10 @@ export function* nmin(
   block: RProc | undefined,
   reverse: boolean
 ): Gen<Value> {
-  const n = yield* toIndex(countValue);
-  if (n < 0) throw argumentError(`negative size (${n})`);
+  const { number: n, integer } = yield* toIndexExact(countValue);
+  if (integer < 0n) throw argumentError(`negative size (${integer})`);
   if (n === 0) return arr([]);
+  if (integer > 9_223_372_036_854_775_807n / 4n / (by ? 2n : 1n)) throw argumentError('too big size');
   const heldArrays = rt().heldArrays;
   const mark = heldArrays.length;
   let roots: Value[] = [];
@@ -849,12 +853,12 @@ def('Enumerable', 'group_by', 0, function* (self, _args, block) {
   const groups = newHash();
   return yield* whileHeld(groups, function* () {
     yield* iterate(self, function* (value) {
-      const key = yield* call(block, value);
-      const entry = yield* hashGet(groups, key);
-      if (entry) {
+      yield* whileHeld(value, function* () {
+        const key = yield* call(block, value);
+        const entry = yield* hashGetOrInsert(groups, key, () => arr([]));
         rt().chargeSlots(1);
         (entry.value as RArray).items.push(value);
-      } else yield* hashSet(groups, key, arr([value]));
+      });
     });
     return groups;
   });
@@ -1058,11 +1062,11 @@ def('Enumerable', 'tally', [0, 1], function* (self, args) {
   } else throw typeError(`no implicit conversion of ${realClassOf(args[0]).name} into Hash`);
   return yield* whileHeld(counts, function* () {
     yield* iterate(self, function* (value) {
-      const entry = yield* hashGet(counts, value);
-      const previous = entry?.value;
-      if (previous !== undefined && (typeof previous !== 'bigint' || previous < 0n))
+      const entry = yield* hashGetOrInsert(counts, value, () => 0n);
+      const previous = entry.value;
+      if (typeof previous !== 'bigint' || previous < 0n)
         throw typeError(`wrong argument type ${realClassOf(previous).name} (expected Integer)`);
-      yield* hashSet(counts, value, previous === undefined ? 1n : previous + 1n);
+      hashUpdateEntry(counts, entry, previous + 1n);
     });
     return counts;
   });
@@ -1232,8 +1236,8 @@ def('Enumerable', 'lazy', 0, () => {
   throw new UnsupportedFeatureError('遅延評価（lazy）');
 });
 
-def('Enumerable', 'to_set', 0, function* (self) {
-  return yield* callMethod(rt().c.Set, 'new', [self]);
+def('Enumerable', 'to_set', [0, -1], function* (self, args, block) {
+  return yield* callMethod(args[0] ?? rt().c.Set, 'new', [self, ...args.slice(1)], undefined, block);
 });
 
 /** The size of a collection when it can tell without iterating, for an enumerator's `size`. */

@@ -2328,6 +2328,57 @@ test('Set classification hashes a new group key once', () => {
   });
 });
 
+test('Set size and length reject arguments and ignore blocks', () => {
+  expect(run('begin;Set[1,2].size(1);rescue=>e;p e.class;end;p Set[1,2].length{puts :hit;false}')).toMatchObject({
+    stdout: 'ArgumentError\n2\n',
+  });
+});
+
+test('Enumerable grouping and tally hash each new key once', () => {
+  expect(run('class K;def hash;puts :hash;0;end;end;[1].group_by{K.new};[K.new].tally')).toMatchObject({
+    stdout: 'hash\nhash\n',
+  });
+});
+
+test('to_set forwards mapping blocks and target Set classes', () => {
+  expect(
+    run(
+      'class S<Set;end;p [1,2].to_set{|x|x*2}.to_a;p Set[1].to_set{|x|x*2}.to_a;p [1].to_set(S).class,Set[1].to_set(S).class'
+    )
+  ).toMatchObject({
+    stdout: '[2, 4]\n[2]\nS\nS\n',
+  });
+});
+
+test('Enumerable reductions convert string-like method names', () => {
+  expect(run('class A;private;def to_str;"+";end;end;p [1,2].inject(A.new),[1,2].reduce(10,A.new)')).toMatchObject({
+    stdout: '3\n13\n',
+  });
+});
+
+test('counted extrema reject sizes beyond Ruby collection bounds', () => {
+  expect(
+    run(
+      'begin;[1,2].min(9223372036854775807);rescue=>e;p e.class,e.message;end;begin;[1,2].min_by(9223372036854775807){|x|x};rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({
+    stdout: 'ArgumentError\n"too big size"\nArgumentError\n',
+  });
+});
+
+test('String searches check pattern encodings and between uses comparison methods', () => {
+  expect(
+    run(
+      's=255.chr;begin;s.partition("é");rescue=>e;p e.class;end;begin;s.rpartition("é");rescue=>e;p e.class;end;begin;s.split("é");rescue=>e;p e.class;end;begin;s.scan("é");rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({
+    stdout: 'Encoding::CompatibilityError\n'.repeat(4),
+  });
+  expect(run('class S<String;def <=>(x);puts :cmp;0;end;end;p S.new("x").between?("a","b")')).toMatchObject({
+    stdout: 'cmp\ncmp\ntrue\n',
+  });
+});
+
 test('recursive Sets inspect with a cycle marker', () => {
   expect(run('s=Set[];s.add(s);p s')).toMatchObject({ stdout: 'Set[Set[...]]\n' });
   expect(run('a=Set[];b=Set[a];a.add(b);p a')).toMatchObject({ stdout: 'Set[Set[Set[...]]]\n' });
