@@ -5366,7 +5366,37 @@ test('unavailable features inside exit handlers return a program result', () => 
 test('return from an exit handler reports LocalJumpError', () => {
   expect(run('at_exit { return }; p :end')).toMatchObject({
     stdout: ':end\n',
-    uncaughtException: 'unexpected return (LocalJumpError)',
+    uncaughtException: 'unexpected return',
+  });
+});
+
+test('defined? does not probe block-pass expressions', () => {
+  expect(run('p defined?(puts(&missing_method))')).toMatchObject({ stdout: '"method"\n' });
+});
+
+test('rebound dynamic Methods dispatch subclass method_missing', () => {
+  expect(
+    run(
+      'class A;def respond_to_missing?(n,*)=true;def method_missing(n,*)=:a;end;class B<A;def method_missing(n,*)=:b;end;p A.new.method(:foo).unbind.bind(B.new).call'
+    )
+  ).toMatchObject({
+    stdout: ':b\n',
+  });
+});
+
+test('Time localtime validates offset before frozen state', () => {
+  expect(run('t=Time.utc(2024).freeze;begin;t.localtime("bad");rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'ArgumentError\n',
+  });
+});
+
+test('Rational Numeric methods and fdiv follow Ruby results', () => {
+  expect(
+    run(
+      'r=Rational(7,3);p(+r);p r.abs2,r.magnitude,r.nonzero?,r.infinite?,r.real?,r.real,r.imaginary,Rational(1,3).fdiv(0),Rational(10**400,3).fdiv(10**399)'
+    )
+  ).toMatchObject({
+    stdout: '(7/3)\n(49/9)\n(7/3)\n(7/3)\nnil\ntrue\n(7/3)\n0\nInfinity\n3.3333333333333335\n',
   });
 });
 

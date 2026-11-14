@@ -449,10 +449,10 @@ def('Time', 'getlocal', [0, 1], function* (self: RObject, args) {
     : makeTime(dataOf(self).nanoseconds);
 });
 def('Time', 'localtime', [0, 1], function* (self: RObject, args) {
-  if (args.length > 0 && self.frozen) throw frozenError(self, timeText(dataOf(self), true));
-  return args.length > 0
-    ? changeZone(self, yield* parseOffset(args[0]), 'fixed')
-    : changeZone(self, LOCAL_OFFSET, 'local');
+  if (args.length === 0) return changeZone(self, LOCAL_OFFSET, 'local');
+  const offset = yield* parseOffset(args[0]);
+  if (self.frozen) throw frozenError(self, timeText(dataOf(self), true));
+  return changeZone(self, offset, 'fixed');
 });
 
 function changeZone(self: RObject, offset: number, zone: TimeData['zone']): RObject {

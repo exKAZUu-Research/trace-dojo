@@ -124,7 +124,8 @@ function* findForMethodObject(self: Value, name: string, publicOnly = false): Ge
       visibility: 'public',
       body: {
         kind: 'native',
-        fn: (recv, args, block, keywords) => invoke(missing, recv, [sym(name), ...args], keywords, block, true),
+        fn: (recv, args, block, keywords) =>
+          callMethod(recv, 'method_missing', [sym(name), ...args], keywords, block, { fcall: true }),
         min: 0,
         max: -1,
         takesKeywords: true,

@@ -1165,7 +1165,6 @@ function* definedText(e: Expr, frame: Frame): Gen {
     }
     case 'call': {
       for (const arg of e.args) if ((yield* definedText(arg, frame)) === NIL) return NIL;
-      if (e.blockArg && (yield* definedText(e.blockArg, frame)) === NIL) return NIL;
       let recv: Value = frame.self;
       if (e.recv) {
         try {
@@ -1206,8 +1205,7 @@ function* definedText(e: Expr, frame: Frame): Gen {
       for (const item of e.items) if ((yield* definedText(item, frame)) === NIL) return NIL;
       return text('expression');
     }
-    case 'splat':
-    case 'blockpass': {
+    case 'splat': {
       return e.e ? yield* definedText(e.e, frame) : text('expression');
     }
     case 'hash': {

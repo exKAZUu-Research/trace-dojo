@@ -132,10 +132,14 @@ function* rationalDivision(
     const [left, converted] = yield* coercePair(self, other);
     return yield* callMethod(left, op, [converted]);
   }
+  if (op === 'fdiv') {
+    if (right.numerator === 0n) return toNumber(left) / 0;
+    const quotient = makeRational(left.numerator * right.denominator, left.denominator * right.numerator);
+    return toNumber(fractionOf(quotient));
+  }
   if (right.numerator === 0n) throw zeroDivisionError();
   const numerator = left.numerator * right.denominator;
   const denominator = left.denominator * right.numerator;
-  if (op === 'fdiv') return Number(numerator) / Number(denominator);
   const quotient = op === 'remainder' ? numerator / denominator : floorDivide(numerator, denominator);
   if (op === 'div') return quotient;
   const remainder = makeRational(
@@ -215,10 +219,22 @@ def(
     fractionOf(other).numerator === fractionOf(self).numerator &&
     fractionOf(other).denominator === fractionOf(self).denominator
 );
-def('Rational', 'abs', 0, (self: RObject) => {
+def('Rational', ['abs', 'magnitude'], 0, (self: RObject) => {
   const { numerator, denominator } = fractionOf(self);
   return makeRational(numerator < 0n ? -numerator : numerator, denominator);
 });
+def('Rational', '+@', 0, (self: RObject) => self);
+def('Rational', 'abs2', 0, (self: RObject) => arithmetic(self, self, '*'));
+def('Rational', 'nonzero?', 0, (self: RObject) => (fractionOf(self).numerator === 0n ? NIL : self));
+def('Rational', 'infinite?', 0, () => NIL);
+def('Rational', 'real?', 0, () => true);
+def('Rational', 'real', 0, (self: RObject) => self);
+def('Rational', 'imaginary', 0, () => 0n);
+for (const name of ['to_c', 'rect', 'polar', 'arg', 'conj', 'i']) {
+  def('Rational', name, [0, -1], () => {
+    throw new UnsupportedFeatureError(`Rational#${name}（複素数）`);
+  });
+}
 def('Rational', 'zero?', 0, (self: RObject) => fractionOf(self).numerator === 0n);
 def('Rational', 'positive?', 0, (self: RObject) => fractionOf(self).numerator > 0n);
 def('Rational', 'negative?', 0, (self: RObject) => fractionOf(self).numerator < 0n);
