@@ -373,21 +373,24 @@ def('Array', 'clear', 0, function* (self: RArray) {
 def('Array', 'delete', 1, function* (self: RArray, [target], block) {
   let found: Value | undefined;
   let read = 0;
-  const kept: Value[] = [];
+  const kept: number[] = [];
   for (; read < self.items.length; read++) {
     const item = self.items[read];
-    const version = self.version;
+    const backing = self.items;
     const matched = yield* rEquals(item, target);
-    const changed = self.version !== version;
+    const changed = self.items !== backing;
     if (changed) kept.length = 0;
     if (matched) {
       yield* modify(self);
       found = item;
-    } else if (!changed) kept.push(item);
+    } else if (!changed) kept.push(read);
   }
   if (found === undefined) return block ? yield* call(block, target) : NIL;
   yield* modify(self);
-  self.items = [...kept, ...self.items.slice(read)];
+  self.items = [
+    ...kept.flatMap((index) => (index < self.items.length ? [self.items[index]] : [])),
+    ...self.items.slice(read),
+  ];
   return found;
 });
 def('Array', 'delete_at', 1, function* (self: RArray, [indexValue]) {
@@ -804,7 +807,7 @@ def('Array', 'transpose', 0, function* (self: RArray) {
   const held = rt().heldArrays.length;
   try {
     for (const item of self.items) {
-      const row = (yield* toAry(item)).items;
+      const row = [...(yield* toAry(item)).items];
       rows.push(row);
       rt().heldArrays.push(row);
     }

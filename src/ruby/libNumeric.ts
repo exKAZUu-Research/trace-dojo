@@ -516,7 +516,8 @@ def('Integer', 'upto', 1, function* (self: bigint, [limit], block) {
     return self;
   }
   if (typeof limit !== 'bigint') {
-    for (let index = self; (yield* compareValues(index, limit)) <= 0; index++) yield* callBlock(block, [index], false);
+    for (let index = self; !truthy(yield* callMethod(index, '>', [limit])); index++)
+      yield* callBlock(block, [index], false);
     return self;
   }
   for (let index = self; index <= limit; index++) yield* callBlock(block, [index], false);
@@ -530,7 +531,8 @@ def('Integer', 'downto', 1, function* (self: bigint, [limit], block) {
     return self;
   }
   if (typeof limit !== 'bigint') {
-    for (let index = self; (yield* compareValues(index, limit)) >= 0; index--) yield* callBlock(block, [index], false);
+    for (let index = self; !truthy(yield* callMethod(index, '<', [limit])); index--)
+      yield* callBlock(block, [index], false);
     return self;
   }
   for (let index = self; index >= limit; index--) yield* callBlock(block, [index], false);

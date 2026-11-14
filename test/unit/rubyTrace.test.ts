@@ -42,6 +42,11 @@ test('Array conversion results stay reachable during transpose and product', () 
   expect(traceProgram('ruby', product, product).finalTurtles).toHaveLength(1);
 });
 
+test('transpose snapshots earlier row values before later conversions', () => {
+  const program = 'class B;def to_ary;$r[0]=nil;q=1;[1];end;end;$r=[Turtle.new];a=[$r,B.new].transpose';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
 test('Array combination snapshots keep later Turtles reachable', () => {
   const program = 'a=[1,Turtle.new];a.permutation(1){|x|a.clear if x[0]==1;$v=x[0]}';
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);

@@ -1996,6 +1996,25 @@ test('Array delete does not restore elements removed by callbacks', () => {
   });
 });
 
+test('Array delete retains unrelated in-place callback changes', () => {
+  expect(run('class X;def ==(v);$a<<9;true;end;end;$a=[8,X.new,1];$a.delete(0);p $a')).toMatchObject({
+    stdout: '[8, 1, 9]\n',
+  });
+  expect(run('class X;def ==(v);$a[0]=7;true;end;end;$a=[8,X.new,1];$a.delete(0);p $a')).toMatchObject({
+    stdout: '[7, 1]\n',
+  });
+});
+
+test('Integer iteration uses relational coercion', () => {
+  expect(
+    run(
+      'class T;def >(x);puts :gt;false;end;def <=>(x);puts :cmp;1;end;end;class A;def coerce(x);[T.new,0];end;end;1.upto(A.new){|x|p x;break}'
+    )
+  ).toMatchObject({
+    stdout: 'gt\n1\n',
+  });
+});
+
 test('ArithmeticSequence last computes ratios before infinite-step results', () => {
   for (const source of [
     'Float::INFINITY.step(1.0, Float::INFINITY).last',
