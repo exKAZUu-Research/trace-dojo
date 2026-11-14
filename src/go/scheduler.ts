@@ -19,10 +19,9 @@ interface Completed {
  * - A goroutine runs until it blocks (on a channel, a lock, a WaitGroup, or a sleep) or ends; it is never preempted.
  * - Goroutines that can run wait in a queue in the order they became able to: `go` puts the new goroutine at its end,
  *   and so does waking a blocked goroutine.
- * - When no goroutine can run, time jumps to the earliest timer (a sleep, `time.After`, a ticker), whose goroutines
- *   or channels wake in the order they started waiting; `time.Sleep` never waits in real time.
- * - When no goroutine can run and no timer is pending, every goroutine is blocked for good, which Go reports as a
- *   deadlock.
+ * - When no goroutine can run, time jumps to the earliest sleep, callback timer, or channel timer with an active
+ *   receiver; ties follow registration order. `time.Sleep` never waits in real time.
+ * - Without a runnable goroutine or a timer that can wake one, the program reports Go's deadlock error.
  * - `select` takes the first ready case in the order written, where Go picks one at random.
  * - The program ends when `main` returns, without waiting for other goroutines, as in Go.
  */

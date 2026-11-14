@@ -4,7 +4,6 @@ import type { CalleeSummary } from './entities';
 import { utf8Decode } from './literals';
 import { quote } from './quote';
 import type { StackBuffers } from './runtime';
-import type { NativeState } from './values';
 
 export type BasicKind =
   | 'bool'
@@ -53,7 +52,6 @@ export interface Field {
 
 export interface StructType {
   nativeIdentity?: string;
-  nativeZero?: (state: NativeState | undefined) => boolean;
   nonComparable?: boolean;
   kind: 'struct';
   fields: Field[];

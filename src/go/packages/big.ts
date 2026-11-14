@@ -21,14 +21,12 @@ const INT_TYPE = namedType('big', 'Int', {
   kind: 'struct',
   fields: [],
   nativeIdentity: 'big.Int',
-  nativeZero: (state) => !state?.bigAllocated && ((state?.int as bigint | undefined) ?? 0n) === 0n,
   nonComparable: true,
 });
 const RAT_TYPE = namedType('big', 'Rat', {
   kind: 'struct',
   fields: [],
   nativeIdentity: 'big.Rat',
-  nativeZero: (state) => !state?.bigAllocated,
   nonComparable: true,
 });
 const INT_POINTER = pointerTo(INT_TYPE);
@@ -49,13 +47,12 @@ function setInt(pointer: Value, value: bigint): Value {
   const struct = structOf(pointer);
   struct.native ??= {};
   struct.native.int = value;
-  struct.native.bigAllocated ||= value !== 0n;
   return pointer;
 }
 
 const newInt = (value: bigint): Pointer => {
   checkBigInt(value);
-  return new Pointer(new Cell(new GoStruct([], { int: value, bigAllocated: value !== 0n })), 'v');
+  return new Pointer(new Cell(new GoStruct([], { int: value })), 'v');
 };
 
 const DIGITS = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -493,12 +490,11 @@ function setRat(pointer: Value, value: Fraction): Value {
   const struct = structOf(pointer);
   checkBigInt(value.num);
   checkBigInt(value.den);
-  struct.native = { ...struct.native, rat: { num: value.num, den: value.den }, bigAllocated: true };
+  struct.native = { ...struct.native, rat: { num: value.num, den: value.den } };
   return pointer;
 }
 
-const newRat = (value: Fraction): Pointer =>
-  new Pointer(new Cell(new GoStruct([], { rat: value, bigAllocated: true })), 'v');
+const newRat = (value: Fraction): Pointer => new Pointer(new Cell(new GoStruct([], { rat: value })), 'v');
 
 const ratString = (value: Fraction): string => `${value.num}/${value.den}`;
 
@@ -671,7 +667,6 @@ function component(receiver: Value, part: 'num' | 'den'): Pointer {
         struct.native ??= {};
         const fraction = (struct.native.rat ??= { num: 0n, den: 0n }) as Fraction;
         fraction[part] = value;
-        struct.native.bigAllocated ||= value !== 0n;
       },
     };
     pointer = new Pointer(new Cell(new GoStruct([], state)), 'v');

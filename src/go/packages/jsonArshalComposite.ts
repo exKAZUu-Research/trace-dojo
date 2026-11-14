@@ -13,6 +13,7 @@ import {
   sliceOf,
   type Type,
   typeIdentityKey,
+  typeString,
   underlying,
 } from '../types';
 import { Complex, type GoArray, GoMap, type GoStruct, Iface, Pointer, Slice, type Value } from '../values';
@@ -53,7 +54,7 @@ import {
   zeroValue,
 } from './reflection';
 import { equalFold } from './strings';
-import { bytesOf } from './support';
+import { bytesOf, stringPanic } from './support';
 import { typeKind } from './templateReflect';
 
 /** Finds the arshaler of a type, which the composite arshalers use for their elements. */
@@ -671,7 +672,30 @@ function zeroJsonValue(ref: Ref, type: Type): boolean {
   if (method === 'pointer') {
     return callPointerMethod(type, ref.pointer, 'IsZero', []) as boolean;
   }
+  const opaque = opaqueZeroType(value, type);
+  if (opaque) stringPanic(`${typeString(opaque)} の omitzeroは、この採点環境では使えません。`);
   return structuralZero(value, type);
+}
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Inspects native state in value arrays and structs without changing pointer or interface zero rules.
+function opaqueZeroType(value: Value, type: Type): Type | undefined {
+  if (value === undefined) return undefined;
+  const under = underlying(type);
+  if (under.kind === 'array') {
+    for (const element of (value as GoArray).elements) {
+      const opaque = opaqueZeroType(element, under.element);
+      if (opaque) return opaque;
+    }
+  }
+  if (under.kind === 'struct') {
+    const struct = value as GoStruct;
+    if (under.nativeIdentity || struct.native) return type;
+    for (const [index, field] of under.fields.entries()) {
+      const opaque = opaqueZeroType(struct.fields[index], field.type);
+      if (opaque) return opaque;
+    }
+  }
+  return undefined;
 }
 
 function structuralZero(value: Value, type: Type): boolean {
@@ -679,7 +703,6 @@ function structuralZero(value: Value, type: Type): boolean {
   const under = underlying(type);
   if (under.kind === 'struct') {
     const struct = value as GoStruct;
-    if (under.nativeZero) return under.nativeZero(struct.native);
     return under.fields.every((field, index) => structuralZero(struct.fields[index], field.type));
   }
   if (under.kind === 'array')

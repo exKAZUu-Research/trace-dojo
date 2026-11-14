@@ -1061,20 +1061,6 @@ test('forward named type arguments are checked after complete constraint lists',
   ).toMatchObject({ kind: 'executed', stdout: '1 1\n', uncaughtException: undefined });
 });
 
-test('native big number zero checks retain payload and backing allocation state', () => {
-  expect(
-    executeProgram(
-      'go',
-      'package main;import("fmt";"math/big";"encoding/json");type S struct{I big.Int `json:",omitzero"`;R big.Rat `json:",omitzero"`;A [1]big.Int `json:",omitzero"`};func show(s *S){b,e:=json.Marshal(s);fmt.Println(string(b),e);b,e=json.Marshal(*s);fmt.Println(string(b),e)};func main(){s:=S{};show(&s);s.I.SetInt64(123);s.R.SetFrac64(1,2);s.A[0].SetInt64(4);show(&s);s.I.SetInt64(0);s.R.SetInt64(0);s.A[0].SetInt64(0);show(&s);z:=S{I:*big.NewInt(0),R:*big.NewRat(0,1)};show(&z);n:=S{};n.R.Num().SetInt64(1);n.R.Num().SetInt64(0);show(&n)}'
-    )
-  ).toMatchObject({
-    kind: 'executed',
-    stdout:
-      '{} <nil>\n{} <nil>\n{"I":123,"R":"1/2","A":[4]} <nil>\n{"I":{},"R":{},"A":[{}]} <nil>\n{"I":0,"R":"0","A":[0]} <nil>\n{"I":{},"R":{},"A":[{}]} <nil>\n{"R":"0"} <nil>\n{"R":{}} <nil>\n{"R":"0"} <nil>\n{"R":{}} <nil>\n',
-    uncaughtException: undefined,
-  });
-});
-
 test('channel conversion calls preserve leading receive operators and parentheses', () => {
   expect(
     executeProgram(
@@ -1113,4 +1099,47 @@ test('generic channel inference preserves choices across receiver and method par
       'package main\nimport "fmt"\nfunc pair[T any](a,b T)T{return a}\ntype W[C ~chan int] struct{C C}\nfunc(w W[X])Run(){d:=make(chan int);fmt.Printf("%T %T\\n",pair(w.C,d),pair(d,w.C))}\ntype A int\nfunc(A)Run[C ~chan int](c C){d:=make(chan int);fmt.Printf("%T %T\\n",pair(c,d),pair(d,c))}\ntype B chan int\nfunc main(){W[B]{make(B)}.Run();A(0).Run(make(B))}\n'
     )
   ).toMatchObject({ kind: 'executed', stdout: 'main.B chan int\nmain.B chan int\n', uncaughtException: undefined });
+});
+
+test('opaque native structural zero checks fail explicitly for every arithmetic result', () => {
+  for (const operation of [
+    '_=s',
+    's.I.Add(big.NewInt(1),big.NewInt(-1))',
+    's.I.Sub(big.NewInt(1),big.NewInt(1))',
+    's.I.Mul(big.NewInt(1),big.NewInt(0))',
+    's.I.SetInt64(0)',
+    's.I.SetInt64(123)',
+  ]) {
+    const source =
+      'package main;import("math/big";"encoding/json");type S struct{I big.Int `json:",omitzero"`};func main(){s:=S{};' +
+      operation +
+      ';json.Marshal(&s)}';
+    expect(executeProgram('go', source)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('は、この採点環境では使えません。'),
+    });
+  }
+  for (const field of ['big.Rat', '[1]big.Int', 'struct{N int;I big.Int}']) {
+    const source =
+      'package main;import("math/big";"encoding/json");type S struct{V ' +
+      field +
+      ' `json:",omitzero"`};func main(){json.Marshal(S{})}';
+    expect(executeProgram('go', source)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('は、この採点環境では使えません。'),
+    });
+  }
+});
+
+test('custom zero methods and pointer fields avoid opaque structural inspection', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main\nimport("fmt";"math/big";"encoding/json")\ntype N struct{I big.Int}\nfunc(n N)IsZero()bool{return n.I.Sign()==0}\ntype S struct{N N `json:",omitzero"`;P *big.Int `json:",omitzero"`;A [0]big.Int `json:",omitzero"`}\nfunc main(){s:=S{P:big.NewInt(0)};s.N.I.SetInt64(123);b,e:=json.Marshal(&s);fmt.Println(string(b),e);b,e=json.Marshal(s);fmt.Println(string(b),e);s.N.I.SetInt64(0);b,e=json.Marshal(&s);fmt.Println(string(b),e)}\n'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '{"N":{"I":123},"P":0} <nil>\n{"N":{"I":{}},"P":0} <nil>\n{"P":0} <nil>\n',
+    uncaughtException: undefined,
+  });
 });
