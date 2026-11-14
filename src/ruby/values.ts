@@ -175,6 +175,10 @@ export function truthy(value: Value): boolean {
   return value !== false && value !== NIL;
 }
 
+export function sameIdentity(left: Value, right: Value): boolean {
+  return typeof left === 'number' && typeof right === 'number' ? Object.is(left, right) : left === right;
+}
+
 export function isNil(value: Value): boolean {
   return value === NIL;
 }

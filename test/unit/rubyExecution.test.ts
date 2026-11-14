@@ -2573,6 +2573,35 @@ test('exit! cannot be rescued as SystemExit', () => {
   });
 });
 
+test('exit converts statuses before raising SystemExit', () => {
+  expect(run('begin;exit "bad";rescue Exception=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'TypeError\n"no implicit conversion of String into Integer"\n',
+  });
+  expect(
+    run('class A;def to_int;puts :converted;7;end;end;begin;exit A.new;rescue SystemExit=>e;p e.status;end')
+  ).toMatchObject({ stdout: 'converted\n7\n' });
+});
+
+test('copied class methods use the copy’s lexical constants', () => {
+  expect(run('class A;X=1;def x;X;end;end;B=A.dup;B::X=2;p A.new.x,B.new.x')).toMatchObject({
+    stdout: '1\n2\n',
+  });
+});
+
+test('catch and throw distinguish signed Float zero tags', () => {
+  expect(run('begin;p catch(-0.0){throw 0.0,7};rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'UncaughtThrowError\n',
+  });
+});
+
+test('default inclusion rejects a duplicate module on a frozen class', () => {
+  expect(
+    run('module M;end;class C;include M;end;C.freeze;begin;C.include(M);puts :ok;rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'FrozenError\n',
+  });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(

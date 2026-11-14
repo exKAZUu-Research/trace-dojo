@@ -11,6 +11,7 @@ import {
   rEql,
   rEquals,
   toInt,
+  toRubyInt,
   toS,
   toStr,
   toStrValue,
@@ -48,7 +49,7 @@ import {
   type Visibility,
 } from './objects';
 import { rt, RubyError, ThrowSignal, UnsupportedFeatureError } from './runtime';
-import { arr, classOf, isA, newHash, realClassOf, singletonClassOf, str, sym, truthy } from './values';
+import { arr, classOf, isA, newHash, realClassOf, sameIdentity, singletonClassOf, str, sym, truthy } from './values';
 
 // Object --------------------------------------------------------------------------------------------------------------
 
@@ -75,9 +76,7 @@ def(
   { visibility: 'private', keywords: true }
 );
 def('BasicObject', '==', 1, (self, [other]) => self === other || (typeof self === 'number' && self === other));
-def('BasicObject', 'equal?', 1, (self, [other]) =>
-  typeof self === 'number' && typeof other === 'number' ? Object.is(self, other) : self === other
-);
+def('BasicObject', 'equal?', 1, (self, [other]) => sameIdentity(self, other));
 def('BasicObject', '!', 0, (self) => !truthy(self));
 def('BasicObject', '!=', 1, function* (self, [other]) {
   return !truthy(yield* callMethod(self, '==', [other]));
@@ -233,7 +232,14 @@ function copyClass(source: RClass): RClass {
   for (const [name, value] of source.constants) copy.constants.set(name, value);
   for (const [name, value] of source.classVariables) copy.classVariables.set(name, value);
   for (const [name, method] of source.methods)
-    copy.methods.set(name, { ...method, owner: method.owner === source ? copy : method.owner });
+    copy.methods.set(name, {
+      ...method,
+      owner: method.owner === source ? copy : method.owner,
+      body:
+        method.body.kind === 'user'
+          ? { ...method.body, cref: method.body.cref.map((scope) => (scope === source ? copy : scope)) }
+          : method.body,
+    });
   invalidateMethodCaches();
   return copy;
 }
@@ -400,7 +406,7 @@ def(
     try {
       return yield* callProc(requireBlock(block), [tag]);
     } catch (error) {
-      if (error instanceof ThrowSignal && error.tag === tag) return error.value;
+      if (error instanceof ThrowSignal && sameIdentity(error.tag, tag)) return error.value;
       throw error;
     } finally {
       runtime.catchTags.pop();
@@ -415,7 +421,7 @@ def(
   function* (_self, [tag, value = NIL]) {
     const runtime = rt();
     for (const active of runtime.catchTags.toReversed()) {
-      if (active === tag) throw new ThrowSignal(active, value);
+      if (sameIdentity(active, tag)) throw new ThrowSignal(active, value);
     }
     throw rubyError(runtime.c.UncaughtThrowError, `uncaught throw ${yield* inspect(tag)}`);
   },
@@ -426,9 +432,10 @@ def(
   'Kernel',
   'exit',
   [0, 1],
-  (_self, [status = true]) => {
+  function* (_self, [status = true]) {
+    const code = status === true ? 0n : status === false ? 1n : BigInt(yield* toRubyInt(status));
     const error = rubyError(rt().c.SystemExit, 'exit');
-    error.exception.ivars = new Map([['@__status', status === true ? 0n : status === false ? 1n : status]]);
+    error.exception.ivars = new Map([['@__status', code]]);
     throw error;
   },
   PRIVATE
@@ -660,8 +667,8 @@ def(
   (self: RClass, [target]) => {
     if (!(target instanceof RClass)) throw typeError('wrong argument type');
     if (self.ancestors().includes(target)) throw argumentError('cyclic include detected');
+    if (target.frozen) throw frozenError(target, target.name ?? '');
     if (!target.ancestors().includes(self)) {
-      if (target.frozen) throw frozenError(target, target.name ?? '');
       target.includes.unshift(self);
       invalidateMethodCaches();
     }
