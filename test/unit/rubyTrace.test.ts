@@ -128,6 +128,33 @@ test('Enumerable reverse_each roots its collected snapshot during callbacks', ()
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
+test('Enumerable minmax roots both pending candidates during comparisons', () => {
+  const program =
+    'class P;attr_reader :n;def initialize(n,t=false);@n=n;@t=Turtle.new if t;end;end;class E;include Enumerable;def each;yield P.new(0);yield P.new(5);yield P.new(2);yield P.new(8,true);end;end;x=E.new.minmax{|a,b|q=1;a.n<=>b.n}';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
+test('Enumerable slice_before roots the pending boundary element', () => {
+  const program =
+    'class E;include Enumerable;def each;yield 1;yield Turtle.new;end;end;x=E.new.slice_before{|v|true}.map{|a|q=1;a}';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
+test('Array minmax roots its first result through the second traversal', () => {
+  const program =
+    'class P;attr_reader :n;def initialize(n,t=false);@n=n;@t=Turtle.new if t;end;def <=>(o);$c+=1;if $c==4;$a.clear;q=1;end;@n<=>o.n;end;end;$c=0;$a=[P.new(0,true),P.new(1),P.new(2)];x=$a.minmax';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
+test('Hash slice and except root results through later key callbacks', () => {
+  const slice =
+    'class K;def hash;if $go;$h.clear;q=1;end;0;end;end;k=K.new;$go=false;$h={a:Turtle.new,k=>2};$go=true;x=$h.slice(:a,k)';
+  expect(traceProgram('ruby', slice, slice).finalTurtles).toHaveLength(1);
+  const except =
+    'class K;def hash;if $go;$h.clear;q=1;end;0;end;end;k=K.new;$go=false;$h={a:Turtle.new,k=>2};$go=true;x=$h.except(k)';
+  expect(traceProgram('ruby', except, except).finalTurtles).toHaveLength(1);
+});
+
 test('Array concat roots early conversion results', () => {
   const program =
     'class A;def to_ary;[Turtle.new];end;end;class B;def to_ary;q=1;[];end;end;a=[];a.concat(A.new,B.new)';

@@ -210,7 +210,6 @@ function* randomRange(generator: MersenneTwister, range: RRange): Gen<Value | un
   return yield* randomArithmeticRange(generator, begin, end, exclusive);
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Ruby's custom range path selects Integer or Float offsets after conversion.
 function* randomArithmeticRange(generator: MersenneTwister, begin: Value, end: Value, exclusive: boolean): Gen<Value> {
   let distance = yield* callMethod(end, '-', [begin]);
   if (typeof distance !== 'bigint' && !isRubyFloat(distance)) {
@@ -222,11 +221,39 @@ function* randomArithmeticRange(generator: MersenneTwister, begin: Value, end: V
     const max = distance - (exclusive ? 1n : 0n);
     return max < 0n ? NIL : yield* callMethod(begin, '+', [generator.limited(max)]);
   }
-  const floatDistance = Number(distance);
-  if (!Number.isFinite(floatDistance)) domainError();
-  if (floatDistance < 0 || (floatDistance === 0 && exclusive)) return NIL;
-  const offset = floatDistance === 0 ? 0 : generator.real(exclusive) * floatDistance;
+  return yield* randomFloatArithmeticRange(generator, begin, end, Number(distance), exclusive);
+}
+
+function* randomFloatArithmeticRange(
+  generator: MersenneTwister,
+  begin: Value,
+  end: Value,
+  distance: number,
+  exclusive: boolean
+): Gen<Value> {
+  if (Number.isNaN(distance)) domainError();
+  if (!Number.isFinite(distance)) {
+    const low = yield* randomEndpointFloat(begin);
+    const high = yield* randomEndpointFloat(end);
+    if (!Number.isFinite(low) || !Number.isFinite(high)) domainError();
+    const halfLow = low / 2;
+    const halfHigh = high / 2;
+    const span = halfHigh - halfLow;
+    if (span > 0) return (generator.real(exclusive) - 0.5) * span * 2 + (halfHigh + halfLow);
+    return span === 0 && !exclusive ? low : NIL;
+  }
+  if (distance < 0 || (distance === 0 && exclusive)) return NIL;
+  const offset = distance === 0 ? 0 : generator.real(exclusive) * distance;
+  return yield* addRandomFloatOffset(begin, offset);
+}
+
+function* addRandomFloatOffset(begin: Value, offset: number): Gen<Value> {
+  if (isRubyNumber(begin) || respondsTo(begin, 'to_f', true)) return (yield* randomEndpointFloat(begin)) + offset;
   return yield* callMethod(begin, '+', [offset]);
+}
+
+function* randomEndpointFloat(value: Value): Gen<number> {
+  return isRubyNumber(value) ? Number(value) : yield* toStepFloat(value);
 }
 
 /** `Random#rand` and `Random.rand`: a Float below 1 or below a Float, an Integer below an Integer, or one in a range. */

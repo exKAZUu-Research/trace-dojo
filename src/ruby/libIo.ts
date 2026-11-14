@@ -261,15 +261,20 @@ def('IO', ['flush', 'fsync'], 0, (self: RObject) => {
   checkWritable(self);
   return self;
 });
-def('IO', 'sync', 0, (self: RObject) => self.ivars?.get('@__sync') ?? true);
+def('IO', 'sync', 0, (self: RObject) => {
+  checkWritable(self);
+  return self.ivars?.get('@__sync') ?? true;
+});
 def('IO', 'sync=', 1, (self: RObject, [value]) => {
   checkWritable(self);
   self.ivars ??= new Map();
   self.ivars.set('@__sync', truthy(value));
   return value;
 });
-def('IO', 'tty?', 0, () => false);
-def('IO', 'isatty', 0, () => false);
+def('IO', ['tty?', 'isatty'], 0, (self: RObject) => {
+  checkWritable(self);
+  return false;
+});
 def('IO', 'fileno', 0, (self: RObject) => (self.data === 'stdout' ? 1n : 2n));
 def('IO', 'inspect', 0, (self: RObject) => str(`#<IO:<${self.data === 'stdout' ? 'STDOUT' : 'STDERR'}>>`));
 for (const name of ['gets', 'read', 'readline', 'readlines', 'each_line', 'getc', 'close', 'reopen']) {

@@ -473,18 +473,22 @@ def('Hash', 'invert', 0, function* (self: RHash) {
 });
 def('Hash', 'slice', [0, -1], function* (self: RHash, keys) {
   const hash = newHash();
-  for (const key of keys) {
-    const entry = yield* hashGet(self, key);
-    if (entry) yield* hashSet(hash, entry.key, entry.value);
-  }
-  return hash;
+  return yield* whileHeld(hash, function* () {
+    for (const key of keys) {
+      const entry = yield* hashGet(self, key);
+      if (entry) yield* hashSet(hash, entry.key, entry.value);
+    }
+    return hash;
+  });
 });
 def('Hash', 'except', [0, -1], function* (self: RHash, keys) {
   const hash = copy(self);
   hash.defaultValue = NIL;
   hash.defaultProc = undefined;
-  for (const key of keys) yield* hashDelete(hash, key);
-  return hash;
+  return yield* whileHeld(hash, function* () {
+    for (const key of keys) yield* hashDelete(hash, key);
+    return hash;
+  });
 });
 def('Hash', 'filter_map', 0, function* (self: RHash, _args, block) {
   if (!block) return makeEnumerator(self, 'filter_map', []);

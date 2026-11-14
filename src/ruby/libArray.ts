@@ -1192,7 +1192,10 @@ def('Array', 'min', [0, 1], function* (self: RArray, args, block) {
 });
 def('Array', 'minmax', 0, function* (self: RArray, _args, block) {
   if (block) return yield* enumerableMinmax(self, block);
-  return arr([yield* arrayExtreme(self, false), yield* arrayExtreme(self, true)]);
+  const minimum = yield* arrayExtreme(self, false);
+  return yield* whileHeld(minimum, function* () {
+    return arr([minimum, yield* arrayExtreme(self, true)]);
+  });
 });
 
 function* arrayExtreme(self: RArray, wantMax: boolean): Gen {

@@ -762,7 +762,7 @@ export function* minmax(self: Value, block: RProc | undefined): Gen {
   let pending: Value | undefined;
   const held = rt().held;
   const mark = held.length;
-  held.push(NIL, NIL, NIL);
+  held.push(NIL, NIL, NIL, NIL);
   try {
     yield* iterate(self, function* (value) {
       if (pending === undefined) {
@@ -772,6 +772,7 @@ export function* minmax(self: Value, block: RProc | undefined): Gen {
       }
       const first = pending;
       pending = undefined;
+      held[mark + 3] = value;
       const order = yield* orderOf(block, first, value);
       const smaller = order <= 0 ? first : value;
       const larger = order >= 0 ? first : value;
@@ -785,6 +786,7 @@ export function* minmax(self: Value, block: RProc | undefined): Gen {
       held[mark] = min;
       held[mark + 1] = max;
       held[mark + 2] = NIL;
+      held[mark + 3] = NIL;
     });
     if (pending !== undefined) {
       if (min === undefined || max === undefined) min = max = pending;
@@ -892,18 +894,20 @@ function* sliceAt(
   arrays.push(current);
   try {
     yield* iterate(self, function* (value) {
-      const boundary = predicate ? truthy(yield* call(predicate, value)) : yield* caseEquals(pattern as Value, value);
-      if (before && boundary && current.length > 0) {
-        yield* callBlock(consumer, [arr(current)], false);
-        current = [];
-        arrays[mark] = current;
-      }
-      current.push(value);
-      if (!before && boundary) {
-        yield* callBlock(consumer, [arr(current)], false);
-        current = [];
-        arrays[mark] = current;
-      }
+      yield* whileHeld(value, function* () {
+        const boundary = predicate ? truthy(yield* call(predicate, value)) : yield* caseEquals(pattern as Value, value);
+        if (before && boundary && current.length > 0) {
+          yield* callBlock(consumer, [arr(current)], false);
+          current = [];
+          arrays[mark] = current;
+        }
+        current.push(value);
+        if (!before && boundary) {
+          yield* callBlock(consumer, [arr(current)], false);
+          current = [];
+          arrays[mark] = current;
+        }
+      });
     });
     if (current.length > 0) yield* callBlock(consumer, [arr(current)], false);
     return self;

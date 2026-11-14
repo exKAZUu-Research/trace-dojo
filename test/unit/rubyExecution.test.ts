@@ -2064,6 +2064,22 @@ test('frozen standard streams reject writes and sync changes', () => {
   ).toMatchObject({
     stdout: 'FrozenError\nFrozenError\n',
   });
+  expect(
+    run(
+      'STDERR.freeze;begin;p STDERR.sync;rescue=>e;p e.class;end;begin;p STDERR.tty?;rescue=>e;p e.class;end;begin;p STDERR.isatty;rescue=>e;p e.class;end;p STDERR.fileno'
+    )
+  ).toMatchObject({
+    stdout: 'FrozenError\nFrozenError\nFrozenError\n2\n',
+  });
+});
+
+test('Random custom ranges convert endpoints after infinite distances', () => {
+  const source =
+    'class A<Numeric;def initialize(n);@n=n;end;def <=>(x);0;end;def -(x);Float::INFINITY;end;def to_f;@n.to_f;end;def +(x);x;end;end;p Random.new(1).rand(A.new(1)..A.new(2))';
+  expect(run(source)).toMatchObject({ stdout: '1.4170219986692967\n' });
+  const invalid =
+    'class A;def <=>(x);0;end;def -(x);Float::INFINITY;end;def +(x);x;end;end;begin;Random.new(1).rand(A.new..A.new);rescue=>e;p e.class;end';
+  expect(run(invalid)).toMatchObject({ stdout: 'TypeError\n' });
 });
 
 test('boxed Floats reject singleton classes within Ruby execution', () => {
