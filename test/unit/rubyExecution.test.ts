@@ -5097,3 +5097,9 @@ test('Regexp bang substitutions check frozen state and match success', () => {
 test('Regexp substitution enforces cumulative output storage', () => {
   expect(run('("a"*1000).gsub(/a/,"x"*1100)')).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
 });
+
+test('negative Integer and Rational powers charge before large allocation', () => {
+  expect(run('p 2 ** -1000000000000')).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  expect(run('p Rational(2) ** 1000000000000')).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  expect(run('p Rational(2) ** Rational(1,2)')).toMatchObject({ stdout: '1.4142135623730951\n' });
+});

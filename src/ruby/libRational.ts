@@ -1,4 +1,4 @@
-import { formatFloat, toInt, toStr } from './conversions';
+import { formatFloat, toFloat, toInt, toStr } from './conversions';
 import { def } from './define';
 import { argumentError, floatDomainError, typeError, zeroDivisionError } from './errors';
 import { exactDecimal } from './floatFormat';
@@ -97,12 +97,19 @@ for (const op of ['+', '-', '*', '/', 'quo']) {
 def('Rational', '**', 1, function* (self: RObject, [exponent]) {
   const { numerator, denominator } = fractionOf(self);
   if (typeof exponent === 'bigint') {
+    const magnitude = exponent < 0n ? -exponent : exponent;
+    const bits = [numerator, denominator]
+      .map((value) => (value < 0n ? -value : value))
+      .filter((value) => value > 1n)
+      .reduce((total, value) => total + value.toString(2).length, 0);
+    rt().spend(Math.ceil((bits * Number(magnitude)) / 256));
     if (exponent >= 0n) return makeRational(numerator ** exponent, denominator ** exponent);
     if (numerator === 0n) throw zeroDivisionError();
     return makeRational(denominator ** -exponent, numerator ** -exponent);
   }
-  yield* [];
-  return toNumber(fractionOf(self)) ** Number(exponent);
+  const power = yield* toFloat(exponent);
+  if (numerator < 0n && !Number.isInteger(power)) throw new UnsupportedFeatureError('複素数（Rational の小数乗）');
+  return toNumber(fractionOf(self)) ** power;
 });
 def('Rational', '-@', 0, (self: RObject) => makeRational(-fractionOf(self).numerator, fractionOf(self).denominator));
 def('Rational', '<=>', 1, (self: RObject, [other]) => {
