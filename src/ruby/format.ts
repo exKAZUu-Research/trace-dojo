@@ -258,6 +258,8 @@ function* directive(type: string, spec: Spec, arg: () => Value): Gen<string | RS
         const point = yield* intArg(value);
         if (point < -0x80_00_00_00_00_00_00_00n || point > 0x7f_ff_ff_ff_ff_ff_ff_ffn)
           throw rangeError("bignum too big to convert into 'long'");
+        if (point < -2_147_483_648n) throw rangeError(`integer ${point} too small to convert to 'int'`);
+        if (point > 2_147_483_647n) throw rangeError(`integer ${point} too big to convert to 'int'`);
         if (point < 0n || point > 0x10_ff_ffn) throw argumentError('invalid character');
         text = String.fromCodePoint(Number(point));
       }

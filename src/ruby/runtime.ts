@@ -158,6 +158,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly comparablePairs = new Map<Value, Set<Value>>();
   /** The row of the statement running now, which a call records as its frame's call row. */
   currentRow = 0;
+  containerVersion = 0;
   /** The fake addresses `inspect` shows for objects, assigned in the order the program shows them. */
   readonly addresses = new Map<object, number>();
   c!: CoreClasses;

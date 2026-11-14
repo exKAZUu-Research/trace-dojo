@@ -38,6 +38,8 @@ import { arr, newHash, realClassOf, str, stringBytes, stringFromBytes, truthy } 
 
 function* modify(self: RArray): Gen<void> {
   if (self.frozen) throw frozenError(self, yield* inspectArray(self));
+  self.version++;
+  rt().containerVersion++;
 }
 
 function grow(length: number, self?: RArray): void {
@@ -156,12 +158,7 @@ def('Array', '[]=', [2, 3], function* (self: RArray, args) {
   yield* modify(self);
   const value = args.at(-1) as Value;
   if (args.length === 2 && !(args[0] instanceof RRange)) {
-    let index = yield* toIndex(args[0]);
-    const length = self.items.length;
-    if (index < 0) {
-      index += length;
-      if (index < 0) throw indexError(`index ${index - length} too small for array; minimum: -${length}`);
-    }
+    const index = yield* assignmentIndex(self, args[0]);
     grow(index + 1, self);
     while (self.items.length < index) self.items.push(NIL);
     self.items[index] = value;
@@ -170,13 +167,9 @@ def('Array', '[]=', [2, 3], function* (self: RArray, args) {
   let start: number;
   let count: number;
   if (args.length === 3) {
-    start = yield* toIndex(args[0]);
+    const { integer } = yield* toIndexExact(args[0]);
     count = yield* toIndex(args[1]);
-    const length = self.items.length;
-    if (start < 0) {
-      start += length;
-      if (start < 0) throw indexError(`index ${start - length} too small for array; minimum: -${length}`);
-    }
+    start = assignmentIndexExact(self, integer);
     if (count < 0) throw indexError(`negative length (${count})`);
   } else {
     const range = args[0] as RRange;
@@ -201,6 +194,19 @@ def('Array', '[]=', [2, 3], function* (self: RArray, args) {
   self.items = [...self.items.slice(0, start), ...replacement, ...self.items.slice(start + count)];
   return value;
 });
+
+function* assignmentIndex(self: RArray, value: Value): Gen<number> {
+  const { integer } = yield* toIndexExact(value);
+  return assignmentIndexExact(self, integer);
+}
+
+function assignmentIndexExact(self: RArray, integer: bigint): number {
+  const length = self.items.length;
+  const adjusted = integer < 0n ? integer + BigInt(length) : integer;
+  if (adjusted < 0n) throw indexError(`index ${integer} too small for array; minimum: -${length}`);
+  if (adjusted >= 1_152_921_504_606_846_975n) throw indexError(`index ${integer} too big`);
+  return Number(adjusted);
+}
 def('Array', 'fetch', [1, 2], function* (self: RArray, args, block) {
   const { number: raw, integer: exact } = yield* toIndexExact(args[0]);
   const index = raw < 0 ? raw + self.items.length : raw;
@@ -668,12 +674,12 @@ def('Array', 'join', [0, 1], function* (self: RArray, args) {
 
 function* joinValue(value: Value, separator: RString, seen: Set<RArray>): Gen<RString> {
   if (value instanceof RString) return value;
+  if (value instanceof RArray) return yield* join(value, separator, seen);
   if (respondsTo(value, 'to_str', true)) {
     const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
     if (converted instanceof RString) return converted;
     if (converted !== NIL) throw joinStringConversionError(value, converted);
   }
-  if (value instanceof RArray) return yield* join(value, separator, seen);
   const converted = yield* tryAry(value);
   return converted
     ? yield* whileHeld(converted, function* () {

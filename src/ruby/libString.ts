@@ -29,7 +29,7 @@ import {
   typeError,
 } from './errors';
 import { formatString } from './format';
-import { hashDefault, hashGet } from './hashes';
+import { hashDefault, hashGet, stringKeyEquals, stringKeyHash } from './hashes';
 import { callBlock, callMethod, type Gen, invoke, nativeProc, requireBlock } from './interp';
 import { makeEnumerator } from './libEnumerator';
 import { parseFloatLenient, parseIntegerLenient } from './libNumeric';
@@ -253,21 +253,8 @@ def('String', 'oct', 0, (self: RString) => parseIntegerLenient(self.s, 8));
 def('String', ['length', 'size'], 0, (self: RString) => BigInt(stringCharacters(self).length));
 def('String', 'bytesize', 0, (self: RString) => BigInt(stringBytes(self).length));
 def('String', 'empty?', 0, (self: RString) => self.s.length === 0);
-def('String', 'hash', 0, (self: RString) => {
-  let hash = 7n;
-  for (const byte of stringBytes(self)) hash = (hash * 31n + BigInt(byte)) % 2_305_843_009_213_693_951n;
-  return hash;
-});
-def('String', ['==', '===', 'eql?'], 1, function* (self: RString, [other]) {
-  if (other instanceof RString) {
-    if (!self.binary && !other.binary && !self.rawBytes && !other.rawBytes) return self.s === other.s;
-    const left = stringBytes(self);
-    const right = stringBytes(other);
-    if (self.binary !== other.binary && left.some((byte) => byte >= 0x80)) return false;
-    return left.length === right.length && left.every((byte, index) => byte === right[index]);
-  }
-  return false;
-});
+def('String', 'hash', 0, (self: RString) => stringKeyHash(self));
+def('String', ['==', '===', 'eql?'], 1, (self: RString, [other]) => stringKeyEquals(self, other));
 def('String', '<=>', 1, (self: RString, [other]) => {
   if (!(other instanceof RString)) return NIL;
   return BigInt(compareRubyStrings(self, other));

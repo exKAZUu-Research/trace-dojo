@@ -2291,6 +2291,64 @@ test('ArithmeticSequence size converts custom Float limits', () => {
   });
 });
 
+test('Hash lookup uses String key semantics for String subclasses', () => {
+  expect(
+    run(
+      'class S<String;def eql?(x);puts :eq;true;end;def hash;puts :hash;1.hash;end;end;s=S.new("x");h={1=>42};puts :lookup;p h[s]'
+    )
+  ).toMatchObject({ stdout: 'lookup\nnil\n' });
+});
+
+test('pp permits changes to a later Hash and omits deleted entries', () => {
+  expect(
+    run(
+      'class A;def inspect;$h[:new]=2;"x";end;end;class B;def inspect;"y";end;end;$h={a:1};pp [A.new,$h,B.new];p $h.size'
+    )
+  ).toMatchObject({ stdout: '[x, {a: 1, new: 2}, y]\n2\n' });
+  expect(
+    run(
+      'class A;def inspect;$h.delete(:b);"x";end;end;class B;def inspect;"y";end;end;$h={a:A.new,b:B.new};pp $h;p $h.size'
+    )
+  ).toMatchObject({ stdout: '{a: x}\n1\n' });
+});
+
+test('pp streams a large unchanged callback collection within the time budget', () => {
+  vi.restoreAllMocks();
+  const result = run('class A;def inspect;"x";end;end;pp Array.new(10000,A.new)');
+  expect(result).toMatchObject({ kind: 'executed' });
+  if (result.kind === 'executed') expect(result.stdout).toHaveLength(40_000);
+});
+
+test('join recursively handles Array subclasses after its preflight', () => {
+  expect(run('class A<Array;def to_str;puts :str;"x";end;end;p [A.new([1,2])].join(",")')).toMatchObject({
+    stdout: 'str\n"1,2"\n',
+  });
+});
+
+test('character formatting validates native int bounds', () => {
+  expect(run('begin;p format("%c",-2147483649);rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'RangeError\n"integer -2147483649 too small to convert to \'int\'"\n',
+  });
+});
+
+test('Array assignment reports exact and oversized indexes', () => {
+  expect(run('a=[1];begin;a[-9007199254740993]=1;rescue=>e;p e.message;end')).toMatchObject({
+    stdout: '"index -9007199254740993 too small for array; minimum: -1"\n',
+  });
+  expect(run('a=[1];begin;a[9223372036854775807]=1;rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'IndexError\n"index 9223372036854775807 too big"\n',
+  });
+});
+
+test('Kernel Integer accepts negative radices and source prefixes', () => {
+  expect(
+    run('p Integer("10",-1),Integer("10",-2),Integer("10",-16),Integer("10",-36),Integer("0xff",-2)')
+  ).toMatchObject({
+    stdout: '10\n2\n16\n36\n255\n',
+  });
+  expect(run('begin;p "10".to_i(-1);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'ArgumentError\n' });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(

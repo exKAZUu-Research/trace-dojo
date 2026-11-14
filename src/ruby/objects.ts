@@ -69,6 +69,7 @@ export class RString extends RBasic {
 }
 
 export class RArray extends RBasic {
+  version = 0;
   constructor(
     cls: RClass,
     public items: Value[]
@@ -89,18 +90,21 @@ class TrackedHashMap extends Map<string, HashEntry> {
   override set(key: string, value: HashEntry): this {
     super.set(key, value);
     this.version++;
+    rt().containerVersion++;
     return this;
   }
 
   override delete(key: string): boolean {
     const removed = super.delete(key);
     if (removed) this.version++;
+    if (removed) rt().containerVersion++;
     return removed;
   }
 
   override clear(): void {
     super.clear();
     this.version++;
+    rt().containerVersion++;
   }
 }
 

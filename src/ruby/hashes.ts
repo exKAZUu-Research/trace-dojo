@@ -3,7 +3,7 @@ import { frozenError, runtimeError } from './errors';
 import { callMethod, callProc, type Gen, runToEnd } from './interp';
 import { type HashEntry, RArray, RBasic, RHash, RRange, RString, type Value } from './objects';
 import { rt } from './runtime';
-import { classOf, snapshot, str, truthy } from './values';
+import { classOf, snapshot, str, stringBytes, truthy } from './values';
 
 interface HashTraversal {
   cycle: boolean;
@@ -21,6 +21,7 @@ export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], traversal?: H
     traversal.cycle = true;
     return 'cycle';
   }
+  if (value instanceof RString) return digest(String(stringKeyHash(value)));
   const method = classOf(value).findMethod('hash');
   if (method && method.body.kind === 'user') {
     traversal.callbacks++;
@@ -89,13 +90,35 @@ function digest(text: string): string {
   return (value >>> 0).toString(16);
 }
 
+export function stringKeyHash(value: RString): bigint {
+  let hash = 7n;
+  for (const byte of stringBytes(value)) hash = (hash * 31n + BigInt(byte)) % 2_305_843_009_213_693_951n;
+  return hash;
+}
+
+export function stringKeyEquals(left: RString, other: Value): boolean {
+  if (!(other instanceof RString)) return false;
+  if (!left.binary && !other.binary && !left.rawBytes && !other.rawBytes) return left.s === other.s;
+  const leftBytes = stringBytes(left);
+  const rightBytes = stringBytes(other);
+  if (left.binary !== other.binary && leftBytes.some((byte) => byte >= 0x80)) return false;
+  return leftBytes.length === rightBytes.length && leftBytes.every((byte, index) => byte === rightBytes[index]);
+}
+
 /** Finds the entry for `key`, checking equality even when distinct keys have the same hash. */
 function* findEntry(hash: RHash, key: Value): Gen<{ base: string; slot: string; entry: HashEntry | undefined }> {
-  const base = `h${digest(String(yield* toInt(yield* callMethod(key, 'hash', []))))}`;
+  const keyHash = key instanceof RString ? stringKeyHash(key) : yield* toInt(yield* callMethod(key, 'hash', []));
+  const base = `h${digest(String(keyHash))}`;
   if (hash.bucketVersion !== hash.map.version) rebuildBuckets(hash);
   for (const slot of hash.buckets.get(base) ?? []) {
     const entry = hash.map.get(slot);
-    if (entry && (entry.key === key || truthy(yield* callMethod(key, 'eql?', [entry.key]))))
+    if (
+      entry &&
+      (entry.key === key ||
+        (key instanceof RString
+          ? stringKeyEquals(key, entry.key)
+          : truthy(yield* callMethod(key, 'eql?', [entry.key]))))
+    )
       return { base, slot, entry };
   }
   for (let index = 0; ; index++) {
@@ -139,6 +162,8 @@ export function* hashSet(hash: RHash, key: Value, value: Value): Gen<boolean> {
     const { base, slot, entry } = yield* findEntry(hash, key);
     if (entry) {
       entry.value = value;
+      hash.map.version++;
+      rt().containerVersion++;
       return true;
     }
     if (hash.iterating > 0) throw runtimeError(hash.iterationError ?? "can't add a new key into hash during iteration");

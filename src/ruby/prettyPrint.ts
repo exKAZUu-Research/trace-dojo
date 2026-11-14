@@ -1,7 +1,7 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { addressOf, anonymousClassName, inspect, strInspect, symInspect } from './conversions';
 import type { Gen } from './interp';
-import { RArray, RBasic, RClass, RHash, RObject, RString, RSymbol, type Value } from './objects';
+import { type HashEntry, RArray, RBasic, RClass, RHash, RObject, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
 import { classOf, realClassOf, stringBytes, stringFromBytes } from './values';
 
@@ -9,7 +9,20 @@ import { classOf, realClassOf, stringBytes, stringFromBytes } from './values';
 type Doc =
   | { kind: 'text'; text: string; deferred?: Value }
   | { kind: 'break'; text: string }
-  | { kind: 'group'; indent: number; parts: Doc[]; source?: RArray | RHash; itemValues?: Value[] };
+  | {
+      kind: 'group';
+      indent: number;
+      parts: Doc[];
+      source?: RArray | RHash;
+      sourceVersion?: number;
+      itemValues?: Value[];
+      hashEntries?: HashEntry[];
+    };
+
+interface Deferred {
+  node: Extract<Doc, { kind: 'text' }>;
+  hashes: RHash[];
+}
 
 /** `pp` prints to a stream that is not a terminal, where Ruby's width is 80 columns less one. */
 const WIDTH = 79;
@@ -28,21 +41,18 @@ export function* writePretty(value: Value, write: (part: string) => Gen<void>): 
   }
   if (callbacks === 1) {
     const doc = yield* build(value, new Set(), { nodes: 0, textLength: 0 }, true);
-    const hashes = new Set<RHash>();
-    holdHashes(doc, hashes);
-    try {
+    const hashes = deferredNodes(doc)[0]?.hashes ?? [];
+    yield* withPrettyGuards(hashes, function* () {
       const prefix = staticPrefix(doc);
       if (prefix) yield* write(prefix);
       const rendered = yield* prettyInspect(value);
       yield* write(rendered.slice(prefix.length));
-    } finally {
-      for (const hash of hashes) hash.iterating--;
-    }
+    });
     return;
   }
   const doc = yield* build(value, new Set(), { nodes: 0, textLength: 0 }, true);
-  const hashes = new Set<RHash>();
-  holdHashes(doc, hashes);
+  let pending = deferredNodes(doc);
+  let cursor = 0;
   let textLength = documentTextLength(doc);
   let emitted = '';
   const flushPrefix = function* (): Gen<void> {
@@ -50,20 +60,33 @@ export function* writePretty(value: Value, write: (part: string) => Gen<void>): 
     yield* write(prefix.slice(emitted.length));
     emitted = prefix;
   };
-  try {
-    yield* flushPrefix();
-    for (let node = firstDeferred(doc); node; node = firstDeferred(doc)) {
+  yield* withPrettyGuards(pending[0]?.hashes ?? [], flushPrefix);
+  while (cursor < pending.length) {
+    const { node, hashes } = pending[cursor++];
+    const version = rt().containerVersion;
+    yield* withPrettyGuards(hashes, function* () {
       node.text = yield* inspect(node.deferred as Value);
       textLength += node.text.length;
       if (textLength > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
       node.deferred = undefined;
-      yield* reconcileContainers(doc, node);
-      textLength = documentTextLength(doc);
-      if (textLength > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
-      holdHashes(doc, hashes);
+      if (rt().containerVersion !== version) {
+        yield* reconcileContainers(doc, node);
+        yield* refreshChangedContainers(doc);
+        textLength = documentTextLength(doc);
+        if (textLength > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
+        pending = deferredNodes(doc);
+        cursor = 0;
+      }
       yield* flushPrefix();
-    }
-    yield* write(`${layout(doc)}\n`.slice(emitted.length));
+    });
+  }
+  yield* write(`${layout(doc)}\n`.slice(emitted.length));
+}
+
+function* withPrettyGuards(hashes: RHash[], action: () => Gen<void>): Gen<void> {
+  for (const hash of hashes) hash.iterating++;
+  try {
+    yield* action();
   } finally {
     for (const hash of hashes) hash.iterating--;
   }
@@ -75,23 +98,16 @@ function documentTextLength(doc: Doc): number {
   return doc.parts.reduce((length, part) => length + documentTextLength(part), 0);
 }
 
-function holdHashes(doc: Doc, held: Set<RHash>): void {
-  if (doc.kind !== 'group') return;
-  if (doc.source instanceof RHash && !held.has(doc.source)) {
-    doc.source.iterating++;
-    held.add(doc.source);
+function deferredNodes(doc: Doc, hashes: RHash[] = [], result: Deferred[] = []): Deferred[] {
+  if (doc.kind === 'text') {
+    if (doc.deferred !== undefined) result.push({ node: doc, hashes });
+    return result;
   }
-  for (const part of doc.parts) holdHashes(part, held);
-}
-
-function firstDeferred(doc: Doc): Extract<Doc, { kind: 'text' }> | undefined {
-  if (doc.kind === 'text') return doc.deferred === undefined ? undefined : doc;
-  if (doc.kind === 'group')
-    for (const part of doc.parts) {
-      const found = firstDeferred(part);
-      if (found) return found;
-    }
-  return undefined;
+  if (doc.kind === 'group') {
+    const next = doc.source instanceof RHash ? [...hashes, doc.source] : hashes;
+    for (const part of doc.parts) deferredNodes(part, next, result);
+  }
+  return result;
 }
 
 function* reconcileContainers(doc: Doc, resolved: Doc): Gen<boolean> {
@@ -100,11 +116,22 @@ function* reconcileContainers(doc: Doc, resolved: Doc): Gen<boolean> {
   for (const [position, part] of doc.parts.entries()) {
     if (!(yield* reconcileContainers(part, resolved))) continue;
     const index = Math.floor((position - 1) / 3);
-    if (doc.source instanceof RArray) yield* reconcileArray(doc, doc.source, index);
-    if (doc.source instanceof RHash) yield* reconcileHash(doc, doc.source, index);
+    if (doc.source instanceof RArray && doc.sourceVersion !== doc.source.version)
+      yield* reconcileArray(doc, doc.source, index);
+    if (doc.source instanceof RHash && doc.sourceVersion !== doc.source.map.version)
+      yield* reconcileHash(doc, doc.source, index);
     return true;
   }
   return false;
+}
+
+function* refreshChangedContainers(doc: Doc): Gen<void> {
+  if (doc.kind !== 'group') return;
+  if (doc.source instanceof RArray && doc.sourceVersion !== doc.source.version)
+    yield* reconcileArray(doc, doc.source, -1);
+  if (doc.source instanceof RHash && doc.sourceVersion !== doc.source.map.version)
+    yield* reconcileHash(doc, doc.source, -1);
+  for (const part of doc.parts) yield* refreshChangedContainers(part);
 }
 
 function* reconcileArray(doc: Extract<Doc, { kind: 'group' }>, source: RArray, index: number): Gen<void> {
@@ -112,30 +139,46 @@ function* reconcileArray(doc: Extract<Doc, { kind: 'group' }>, source: RArray, i
   let changed = index + 1;
   while (changed < previous.length && changed < source.items.length && previous[changed] === source.items[changed])
     changed++;
-  if (changed === previous.length && changed === source.items.length) return;
-  const end = doc.parts.at(-1) as Doc;
-  const remainder: Doc[] = [];
-  for (let next = changed; next < source.items.length; next++) {
-    remainder.push({ kind: 'text', text: ',' }, breakable());
-    remainder.push(yield* build(source.items[next], new Set([source]), { nodes: 0, textLength: 0 }, true));
+  if (changed !== previous.length || changed !== source.items.length) {
+    const end = doc.parts.at(-1) as Doc;
+    const remainder: Doc[] = [];
+    for (let next = changed; next < source.items.length; next++) {
+      if (next > 0) remainder.push({ kind: 'text', text: ',' }, breakable());
+      remainder.push(yield* build(source.items[next], new Set([source]), { nodes: 0, textLength: 0 }, true));
+    }
+    doc.parts = [...doc.parts.slice(0, changed === 0 ? 1 : changed * 3 - 1), ...remainder, end];
+    doc.itemValues = [...source.items];
   }
-  doc.parts = [...doc.parts.slice(0, changed * 3 - 1), ...remainder, end];
-  doc.itemValues = [...source.items];
+  doc.sourceVersion = source.version;
 }
 
 function* reconcileHash(doc: Extract<Doc, { kind: 'group' }>, source: RHash, index: number): Gen<void> {
-  const previous = doc.itemValues as Value[];
-  const entries = [...source.map.values()];
-  for (let next = index + 1; next < entries.length; next++) {
-    const value = entries[next].value;
-    if (previous[next] === value) continue;
-    const pairDoc = doc.parts[next * 3 + 1];
-    if (pairDoc.kind !== 'group') continue;
-    const valueDoc = pairDoc.parts.at(-1);
-    if (valueDoc?.kind !== 'group') continue;
-    valueDoc.parts[1] = yield* build(value, new Set([source]), { nodes: 0, textLength: 0 }, true);
-    previous[next] = value;
+  const previous = doc.hashEntries as HashEntry[];
+  const previousValues = doc.itemValues as Value[];
+  const processed = previous.slice(0, index + 1);
+  const processedSet = new Set(processed);
+  const future = [...source.map.values()].filter((entry) => !processedSet.has(entry));
+  const parts = doc.parts.slice(0, index < 0 ? 1 : index * 3 + 2);
+  const values = previousValues.slice(0, index + 1);
+  const end = doc.parts.at(-1) as Doc;
+  for (const entry of future) {
+    if (parts.length > 1) parts.push({ kind: 'text', text: ',' }, breakable());
+    const oldIndex = previous.indexOf(entry);
+    const oldDoc =
+      oldIndex === -1 || previousValues[oldIndex] !== entry.value ? undefined : doc.parts[oldIndex * 3 + 1];
+    parts.push(
+      oldDoc ?? {
+        kind: 'group',
+        indent: 0,
+        parts: yield* pair(entry.key, entry.value, new Set([source]), { nodes: 0, textLength: 0 }, true),
+      }
+    );
+    values.push(entry.value);
   }
+  doc.parts = [...parts, end];
+  doc.hashEntries = [...processed, ...future];
+  doc.itemValues = values;
+  doc.sourceVersion = source.map.version;
 }
 
 function staticPrefix(doc: Doc): string {
@@ -188,7 +231,15 @@ function group(
       : source instanceof RHash
         ? [...source.map.values()].map((entry) => entry.value)
         : undefined;
-  return { kind: 'group', indent, parts: [text(open, budget), ...parts, text(close, budget)], source, itemValues };
+  return {
+    kind: 'group',
+    indent,
+    parts: [text(open, budget), ...parts, text(close, budget)],
+    source,
+    sourceVersion: source instanceof RArray ? source.version : source?.map.version,
+    itemValues,
+    hashEntries: source instanceof RHash ? [...source.map.values()] : undefined,
+  };
 }
 
 /** Whether the program redefined how a value is shown, which then decides its text as a whole. */

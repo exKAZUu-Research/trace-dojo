@@ -772,7 +772,7 @@ export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen 
   const raise = yield* exceptionOption(keywords);
   const [value, baseValue] = args;
   const base = baseValue === undefined ? undefined : yield* toRubyInt(baseValue);
-  const invalidBase = base !== undefined && (base < 0 || (base !== 0 && (base < 2 || base > 36)));
+  const invalidBase = base !== undefined && (base < -36 || base > 36 || base === 1);
   let parsedString = false;
   try {
     if (value instanceof RString) {
@@ -816,7 +816,7 @@ export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen 
 }
 
 function parseIntegerValue(value: RString, base: number | undefined): bigint {
-  const parsed = parseIntegerStrict(value.s, base);
+  const parsed = parseIntegerStrict(value.s, base, true);
   if (parsed === undefined) throw argumentError(`invalid value for Integer(): ${JSON.stringify(value.s)}`);
   return parsed;
 }
@@ -828,8 +828,8 @@ function integerStringConversionError(value: Value, converted: Value): RubyError
 
 /** Parses an Integer as `Integer()` does: prefixes, underscores between digits, and surrounding blanks. */
 // code-gauge-allow functionNcss 33 -- Strict Integer parsing validates radix prefixes, signs, underscores, and surrounding whitespace.
-export function parseIntegerStrict(text: string, base?: number): bigint | undefined {
-  if (base !== undefined && (base < 0 || (base !== 0 && (base < 2 || base > 36)))) {
+export function parseIntegerStrict(text: string, base?: number, allowNegativeBase = false): bigint | undefined {
+  if (base !== undefined && (base < -36 || base > 36 || base === 1 || (!allowNegativeBase && base < 0))) {
     throw argumentError(`invalid radix ${base}`);
   }
   const match = /^[\t\n\v\f\r ]*([+-]?)(0[xXbBoOdD]?)?([\dA-Za-z]+(?:_[\dA-Za-z]+)*)[\t\n\v\f\r ]*$/.exec(text);
@@ -838,15 +838,15 @@ export function parseIntegerStrict(text: string, base?: number): bigint | undefi
     return undefined;
   }
   const [, sign, prefix = '', body] = match;
-  let radix = base === undefined || base === 0 ? 10 : base;
+  let radix = base === undefined || base === 0 || base === -1 ? 10 : Math.abs(base);
   const lower = prefix.toLowerCase();
   if (lower === '0x') radix = check(16, base);
   else if (lower === '0b') radix = check(2, base);
   else if (lower === '0o') radix = check(8, base);
   else if (lower === '0d') radix = check(10, base);
-  else if (lower === '0') radix = base === undefined || base === 0 ? 8 : base;
+  else if (lower === '0') radix = base === undefined || base === 0 || base < 0 ? 8 : base;
   if (radix === -1) return undefined;
-  const digits = (lower === '0' && base !== undefined && base !== 0 && base !== 8 ? `0${body}` : body).replaceAll(
+  const digits = (lower === '0' && base !== undefined && base > 0 && base !== 8 ? `0${body}` : body).replaceAll(
     '_',
     ''
   );
@@ -862,7 +862,7 @@ export function parseIntegerStrict(text: string, base?: number): bigint | undefi
 }
 
 function check(radix: number, base: number | undefined): number {
-  return base === undefined || base === 0 || base === radix ? radix : -1;
+  return base === undefined || base <= 0 || base === radix ? radix : -1;
 }
 
 export function* kernelFloat(value: Value, keywords: RHash | undefined): Gen {

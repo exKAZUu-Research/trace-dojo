@@ -361,6 +361,8 @@ def('Hash', 'transform_values!', 0, function* (self: RHash, _args, block) {
   yield* modify(self);
   yield* eachEntry(self, function* (entry) {
     entry.value = yield* callBlock(block, [entry.value]);
+    self.map.version++;
+    rt().containerVersion++;
   });
   return self;
 });
