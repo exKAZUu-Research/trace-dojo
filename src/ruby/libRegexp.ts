@@ -60,7 +60,6 @@ export function translate(source: string, extended: boolean): string {
   let out = '';
   let inClass = 0;
   let atomStart = 0;
-  let intervalAtomStart: number | undefined;
   const groupStarts: number[] = [];
   const namedCaptures = regexpCaptureNames(source).length > 0;
   for (let index = 0; index < source.length; index++) {
@@ -75,6 +74,33 @@ export function translate(source: string, extended: boolean): string {
     if (char === '\\') {
       if (inClass === 0) atomStart = out.length;
       const next = source[++index] ?? '\\';
+      if (next === 'x' && /^[0-9a-fA-F]{2}/.test(source.slice(index + 1))) {
+        out += `\\x${source.slice(index + 1, index + 3)}`;
+        index += 2;
+        continue;
+      }
+      if (next === 'u') {
+        const braced = /^\{[0-9a-fA-F]{1,6}\}/.exec(source.slice(index + 1));
+        const fixed = /^[0-9a-fA-F]{4}/.exec(source.slice(index + 1));
+        if (braced || fixed) {
+          out += `\\u${braced?.[0] ?? fixed?.[0]}`;
+          index += (braced?.[0] ?? fixed?.[0])!.length;
+          continue;
+        }
+      }
+      if (/^[0-7]$/.test(next)) {
+        const octal = /^[0-7]{0,2}/.exec(source.slice(index + 1))?.[0] ?? '';
+        out += `\\x${Number.parseInt(next + octal, 8)
+          .toString(16)
+          .padStart(2, '0')}`;
+        index += octal.length;
+        continue;
+      }
+      if (next === 'c' && /^[A-Za-z]/.test(source[index + 1] ?? '')) {
+        out += `\\x${(source[index + 1].toUpperCase().codePointAt(0)! & 31).toString(16).padStart(2, '0')}`;
+        index++;
+        continue;
+      }
       out += translateEscape(next, source, index, inClass > 0, (count) => {
         index += count;
       });
@@ -138,10 +164,11 @@ export function translate(source: string, extended: boolean): string {
     if (inClass === 0 && char === '(') groupStarts.push(out.length);
     if (inClass === 0 && char === ')') atomStart = groupStarts.pop() ?? out.length;
     if (inClass === 0 && char === '{') {
-      const interval = /^\{\d+(?:,\d*)?\}/.exec(source.slice(index));
+      const interval = /^\{(?:\d+(?:,\d*)?|,\d+)\}/.exec(source.slice(index));
       if (interval) {
-        intervalAtomStart = atomStart;
-        out += interval[0];
+        const quantified = out.slice(atomStart) + interval[0].replace('{,', '{0,');
+        const next = source[index + interval[0].length];
+        out = `${out.slice(0, atomStart)}${next && '*+?{'.includes(next) ? `(?:${quantified})` : quantified}`;
         index += interval[0].length - 1;
         continue;
       }
@@ -149,15 +176,13 @@ export function translate(source: string, extended: boolean): string {
     if (inClass === 0 && char === '+' && /[*+?]/.test(source[index - 1] ?? '') && source[index - 2] !== '\\') {
       throw unsupportedSyntax('強欲な量指定子（*+ など）');
     }
-    if (inClass === 0 && char === '+' && source[index - 1] === '}' && intervalAtomStart !== undefined) {
-      out = `${out.slice(0, intervalAtomStart)}(?:${out.slice(intervalAtomStart)})+`;
-      atomStart = intervalAtomStart;
-      intervalAtomStart = undefined;
-      continue;
-    }
     if (inClass === 0 && !'*+?)}|'.includes(char)) {
       atomStart = out.length;
-      intervalAtomStart = undefined;
+    }
+    if (inClass === 0 && (source.codePointAt(index) ?? 0) > 0xff_ff) {
+      out += source.slice(index, index + 2);
+      index++;
+      continue;
     }
     out += char;
   }

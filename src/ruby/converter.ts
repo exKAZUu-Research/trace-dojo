@@ -36,7 +36,7 @@ class LocalScope {
   innerNumberedUsed = false;
 
   constructor(
-    readonly kind: 'top' | 'method' | 'class' | 'block',
+    readonly kind: 'top' | 'method' | 'class' | 'block' | 'end',
     readonly parent?: LocalScope
   ) {}
 
@@ -50,7 +50,7 @@ class LocalScope {
     for (
       let scope: LocalScope | undefined = this.self();
       scope;
-      scope = scope.kind === 'block' ? scope.parent : undefined
+      scope = scope.kind === 'block' || scope.kind === 'end' ? scope.parent : undefined
     ) {
       if (scope.set.has(name)) return depth;
       depth++;
@@ -63,7 +63,7 @@ class LocalScope {
     for (
       let scope: LocalScope | undefined = this.self();
       scope;
-      scope = scope.kind === 'block' ? scope.parent : undefined
+      scope = scope.kind === 'block' || scope.kind === 'end' ? scope.parent : undefined
     ) {
       if (scope.kind === 'method' && scope.set.has(name)) return depth;
       depth++;
@@ -75,7 +75,7 @@ class LocalScope {
     for (
       let scope: LocalScope | undefined = this.self();
       scope;
-      scope = scope.kind === 'block' ? scope.parent : undefined
+      scope = scope.kind === 'block' || scope.kind === 'end' ? scope.parent : undefined
     ) {
       if (scope.set.has(name)) return scope.implicitNames.has(name);
     }
@@ -85,6 +85,10 @@ class LocalScope {
   declare(name: string): number {
     const depth = this.depthOf(name);
     if (depth >= 0) return depth;
+    if (this.kind === 'end') {
+      this.parent!.declare(name);
+      return 1;
+    }
     this.declareOwn(name);
     return 0;
   }
@@ -496,8 +500,8 @@ export class Converter {
       }
       case 'end_block': {
         const outer = this.ctx;
-        const scope = new LocalScope('block', outer.scope);
-        this.ctx = { ...outer, scope, inBlock: true, inLoop: false, implicit: new Set() };
+        const scope = new LocalScope('end', outer.scope);
+        this.ctx = { ...outer, scope, inBlock: true, inLoop: false, implicit: undefined };
         try {
           const block: BlockDef = {
             params: undefined,
@@ -526,7 +530,7 @@ export class Converter {
   private identifier(node: Node, use: Use): Expr {
     const name = node.text;
     const depth = this.ctx.scope.depthOf(name);
-    if (/^_[1-9]$/.test(name) && this.ctx.inBlock) {
+    if (/^_[1-9]$/.test(name) && this.ctx.inBlock && this.ctx.scope.kind !== 'end') {
       if (this.ctx.scope.innerNumberedUsed) this.fail(node, '内側のブロックで番号付き引数が既に使われています。');
       for (let parent = this.ctx.scope.parent; parent?.kind === 'block'; parent = parent.parent)
         if (parent.numberedUsed) this.fail(node, '外側のブロックで番号付き引数が既に使われています。');
@@ -1281,7 +1285,8 @@ export class Converter {
         }
         case 'hash_splat_nil': {
           advance(child, 5);
-          if (params.keywordRest !== undefined) this.fail(child, '引数の並び順に誤りがあります。');
+          if (params.keywordRest !== undefined || params.noKeywords || params.keywords.length > 0)
+            this.fail(child, '引数の並び順に誤りがあります。');
           params.noKeywords = true;
           break;
         }
@@ -1440,6 +1445,7 @@ export class Converter {
   private bindTarget(node: Node): LocalRef | undefined {
     const name = node.text;
     this.checkReservedBinding(node, name);
+    if (this.alternativeDepth > 0 && !name.startsWith('_')) this.fail(node, '選択パターンでは変数を束縛できません。');
     if (name === '_') {
       this.ctx.scope.declare(name);
       return undefined;
@@ -1456,6 +1462,7 @@ export class Converter {
 
   private readonly patternBindings = new Set<string>();
   private patternDepth = 0;
+  private alternativeDepth = 0;
 
   private pattern(node: Node): Pattern {
     if (this.patternDepth++ === 0) this.patternBindings.clear();
@@ -1477,14 +1484,17 @@ export class Converter {
         return target ? { k: 'as', pattern, target } : pattern;
       }
       case 'alternative_pattern': {
-        for (const binding of node.descendantsOfType('identifier'))
-          if (binding && !binding.text.startsWith('_')) this.fail(binding, '選択パターンでは変数を束縛できません。');
-        return {
-          k: 'alt',
-          options: namedChildren(node)
-            .filter((c) => c.type !== 'comment')
-            .map((c) => this.pattern(c)),
-        };
+        this.alternativeDepth++;
+        try {
+          return {
+            k: 'alt',
+            options: namedChildren(node)
+              .filter((c) => c.type !== 'comment')
+              .map((c) => this.pattern(c)),
+          };
+        } finally {
+          this.alternativeDepth--;
+        }
       }
       case 'parenthesized_pattern': {
         return this.pattern(onlyNamedChild(node));
@@ -1638,7 +1648,9 @@ export class Converter {
 function decodePercentLiteral(value: string, opening: string, words: boolean): string {
   const closing = ({ '(': ')', '[': ']', '{': '}', '<': '>' } as Record<string, string>)[opening] ?? opening;
   return value.replaceAll(/\\(.)/gs, (whole, escaped: string) =>
-    escaped === opening || escaped === closing || escaped === '\\' || (words && /\s/.test(escaped)) ? escaped : whole
+    escaped === opening || escaped === closing || escaped === '\\' || (words && /[ \t\r\n\f\v]/.test(escaped))
+      ? escaped
+      : whole
   );
 }
 

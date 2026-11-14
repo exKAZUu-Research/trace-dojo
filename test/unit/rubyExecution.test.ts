@@ -5427,6 +5427,8 @@ test('Ruby syntax validation rejects invalid numeric, parameter and regexp forms
     'puts :before;p /a(?#x/',
     'p proc{_1+it}.call(2)',
     'def f(**nil,a:1);p a;end;f',
+    'puts :before;def f(a:,**nil);end;f(a:1)',
+    'puts :before;def f(**nil,**nil);end;f',
   ])
     expect(run(source)).toMatchObject({ kind: 'compileError' });
 });
@@ -5448,12 +5450,19 @@ test('BEGIN hoists execution after source-order local and heredoc conversion', (
 test('END blocks capture surrounding locals and accept next', () => {
   expect(run('x=3;END { p x }')).toMatchObject({ stdout: '3\n' });
   expect(run('END { next }; puts :ok')).toMatchObject({ stdout: 'ok\n' });
+  expect(run('END { y=3;p y };p y')).toMatchObject({ stdout: 'nil\n3\n' });
+  expect(run('def it = 42;END { p it };puts :before')).toMatchObject({ stdout: 'before\n42\n' });
+  expect(run('END { p _1 };puts :before')).toMatchObject({
+    stdout: 'before\n',
+    uncaughtException: expect.stringContaining("undefined local variable or method '_1'"),
+  });
 });
 
 test('percent literals unescape words and their delimiters', () => {
   expect(run(String.raw`p %w[a\ b c\]d],%q(a\)b)`)).toMatchObject({
     stdout: '["a b", "c]d"]\n"a)b"\n',
   });
+  expect(run(String.raw`p %w[c\　d]`)).toMatchObject({ stdout: '["c\\\\　d"]\n' });
 });
 
 test('pattern validation rejects duplicate captures, alternative binds and unknown pins', () => {
@@ -5461,8 +5470,10 @@ test('pattern validation rejects duplicate captures, alternative binds and unkno
     'p case [1,1];in [a,a] then a;end',
     'p case [1];in [a] | [b] then a;end',
     'p case [1];in [^missing] then 1;end',
+    'p(case {a:1};in {a:}|{};a;end)',
   ])
     expect(run(source)).toMatchObject({ kind: 'compileError' });
+  expect(run('a=1;p(case [1];in [^a]|[2];true;else;false;end)')).toMatchObject({ stdout: 'true\n' });
 });
 
 test('numbered block parameters reject nested, explicit and assigned misuse', () => {
@@ -5490,6 +5501,14 @@ test('Regexp handles quantified properties and Ruby escaping', () => {
     )
   ).toMatchObject({
     stdout: '["日本語"]\n0\n["日本日本"]\n"a/b\\\\#c\\\\ d\\\\-e\\\\r\\\\f\\\\v"\n"a/b|c\\\\#"\n',
+  });
+});
+
+test('Regexp repeats complete escaped and Unicode atoms', () => {
+  const emoji = String.fromCodePoint(0x1_f6_42);
+  expect(run(`p "${emoji}${emoji}${emoji}"[/${emoji}{2}+/]`)).toMatchObject({ stdout: `"${emoji}${emoji}"\n` });
+  expect(run(String.raw`p "AAAA"[/\x41{2}+/];p "aaaa"[/a{2}*/];p "aaaa"[/a{2}{2}/];p "AA"[/\101{2}+/]`)).toMatchObject({
+    stdout: '"AAAA"\n"aaaa"\n"aaaa"\n"AA"\n',
   });
 });
 
