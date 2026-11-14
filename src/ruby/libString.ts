@@ -211,7 +211,6 @@ def(
         const key = entry.key instanceof RSymbol ? entry.key.name : undefined;
         if (key === 'capacity') {
           const capacity = yield* toIndex(entry.value);
-          if (capacity < 0) throw argumentError('negative string size');
           if (capacity > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
         } else if (key === 'encoding') {
           const encoding =
@@ -246,7 +245,7 @@ sdef(
   { keywords: true }
 );
 def('String', ['to_s', 'to_str'], 0, (self: RString) => (self.cls === rt().c.String ? self : copyStringEncoding(self)));
-function copyStringEncoding(self: RString): RString {
+export function copyStringEncoding(self: RString): RString {
   const copy = stringFromBytes(stringBytes(self), self.binary);
   copy.usAscii = self.usAscii;
   return copy;

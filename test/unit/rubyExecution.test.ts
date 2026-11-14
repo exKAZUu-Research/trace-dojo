@@ -5678,9 +5678,10 @@ test('Regexp repeats complete escaped and Unicode atoms', () => {
   });
 });
 
-test('Regexp rejects nested unbounded repetition before native matching', () => {
+test('Regexp bounds nested unbounded repetition', () => {
   expect(run(String.raw`p(/^(a+)+$|!/.match?("a"*30+"!"))`)).toMatchObject({
-    uncaughtException: expect.stringContaining('は、この採点環境では使えません。'),
+    kind: 'limitExceeded',
+    limit: 'time',
   });
 });
 
@@ -6037,8 +6038,8 @@ test('Regexp retains scoped lines, Unicode words and literal match metadata', ()
 });
 
 test('Regexp rejects unsafe matching and validates runtime backreferences', () => {
-  for (const source of [String.raw`p(/^(a|a)+$/.match?("a"*24+"!"))`, String.raw`p(/^(?:a*){12}$/.match?("a"*24+"!"))`])
-    expect(run(source)).toMatchObject({ uncaughtException: expect.stringContaining('使えません。') });
+  for (const source of [String.raw`p(/^(a|a)+$/.match?("a"*12+"!"))`, String.raw`p(/^(?:a*){12}$/.match?("a"*12+"!"))`])
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout: 'false\n' });
   expect(run(String.raw`p /(?<x>a)\101/.match("aA")[0]`)).toMatchObject({ stdout: '"aA"\n' });
   expect(run(String.raw`p Regexp.new("(?<x>a)b\\1")`)).toMatchObject({
     uncaughtException: expect.stringContaining('(RegexpError)'),
@@ -6566,7 +6567,7 @@ test('strftime year flags override default padding', () => {
 
 test('untranslatable regexp names and backreferences fail explicitly', () => {
   expect(run(String.raw`p /(?<n-1>\w)/.names`)).toMatchObject({
-    uncaughtException: '正規表現のハイフン付きキャプチャ名は、この採点環境では使えません。',
+    uncaughtException: '正規表現の特殊なキャプチャ名は、この採点環境では使えません。',
   });
   expect(run(String.raw`p "b".match?(/(a)?b\1/)`)).toMatchObject({
     uncaughtException: '正規表現の省略可能なキャプチャへの後方参照は、この採点環境では使えません。',
@@ -6629,4 +6630,85 @@ test('Enumerator.new normalizes numeric size and calls size Procs', () => {
 
 test('regexp replacement Hash uses its default callback', () => {
   expect(run('h=Hash.new{|_,k|k.upcase};p "abc".gsub(/./,h)')).toMatchObject({ stdout: '"ABC"\n' });
+});
+
+test('define_method gives break method-body control flow', () => {
+  expect(run('class A; define_method(:f) { break 3 }; end; p A.new.f')).toMatchObject({ stdout: '3\n' });
+});
+
+test('unambiguous repeated regexp groups remain supported', () => {
+  expect(run(String.raw`p "catdog" =~ /\A(cat|dog)+\z/, "a@b.co.jp".match?(/\A\w+@\w+(\.\w+)+\z/)`)).toMatchObject({
+    stdout: '0\ntrue\n',
+  });
+});
+
+test('renamed Method bodies retain their source super name', () => {
+  expect(
+    run(
+      'class Base;def f;"B";end;end;class A<Base;def f;"A"+super;end;end;class C<A;define_method(:g,A.instance_method(:f));end;p C.new.g'
+    )
+  ).toMatchObject({
+    stdout: '"AAB"\n',
+  });
+});
+
+test('Method and UnboundMethod wrappers compare by binding and body', () => {
+  expect(
+    run(
+      'class A;def f;1;end;alias g f;end;a=A.new;p a.method(:f)==a.method(:g),A.instance_method(:f)==A.instance_method(:f),{a.method(:f)=>:hit}[a.method(:f)]'
+    )
+  ).toMatchObject({
+    stdout: 'true\ntrue\n:hit\n',
+  });
+});
+
+test('inherited definition hooks also block removal silently skipping callbacks', () => {
+  expect(
+    run('module Hook;def method_removed(n);puts n;end;end;class A;extend Hook;def x;end;remove_method :x;end')
+  ).toMatchObject({
+    uncaughtException: 'メソッド・定数フック（method_removed）は、この採点環境では使えません。',
+  });
+});
+
+test('exclusive Range max follows successor iteration for Symbols', () => {
+  expect(
+    run('p (:a...:d).max; begin; (Time.utc(2024)...Time.utc(2025)).max; rescue => e; p e.message; end')
+  ).toMatchObject({
+    stdout: ':c\n"can\'t iterate from Time"\n',
+  });
+});
+
+test('strftime distinguishes unknown from truncated directives', () => {
+  expect(
+    run('begin; Time.utc(2024).strftime("100%"); rescue => e; p e.message; end; p Time.utc(2024).strftime("%Q")')
+  ).toMatchObject({
+    stdout: '"invalid format: 100%"\n"%Q"\n',
+  });
+});
+
+test('String.new accepts negative capacity without changing text', () => {
+  expect(run('p String.new(capacity:-1), String.new("abc",capacity:-3)')).toMatchObject({
+    stdout: '""\n"abc"\n',
+  });
+});
+
+test('Ruby capture names outside JavaScript syntax fail explicitly', () => {
+  expect(run(String.raw`p /(?<日本-1>\w)/.names`)).toMatchObject({
+    uncaughtException: '正規表現の特殊なキャプチャ名は、この採点環境では使えません。',
+  });
+});
+
+test('rpartition handles a long quantified regexp at either end', () => {
+  expect(
+    run('p ("a"*50000).rpartition(/a+/).map(&:length), ("a"+"b"*50000).rpartition(/a+/).map(&:length)')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '[49999, 1, 0]\n[0, 1, 50000]\n',
+  });
+});
+
+test('MatchData source snapshots preserve binary bytes and freezing', () => {
+  expect(run('s=255.chr;m=/./.match(s);p m.string.encoding,m.string.bytes,m.string.frozen?')).toMatchObject({
+    stdout: '#<Encoding:BINARY (ASCII-8BIT)>\n[255]\ntrue\n',
+  });
 });

@@ -196,14 +196,13 @@ def('Range', 'max', [0, 1], function* (self: RRange, args, block) {
   }
   if (block || args.length > 0) return yield* callEnumerable(self, 'max', args, block);
   if (self.end === NIL) throw rangeError('cannot get the maximum of endless range');
+  if (self.exclusive && !(typeof self.begin === 'bigint' && typeof self.end === 'bigint') && !isRubyFloat(self.end))
+    return yield* callEnumerable(self, 'max', [], undefined);
   const order = yield* spaceship(self.begin, self.end);
   if (order === undefined || order > 0 || (order === 0 && self.exclusive)) return NIL;
   if (self.exclusive) {
     if (typeof self.end === 'bigint' && typeof self.begin === 'bigint') return self.end - 1n;
     if (isRubyFloat(self.end)) throw typeError('cannot exclude non Integer end value');
-    if (self.begin instanceof RString && self.end instanceof RString)
-      return yield* callEnumerable(self, 'max', [], undefined);
-    throw typeError('cannot exclude end value with non Integer begin value');
   }
   return self.end;
 });

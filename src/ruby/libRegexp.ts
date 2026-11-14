@@ -8,7 +8,7 @@ import { argumentError, frozenError, indexError, rubyError, typeError } from './
 import { digest, hashDefault, hashGet, hashSet } from './hashes';
 import { callBlock, callMethod, type Gen } from './interp';
 import { makeEnumerator } from './libEnumerator';
-import { setText } from './libString';
+import { copyStringEncoding, setText } from './libString';
 import {
   type NativeFn,
   NIL,
@@ -38,6 +38,7 @@ export interface RegexpData {
   /** The translated expression; its `lastIndex` is set before each use. */
   js: RegExp;
   safeNative: boolean;
+  reverseSticky?: RegExp;
   context?: vm.Context;
 }
 
@@ -79,10 +80,14 @@ const SYNTAX = String.raw`^$\.*+?()[]{}|/-`;
 
 /** Translates a Ruby (Onigmo) expression into JavaScript's syntax, rejecting what has no counterpart. */
 export function translate(source: string, extended: boolean, multiline = false): string {
-  if (/(?<!\\)\(\?<([A-Za-z_][\w-]*-[\w-]*)>/.test(source)) throw unsupportedSyntax('ハイフン付きキャプチャ名');
+  for (const capture of source.matchAll(/(?<!\\)\(\?<([^>]+)>/g))
+    if (
+      (/^[\p{ID_Start}_]/u.test(capture[1]) || /^\\u(?:[\dA-Fa-f]{4}|\{[\dA-Fa-f]+\})/.test(capture[1])) &&
+      /[-\\]/.test(capture[1])
+    )
+      throw unsupportedSyntax('特殊なキャプチャ名');
   if (/\\(?:[1-9]|k<)/.test(source) && /(?<!\\)\((?!\?:|\?=|\?!|\?<=|\?<!)[^()]*\)(?:[?*]|\{0,)/.test(source))
     throw unsupportedSyntax('省略可能なキャプチャへの後方参照');
-  rejectNestedRepetition(source, extended);
   let out = '';
   let inClass = 0;
   let classStart = 0;
@@ -285,54 +290,6 @@ export function translate(source: string, extended: boolean, multiline = false):
   return out;
 }
 
-function rejectNestedRepetition(source: string, extended: boolean): void {
-  const groups: boolean[] = [];
-  let inClass = false;
-  let closedGroupRisky = false;
-  for (let index = 0; index < source.length; index++) {
-    const char = source[index];
-    if (extended && !inClass) {
-      if (/\s/.test(char)) continue;
-      if (char === '#') {
-        index = regexpLineCommentEnd(source, index);
-        if (index >= source.length) break;
-        continue;
-      }
-    }
-    if (!inClass && source.startsWith('(?#', index)) {
-      index = regexpCommentEnd(source, index + 3);
-      if (index < 0) break;
-      continue;
-    }
-    if (char === '\\') {
-      index++;
-      closedGroupRisky = false;
-      continue;
-    }
-    if (char === '[') inClass = true;
-    if (char === ']') inClass = false;
-    if (inClass) continue;
-    if (char === '(') {
-      groups.push(false);
-      closedGroupRisky = false;
-      continue;
-    }
-    if (char === ')') {
-      closedGroupRisky = groups.pop() ?? false;
-      if (closedGroupRisky && groups.length > 0) groups[groups.length - 1] = true;
-      continue;
-    }
-    const quantified =
-      char === '+' ||
-      char === '*' ||
-      (char === '?' && source[index - 1] !== '(') ||
-      (char === '{' && /^\{(?:\d+(?:,\d*)?|,\d+)\}/.test(source.slice(index)));
-    if (quantified && closedGroupRisky) throw unsupportedSyntax('入れ子の繰り返し');
-    if ((quantified || char === '|') && groups.length > 0) groups[groups.length - 1] = true;
-    if (!'?*+{}'.includes(char)) closedGroupRisky = false;
-  }
-}
-
 // code-gauge-allow functionNcss 35 -- Ruby's method takes these argument forms, which the branches mirror.
 function translateEscape(
   next: string,
@@ -529,7 +486,7 @@ function unitIndex(text: string, char: number): number {
 }
 
 /** Runs a regexp from a character position, returning the match's state or undefined. */
-export function execAt(regexp: RObject, text: string, start: number): MatchState | undefined {
+export function execAt(regexp: RObject, text: string, start: number, source?: RString): MatchState | undefined {
   if (start < 0 || start > charIndex(text, text.length)) return undefined;
   const data = dataOf(regexp);
   if (data.ignoreCase && requiresMultiCharacterFold(data.source, text))
@@ -562,7 +519,14 @@ export function execAt(regexp: RObject, text: string, start: number): MatchState
     if (!(name in namedGroups)) names.push(name);
     if (!(name in namedGroups) || result.indices[position + 1] !== undefined) namedGroups[name] = position + 1;
   }
-  return { text, groups: [...result.indices], names, namedGroups, regexp };
+  return {
+    text,
+    snapshot: source ? copyStringEncoding(source) : undefined,
+    groups: [...result.indices],
+    names,
+    namedGroups,
+    regexp,
+  };
 }
 
 function requiresMultiCharacterFold(source: string, text: string): boolean {
@@ -576,10 +540,8 @@ function requiresMultiCharacterFold(source: string, text: string): boolean {
 }
 
 function matchData(state: MatchState): RObject {
-  if (!state.snapshot) {
-    state.snapshot = str(state.text);
-    state.snapshot.frozen = true;
-  }
+  state.snapshot ??= str(state.text);
+  state.snapshot.frozen = true;
   const match = new RObject(rt().c.MatchData);
   match.data = state;
   return match;
@@ -759,6 +721,7 @@ function literalRegexpText(regexp: RObject): string | undefined {
   const data = dataOf(regexp);
   if (data.ignoreCase || data.extended) return undefined;
   const syntax = String.raw`\\^$.*+?()[]{}|`;
+  if (data.source.length === 2 && !syntax.includes(data.source[0]) && data.source[1] === '+') return data.source[0];
   return [...data.source].some((char) => syntax.includes(char)) ? undefined : data.source;
 }
 
@@ -799,7 +762,14 @@ def('Regexp', 'match', [1, 2], function* (self: RObject, args, block) {
   const text = yield* subjectText(args[0]);
   if (text === undefined) return setLastMatch(undefined);
   const start = args.length > 1 ? yield* toIndex(args[1]) : 0;
-  const match = setLastMatch(execAt(self, text, start < 0 ? start + charIndex(text, text.length) : start));
+  const match = setLastMatch(
+    execAt(
+      self,
+      text,
+      start < 0 ? start + charIndex(text, text.length) : start,
+      args[0] instanceof RString ? args[0] : undefined
+    )
+  );
   if (block && match !== NIL) return yield* callBlock(block, [match]);
   return match;
 });
@@ -1278,6 +1248,17 @@ for (const [name, last] of [
       if (literal !== undefined) {
         const index = self.s.lastIndexOf(literal);
         state = index === -1 ? undefined : execAt(regexp, self.s, charIndex(self.s, index));
+      } else if (dataOf(regexp).safeNative && !/^(?:\^|\\A)/.test(dataOf(regexp).source)) {
+        const data = dataOf(regexp);
+        const sticky = (data.reverseSticky ??= new RegExp(data.js.source, data.js.flags.replace('g', 'y')));
+        for (let position = charIndex(self.s, self.s.length); position >= 0; position--) {
+          if (position % 64 === 0) rt().spend();
+          sticky.lastIndex = unitIndex(self.s, position);
+          if (sticky.test(self.s)) {
+            state = execAt(regexp, self.s, position);
+            break;
+          }
+        }
       } else {
         for (;;) {
           const from = (state.groups[0] as readonly [number, number])[0];
@@ -1323,7 +1304,9 @@ function* asRegexp(pattern: Value): Gen<RObject> {
 def('String', 'match', [1, 2], function* (self: RString, args, block) {
   const regexp = yield* asRegexp(args[0]);
   const start = args.length > 1 ? yield* toIndex(args[1]) : 0;
-  const match = setLastMatch(execAt(regexp, self.s, start < 0 ? start + charIndex(self.s, self.s.length) : start));
+  const match = setLastMatch(
+    execAt(regexp, self.s, start < 0 ? start + charIndex(self.s, self.s.length) : start, self)
+  );
   if (block && match !== NIL) return yield* callBlock(block, [match]);
   return match;
 });

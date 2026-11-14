@@ -355,6 +355,7 @@ function pad(value: number, width: number, flag: string): string {
 
 function strftime(data: TimeData, format: string): string {
   if (format.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+  if (/%[-_0^#]*\d*:{0,3}$/.test(format.replaceAll('%%', ''))) throw argumentError(`invalid format: ${format}`);
   const date = data.fields();
   let outputLength = format.length;
   const result = format.replaceAll(

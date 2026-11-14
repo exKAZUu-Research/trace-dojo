@@ -315,7 +315,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
       const value = e.value ? yield* ev(e.value, frame) : NIL;
       if (!e.inBlock) throw new BreakSignal(value, undefined);
       const proc = frame.extra.proc as RProc;
-      if (!proc.isLambda && !proc.callSiteState?.active)
+      if (!frame.extra.isLambda && !proc.callSiteState?.active)
         throw rubyError(rt().c.LocalJumpError, 'break from proc-closure');
       throw new BreakSignal(value, proc.breakTag);
     }
@@ -790,6 +790,7 @@ function missingConstant(module: RClass, name: string, scoped = false): never {
 
 function constSet(module: RClass, name: string, value: Value): void {
   assertMutableClass(module);
+  assertNoDefinitionHook(module, 'const');
   if (module.constants.has(name)) {
     rt().io.stderr.write(`warning: already initialized constant ${name}\n`);
   }
@@ -1507,12 +1508,18 @@ export function addMethod(owner: RClass, method: RMethod): void {
     (method.body.kind === 'user' || method.body.kind === 'proc')
   )
     throw new UnsupportedFeatureError(`メソッド・定数フック（${method.name}）`);
-  const target = owner.isSingleton ? owner.attached : owner;
-  const hookName = owner.isSingleton ? 'singleton_method_added' : 'method_added';
-  const activeHook = target === undefined ? undefined : classOf(target).findMethod(hookName);
-  if (activeHook) throw new UnsupportedFeatureError(`メソッド・定数フック（${hookName}）`);
+  if (method.body.kind !== 'visibility')
+    assertNoDefinitionHook(owner, method.body.kind === 'undefined' ? 'undefined' : 'added');
   owner.methods.set(method.name, method);
   invalidateMethodCaches();
+}
+
+export function assertNoDefinitionHook(owner: RClass, action: 'added' | 'removed' | 'undefined' | 'const'): void {
+  const target = owner.isSingleton ? owner.attached : owner;
+  const hookName =
+    action === 'const' ? 'const_added' : owner.isSingleton ? `singleton_method_${action}` : `method_${action}`;
+  if (target !== undefined && classOf(target).findMethod(hookName))
+    throw new UnsupportedFeatureError(`メソッド・定数フック（${hookName}）`);
 }
 
 export function assertMutableClass(owner: RClass): void {
@@ -1923,10 +1930,11 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
     let block: RProc | undefined = home.extra.block;
     if (e.block) block = makeBlock(e.block, frame);
     else if (e.blockArg) block = yield* toBlock(yield* ev(e.blockArg, frame));
-    const superMethod = classOf(home.self).findSuperMethod(method.name, method.owner, method.lookupIndex);
+    const superName = method.superName ?? method.name;
+    const superMethod = classOf(home.self).findSuperMethod(superName, method.owner, method.lookupIndex);
     if (!superMethod) {
       throw noMethodError(
-        `super: no superclass method '${method.name}' for ${receiverDescription(home.self)}`,
+        `super: no superclass method '${superName}' for ${receiverDescription(home.self)}`,
         home.self,
         method.name
       );

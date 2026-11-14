@@ -2,10 +2,11 @@ import type { Params } from './ast';
 import { className, inspect, tryImplicitConversion } from './conversions';
 import { def } from './define';
 import { argumentError, frozenError, nameError, typeError } from './errors';
-import { hashGet } from './hashes';
+import { digest, hashGet } from './hashes';
 import {
   addMethod,
   assertMutableClass,
+  assertNoDefinitionHook,
   callMethod,
   callProc,
   constInModule,
@@ -126,6 +127,16 @@ function methodObject(recv: Value, method: RMethod, name = method.name): RObject
   };
   object.data = data;
   return object;
+}
+
+function methodIdentity(value: object): number {
+  const runtime = rt();
+  let id = runtime.methodHashIds.get(value);
+  if (id === undefined) {
+    id = runtime.nextMethodHashId++;
+    runtime.methodHashIds.set(value, id);
+  }
+  return id;
 }
 
 function* findForMethodObject(self: Value, name: string, publicOnly = false): Gen<RMethod> {
@@ -279,6 +290,24 @@ function callParameters(proc: RProc): Value {
 }
 
 for (const owner of ['Method', 'UnboundMethod']) {
+  def(owner, ['==', 'eql?'], 1, (self: RObject, [other]) => {
+    if (!(other instanceof RObject) || other.cls !== self.cls) return false;
+    const left = self.data as MethodData;
+    const right = other.data as MethodData;
+    return (
+      left.recv === right.recv && left.method.owner === right.method.owner && left.method.body === right.method.body
+    );
+  });
+  def(owner, 'hash', 0, (self: RObject) => {
+    const { recv, method } = self.data as MethodData;
+    const receiver =
+      recv instanceof RBasic
+        ? `o${methodIdentity(recv)}`
+        : typeof recv === 'bigint' || typeof recv === 'number' || typeof recv === 'boolean'
+          ? `${typeof recv}:${recv}`
+          : 'nil';
+    return BigInt(`0x${digest(`${receiver}:${methodIdentity(method.owner)}:${methodIdentity(method.body)}`)}`);
+  });
   def(owner, 'arity', 0, (self: RObject) => BigInt(methodArity((self.data as MethodData).method)));
   def(owner, 'parameters', 0, (self: RObject) => {
     const { method } = self.data as MethodData;
@@ -404,7 +433,7 @@ function* defineMethodFrom(
   } else if (body instanceof RObject && (body.cls === rt().c.Method || body.cls === rt().c.UnboundMethod)) {
     const source = (body.data as MethodData).method;
     assertMethodOwner(source.owner, owner, true);
-    method = { ...(body.data as MethodData).method, name, owner, visibility };
+    method = { ...source, name, superName: source.superName ?? source.name, owner, visibility };
   } else {
     throw typeError(`wrong argument type ${realClassOf(body).name} (expected Proc/Method/UnboundMethod)`);
   }
@@ -431,6 +460,7 @@ def('Module', 'alias_method', 2, function* (self: RClass, [newName, oldName]) {
 });
 def('Module', 'remove_method', [0, -1], function* (self: RClass, names) {
   assertMutableClass(self);
+  assertNoDefinitionHook(self, 'removed');
   for (const value of names) {
     const name = yield* nameOf(value);
     if (!self.methods.delete(name)) {
@@ -592,6 +622,7 @@ def('Module', 'const_get', [1, 2], function* (self: RClass, args) {
 def('Module', 'const_set', 2, function* (self: RClass, [name, value]) {
   const constant = yield* constantName(name);
   assertMutableClass(self);
+  assertNoDefinitionHook(self, 'const');
   self.constants.set(constant, value);
   if (value instanceof RClass && value.baseName === undefined) {
     value.baseName = constant;

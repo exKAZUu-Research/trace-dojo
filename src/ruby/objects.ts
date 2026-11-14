@@ -231,6 +231,7 @@ export type MethodBody =
 
 export interface RMethod {
   name: string;
+  superName?: string;
   owner: RClass;
   visibility: Visibility;
   body: MethodBody;

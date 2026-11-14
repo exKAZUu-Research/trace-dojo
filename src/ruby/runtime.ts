@@ -186,6 +186,8 @@ export class Runtime implements TracedRuntime<Frame> {
   setInspectDepth = 0;
   /** The fake addresses `inspect` shows for objects, assigned in the order the program shows them. */
   readonly addresses = new Map<object, number>();
+  readonly methodHashIds = new WeakMap<object, number>();
+  nextMethodHashId = 1;
   c!: CoreClasses;
   mainObject!: RObject;
   /** The state of the default random number generator, which `srand` reseeds. */
