@@ -14,7 +14,6 @@ import {
   toRubyInt,
   toStr,
   toStrValue,
-  toSValue,
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentCountError, argumentError, frozenError, nameError, rubyError, typeError } from './errors';
@@ -183,7 +182,10 @@ def(
 // code-gauge-allow functionCognitiveComplexity 18 -- Object copying preserves each value kind, singleton methods, copy hooks, and clone freeze options.
 // code-gauge-allow functionNcss 39 -- Object copying preserves each value kind, singleton methods, copy hooks, and clone freeze options.
 function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
-  if (!(self instanceof RBasic)) return self;
+  if (!(self instanceof RBasic)) {
+    if (clone && freezeOption === false) throw argumentError(`can't unfreeze ${realClassOf(self).name}`);
+    return self;
+  }
   let copy: RBasic;
   if (self instanceof RClass) copy = copyClass(self);
   else if (self instanceof RString) {
@@ -989,10 +991,15 @@ def('Exception', 'to_s', 0, function* (self: RObject) {
   const message = self.exception?.message ?? NIL;
   if (message === NIL) return str(className(realClassOf(self)));
   if (message instanceof RString) return message;
-  return yield* toSValue(message);
+  const converted = yield* callMethod(message, 'to_s', [], undefined, undefined, { fcall: true });
+  if (!(converted instanceof RString)) {
+    const name = realClassOf(message).name;
+    throw typeError(`can't convert ${name} to String (${name}#to_s gives ${realClassOf(converted).name})`);
+  }
+  return converted;
 });
 def('Exception', 'message', 0, function* (self: RObject) {
-  return yield* toSValue(yield* callMethod(self, 'to_s', []));
+  return yield* callMethod(self, 'to_s', []);
 });
 def('Exception', 'detailed_message', [0, -1], () => {
   throw new UnsupportedFeatureError('Exception#detailed_message');

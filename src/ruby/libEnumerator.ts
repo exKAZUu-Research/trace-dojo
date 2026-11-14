@@ -33,10 +33,11 @@ export interface EnumeratorSource {
 }
 
 export function makeEnumerator(recv: Value, method: string, args: Value[], keywords?: RHash): RObject {
-  const end = method === 'step' || method === '%' ? arithmeticSpec(recv, args, keywords).end : NIL;
+  const spec = method === 'step' || method === '%' ? arithmeticSpec(recv, args, keywords) : undefined;
   const arithmetic =
-    (method === 'step' || method === '%') &&
-    (end === NIL || typeof end === 'bigint' || typeof end === 'number') &&
+    spec !== undefined &&
+    (spec.end === NIL || typeof spec.end === 'bigint' || typeof spec.end === 'number') &&
+    (typeof spec.step === 'bigint' || typeof spec.step === 'number') &&
     (typeof recv === 'bigint' ||
       typeof recv === 'number' ||
       (recv instanceof RRange && (typeof recv.begin === 'bigint' || typeof recv.begin === 'number')));

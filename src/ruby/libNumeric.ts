@@ -308,7 +308,6 @@ for (const owner of ['Integer', 'Float']) {
     },
     { keywords: true }
   );
-  def(owner, 'clone', [0, 1], (self) => self);
   def(owner, 'dup', 0, (self) => self);
 }
 def('Integer', 'ceildiv', 1, function* (self: bigint, [other]) {
@@ -379,12 +378,14 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
       } else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
     }
   }
-  if (!isNum(step)) throw typeError(`no implicit conversion of ${realClassOf(step).name} into Integer`);
+  if (!isNum(step) && !respondsTo(step, 'coerce', true))
+    throw typeError(`no implicit conversion of ${realClassOf(step).name} into Integer`);
   if (step === 0n || step === 0) {
     if (!block) throw argumentError("step can't be 0");
     throw argumentError("step can't be 0");
   }
   if (!block) return makeEnumerator(self, 'step', args, keywords);
+  if (!isNum(step)) return yield* stepCustomNumeric(self, limit, step, block);
   const useFloat = typeof self === 'number' || typeof limit === 'number' || typeof step === 'number';
   if (useFloat && limit !== NIL && !isNum(limit)) limit = yield* toStepFloat(limit);
   if (!useFloat && limit !== NIL && !isNum(limit)) {
@@ -421,6 +422,20 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
   for (let index = 0; index < count; index++) {
     const value = fusedMultiplyAdd(index, by, begin);
     yield* callBlock(block, [by > 0 ? Math.min(value, end) : Math.max(value, end)], false);
+  }
+  return self;
+}
+
+function* stepCustomNumeric(self: Num, limit: Value, step: Value, block: RProc): Gen<Value> {
+  const ascending = truthy(yield* callMethod(step, '>', [0n]));
+  let value: Value = self;
+  for (;;) {
+    if (limit !== NIL) {
+      const order = yield* compareValues(value, limit);
+      if (ascending ? order > 0 : order < 0) break;
+    }
+    yield* callBlock(block, [value], false);
+    value = yield* callMethod(value, '+', [step]);
   }
   return self;
 }

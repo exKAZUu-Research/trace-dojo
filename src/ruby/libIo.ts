@@ -7,7 +7,7 @@ import { callMethod, type Gen, respondsTo } from './interp';
 import { NIL, RArray, RObject, RString, type Value, type Visibility } from './objects';
 import { writePretty } from './prettyPrint';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
-import { arr, classOf, realClassOf, str, stringBytes, stringCharacters, stringFromBytes } from './values';
+import { arr, classOf, realClassOf, str, stringBytes, stringCharacters, stringFromBytes, truthy } from './values';
 
 const PRIVATE = { visibility: 'private' as Visibility };
 
@@ -219,8 +219,12 @@ def('IO', 'putc', 1, function* (self: RObject, [value]) {
   return value;
 });
 def('IO', ['flush', 'fsync'], 0, (self) => self);
-def('IO', 'sync', 0, () => true);
-def('IO', 'sync=', 1, (_self, [value]) => value);
+def('IO', 'sync', 0, (self: RObject) => self.ivars?.get('@__sync') ?? true);
+def('IO', 'sync=', 1, (self: RObject, [value]) => {
+  self.ivars ??= new Map();
+  self.ivars.set('@__sync', truthy(value));
+  return value;
+});
 def('IO', 'tty?', 0, () => false);
 def('IO', 'isatty', 0, () => false);
 def('IO', 'fileno', 0, (self: RObject) => (self.data === 'stdout' ? 1n : 2n));

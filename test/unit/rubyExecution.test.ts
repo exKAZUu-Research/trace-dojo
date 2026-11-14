@@ -2689,6 +2689,42 @@ test('IO receivers keep Kernel p private', () => {
   expect(run('begin;STDOUT.p 1;rescue=>e;p e.class;end')).toMatchObject({ stdout: 'NoMethodError\n' });
 });
 
+test('IO sync remembers each output stream’s assigned state', () => {
+  expect(
+    run('STDOUT.sync=false;p STDOUT.sync;STDOUT.sync=true;p STDOUT.sync;STDERR.sync=false;p STDERR.sync')
+  ).toMatchObject({
+    stdout: 'false\ntrue\nfalse\n',
+  });
+});
+
+test('Exception message returns an overridden to_s result unchanged', () => {
+  expect(run('class E<StandardError;def to_s;7;end;end;p E.new.message')).toMatchObject({ stdout: '7\n' });
+  expect(run('class E<StandardError;def to_s;nil;end;end;p E.new.message')).toMatchObject({ stdout: 'nil\n' });
+});
+
+test('Exception to_s validates message object conversion', () => {
+  expect(run('class A;def to_s;7;end;end;begin;p Exception.new(A.new).to_s;rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'TypeError\n',
+  });
+});
+
+test('numeric and immediate clones validate arguments and freezing', () => {
+  expect(run('begin;1.clone(1);rescue=>e;p e.class;end;begin;1.0.clone(foo:1);rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'ArgumentError\nArgumentError\n',
+  });
+  expect(run('begin;nil.clone(freeze:false);rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'ArgumentError\n"can\'t unfreeze NilClass"\n',
+  });
+});
+
+test('Numeric step accepts numeric-like custom increments', () => {
+  expect(
+    run(
+      'class N;def coerce(x);[x,2];end;def >(x);true;end;def <(x);false;end;def ==(x);false;end;end;p 1.step(5,N.new).first(4)'
+    )
+  ).toMatchObject({ stdout: '[1, 3, 5]\n' });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(
