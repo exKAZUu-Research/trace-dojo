@@ -2528,6 +2528,22 @@ test('Random copies large seeded state without reseeding', () => {
   expect(run('r=Random.new(2**5000000);3.times{r.dup};puts :ok')).toMatchObject({ stdout: 'ok\n' });
 });
 
+test('large Integer arithmetic follows execution budgets instead of a fixed bit ceiling', () => {
+  expect(run('p (2**16000001).bit_length,(1<<32000001).bit_length')).toMatchObject({
+    stdout: '16000002\n32000002\n',
+  });
+});
+
+test('Enumerator each_with_index rejects offsets while with_index accepts them', () => {
+  expect(
+    run(
+      'e=[1].each;begin;e.each_with_index(5).to_a;rescue=>x;p x.class,x.message;end;begin;e.each_with_index(5){|v,i|p i};rescue=>x;p x.class;end;p e.each_with_index.to_a,e.with_index(5).to_a'
+    )
+  ).toMatchObject({
+    stdout: 'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\nArgumentError\n[[1, 0]]\n[[1, 5]]\n',
+  });
+});
+
 test('recursive Sets inspect with a cycle marker', () => {
   expect(run('s=Set[];s.add(s);p s')).toMatchObject({ stdout: 'Set[Set[...]]\n' });
   expect(run('a=Set[];b=Set[a];a.add(b);p a')).toMatchObject({ stdout: 'Set[Set[Set[...]]]\n' });

@@ -109,10 +109,9 @@ function intPow(base: bigint, exponent: bigint): Value {
   if (base === 0n || base === 1n) return base;
   if (base === -1n) return exponent % 2n === 0n ? 1n : -1n;
   const bits = integerBits(base);
-  if (base !== 0n && base !== 1n && base !== -1n && BigInt(bits) * exponent > 32_000_000n) {
-    throw argumentError('exponent is too large');
-  }
-  rt().spend(Number((BigInt(bits) * exponent) / 4096n));
+  const magnitude = base < 0n ? -base : base;
+  const outputBits = BigInt((magnitude & (magnitude - 1n)) === 0n ? bits - 1 : bits) * exponent + 1n;
+  chargeIntegerResult(Number(outputBits), Number(outputBits));
   return base ** exponent;
 }
 
@@ -121,8 +120,7 @@ function integerBits(value: bigint): number {
 }
 
 function chargeIntegerResult(bits: number, cost: number): void {
-  if (bits > 32_000_000) throw argumentError('integer size too large');
-  rt().spend(Math.ceil(cost / 4096));
+  rt().spend(Math.ceil(bits / 256) + Math.ceil(cost / 4096));
 }
 
 function floatPow(base: number, exponent: number): Value {
@@ -477,8 +475,8 @@ def('Integer', '>>', 1, function* (self: bigint, [other]) {
 function shift(value: bigint, amount: bigint): bigint {
   if (value === 0n) return 0n;
   if (amount >= 0n) {
-    if (amount > 32_000_000n) throw rangeError('shift width too big');
-    chargeIntegerResult(integerBits(value) + Number(amount), integerBits(value) + Number(amount));
+    const bits = Number(BigInt(integerBits(value)) + amount);
+    chargeIntegerResult(bits, bits);
     return value << amount;
   }
   return value >> -amount;
@@ -508,7 +506,6 @@ function bitSlice(value: bigint, start: bigint, length: bigint): bigint {
   if (length < 0n) return shifted;
   if (length === 0n || shifted === 0n) return 0n;
   if (shifted > 0n && BigInt(shifted.toString(2).length) <= length) return shifted;
-  if (length > 32_000_000n) throw rangeError('shift width too big');
   chargeIntegerResult(Number(length), Number(length));
   return shifted & ((1n << length) - 1n);
 }

@@ -308,9 +308,14 @@ def('Enumerator', 'each', [0, -1], function* (self: RObject, args, block) {
   }
   return yield* runSource(source, block, args);
 });
-def('Enumerator', ['with_index', 'each_with_index'], [0, 1], function* (self: RObject, args, block) {
+def('Enumerator', 'with_index', [0, 1], (self: RObject, args, block) => withIndex(self, args, block, 'with_index'));
+def('Enumerator', 'each_with_index', 0, (self: RObject, args, block) =>
+  withIndex(self, args, block, 'each_with_index')
+);
+
+function* withIndex(self: RObject, args: Value[], block: RProc | undefined, name: string): Gen {
   let index = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : 0n;
-  if (!block) return makeEnumerator(self, 'with_index', args);
+  if (!block) return makeEnumerator(self, name, args);
   const userBlock = block;
   const source = sourceOf(self);
   const proc = nativeProc(-1, (yielded, _block, used) => {
@@ -318,7 +323,7 @@ def('Enumerator', ['with_index', 'each_with_index'], [0, 1], function* (self: RO
     return callProc(userBlock, [value, index++], { used });
   });
   return yield* runSource(source, proc);
-});
+}
 def('Enumerator', ['with_object', 'each_with_object'], 1, function* (self: RObject, [memo], block) {
   if (!block) return makeEnumerator(self, 'with_object', [memo]);
   const userBlock = block;
