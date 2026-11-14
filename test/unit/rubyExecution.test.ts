@@ -2350,6 +2350,18 @@ test('Set subclass add? dispatches include? and add overrides', () => {
   });
 });
 
+test('singleton_class returns immediate nil and boolean classes', () => {
+  expect(run('p nil.singleton_class,true.singleton_class,false.singleton_class')).toMatchObject({
+    stdout: 'NilClass\nTrueClass\nFalseClass\n',
+  });
+});
+
+test('raise appends unknown keyword Hash once', () => {
+  expect(run('begin;raise "x",foo:1,bar:2;rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'TypeError\n"exception class/object expected"\n',
+  });
+});
+
 test('Enumerable grouping and tally hash each new key once', () => {
   expect(run('class K;def hash;puts :hash;0;end;end;[1].group_by{K.new};[K.new].tally')).toMatchObject({
     stdout: 'hash\nhash\n',

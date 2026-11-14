@@ -109,6 +109,7 @@ function hashString(text: string): number {
 
 def('Kernel', 'class', 0, (self) => realClassOf(self));
 def('Kernel', 'singleton_class', 0, (self) => {
+  if (self === NIL || typeof self === 'boolean') return realClassOf(self);
   if (!(self instanceof RBasic) || self instanceof RFloat) throw typeError("can't define singleton");
   return singletonClassOf(self);
 });
@@ -398,11 +399,13 @@ export function* makeRaise(args: Value[], keywords?: RHash): Gen<RubyError> {
 
 function raiseArguments(args: Value[], keywords: RHash | undefined): { args: Value[]; cause?: Value } {
   let cause: Value | undefined;
+  let hasOtherKeyword = false;
   if (keywords) {
     for (const entry of keywords.map.values()) {
       if (entry.key instanceof RSymbol && entry.key.name === 'cause') cause = entry.value;
-      else args = [...args, keywords];
+      else hasOtherKeyword = true;
     }
+    if (hasOtherKeyword) args = [...args, keywords];
   }
   return { args, cause };
 }
