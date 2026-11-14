@@ -122,8 +122,13 @@ def('Range', 'reverse_each', 0, function* (self: RRange, _args, block) {
     return self;
   }
   const items = yield* toArray(self);
-  for (let index = items.length - 1; index >= 0; index--) yield* callBlock(block, [items[index]], false);
-  return self;
+  rt().heldArrays.push(items);
+  try {
+    for (let index = items.length - 1; index >= 0; index--) yield* callBlock(block, [items[index]], false);
+    return self;
+  } finally {
+    rt().heldArrays.pop();
+  }
 });
 def('Range', ['to_a', 'to_ary', 'entries'], 0, function* (self: RRange) {
   if (self.end === NIL) throw rangeError('cannot convert endless range to an array');

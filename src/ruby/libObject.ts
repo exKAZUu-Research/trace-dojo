@@ -822,18 +822,20 @@ function* setVisibility(self: RClass, args: Value[], visibility: Visibility): Ge
     return NIL;
   }
   if (self.frozen) throw frozenError(self, self.name ?? '');
-  for (const name of yield* symbolNames(args, true)) {
-    const method = self.findMethod(name);
-    if (!method) {
-      throw nameError(
-        `undefined method '${name}' for ${self.isModule ? 'module' : 'class'} '${self.name}'`,
-        self,
-        name
-      );
+  for (const arg of args)
+    for (const value of arg instanceof RArray ? arg.items : [arg]) {
+      const name = yield* symbolName(value);
+      const method = self.findMethod(name);
+      if (!method) {
+        throw nameError(
+          `undefined method '${name}' for ${self.isModule ? 'module' : 'class'} '${self.name}'`,
+          self,
+          name
+        );
+      }
+      if (method.owner === self) method.visibility = visibility;
+      else addMethod(self, { name, owner: self, visibility, body: { kind: 'visibility' } });
     }
-    if (method.owner === self) method.visibility = visibility;
-    else addMethod(self, { name, owner: self, visibility, body: { kind: 'visibility' } });
-  }
   invalidateMethodCaches();
   return args.length === 1 ? args[0] : arr(args);
 }

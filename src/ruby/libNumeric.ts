@@ -1032,6 +1032,10 @@ for (const [name, arity, fn, valid] of MATH_FUNCTIONS) {
     const values: number[] = [];
     for (const arg of args) values.push(yield* toFloat(arg));
     if (valid) domainCheck(name, valid(...values));
+    if (name === 'log2' && typeof args[0] === 'bigint' && !Number.isFinite(values[0]))
+      return mathLog(args[0], values[0]) / Math.LN2;
+    if (name === 'log10' && typeof args[0] === 'bigint' && !Number.isFinite(values[0]))
+      return mathLog(args[0], values[0]) / Math.LN10;
     return fn(...values);
   });
 }

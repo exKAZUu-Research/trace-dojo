@@ -2140,6 +2140,40 @@ test('lambda curry counts keyword slots in explicit bounds', () => {
   expect(run('f=->(x:1){};p f.curry(0).class,f.curry(1).class')).toMatchObject({ stdout: 'Proc\nProc\n' });
 });
 
+test('Math logarithms retain very large Integer magnitudes', () => {
+  expect(run('p Math.log2(10**400),Math.log10(10**400),Math.log2(2**1024)')).toMatchObject({
+    stdout: '1328.771237954945\n400.0\n1024.0\n',
+  });
+});
+
+test('visibility changes apply before later name conversion errors', () => {
+  expect(
+    run('class C;def x;1;end;begin;private :x,1;rescue;end;end;begin;p C.new.x;rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'NoMethodError\n',
+  });
+});
+
+test('String concat validates integers after encoding promotion', () => {
+  expect(run('s=255.chr;s.clear;s.concat("é",256);p s.bytes')).toMatchObject({
+    stdout: '[195, 169, 196, 128]\n',
+  });
+});
+
+test('String prefix and suffix predicates check encoding compatibility', () => {
+  expect(
+    run('begin;255.chr.start_with?("é");rescue=>e;p e.class;end;begin;"é".end_with?(255.chr);rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'Encoding::CompatibilityError\nEncoding::CompatibilityError\n',
+  });
+});
+
+test('String substitutions preserve mixed UTF-8 and invalid bytes', () => {
+  expect(run(String.raw`p "é\xFFa".gsub("a","b").bytes,"é\xFFa".sub("a","b").bytes`)).toMatchObject({
+    stdout: '[195, 169, 255, 98]\n[195, 169, 255, 98]\n',
+  });
+});
+
 test('Set reinitialization preserves existing members and frozen contents', () => {
   expect(
     run(

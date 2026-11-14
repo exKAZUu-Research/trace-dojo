@@ -50,6 +50,8 @@ import {
   truthy,
 } from './values';
 
+type StringTextMode = 'binary' | 'mixed' | 'utf8';
+
 // Characters ----------------------------------------------------------------------------------------------------------
 
 const SURROGATE = /[\uD800-\uDFFF]/;
@@ -327,9 +329,20 @@ def('String', '+@', 0, (self: RString) => (self.frozen ? stringFromBytes(stringB
 def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
   modify(self);
   const converted: (RString | bigint)[] = [];
+  let validationBinary = self.binary;
+  let validationAscii = stringBytes(self).every((byte) => byte < 0x80);
   for (const arg of args) {
-    if (typeof arg === 'bigint') validateConcatCodepoint(arg, self.binary);
-    converted.push(typeof arg === 'bigint' ? arg : yield* stringArgValue(arg));
+    if (typeof arg === 'bigint') {
+      validateConcatCodepoint(arg, validationBinary);
+      if (arg > 0x7fn) validationAscii = false;
+      converted.push(arg);
+    } else {
+      const string = yield* stringArgValue(arg);
+      const stringAscii = stringBytes(string).every((byte) => byte < 0x80);
+      if (validationAscii && !stringAscii) validationBinary = string.binary;
+      validationAscii &&= stringAscii;
+      converted.push(string);
+    }
   }
   const chunks: Uint8Array[] = [stringBytes(self)];
   let length = chunks[0].length;
@@ -667,14 +680,21 @@ function* searchString(self: RString, value: Value): Gen<RString> {
 def('String', 'start_with?', [0, -1], function* (self: RString, args) {
   for (const arg of args) {
     regexpUnsupported(arg);
-    if (self.s.startsWith(yield* stringArg(arg))) return true;
+    if (hasStringAffix(self, yield* searchString(self, arg), true)) return true;
   }
   return false;
 });
 def('String', 'end_with?', [0, -1], function* (self: RString, args) {
-  for (const arg of args) if (self.s.endsWith(yield* stringArg(arg))) return true;
+  for (const arg of args) if (hasStringAffix(self, yield* searchString(self, arg), false)) return true;
   return false;
 });
+function hasStringAffix(self: RString, target: RString, prefix: boolean): boolean {
+  const bytes = stringBytes(self);
+  const affix = stringBytes(target);
+  if (affix.length > bytes.length) return false;
+  const offset = prefix ? 0 : bytes.length - affix.length;
+  return affix.every((byte, index) => bytes[offset + index] === byte);
+}
 def('String', 'delete_prefix', 1, function* (self: RString, [prefix]) {
   const bytes = yield* withoutAffix(self, prefix, true);
   return stringFromBytes(bytes ?? stringBytes(self), self.binary);
@@ -984,8 +1004,8 @@ function* substitute(
   for (;;) {
     const found = text.indexOf(target, position);
     if (found === -1) break;
-    const raw = self.binary || self.rawBytes !== undefined;
-    const foundByte = textByteLength(text.slice(0, found), raw);
+    const mode = stringTextMode(self);
+    const foundByte = textByteLength(text.slice(0, found), mode);
     matched = true;
     const piece = yield* substitutionPiece(self, target, replacement, block, text, found, foundByte);
     if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
@@ -997,11 +1017,11 @@ function* substitute(
     append(active.slice(positionByte, foundByte));
     resultBinary = combinedStringEncoding(resultBinary, sourceAscii, piece);
     append(stringBytes(piece));
-    positionByte = foundByte + textByteLength(target, raw);
-    position = modified ? textIndexAtByte(text, positionByte, raw) : found + target.length;
+    positionByte = foundByte + textByteLength(target, mode);
+    position = modified ? textIndexAtByte(text, positionByte, mode) : found + target.length;
     if (target.length === 0) {
-      position = advanceEmptySubstitution(text, position, positionByte, active, raw, append);
-      positionByte = textByteLength(text.slice(0, position), raw);
+      position = advanceEmptySubstitution(text, position, positionByte, active, mode, append);
+      positionByte = textByteLength(text.slice(0, position), mode);
       if (position > text.length) break;
     }
     if (!global) break;
@@ -1016,12 +1036,12 @@ function advanceEmptySubstitution(
   position: number,
   positionByte: number,
   active: Uint8Array,
-  raw: boolean,
+  mode: StringTextMode,
   append: (bytes: Uint8Array) => void
 ): number {
   if (position >= text.length) return position + 1;
   const char = String.fromCodePoint(text.codePointAt(position) as number);
-  append(active.slice(positionByte, textByteLength(text.slice(0, position + char.length), raw)));
+  append(active.slice(positionByte, textByteLength(text.slice(0, position + char.length), mode)));
   return position + char.length;
 }
 
@@ -1053,7 +1073,7 @@ function* substitutionPiece(
   }
   if (replacement !== undefined) {
     const bytes = stringBytes(self);
-    const matchLength = textByteLength(target, self.binary || self.rawBytes !== undefined);
+    const matchLength = textByteLength(target, stringTextMode(self));
     return expandReplacementValue(
       yield* stringArgValue(replacement),
       stringFromBytes(bytes.slice(foundByte, foundByte + matchLength), self.binary),
@@ -1096,8 +1116,8 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
   for (;;) {
     const index = text.indexOf(target, position);
     if (index === -1) break;
-    const raw = self.binary || self.rawBytes !== undefined;
-    const foundByte = textByteLength(text.slice(0, index), raw);
+    const mode = stringTextMode(self);
+    const foundByte = textByteLength(text.slice(0, index), mode);
     const match = textResult(self, target);
     let modified = false;
     if (block) {
@@ -1106,8 +1126,8 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
       modified = self.s !== text;
       text = self.s;
     } else found.push(match);
-    const nextByte = foundByte + textByteLength(target, raw);
-    position = modified ? textIndexAtByte(text, nextByte, raw) : index + target.length;
+    const nextByte = foundByte + textByteLength(target, mode);
+    position = modified ? textIndexAtByte(text, nextByte, mode) : index + target.length;
     if (position > text.length) break;
   }
   if (!block) return arr(found);
@@ -1133,17 +1153,35 @@ function* scanEmpty(self: RString, block: RProc | undefined): Gen<Value> {
   return block ? self : arr(found);
 }
 
-function textByteLength(text: string, raw: boolean): number {
-  return raw ? text.length : new TextEncoder().encode(text).length;
+function stringTextMode(value: RString): StringTextMode {
+  return value.binary ? 'binary' : value.rawBytes ? 'mixed' : 'utf8';
 }
 
-function textIndexAtByte(text: string, offset: number, raw: boolean): number {
-  if (raw) return Math.min(offset, text.length);
+function textByteLength(text: string, mode: StringTextMode): number {
+  if (mode === 'binary') return text.length;
+  if (mode === 'utf8') return new TextEncoder().encode(text).length;
+  let bytes = 0;
+  for (const char of text) {
+    const point = char.codePointAt(0) as number;
+    bytes += point >= 0xdc_80 && point <= 0xdc_ff ? 1 : utf8ByteWidth(point);
+  }
+  return bytes;
+}
+
+function utf8ByteWidth(point: number): number {
+  if (point < 0x80) return 1;
+  if (point < 0x8_00) return 2;
+  if (point < 0x1_00_00) return 3;
+  return 4;
+}
+
+function textIndexAtByte(text: string, offset: number, mode: StringTextMode): number {
+  if (mode === 'binary') return Math.min(offset, text.length);
   let bytes = 0;
   for (let index = 0; index < text.length;) {
     if (bytes >= offset) return index;
     const point = text.codePointAt(index) as number;
-    bytes += textByteLength(String.fromCodePoint(point), false);
+    bytes += textByteLength(String.fromCodePoint(point), mode);
     index += point > 0xff_ff ? 2 : 1;
     if (index % 256 === 0) rt().spend(256);
   }

@@ -155,6 +155,12 @@ test('Hash slice and except root results through later key callbacks', () => {
   expect(traceProgram('ruby', except, except).finalTurtles).toHaveLength(1);
 });
 
+test('custom Range reverse_each roots generated elements during callbacks', () => {
+  const program =
+    'class A;attr_reader :n;def initialize(n,t=false);@n=n;@t=Turtle.new if t;end;def <=>(o);n<=>o.n;end;def succ;A.new(n+1,n==0);end;end;x=[];(A.new(0)..A.new(2)).reverse_each{|v|q=1;x<<v}';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
 test('Array concat roots early conversion results', () => {
   const program =
     'class A;def to_ary;[Turtle.new];end;end;class B;def to_ary;q=1;[];end;end;a=[];a.concat(A.new,B.new)';
