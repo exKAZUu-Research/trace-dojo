@@ -1,6 +1,11 @@
-import { type Scalar, toInt32 } from '../arith';
+import type { Scalar } from '../arith';
 import { CRuntimeError } from '../errors';
+import { constantOperand, type SpecialCall } from '../expressionCompiler';
 import type { NativeFunction, Runtime } from '../runtime';
+import { INT } from '../types';
+import { appleFloatPower } from './appleFloatPower';
+import { exactParts, fma, roundBinary, roundSquareRoot } from './binaryFloat';
+import { precisePower } from './precisePower';
 import { asAddress, asNumber, writeBytes } from './support';
 
 /** Rounds half away from zero, as C's `round` does. */
@@ -23,11 +28,8 @@ function roundHalfEven(x: number): number {
   return rounded === 0 ? (x < 0 || Object.is(x, -0) ? -0 : 0) : rounded;
 }
 
-/** 2^x, exact for integers and correctly rounded for halves (via sqrt), where JavaScript's ** may miss the last bit. */
 function exp2(x: number): number {
-  if (Number.isInteger(x)) return pow(2, x);
-  if (Number.isInteger(x * 2) && Math.abs(x) < 1000) return Math.sqrt(pow(2, x * 2));
-  return 2 ** x;
+  return pow(2, x);
 }
 
 const UNARY: Record<string, (x: number) => number> = {
@@ -50,8 +52,7 @@ const UNARY: Record<string, (x: number) => number> = {
   log10: Math.log10,
   log2: Math.log2,
   log1p: Math.log1p,
-  logb: (x) =>
-    x === 0 ? Number.NEGATIVE_INFINITY : Number.isFinite(x) ? Math.floor(Math.log2(Math.abs(x))) : Math.abs(x),
+  logb: (x) => (x === 0 ? Number.NEGATIVE_INFINITY : Number.isFinite(x) ? frexp(x).exponent - 1 : Math.abs(x)),
   sqrt: Math.sqrt,
   cbrt: Math.cbrt,
   fabs: Math.abs,
@@ -63,62 +64,70 @@ const UNARY: Record<string, (x: number) => number> = {
   nearbyint: roundHalfEven,
 };
 
-/** x^y, correctly rounded when y is an integer, as macOS's pow is; JavaScript's ** may differ in the last bit. */
+// code-gauge-allow functionCognitiveComplexity 18 -- C special values, exact powers, and fractional modes require distinct rounding paths.
 function pow(x: number, y: number): number {
-  if (x === 1 || y === 0) return 1;
-  if (!Number.isInteger(y) || Math.abs(y) > 1024 || !Number.isFinite(x) || x === 0) return x ** y;
-  const { mantissa, exponent } = exactParts(Math.abs(x));
+  if (x === 1 || y === 0 || (x === -1 && !Number.isFinite(y) && !Number.isNaN(y))) return 1;
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x === 0) return x ** y;
   const n = Math.abs(y);
-  const negative = x < 0 && n % 2 === 1;
-  // |x|^n = mantissa^n * 2^(exponent * n)
-  const numerator = mantissa ** BigInt(n);
-  const power = exponent * n;
-  const magnitude = y > 0 ? scaledToDouble(numerator, 1n, power) : scaledToDouble(1n, numerator, -power);
-  return negative ? -magnitude : magnitude;
+  if (!Number.isInteger(y * 2)) return x ** y;
+  if (n > 1024) return precisePower(x, y);
+  if (x < 0 && !Number.isInteger(y)) return Number.NaN;
+  const { mantissa, exponent } = exactParts(Math.abs(x));
+  const half = !Number.isInteger(y);
+  const power = mantissa ** BigInt(half ? n * 2 : n);
+  const binaryExponent = exponent * (half ? n * 2 : n);
+  const rounded = half
+    ? y > 0
+      ? roundSquareRoot(power, 1n, binaryExponent)
+      : roundSquareRoot(1n, power, -binaryExponent)
+    : y > 0
+      ? roundBinary(power, 1n, binaryExponent)
+      : roundBinary(1n, power, -binaryExponent);
+  return x < 0 && n % 2 === 1 ? -rounded : rounded;
 }
 
-function exactParts(value: number): { mantissa: bigint; exponent: number } {
-  const view = new DataView(new ArrayBuffer(8));
-  view.setFloat64(0, value);
-  const bits = view.getBigUint64(0);
-  const biased = Number((bits >> 52n) & 0x7_ffn);
-  const fraction = bits & ((1n << 52n) - 1n);
-  return biased === 0
-    ? { mantissa: fraction, exponent: -1074 }
-    : { mantissa: fraction | (1n << 52n), exponent: biased - 1075 };
+function remainderParts(x: number, y: number): { value: number; quotient: number } {
+  if (y === 0 || !Number.isFinite(x) || Number.isNaN(y)) return { value: Number.NaN, quotient: 0 };
+  if (!Number.isFinite(y)) return { value: x, quotient: 0 };
+  const a = exactParts(Math.abs(x));
+  const b = exactParts(Math.abs(y));
+  const exponent = Math.min(a.exponent, b.exponent);
+  const numerator = a.mantissa << BigInt(a.exponent - exponent);
+  const denominator = b.mantissa << BigInt(b.exponent - exponent);
+  let quotient = numerator / denominator;
+  let residual = numerator % denominator;
+  const twice = residual * 2n;
+  if (twice > denominator || (twice === denominator && (quotient & 1n) === 1n)) {
+    quotient++;
+    residual -= denominator;
+  }
+  const sign = x < 0 || Object.is(x, -0) ? -1 : 1;
+  const magnitude = residual < 0n ? -residual : residual;
+  const value = sign * (residual < 0n ? -1 : 1) * roundBinary(magnitude, 1n, exponent);
+  return { value, quotient: sign * (y < 0 ? -1 : 1) * Number(quotient & 0x7fn) };
 }
 
-/** numerator / denominator × 2^exponent, rounded to the nearest double with ties to even. */
-function scaledToDouble(numerator: bigint, denominator: bigint, exponent: number): number {
-  // Find the binary exponent e of the quotient q, so that 2^e <= q < 2^(e+1).
-  let e = numerator.toString(2).length - denominator.toString(2).length;
-  if ((e >= 0 ? numerator : numerator << BigInt(-e)) < (e >= 0 ? denominator << BigInt(e) : denominator)) e--;
-  const total = e + exponent;
-  if (total > 1023) return Number.POSITIVE_INFINITY;
-  // Keep 53 significant bits, or fewer for a subnormal result.
-  const precision = total < -1022 ? 53 - (-1022 - total) : 53;
-  if (precision <= 0 && total < -1075) return 0;
-  const shift = precision - 1 - e;
-  const scaledNumerator = shift >= 0 ? numerator << BigInt(shift) : numerator;
-  const scaledDenominator = shift >= 0 ? denominator : denominator << BigInt(-shift);
-  let quotient = scaledNumerator / scaledDenominator;
-  const remainder = scaledNumerator % scaledDenominator;
-  const twice = remainder * 2n;
-  if (twice > scaledDenominator || (twice === scaledDenominator && (quotient & 1n) === 1n)) quotient++;
-  return Number(quotient) * 2 ** (exponent - shift);
+function modf(isFloat: boolean): NativeFunction {
+  return (runtime, [x, integer]) => {
+    const value = x as number;
+    const whole = Number.isFinite(value) ? Math.trunc(value) : value;
+    storeDouble(runtime, asAddress(integer), whole, isFloat);
+    if (Number.isNaN(value)) return value;
+    const fraction = Number.isFinite(value) ? value - whole : 0;
+    return fraction || (value < 0 || Object.is(value, -0) ? -0 : 0);
+  };
 }
 
-function remainder(x: number, y: number): number {
-  if (y === 0 || !Number.isFinite(x) || Number.isNaN(y)) return Number.NaN;
-  if (!Number.isFinite(y)) return x;
-  const quotient = roundHalfEven(x / y);
-  return x - quotient * y;
-}
-
-function nextAfter(x: number, y: number): number {
+function nextAfter(x: number, y: number, isFloat = false): number {
   if (Number.isNaN(x) || Number.isNaN(y)) return Number.NaN;
   if (x === y) return y;
-  if (x === 0) return y > 0 ? Number.MIN_VALUE : -Number.MIN_VALUE;
+  if (x === 0) return (y > 0 ? 1 : -1) * (isFloat ? 2 ** -149 : Number.MIN_VALUE);
+  if (isFloat) {
+    const view = new DataView(new ArrayBuffer(4));
+    view.setFloat32(0, x);
+    view.setUint32(0, view.getUint32(0) + (y > x === x > 0 ? 1 : -1));
+    return view.getFloat32(0);
+  }
   const view = new DataView(new ArrayBuffer(8));
   view.setFloat64(0, x);
   let bits = view.getBigInt64(0);
@@ -131,7 +140,7 @@ const BINARY: Record<string, (x: number, y: number) => number> = {
   atan2: Math.atan2,
   pow,
   fmod: (x, y) => x % y,
-  remainder,
+  remainder: (x, y) => remainderParts(x, y).value,
   hypot: Math.hypot,
   fmin: (x, y) => (Number.isNaN(x) ? y : Number.isNaN(y) ? x : Math.min(x, y)),
   fmax: (x, y) => (Number.isNaN(x) ? y : Number.isNaN(y) ? x : Math.max(x, y)),
@@ -156,17 +165,18 @@ function storeDouble(runtime: Runtime, address: number, value: number, isFloat: 
 
 function frexp(x: number): { mantissa: number; exponent: number } {
   if (x === 0 || !Number.isFinite(x)) return { mantissa: x, exponent: 0 };
-  let exponent = Math.max(-1073, Math.floor(Math.log2(Math.abs(x))) + 1);
-  let mantissa = x * 2 ** -exponent;
-  while (Math.abs(mantissa) < 0.5) {
-    mantissa *= 2;
-    exponent--;
-  }
-  while (Math.abs(mantissa) >= 1) {
-    mantissa /= 2;
-    exponent++;
-  }
-  return { mantissa, exponent };
+  const parts = exactParts(Math.abs(x));
+  const bits = parts.mantissa.toString(2).length;
+  return {
+    mantissa: Math.sign(x) * Number(parts.mantissa) * 2 ** -bits,
+    exponent: parts.exponent + bits,
+  };
+}
+
+function ldexp(x: number, exponent: number, isFloat = false): number {
+  if (x === 0 || !Number.isFinite(x)) return x;
+  const parts = exactParts(Math.abs(x));
+  return Math.sign(x) * roundBinary(parts.mantissa, 1n, parts.exponent + exponent, isFloat);
 }
 
 function toLong(value: number): bigint {
@@ -174,40 +184,57 @@ function toLong(value: number): bigint {
   return BigInt(value);
 }
 
-function fpClassify(x: number): number {
+function fpClassify(x: number, isFloat = false): number {
   if (Number.isNaN(x)) return 1;
   if (!Number.isFinite(x)) return 2;
   if (x === 0) return 3;
-  return Math.abs(x) < 2.2250738585072014e-308 ? 5 : 4;
+  return Math.abs(x) < (isFloat ? 2 ** -126 : 2 ** -1022) ? 5 : 4;
 }
 
+export const classificationCall: SpecialCall = (compiler, call, fn) => {
+  if (call.args.length !== 1) compiler.error(call.row, '浮動小数点数の分類には引数を1つ書いてください。');
+  const operand = compiler.rvalue(call.args[0]);
+  const isFloat = operand.type.kind === 'float' && operand.type.name === 'float';
+  return {
+    type: INT,
+    isCall: true,
+    value: (frame) => {
+      frame.runtime.spend();
+      const classification = fpClassify(Number(operand.value(frame)), isFloat);
+      return fn.name === '__builtin_isnormal' ? (classification === 4 ? 1 : 0) : classification;
+    },
+  };
+};
+
+const BUILTIN_CONSTANTS: Record<string, number> = {
+  __builtin_huge_val: Number.POSITIVE_INFINITY,
+  __builtin_huge_valf: Number.POSITIVE_INFINITY,
+  __builtin_inff: Number.POSITIVE_INFINITY,
+  __builtin_nanf: Number.NaN,
+};
+export const constantCall: SpecialCall = (compiler, call, fn) => {
+  compiler.arguments(fn.type, call.args, call.row, fn.name);
+  if (
+    call.args.some((argument) => {
+      const operand = compiler.rvalue(argument);
+      return operand.constant === undefined && !operand.isAddressConstant;
+    })
+  )
+    return;
+  return { ...constantOperand(fn.type.ret, BUILTIN_CONSTANTS[fn.name]), isCall: true };
+};
+
 export const MATH_FUNCTIONS: Record<string, NativeFunction> = {
-  fma: (_runtime, [x, y, z]) => (x as number) * (y as number) + (z as number),
-  fmaf: (_runtime, [x, y, z]) => Math.fround((x as number) * (y as number) + (z as number)),
+  fma: (_runtime, [x, y, z]) => fma(x as number, y as number, z as number),
+  fmaf: (_runtime, [x, y, z]) => fma(x as number, y as number, z as number, true),
   lround: (_runtime, [x]) => toLong(roundHalfAway(x as number)),
   lroundf: (_runtime, [x]) => toLong(roundHalfAway(x as number)),
   llround: (_runtime, [x]) => toLong(roundHalfAway(x as number)),
   llroundf: (_runtime, [x]) => toLong(roundHalfAway(x as number)),
   lrint: (_runtime, [x]) => toLong(roundHalfEven(x as number)),
   llrint: (_runtime, [x]) => toLong(roundHalfEven(x as number)),
-  modf: (runtime, [x, integer]) => {
-    const value = x as number;
-    const whole = Number.isFinite(value) ? Math.trunc(value) : value;
-    storeDouble(runtime, asAddress(integer), whole, false);
-    return Number.isFinite(value)
-      ? value - whole || (value < 0 ? -0 : 0)
-      : Number.isNaN(value)
-        ? value
-        : value < 0
-          ? -0
-          : 0;
-  },
-  modff: (runtime, [x, integer]) => {
-    const value = x as number;
-    const whole = Number.isFinite(value) ? Math.trunc(value) : value;
-    storeDouble(runtime, asAddress(integer), whole, true);
-    return Math.fround(Number.isFinite(value) ? value - whole : 0);
-  },
+  modf: modf(false),
+  modff: modf(true),
   frexp: (runtime, [x, exponent]) => {
     const result = frexp(x as number);
     storeInt(runtime, asAddress(exponent), result.exponent);
@@ -218,9 +245,9 @@ export const MATH_FUNCTIONS: Record<string, NativeFunction> = {
     storeInt(runtime, asAddress(exponent), result.exponent);
     return Math.fround(result.mantissa);
   },
-  ldexp: (_runtime, [x, exponent]) => (x as number) * 2 ** asNumber(exponent),
-  ldexpf: (_runtime, [x, exponent]) => Math.fround((x as number) * 2 ** asNumber(exponent)),
-  scalbn: (_runtime, [x, exponent]) => (x as number) * 2 ** asNumber(exponent),
+  ldexp: (_runtime, [x, exponent]) => ldexp(x as number, asNumber(exponent)),
+  ldexpf: (_runtime, [x, exponent]) => ldexp(x as number, asNumber(exponent), true),
+  scalbn: (_runtime, [x, exponent]) => ldexp(x as number, asNumber(exponent)),
   ilogb: (_runtime, [x]) => {
     const value = x as number;
     if (value === 0) return -2_147_483_648;
@@ -231,9 +258,9 @@ export const MATH_FUNCTIONS: Record<string, NativeFunction> = {
   nan: () => Number.NaN,
   nanf: () => Number.NaN,
   remquo: (runtime, [x, y, quotient]) => {
-    const result = remainder(x as number, y as number);
-    storeInt(runtime, asAddress(quotient), toInt32(roundHalfEven((x as number) / (y as number))));
-    return result;
+    const result = remainderParts(x as number, y as number);
+    storeInt(runtime, asAddress(quotient), result.quotient);
+    return result.value;
   },
   __builtin_huge_val: () => Number.POSITIVE_INFINITY,
   __builtin_huge_valf: () => Number.POSITIVE_INFINITY,
@@ -276,6 +303,35 @@ for (const [name, fn] of Object.entries(BINARY)) {
   MATH_FUNCTIONS[`${name}f`] = (_runtime, [x, y]) => Math.fround(fn(x as number, y as number));
 }
 
+for (const name of [
+  'fma',
+  'modf',
+  'frexp',
+  'ldexp',
+  'scalbn',
+  'ilogb',
+  'nan',
+  'remquo',
+  'lround',
+  'llround',
+  'lrint',
+  'llrint',
+]) {
+  MATH_FUNCTIONS[`${name}l`] = MATH_FUNCTIONS[name];
+}
+for (const name of ['ilogb', 'lrint', 'llrint']) MATH_FUNCTIONS[`${name}f`] = MATH_FUNCTIONS[name];
+MATH_FUNCTIONS.scalbnf = MATH_FUNCTIONS.ldexpf;
+MATH_FUNCTIONS.scalbln = MATH_FUNCTIONS.ldexp;
+MATH_FUNCTIONS.scalblnf = MATH_FUNCTIONS.ldexpf;
+MATH_FUNCTIONS.scalblnl = MATH_FUNCTIONS.ldexp;
+MATH_FUNCTIONS.remquof = (runtime, args, types, row) =>
+  Math.fround(MATH_FUNCTIONS.remquo(runtime, args, types, row) as number);
+
+MATH_FUNCTIONS.nextafterf = (_runtime, [x, y]) => nextAfter(x as number, y as number, true);
+MATH_FUNCTIONS.nexttoward = MATH_FUNCTIONS.nextafter;
+MATH_FUNCTIONS.nexttowardf = MATH_FUNCTIONS.nextafterf;
+MATH_FUNCTIONS.nexttowardl = MATH_FUNCTIONS.nextafterl;
+
 export const CTYPE_FUNCTIONS: Record<string, NativeFunction> = {};
 const CLASSES: Record<string, (c: number) => boolean> = {
   isalnum: (c) => /[\dA-Za-z]/.test(String.fromCodePoint(c)),
@@ -306,3 +362,5 @@ CTYPE_FUNCTIONS.toupper = (_runtime, [c]) => {
   const value = asNumber(c);
   return value >= 0x61 && value <= 0x7a ? value - 32 : value;
 };
+
+MATH_FUNCTIONS.powf = (_runtime, [x, y]) => appleFloatPower(x as number, y as number);

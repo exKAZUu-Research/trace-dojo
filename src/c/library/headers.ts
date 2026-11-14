@@ -1,5 +1,7 @@
 import type { HeaderLookup } from '../preprocessor';
 import { unsupportedMessage } from '../unsupported';
+import { ERRNO_HEADER } from './appleErrno';
+import { PLATFORM_DECLARATIONS, PLATFORM_MACROS, PLATFORM_UNMODELED } from './platformHeaders';
 
 /** The interpreter's own declarations, which every program sees without including anything. */
 export const TURTLE_HEADER = `
@@ -120,6 +122,19 @@ unsigned long long strtoull(const char *s, char **end, int base);
 double strtod(const char *s, char **end);
 float strtof(const char *s, char **end);
 long double strtold(const char *s, char **end);
+long random(void);
+void srandom(unsigned int seed);
+char *initstate(unsigned int seed, char *state, size_t size);
+char *setstate(char *state);
+double drand48(void);
+double erand48(unsigned short state[3]);
+long lrand48(void);
+long nrand48(unsigned short state[3]);
+long mrand48(void);
+long jrand48(unsigned short state[3]);
+void srand48(long seed);
+unsigned short *seed48(unsigned short seed[3]);
+void lcong48(unsigned short parameters[7]);
 int rand(void);
 void srand(unsigned int seed);
 void qsort(void *base, size_t count, size_t size, int (*compare)(const void *, const void *));
@@ -160,6 +175,10 @@ size_t strcspn(const char *s, const char *reject);
 char *strpbrk(const char *s, const char *accept);
 char *strdup(const char *s);
 char *strndup(const char *s, size_t n);
+int strcasecmp(const char *a, const char *b);
+int strncasecmp(const char *a, const char *b, size_t n);
+size_t strlcpy(char *dst, const char *src, size_t n);
+size_t strlcat(char *dst, const char *src, size_t n);
 char *strerror(int error);
 size_t strxfrm(char *dst, const char *src, size_t n);
 void *memcpy(void *dst, const void *src, size_t n);
@@ -184,6 +203,8 @@ int isupper(int c);
 int isxdigit(int c);
 int tolower(int c);
 int toupper(int c);
+int isascii(int c);
+int toascii(int c);
 `;
 
 const MATH_FUNCTIONS_1 = [
@@ -293,25 +314,26 @@ int __builtin_islessgreater();
 int __builtin_isunordered();
 ${[...MATH_FUNCTIONS_1].map((name) => `double ${name}(double x);\nfloat ${name}f(float x);\nlong double ${name}l(long double x);`).join('\n')}
 ${MATH_FUNCTIONS_2.map((name) => `double ${name}(double x, double y);\nfloat ${name}f(float x, float y);\nlong double ${name}l(long double x, long double y);`).join('\n')}
-double fma(double x, double y, double z);
-float fmaf(float x, float y, float z);
-long lround(double x);
-long lroundf(float x);
-long long llround(double x);
-long long llroundf(float x);
-long lrint(double x);
-long long llrint(double x);
-double modf(double x, double *integer);
-float modff(float x, float *integer);
-double frexp(double x, int *exponent);
-float frexpf(float x, int *exponent);
-double ldexp(double x, int exponent);
-float ldexpf(float x, int exponent);
-double scalbn(double x, int exponent);
-int ilogb(double x);
-double nan(const char *tag);
-float nanf(const char *tag);
-double remquo(double x, double y, int *quotient);
+${(['', 'f', 'l'] as const)
+  .map((suffix) => {
+    const type = suffix === 'f' ? 'float' : suffix === 'l' ? 'long double' : 'double';
+    return `${type} fma${suffix}(${type} x, ${type} y, ${type} z);
+long lround${suffix}(${type} x);
+long long llround${suffix}(${type} x);
+long lrint${suffix}(${type} x);
+long long llrint${suffix}(${type} x);
+${type} modf${suffix}(${type} x, ${type} *integer);
+${type} frexp${suffix}(${type} x, int *exponent);
+${type} ldexp${suffix}(${type} x, int exponent);
+${type} scalbn${suffix}(${type} x, int exponent);
+${type} scalbln${suffix}(${type} x, long exponent);
+int ilogb${suffix}(${type} x);
+${type} nan${suffix}(const char *tag);
+${type} remquo${suffix}(${type} x, ${type} y, int *quotient);
+${type} nexttoward${suffix}(${type} x, long double y);`;
+  })
+  .join('\n')}
+
 `;
 
 /** On arm64 macOS, a va_list is a char * to the extra arguments, which lie in 8-byte slots. */
@@ -582,21 +604,7 @@ void __assert_rtn(const char *expression, int line);
 #define static_assert _Static_assert
 `;
 
-const ERRNO = `
-extern int errno;
-#define EPERM 1
-#define ENOENT 2
-#define EINTR 4
-#define EIO 5
-#define ENOMEM 12
-#define EACCES 13
-#define EEXIST 17
-#define EINVAL 22
-#define ENOSPC 28
-#define EDOM 33
-#define ERANGE 34
-#define EILSEQ 92
-`;
+const ERRNO = ERRNO_HEADER;
 
 const ISO646 = `
 #define and &&
@@ -654,7 +662,11 @@ const UNSUPPORTED_HEADERS: Record<string, string> = {
 /** Finds the header that `#include` names, or why the program cannot include it. */
 export const lookupHeader: HeaderLookup = (name, quoted) => {
   const text = HEADERS[name];
-  if (text !== undefined) return { text };
+  if (text !== undefined) {
+    const declarations = PLATFORM_DECLARATIONS[name] ?? '';
+    const excluded = (PLATFORM_UNMODELED[name] ?? []).map((fn) => `int ${fn}();`).join('\n');
+    return { text: `${text}\n${declarations}\n${excluded}\n${PLATFORM_MACROS[name] ?? ''}` };
+  }
   const feature = UNSUPPORTED_HEADERS[name];
   if (feature) return { refusal: unsupportedMessage(feature) };
   return {

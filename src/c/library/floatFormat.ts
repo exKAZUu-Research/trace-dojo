@@ -1,22 +1,14 @@
+import { exactParts } from './binaryFloat';
+
 /**
  * Formats doubles as macOS's libc does for `%f`, `%e`, `%g`, and `%a`: from the exact binary value, rounded to the
- * requested digits with ties to even.
+ * requested digits using macOS rounding rules.
  */
 
 /** The exact decimal digits of a finite positive double, and the power of ten of the first digit. */
+// code-gauge-allow duplicateLines 16 -- Numeric conversions preserve their reference language's zero representation and coefficient normalization.
 function exactDigits(value: number): { digits: string; exponent: number } {
-  const view = new DataView(new ArrayBuffer(8));
-  view.setFloat64(0, value);
-  const bits = view.getBigUint64(0);
-  const biasedExponent = Number((bits >> 52n) & 0x7_ffn);
-  let mantissa = bits & ((1n << 52n) - 1n);
-  let exponent: number;
-  if (biasedExponent === 0) {
-    exponent = -1074;
-  } else {
-    mantissa |= 1n << 52n;
-    exponent = biasedExponent - 1075;
-  }
+  const { mantissa, exponent } = exactParts(value);
   let digits: string;
   let pointPosition: number;
   if (exponent >= 0) {
@@ -118,6 +110,8 @@ export function formatGeneral(value: number, precision: number, alternate: boole
 }
 
 /** `%a` of a finite non-negative double, without its sign: macOS's form, `0x1.8p+1`, with the precision if given. */
+// code-gauge-allow functionCognitiveComplexity 24 -- Keep normalization, discarded-digit rounding, and exponent formatting together as one hexadecimal conversion.
+// code-gauge-allow functionNcss 37 -- Keep normalization, discarded-digit rounding, and exponent formatting together as one hexadecimal conversion.
 export function formatHex(value: number, precision: number | undefined, alternate: boolean): string {
   if (value === 0) {
     const fraction = precision ? `.${'0'.repeat(precision)}` : alternate ? '.' : '';
@@ -142,22 +136,17 @@ export function formatHex(value: number, precision: number | undefined, alternat
   let lead = 1n;
   let hex = mantissa.toString(16).padStart(13, '0');
   if (precision !== undefined && precision < 13) {
-    // Round the fraction to `precision` hex digits with ties to even.
     const dropBits = BigInt((13 - precision) * 4);
     const full = (lead << 52n) | mantissa;
     const kept = full >> dropBits;
-    const remainder = full & ((1n << dropBits) - 1n);
-    const half = 1n << (dropBits - 1n);
-    let rounded = kept;
-    if (remainder > half || (remainder === half && (kept & 1n) === 1n)) rounded++;
+    const dropped = full & ((1n << dropBits) - 1n);
+    const first = Number(dropped >> (dropBits - 4n));
+    const next = dropBits >= 8n ? Number((dropped >> (dropBits - 8n)) & 15n) : 0;
+    // Apple's __hdtoa uses the first discarded digit and the low bit of the next, ignoring later digits.
+    // https://github.com/apple-oss-distributions/Libc/blob/main/gdtoa/FreeBSD/_hdtoa.c
+    const rounded = kept + (first > 8 || (first === 8 && (next & 1) !== 0) ? 1n : 0n);
     const fractionBits = BigInt(precision * 4);
     lead = rounded >> fractionBits;
-    if (lead > 1n) {
-      // A carry into the leading digit, as from 0x1.f to 0x2.0, renormalizes.
-      lead = 1n;
-      rounded >>= 1n;
-      exponent++;
-    }
     hex = precision > 0 ? (rounded & ((1n << fractionBits) - 1n)).toString(16).padStart(precision, '0') : '';
   } else if (precision === undefined) {
     hex = hex.replace(/0+$/, '');

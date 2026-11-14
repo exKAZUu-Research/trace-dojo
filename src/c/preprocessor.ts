@@ -1,5 +1,9 @@
+// code-gauge-allow-file fileNcss 497 -- Directive handling and macro expansion share preprocessing state.
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
+import { ExecutionBudget } from '../interpreter/limits';
 import { type LogicalLine, type PPToken, spell, tokenize } from './lexer';
+import { evaluatePreprocessorCondition } from './preprocessorCondition';
+import { TokenStream } from './tokenStream';
 import { unsupported } from './unsupported';
 
 /** A macro, as `#define` records it. */
@@ -11,6 +15,7 @@ interface Macro {
   body: PPToken[];
   /** Whether a header the program includes defined the macro, which may use features learners cannot. */
   fromHeader: boolean;
+  dynamic?: 'line' | 'file';
 }
 
 /** A standard header, written as C source the preprocessor reads when a program includes it. */
@@ -57,6 +62,7 @@ interface Conditional {
 const CONDITIONAL_DIRECTIVES = new Set(['if', 'ifdef', 'ifndef', 'elif', 'elifdef', 'elifndef', 'else', 'endif']);
 
 class Preprocessor {
+  private readonly budget = new ExecutionBudget();
   private readonly macros = new Map<string, Macro>();
   private readonly includes: IncludedHeader[] = [];
   private readonly included = new Set<string>();
@@ -87,10 +93,12 @@ class Preprocessor {
         fromHeader: true,
       });
     }
+    this.macros.set('__LINE__', { name: '__LINE__', body: [], variadic: false, fromHeader: true, dynamic: 'line' });
+    this.macros.set('__FILE__', { name: '__FILE__', body: [], variadic: false, fromHeader: true, dynamic: 'file' });
   }
 
   run(source: string): PreprocessedSource {
-    const { lines, rowCount } = tokenize(source);
+    const { lines, rowCount } = tokenize(source, this.budget);
     const output: string[][] = Array.from({ length: rowCount }, () => []);
     const emit = (tokens: PPToken[]): void => {
       for (const token of tokens) output[token.row]?.push(token.text);
@@ -100,6 +108,7 @@ class Preprocessor {
     return { text: output.map((tokens) => tokens.join(' ')).join('\n'), includes: this.includes };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 21 -- Directive processing and ordinary-token flushing share source order and conditional state.
   private process(lines: LogicalLine[], emit: (tokens: PPToken[]) => void): void {
     const conditionals: Conditional[] = [];
     let pending: PPToken[] = [];
@@ -107,6 +116,7 @@ class Preprocessor {
     const flush = (): void => {
       if (pending.length === 0) return;
       try {
+        rejectTrigraphs(pending);
         emit(this.expand(pending));
       } catch (error) {
         if (!(error instanceof CompileError)) throw error;
@@ -143,6 +153,7 @@ class Preprocessor {
     const name = nameToken?.text ?? '';
     const rest = line.tokens.slice(2);
     const active = isActive();
+    if (active) rejectTrigraphs(line.tokens);
     if (CONDITIONAL_DIRECTIVES.has(name)) this.conditionalDirective(name, rest, row, conditionals, active);
     else if (active) this.otherDirective(name, nameToken, rest, row);
   }
@@ -201,6 +212,7 @@ class Preprocessor {
     top.taken = value;
   }
 
+  // code-gauge-allow functionNcss 36 -- Each directive shares one source-row and macro context.
   private otherDirective(name: string, nameToken: PPToken | undefined, rest: PPToken[], row: number): void {
     switch (name) {
       case '': {
@@ -297,6 +309,7 @@ class Preprocessor {
     this.macros.set(name, { name, params, variadic, body, fromHeader: this.inHeader });
   }
 
+  // code-gauge-allow functionNcss 36 -- Include expansion, lookup, declarations, and source rows form one ordered header operation.
   private include(tokens: PPToken[], row: number): void {
     let target = tokens;
     if (target[0]?.kind !== 'string' && target[0]?.text !== '<') target = this.expand(target);
@@ -314,13 +327,14 @@ class Preprocessor {
     }
     const found = this.lookup(name, quoted);
     if ('refusal' in found) throw new CompileError([{ row, message: found.refusal }]);
-    if (this.included.has(name)) return;
+    if (name !== 'assert.h' && this.included.has(name)) return;
     this.included.add(name);
+    if (name === 'assert.h') this.macros.delete('assert');
     const declarations: string[] = [];
     const wasInHeader = this.inHeader;
     this.inHeader = true;
     try {
-      const { lines } = tokenize(found.text);
+      const { lines } = tokenize(found.text, this.budget);
       // A header's tokens all take the row of its #include, where its declarations become visible.
       for (const line of lines) {
         line.row = row;
@@ -343,7 +357,9 @@ class Preprocessor {
 
   // Conditions ----------------------------------------------------------------------------------------------------
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- defined replacement and identifier normalization precede one shared integer-expression evaluator.
   private evaluateCondition(tokens: PPToken[], row: number): boolean {
+    rejectTrigraphs(tokens);
     const replaced: PPToken[] = [];
     for (let index = 0; index < tokens.length; index++) {
       const token = tokens[index];
@@ -363,7 +379,7 @@ class Preprocessor {
       token.kind === 'identifier' ? { ...token, kind: 'number', text: '0' } : token
     );
     if (expanded.length === 0) throw new CompileError([{ row, message: '#if の後には条件を書いてください。' }]);
-    return new ConditionParser(expanded, row).parse() !== 0n;
+    return evaluatePreprocessorCondition(expanded, row) !== 0n;
   }
 
   // Expansion -----------------------------------------------------------------------------------------------------
@@ -389,18 +405,21 @@ class Preprocessor {
   }
 
   /** Expands the macros in a list of tokens, as C's rescanning with hide sets does. */
+  // code-gauge-allow functionCognitiveComplexity 23 -- Macro recursion, hide sets, and argument substitution share the token worklist.
   private expand(input: PPToken[]): PPToken[] {
     const output: PPToken[] = [];
-    const queue = [...input];
-    let index = 0;
-    while (index < queue.length) {
-      const token = queue[index++];
-      const next = this.expandBuiltin(queue, index, token, output);
-      if (next !== undefined) {
-        index = next;
+    const queue = new TokenStream(input, this.budget);
+    for (let token = queue.take(); token; token = queue.take()) {
+      const macro = token.kind === 'identifier' ? this.macros.get(token.text) : undefined;
+      const builtin =
+        token.kind === 'identifier' && (macro?.dynamic || token.text === '__DATE__' || token.text === '__TIME__')
+          ? this.builtinMacro(token)
+          : undefined;
+      if (builtin && !token.hide?.has(token.text)) {
+        output.push(builtin);
         continue;
       }
-      const macro = token.kind === 'identifier' ? this.macros.get(token.text) : undefined;
+      if (skipIgnored(queue, token)) continue;
       if (!macro || token.hide?.has(macro.name)) {
         output.push(token);
         continue;
@@ -408,59 +427,45 @@ class Preprocessor {
       if (!macro.params) {
         const hide = new Set([...(token.hide ?? []), macro.name]);
         const replacement = this.substitute(macro, [], hide, token);
-        queue.splice(index, 0, ...replacement);
+        queue.prepend(replacement);
         continue;
       }
-      if (queue[index]?.text !== '(') {
+      if (queue.peek()?.text !== '(') {
         output.push(token);
         continue;
       }
-      const { args, end } = this.collectArguments(queue, index, macro, token.row);
-      const closing = queue[end];
+      const { args, closing } = this.collectArguments(queue, macro, token.row);
       const hide = new Set([...[...(token.hide ?? [])].filter((name) => closing.hide?.has(name) ?? false), macro.name]);
       const replacement = this.substitute(macro, args, hide, token);
-      queue.splice(index - 1, end - index + 2, ...replacement);
-      index--;
+      queue.prepend(replacement);
     }
     return output;
   }
 
-  /**
-   * Expands what no #define makes, `__LINE__` and the like, and drops `_Pragma(...)` and `__attribute__((...))`,
-   * returning the index of the token after it; undefined for any other token.
-   */
-  private expandBuiltin(queue: PPToken[], next: number, token: PPToken, output: PPToken[]): number | undefined {
-    if (token.kind !== 'identifier') return undefined;
-    const builtin = this.builtinMacro(token);
-    if (!builtin) return skipIgnored(queue, next, token);
-    output.push(builtin);
-    return next;
-  }
-
-  private collectArguments(
-    queue: PPToken[],
-    open: number,
-    macro: Macro,
-    row: number
-  ): { args: PPToken[][]; end: number } {
+  // code-gauge-allow functionNcss 31 -- Nested argument scanning and its final arity check share the macro invocation.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Nested parentheses, separators, and the closing token share one argument cursor.
+  private collectArguments(queue: TokenStream, macro: Macro, row: number): { args: PPToken[][]; closing: PPToken } {
     const params = macro.params as string[];
     const args: PPToken[][] = [[]];
     let depth = 0;
-    let index = open + 1;
+    queue.take();
+    let closing: PPToken;
     for (;;) {
-      const token = queue[index];
+      const token = queue.take();
       if (!token) {
         throw new CompileError([{ row, message: `マクロ「${macro.name}」の呼び出しが ) で閉じられていません。` }]);
       }
       if (token.text === '(') depth++;
       if (token.text === ')') {
-        if (depth === 0) break;
+        if (depth === 0) {
+          closing = token;
+          break;
+        }
         depth--;
       }
       const isSeparator = token.text === ',' && depth === 0 && !(macro.variadic && args.length > params.length);
       if (isSeparator) args.push([]);
       else (args.at(-1) as PPToken[]).push(token);
-      index++;
     }
     const expected = params.length + (macro.variadic ? 1 : 0);
     if (args.length === 1 && args[0].length === 0 && params.length === 0) args.length = 0;
@@ -472,10 +477,10 @@ class Preprocessor {
           : `マクロ「${macro.name}」の引数が多すぎます。`;
       throw new CompileError([{ row, message }]);
     }
-    return { args, end: index };
+    return { args, closing };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- C's substitution rules for #, ##, and arguments.
+  // code-gauge-allow functionNcss 33 -- Stringification, variadic substitution and token pasting form one ordered pass.
   private substitute(macro: Macro, args: PPToken[][], hide: ReadonlySet<string>, call: PPToken): PPToken[] {
     const params = macro.variadic ? [...(macro.params ?? []), '__VA_ARGS__'] : (macro.params ?? []);
     const argumentOf = (token: PPToken | undefined): PPToken[] | undefined => {
@@ -483,13 +488,14 @@ class Preprocessor {
       const position = params.indexOf(token.text);
       return position === -1 ? undefined : args[position];
     };
-    const result: PPToken[] = [];
+    const result: (PPToken | undefined)[] = [];
     const body = macro.variadic ? withVaOpt(macro.body, (args.at(-1) ?? []).length > 0, call.row) : macro.body;
     for (let index = 0; index < body.length; index++) {
       const token = body[index];
+      this.budget.spend(1 + hide.size);
       if (token.text === '#' && macro.params) {
         const arg = argumentOf(body[index + 1]) as PPToken[];
-        result.push({ kind: 'string', text: stringify(arg), row: call.row, space: token.space });
+        result.push({ kind: 'string', text: stringify(arg, this.budget), row: call.row, space: token.space });
         index++;
         continue;
       }
@@ -498,66 +504,49 @@ class Preprocessor {
       if (token.text === '##') continue;
       const arg = argumentOf(token);
       const copies = arg
-        ? this.argumentCopies(arg, pastesNext || pastedPrevious, token.space, call.row)
+        ? copyArgument(pastesNext || pastedPrevious ? arg : this.expand(arg), call.row, token.space, this.budget)
         : [{ ...token, row: call.row }];
-      appendCopies(result, copies, pastedPrevious, arg !== undefined && token.text === '__VA_ARGS__', call.row);
+      if (pastedPrevious && arg !== undefined && token.text === '__VA_ARGS__' && result.at(-1)?.text === ',') {
+        if (copies.length === 0) result.pop();
+        else result.push(...copies);
+      } else appendSubstitution(result, copies, pastedPrevious, pastesNext, call.row, this.budget);
     }
-    return result.map((token, position) => ({
-      ...token,
-      space: position === 0 ? call.space : token.space,
-      hide: new Set([...(token.hide ?? []), ...hide]),
-    }));
-  }
-
-  /** An argument's tokens in place of a parameter, macro-expanded unless next to `##`. */
-  private argumentCopies(arg: PPToken[], isPasted: boolean, space: PPToken['space'], row: number): PPToken[] {
-    return (isPasted ? arg : this.expand(arg)).map((item, position) => ({
-      ...item,
-      row,
-      space: position === 0 ? space : item.space,
-    }));
+    return result
+      .filter((token): token is PPToken => token !== undefined)
+      .map((token, position) => {
+        this.budget.spend(1 + (token.hide?.size ?? 0) + hide.size);
+        return {
+          ...token,
+          space: position === 0 ? call.space : token.space,
+          hide: new Set([...(token.hide ?? []), ...hide]),
+        };
+      });
   }
 }
 
-/** Appends a replacement's tokens, pasting the first onto the last token so far when `##` comes before it. */
-function appendCopies(
-  result: PPToken[],
-  copies: PPToken[],
-  pastedPrevious: boolean,
-  isVaArgs: boolean,
-  row: number
-): void {
-  // GNU's `, ## __VA_ARGS__` drops the comma when no extra arguments are given.
-  if (pastedPrevious && isVaArgs && result.at(-1)?.text === ',') {
-    if (copies.length === 0) result.pop();
-    else result.push(...copies);
-    return;
-  }
-  if (pastedPrevious && result.length > 0 && copies.length > 0) {
-    result.push(paste(result.pop() as PPToken, copies[0], row), ...copies.slice(1));
-  } else {
-    result.push(...copies);
-  }
-}
-
-/** A variadic macro's body with each `__VA_OPT__(...)` replaced by its content, or removed when no extra arguments. */
 const GNU_ATTRIBUTE_KEYWORDS = new Set(['__attribute__', '__attribute']);
 
-/**
- * The index after `_Pragma(...)` or `__attribute__((...))`, which the interpreter drops, when `token` starts one before
- * `next`; undefined when it starts neither.
- */
-function skipIgnored(queue: PPToken[], next: number, token: PPToken): number | undefined {
-  if (token.kind !== 'identifier' || queue[next]?.text !== '(') return undefined;
+function skipIgnored(queue: TokenStream, token: PPToken): boolean {
+  if (
+    token.kind !== 'identifier' ||
+    queue.peek()?.text !== '(' ||
+    (token.text !== '_Pragma' && !GNU_ATTRIBUTE_KEYWORDS.has(token.text))
+  )
+    return false;
+  const tokens: PPToken[] = [];
+  let depth = 0;
+  do {
+    const next = queue.take();
+    if (!next) throw new CompileError([{ row: token.row, message: '属性の ( と ) の数が合いません。' }]);
+    tokens.push(next);
+    if (next.text === '(') depth++;
+    else if (next.text === ')') depth--;
+  } while (depth > 0);
   if (token.text === '_Pragma') {
-    // _Pragma("...") is a #pragma written in an expression, which the interpreter ignores alike.
-    const close = queue.findIndex((item, position) => position > next && item.text === ')');
-    if (close === -1 || queue[next + 1]?.kind !== 'string') {
+    if (tokens.length !== 3 || tokens[1].kind !== 'string')
       throw new CompileError([{ row: token.row, message: '_Pragma の後には ( と文字列と ) を書いてください。' }]);
-    }
-    return close + 1;
-  }
-  return GNU_ATTRIBUTE_KEYWORDS.has(token.text) ? skipGnuAttribute(queue, next, token.row) : undefined;
+  } else skipGnuAttribute(tokens, 0, token.row);
+  return true;
 }
 
 /** The GNU attributes that change a type's layout, which the interpreter leaves out; the others only change warnings. */
@@ -584,6 +573,7 @@ function skipGnuAttribute(queue: PPToken[], open: number, row: number): number {
   return index + 1;
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Balanced parentheses and variadic presence determine replacement.
 function withVaOpt(body: PPToken[], hasExtra: boolean, row: number): PPToken[] {
   const result: PPToken[] = [];
   for (let index = 0; index < body.length; index++) {
@@ -606,6 +596,24 @@ function withVaOpt(body: PPToken[], hasExtra: boolean, row: number): PPToken[] {
   return result;
 }
 
+function appendSubstitution(
+  result: (PPToken | undefined)[],
+  copies: PPToken[],
+  pastedPrevious: boolean,
+  pastesNext: boolean,
+  row: number,
+  budget: ExecutionBudget
+): void {
+  if (pastedPrevious) {
+    const previous = result.pop();
+    const next = copies[0];
+    result.push(previous && next ? paste(previous, next, row, budget) : (previous ?? next));
+    for (let i = 1; i < copies.length; i++) result.push(copies[i]);
+  } else if (copies.length === 0 && pastesNext) result.push(undefined);
+  else for (const copy of copies) result.push(copy);
+}
+
+// code-gauge-allow functionCognitiveComplexity 18 -- Parameter names and variadic placement are validated in one sequential macro signature.
 function macroParameters(rest: PPToken[], row: number): { params: string[]; variadic: boolean; body: PPToken[] } {
   const params: string[] = [];
   let variadic = false;
@@ -646,7 +654,8 @@ function checkStringizing(body: PPToken[], params: string[], variadic: boolean, 
   }
 }
 
-function stringify(tokens: PPToken[]): string {
+function stringify(tokens: PPToken[], budget: ExecutionBudget): string {
+  for (const token of tokens) budget.spend(token.text.length);
   const text = tokens
     .map((token, index) => {
       const spelled =
@@ -659,9 +668,9 @@ function stringify(tokens: PPToken[]): string {
   return `"${text}"`;
 }
 
-function paste(left: PPToken, right: PPToken, row: number): PPToken {
+function paste(left: PPToken, right: PPToken, row: number, budget: ExecutionBudget): PPToken {
   const text = left.text + right.text;
-  const { lines } = tokenize(text);
+  const { lines } = tokenize(text, budget);
   const tokens = lines.flatMap((line) => line.tokens);
   if (tokens.length !== 1) {
     throw new CompileError([{ row, message: `## でつないだ「${text}」は、1つの字句になりません。` }]);
@@ -669,174 +678,12 @@ function paste(left: PPToken, right: PPToken, row: number): PPToken {
   return { ...tokens[0], row, space: left.space };
 }
 
-const truth = (value: boolean): bigint => (value ? 1n : 0n);
-
-/** Evaluates the integer constant expression of `#if`, in the widest integer type as C requires. */
-class ConditionParser {
-  private index = 0;
-
-  constructor(
-    private readonly tokens: PPToken[],
-    private readonly row: number
-  ) {}
-
-  parse(): bigint {
-    const value = this.conditional();
-    if (this.index < this.tokens.length) this.fail();
-    return value;
-  }
-
-  private fail(): never {
-    throw new CompileError([{ row: this.row, message: '#if の条件の書き方に誤りがあります。' }]);
-  }
-
-  private peek(): string | undefined {
-    return this.tokens[this.index]?.text;
-  }
-
-  private conditional(): bigint {
-    const condition = this.binary(0);
-    if (this.peek() !== '?') return condition;
-    this.index++;
-    const whenTrue = this.conditional();
-    if (this.peek() !== ':') this.fail();
-    this.index++;
-    const whenFalse = this.conditional();
-    return condition === 0n ? whenFalse : whenTrue;
-  }
-
-  private static readonly LEVELS: string[][] = [
-    ['||'],
-    ['&&'],
-    ['|'],
-    ['^'],
-    ['&'],
-    ['==', '!='],
-    ['<', '>', '<=', '>='],
-    ['<<', '>>'],
-    ['+', '-'],
-    ['*', '/', '%'],
-  ];
-
-  private binary(level: number): bigint {
-    if (level >= ConditionParser.LEVELS.length) return this.unary();
-    let left = this.binary(level + 1);
-    for (;;) {
-      const operator = this.peek();
-      if (operator === undefined || !ConditionParser.LEVELS[level].includes(operator)) return left;
-      this.index++;
-      const right = this.binary(level + 1);
-      left = this.apply(operator, left, right);
-    }
-  }
-
-  private apply(operator: string, left: bigint, right: bigint): bigint {
-    switch (operator) {
-      case '||': {
-        return truth(left !== 0n || right !== 0n);
-      }
-      case '&&': {
-        return truth(left !== 0n && right !== 0n);
-      }
-      case '|': {
-        return left | right;
-      }
-      case '^': {
-        return left ^ right;
-      }
-      case '&': {
-        return left & right;
-      }
-      case '==': {
-        return truth(left === right);
-      }
-      case '!=': {
-        return truth(left !== right);
-      }
-      case '<': {
-        return truth(left < right);
-      }
-      case '>': {
-        return truth(left > right);
-      }
-      case '<=': {
-        return truth(left <= right);
-      }
-      case '>=': {
-        return truth(left >= right);
-      }
-      case '<<': {
-        return BigInt.asIntN(64, left << right);
-      }
-      case '>>': {
-        return left >> right;
-      }
-      case '+': {
-        return BigInt.asIntN(64, left + right);
-      }
-      case '-': {
-        return BigInt.asIntN(64, left - right);
-      }
-      case '*': {
-        return BigInt.asIntN(64, left * right);
-      }
-      default: {
-        if (right === 0n) throw new CompileError([{ row: this.row, message: '#if の条件で 0 で割っています。' }]);
-        return operator === '/' ? left / right : left % right;
-      }
-    }
-  }
-
-  private unary(): bigint {
-    const token = this.tokens[this.index++];
-    if (!token) this.fail();
-    switch (token.text) {
-      case '-': {
-        return -this.unary();
-      }
-      case '+': {
-        return this.unary();
-      }
-      case '!': {
-        return this.unary() === 0n ? 1n : 0n;
-      }
-      case '~': {
-        return ~this.unary();
-      }
-      case '(': {
-        const value = this.conditional();
-        if (this.peek() !== ')') this.fail();
-        this.index++;
-        return value;
-      }
-    }
-    if (token.kind === 'number') {
-      const match = /^(0[xX][\da-fA-F]+|0[bB][01]+|0[0-7]*|[1-9]\d*)[uUlL]*$/.exec(token.text);
-      if (!match) this.fail();
-      const digits = match[1];
-      if (/^0[0-7]+$/.test(digits)) return BigInt(`0o${digits.slice(1)}`);
-      return BigInt(digits);
-    }
-    if (token.kind === 'char') {
-      const body = token.text.slice(1, -1);
-      return BigInt(
-        body.startsWith('\\') ? (ESCAPES[body[1]] ?? Number.parseInt(body.slice(1), 8)) : (body.codePointAt(0) ?? 0)
-      );
-    }
-    this.fail();
-  }
+function rejectTrigraphs(tokens: PPToken[]): void {
+  const token = tokens.find((item) => item.hasTrigraph);
+  if (token) unsupported(token.row, 'トライグラフ');
 }
 
-const ESCAPES: Record<string, number> = {
-  n: 10,
-  t: 9,
-  r: 13,
-  '0': 0,
-  '\\': 92,
-  "'": 39,
-  '"': 34,
-  a: 7,
-  b: 8,
-  f: 12,
-  v: 11,
-};
+function copyArgument(tokens: PPToken[], row: number, space: boolean, budget: ExecutionBudget): PPToken[] {
+  budget.spend(tokens.length);
+  return tokens.map((token, index) => ({ ...token, row, space: index === 0 ? space : token.space }));
+}

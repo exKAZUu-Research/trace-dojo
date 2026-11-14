@@ -304,6 +304,8 @@ function unsignedOf(name: IntName): IntName {
 }
 
 /** Whether two types are compatible, as C requires of redeclarations and of the targets of assigned pointers. */
+// code-gauge-allow functionCognitiveComplexity 30 -- C type compatibility recursively combines qualifiers, prototypes, and composite array rules.
+// code-gauge-allow functionNcss 35 -- C type compatibility recursively combines qualifiers, prototypes, and composite array rules.
 export function compatible(a: CType, b: CType, ignoreQualifiers = false): boolean {
   const qualifiersDiffer =
     isConstQualified(a) !== isConstQualified(b) || qualifierOf(a, 'isVolatile') !== qualifierOf(b, 'isVolatile');
@@ -335,7 +337,17 @@ export function compatible(a: CType, b: CType, ignoreQualifiers = false): boolea
     case 'function': {
       const other = b as FunctionType;
       if (!compatible(a.ret, other.ret)) return false;
-      if (!a.params || !other.params) return true;
+      if (!a.params || !other.params) {
+        const prototype = a.params ? a : other;
+        return (
+          !prototype.variadic &&
+          (prototype.params ?? []).every((param) =>
+            param.kind === 'float'
+              ? param.name !== 'float'
+              : param.kind !== 'int' || compatible(param, promote(param), true)
+          )
+        );
+      }
       if (a.variadic !== other.variadic || a.params.length !== other.params.length) return false;
       return a.params.every((param, index) =>
         compatible(unqualified(param), unqualified((other.params as CType[])[index]))
@@ -434,6 +446,7 @@ const SOLE_BUILTIN_WORDS: [string, CType][] = [
 ];
 
 /** The integer type a set of builtin type words names, such as `unsigned long int`. */
+// code-gauge-allow functionCognitiveComplexity 17 -- C type-specifier word combinations are validated as a single type selection.
 export function builtinType(words: readonly string[]): CType | undefined {
   const counts = new Map<string, number>();
   for (const word of words) counts.set(word, (counts.get(word) ?? 0) + 1);
@@ -454,6 +467,7 @@ export function builtinType(words: readonly string[]): CType | undefined {
   return integerBuiltinType(counts, others, words.length);
 }
 
+// code-gauge-allow functionCognitiveComplexity 20 -- Signedness and width specifiers jointly select one C integer type.
 function integerBuiltinType(counts: ReadonlyMap<string, number>, others: number, wordCount: number): CType | undefined {
   const count = (word: string): number => counts.get(word) ?? 0;
   const isUnsigned = count('unsigned') === 1;
@@ -484,7 +498,8 @@ export interface RecordMember {
   align?: number;
   isAnonymous?: boolean;
 }
-
+// code-gauge-allow functionCognitiveComplexity 24 -- Alignment, bit allocation and extent share a target ABI cursor.
+// code-gauge-allow functionNcss 48 -- Field layout shares one target ABI cursor.
 export function layoutRecord(info: RecordInfo, members: RecordMember[]): void {
   const fields: Field[] = [];
   let offset = 0;
@@ -497,7 +512,11 @@ export function layoutRecord(info: RecordInfo, members: RecordMember[]): void {
     if (member.bitWidth !== undefined) {
       if (member.bitWidth === 0) {
         // A zero-width bit-field ends the current storage unit.
-        bitPosition = Math.ceil(bitPosition / (memberSize * 8)) * memberSize * 8;
+        if (info.kind !== 'union') {
+          bitPosition = Math.ceil(bitPosition / (memberSize * 8)) * memberSize * 8;
+          offset = bitPosition / 8;
+          size = Math.max(size, offset);
+        }
         continue;
       }
       if (info.kind === 'union') {

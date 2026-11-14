@@ -1,0 +1,43 @@
+Rex says Woof!
+Generic says ...
+2
+#<Dog Rex>
+true
+false
+Animal
+[Dog, Animal, Comparable]
+42
+"protected method 'secret' called for an instance of Animal"
+"private method 'hidden' called for an instance of Animal"
+["Generic", "Rex", "b"]
+true
+true
+"Rex"
+"hi from Dog"
+:reopened
+true
+4
+9
+6.28
+[1, 2, 3]
+true
+1
+6
+[3, 1, 2]
+3
+[3, 1]
+[3, 2, 1]
+6
+[[3, 1], [2]]
+3
+true
+false
+false
+"wrong number of arguments (given 0, expected 1)"
+Foo
+"Foo"
+"Foo"
+Class
+Module
+Object
+"superclass mismatch for class Foo"

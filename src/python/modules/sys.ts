@@ -1,16 +1,21 @@
 import { moduleBuiltin } from '../define';
+import { displayValue } from '../display';
 import { registerModule } from '../modules';
 import { argument } from '../nativeArgs';
 import { toIndex } from '../numbers';
+import { UNSUPPORTED_SYS_ATTRIBUTES } from '../sysAttributes';
 import { exceptionClassNamed, newException, None, typeError, valueError } from '../types';
-import { PyError, type PyValue } from '../values';
+import { LazyModuleAttribute, PyError, type PyValue } from '../values';
+import { sysHooks } from './sysHooks';
+import { sysInformation, sysModules } from './sysInfo';
 
 const builtin = moduleBuiltin('sys');
 
 registerModule(
   'sys',
-  (runtime) =>
-    new Map<string, PyValue>([
+  (runtime, namespace) => {
+    const displayhook = builtin('displayhook', 'one', 1, 1, ([value]) => displayValue(runtime, value));
+    const entries = new Map<string, PyValue>([
       [
         'exit',
         builtin('exit', 'expected', 0, 1, (args) => {
@@ -44,7 +49,19 @@ registerModule(
       ],
       ['stdout', runtime.standardStream('stdout')],
       ['stderr', runtime.standardStream('stderr')],
-    ])
+      ['displayhook', displayhook],
+      ['__displayhook__', displayhook],
+      ...sysInformation(runtime),
+      ...sysHooks(runtime),
+    ]);
+    for (const [key, value] of entries) namespace.set(key, value);
+    namespace.set('modules', sysModules(runtime));
+    const module = runtime.importModule('sys');
+    const stdin = new LazyModuleAttribute(() => runtime.standardStream('stdin'));
+    for (const name of ['stdin', '__stdin__']) module.imports.set(name, stdin);
+    return new Map();
+  },
+  UNSUPPORTED_SYS_ATTRIBUTES
 );
 
 export function systemExitError(code: PyValue | undefined): PyError {

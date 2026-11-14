@@ -3,6 +3,7 @@ import { convertScalar } from './arith';
 import type { Compound, Declaration, Expression, Statement, StaticAssert } from './ast';
 import type { FunctionContext, SwitchContext } from './compilerBase';
 import { ExpressionCompiler } from './expressionCompiler';
+import { evaluate } from './pointerBounds';
 import { Completion, type Exec, type Frame, type LocalInfo } from './runtime';
 import { type CType, isInteger, promote, typeName, unqualified } from './types';
 
@@ -38,8 +39,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- Running a block from a label, and leaving its scope.
+  // code-gauge-allow functionNcss 40 -- Label dispatch, lexical lifetime and completion share the child list.
   private blockItems(items: (Statement | Declaration | StaticAssert)[], endsScope: boolean): Compiled {
-    const firstLocal = this.context.info.locals.length;
     const children = items.map((item): Compiled => {
       if (item.kind === 'declaration') return this.localDeclaration(item);
       if (item.kind === 'staticAssert') {
@@ -48,7 +49,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       }
       return this.statement(item);
     });
-    const locals = this.context.info.locals.slice(firstLocal);
+    const locals = this.scopeLocals().filter((local) => !local.isParameter);
     const labels = new Set<number>();
     const childOfLabel = new Map<number, number>();
     for (const [index, child] of children.entries()) {
@@ -59,8 +60,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
     const execs = children.map((child) => child.exec);
     const count = execs.length;
-    const leave = endsScope ? scopeExit(locals) : undefined;
     const exec: Exec = (frame, entry) => {
+      frame.enterScope(locals);
       let start = 0;
       let enter = entry;
       if (entry !== undefined) start = childOfLabel.get(entry) ?? count;
@@ -81,13 +82,49 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         }
         return Completion.Normal;
       } finally {
-        leave?.(frame);
+        if (endsScope) frame.exitScope(locals);
       }
     };
     return { exec, labels };
   }
 
+  private scopeLocals(): LocalInfo[] {
+    return [...this.scope.ordinary.values()].flatMap((entity) => (entity.kind === 'local' ? [entity.local] : []));
+  }
+
   protected statement(statement: Statement): Compiled {
+    return this.withVisibility(this.compileStatement(statement));
+  }
+
+  protected withVisibility(compiled: Compiled): Compiled {
+    if (!this.isTracing) return compiled;
+    const locals: LocalInfo[] = [];
+    const names = new Set<string>();
+    for (let scope: typeof this.scope | undefined = this.scope; scope; scope = scope.parent) {
+      for (const [name, entity] of scope.ordinary) {
+        if (names.has(name)) continue;
+        names.add(name);
+        if (entity.kind === 'local') locals.push(entity.local);
+      }
+    }
+    locals.sort((a, b) => a.index - b.index);
+    return {
+      ...compiled,
+      exec: (frame, entry) => {
+        const previous = frame.visibleLocals;
+        frame.visibleLocals = locals;
+        try {
+          return compiled.exec(frame, entry);
+        } finally {
+          if (previous === undefined) frame.finalVisibleLocals = locals;
+          frame.visibleLocals = previous;
+        }
+      },
+    };
+  }
+
+  // code-gauge-allow functionNcss 43 -- One case per C statement kind; helpers already isolate control-flow construction.
+  private compileStatement(statement: Statement): Compiled {
     const { row } = statement;
     switch (statement.kind) {
       case 'compound': {
@@ -106,7 +143,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return this.doWhileStatement(statement);
       }
       case 'for': {
-        return this.withScope(() => this.forStatement(statement));
+        return this.withScope(() => this.withVisibility(this.forStatement(statement)));
       }
       case 'switch': {
         return this.switchStatement(statement);
@@ -132,6 +169,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         const id = label.id;
         return {
           exec: (frame) => {
+            frame.runtime.spend();
             frame.gotoLabel = id;
             return Completion.Goto;
           },
@@ -181,7 +219,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (step === undefined) {
       return {
         exec: (frame) => {
-          effect(frame);
+          frame.runtime.fullExpression(() => effect(frame));
           return Completion.Normal;
         },
         labels: NO_LABELS,
@@ -190,7 +228,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const onlyCalls = operand.isCall === true;
     return {
       exec: (frame) => {
-        frame.runtime.steps.runStatement(step, onlyCalls, () => effect(frame));
+        frame.runtime.steps.runStatement(step, onlyCalls, () => frame.runtime.fullExpression(() => effect(frame)));
         return Completion.Normal;
       },
       labels: NO_LABELS,
@@ -221,6 +259,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Loop entry labels and condition/step timing must remain coordinated with completion handling.
+  // code-gauge-allow duplicateLines 19 -- While and do-while intentionally mirror completion handling but differ in condition and step timing.
   private whileStatement(statement: Extract<Statement, { kind: 'while' }>): Compiled {
     const condition = this.condition(statement.condition, 'while 文');
     const body = this.loopBody(statement.body);
@@ -241,6 +281,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return { exec, labels: body.labels };
   }
 
+  // code-gauge-allow duplicateLines 19 -- While and do-while intentionally mirror completion handling but differ in condition and step timing.
   private doWhileStatement(statement: Extract<Statement, { kind: 'doWhile' }>): Compiled {
     const body = this.loopBody(statement.body);
     const condition = this.condition(statement.condition, 'do while 文');
@@ -260,22 +301,23 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- The parts of a for statement, each optional, and their steps.
+  // code-gauge-allow functionNcss 33 -- Initialization, condition, update, entry labels, and scope exit form one loop lifecycle.
   private forStatement(statement: Extract<Statement, { kind: 'for' }>): Compiled {
     const row = this.stepRow(statement.row);
-    const firstLocal = this.context.info.locals.length;
     const init = statement.init === undefined ? undefined : this.forInit(statement.init);
     const condition = statement.condition ? this.condition(statement.condition, 'for 文') : undefined;
     const update = statement.update ? this.rvalue(statement.update) : undefined;
     const updateEffect = update ? (update.effect ?? update.value) : undefined;
     const body = this.loopBody(statement.body);
     const run = body.exec;
-    const leave = scopeExit(this.context.info.locals.slice(firstLocal));
+    const locals = this.scopeLocals();
     const exec: Exec = (frame, entry) => {
       const { steps } = frame.runtime;
+      frame.enterScope(locals);
       let enter = entry;
       try {
         if (enter === undefined && init) {
-          init(frame);
+          frame.runtime.fullExpression(() => init(frame));
           steps.step(row);
         }
         for (;;) {
@@ -288,12 +330,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
           if (completion === Completion.Break) return Completion.Normal;
           if (completion !== Completion.Normal && completion !== Completion.Continue) return completion;
           if (updateEffect) {
-            updateEffect(frame);
+            frame.runtime.fullExpression(() => updateEffect(frame));
             steps.step(row);
           }
         }
       } finally {
-        leave?.(frame);
+        frame.exitScope(locals);
       }
     };
     return { exec, labels: body.labels };
@@ -345,7 +387,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const exec: Exec = (frame, entry) => {
       let label = entry;
       if (label === undefined) {
-        const selected = value(frame) as Scalar;
+        const selected = frame.runtime.fullExpression(() => value(frame)) as Scalar;
         label = cases.get(String(selected)) ?? rangeLabel(ranges, selected) ?? defaultLabel;
         if (label === undefined) return Completion.Normal;
       }
@@ -360,6 +402,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return { exec, labels: new Set([...body.labels].filter((label) => !ownLabels.has(label))) };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 21 -- Case ranges and individual labels share duplicate detection.
   private caseStatement(statement: Extract<Statement, { kind: 'case' }>): Compiled {
     const { row } = statement;
     const context = this.context.switches.at(-1);
@@ -423,7 +466,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       const effect = operand.effect ?? operand.value;
       return {
         exec: (frame) => {
-          effect(frame);
+          frame.runtime.fullExpression(() => effect(frame));
           return Completion.Return;
         },
         labels: NO_LABELS,
@@ -432,7 +475,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const value = this.convertForAssignment(operand, returnType, 'return', row);
     return {
       exec: (frame) => {
-        frame.returnValue = value(frame);
+        const result = frame.runtime.fullExpression(() => evaluate(value, frame));
+        frame.returnValue = result.value;
+        frame.returnRange = result.range;
+        frame.returnBytes = result.bytes;
         return Completion.Return;
       },
       labels: NO_LABELS,
@@ -445,18 +491,6 @@ function rangeLabel(ranges: SwitchContext['ranges'], value: Scalar): number | un
   if (ranges.length === 0) return undefined;
   const number = BigInt(value);
   return ranges.find((range) => BigInt(range.low) <= number && number <= BigInt(range.high))?.label;
-}
-
-/** Ends the scope of a block's variables: the trace no longer shows them, and their values are gone. */
-export function scopeExit(locals: readonly LocalInfo[]): ((frame: Frame) => void) | undefined {
-  if (locals.length === 0) return undefined;
-  const indexes = locals.map((local) => local.index);
-  return (frame) => {
-    for (const index of indexes) {
-      frame.live[index] = false;
-      frame.slots[index] = undefined;
-    }
-  };
 }
 
 export type { Value };

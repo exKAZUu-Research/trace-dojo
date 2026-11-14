@@ -262,3 +262,12 @@ export function asciiEscape(text: string): string {
   }
   return result;
 }
+
+/** Builds a string from code points in bounded chunks, staying below the host's call-argument limit. */
+export function fromCodePoints(points: readonly number[]): string {
+  let text = '';
+  for (let start = 0; start < points.length; start += 8192) {
+    text += String.fromCodePoint(...points.slice(start, start + 8192));
+  }
+  return text;
+}

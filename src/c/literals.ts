@@ -5,7 +5,7 @@ import { type CType, DOUBLE, FLOAT, INT, INT_PROPERTIES, type IntName, LDOUBLE }
 import { unsupported } from './unsupported';
 
 /** The type and value of a number literal, as C17's rules for integer constants choose the type. */
-export function parseNumber(text: string, row: number): { type: CType; value: Scalar } {
+export function parseNumber(text: string, row: number, preprocessing = false): { type: CType; value: Scalar } {
   const fail = (): never => {
     throw new CompileError([{ row, message: `数「${text}」の書き方に誤りがあります。` }]);
   };
@@ -14,7 +14,7 @@ export function parseNumber(text: string, row: number): { type: CType; value: Sc
   if (isHex ? /[pP]/.test(text) : /[.eE]/.test(text) && !/^0[bB]/.test(text)) {
     return isHex ? parseHexFloating(text, fail) : parseFloating(text, fail);
   }
-  return parseInteger(text, row, isHex, fail);
+  return parseInteger(text, row, isHex, fail, preprocessing);
 }
 
 /** A hexadecimal floating constant, such as `0x1.8p3`, whose binary exponent `p` C requires. */
@@ -36,7 +36,14 @@ function parseFloating(text: string, fail: () => never): { type: CType; value: S
   return { type: suffix === 'l' ? LDOUBLE : DOUBLE, value };
 }
 
-function parseInteger(text: string, row: number, isHex: boolean, fail: () => never): { type: CType; value: Scalar } {
+// code-gauge-allow functionCognitiveComplexity 24 -- Radix, suffix and preprocessor widths share integer candidate selection.
+function parseInteger(
+  text: string,
+  row: number,
+  isHex: boolean,
+  fail: () => never,
+  preprocessing: boolean
+): { type: CType; value: Scalar } {
   const match = /^(0[xX][\da-fA-F]+|0[bB][01]+|\d+)([uUlL]*)$/.exec(text);
   if (!match) return fail();
   const [, digits, rawSuffix] = match;
@@ -49,9 +56,10 @@ function parseInteger(text: string, row: number, isHex: boolean, fail: () => nev
   const value = BigInt(isOctal ? `0o${digits.slice(1)}` : digits);
   const length = suffix.includes('ll') ? 2 : suffix.includes('l') ? 1 : 0;
   for (const name of integerCandidates(suffix.includes('u'), length, !isHex && !isOctal && !isBinary)) {
-    if (value <= INT_PROPERTIES[name].max) {
-      const type: CType = { kind: 'int', name };
-      return { type, value: INT_PROPERTIES[name].size === 8 ? value : Number(value) };
+    const candidate = preprocessing ? (INT_PROPERTIES[name].signed ? 'long' : 'ulong') : name;
+    if (value <= INT_PROPERTIES[candidate].max) {
+      const type: CType = { kind: 'int', name: candidate };
+      return { type, value: INT_PROPERTIES[candidate].size === 8 ? value : Number(value) };
     }
   }
   // clang gives a decimal literal too large for long long the type unsigned long long, with a warning.

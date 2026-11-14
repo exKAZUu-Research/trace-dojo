@@ -215,3 +215,28 @@ test.each([
   const execution = executeProgram('c', program);
   expect(execution.kind === 'compileError' && execution.diagnostics[0].message).toBe(message);
 });
+
+test('zero-sized allocations can be freed and resized', () => {
+  const program = `#include <stdio.h>
+#include <stdlib.h>
+int main(void) {
+  void *empty = malloc(0);
+  void *other = calloc(0, sizeof(int));
+  printf("%d %d %d\\n", empty != NULL, other != NULL, empty != other);
+  free(empty);
+  int *values = realloc(other, 2 * sizeof(int));
+  values[0] = 17;
+  values[1] = 25;
+  printf("%d\\n", values[0] + values[1]);
+  empty = realloc(values, 0);
+  free(empty);
+  free(realloc(NULL, 0));
+  puts("done");
+  return 0;
+}`;
+  expect(executeProgram('c', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '1 1 1\n42\ndone\n',
+  });
+});

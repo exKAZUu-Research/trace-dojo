@@ -1,6 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
+import { ExecutionBudget } from '../interpreter/limits';
 import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAnnotations';
 import { loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Declaration, TranslationUnit } from './ast';
@@ -8,6 +9,8 @@ import { Converter, declaredName, type HeaderDeclarations } from './convert';
 import { tokenize } from './lexer';
 import { lookupHeader, TURTLE_HEADER } from './library/headers';
 import { preprocess } from './preprocessor';
+import { cSyntaxDiagnostics, CSyntaxError } from './syntaxDiagnostics';
+import type { TypeScope } from './syntaxTokens';
 
 const parser = await loadParser('@willbooster/tree-sitter-c/tree-sitter-c.wasm');
 
@@ -30,26 +33,92 @@ export function parseC(source: string): TranslationUnit {
   for (const header of [{ row: -1, name: TURTLE_HEADER_NAME, declarations: TURTLE_HEADER }, ...includes]) {
     const parsed = parseHeader(header.name, header.declarations, typedefNames);
     typedefNames.push(...parsed.typedefNames);
-    headers.push({ row: header.row, name: header.name, ...parsed });
+    headers.push({ row: header.row, name: header.name, ...parsed, items: headerItemsAt(parsed.items, header.row) });
   }
-  try {
-    return parseSource(parser, text, MISSING_TOKEN_NAMES, (root) => ({
-      items: new Converter([]).convertUnit(root, headers),
-    }));
-  } catch (error) {
-    throw atEndOfFile(error, text);
+  return parseUnit(text, headers, typedefNames);
+}
+
+class ReparseRequired extends Error {
+  constructor(readonly source: string) {
+    super();
   }
 }
 
-/** clang reports a `}` missing at the end of the file at the end of the file, after the last line. */
-function atEndOfFile(error: unknown, text: string): unknown {
-  if (!(error instanceof CompileError)) return error;
-  const [first] = error.diagnostics;
-  if (first?.message !== '「}」が足りません。' || text.slice(text.lastIndexOf('}') + 1).trim() !== '') return error;
-  // clang places the end of a file that ends with a newline on the last line, not after it.
-  const newlines = text.split('\n').length - 1;
-  const lastRow = text.endsWith('\n') ? newlines - 1 : newlines;
-  return new CompileError([{ ...first, row: lastRow }]);
+// code-gauge-allow functionCognitiveComplexity 20 -- Conversion and syntax recovery share the same source, scopes, and bounded reparse loop.
+function parseUnit(text: string, headers: HeaderDeclarations[], typedefNames: readonly string[]): TranslationUnit {
+  const budget = new ExecutionBudget();
+  let current = text;
+  for (;;) {
+    budget.spend(current.length);
+    try {
+      return parseSource(
+        parser,
+        current,
+        MISSING_TOKEN_NAMES,
+        (root) => {
+          try {
+            return { items: new Converter([], parser).convertUnit(root, headers) };
+          } catch (error) {
+            if (!(error instanceof CompileError)) throw error;
+            const scopes = resolveValueTypes(current, root, headers, budget);
+            if (!(error instanceof CSyntaxError)) throw error;
+            throw new CompileError(
+              cSyntaxDiagnostics(parser, current, root, error.diagnostics, {
+                headerTypes: typedefNames,
+                errorOffset: error.offset,
+                typeScopes: scopes,
+              })
+            );
+          }
+        },
+        {
+          locateErrors: (root, errors) => {
+            if (errors.length === 0) return errors;
+            const scopes = resolveValueTypes(current, root, headers, budget);
+            return cSyntaxDiagnostics(parser, current, root, errors, { headerTypes: typedefNames, typeScopes: scopes });
+          },
+        }
+      );
+    } catch (error) {
+      if (!(error instanceof ReparseRequired)) throw error;
+      current = error.source;
+    }
+  }
+}
+
+function resolveValueTypes(
+  text: string,
+  root: Node,
+  headers: HeaderDeclarations[],
+  budget: ExecutionBudget
+): TypeScope[] {
+  const converter = new Converter([], parser, undefined, budget);
+  try {
+    converter.convertUnit(root, headers);
+  } catch (error) {
+    if (!(error instanceof CompileError)) throw error;
+  }
+  if (converter.valueTypeRanges.size === 0) return converter.typeScopes;
+  budget.spend(text.length + converter.valueTypeRanges.size);
+  const chunks: string[] = [];
+  let at = 0;
+  for (const [start, end] of [...converter.valueTypeRanges].toSorted((a, b) => a[0] - b[0])) {
+    chunks.push(text.slice(at, start), '(', text.slice(start, end), ')');
+    at = end;
+  }
+  chunks.push(text.slice(at));
+  throw new ReparseRequired(chunks.join(''));
+}
+
+function headerItemsAt(source: Declaration[], row: number): Declaration[] {
+  const items = structuredClone(source);
+  const pending: object[] = [items];
+  while (pending.length > 0) {
+    const item = pending.pop()!;
+    if ('row' in item) item.row = row;
+    for (const child of Object.values(item)) if (child && typeof child === 'object') pending.push(child);
+  }
+  return items;
 }
 
 const headerCache = new Map<string, { items: Declaration[]; typedefNames: string[] }>();
@@ -64,7 +133,7 @@ function parseHeader(
   const cached = headerCache.get(key);
   if (cached) return cached;
   const items = parseSource(parser, text, MISSING_TOKEN_NAMES, (root: Node) =>
-    new Converter(knownTypedefs, name).convertUnit(root)
+    new Converter(knownTypedefs, parser, name).convertUnit(root)
   ) as Declaration[];
   const typedefNames = items.flatMap((item) =>
     item.specifiers.storage === 'typedef'

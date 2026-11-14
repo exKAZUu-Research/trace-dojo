@@ -1,5 +1,6 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { CRuntimeError } from './errors';
+import type { PointerBytes } from './pointerBounds';
 import type { CType } from './types';
 
 export type Region = 'text' | 'data' | 'heap' | 'stack';
@@ -8,8 +9,9 @@ export type Region = 'text' | 'data' | 'heap' | 'stack';
 export class Allocation {
   readonly bytes: Uint8Array;
   readonly view: DataView;
-  /** Which bytes hold a value, since reading a byte never written is undefined behavior the interpreter stops at. */
+  /** Each set bit marks an initialized bit; record copies must retain partial bit-field initialization. */
   readonly initialized: Uint8Array;
+  readonly pointerBytes: PointerBytes = new Map();
   isAlive = true;
   isReadOnly = false;
   /** The declared type of a variable, which the trace uses to show what a pointer to it points to. */
@@ -45,6 +47,8 @@ const REGION_STARTS: Record<Region, number> = {
   stack: 0x1_6f_df_f0_00,
 };
 
+export const MIN_ADDRESS = Math.min(...Object.values(REGION_STARTS));
+
 /** The gap left after every block, so that a pointer just past one block never points into the next. */
 const GUARD = 16;
 const MAX_STACK_BYTES = 8 * 1024 * 1024;
@@ -59,11 +63,12 @@ export class Memory {
   /** The live blocks of each region, in address order. */
   private readonly live: Record<Region, Allocation[]> = { text: [], data: [], heap: [], stack: [] };
   private readonly freed: Allocation[] = [];
+  private readonly byBase = new Map<number, Allocation>();
   private next: Record<Region, number> = { ...REGION_STARTS };
   private stackBytes = 0;
   private lastFound?: Allocation;
 
-  allocate(size: number, region: Region): Allocation {
+  allocate(size: number, region: Region, alignment = 16): Allocation {
     let base: number;
     if (region === 'stack') {
       this.stackBytes += size;
@@ -71,20 +76,30 @@ export class Memory {
       // The stack grows downward, so that later frames have lower addresses, as on arm64.
       this.next.stack -= Math.ceil((size + GUARD) / 16) * 16;
       base = this.next.stack;
-      const allocation = new Allocation(base, size, region);
-      this.live.stack.unshift(allocation);
-      return allocation;
+    } else {
+      base = this.alignedBase(region, alignment);
+      this.next[region] = base + Math.ceil((Math.max(size, 1) + GUARD) / 16) * 16;
     }
-    base = this.next[region];
-    this.next[region] = base + Math.ceil((Math.max(size, 1) + GUARD) / 16) * 16;
     const allocation = new Allocation(base, size, region);
-    this.live[region].push(allocation);
+    this.byBase.set(base, allocation);
+    if (region === 'stack') this.live.stack.unshift(allocation);
+    else this.live[region].push(allocation);
     return allocation;
+  }
+
+  canAllocateHeap(size: number, alignment: number): boolean {
+    return Number.isSafeInteger(this.alignedBase('heap', alignment) + Math.max(size, 1) + GUARD);
+  }
+
+  private alignedBase(region: Region, alignment: number): number {
+    const unit = Math.max(16, alignment);
+    return Math.ceil(this.next[region] / unit) * unit;
   }
 
   /** Ends the lifetime of a block: a returned function's variable, or a block that `free` releases. */
   release(allocation: Allocation): void {
     allocation.isAlive = false;
+    this.byBase.delete(allocation.base);
     const list = this.live[allocation.region];
     const index = list.indexOf(allocation);
     if (index !== -1) list.splice(index, 1);
@@ -115,8 +130,7 @@ export class Memory {
 
   /** The live block starting exactly at an address, as `free` requires. */
   findBase(address: number): Allocation | undefined {
-    const found = this.find(address);
-    return found?.base === address ? found : undefined;
+    return this.byBase.get(address);
   }
 
   wasFreed(address: number): boolean {

@@ -63,7 +63,7 @@ export const STDIO_FUNCTIONS: Record<string, NativeFunction> = {
   },
   puts: (runtime, [s]) => {
     write(runtime, 'stdout', [...readCString(runtime, asAddress(s)), 0x0a]);
-    return 0;
+    return 10;
   },
   putchar: (runtime, [c]) => {
     const byte = asNumber(c) & 0xff;
@@ -71,8 +71,9 @@ export const STDIO_FUNCTIONS: Record<string, NativeFunction> = {
     return byte;
   },
   fputs: (runtime, [s, stream]) => {
-    write(runtime, streamOf(runtime, stream), readCString(runtime, asAddress(s)));
-    return 0;
+    const bytes = readCString(runtime, asAddress(s));
+    write(runtime, streamOf(runtime, stream), bytes);
+    return bytes.length;
   },
   fputc: (runtime, [c, stream]) => {
     const byte = asNumber(c) & 0xff;
@@ -121,6 +122,7 @@ export const STDIO_FUNCTIONS: Record<string, NativeFunction> = {
 };
 
 /** The type a `scanf` conversion stores through its pointer argument. */
+// code-gauge-allow functionCognitiveComplexity 19 -- The scanf length modifier and conversion jointly determine the destination type; keep that decision together.
 function scanTarget(conversion: string, length: string): CType {
   if ('diouxXn'.includes(conversion)) {
     const signed = 'din'.includes(conversion);
@@ -161,7 +163,6 @@ class Scanner {
   private assigned = 0;
   private argument = 0;
   private index = 0;
-  private converted = false;
 
   constructor(
     private readonly runtime: Runtime,
@@ -206,6 +207,7 @@ class Scanner {
     return this.conversion();
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Suppression, field width, and conversion kind share the scanner cursor; helpers handle the individual conversions.
   private conversion(): Stop {
     const { input, format } = this;
     let suppress = false;
@@ -250,10 +252,9 @@ class Scanner {
   private integer(conversion: string, length: string, limit: number, suppress: boolean): Stop {
     const base =
       conversion === 'd' ? 10 : conversion === 'i' ? 0 : conversion === 'o' ? 8 : conversion === 'u' ? 10 : 16;
-    const parsed = parseIntegerPrefix(this.input.subarray(this.position), base, limit);
+    const parsed = parseIntegerPrefix(this.input.subarray(this.position), base, limit, () => this.runtime.spend());
     if (parsed.length === 0) return this.assigned;
     this.position += parsed.length;
-    this.converted = true;
     if (!suppress) {
       const target = scanTarget(conversion, length);
       const pointer = this.nextPointer(target);
@@ -270,7 +271,6 @@ class Scanner {
     const parsed = parseFloatPrefix(this.input.subarray(this.position), limit);
     if (parsed.length === 0) return this.assigned;
     this.position += parsed.length;
-    this.converted = true;
     if (!suppress) {
       const target = scanTarget(conversion, length);
       storerOf(target)(
@@ -297,8 +297,6 @@ class Scanner {
       this.position++;
     }
     if (this.position === start) return this.assigned;
-    if (conversion === 'c' && this.position - start < max) return this.inputFailure();
-    this.converted = true;
     if (!suppress) {
       const bytes = input.subarray(start, this.position);
       writeBytes(this.runtime, this.nextPointer(CHAR), conversion === 'c' ? bytes : Uint8Array.from([...bytes, 0]));
@@ -354,7 +352,7 @@ class Scanner {
   }
 
   private inputFailure(): number {
-    return this.converted || this.assigned > 0 ? this.assigned : -1;
+    return this.assigned > 0 ? this.assigned : -1;
   }
 }
 

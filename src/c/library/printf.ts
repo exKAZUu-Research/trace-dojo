@@ -56,6 +56,7 @@ class Arguments {
 }
 
 /** Formats a `printf` format string and its arguments into bytes, as macOS's libc does. */
+// code-gauge-allow functionCognitiveComplexity 17 -- Format parsing and byte/text field emission share argument and output positions; keep their ordered traversal together.
 export function formatPrintf(runtime: Runtime, format: Uint8Array, values: Value[], types: CType[]): number[] {
   const out: number[] = [];
   const args = new Arguments(values, types);
@@ -73,14 +74,17 @@ export function formatPrintf(runtime: Runtime, format: Uint8Array, values: Value
     index = readSpec(format, index, spec, args);
     if (index >= format.length) break;
     spec.conversion = String.fromCodePoint(format[index++]);
+    runtime.spend(Math.max(spec.width ?? 0, /[diuoxXfFeEgGaA]/.test(spec.conversion) ? (spec.precision ?? 0) : 0));
     const field = convert(runtime, spec, args, out.length);
     if (field === undefined) continue;
     if (typeof field === 'string') pushText(pad(spec, field));
-    else out.push(...padBytes(spec, field));
+    else for (const byte of padBytes(spec, field)) out.push(byte);
   }
   return out;
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Flags, dynamic width, precision, and modifiers are one sequential format-specifier grammar.
+// code-gauge-allow functionNcss 33 -- Flags, dynamic width, precision, and modifiers are one sequential format-specifier grammar.
 function readSpec(format: Uint8Array, start: number, spec: Spec, args: Arguments): number {
   let index = start;
   while (index < format.length && '-+ #0'.includes(String.fromCodePoint(format[index]))) {
@@ -128,6 +132,7 @@ function readDigits(format: Uint8Array, start: number): string {
   return digits;
 }
 
+// code-gauge-allow functionNcss 48 -- One case per printf conversion; helpers already isolate numeric and string formatting.
 function convert(runtime: Runtime, spec: Spec, args: Arguments, written: number): string | Uint8Array | undefined {
   const { conversion, length } = spec;
   const wide = ['l', 'll', 'j', 'z', 't', 'q'].includes(length) || 'DOU'.includes(conversion);
@@ -246,6 +251,8 @@ function integerField(
   return lead + body;
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Format variants share sign, alternate-form, case, and padding rules; retain that coordination together.
+// code-gauge-allow functionNcss 36 -- Format variants share sign, alternate-form, case, and padding rules; retain that coordination together.
 function floatField(spec: Spec, value: number): string {
   const { conversion } = spec;
   const upper = conversion === conversion.toUpperCase();
@@ -256,7 +263,7 @@ function floatField(spec: Spec, value: number): string {
   if (!Number.isFinite(magnitude)) {
     const text = Number.isNaN(magnitude) ? 'nan' : 'inf';
     // macOS prints no sign for a NaN.
-    const shownSign = Number.isNaN(magnitude) ? signOf(spec) : sign;
+    const shownSign = Number.isNaN(magnitude) ? '' : sign;
     return shownSign + (upper ? text.toUpperCase() : text);
   }
   let body: string;
@@ -294,12 +301,17 @@ function floatField(spec: Spec, value: number): string {
 function pad(spec: Spec, text: string): string {
   const width = spec.width ?? 0;
   if (text.length >= width) return text;
-  return spec.flags.includes('-') ? text.padEnd(width, ' ') : text.padStart(width, ' ');
+  return spec.flags.includes('-')
+    ? text.padEnd(width, ' ')
+    : text.padStart(width, spec.flags.includes('0') && ['s', 'c', '%'].includes(spec.conversion) ? '0' : ' ');
 }
 
-function padBytes(spec: Spec, bytes: Uint8Array): number[] {
+function padBytes(spec: Spec, bytes: Uint8Array): Uint8Array {
   const width = spec.width ?? 0;
   const padding = Math.max(width - bytes.length, 0);
-  const spaces = Array.from({ length: padding }, () => 0x20);
-  return spec.flags.includes('-') ? [...bytes, ...spaces] : [...spaces, ...bytes];
+  const result = new Uint8Array(bytes.length + padding).fill(
+    spec.flags.includes('0') && !spec.flags.includes('-') ? 0x30 : 0x20
+  );
+  result.set(bytes, spec.flags.includes('-') ? 0 : padding);
+  return result;
 }

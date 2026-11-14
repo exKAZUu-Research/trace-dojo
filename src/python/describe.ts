@@ -3,6 +3,7 @@ import { getAttributeOrUndefined } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { STDLIB_MODULE_NAMES } from './stdlibModuleNames';
 import { iterStr } from './strings';
+import { fullyQualifiedName } from './types';
 import { type ExceptionState, PyError, type PyInstance, PyList, type PyValue } from './values';
 
 const MOVE_COST = 2;
@@ -13,8 +14,7 @@ const MAX_STRING_SIZE = 40;
 /** The last line of the traceback CPython prints for an uncaught exception, followed by the exception's notes. */
 export function describeException(exception: PyInstance): string {
   const cls = exception.cls;
-  const name =
-    cls.module === '__main__' || cls.module === 'builtins' ? cls.qualifiedName : `${cls.module}.${cls.qualifiedName}`;
+  const name = fullyQualifiedName(cls);
   let text: string;
   try {
     text = pyStr(exception);
@@ -25,7 +25,7 @@ export function describeException(exception: PyInstance): string {
   let line = text === '' ? name : `${name}: ${text}`;
   const suggestion = suggestionFor(exception);
   if (suggestion) line += suggestion;
-  const notes = exception.exception?.notes;
+  const notes = exception.dict.get('__notes__');
   if (notes instanceof PyList) {
     for (const note of notes.items) line += `\n${typeof note === 'string' ? note : safeStr(note)}`;
   }
@@ -40,7 +40,8 @@ function safeStr(value: PyValue): string {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Follows traceback._compute_suggestion_error.
+// code-gauge-allow functionCognitiveComplexity 23 -- Follows traceback._compute_suggestion_error.
+// code-gauge-allow functionNcss 31 -- Follows traceback._compute_suggestion_error.
 function suggestionFor(exception: PyInstance): string | undefined {
   const state = exception.exception;
   if (!state) return undefined;
@@ -49,7 +50,12 @@ function suggestionFor(exception: PyInstance): string | undefined {
   if (!state.name) return undefined;
   const wrongName = state.name;
   if (is('AttributeError') && state.object !== undefined) {
-    let candidates = currentRuntime().dirNames(state.object);
+    let candidates: string[];
+    try {
+      candidates = currentRuntime().suggestionNames(state.object);
+    } catch {
+      return undefined;
+    }
     if (!wrongName.startsWith('_')) candidates = candidates.filter((candidate) => !candidate.startsWith('_'));
     const suggestion = bestSuggestion(wrongName, candidates);
     return suggestion ? `. Did you mean: '${suggestion}'?` : undefined;
@@ -76,7 +82,7 @@ function importSuggestion(state: ExceptionState): string | undefined {
   const runtime = currentRuntime();
   let candidates: string[];
   try {
-    candidates = runtime.dirNames(runtime.importModule(moduleName));
+    candidates = runtime.suggestionNames(runtime.resolveImport(moduleName));
   } catch {
     return undefined;
   }

@@ -1,6 +1,9 @@
-import type { Node } from '@willbooster/web-tree-sitter';
+// code-gauge-allow-file fileNcss 831 -- C syntax conversion shares scoped names and tree-sitter recovery.
+import type { Node, Parser } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
+import type { ExecutionBudget } from '../interpreter/limits';
+import { parseSource } from '../interpreter/treeSitter';
 import {
   type BinaryOperator,
   type Compound,
@@ -21,8 +24,13 @@ import {
   type TypeName,
   type TypeSpecifier,
 } from './ast';
+import { validateDeclarationChildren, validateDeclaratorChildren } from './declarationSyntax';
 import { LAYOUT_ATTRIBUTES } from './preprocessor';
+import { CSyntaxError } from './syntaxDiagnostics';
+import type { TypeScope } from './syntaxTokens';
+import { builtinType } from './types';
 import { unsupported } from './unsupported';
+import { declarationTypeNodes, validateNames, validateSyntax } from './validateSyntax';
 
 /** What learners call the syntax that the converter leaves out, by tree-sitter's node type. */
 const UNSUPPORTED_NODES: Record<string, string> = {
@@ -69,9 +77,23 @@ class NameScope {
 
   constructor(private readonly parent?: NameScope) {}
 
+  typeNames(budget: ExecutionBudget): ReadonlySet<string> {
+    const inherited = this.parent?.typeNames(budget);
+    budget.spend((inherited?.size ?? 0) + this.names.size);
+    const names = new Set(inherited);
+    for (const [name, kind] of this.names) {
+      if (kind === 'type') names.add(name);
+      else names.delete(name);
+    }
+    return names;
+  }
+
+  kindOf(name: string): 'type' | 'value' | undefined {
+    return this.names.get(name) ?? this.parent?.kindOf(name);
+  }
+
   isType(name: string): boolean {
-    const kind = this.names.get(name);
-    return kind ? kind === 'type' : (this.parent?.isType(name) ?? false);
+    return this.kindOf(name) === 'type';
   }
 
   declare(name: string, kind: 'type' | 'value'): void {
@@ -89,42 +111,59 @@ export interface HeaderDeclarations {
 
 /** Converts tree-sitter's tree of a translation unit into the interpreter's syntax tree. */
 export class Converter {
+  readonly typeScopes: TypeScope[] = [];
+  readonly valueTypeRanges = new Map<number, number>();
+  private readonly recoveredCasts = new WeakSet<Expression>();
   private scope: NameScope;
+  private headers: readonly HeaderDeclarations[] = [];
+  private nextHeader = 0;
 
   constructor(
     builtinTypedefs: readonly string[],
-    private readonly fromHeader?: string
+    private readonly parser: Parser,
+    private readonly fromHeader?: string,
+    private readonly recovery?: ExecutionBudget
   ) {
     this.scope = new NameScope();
     for (const name of builtinTypedefs) this.scope.declare(name, 'type');
   }
 
   convertUnit(root: Node, headers: readonly HeaderDeclarations[] = []): ExternalDeclaration[] {
+    if (!this.recovery) validateSyntax(root, (node) => this.checkUnsupported(node));
     const items: ExternalDeclaration[] = [];
-    let nextHeader = 0;
-    const declareHeadersBefore = (row: number): void => {
-      while (nextHeader < headers.length && headers[nextHeader].row <= row) {
-        const header = headers[nextHeader++];
-        for (const name of header.typedefNames) this.scope.declare(name, 'type');
-        for (const item of header.items) {
-          for (const declarator of item.declarators) {
-            const name = declaredName(declarator.declarator);
-            if (name) this.scope.declare(name, item.specifiers.storage === 'typedef' ? 'type' : 'value');
-          }
-          items.push(item);
-        }
-      }
-    };
+    this.headers = headers;
+    this.nextHeader = 0;
     for (const child of namedChildren(root)) {
       if (child.type === 'comment') continue;
-      declareHeadersBefore(child.startPosition.row);
+      items.push(...this.headersBefore(child.startPosition.row));
       items.push(...this.externalDeclaration(child));
     }
-    declareHeadersBefore(Number.POSITIVE_INFINITY);
+    items.push(...this.headersBefore(Number.POSITIVE_INFINITY));
+    if (!this.recovery) validateNames({ items });
     return items;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 21 -- Header cursor, lexical names, and declarations must advance together in source order.
+  private headersBefore(row: number, inBlock = false): Declaration[] {
+    const declarations: Declaration[] = [];
+    while (this.nextHeader < this.headers.length && this.headers[this.nextHeader].row <= row) {
+      const header = this.headers[this.nextHeader++];
+      if (inBlock && ['stdio.h', 'stdlib.h', 'ctype.h', 'math.h'].includes(header.name))
+        throw new CompileError([{ row: header.row, message: `<${header.name}> は関数の外で読み込んでください。` }]);
+      for (const name of header.typedefNames) this.scope.declare(name, 'type');
+      for (const item of header.items) {
+        for (const declarator of item.declarators) {
+          const name = declaredName(declarator.declarator);
+          if (name) this.scope.declare(name, item.specifiers.storage === 'typedef' ? 'type' : 'value');
+        }
+        declarations.push(item);
+      }
+    }
+    return declarations;
+  }
+
   private externalDeclaration(node: Node): ExternalDeclaration[] {
+    if (this.recovery && node.isError) this.scanValueTypes(node);
     switch (node.type) {
       case 'function_definition': {
         return [this.functionDefinition(node)];
@@ -150,6 +189,8 @@ export class Converter {
         if (node.namedChildCount === 0) return [];
         const staticAssert = this.staticAssert(node);
         if (staticAssert) return [staticAssert];
+        const declaration = this.reparseDeclaration(node);
+        if (declaration) return [declaration];
         break;
       }
       case 'attributed_statement': {
@@ -221,8 +262,9 @@ export class Converter {
 
   // Declarations ----------------------------------------------------------------------------------------------------
 
-  private declaration(node: Node): Declaration {
+  private declaration(node: Node, type?: TypeSpecifier): Declaration {
     const specifiers = this.specifiers(node);
+    if (type) specifiers.type = type;
     if (node.type === 'type_definition') specifiers.storage = 'typedef';
     const declarators = node.childrenForFieldName('declarator').map((child) => {
       if (child.type === 'init_declarator') {
@@ -298,13 +340,14 @@ export class Converter {
 
   // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of declaration specifier.
   private specifiers(node: Node): Specifiers {
+    const typeNodes = declarationTypeNodes(node);
+    if (typeNodes.length === 0) throw new CSyntaxError(node, '型の指定が必要です。');
+    validateDeclarationChildren(node, typeNodes, (child) => this.checkUnsupported(child));
     let storage: StorageClass | undefined;
     let isInline = false;
     let alignas: Specifiers['alignas'];
     const qualifiers = { isConst: false, isVolatile: false };
     for (const child of node.namedChildren) {
-      if (!child) continue;
-      this.checkUnsupported(child);
       if (child.type === 'storage_class_specifier') {
         const word = this.storageClass(child);
         if (word === 'inline') isInline = true;
@@ -322,18 +365,28 @@ export class Converter {
         this.attributes(child);
       }
     }
-    const typeNode = field(node, 'type');
-    for (const child of typeNode.namedChildren) {
-      if (child?.type === 'type_qualifier') alignas = this.qualifier(child, qualifiers) ?? alignas;
-    }
+    for (const child of typeNodes.flatMap((typeNode) => typeNode.namedChildren))
+      if (child.type === 'type_qualifier') alignas = this.qualifier(child, qualifiers) ?? alignas;
     return {
       storage,
       qualifiers,
-      type: this.typeSpecifier(typeNode),
+      type: this.declarationType(typeNodes),
       row: node.startPosition.row,
       ...(alignas ? { alignas } : {}),
       ...(isInline ? { isInline } : {}),
     };
+  }
+
+  private declarationType(nodes: Node[]): TypeSpecifier {
+    let type = this.typeSpecifier(nodes[0]);
+    for (const node of nodes.slice(1)) {
+      const next = this.typeSpecifier(node);
+      const words = type.kind === 'builtin' && next.kind === 'builtin' ? [...type.words, ...next.words] : undefined;
+      if (!words || !builtinType(words))
+        throw new CompileError([{ row: node.startPosition.row, message: '型の指定を組み合わせることはできません。' }]);
+      type = { kind: 'builtin', words, row: type.row };
+    }
+    return type;
   }
 
   private storageClass(node: Node): StorageClass | 'inline' | undefined {
@@ -394,6 +447,8 @@ export class Converter {
     if (layout) unsupported(node.startPosition.row, `配置や型を変える属性（${layout}）`);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Each C type specifier has a distinct AST form.
+  // code-gauge-allow functionNcss 33 -- Keep the type specifier dispatch together.
   private typeSpecifier(node: Node): TypeSpecifier {
     const row = node.startPosition.row;
     this.checkUnsupported(node);
@@ -499,6 +554,7 @@ export class Converter {
   }
 
   /** The declarators of a member declaration, each with the width after it when it is a bit-field. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Keep named, unnamed, and bit-field declarators in the same field-list conversion.
   private fieldDeclarators(node: Node): FieldDeclaration['declarators'] {
     const result: FieldDeclaration['declarators'] = [];
     let current: FieldDeclaration['declarators'][number] | undefined;
@@ -542,9 +598,11 @@ export class Converter {
       });
   }
 
+  // code-gauge-allow functionNcss 32 -- Each declarator shape has its own conversion.
   private declarator(node: Node): Declarator {
     const row = node.startPosition.row;
     this.checkUnsupported(node);
+    validateDeclaratorChildren(node, (child) => this.checkUnsupported(child));
     switch (node.type) {
       case 'attributed_declarator': {
         for (const child of namedChildren(node)) if (child.type === 'attribute_declaration') this.attributes(child);
@@ -667,8 +725,10 @@ export class Converter {
       const items: (Statement | Declaration | StaticAssert)[] = [];
       for (const child of namedChildren(node)) {
         if (child.type === 'comment') continue;
+        items.push(...this.headersBefore(child.startPosition.row, true));
         items.push(...this.blockItem(child));
       }
+      items.push(...this.headersBefore(node.endPosition.row, true));
       return { kind: 'compound', items, row: node.startPosition.row };
     } finally {
       this.scope = outer;
@@ -676,7 +736,13 @@ export class Converter {
   }
 
   /** A block item, where a `case` label's statements become the statements after the label. */
+  // code-gauge-allow functionCognitiveComplexity 22 -- Case labels, static assertions and declaration recovery share block scope.
   private blockItem(node: Node): (Statement | Declaration | StaticAssert)[] {
+    if (this.recovery) this.scanValueTypes(node);
+    if (node.type === 'expression_statement') {
+      const declaration = this.reparseDeclaration(node);
+      if (declaration) return [declaration];
+    }
     if (node.type === 'declaration' || node.type === 'type_definition') return this.declarationOrExpression(node);
     if (node.type === 'expression_statement') {
       const staticAssert = this.staticAssert(node);
@@ -686,7 +752,8 @@ export class Converter {
       return this.externalDeclaration(node) as Declaration[];
     }
     if (node.type === 'function_definition') {
-      throw new CompileError([{ row: node.startPosition.row, message: '関数の中では、関数を定義できません。' }]);
+      this.specifiers(node);
+      throw new CSyntaxError(field(node, 'body'), '関数の中では、関数を定義できません。');
     }
     if (node.type === 'case_statement') {
       const row = node.startPosition.row;
@@ -709,6 +776,38 @@ export class Converter {
       return [labeled, ...rest];
     }
     return [this.statement(node)];
+  }
+
+  private reparseDeclaration(node: Node): Declaration | undefined {
+    const leading = this.leadingType(node.text, node.startPosition.row);
+    if (!leading) return undefined;
+    const source = '\n'.repeat(node.startPosition.row) + 'int' + node.text.slice(leading.length);
+    return parseSource(
+      this.parser,
+      source,
+      {},
+      (root) => {
+        const declaration = root.firstNamedChild;
+        if (!declaration || declaration.type !== 'declaration')
+          throw new CompileError([{ row: node.startPosition.row, message: '宣言の書き方に誤りがあります。' }]);
+        return this.declaration(declaration, leading.type);
+      },
+      {
+        locateErrors: (_root, errors) => {
+          if (errors.length > 0)
+            throw new CSyntaxError(node, errors[0].message, { row: errors[0].row, offset: node.endIndex });
+          return errors;
+        },
+      }
+    );
+  }
+
+  private leadingType(text: string, row: number): { length: number; type: TypeSpecifier } | undefined {
+    const name = /^[\p{XID_Start}_$][\p{XID_Continue}$]*/u.exec(text)?.[0];
+    if (!name) return undefined;
+    if (name === '_Bool') return { length: name.length, type: { kind: 'builtin', words: ['_Bool'], row } };
+    if (!this.scope.isType(name)) return undefined;
+    return { length: name.length, type: { kind: 'typedefName', name, row } };
   }
 
   /**
@@ -750,7 +849,9 @@ export class Converter {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of statement.
+  // code-gauge-allow functionNcss 48 -- Keep the statement shape dispatch together.
   private statement(node: Node): Statement {
+    if (this.recovery && node.isError) this.scanValueTypes(node);
     const row = node.startPosition.row;
     this.checkUnsupported(node);
     switch (node.type) {
@@ -904,7 +1005,9 @@ export class Converter {
 
   // Expressions -----------------------------------------------------------------------------------------------------
 
+  // code-gauge-allow functionNcss 60 -- One case per C expression kind; helpers already isolate the nontrivial forms.
   private expression(node: Node): Expression {
+    if (this.recovery) this.scanValueTypes(node);
     const row = node.startPosition.row;
     this.checkUnsupported(node);
     switch (node.type) {
@@ -956,12 +1059,7 @@ export class Converter {
         return this.update(node);
       }
       case 'cast_expression': {
-        return {
-          kind: 'cast',
-          typeName: this.typeName(field(node, 'type')),
-          operand: this.expression(field(node, 'value')),
-          row,
-        };
+        return this.cast(node);
       }
       case 'sizeof_expression': {
         return this.sizeof(node);
@@ -981,21 +1079,30 @@ export class Converter {
         return this.call(node);
       }
       case 'subscript_expression': {
-        return {
-          kind: 'subscript',
-          array: this.expression(field(node, 'argument')),
-          index: this.expression(field(node, 'index')),
-          row,
-        };
+        const index = this.expression(field(node, 'index'));
+        return this.postfix(
+          this.expression(field(node, 'argument')),
+          (array) => ({
+            kind: 'subscript',
+            array,
+            index,
+            row,
+          }),
+          node.children.find((child) => child.type === '[')!
+        );
       }
       case 'field_expression': {
-        return {
-          kind: 'member',
-          object: this.expression(field(node, 'argument')),
-          field: field(node, 'field').text,
-          arrow: field(node, 'operator').type === '->',
-          row,
-        };
+        return this.postfix(
+          this.expression(field(node, 'argument')),
+          (object) => ({
+            kind: 'member',
+            object,
+            field: field(node, 'field').text,
+            arrow: field(node, 'operator').type === '->',
+            row,
+          }),
+          field(node, 'operator')
+        );
       }
       case 'compound_literal_expression': {
         return this.compoundLiteral(node);
@@ -1029,6 +1136,23 @@ export class Converter {
     throw new CompileError([{ row, message: '式の書き方に誤りがあります。' }]);
   }
 
+  private update(node: Node): Expression {
+    const row = node.startPosition.row;
+    const operator = field(node, 'operator');
+    const argument = field(node, 'argument');
+    const operand = this.expression(argument);
+    const prefix = operator.startIndex < argument.startIndex;
+    const build = (value: Expression): Expression => ({
+      kind: 'update',
+      operatorRow: operator.startPosition.row,
+      operator: operator.type as '++' | '--',
+      prefix,
+      operand: value,
+      row,
+    });
+    return prefix ? build(operand) : this.postfix(operand, build, operator);
+  }
+
   private assignment(node: Node): Expression {
     const operator = field(node, 'operator').type;
     return {
@@ -1036,18 +1160,6 @@ export class Converter {
       operator: operator === '=' ? undefined : (operator.slice(0, -1) as BinaryOperator),
       left: this.expression(field(node, 'left')),
       right: this.expression(field(node, 'right')),
-      row: node.startPosition.row,
-    };
-  }
-
-  private update(node: Node): Expression {
-    const operator = field(node, 'operator');
-    const argument = field(node, 'argument');
-    return {
-      kind: 'update',
-      operator: operator.type as '++' | '--',
-      prefix: operator.startIndex < argument.startIndex,
-      operand: this.expression(argument),
       row: node.startPosition.row,
     };
   }
@@ -1064,10 +1176,28 @@ export class Converter {
     };
   }
 
+  private scanValueTypes(node: Node): void {
+    if (!this.recovery) return;
+    this.typeScopes.push({ start: node.startIndex, end: node.endIndex, names: this.scope.typeNames(this.recovery) });
+    if (['compound_statement', 'for_statement', 'function_definition'].includes(node.type)) return;
+    const pending = [node];
+    while (pending.length > 0) {
+      this.recovery.spend();
+      const part = pending.pop()!;
+      if (['compound_statement', 'for_statement', 'function_definition'].includes(part.type)) continue;
+      if (part.type === 'type_descriptor') {
+        const type = part.childForFieldName('type');
+        if (type?.type === 'type_identifier' && this.scope.kindOf(type.text) === 'value')
+          this.valueTypeRanges.set(type.startIndex, type.endIndex);
+      }
+      pending.push(...part.namedChildren);
+    }
+  }
+
   private concatenatedString(node: Node): Expression {
     const parts = namedChildren(node).map((child) => {
       if (child.type !== 'string_literal') {
-        throw new CompileError([{ row: child.startPosition.row, message: '文字列リテラルの並べ方に誤りがあります。' }]);
+        throw new CSyntaxError(child, '文字列リテラルの並べ方に誤りがあります。');
       }
       return child.text;
     });
@@ -1082,11 +1212,36 @@ export class Converter {
     return { kind: 'paren', expression: this.expression(inner[0]), row };
   }
 
+  private cast(node: Node): Expression {
+    const row = node.startPosition.row;
+    const typeName = this.typeName(field(node, 'type'));
+    const value = field(node, 'value');
+    if (value.type === 'assignment_expression')
+      throw new CSyntaxError(value, '代入する左側には、変数や配列の要素などを書いてください。');
+    return { kind: 'cast', typeName, operand: this.expression(value), row };
+  }
+
   private sizeof(node: Node): Expression {
     const row = node.startPosition.row;
     const type = node.childForFieldName('type');
     if (type) return { kind: 'sizeofType', typeName: this.typeName(type), row };
-    const operand = this.expression(field(node, 'value'));
+    const value = field(node, 'value');
+    const text = value.text;
+    const inner = value.type === 'parenthesized_expression' ? text.slice(1, -1).trim() : '';
+    const leading = this.leadingType(inner, row);
+    if (leading) {
+      const source = '\n'.repeat(row) + `int __trace_size = sizeof(int${inner.slice(leading.length)});`;
+      return parseSource(this.parser, source, {}, (root) => {
+        const typeNode = root.descendantsOfType('sizeof_expression')[0]?.childForFieldName('type');
+        if (!typeNode) throw new CompileError([{ row, message: '型の書き方に誤りがあります。' }]);
+        const typeName = this.typeName(typeNode);
+        typeName.specifiers.type = leading.type;
+        return { kind: 'sizeofType', typeName, row };
+      });
+    }
+    const operand = this.expression(value);
+    if (operand.kind === 'cast')
+      throw new CompileError([{ row, message: 'sizeof の型や式を括弧で正しく囲んでください。' }]);
     const typeName = this.parenthesizedTypeName(operand);
     return typeName ? { kind: 'sizeofType', typeName, row } : { kind: 'sizeofExpression', operand, row };
   }
@@ -1129,7 +1284,7 @@ export class Converter {
     const right = this.expression(field(node, 'right'));
     const castType = ['*', '&', '+', '-'].includes(operator) ? this.parenthesizedTypeName(left) : undefined;
     if (castType) return castOfUnary(castType, operator, right, row);
-    return { kind: 'binary', operator, left, right, row };
+    return { kind: 'binary', operator, left, right, row, operatorRow: field(node, 'operator').startPosition.row };
   }
 
   private call(node: Node): Expression {
@@ -1146,9 +1301,34 @@ export class Converter {
       if (args.length === 0) throw new CompileError([{ row, message: '式の書き方に誤りがあります。' }]);
       let operand = args[0];
       for (const right of args.slice(1)) operand = { kind: 'comma', left: operand, right, row };
-      return { kind: 'cast', typeName: castType, operand: { kind: 'paren', expression: operand, row }, row };
+      const cast: Expression = {
+        kind: 'cast',
+        typeName: castType,
+        operand: { kind: 'paren', expression: operand, row },
+        row,
+      };
+      this.recoveredCasts.add(cast);
+      return cast;
     }
-    return { kind: 'call', callee, args, row };
+    return this.postfix(
+      callee,
+      (target) => ({
+        kind: 'call',
+        callee: target,
+        args,
+        row,
+        operatorRow: field(node, 'arguments').startPosition.row,
+      }),
+      field(node, 'arguments')
+    );
+  }
+
+  private postfix(operand: Expression, build: (operand: Expression) => Expression, token: Node): Expression {
+    if (operand.kind === 'sizeofType') throw new CSyntaxError(token, 'sizeof の式を括弧で正しく囲んでください。');
+    if (operand.kind !== 'cast' || !this.recoveredCasts.has(operand)) return build(operand);
+    const cast: Expression = { ...operand, operand: build(operand.operand) };
+    this.recoveredCasts.add(cast);
+    return cast;
   }
 
   private checkUnsupported(node: Node): void {

@@ -1,7 +1,7 @@
 const MESSAGES = {
   nullAccess: 'NULL ポインタの指す先を読み書きしました。',
   outOfBounds: '配列や確保した領域の範囲の外を読み書きしました。',
-  deadStack: '関数から戻ってなくなった変数を読み書きしました。',
+  deadStack: '有効期間が終わった変数を読み書きしました。',
   useAfterFree: 'free で解放した領域を読み書きしました。',
   uninitialized: '値を入れていない変数（または領域）の値を読みました。',
   readOnly: '文字列リテラルは書き換えられません。',

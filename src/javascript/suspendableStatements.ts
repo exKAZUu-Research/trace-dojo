@@ -56,8 +56,8 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     this.runtime.steps.stepBinding(stepRow, !storesReference(target) || (!isObject(value) && value !== null));
   }
 
-  // code-gauge-allow functionNcss 54 -- One case per statement kind, each delegating where it grows.
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per statement kind, each delegating where it grows.
+  // code-gauge-allow functionNcss 60 -- One case per statement kind, each delegating where it grows.
+  // code-gauge-allow functionCognitiveComplexity 26 -- One case per statement kind, each delegating where it grows.
   private *statementSteps(statement: Statement, labels: string[]): Steps<Completion> {
     const { runtime } = this;
     runtime.spend();
@@ -112,13 +112,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
       }
       case 'while':
       case 'doWhile': {
-        for (let first = true; ; first = false) {
-          if (!(first && statement.kind === 'doWhile') && !toBoolean(yield* this.valueSteps(statement.test)))
-            return undefined;
-          const result = yield* this.loopBodySteps(statement.body, labels);
-          if (result !== 'next') return result;
-          runtime.spend();
-        }
+        return yield* this.whileSteps(statement, labels);
       }
       case 'break':
       case 'continue': {
@@ -167,6 +161,8 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
    * Runs `run`, then disposes of the values the `using` declarations in the current scope declared, the last first. An
    * error a disposal throws suppresses the error before it, which a SuppressedError then holds.
    */
+  // code-gauge-allow functionCognitiveComplexity 21 -- Transcribes the specification's DisposeResources step by step, whose branches mirror its steps.
+  // code-gauge-allow functionNcss 37 -- Transcribes the specification's DisposeResources step by step, whose branches mirror its steps.
   private *disposingSteps<T extends Outcome>(run: () => Steps<T>): Steps<T> {
     const { runtime } = this;
     const scope = runtime.frame.scope;
@@ -250,12 +246,14 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     }
     if (!isObject(value)) runtime.throwError('TypeError', 'An object is expected with `using` declarations');
     const asyncMethod = isAsync ? runtime.get(value, WELL_KNOWN_SYMBOLS.asyncDispose) : undefined;
-    const method = asyncMethod ?? runtime.get(value, WELL_KNOWN_SYMBOLS.dispose);
+    const awaitsResult = asyncMethod !== undefined && asyncMethod !== null;
+    const method = awaitsResult ? asyncMethod : runtime.get(value, WELL_KNOWN_SYMBOLS.dispose);
     if (!isCallable(method)) {
-      const key = isAsync ? WELL_KNOWN_SYMBOLS.asyncDispose : WELL_KNOWN_SYMBOLS.dispose;
+      // The error names the method last read, which is Symbol.dispose once Symbol.asyncDispose is missing.
+      const key = awaitsResult ? WELL_KNOWN_SYMBOLS.asyncDispose : WELL_KNOWN_SYMBOLS.dispose;
       return runtime.throwError('TypeError', `${key.toString()} is not a function`);
     }
-    scope.disposables.push({ value, method, isAsync, awaitsResult: asyncMethod !== undefined && asyncMethod !== null });
+    scope.disposables.push({ value, method, isAsync, awaitsResult });
   }
 
   /** Keeps `value` reachable for garbage collection while `run` computes with it. */
@@ -292,6 +290,19 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     this.bindPattern(target, value, 'initialize');
   }
 
+  private *whileSteps(
+    statement: Extract<Statement, { kind: 'while' | 'doWhile' }>,
+    labels: string[]
+  ): Steps<Completion> {
+    for (let first = true; ; first = false) {
+      if (!(first && statement.kind === 'doWhile') && !toBoolean(yield* this.valueSteps(statement.test)))
+        return undefined;
+      const result = yield* this.loopBodySteps(statement.body, labels);
+      if (result !== 'next') return result;
+      this.runtime.spend();
+    }
+  }
+
   /** Runs a loop body, returning `'next'` to continue the loop or the completion that ends it. */
   private *loopBodySteps(body: Statement, labels: string[]): Steps<'next' | Completion> {
     const completion = yield* this.statementSteps(body, []);
@@ -302,6 +313,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     return completion.kind === 'continue' ? 'next' : undefined;
   }
 
+  // code-gauge-allow duplicateLines 28 -- Mirrors the synchronous version in evaluator.ts, as a generator that suspends at yield and await.
   private forStatementSteps(statement: Extract<Statement, { kind: 'for' }>, labels: string[]): Steps<Completion> {
     const { runtime } = this;
     return this.scopedSteps(
@@ -379,6 +391,9 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     }
   }
 
+  // code-gauge-allow duplicateLines 17 -- Mirrors the synchronous version in evaluator.ts, as a generator that suspends at yield and await.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Mirrors the synchronous version in evaluator.ts, as a generator that suspends at yield and await.
+  // code-gauge-allow functionNcss 40 -- Mirrors the synchronous version in evaluator.ts, as a generator that suspends at yield and await.
   private *forEachIterationsSteps(
     statement: Extract<Statement, { kind: 'forOf' | 'forIn' }>,
     labels: string[],
@@ -441,7 +456,8 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     const keys: string[] = [];
     const seen = new Set<string>();
     for (let current: JsObject | null = value; current; current = current.proto) {
-      for (const key of runtime.ownKeys(current)) {
+      // Every own name, enumerable or not, hides the same name further up the chain.
+      for (const key of runtime.ownPropertyNames(current)) {
         if (seen.has(key)) continue;
         seen.add(key);
         if (runtime.getOwnProperty(current, key)?.enumerable) keys.push(key);

@@ -39,15 +39,32 @@ export class StepTracker {
    * an argument whose evaluation recorded steps, a variable a `return` expression updates), needs this step.
    */
   runStatement<T>(row: number | undefined, onlyCalls: boolean | (() => boolean), run: () => T): T {
-    const { recordedSteps } = this;
+    const mark = this.statementMark();
     const result = run();
-    const callsShowedIt =
-      (typeof onlyCalls === 'function' ? onlyCalls() : onlyCalls) &&
-      this.recordedSteps !== recordedSteps &&
-      !this.atomicCallUnshown &&
-      this.recorder?.showsState() === true;
-    if (!callsShowedIt) this.step(row);
+    this.completeStatement(row, onlyCalls, mark);
     return result;
+  }
+
+  statementMark(): number {
+    return this.recordedSteps;
+  }
+
+  completeStatement(row: number | undefined, onlyCalls: boolean | (() => boolean), mark: number): void {
+    this.finishStatement(row, typeof onlyCalls === 'function' ? onlyCalls() : onlyCalls, mark);
+  }
+
+  /** How many steps have been recorded, which a statement that cannot run as a callback reads before it runs. */
+  get stepCount(): number {
+    return this.recordedSteps;
+  }
+
+  /**
+   * Records the step of a statement that ran since `stepCount` was `begun`, as `runStatement` does after running one.
+   */
+  finishStatement(row: number | undefined, onlyCalls: boolean, begun: number): void {
+    const callsShowedIt =
+      onlyCalls && this.recordedSteps !== begun && !this.atomicCallUnshown && this.recorder?.showsState() === true;
+    if (!callsShowedIt) this.step(row);
   }
 
   completeAtomicCall(): void {

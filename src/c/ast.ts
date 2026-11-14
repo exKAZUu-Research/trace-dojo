@@ -160,7 +160,7 @@ export type BinaryOperator =
   | '>'
   | '>=';
 
-export type Expression =
+export type Expression = (
   | ({ kind: 'identifier'; name: string } & Span)
   | ({ kind: 'number'; text: string } & Span)
   | ({ kind: 'char'; text: string } & Span)
@@ -184,10 +184,10 @@ export type Expression =
   | ({ kind: 'call'; callee: Expression; args: Expression[] } & Span)
   | ({ kind: 'subscript'; array: Expression; index: Expression } & Span)
   | ({ kind: 'member'; object: Expression; field: string; arrow: boolean } & Span)
-  /** A parenthesized expression, which matters to clang only in what it warns about, and to `sizeof (T)`. */
   | ({ kind: 'paren'; expression: Expression } & Span)
   | ({ kind: 'offsetof'; typeName: TypeName; member: string } & Span)
   /** `va_arg(ap, T)`, which tree-sitter parses as an expression of its own. */
-  | ({ kind: 'vaArg'; operand: Expression; typeName: TypeName } & Span);
+  | ({ kind: 'vaArg'; operand: Expression; typeName: TypeName } & Span)
+) & { operatorRow?: number };
 
 export const NO_QUALIFIERS: Qualifiers = { isConst: false, isVolatile: false };

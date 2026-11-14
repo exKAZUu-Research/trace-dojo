@@ -4,7 +4,7 @@ import { asFloat } from './numbers';
 import { iterate, type NextFunction } from './objects';
 import { binaryOp } from './operators';
 import { currentRuntime } from './runtimeContext';
-import { complexClass, typeError } from './types';
+import { complexClass, stringValue, typeError } from './types';
 import { DONE, type Kwargs, PyComplex, type PyValue } from './values';
 
 type Item = PyValue | typeof DONE;
@@ -23,7 +23,7 @@ export function sum(args: PyValue[], kwargs: Kwargs): PyValue {
   if (args.length === 0) throw typeError('sum() takes at least 1 positional argument (0 given)');
   checkArgs({ qualified: 'sum', min: 1, max: 2, style: 'takes', keywords: ['start'], named: 1 }, args, kwargs);
   let result = argument(args, kwargs, 1, 'start') ?? 0n;
-  if (typeof result === 'string') throw typeError("sum() can't sum strings [use ''.join(seq) instead]");
+  if (stringValue(result) !== undefined) throw typeError("sum() can't sum strings [use ''.join(seq) instead]");
   const next = iterate(args[0]);
   let item: Item;
   [result, item] = sumInts(result, next);

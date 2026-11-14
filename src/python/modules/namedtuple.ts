@@ -1,10 +1,12 @@
+import { copyKeywords } from '../callArguments';
 import { bindArguments, type Signature } from '../calls';
 import { pyRepr, pyStr } from '../conversions';
-import { pythonFunction, pythonMethod } from '../define';
+import { method, pythonFunction, pythonMethod } from '../define';
+import { definePythonLevelNew } from '../instances';
 import { libraryReceiver, unsupportedReceiver } from '../libraryReceivers';
 import { argument } from '../nativeArgs';
 import { callValue, exactLength, getAttribute, isTruthy, iterate, toArray } from '../objects';
-import { PYTHON_WHITESPACE } from '../strings';
+import { runningRuntime } from '../runtimeContext';
 import { containerRepr } from '../typeContainers';
 import {
   builtinClass,
@@ -12,24 +14,61 @@ import {
   newList,
   newTuple,
   None,
-  propertyClass,
+  pyError,
+  stringValue,
   tupleClass,
+  tupleGetterClass,
   typeClass,
   typeError,
+  typeName,
   valueError,
 } from '../types';
 import { isIdentifierText } from '../unicodeClasses';
-import {
-  AttributeMap,
-  DONE,
-  type Kwargs,
-  PyBuiltinFunction,
-  PyClass,
-  PyDescriptor,
-  PyTuple,
-  type PyValue,
-} from '../values';
+import { DONE, type Kwargs, PyBuiltinFunction, PyClass, PyDescriptor, PyTuple, type PyValue } from '../values';
 import { PYTHON_KEYWORDS } from './keywords';
+
+const NAMED_TUPLE_ORDER = [
+  '__doc__',
+  '__slots__',
+  '_fields',
+  '_field_defaults',
+  '__new__',
+  '_make',
+  '__replace__',
+  '_replace',
+  '__repr__',
+  '_asdict',
+  '__getnewargs__',
+  '__match_args__',
+];
+
+/** The index of the field each `_tuplegetter` reads. */
+const tupleGetterIndexes = new WeakMap<PyDescriptor, number>();
+
+/** The namedtuple class that a `typing.NamedTuple` class statement creates. */
+export function namedTupleClass(name: string, fields: string[], defaults: PyValue[]): PyClass {
+  return namedtupleWithMethods([name, newList(fields)], new Map([['defaults', newTuple(defaults)]])) as PyClass;
+}
+
+/** A namedtuple class that a library module defines, such as `functools.CacheInfo`. */
+export function makeNamedTupleClass(name: string, fields: string[], module: string): PyClass {
+  return namedtupleWithMethods([name, newList(fields)], new Map([['module', module]])) as PyClass;
+}
+
+function namedtupleWithMethods(args: PyValue[], kwargs: Kwargs): PyValue {
+  const cls = namedtuple(args, kwargs);
+  defineNamedTupleMethods(cls);
+  // The order of the namespace collections.namedtuple's code gives its class.
+  const fields = (cls.dict.get('_fields') as PyTuple).items as string[];
+  const entries = new Map(cls.dict);
+  cls.dict.clear();
+  for (const name of [...NAMED_TUPLE_ORDER, ...fields, '__module__', ...entries.keys()]) {
+    const value = entries.get(name);
+    if (value === undefined || cls.dict.has(name)) continue;
+    cls.dict.set(name, value);
+  }
+  return cls;
+}
 
 /** `collections.namedtuple`. */
 export const namedtupleFunction = pythonFunction(
@@ -38,13 +77,11 @@ export const namedtupleFunction = pythonFunction(
   namedtupleWithMethods
 );
 
-function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
+function namedtuple(args: PyValue[], kwargs: Kwargs): PyClass {
   const typename = pyStr(argument(args, kwargs, 0, 'typename') as PyValue);
-  const fields = namedTupleFields(
-    argument(args, kwargs, 1, 'field_names') as PyValue,
-    isTruthy(kwargs?.get('rename') ?? false)
-  );
-  checkNamedTupleNames(typename, fields, isTruthy(kwargs?.get('rename') ?? false));
+  const rename = isTruthy(kwargs?.get('rename') ?? false);
+  const fields = namedTupleFields(argument(args, kwargs, 1, 'field_names') as PyValue, rename);
+  checkNamedTupleNames(typename, fields, rename);
   const defaultsValue = kwargs?.get('defaults') ?? None;
   const defaults = defaultsValue === None ? [] : toArray(defaultsValue);
   if (defaults.length > fields.length) throw typeError('Got more default values than field names');
@@ -52,10 +89,15 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
   cls.mro = [cls, ...tupleClass.mro];
   cls.isBuiltin = false;
   cls.layout = { base: 'native' };
+  cls.slotNames = new Set();
   cls.construct = (tupleType, values, keywords) =>
     newNamedTuple(typename, tupleType, fields, defaults, values, keywords);
-  const module = kwargs?.get('module');
-  cls.module = typeof module === 'string' ? module : '__main__';
+  definePythonLevelNew(cls, cls.construct);
+  const moduleArg = kwargs?.get('module');
+  const resolvedModule =
+    moduleArg === undefined || moduleArg === None ? runningRuntime()?.frame?.globals.get('__name__') : moduleArg;
+  cls.module = stringValue(resolvedModule) ?? '__main__';
+  cls.dict.set('__module__', resolvedModule ?? '__main__');
   cls.dict.set('__doc__', `${typename}(${fields.join(', ')}${fields.length === 1 ? ',' : ''})`);
   cls.dict.set('__slots__', newTuple([]));
   cls.dict.set('_fields', newTuple(fields));
@@ -64,28 +106,60 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
     newDict(defaults.map((value, index) => [fields[fields.length - defaults.length + index], value]))
   );
   cls.dict.set('__match_args__', newTuple(fields));
-  cls.dict.set('__module__', cls.module);
-  for (const [index, name] of fields.entries()) {
-    cls.dict.set(
-      name,
-      new PyDescriptor(
-        propertyClass,
-        new PyBuiltinFunction(builtinClass('getter'), name, ([self]) => (self as PyTuple).items[index])
-      )
-    );
-  }
+  cls.dict.set('__module__', resolvedModule ?? '__main__');
+  defineFieldGetters(cls, fields);
   return cls;
 }
 
+/** Gives a namedtuple's class a `_tuplegetter` for each field. */
+function defineFieldGetters(cls: PyClass, fields: string[]): void {
+  for (const [index, name] of fields.entries()) {
+    const getter = new PyDescriptor(
+      tupleGetterClass,
+      new PyBuiltinFunction(builtinClass('getter'), name, ([self]) => fieldAt(self as PyTuple, index)),
+      undefined,
+      undefined,
+      `Alias for field number ${index}`
+    );
+    tupleGetterIndexes.set(getter, index);
+    cls.dict.set(name, getter);
+  }
+}
+
+function fieldAt(tuple: PyTuple, index: number): PyValue {
+  if (index >= tuple.items.length) throw pyError('IndexError', 'tuple index out of range');
+  return tuple.items[index];
+}
+
+method(tupleGetterClass, '__repr__', 'none', 0, 0, (self) => {
+  const getter = self as PyDescriptor;
+  return `_tuplegetter(${tupleGetterIndexes.get(getter) ?? 0}, ${pyRepr(getter.doc ?? None)})`;
+});
+method(tupleGetterClass, '__get__', 'expected', 1, 2, (self, [instance]) => {
+  const getter = self as PyDescriptor;
+  if (instance === None) return getter;
+  const index = tupleGetterIndexes.get(getter) ?? 0;
+  if (!(instance instanceof PyTuple)) {
+    throw typeError(
+      `descriptor for index '${index}' for tuple subclasses doesn't apply to '${typeName(instance)}' object`
+    );
+  }
+  return fieldAt(instance, index);
+});
+method(tupleGetterClass, '__set__', 'expected', 2, 2, () => {
+  throw pyError('AttributeError', "can't set attribute");
+});
+method(tupleGetterClass, '__delete__', 'one', 1, 1, () => {
+  throw pyError('AttributeError', "can't delete attribute");
+});
+
 /** The field names of a namedtuple, with `rename` replacing each unusable or repeated name by `_<index>`. */
 function namedTupleFields(fieldNames: PyValue, rename: boolean): string[] {
-  const fields =
-    typeof fieldNames === 'string'
+  const names =
+    stringValue(fieldNames) === undefined
       ? fieldNames
-          .replaceAll(',', ' ')
-          .split(new RegExp(`${PYTHON_WHITESPACE.source}+`, 'u'))
-          .filter(Boolean)
-      : toArray(fieldNames).map(pyStr);
+      : callValue(getAttribute(callValue(getAttribute(fieldNames, 'replace'), [',', ' ']), 'split'), []);
+  const fields = toArray(names).map(pyStr);
   if (!rename) return fields;
   const seen = new Set<string>();
   return fields.map((name, index) => {
@@ -127,17 +201,10 @@ function newNamedTuple(
     keywordDefaults: new Map(),
   };
   const bound = bindArguments(signature, [cls, ...values], kwargs);
-  return namedTupleInstance(
+  return new PyTuple(
     cls,
     fields.map((field) => bound.get(field) as PyValue)
   );
-}
-
-const isNamedTuple = (value: PyValue): value is PyTuple =>
-  value instanceof PyTuple && value.cls.lookup('_fields') !== undefined;
-
-function fieldsOf(tuple: PyTuple): readonly PyValue[] {
-  return (tuple.cls.lookup('_fields') as PyTuple | undefined)?.items ?? [];
 }
 
 /**
@@ -168,10 +235,17 @@ function defineNamedTupleMethods(cls: PyClass): void {
   pythonMethod(cls, '__getnewargs__', '', (self) => newTuple(toArray(self)));
 }
 
+const isNamedTuple = (value: PyValue): value is PyTuple =>
+  value instanceof PyTuple && value.cls.lookup('_fields') !== undefined;
+
+function fieldsOf(tuple: PyTuple): readonly PyValue[] {
+  return (tuple.cls.lookup('_fields') as PyTuple | undefined)?.items ?? [];
+}
+
 /** Transcribes `self._make(map(kwds.pop, field_names, self))` of `_replace` and its check of the keywords left over. */
 function replaceFields(self: PyValue, kwargs: Kwargs): PyValue {
   const tuple = libraryReceiver(self, isNamedTuple, '_make', 'NamedTuple._replace');
-  const remaining = new Map(kwargs);
+  const remaining = copyKeywords(kwargs);
   // map() stops at the shorter of the fields and the tuple's iteration, which a subclass may override.
   const fields = fieldsOf(tuple);
   const items = leadingItems(tuple, fields.length).map((current, index) => {
@@ -179,7 +253,7 @@ function replaceFields(self: PyValue, kwargs: Kwargs): PyValue {
     remaining.delete(fields[index] as string);
     return value;
   });
-  const result = callValue(getAttribute(tuple.cls, '_make'), [newList(items)]);
+  const result = callValue(getAttribute(tuple, '_make'), [newList(items)]);
   if (remaining.size > 0) throw typeError(`Got unexpected field names: ${pyRepr(newList([...remaining.keys()]))}`);
   return result;
 }
@@ -198,31 +272,10 @@ function leadingItems(tuple: PyTuple, count: number): PyValue[] {
 
 /** Transcribes `_make` of collections.namedtuple, which builds the tuple without calling the class. */
 function makeNamedTuple(cls: PyClass, iterable: PyValue): PyTuple {
-  const result = namedTupleInstance(cls, toArray(iterable));
+  const result = new PyTuple(cls, toArray(iterable));
   const count = BigInt((cls.lookup('_fields') as PyTuple).items.length);
   // `len()` of the result, which a subclass's __len__ answers.
   const length = exactLength(result);
   if (length !== count) throw typeError(`Expected ${count} arguments, got ${exactLength(result)}`);
   return result;
-}
-
-/**
- * An instance of a namedtuple class or its subclass, however it is made. A subclass that does not define `__slots__`,
- * as the class namedtuple creates does, gives its instances a `__dict__`.
- */
-function namedTupleInstance(cls: PyClass, items: PyValue[]): PyTuple {
-  const tuple = new PyTuple(cls, items);
-  if (cls.mro.some((each) => !each.isBuiltin && !each.dict.has('__slots__'))) tuple.attributes = new AttributeMap();
-  return tuple;
-}
-
-function namedtupleWithMethods(args: PyValue[], kwargs: Kwargs): PyValue {
-  const cls = namedtuple(args, kwargs) as PyClass;
-  defineNamedTupleMethods(cls);
-  return cls;
-}
-
-/** A namedtuple class that a library module defines, such as `functools.CacheInfo`. */
-export function makeNamedTupleClass(name: string, fields: string[], module: string): PyClass {
-  return namedtupleWithMethods([name, newList(fields)], new Map([['module', module]])) as PyClass;
 }

@@ -2,6 +2,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { convertScalar, type Scalar, type Value } from './arith';
 import type {
+  Declaration,
   Declarator,
   Expression,
   FieldDeclaration,
@@ -12,6 +13,7 @@ import type {
 } from './ast';
 import { CRuntimeError } from './errors';
 import { decodeStringLiteral } from './literals';
+import type { Address, MetadataReader, PointerBytes, PointerRange } from './pointerBounds';
 import type { Frame, FunctionInfo, GlobalInfo, LocalInfo } from './runtime';
 import {
   alignOf,
@@ -34,8 +36,8 @@ import { unsupported } from './unsupported';
 export type Entity =
   | { kind: 'typedef'; type: CType }
   /** A variable; `constant` is the value of a const integer one with a constant initializer, which clang folds. */
-  | { kind: 'local'; local: LocalInfo; type: CType; constant?: Scalar }
-  | { kind: 'global'; global: GlobalInfo; type: CType; constant?: Scalar }
+  | { kind: 'local'; local: LocalInfo; type: CType; constant?: Scalar; constantBytes?: Uint8Array }
+  | { kind: 'global'; global: GlobalInfo; type: CType; constant?: Scalar; constantBytes?: Uint8Array }
   | { kind: 'function'; fn: FunctionInfo; type: CType }
   | { kind: 'enumConstant'; value: number; type: CType };
 
@@ -68,7 +70,12 @@ export interface Operand {
   type: CType;
   /** Computes the value, after an lvalue's conversion and the decay of arrays and functions. */
   value: (frame: Frame) => Value;
+  read?: MetadataReader;
   lvalue?: LValue;
+  bitWidth?: number;
+  constantBytes?: Uint8Array;
+  pointer?: (frame: Frame) => Address;
+  arrayObject?: boolean;
   /** The value of an arithmetic constant expression. */
   constant?: Scalar;
   /** Whether the value is an address known before the program runs, as static initializers require. */
@@ -77,13 +84,18 @@ export interface Operand {
   isCall?: boolean;
   /** Evaluates the expression for its effects only, as an expression statement does. */
   effect?: (frame: Frame) => void;
-  /** Whether the expression is a parenthesized one, which changes only some of clang's checks. */
-  isParenthesized?: boolean;
+}
+
+export interface Location {
+  load: () => Value;
+  store: (value: Value, range?: PointerRange, bytes?: PointerBytes) => void;
+  range?: () => PointerRange | undefined;
+  bytes?: () => PointerBytes | undefined;
 }
 
 export interface LValue {
-  load: (frame: Frame) => Value;
-  store: (frame: Frame, value: Value) => void;
+  location?: (frame: Frame) => Address;
+  resolve: (frame: Frame) => Location;
   /** The address of an object in memory; undefined for a variable that lives outside memory. */
   address?: (frame: Frame) => number;
   isBitField?: boolean;
@@ -124,6 +136,8 @@ export interface CompileOptions {
 
 export abstract class CompilerBase {
   protected scope = new Scope();
+  protected isUnevaluated = false;
+  private inParameter = false;
   protected fn?: FunctionContext;
   /** The lengths of variable-length arrays in the declarator being compiled, which its declaration computes. */
   protected pendingVla: ((frame: Frame) => void)[] = [];
@@ -148,6 +162,16 @@ export abstract class CompilerBase {
 
   protected get isTracing(): boolean {
     return this.options.trace !== undefined;
+  }
+
+  protected unevaluated<T>(compile: () => T): T {
+    const previous = this.isUnevaluated;
+    this.isUnevaluated = true;
+    try {
+      return compile();
+    } finally {
+      this.isUnevaluated = previous;
+    }
   }
 
   protected withScope<T>(compile: () => T): T {
@@ -235,6 +259,20 @@ export abstract class CompilerBase {
     return value;
   }
 
+  protected declareStandaloneTag(declaration: Declaration): void {
+    const { type } = declaration.specifiers;
+    if (
+      declaration.declarators.length === 0 &&
+      (type.kind === 'struct' || type.kind === 'union') &&
+      type.tag &&
+      !type.fields
+    ) {
+      const existing = this.scope.tags.get(type.tag);
+      if (!existing) this.scope.tags.set(type.tag, { kind: 'record', info: new RecordInfo(type.kind, type.tag) });
+    }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 17 -- Tag lookup and definition must share the current-scope identity; keep their resolution rules together.
   private recordInfo(specifier: Extract<TypeSpecifier, { kind: 'struct' | 'union' }>): RecordInfo {
     const { tag, fields, row, kind } = specifier;
     let info: RecordInfo | undefined;
@@ -259,6 +297,7 @@ export abstract class CompilerBase {
     return info;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 22 -- Field validation, duplicate names, and layout are one declaration pass; helpers already isolate type and width checks.
   private defineRecord(info: RecordInfo, fields: FieldDeclaration[], row: number): void {
     const members: RecordMember[] = [];
     const names = new Set<string>();
@@ -338,6 +377,8 @@ export abstract class CompilerBase {
     return bitWidth;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- Enumerator values and tag identity are resolved in declaration order; splitting the pass would distribute its state.
+  // code-gauge-allow functionNcss 32 -- Enumerator values and tag identity are resolved in declaration order; splitting the pass would distribute its state.
   private enumType(specifier: Extract<TypeSpecifier, { kind: 'enum' }>): CType {
     const { tag, enumerators, row } = specifier;
     if (tag !== undefined && !enumerators) {
@@ -372,6 +413,7 @@ export abstract class CompilerBase {
   }
 
   /** The type a declarator derives from a base type, and the name it declares. */
+  // code-gauge-allow functionCognitiveComplexity 24 -- The declarator walk applies pointer, array, and function layers in order; separate cases would only move the same branches.
   protected declaredType(base: CType, declarator: Declarator): { type: CType; name?: string; row: number } {
     let type = base;
     let current = declarator;
@@ -495,7 +537,15 @@ export abstract class CompilerBase {
     if (param.specifiers.storage && param.specifiers.storage !== 'register') {
       this.error(param.row, '引数に記憶域の指定（static など）は書けません。');
     }
-    const { type, name } = this.withScope(() => this.declaredType(this.baseType(param.specifiers), param.declarator));
+    const previous = this.inParameter;
+    this.inParameter = true;
+    let declared: ReturnType<CompilerBase['declaredType']>;
+    try {
+      declared = this.withScope(() => this.declaredType(this.baseType(param.specifiers), param.declarator));
+    } finally {
+      this.inParameter = previous;
+    }
+    const { type, name } = declared;
     if (type.kind === 'void') this.error(param.row, '引数の型に void は使えません。');
     if (type.kind === 'array')
       return { type: withQualifiers({ kind: 'pointer', to: type.of }, false, false), ...(name ? { name } : {}) };

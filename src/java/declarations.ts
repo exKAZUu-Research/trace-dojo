@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 408 -- One checker of the declarations of a compilation unit, whose rules share its class tables.
 import type {
   ClassDeclaration,
   CompilationUnit,
@@ -7,8 +8,8 @@ import type {
   Modifiers,
   TypeSyntax,
 } from './ast';
-import { functionalMethodOf } from './builtinFunctions';
 import { sameParameters, superclassesOf } from './compilerBase';
+import { functionalMethodOf } from './functionalInterfaces';
 import { LambdaCompiler } from './lambdaCompiler';
 import { findImplementation, throwBuiltin } from './runtime';
 import {

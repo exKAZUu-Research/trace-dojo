@@ -7,6 +7,16 @@ import type { RecordValue, Scalar, Value } from './arith';
 import { CRuntimeError } from './errors';
 import { ByteStream } from './library/support';
 import { type Allocation, Memory } from './memory';
+import {
+  type Evaluated,
+  narrowByteProvenance,
+  type PointerBytes,
+  pointerBytesOf,
+  type PointerRange,
+  replacePointerBytes,
+  slicePointerBytes,
+  storedPointerBytes,
+} from './pointerBounds';
 import { type CType, type FunctionType, sizeOf } from './types';
 
 /** A block-scope variable of a function, in the order the function declares it. */
@@ -27,6 +37,8 @@ export interface LocalInfo {
 }
 
 export interface GlobalInfo {
+  header?: string;
+  referencedAt?: number;
   index: number;
   name: string;
   type: CType;
@@ -82,9 +94,15 @@ export class Frame implements TracedFrame {
   readonly slots: (Scalar | undefined)[];
   /** The addresses of the function's variables that live in memory, by local index. */
   readonly bases: number[] = [];
-  readonly blocks: Allocation[] = [];
+  readonly blocks = new Map<number, Allocation>();
   /** Which variables are in scope, by local index, for the trace. */
   readonly live: boolean[] = [];
+  visibleLocals?: readonly LocalInfo[];
+  finalVisibleLocals?: readonly LocalInfo[];
+  readonly scalarBytes = new Map<number, PointerBytes>();
+  readonly scalarRanges = new Map<number, PointerRange>();
+  returnRange?: PointerRange;
+  returnBytes?: PointerBytes;
   returnValue: Value | undefined;
   /** The label a `goto` jumps to, while its completion travels to the statement holding the label. */
   gotoLabel = -1;
@@ -100,9 +118,51 @@ export class Frame implements TracedFrame {
   ) {
     this.slots = Array.from({ length: fn.slotCount });
   }
+  assign(index: number, result: Evaluated | undefined): void {
+    const type = this.fn.locals[index]?.type;
+    if (type?.kind === 'int' && (result?.range || result?.bytes?.size)) this.runtime.hasIntegerProvenance = true;
+    this.slots[index] = result?.value as Scalar | undefined;
+    if (result?.range) this.scalarRanges.set(index, result.range);
+    else this.scalarRanges.delete(index);
+    const bytes =
+      result?.range && type && sizeOf(type) === 8
+        ? type.kind === 'pointer'
+          ? pointerBytesOf(result.range, result.value as Scalar)
+          : storedPointerBytes(result.range, result.value as Scalar, result.bytes, this.runtime.budget)
+        : type?.kind === 'int' && sizeOf(type) === 1 && result
+          ? narrowByteProvenance(result.bytes, result.value as Scalar, this.runtime.budget)
+          : result?.bytes;
+    if (bytes) this.scalarBytes.set(index, bytes);
+    else this.scalarBytes.delete(index);
+  }
+
+  enterScope(locals: readonly LocalInfo[]): void {
+    for (const local of locals) {
+      if (!local.inMemory || local.staticGlobal || local.isVla) continue;
+      const block = this.runtime.allocate(local.size, 'stack');
+      block.type = local.type;
+      block.name = local.name;
+      this.bases[local.index] = block.base;
+      this.blocks.set(local.index, block);
+    }
+  }
+
+  exitScope(locals: readonly LocalInfo[]): void {
+    for (const local of locals) {
+      const index = local.index;
+      this.live[index] = false;
+      this.assign(index, undefined);
+      const block = this.blocks.get(index);
+      if (block) {
+        this.runtime.memory.release(block);
+        this.blocks.delete(index);
+      }
+    }
+  }
 }
 
 export class Runtime implements TracedRuntime<Frame> {
+  hasIntegerProvenance = false;
   readonly world = new TurtleWorld();
   readonly budget = new ExecutionBudget();
   readonly steps = new StepTracker();
@@ -120,13 +180,27 @@ export class Runtime implements TracedRuntime<Frame> {
   private readonly writers: Record<'stdout' | 'stderr', ByteStream>;
   /** The functions by address. */
   readonly functions = new Map<number, FunctionInfo>();
+  returnRange?: PointerRange;
+  returnBytes?: PointerBytes;
   randomState = 1;
   /** Where `strtok` continues when called with NULL. */
   tokenizerPosition = 0;
   readonly exitHandlers: number[] = [];
   /** The static struct tm and string of time.h's functions, created when first used. */
   readonly timeBuffers: { tm?: Allocation; text?: Allocation } = {};
-  errno = 0;
+  private fallbackErrno = 0;
+
+  get errno(): number {
+    return this.errnoAddress === undefined
+      ? this.fallbackErrno
+      : (loaderOf({ kind: 'int', name: 'int' })(this, this.errnoAddress) as number);
+  }
+
+  set errno(value: number) {
+    this.fallbackErrno = value;
+    if (this.errnoAddress !== undefined) storerOf({ kind: 'int', name: 'int' })(this, this.errnoAddress, value);
+  }
+  private readonly temporaryScopes: Allocation[][] = [];
   private allocatedSlots = 0;
 
   constructor(input?: ProgramInput) {
@@ -165,6 +239,28 @@ export class Runtime implements TracedRuntime<Frame> {
     return this.memory.allocate(size, region);
   }
 
+  fullExpression<T>(run: () => T): T {
+    const temporaries: Allocation[] = [];
+    this.temporaryScopes.push(temporaries);
+    try {
+      return run();
+    } finally {
+      this.temporaryScopes.pop();
+      for (const block of temporaries) this.memory.release(block);
+    }
+  }
+
+  materialize(value: RecordValue, type: CType): Allocation {
+    const temporaries = this.temporaryScopes.at(-1);
+    if (!temporaries) throw new Error('A record temporary requires a full-expression lifetime');
+    const block = this.allocate(value.bytes.length, 'stack');
+    block.type = type;
+    storeRecord(this, block.base, value);
+    block.isReadOnly = true;
+    temporaries.push(block);
+    return block;
+  }
+
   /** The block of a string literal, which identical literals share, as clang merges them. */
   stringLiteral(bytes: Uint8Array): Allocation {
     const key = String.fromCodePoint(...bytes);
@@ -172,7 +268,7 @@ export class Runtime implements TracedRuntime<Frame> {
     if (!block) {
       block = this.allocate(bytes.length, 'data');
       block.bytes.set(bytes);
-      block.initialized.fill(1);
+      block.initialized.fill(255);
       block.isReadOnly = true;
       this.strings.set(key, block);
     }
@@ -184,29 +280,31 @@ export class Runtime implements TracedRuntime<Frame> {
    *
    * @param onReturn Receives the callee's frame when it returns, while the frame still holds its variables.
    */
+  // code-gauge-allow functionNcss 31 -- Call setup and cleanup share the frame and argument metadata.
   call(
     fn: FunctionInfo,
     args: Value[],
     argTypes: CType[],
     callRow: number | undefined,
-    onReturn?: (frame: Frame) => void
+    onReturn?: (frame: Frame) => void,
+    argMetadata: Pick<Evaluated, 'range' | 'bytes'>[] = []
   ): Value | undefined {
     this.spend();
-    if (fn.native) return fn.native(this, args, argTypes, callRow ?? 0);
+    if (fn.native) {
+      const result = fn.native(this, args, argTypes, callRow ?? 0);
+      this.returnRange =
+        fn.type.ret.kind === 'pointer' && typeof result === 'number'
+          ? argMetadata.map((item) => item.range).find((range) => range && result >= range.start && result <= range.end)
+          : undefined;
+      this.returnBytes = undefined;
+      return result;
+    }
     if (!fn.body) throw new CRuntimeError('custom', `関数「${fn.name}」が定義されていません。`);
     if (this.frames.length >= LIMITS.maxCallDepth) throw new CRuntimeError('stackOverflow');
     const frame = new Frame(this, fn, callRow);
-    for (const local of fn.locals) {
-      // A variable-length array gets its block when its declaration runs and its length is known.
-      if (!local.inMemory || local.staticGlobal || local.isVla) continue;
-      const block = this.allocate(local.size, 'stack');
-      block.type = local.type;
-      block.name = local.name;
-      frame.bases[local.index] = block.base;
-      frame.blocks.push(block);
-    }
+    frame.enterScope(fn.params);
     for (const [index, param] of fn.params.entries()) {
-      bindParameter(frame, param, args[index]);
+      bindParameter(frame, param, args[index], argMetadata[index]);
     }
     if (fn.type.variadic)
       frame.varargs = this.storeVarargs(frame, args.slice(fn.params.length), argTypes.slice(fn.params.length));
@@ -216,10 +314,12 @@ export class Runtime implements TracedRuntime<Frame> {
       onReturn?.(frame);
     } finally {
       this.frames.pop();
-      for (const block of frame.blocks) this.memory.release(block);
+      for (const block of frame.blocks.values()) this.memory.release(block);
       if (frame.varargs !== 0) this.varargTypes.delete(frame.varargs);
     }
     if (fn.isAtomic) this.steps.completeAtomicCall();
+    this.returnRange = frame.returnRange;
+    this.returnBytes = frame.returnBytes;
     return frame.returnValue;
   }
 
@@ -234,7 +334,7 @@ export class Runtime implements TracedRuntime<Frame> {
       for (let extra = 8; extra < sizeOf(type); extra += 8) slots.push(type);
     }
     const block = this.allocate(Math.max(slots.length * 8, 8), 'stack');
-    frame.blocks.push(block);
+    frame.blocks.set(-1, block);
     let offset = 0;
     for (const [index, type] of types.entries()) {
       storeValue(this, block.base + offset, type, values[index]);
@@ -248,6 +348,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly varargTypes = new Map<number, CType[]>();
 
   /** Removes the turtles that no variable, nor any block a variable reaches, points to any longer. */
+  // code-gauge-allow functionCognitiveComplexity 22 -- Root discovery and the reachability worklist share allocation identities; retain the single traversal.
   collectGarbage(): void {
     if (!this.world.hasTurtles) return;
     const reached = new Set<Allocation>();
@@ -276,29 +377,56 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 }
 
-function bindParameter(frame: Frame, param: LocalInfo, value: Value | undefined): void {
+function bindParameter(
+  frame: Frame,
+  param: LocalInfo,
+  value: Value | undefined,
+  metadata?: Pick<Evaluated, 'range' | 'bytes'>
+): void {
   frame.live[param.index] = true;
   if (!param.inMemory) {
-    frame.slots[param.index] = value as Scalar | undefined;
+    frame.assign(param.index, value === undefined ? undefined : { value, ...metadata });
     return;
   }
-  storeValue(frame.runtime, frame.bases[param.index], param.type, value);
+  storeValue(frame.runtime, frame.bases[param.index], param.type, value, metadata?.range, metadata?.bytes);
 }
 
 /** Stores a value of any complete type at an address, which the caller has already converted to the type. */
-export function storeValue(runtime: Runtime, address: number, type: CType, value: Value | undefined): void {
+export function storeValue(
+  runtime: Runtime,
+  address: number,
+  type: CType,
+  value: Value | undefined,
+  range?: PointerRange,
+  bytes?: PointerBytes
+): void {
   if (value === undefined) return;
   if (typeof value === 'object') {
     storeRecord(runtime, address, value);
     return;
   }
   storerOf(type)(runtime, address, value);
+  const metadata =
+    range && sizeOf(type) === 8
+      ? type.kind === 'pointer'
+        ? pointerBytesOf(range, value)
+        : storedPointerBytes(range, value, bytes, runtime.budget)
+      : type.kind === 'int' && sizeOf(type) === 1
+        ? narrowByteProvenance(bytes, value, runtime.budget)
+        : bytes;
+  if (metadata) {
+    if (type.kind === 'int') runtime.hasIntegerProvenance = true;
+    const size = sizeOf(type);
+    const block = runtime.memory.locate(address, size);
+    replacePointerBytes(block.pointerBytes, address - block.base, size, metadata);
+  }
 }
 
 export function storeRecord(runtime: Runtime, address: number, value: RecordValue): void {
   const block = runtime.memory.locate(address, value.bytes.length);
   if (block.isReadOnly) throw new CRuntimeError('readOnly');
   const offset = address - block.base;
+  replacePointerBytes(block.pointerBytes, offset, value.bytes.length, value.pointerBytes);
   block.bytes.set(value.bytes, offset);
   block.initialized.set(value.initialized, offset);
 }
@@ -307,6 +435,7 @@ export function loadRecord(runtime: Runtime, address: number, size: number): Rec
   const block = runtime.memory.locate(address, size);
   const offset = address - block.base;
   return {
+    pointerBytes: slicePointerBytes(block.pointerBytes, offset, size),
     bytes: block.bytes.slice(offset, offset + size),
     initialized: block.initialized.slice(offset, offset + size),
   };
@@ -318,7 +447,7 @@ type Storer = (runtime: Runtime, address: number, value: Scalar) => void;
 function checkInitialized(block: Allocation, offset: number, size: number): void {
   const flags = block.initialized;
   for (let index = offset; index < offset + size; index++) {
-    if (flags[index] === 0) throw new CRuntimeError('uninitialized');
+    if (flags[index] !== 255) throw new CRuntimeError('uninitialized');
   }
 }
 
@@ -336,8 +465,9 @@ function write(size: number, set: (view: DataView, offset: number, value: Scalar
     const block = runtime.memory.locate(address, size);
     if (block.isReadOnly) throw new CRuntimeError('readOnly');
     const offset = address - block.base;
+    replacePointerBytes(block.pointerBytes, offset, size);
     set(block.view, offset, value);
-    block.initialized.fill(1, offset, offset + size);
+    block.initialized.fill(255, offset, offset + size);
   };
 }
 

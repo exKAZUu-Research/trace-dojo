@@ -1,0 +1,434 @@
+import type { Module, ScopeInfo } from './ast';
+import {
+  type CodeNames,
+  comprehensionsByScope,
+  functionCodeNames,
+  generatorCodeNames,
+  moduleCodeNames,
+} from './codeNames';
+import { addressOf } from './conversions';
+import { method, unsupportedMethod, unsupportedSizeof } from './define';
+import type { Frame } from './frame';
+import { identityHash, pyHash } from './hashing';
+import { defineProperty } from './modules/numberSupport';
+import { namespaceDict } from './namespaces';
+import { callValue, getAttribute } from './objects';
+import { firstRowOf } from './programSource';
+import { cpythonFrames } from './reflection';
+import { currentRuntime } from './runtimeContext';
+import { builtinClass, newDict, newTuple, None, NotImplemented, pyError, stringValue, typeError } from './types';
+import { UnsupportedFeatureError } from './unsupported';
+import {
+  type ExceptionState,
+  PyError,
+  type PyFunction,
+  PyGenerator,
+  PyModule,
+  PyObject,
+  PyOpaque,
+  type PyValue,
+} from './values';
+
+// Traceback, frame, and code objects. An exception's traceback grows as it leaves each frame, as CPython adds an entry
+// for every frame it passes through: the frame it was raised in, each caller with the row of its call, up to the frame
+// that catches it.
+
+export const tracebackClass = builtinClass('traceback');
+export const frameClass = builtinClass('frame');
+export const codeClass = builtinClass('code');
+
+export class PyTraceback extends PyObject {
+  constructor(
+    readonly frame: Frame,
+    readonly row: number,
+    public next: PyValue
+  ) {
+    super(tracebackClass);
+  }
+}
+
+/** The caller of each frame an exception left, and the row each frame stopped at, which its frame object reports. */
+const callers = new WeakMap<Frame, Frame | undefined>();
+const finishedRows = new WeakMap<Frame, number>();
+
+/** Adds an entry for `frame` at `row` in front of an exception's traceback, as raising it there does. */
+export function prependTraceback(state: ExceptionState, frame: Frame, row: number | undefined): void {
+  currentRuntime().finalizer.locals.retainFrame(frame);
+  const head = state.traceback;
+  state.traceback = new PyTraceback(frame, row ?? 0, head ?? None);
+}
+
+function headFrame(state: ExceptionState): Frame | undefined {
+  return state.traceback instanceof PyTraceback ? state.traceback.frame : undefined;
+}
+
+/**
+ * Records that an exception leaves the innermost frame of the stack: the frame where it was raised, if it has no entry
+ * yet, and the caller at the row of the call. Runs before the frame is taken off the stack.
+ */
+export function noteUnwinding(error: unknown): void {
+  if (!(error instanceof PyError)) return;
+  const state = error.exception.exception;
+  if (!state) return;
+  const runtime = currentRuntime();
+  const frames = cpythonFrames(runtime.frames);
+  const frame = frames.at(-1);
+  if (!frame) return;
+  if (headFrame(state) !== frame) prependTraceback(state, frame, runtime.currentRow);
+  finishedRows.set(frame, (state.traceback as PyTraceback).row);
+  const caller = frames.at(-2);
+  callers.set(frame, caller);
+  if (caller) prependTraceback(state, caller, frame.callRow ?? frame.resumeRow ?? runtime.currentRow);
+}
+
+/** Records the entry of the frame that catches an exception raised in it, as the traceback it handles shows. */
+export function noteCaught(error: PyError, frame: Frame): void {
+  const state = error.exception.exception;
+  if (state && headFrame(state) !== frame) prependTraceback(state, frame, currentRuntime().currentRow);
+}
+
+// Traceback objects -------------------------------------------------------------------------------------------------
+
+method(tracebackClass, '__dir__', 'none', 0, 0, () =>
+  currentRuntime().listOf(['tb_frame', 'tb_next', 'tb_lasti', 'tb_lineno'])
+);
+defineProperty(tracebackClass, 'tb_frame', (self) => frameObject((self as PyTraceback).frame));
+defineProperty(tracebackClass, 'tb_lineno', (self) => BigInt((self as PyTraceback).row + 1));
+defineProperty(tracebackClass, 'tb_next', (self) => (self as PyTraceback).next);
+defineProperty(tracebackClass, 'tb_lasti', () => {
+  throw new UnsupportedFeatureError('バイトコードの位置（tb_lasti）');
+});
+
+// Frame objects -----------------------------------------------------------------------------------------------------
+
+const frameObjects = new WeakMap<Frame, PyOpaque>();
+
+/** The frame object of a frame, the same each time, as CPython keeps one per running frame. */
+export function frameObject(frame: Frame): PyOpaque {
+  // The program can now read the frames' variables as objects.
+  currentRuntime().finalizer.locals.expose();
+  currentRuntime().finalizer.locals.retainFrame(frame);
+  let object = frameObjects.get(frame);
+  if (!object) {
+    object = new PyOpaque(frameClass, '', frame);
+    frameObjects.set(frame, object);
+  }
+  return object;
+}
+
+const frameOf = (self: PyValue): Frame => (self as PyOpaque).data as Frame;
+
+const frameGenerators = new WeakMap<Frame, PyValue>();
+
+/** Records the generator, coroutine, or async generator whose frame `frame` is, which `f_generator` gives. */
+export function setFrameGenerator(frame: Frame, generator: PyValue): void {
+  frameGenerators.set(frame, generator);
+}
+
+/** The execution state, namespace, function metadata and exposed caller a live frame owns. */
+export function frameReferences(frame: Frame): unknown[] {
+  return [
+    ...frame.localValues(),
+    namespaceDict(frame.globals),
+    frame.annotations,
+    frame.fn,
+    frame.classCell,
+    frame.builtins,
+    frame.inlinedIn,
+    callers.get(frame),
+  ];
+}
+
+/** The frame object `depth` frames below the innermost one, as `sys._getframe(depth)` gives it. */
+export function stackFrame(depth: number): PyValue | undefined {
+  const frames = cpythonFrames(currentRuntime().frames);
+  const frame = frames.at(-1 - depth);
+  if (!frame) return undefined;
+  for (let index = frames.length - 1 - depth; index >= 0; index--) callers.set(frames[index], frames[index - 1]);
+  return frameObject(frame);
+}
+
+/** The row a frame runs: the current one while it is on the stack, or the one it stopped at. */
+function frameRow(frame: Frame): number {
+  const running = currentRuntime()
+    .allFrames()
+    .find((each) => each.frame === frame);
+  return running?.row ?? finishedRows.get(frame) ?? 0;
+}
+
+method(frameClass, '__repr__', 'none', 0, 0, () => {
+  throw new UnsupportedFeatureError('フレームオブジェクトの表示（スクリプトのファイルのパスを含む）');
+});
+defineProperty(frameClass, 'f_lineno', (self) => BigInt(frameRow(frameOf(self)) + 1));
+defineProperty(frameClass, 'f_code', (self) => codeObject(frameOf(self)));
+defineProperty(frameClass, 'f_globals', (self) => namespaceDict(frameOf(self).globals));
+defineProperty(frameClass, 'f_builtins', (self) => {
+  const builtins = frameOf(self).builtins;
+  if (builtins === undefined) return namespaceDict(currentRuntime().builtins);
+  return builtins instanceof PyModule ? namespaceDict(builtins.dict) : builtins;
+});
+defineProperty(frameClass, 'f_locals', (self) => frameLocals(frameOf(self)));
+defineProperty(frameClass, 'f_back', (self) => {
+  const frame = frameOf(self);
+  const frames = cpythonFrames(currentRuntime().frames);
+  const index = frames.indexOf(frame);
+  const caller = index === -1 ? callers.get(frame) : frames[index - 1];
+  return caller ? frameObject(caller) : None;
+});
+method(frameClass, 'clear', 'none', 0, 0, (self) => {
+  const frame = frameOf(self);
+  const generator = frameGenerators.get(frame);
+  const executing = currentRuntime()
+    .allFrames()
+    .some((each) => each.frame === frame);
+  if (executing || (generator instanceof PyGenerator && generator.running)) {
+    throw pyError('RuntimeError', 'cannot clear an executing frame');
+  }
+  if (generator instanceof PyGenerator && !generator.finished) {
+    if (generator.started) throw pyError('RuntimeError', 'cannot clear a suspended frame');
+    callValue(getAttribute(generator, 'close'), []);
+  }
+  // A module's or a class body's frame shares its namespace, which clearing the frame leaves.
+  if (frame.kind === 'function' || frame.kind === 'comprehension') {
+    currentRuntime().finalizer.release(frame.clearLocals());
+  }
+  return None;
+});
+defineProperty(frameClass, 'f_generator', (self) => {
+  const generator = frameGenerators.get(frameOf(self));
+  return generator instanceof PyGenerator && !generator.finished ? generator : None;
+});
+defineProperty(frameClass, 'f_trace', () => None);
+defineProperty(frameClass, 'f_trace_lines', () => true);
+defineProperty(frameClass, 'f_trace_opcodes', () => false);
+defineProperty(frameClass, 'f_lasti', () => {
+  throw new UnsupportedFeatureError('バイトコードの位置（f_lasti）');
+});
+
+/** `frame.f_locals`: a module's or class body's namespace, or a snapshot of a function's variables. */
+function frameLocals(frame: Frame): PyValue {
+  if (frame.kind === 'module' || frame.kind === 'class') return namespaceDict(frame.locals);
+  const variables = new Map<PyValue, PyValue>();
+  for (const [name, value] of frame.locals) variables.set(name, value);
+  for (const [name, cell] of frame.cells) if (cell.value !== undefined) variables.set(name, cell.value);
+  return newDict(variables.entries());
+}
+
+// Code objects ------------------------------------------------------------------------------------------------------
+
+/** What a code object describes: the function it compiles, the module or class body it runs, or compiled source. */
+export interface CodeInfo {
+  name: string;
+  qualifiedName: string;
+  firstRow: number;
+  fn?: PyFunction;
+  /** The file name compile() was given, which code from the program's own file does not reveal. */
+  filename?: PyValue;
+  /** What compile() compiled, which exec() and eval() run. */
+  compiled?: unknown;
+  /** The scope of the code, which tells whether the code is the program's own. */
+  scope?: object;
+  /** The `co_flags` of module code compile() created, which hold only the flags of its `__future__` features. */
+  futureFlags?: bigint;
+}
+
+const codeObjects = new WeakMap<object, PyOpaque>();
+
+export function hasCode(scope: object): boolean {
+  return codeObjects.has(scope);
+}
+
+/** Makes `code` the code object of the frames that run `scope`, as compile() returns it for the code it compiles. */
+export function registerCode(scope: object, code: PyOpaque): void {
+  codeObjects.set(scope, code);
+}
+
+/** The code object of a frame's code: its function's, or one of a module or a class body. */
+export function codeObject(frame: Frame): PyOpaque {
+  if (frame.fn) return functionCode(frame.fn);
+  let code = codeObjects.get(frame.scope);
+  if (!code) {
+    const qualifiedName = frame.locals.get('__qualname__');
+    const name = frame.kind === 'class' && typeof qualifiedName === 'string' ? qualifiedName : '<module>';
+    const info: CodeInfo = {
+      name: name.split('.').at(-1) ?? name,
+      qualifiedName: name,
+      firstRow: Number(frame.locals.get('__firstlineno__') ?? 1n) - 1,
+      scope: frame.scope,
+    };
+    code = new PyOpaque(codeClass, '', info);
+    codeObjects.set(frame.scope, code);
+  }
+  return code;
+}
+
+/** `function.__code__`, the same for every function a definition creates. */
+export function functionCode(fn: PyFunction): PyOpaque {
+  let code = codeObjects.get(fn.def);
+  if (!code) {
+    const info: CodeInfo = {
+      name: fn.def.name,
+      qualifiedName: fn.def.qualifiedName,
+      firstRow: firstRowOf(fn.def),
+      fn,
+      scope: fn.def.scope,
+    };
+    code = new PyOpaque(codeClass, '', info);
+    codeObjects.set(fn.def, code);
+  }
+  return code;
+}
+
+export const infoOf = (self: PyValue): CodeInfo => (self as PyOpaque).data as CodeInfo;
+
+/**
+ * Whether two code objects are equal, as CPython compares their names, flags, bytecode, constants, and position
+ * tables: code compiled from the same source in the same mode is, and so is a definition's code with itself.
+ */
+function sameCode(a: CodeInfo, b: CodeInfo): boolean {
+  if (a === b) return true;
+  const [sourceA, sourceB] = [compiledSource(a), compiledSource(b)];
+  if (sourceA !== undefined || sourceB !== undefined) return sourceA === sourceB && a.futureFlags === b.futureFlags;
+  if (a.name === b.name && a.qualifiedName === b.qualifiedName && a.firstRow === b.firstRow) {
+    // Code of two definitions in two compilations of the same source, which CPython's bytecode may tell apart or not.
+    throw new UnsupportedFeatureError(
+      '同じ行の同じ名前の別々の定義のコードオブジェクトの比較（CPython はバイトコードと位置の表で比べる）'
+    );
+  }
+  return false;
+}
+
+/** The mode and compiled AST of code compile() created, which decide its contents, or undefined for other code. */
+function compiledSource(info: CodeInfo): string | undefined {
+  const compiled = info.compiled as { module: Module; mode: string } | undefined;
+  if (compiled?.module.source === undefined) return undefined;
+  return JSON.stringify([compiled.mode, compiled.module.doc, compiled.module.body], (_key, value: unknown) => {
+    if (typeof value === 'bigint') return { $bigint: String(value) };
+    if (value instanceof Uint8Array) return { $bytes: [...value] };
+    return value;
+  });
+}
+
+function parameterCount(self: PyValue, kinds: string[]): bigint {
+  const { fn, scope } = infoOf(self);
+  // A generator expression's code takes the iterator of its first iterable as its one positional parameter.
+  if (!fn && scope && comprehensionsByScope.has(scope as ScopeInfo)) return kinds.includes('positional') ? 1n : 0n;
+  return BigInt(fn ? fn.def.params.filter((param) => kinds.includes(param.kind)).length : 0);
+}
+
+unsupportedSizeof(frameClass);
+unsupportedSizeof(codeClass);
+// CPython's bytecode, which this grader does not compile to.
+unsupportedMethod(codeClass, 'co_branches', 'コードオブジェクトのバイトコード（co_branches）');
+method(codeClass, '_varname_from_oparg', 'one', 1, 1, () => {
+  throw new UnsupportedFeatureError('コードオブジェクトのバイトコード（_varname_from_oparg）');
+});
+method(codeClass, '__eq__', 'one', 1, 1, (self, [other]) => {
+  if (!(other instanceof PyOpaque) || other.cls !== codeClass) return NotImplemented;
+  return sameCode(infoOf(self), infoOf(other));
+});
+method(codeClass, '__ne__', 'one', 1, 1, (self, [other]) => {
+  if (!(other instanceof PyOpaque) || other.cls !== codeClass) return NotImplemented;
+  return !sameCode(infoOf(self), infoOf(other));
+});
+method(codeClass, '__hash__', 'none', 0, 0, (self) => {
+  const compiled = compiledSource(infoOf(self));
+  return compiled === undefined ? identityHash(self as PyObject) : pyHash(compiled);
+});
+method(codeClass, '__repr__', 'none', 0, 0, (self) => {
+  const { name, filename, firstRow } = infoOf(self);
+  if (filename === undefined) {
+    throw new UnsupportedFeatureError('コードオブジェクトの表示（スクリプトのファイルのパスを含む）');
+  }
+  return `<code object ${name} at ${addressOf(self as PyOpaque)}, file "${stringValue(filename)}", line ${firstRow + 1}>`;
+});
+defineProperty(codeClass, 'co_name', (self) => infoOf(self).name);
+defineProperty(codeClass, 'co_qualname', (self) => infoOf(self).qualifiedName);
+defineProperty(codeClass, 'co_firstlineno', (self) => BigInt(infoOf(self).firstRow + 1));
+defineProperty(codeClass, 'co_argcount', (self) => parameterCount(self, ['positionalOnly', 'positional']));
+defineProperty(codeClass, 'co_posonlyargcount', (self) => parameterCount(self, ['positionalOnly']));
+defineProperty(codeClass, 'co_kwonlyargcount', (self) => parameterCount(self, ['keywordOnly']));
+defineProperty(codeClass, 'co_filename', (self) => {
+  const { filename } = infoOf(self);
+  if (filename === undefined) throw new UnsupportedFeatureError('スクリプトのファイルのパス（co_filename）');
+  return filename;
+});
+defineProperty(codeClass, 'co_flags', (self) => {
+  const { futureFlags } = infoOf(self);
+  if (futureFlags === undefined) throw new UnsupportedFeatureError('CPython のバイトコードの情報（co_flags）');
+  return futureFlags;
+});
+defineProperty(codeClass, 'co_cellvars', (self) => newTuple(cellNames(infoOf(self).fn)));
+defineProperty(codeClass, 'co_freevars', (self) => newTuple(freeNames(infoOf(self).fn)));
+defineProperty(codeClass, 'co_varnames', (self) => newTuple(namesOf(self, 'co_varnames').varnames));
+defineProperty(codeClass, 'co_nlocals', (self) => BigInt(namesOf(self, 'co_nlocals').varnames.length));
+defineProperty(codeClass, 'co_names', (self) => newTuple(namesOf(self, 'co_names').names));
+
+const codeNamesCache = new WeakMap<object, CodeNames>();
+
+/** The names of a function's code, or of the module code compile() made, as CPython's compiler emits them. */
+function namesOf(self: PyValue, attribute: string): CodeNames {
+  const { fn, compiled, scope } = infoOf(self);
+  const generator = scope && comprehensionsByScope.get(scope as ScopeInfo);
+  if (generator) return generatorCodeNames(generator);
+  const source = fn?.def ?? (compiled as { module?: Module } | undefined)?.module;
+  if (!source) {
+    throw new UnsupportedFeatureError(`compile() で作ったもの以外のモジュールやクラスの本体のコードの ${attribute}`);
+  }
+  let names = codeNamesCache.get(source);
+  if (!names) {
+    names = 'params' in source ? functionCodeNames(source) : moduleCodeNames(source);
+    codeNamesCache.set(source, names);
+  }
+  return names;
+}
+
+// The bytecode, its offsets, and the tables over them, which also `replace()` would rebuild.
+for (const name of [
+  'co_code',
+  'co_consts',
+  'co_stacksize',
+  'co_lines',
+  'co_positions',
+  'co_linetable',
+  'co_exceptiontable',
+  'co_lnotab',
+  'replace',
+  '__replace__',
+]) {
+  defineProperty(codeClass, name, () => {
+    throw new UnsupportedFeatureError(`CPython のバイトコードの情報（${name}）`);
+  });
+}
+
+/** A function's variables that nested functions capture: its parameters in their order, then the others sorted. */
+function cellNames(fn: PyFunction | undefined): string[] {
+  if (!fn) return [];
+  const { scope, params } = fn.def;
+  // A variable only a comprehension CPython inlines reads stays a fast local.
+  const { captured } = functionCodeNames(fn.def);
+  const own = new Set([...scope.locals, ...params.map((param) => param.name), ...(scope.inlinedCells ?? [])]);
+  const cells = new Set(
+    [...scope.cells, ...(scope.inlinedCells ?? []), ...captured].filter((name) => captured.has(name) && own.has(name))
+  );
+  const parameters = params.map((param) => param.name).filter((name) => cells.has(name));
+  return [...parameters, ...[...cells].filter((name) => !parameters.includes(name)).toSorted()];
+}
+
+/** The variables a function reads from the functions enclosing it, sorted, with the class cell `super()` reads. */
+function freeNames(fn: PyFunction | undefined): string[] {
+  if (!fn) return [];
+  const { scope, usesClassCell, className } = fn.def;
+  // A compiler-made `__annotate__` has the free variables of its closure, which its shared definition does not list.
+  const frees = new Set([...scope.frees, ...fn.closure.keys()]);
+  if (usesClassCell && className !== undefined) frees.add('__class__');
+  return [...frees].toSorted();
+}
+
+// Exceptions --------------------------------------------------------------------------------------------------------
+
+/** `exception.__traceback__ = value` and `with_traceback(value)`. */
+export function setTraceback(state: ExceptionState, value: PyValue): void {
+  if (value !== None && !(value instanceof PyTraceback)) throw typeError('__traceback__ must be a traceback or None');
+  state.traceback = value;
+}

@@ -1,3 +1,4 @@
+import { LIMITS } from '../interpreter/limits';
 import { Awaiting, type BodyResult, type Resume, type Steps, type Suspension } from './generators';
 import { DONE, type ValueIterator } from './iteration';
 import type { RealmBuilder } from './realm';
@@ -30,31 +31,69 @@ export interface Job {
 
 interface Timer extends Job {
   id: number;
-  time: number;
-  /** The period of a `setInterval` timer, which runs again after each run until it is cleared. */
-  interval?: number;
+  /** The clock's whole milliseconds when the timer was scheduled, which with its list's delay gives when it is due. */
+  start: number;
+  /** Whether a `setInterval` timer runs again after each run until it is cleared. */
+  repeats: boolean;
+}
+
+/** Node.js's list of the timers of one delay, which run in the order they were scheduled. */
+interface TimerList {
+  delay: number;
+  timers: Timer[];
+  /** When the list's first timer is due, by which the lists run. */
+  expiry: number;
+  /** Orders lists due at the same time, as their creation or last reschedule does. */
+  order: number;
 }
 
 /**
+ * How a read of the clock moves it forward. Once a run has spent POLLING_OPERATIONS, a read moves it by the operations
+ * spent since the previous read at OPERATIONS_PER_MILLISECOND, so that a busy wait, whatever its body costs, reaches a
+ * deadline as long as the time limit within the budget. Before that, a read, such as a timestamp of a loop's rounds,
+ * moves it by CLOCK_STEP alone: the interpreter's operations are far slower than Node.js's, where such computation takes
+ * next to no time, and a timestamp after it must not push timers scheduled after it past earlier ones. Telling a busy
+ * wait from timed computation by how its loop is written kept missing ways a busy wait ends.
+ */
+const POLLING_OPERATIONS = LIMITS.maxOperations / 4;
+const OPERATIONS_PER_MILLISECOND = LIMITS.maxOperations / (LIMITS.maxMilliseconds * 5);
+const CLOCK_STEP = 10 / OPERATIONS_PER_MILLISECOND;
+
+/**
  * The event loop of one run: the microtasks promises queue and the timers `setTimeout` schedules, which run after the
- * program's statements in Node.js's order on a simulated clock, so a program never waits for real time.
+ * program's statements on a simulated clock, so a program never waits for real time. Timers run as Node.js's
+ * lib/internal/timers.js runs them: one list per delay, the lists in the order they fall due, and each list's due timers
+ * in the order they were scheduled. The clock jumps to the first list due when the loop would wait and otherwise
+ * advances only when the program reads it, as the constants above say.
  */
 export class EventLoop {
   private readonly microtasks: Job[] = [];
-  private readonly timers: Timer[] = [];
+  private readonly lists = new Map<number, TimerList>();
+  private nextListOrder = 0;
   /** The jobs running now, innermost last. */
   private readonly running: Job[] = [];
   private readonly rejections = new Set<JsObject>();
+  /** The milliseconds the simulated clock has advanced since the program started, in fractions of a millisecond. */
   private now = 0;
+  /** The operations spent when the clock last moved, by a read or a jump to a timer. */
+  private spentAtNow = 0;
   /** The timer whose callback is running, which clearing stops from running again. */
   private runningTimer: Timer | undefined;
   private nextTimerId = 1;
+  /** The timers by their ids, which clearing looks up. */
+  private readonly timerLists = new Map<number, TimerList>();
 
   constructor(private readonly runtime: Runtime) {}
 
-  /** The milliseconds the simulated clock has advanced since the program started. */
-  get time(): number {
-    return this.now;
+  /** Reads the clock for `Date`, which moves it forward as the constants above say: the whole milliseconds so far. */
+  readClock(): number {
+    const { spent } = this.runtime.budget;
+    this.now +=
+      spent > POLLING_OPERATIONS
+        ? Math.max(CLOCK_STEP, (spent - this.spentAtNow) / OPERATIONS_PER_MILLISECOND)
+        : CLOCK_STEP;
+    this.spentAtNow = spent;
+    return Math.floor(this.now);
   }
 
   enqueue(job: Job): void {
@@ -63,15 +102,31 @@ export class EventLoop {
 
   addTimer(delay: number, job: Job, repeats: boolean): number {
     const id = this.nextTimerId++;
-    const interval = Math.max(1, delay);
-    this.timers.push({ ...job, id, time: this.now + interval, interval: repeats ? interval : undefined });
+    this.insert({ ...job, id, start: Math.floor(this.now), repeats }, Math.max(1, delay));
     return id;
   }
 
   clearTimer(id: Value): void {
-    const index = this.timers.findIndex((timer) => timer.id === id);
-    if (index !== -1) this.timers.splice(index, 1);
+    if (typeof id !== 'number') return;
+    const list = this.timerLists.get(id);
+    if (list) {
+      const index = list.timers.findIndex((timer) => timer.id === id);
+      if (index !== -1) list.timers.splice(index, 1);
+      if (list.timers.length === 0) this.lists.delete(list.delay);
+      this.timerLists.delete(id);
+    }
     if (this.runningTimer?.id === id) this.runningTimer = undefined;
+  }
+
+  /** Appends a timer to its delay's list, which starts due when the timer is if it is new. */
+  private insert(timer: Timer, delay: number): void {
+    let list = this.lists.get(delay);
+    if (!list) {
+      list = { delay, timers: [], expiry: timer.start + delay, order: this.nextListOrder++ };
+      this.lists.set(delay, list);
+    }
+    list.timers.push(timer);
+    this.timerLists.set(timer.id, list);
   }
 
   trackRejection(promise: JsObject): void {
@@ -86,15 +141,49 @@ export class EventLoop {
   run(): void {
     for (;;) {
       this.drainMicrotasks();
-      const timer = this.nextTimer();
-      if (!timer) return;
-      this.now = timer.time;
+      const first = this.firstList();
+      if (!first) return;
+      // The loop waits for the first list due, unless the program's polling already took the clock past it.
+      if (first.expiry > this.now) {
+        this.now = first.expiry;
+        this.spentAtNow = this.runtime.budget.spent;
+      }
+      this.processTimers(Math.floor(this.now));
+    }
+  }
+
+  /** Node.js's processTimers: runs the lists due by `now`, the clock as the timer phase began. */
+  private processTimers(now: number): void {
+    // Microtasks run between lists and between timers, and may clear or schedule timers, so each step looks again.
+    for (let ranList = false; ; ranList = true) {
+      if (ranList) this.drainMicrotasks();
+      const list = this.firstList();
+      if (!list || list.expiry > now) return;
+      this.listOnTimeout(list, now);
+    }
+  }
+
+  /** Node.js's listOnTimeout: runs a list's due timers in order, and reschedules the list for the first one not due. */
+  private listOnTimeout(list: TimerList, now: number): void {
+    for (let ranTimer = false; ; ranTimer = true) {
+      if (ranTimer) this.drainMicrotasks();
+      const timer = list.timers.at(0);
+      if (!timer) break;
+      if (now - timer.start < list.delay) {
+        list.expiry = Math.max(timer.start + list.delay, now + 1);
+        list.order = this.nextListOrder++;
+        return;
+      }
+      list.timers.shift();
+      this.timerLists.delete(timer.id);
+      // A repeat is due a delay after its run began, however long its callback takes, as Node.js schedules it.
+      const started = Math.floor(this.now);
       this.runningTimer = timer;
       this.runJob(timer);
-      if (this.runningTimer && timer.interval !== undefined)
-        this.timers.push({ ...timer, time: this.now + timer.interval });
+      if (this.runningTimer && timer.repeats) this.insert({ ...timer, start: started }, list.delay);
       this.runningTimer = undefined;
     }
+    if (this.lists.get(list.delay) === list && list.timers.length === 0) this.lists.delete(list.delay);
   }
 
   /**
@@ -105,7 +194,10 @@ export class EventLoop {
     return [
       ...this.rejections,
       ...this.running.flatMap((job) => job.roots),
-      ...[...this.microtasks, ...this.timers].flatMap((job) => [...(job.queuedRoots ?? []), ...job.roots]),
+      ...[...this.microtasks, ...[...this.lists.values()].flatMap((list) => list.timers)].flatMap((job) => [
+        ...(job.queuedRoots ?? []),
+        ...job.roots,
+      ]),
     ];
   }
 
@@ -129,11 +221,14 @@ export class EventLoop {
     for (const promise of this.rejections) throw new JsThrow((promise.promise as PromiseState).result);
   }
 
-  private nextTimer(): Timer | undefined {
-    if (this.timers.length === 0) return undefined;
-    let next = 0;
-    for (const [index, timer] of this.timers.entries()) if (timer.time < this.timers[next].time) next = index;
-    return this.timers.splice(next, 1)[0];
+  /** The list due first, the earliest created among lists due together. */
+  private firstList(): TimerList | undefined {
+    let first: TimerList | undefined;
+    for (const list of this.lists.values()) {
+      if (!first || list.expiry < first.expiry || (list.expiry === first.expiry && list.order < first.order))
+        first = list;
+    }
+    return first;
   }
 }
 

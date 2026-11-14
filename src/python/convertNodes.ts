@@ -1,6 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { fail } from './scopes';
+import { lookupName } from './unicodeDatabase';
 
 export function rowOf(node: Node): number {
   return node.startPosition.row;
@@ -8,21 +9,17 @@ export function rowOf(node: Node): number {
 
 /** The named children except extras: comments and backslash line continuations, which may appear anywhere. */
 export function namedChildren(node: Node): Node[] {
-  return node.namedChildren.filter((child): child is Node => child !== null && !child.isExtra);
+  return node.namedChildren.filter((child) => !child.isExtra);
 }
 
 export function children(node: Node): Node[] {
-  return node.children.filter((child): child is Node => child !== null && !child.isExtra);
+  return node.children.filter((child) => !child.isExtra);
 }
 
 export function field(node: Node, name: string): Node {
   const child = node.childForFieldName(name);
   if (!child) throw new Error(`The ${node.type} node has no ${name}`);
   return child;
-}
-
-export function fieldNodes(node: Node, name: string): Node[] {
-  return node.childrenForFieldName(name).filter((child): child is Node => child !== null);
 }
 
 const CLAUSE_TYPES = new Set(['elif_clause', 'else_clause', 'except_clause', 'finally_clause']);
@@ -48,7 +45,7 @@ export function checkClauseLines(node: Node): void {
 }
 
 export function hasToken(node: Node, token: string): boolean {
-  return node.children.some((child) => child?.type === token);
+  return node.children.some((child) => child.type === token);
 }
 
 /** Rejects a construct this grader does not support, naming it for learners. */
@@ -88,9 +85,22 @@ function decodeEscape(text: string, start: number, row: number): [string, number
   }
   const hexLength = HEX_ESCAPE_LENGTHS[next];
   if (hexLength !== undefined) return [decodeHexEscape(text, start, hexLength, row), start + 1 + hexLength];
-  if (next === 'N') unsupported(row, String.raw`文字列の中の \N{...}`);
+  if (next === 'N') return decodeNamedEscape(text, start, row);
   // An unknown escape keeps its backslash, which Python only warns about.
   return [`\\${next}`, start + 1];
+}
+
+/** Decodes `\N{name}`, whose name may be a character's name or alias in any letter case. */
+function decodeNamedEscape(text: string, start: number, row: number): [string, number] {
+  const end = text.indexOf('}', start);
+  const name = text.slice(start + 2, end);
+  if (text[start + 1] !== '{' || end === -1 || name === '') {
+    // oxlint-disable-next-line unicorn/prefer-string-raw -- Bun's transpiler escapes non-ASCII characters in a raw template.
+    fail(row, '文字列の中の \\N の後には、{文字の名前} を書いてください。');
+  }
+  const point = lookupName(name, false);
+  if (typeof point !== 'number') fail(row, `文字列の中の \\N{${name}} は、Unicode の文字の名前ではありません。`);
+  return [String.fromCodePoint(point), end + 1];
 }
 
 function decodeHexEscape(text: string, start: number, hexLength: number, row: number): string {
@@ -102,6 +112,36 @@ function decodeHexEscape(text: string, start: number, hexLength: number, row: nu
   const codePoint = Number.parseInt(digits, 16);
   if (codePoint > 0x10_ff_ff) fail(row, `文字列の中の \\${next}${digits} は、文字の範囲を超えています。`);
   return String.fromCodePoint(codePoint);
+}
+
+/** The bytes of a bytes literal's ASCII text, decoding its escape sequences unless the literal is raw. */
+export function decodeBytesEscapes(text: string, row: number, isRaw: boolean): Uint8Array {
+  const bytes: number[] = [];
+  let index = 0;
+  while (index < text.length) {
+    if (isRaw || text[index] !== '\\' || index + 1 >= text.length) {
+      bytes.push(text.codePointAt(index++) as number);
+      continue;
+    }
+    const next = text[index + 1];
+    if (next === 'x') {
+      const digits = text.slice(index + 2, index + 4);
+      if (!/^[0-9a-fA-F]{2}$/.test(digits)) {
+        // oxlint-disable-next-line unicorn/prefer-string-raw -- Bun's transpiler escapes non-ASCII characters in a raw template.
+        fail(row, 'bytes の中の \\x の後には、16進数を2桁書いてください。');
+      }
+      bytes.push(Number.parseInt(digits, 16));
+      index += 4;
+    } else if (next === 'N' || next === 'u' || next === 'U') {
+      bytes.push(0x5c);
+      index++;
+    } else {
+      const [decoded, end] = decodeEscape(text, index + 1, row);
+      for (const char of decoded) bytes.push((char.codePointAt(0) as number) & 0xff);
+      index = end;
+    }
+  }
+  return Uint8Array.from(bytes);
 }
 
 const HEX_ESCAPE_LENGTHS: Record<string, number> = { x: 2, u: 4, U: 8 };

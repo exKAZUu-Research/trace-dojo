@@ -1,4 +1,4 @@
-/** Parses numbers at the start of byte strings, as `strtol`, `strtod`, and `scanf` do. */
+import { exactParts, roundBinary } from './binaryFloat';
 
 export function isSpaceByte(byte: number): boolean {
   return byte === 0x20 || (byte >= 0x09 && byte <= 0x0d);
@@ -12,13 +12,16 @@ function digitValue(byte: number): number {
 }
 
 /**
- * The integer at the start of a string as `strtol` reads it: the value with its sign, its magnitude, and how many
- * bytes it takes (0 when no digits follow the white space and sign).
+ * The integer prefix with its sign, magnitude and consumed length (0 when no digits follow the sign).
+ * Magnitudes beyond uint64 retain only an overflow sentinel while scanning continues to the end of the prefix.
  */
+// code-gauge-allow functionCognitiveComplexity 23 -- Sign, base detection, bounded accumulation and digit consumption share one input cursor; separating branches would distribute that state.
+// code-gauge-allow functionNcss 31 -- Prefix classification and the consumed-length result share the same scan cursor.
 export function parseIntegerPrefix(
   bytes: Uint8Array,
   requestedBase: number,
-  maxLength = Number.POSITIVE_INFINITY
+  maxLength = Number.POSITIVE_INFINITY,
+  spend?: () => void
 ): { value: bigint; magnitude: bigint; length: number } {
   const limit = Math.min(bytes.length, maxLength);
   let index = 0;
@@ -46,7 +49,8 @@ export function parseIntegerPrefix(
   let magnitude = 0n;
   const bigBase = BigInt(base);
   while (index < limit && digitValue(bytes[index]) < base) {
-    magnitude = magnitude * bigBase + BigInt(digitValue(bytes[index]));
+    if (index % 64 === 0) spend?.();
+    if (magnitude <= 0xff_ff_ff_ff_ff_ff_ff_ffn) magnitude = magnitude * bigBase + BigInt(digitValue(bytes[index]));
     index++;
   }
   if (index === start) return { value: 0n, magnitude: 0n, length: 0 };
@@ -55,6 +59,7 @@ export function parseIntegerPrefix(
 
 /** The floating-point number at the start of a string as `strtod` reads it. */
 // code-gauge-allow functionCognitiveComplexity 30 -- The forms strtod accepts: decimal, hexadecimal, infinity, NaN.
+// code-gauge-allow functionNcss 35 -- Decimal, hexadecimal, infinity, and NaN prefixes share one consumed-length contract.
 export function parseFloatPrefix(
   bytes: Uint8Array,
   maxLength = Number.POSITIVE_INFINITY
@@ -67,7 +72,7 @@ export function parseFloatPrefix(
     sign = bytes[index] === 0x2d ? -1 : 1;
     index++;
   }
-  const rest = String.fromCodePoint(...bytes.subarray(index, limit)).toLowerCase();
+  const rest = new TextDecoder('latin1').decode(bytes.subarray(index, limit)).toLowerCase();
   if (rest.startsWith('inf')) {
     const length = rest.startsWith('infinity') ? 8 : 3;
     return {
@@ -92,7 +97,7 @@ export function parseFloatPrefix(
     const fraction = hex[2] ?? '';
     const mantissa = BigInt(`0x${integer + fraction || '0'}`);
     const exponent = Number(hex[3] ?? '0') - fraction.length * 4;
-    const value = sign * hexToDouble(mantissa, exponent);
+    const value = sign * roundBinary(mantissa, 1n, exponent);
     const matched = hex[3] === undefined ? `0x${integer}${hex[2] === undefined ? '' : `.${fraction}`}` : hex[0];
     return { value, length: index + matched.length, isInfinityText: false, isNonzeroText: mantissa !== 0n };
   }
@@ -112,15 +117,26 @@ export function parseFloatPrefix(
   };
 }
 
-/** mantissa × 2^exponent, rounded to the nearest double with ties to even. */
-function hexToDouble(mantissa: bigint, exponent: number): number {
-  if (mantissa === 0n) return 0;
-  const bits = mantissa.toString(2).length;
-  // Keep 54 significant bits plus a sticky bit, so that Number's conversion rounds once, correctly.
-  if (bits > 60) {
-    const shift = bits - 60;
-    const sticky = (mantissa & ((1n << BigInt(shift)) - 1n)) === 0n ? 0n : 1n;
-    return hexToDouble((mantissa >> BigInt(shift)) | sticky, exponent + shift);
+export function isExactFloatPrefix(bytes: Uint8Array, length: number, value: number): boolean {
+  const text = new TextDecoder().decode(bytes.subarray(0, length)).trim().replace(/^[+-]/, '').toLowerCase();
+  const hex = /^0x([\da-f]*)(?:\.([\da-f]*))?(?:p([+-]?\d+))?$/.exec(text);
+  const decimal = /^(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/.exec(text);
+  const match = hex ?? decimal;
+  if (!match) return false;
+  const fraction = match[2] ?? '';
+  const digits = (match[1] ?? '') + fraction;
+  const coefficient = BigInt((hex ? '0x' : '') + (digits || '0'));
+  const exponent = Number(match[3] ?? 0) - fraction.length * (hex ? 4 : 1);
+  if (!Number.isFinite(exponent) || Math.abs(exponent) > 5000) return coefficient === 0n && value === 0;
+  const parts = exactParts(Math.abs(value));
+  const binaryShift = parts.exponent - (hex ? exponent : 0);
+  let left = parts.mantissa;
+  let right = coefficient;
+  if (binaryShift >= 0) left <<= BigInt(binaryShift);
+  else right <<= BigInt(-binaryShift);
+  if (!hex) {
+    if (exponent >= 0) right *= 10n ** BigInt(exponent);
+    else left *= 10n ** BigInt(-exponent);
   }
-  return Number(mantissa) * 2 ** exponent;
+  return left === right;
 }

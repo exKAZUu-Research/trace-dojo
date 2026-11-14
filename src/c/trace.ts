@@ -5,11 +5,12 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import type { Scalar } from './arith';
 import type { CompiledProgram } from './compiler';
+import { CRuntimeError } from './errors';
 import { compileC, runProgram } from './execute';
-import { readScalar } from './expressionCompiler';
+import { readBits, readScalar } from './expressionCompiler';
 import type { Allocation } from './memory';
 import { type Frame, type FunctionInfo, Runtime } from './runtime';
-import { type CType, hasVla, INT_PROPERTIES, isCharType, sizeIn, sizeOf } from './types';
+import { type CType, hasVla, isCharType, sizeIn, sizeOf } from './types';
 
 // code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceCProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
@@ -49,12 +50,14 @@ class Snapshotter {
   }
 
   /** The variables a frame shows: its own in scope, then the file-scope variables when `withContext`. */
+  // code-gauge-allow functionCognitiveComplexity 21 -- Lexical locals, receiver fields, and globals must obey one shadowing order.
   variablesOf(frame: Frame, withContext: boolean): TraceVariables {
     this.vla = frame.vla;
     const variables: TraceVariables = { vars: {}, referenceVars: {} };
     const hidesArgs = frame.fn === this.program.main && frame.fn.params.length === 2;
-    for (const local of frame.fn.locals) {
-      if (!frame.live[local.index]) continue;
+    const locals =
+      frame.visibleLocals ?? frame.finalVisibleLocals ?? frame.fn.locals.filter((local) => frame.live[local.index]);
+    for (const local of locals) {
       // main's parameters only receive the launcher's arguments, which these programs never use.
       if (hidesArgs && local.isParameter) continue;
       if (!local.inMemory) {
@@ -70,7 +73,7 @@ class Snapshotter {
     if (!withContext) return variables;
     this.addReceiverFields(variables, frame);
     for (const global of this.program.globals) {
-      if (!global.isShown) continue;
+      if (!global.isShown || locals.some((local) => local.name === global.name)) continue;
       const block = this.runtime.globals[global.index];
       if (block) this.addVariable(variables, global.name, global.type, { address: block.base });
     }
@@ -119,7 +122,7 @@ class Snapshotter {
     const offset = where.address - block.base;
     const size = sizeOf(type);
     if (offset + size > block.size) return undefined;
-    for (let index = offset; index < offset + size; index++) if (block.initialized[index] === 0) return undefined;
+    for (let index = offset; index < offset + size; index++) if (block.initialized[index] !== 255) return undefined;
     return readScalar(block.view, offset, type);
   }
 
@@ -157,7 +160,8 @@ class Snapshotter {
    * such variable, so the trace leaves it out.
    */
   private isVaList(address: number): boolean {
-    const block = address === 0 ? undefined : this.runtime.memory.find(address);
+    const block =
+      address === 0 ? undefined : (this.runtime.memory.find(address) ?? this.runtime.memory.find(address - 1));
     return block !== undefined && this.runtime.varargTypes.has(block.base);
   }
 
@@ -169,6 +173,8 @@ class Snapshotter {
     const value = this.read(type, where);
     if (value === undefined || this.isVaList(value as number)) return undefined;
     if (value === 0) return NOT_SCALAR;
+    const block = this.runtime.memory.find(value as number);
+    if (type.to.kind !== 'function' && (!block || type.to.kind === 'void')) return `0x${Number(value).toString(16)}`;
     if (isCharType(type.to)) return this.stringAt(value as number) ?? NOT_SCALAR;
     if (isArrayLike(this.runtime, type, where)) return this.elementsFrom(type.to, value as number);
     return NOT_SCALAR;
@@ -196,7 +202,7 @@ class Snapshotter {
     if (!block) return undefined;
     const start = address - block.base;
     let end = start;
-    while (end < block.size && end - start < limit && block.initialized[end] === 1 && block.bytes[end] !== 0) end++;
+    while (end < block.size && end - start < limit && block.initialized[end] === 255 && block.bytes[end] !== 0) end++;
     return new TextDecoder().decode(block.bytes.subarray(start, end));
   }
 
@@ -213,7 +219,12 @@ class Snapshotter {
         const value = this.read(type, where);
         if (value === undefined || this.isVaList(value as number)) return undefined;
         if (value === 0) return NULL_NODE;
-        return this.pointeeNode(type.to, value as number, seen);
+        return (
+          this.pointeeNode(type.to, value as number, seen) ?? {
+            kind: 'value',
+            value: `0x${Number(value).toString(16)}`,
+          }
+        );
       }
       case 'array': {
         return 'address' in where ? this.arrayNode(type, where.address, seen) : undefined;
@@ -269,18 +280,16 @@ class Snapshotter {
     const block = this.runtime.memory.find(address);
     if (!field || !block || field.bitWidth === undefined) return NULL_NODE;
     const offset = address - block.base + field.offset;
-    let raw = 0n;
-    const size = sizeOf(field.type);
-    for (let index = size - 1; index >= 0; index--) raw = (raw << 8n) | BigInt(block.bytes[offset + index]);
-    let value = (raw >> BigInt(field.bitOffset ?? 0)) & ((1n << BigInt(field.bitWidth)) - 1n);
-    if (
-      field.type.kind === 'int' &&
-      INT_PROPERTIES[field.type.name].signed &&
-      (value >> BigInt(field.bitWidth - 1)) & 1n
-    ) {
-      value -= 1n << BigInt(field.bitWidth);
+    if (field.type.kind !== 'int') return NULL_NODE;
+    try {
+      return {
+        kind: 'value',
+        value: Number(readBits(block, offset, field.bitOffset ?? 0, field.bitWidth, field.type)),
+      };
+    } catch (error) {
+      if (!(error instanceof CRuntimeError) || error.kind !== 'uninitialized') throw error;
+      return NULL_NODE;
     }
-    return { kind: 'value', value: Number(value) };
   }
 
   /** What a pointer points to: a turtle, a struct, the elements from it to its block's end, or a single value. */
@@ -295,7 +304,7 @@ class Snapshotter {
 
   private pointeeNodeAt(type: CType, address: number, seen: Set<number>): DisplayNode | undefined {
     const block = this.runtime.memory.find(address);
-    if (!block) return undefined;
+    if (!block) return { kind: 'value', value: `0x${address.toString(16)}` };
     if (block.turtle) {
       if (!block.turtle.isAlive) return undefined;
       return {

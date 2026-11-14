@@ -1,3 +1,5 @@
+// code-gauge-allow-file fileNcss 717 -- Declaration and initializer compilation share symbol and type state.
+import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type { Value } from './arith';
 import type {
   Compound,
@@ -15,9 +17,10 @@ import type {
 } from './ast';
 import type { CompileOptions, Entity, FunctionContext, LValue, Operand } from './compilerBase';
 import { declaredName, findFunctionDeclarator } from './convert';
-import { isNullConstant, type SpecialCall } from './expressionCompiler';
+import { isNullConstant, type SpecialCall, writeBits } from './expressionCompiler';
 import { decodeStringLiteral } from './literals';
 import { TURTLE_HEADER_NAME } from './parse';
+import { evaluate, type Evaluator, replacePointerBytes } from './pointerBounds';
 import {
   Completion,
   type Exec,
@@ -39,6 +42,7 @@ import {
   INT,
   isCharArray,
   isComplete,
+  isConstQualified,
   isScalar,
   sizeIn,
   sizeOf,
@@ -48,9 +52,10 @@ import {
 import { unsupported } from './unsupported';
 
 /** A library function: its implementation, or the reason the interpreter leaves it out. */
-export type LibraryEntry =
+export type LibraryEntry = (
   | { kind: 'native'; run: NonNullable<FunctionInfo['native']>; special?: SpecialCall }
-  | { kind: 'unsupported'; feature: string };
+  | { kind: 'unsupported'; feature: string }
+) & { canDefine?: boolean; hasDefinition?: boolean };
 
 export interface CompiledProgram {
   globals: GlobalInfo[];
@@ -114,8 +119,9 @@ function zeroedWriter(size: number, writes: Write[]): Writer {
   return (frame, address) => {
     const block = frame.runtime.memory.locate(address, size);
     const offset = address - block.base;
+    replacePointerBytes(block.pointerBytes, offset, size);
     block.bytes.fill(0, offset, offset + size);
-    block.initialized.fill(1, offset, offset + size);
+    block.initialized.fill(255, offset, offset + size);
     for (const { offset: at, write } of writes) write(frame, address + at);
   };
 }
@@ -126,6 +132,8 @@ interface LocalPart {
 }
 
 export class Compiler extends StatementCompiler {
+  private readonly linkage = new Map<string, Entity>();
+  private readonly usedAtomicRows = new Set<number>();
   constructor(
     options: CompileOptions,
     private readonly library: (name: string) => LibraryEntry | undefined
@@ -138,15 +146,34 @@ export class Compiler extends StatementCompiler {
     const main = this.scope.ordinary.get('main');
     if (main?.kind !== 'function' || !main.fn.isDefined)
       this.error(0, 'main 関数がありません（int main(void) { ... } を書いてください）。');
-    for (const fn of this.functions) {
-      // A definition that only `inline` declares is an inline definition, which gives the function no external
-      // definition; clang does not inline at -O0, so the program fails to link.
-      const lacksDefinition = !fn.isDefined || (fn.isInlineDefinition && !fn.hasExternalDeclaration);
-      if (fn.referencedAt !== undefined && lacksDefinition && !fn.native && fn.header === undefined) {
-        this.error(fn.referencedAt, `関数「${fn.name}」は宣言されていますが、定義されていません。`);
-      }
+    for (const fn of this.functions) this.checkFunctionDefinition(fn);
+    for (const global of this.globals) this.completeGlobal(global);
+    for (const row of this.options.trace?.atomicAnnotations.keys() ?? []) {
+      if (!this.usedAtomicRows.has(row)) this.error(row, misplacedAtomicMessage);
     }
     return { globals: this.globals, functions: this.functions, strings: this.strings, main: main.fn };
+  }
+
+  private completeGlobal(global: GlobalInfo): void {
+    if (!global.isDefined && global.header === undefined) global.isShown = false;
+    if (!global.isDefined && global.header === undefined && global.referencedAt !== undefined)
+      this.error(global.referencedAt, `変数「${global.name}」は宣言されていますが、定義されていません。`);
+    if (global.isDefined && global.type.kind === 'array' && global.type.length === undefined)
+      global.type = { ...global.type, length: 1 };
+    if (global.type.kind === 'void' || (global.isDefined && !isComplete(global.type)))
+      this.error(global.row, `変数「${global.name}」の型（${typeName(global.type)}）の中身が定義されていません。`);
+  }
+
+  private checkFunctionDefinition(fn: FunctionInfo): void {
+    if (
+      fn.referencedAt === undefined ||
+      (fn.isDefined && !(fn.isInlineDefinition && !fn.hasExternalDeclaration)) ||
+      fn.native
+    )
+      return;
+    const entry = fn.header === undefined ? undefined : this.library(fn.name);
+    if (entry?.kind === 'unsupported') unsupported(fn.referencedAt, entry.feature);
+    this.error(fn.referencedAt, `関数「${fn.name}」は宣言されていますが、定義されていません。`);
   }
 
   protected specialCall(name: string): SpecialCall | undefined {
@@ -155,10 +182,10 @@ export class Compiler extends StatementCompiler {
   }
 
   protected checkFunctionUse(fn: FunctionInfo, row: number): void {
-    fn.referencedAt ??= row;
+    if (!this.isUnevaluated) fn.referencedAt ??= row;
     if (fn.header === undefined) return;
     const entry = this.library(fn.name);
-    if (entry?.kind === 'unsupported') unsupported(row, entry.feature);
+    if (entry?.kind === 'unsupported' && !entry.canDefine) unsupported(row, entry.feature);
   }
 
   private externalDeclaration(item: ExternalDeclaration): void {
@@ -175,6 +202,7 @@ export class Compiler extends StatementCompiler {
 
   // File scope --------------------------------------------------------------------------------------------------------
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- File declarations share type, linkage and initializer checks.
   private fileScopeDeclaration(declaration: Declaration): void {
     const { specifiers } = declaration;
     if (specifiers.storage === 'auto' || specifiers.storage === 'register') {
@@ -208,6 +236,8 @@ export class Compiler extends StatementCompiler {
     this.scope.ordinary.set(name, { kind: 'typedef', type });
   }
 
+  // code-gauge-allow functionCognitiveComplexity 24 -- Keep the compatible-declaration and builtin-replacement rules together; extracting branches would obscure their shared symbol state.
+  // code-gauge-allow functionNcss 37 -- All declarations must reuse one function identity and its composite type.
   protected declareFunction(
     name: string,
     type: FunctionType,
@@ -219,8 +249,14 @@ export class Compiler extends StatementCompiler {
     // The turtle's functions are visible without an #include, so a program may still declare its own of their names.
     const isTurtleBuiltin =
       looked?.kind === 'function' && looked.fn.header === TURTLE_HEADER_NAME && header !== TURTLE_HEADER_NAME;
-    const existing = isTurtleBuiltin ? undefined : looked;
+    const local = this.scope.ordinary.get(name);
+    if (local && local.kind !== 'function') this.error(row, `「${name}」が2回宣言されています。`);
+    const existing = isTurtleBuiltin ? undefined : looked?.kind === 'function' ? looked : this.linkage.get(name);
+    const entry = header === undefined ? undefined : this.library(name);
+    if (existing?.kind === 'function' && isStatic && !existing.fn.isStatic && header === undefined)
+      this.error(row, `関数「${name}」は外部リンケージで宣言されているので static にできません。`);
     if (existing && existing.kind === 'function') {
+      if (existing.fn.isDefined && entry?.hasDefinition) this.error(row, `関数「${name}」が2回定義されています。`);
       if (!compatible(existing.type, type)) {
         this.error(row, `関数「${name}」の型が、前の宣言（${typeName(existing.type)}）と合いません。`);
       }
@@ -229,14 +265,7 @@ export class Compiler extends StatementCompiler {
       if (this.scope.ordinary.get(name) !== existing) this.scope.ordinary.set(name, existing);
       return existing.fn;
     }
-    if (existing && this.scope.ordinary.get(name) === existing) this.error(row, `「${name}」が2回宣言されています。`);
-    const global = isTurtleBuiltin ? undefined : this.findFileScope(name);
-    if (global && global.kind === 'function') {
-      if (!compatible(global.type, type))
-        this.error(row, `関数「${name}」の型が、前の宣言（${typeName(global.type)}）と合いません。`);
-      this.scope.ordinary.set(name, global);
-      return global.fn;
-    }
+    if (existing) this.error(row, `「${name}」が2回宣言されています。`);
     const info: FunctionInfo = {
       name,
       type,
@@ -249,14 +278,12 @@ export class Compiler extends StatementCompiler {
       isAtomic: false,
       ...(header === undefined ? {} : { header }),
     };
-    if (header !== undefined) {
-      const entry = this.library(name);
-      if (entry?.kind === 'native') info.native = entry.run;
-    }
+    if (header !== undefined && entry?.kind === 'native') info.native = entry.run;
     this.functions.push(info);
     const entity = { kind: 'function' as const, fn: info, type };
     this.scope.ordinary.set(name, entity);
-    this.fileScope.ordinary.set(name, entity);
+    this.linkage.set(name, entity);
+    if (this.scope === this.fileScope) this.fileScope.ordinary.set(name, entity);
     return info;
   }
 
@@ -266,11 +293,8 @@ export class Compiler extends StatementCompiler {
     return scope;
   }
 
-  private findFileScope(name: string): ReturnType<typeof this.scope.lookup> {
-    return this.fileScope.ordinary.get(name);
-  }
-
   // code-gauge-allow functionCognitiveComplexity 25 -- C's rules for tentative definitions and redeclarations.
+  // code-gauge-allow functionNcss 37 -- Tentative definitions, composite types, and initializers update one symbol; separating branches would split that invariant.
   private declareGlobal(
     name: string,
     declaredType: CType,
@@ -283,7 +307,8 @@ export class Compiler extends StatementCompiler {
     if (init && storage === 'extern' && this.fn) this.error(row, '関数の中の extern の変数には、初期値を書けません。');
     if (init && type.kind === 'array' && type.length === undefined)
       type = { ...type, length: this.initializerLength(type, init) };
-    const existing = this.fileScope.ordinary.get(name);
+    const existing =
+      (this.scope === this.fileScope ? this.scope.ordinary.get(name) : undefined) ?? this.linkage.get(name);
     if (existing) {
       if (existing.kind !== 'global') this.error(row, `「${name}」が2回宣言されています。`);
       if (!compatible(existing.type, type)) {
@@ -296,7 +321,7 @@ export class Compiler extends StatementCompiler {
         if (global.initialize) this.error(row, `変数「${name}」が2回定義されています。`);
         global.initialize = this.staticInitializer(global.type, init, row);
       }
-      if (storage !== 'extern') global.isDefined = true;
+      if (storage !== 'extern' || init !== undefined) global.isDefined = true;
       this.scope.ordinary.set(name, existing);
       return global;
     }
@@ -307,13 +332,16 @@ export class Compiler extends StatementCompiler {
       row,
       isShown: header === undefined && !isConstGlobal(type),
       isReadOnly: false,
-      isDefined: storage !== 'extern',
+      isDefined: storage !== 'extern' || init !== undefined,
+      header,
     };
     this.globals.push(global);
     const entity: Extract<Entity, { kind: 'global' }> = { kind: 'global', global, type };
-    this.fileScope.ordinary.set(name, entity);
+    this.linkage.set(name, entity);
+    if (this.scope === this.fileScope) this.fileScope.ordinary.set(name, entity);
     this.scope.ordinary.set(name, entity);
     if (init) {
+      entity.constantBytes = this.constantString(type, init);
       global.initialize = this.staticInitializer(type, init, row);
       const constant = this.foldedConstant(type, init);
       if (constant !== undefined) entity.constant = constant;
@@ -333,6 +361,7 @@ export class Compiler extends StatementCompiler {
   // Functions ---------------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionCognitiveComplexity 30 -- Declaring a function's parameters, checking main's form.
+  // code-gauge-allow functionNcss 49 -- Function setup shares linkage, parameter lengths, trace annotations and body state.
   private functionDefinition(definition: FunctionDefinition): void {
     const { specifiers, row } = definition;
     if (specifiers.storage === 'typedef' || specifiers.storage === 'auto' || specifiers.storage === 'register') {
@@ -350,14 +379,18 @@ export class Compiler extends StatementCompiler {
     if (specifiers.isInline && specifiers.storage === undefined) info.isInlineDefinition = true;
     else info.hasExternalDeclaration = true;
     if (info.isDefined) this.error(row, `関数「${name}」が2回定義されています。`);
-    if (info.header !== undefined)
+    if (info.header !== undefined && !this.library(name)?.canDefine)
       this.error(row, `関数「${name}」は標準ライブラリにあるので、同じ名前の関数は定義できません。`);
+    info.header = undefined;
+    info.native = undefined;
     info.isDefined = true;
     info.row = row;
     const annotations = this.options.trace?.atomicAnnotations;
-    info.isAtomic =
-      annotations !== undefined &&
-      [...annotations.keys()].some((annotation) => annotation >= row && annotation <= definition.bodyRow);
+    const atomicRows = [...(annotations?.keys() ?? [])].filter(
+      (annotation) => annotation >= row && annotation <= definition.bodyRow
+    );
+    info.isAtomic = atomicRows.length > 0;
+    for (const annotation of atomicRows) this.usedAtomicRows.add(annotation);
     const declarator = findFunctionDeclarator(definition.declarator) as Extract<Declarator, { kind: 'function' }>;
     const context: FunctionContext = {
       info,
@@ -443,16 +476,17 @@ export class Compiler extends StatementCompiler {
 
   protected localDeclaration(declaration: Declaration): Compiled {
     const { specifiers, row } = declaration;
+    this.declareStandaloneTag(declaration);
     const base = this.baseType(specifiers);
     if (specifiers.alignas) this.requestedAlignment(specifiers.alignas);
     const parts: LocalPart[] = [];
     for (const declarator of declaration.declarators) {
-      const part = this.localDeclarator(specifiers.storage, base, declarator);
+      const part = this.localDeclarator(specifiers.storage, base, declarator, declaration.fromHeader);
       if (part) parts.push(part);
     }
     const step = parts.some((part) => part.initializes) ? this.stepRow(row) : undefined;
     const run = (frame: Frame): void => {
-      for (const part of parts) part.run(frame);
+      for (const part of parts) frame.runtime.fullExpression(() => part.run(frame));
     };
     const exec: Exec =
       step === undefined
@@ -464,13 +498,16 @@ export class Compiler extends StatementCompiler {
             frame.runtime.steps.runStatement(step, false, () => run(frame));
             return Completion.Normal;
           };
-    return { exec, labels: new Set() };
+    return this.withVisibility({ exec, labels: new Set() });
   }
 
+  // code-gauge-allow functionCognitiveComplexity 23 -- Storage class and variably modified types determine one local declaration.
+  // code-gauge-allow functionNcss 43 -- Local declaration alternatives share storage and initializer state.
   private localDeclarator(
     storage: StorageClass | undefined,
     base: CType,
-    declarator: InitDeclarator
+    declarator: InitDeclarator,
+    header?: string
   ): LocalPart | undefined {
     const declared = this.declaredType(base, declarator.declarator);
     const lengths = this.takePendingVla();
@@ -478,8 +515,7 @@ export class Compiler extends StatementCompiler {
     let { type } = declared;
     if (name === undefined) this.error(declared.row, '宣言する名前を書いてください。');
     if (storage === 'typedef') {
-      if (this.scope.ordinary.has(name)) this.error(declared.row, `「${name}」が2回宣言されています。`);
-      this.scope.ordinary.set(name, { kind: 'typedef', type });
+      this.declareTypedef(name, type, declared.row);
       return lengths ? { run: lengths, initializes: false } : undefined;
     }
     if (lengths && (storage === 'static' || storage === 'extern')) {
@@ -487,16 +523,16 @@ export class Compiler extends StatementCompiler {
     }
     if (type.kind === 'function') {
       if (storage === 'static') this.error(declared.row, '関数の中では、static の関数は宣言できません。');
-      this.declareFunction(name, type, declared.row, false, undefined);
+      this.declareFunction(name, type, declared.row, false, header);
       return undefined;
     }
-    if (this.scope.ordinary.has(name)) this.error(declared.row, `「${name}」が2回宣言されています。`);
     const { init } = declarator;
     if (storage === 'extern') {
       if (init) this.error(declared.row, '関数の中の extern の変数には、初期値を書けません。');
-      this.externLocal(name, type, declared.row);
+      this.externLocal(name, type, declared.row, header);
       return undefined;
     }
+    if (this.scope.ordinary.has(name)) this.error(declared.row, `「${name}」が2回宣言されています。`);
     if (init && type.kind === 'array' && type.length === undefined)
       type = { ...type, length: this.initializerLength(type, init) };
     if (type.kind === 'void') this.error(declared.row, `変数「${name}」の型に void は使えません。`);
@@ -519,12 +555,10 @@ export class Compiler extends StatementCompiler {
     };
   }
 
-  private externLocal(name: string, type: CType, row: number): void {
-    const existing = this.fileScope.ordinary.get(name);
-    const global =
-      existing?.kind === 'global'
-        ? existing.global
-        : this.declareGlobal(name, type, row, 'extern', undefined, undefined);
+  private externLocal(name: string, type: CType, row: number, header?: string): void {
+    const existing = this.scope.ordinary.get(name);
+    if (existing && existing.kind !== 'global') this.error(row, `「${name}」が2回宣言されています。`);
+    const global = this.declareGlobal(name, type, row, 'extern', undefined, header);
     this.scope.ordinary.set(name, { kind: 'global', global, type: global.type });
   }
 
@@ -568,7 +602,7 @@ export class Compiler extends StatementCompiler {
         block.type = type;
         block.name = name;
         frame.bases[index] = block.base;
-        frame.blocks.push(block);
+        frame.blocks.set(local.index, block);
         frame.live[index] = true;
       },
       initializes: false,
@@ -593,10 +627,11 @@ export class Compiler extends StatementCompiler {
               frame.live[index] = true;
               const block = frame.runtime.memory.find(frame.bases[index]);
               block?.initialized.fill(0);
+              block?.pointerBytes.clear();
             }
           : (frame) => {
               frame.live[index] = true;
-              frame.slots[index] = undefined;
+              frame.assign(index, undefined);
             },
         initializes: false,
       };
@@ -605,7 +640,8 @@ export class Compiler extends StatementCompiler {
       const value = this.scalarInitializer(type, init);
       return {
         run: (frame) => {
-          frame.slots[index] = value(frame) as number;
+          const result = evaluate(value, frame);
+          frame.assign(index, result);
           frame.live[index] = true;
         },
         initializes: true,
@@ -624,7 +660,16 @@ export class Compiler extends StatementCompiler {
   private foldInto(name: string, type: CType, init: Initializer | undefined): void {
     const constant = this.foldedConstant(type, init);
     const entity = this.scope.ordinary.get(name);
-    if (constant !== undefined && entity?.kind === 'local') entity.constant = constant;
+    if (entity?.kind === 'local') {
+      if (constant !== undefined) entity.constant = constant;
+      if (init) entity.constantBytes = this.constantString(type, init);
+    }
+  }
+
+  private constantString(type: CType, init: Initializer): Uint8Array | undefined {
+    if (!isCharArray(type) || !isConstQualified(type.of)) return undefined;
+    const literal = stringLiteralOf(init);
+    return literal ? decodeStringLiteral(literal.parts, literal.row).slice(0, type.length) : undefined;
   }
 
   protected compoundLiteral(expression: Extract<Expression, { kind: 'compoundLiteral' }>): Operand {
@@ -669,7 +714,7 @@ export class Compiler extends StatementCompiler {
 
   // Initializers ------------------------------------------------------------------------------------------------------
 
-  private scalarInitializer(type: CType, init: Initializer): (frame: Frame) => Value {
+  private scalarInitializer(type: CType, init: Initializer): Evaluator {
     const expression = this.singleExpression(type, init);
     return this.convertForAssignment(this.rvalue(expression), type, 'initialization', expression.row);
   }
@@ -681,10 +726,17 @@ export class Compiler extends StatementCompiler {
       return this.error(init.row, `${typeName(type)} の初期化に、要素の指定は書けません。`);
     // An empty initializer (C23, which clang accepts in C17) initializes a scalar to 0.
     if (init.items.length === 0) return { kind: 'number', text: '0', row: init.row };
-    const [first] = init.items;
+    const [first, ...excess] = init.items;
+    for (const item of excess) this.validateInitializer(item);
     if (first.kind !== 'expression')
       return this.error(first.row, `${typeName(type)} の初期化に、{ } や要素の指定は書けません。`);
     return first.expression;
+  }
+
+  private validateInitializer(init: Initializer): void {
+    if (init.kind === 'expression') this.unevaluated(() => this.rvalue(init.expression));
+    else if (init.kind === 'designated') this.validateInitializer(init.value);
+    else for (const item of init.items) this.validateInitializer(item);
   }
 
   /** The length that an initializer gives an array declared without one. */
@@ -710,7 +762,10 @@ export class Compiler extends StatementCompiler {
       const operand = this.rvalue(expression);
       this.checkStatic(operand, expression, isStatic);
       const value = this.convertForAssignment(operand, unqualified(type), 'initialization', expression.row);
-      return (frame, address) => storeValue(frame.runtime, address, unqualified(type), value(frame));
+      return (frame, address) => {
+        const result = evaluate(value, frame);
+        storeValue(frame.runtime, address, unqualified(type), result.value, result.range, result.bytes);
+      };
     }
     this.braced(type, init.items, 0, writes, isStatic);
     return zeroedWriter(sizeOf(type), writes);
@@ -725,6 +780,7 @@ export class Compiler extends StatementCompiler {
         this.stringInto(type, literal, 0, writes);
         return zeroedWriter(sizeOf(type), writes);
       }
+      this.unevaluated(() => this.rvalue(expression));
       this.error(expression.row, '配列の初期化には { } か文字列リテラルを書いてください。');
     }
     if (type.kind === 'record') {
@@ -847,7 +903,7 @@ export class Compiler extends StatementCompiler {
       if (!member) {
         if (stack.length === 1) {
           // clang warns about excess initializers and ignores them, but still checks their types.
-          if (item.kind === 'expression') this.rvalue(item.expression);
+          this.validateInitializer(item);
           return;
         }
         stack.pop();
@@ -905,7 +961,10 @@ export class Compiler extends StatementCompiler {
     }
     writes.push({
       offset: member.offset,
-      write: (frame, address) => storeValue(frame.runtime, address, target, value(frame)),
+      write: (frame, address) => {
+        const result = evaluate(value, frame);
+        storeValue(frame.runtime, address, target, result.value, result.range, result.bytes);
+      },
     });
   }
 
@@ -922,6 +981,7 @@ export class Compiler extends StatementCompiler {
       offset,
       write: (frame, address) => {
         const block = frame.runtime.memory.locate(address, copied.length);
+        replacePointerBytes(block.pointerBytes, address - block.base, copied.length);
         block.bytes.set(copied, address - block.base);
       },
     });
@@ -933,19 +993,13 @@ export class Compiler extends StatementCompiler {
     bitOffset?: number;
     bitWidth?: number;
   }): (frame: Frame, address: number, value: Value) => void {
-    const operand = this.memoryOperand(INT, () => 0);
-    void operand;
     const width = field.bitWidth as number;
     const bitOffset = field.bitOffset ?? 0;
     const size = sizeOf(field.type);
     return (frame, address, value) => {
       const block = frame.runtime.memory.locate(address, size);
       const at = address - block.base;
-      const mask = ((1n << BigInt(width)) - 1n) << BigInt(bitOffset);
-      let raw = 0n;
-      for (let index = size - 1; index >= 0; index--) raw = (raw << 8n) | BigInt(block.bytes[at + index]);
-      raw = (raw & ~mask) | ((BigInt(value as number | bigint) << BigInt(bitOffset)) & mask);
-      for (let index = 0; index < size; index++) block.bytes[at + index] = Number((raw >> BigInt(index * 8)) & 0xffn);
+      writeBits(block, at, bitOffset, width, value as number | bigint);
     };
   }
 
@@ -986,6 +1040,7 @@ function functionBody(exec: Exec, isMain: boolean, prepare: ((frame: Frame) => v
 }
 
 /** The names whose addresses a function body takes with `&`, whose variables must live in memory. */
+// code-gauge-allow functionCognitiveComplexity 18 -- The recursive AST walk must visit every expression shape; splitting the visitor would only relocate its cases.
 function addressTakenNames(body: Compound): Set<string> {
   const names = new Set<string>();
   const visit = (node: unknown): void => {

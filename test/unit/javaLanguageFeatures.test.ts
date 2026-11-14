@@ -1699,6 +1699,52 @@ test.each([
     'static java.util.stream.Stream<Integer> make() { Turtle t = new Turtle(); return java.util.stream.Stream.of(1).map(v -> { t.前に進む(); return v; }); }',
   ],
   [
+    'a predicate of Predicate.isEqual',
+    'java.util.function.Predicate<Turtle> p = java.util.function.Predicate.isEqual(new Turtle()); int done = 1;',
+    '',
+  ],
+  [
+    'an array that a predicate of Predicate.isEqual',
+    'java.util.function.Predicate<Object> p = java.util.function.Predicate.isEqual(new Object[] { new Turtle[] { new Turtle() } }); int done = 1;',
+    '',
+  ],
+  [
+    'an entry that removeEldestEntry saved',
+    'Cache c = new Cache(); c.put(1, new Turtle()); c.put(2, null); int done = 1;',
+    'static class Cache extends LinkedHashMap<Integer, Turtle> { Map.Entry<Integer, Turtle> evicted; protected boolean removeEldestEntry(Map.Entry<Integer, Turtle> eldest) { if (size() <= 1) return false; evicted = eldest; return true; } }',
+  ],
+  ['an entry of Map.entry', 'Map.Entry<Integer, Turtle> e = Map.entry(1, new Turtle()); int done = 1;', ''],
+  [
+    'an entry comparator',
+    'Comparator<Map.Entry<Integer, Integer>> c = make(); int done = 1;',
+    'static Comparator<Map.Entry<Integer, Integer>> make() { Turtle t = new Turtle(); return Map.Entry.comparingByKey((a, b) -> { t.前に進む(); return 0; }); }',
+  ],
+  [
+    'a toMap collector',
+    'java.util.stream.Collector<Integer, ?, Map<Integer, Integer>> c = make(); int done = 1;',
+    'static java.util.stream.Collector<Integer, ?, Map<Integer, Integer>> make() { Turtle t = new Turtle(); return java.util.stream.Collectors.toMap(x -> x, x -> x, (x, y) -> { t.前に進む(); return x; }); }',
+  ],
+  [
+    'a negated primitive predicate',
+    'java.util.function.IntPredicate p = make().negate(); int done = 1;',
+    'static java.util.function.IntPredicate make() { Turtle t = new Turtle(); return x -> { t.前に進む(); return x > 0; }; }',
+  ],
+  [
+    'a combined comparator',
+    'Comparator<Integer> c = make().thenComparing(Comparator.naturalOrder()); int done = 1;',
+    'static Comparator<Integer> make() { Turtle t = new Turtle(); return (x, y) -> { t.前に進む(); return 0; }; }',
+  ],
+  [
+    'a collector',
+    'java.util.stream.Collector<Integer, ?, LongSummaryStatistics> c = make(); int done = 1;',
+    'static java.util.stream.Collector<Integer, ?, LongSummaryStatistics> make() { Turtle t = new Turtle(); return java.util.stream.Collectors.summarizingLong(x -> { t.前に進む(); return x; }); }',
+  ],
+  [
+    'a downstream collector',
+    'java.util.stream.Collector<Integer, ?, Map<Integer, List<Integer>>> c = make(); int done = 1;',
+    'static java.util.stream.Collector<Integer, ?, Map<Integer, List<Integer>>> make() { Turtle t = new Turtle(); return java.util.stream.Collectors.groupingBy(x -> x, java.util.stream.Collectors.mapping(x -> { t.前に進む(); return x; }, java.util.stream.Collectors.toList())); }',
+  ],
+  [
     "a map's view",
     'Collection<Integer> v = make(); int done = 1;',
     'static Collection<Integer> make() { Map<Turtle, Integer> m = new HashMap<>(); m.put(new Turtle(), 1); return m.values(); }',
@@ -1867,5 +1913,383 @@ List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(
       '{nine=1, six=1, one=2, seven=1, three=1, two=1, thirteen=1, eight=1, four=1, twelve=1, eleven=1, ten=1, five=1}',
     wrapped: 'cme',
     sorted: '[null, a, b]',
+  });
+});
+
+test("Java's restricted lists reject a change only where their JDK classes do, and give the JDK's sublist classes", () => {
+  const program = `import java.util.*;
+import java.util.function.*;
+public class Main {
+  static void t(String label, Supplier<Object> s) { try { System.out.println(label + " " + s.get()); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  static void ops(String name, Supplier<List<Integer>> f) {
+    t(name, () -> f.get().getClass().getName() + " " + f.get().subList(0, f.get().size()).getClass().getName());
+    t(name + " remove", () -> f.get().remove((Object) 42) + " " + f.get().addAll(List.of()) + " " + f.get().removeIf(x -> x == 42) + " " + f.get().removeAll(List.of(42)));
+    t(name + " removeFound", () -> f.get().remove((Object) 1));
+    t(name + " clear", () -> { f.get().clear(); return "ok"; });
+    t(name + " sort", () -> { Collections.sort(f.get()); return "ok"; });
+    t(name + " swap", () -> { Collections.swap(f.get(), 0, 0); return "ok"; });
+    t(name + " subSet", () -> f.get().subList(0, f.get().size()).set(5, 1));
+    t(name + " subAdd", () -> { f.get().subList(0, f.get().size()).add(5, 1); return "ok"; });
+    t(name + " subRemove", () -> f.get().subList(0, f.get().size()).remove((Object) 1));
+  }
+  public static void main(String[] args) {
+    ops("asList", () -> Arrays.asList(1, 2));
+    ops("empty", () -> Collections.emptyList());
+    ops("single", () -> Collections.singletonList(1));
+    ops("copies", () -> Collections.nCopies(2, 1));
+    ops("of", () -> List.of(1, 2));
+    ops("unmod", () -> Collections.unmodifiableList(new ArrayList<>(List.of(1, 2))));
+    t("stackLi", () -> { Stack<Integer> s = new Stack<>(); s.push(1); return s.listIterator(5); });
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'asList java.util.Arrays$ArrayList java.util.AbstractList$RandomAccessSubList\nasList remove false false false false\nasList removeFound java.lang.UnsupportedOperationException: remove\nasList clear java.lang.UnsupportedOperationException\nasList sort ok\nasList swap ok\nasList subSet java.lang.IndexOutOfBoundsException: Index 5 out of bounds for length 2\nasList subAdd java.lang.IndexOutOfBoundsException: Index: 5, Size: 2\nasList subRemove java.lang.UnsupportedOperationException\nempty java.util.Collections$EmptyList java.util.AbstractList$RandomAccessSubList\nempty remove false false false false\nempty removeFound false\nempty clear ok\nempty sort ok\nempty swap java.lang.IndexOutOfBoundsException: Index: 0\nempty subSet java.lang.IndexOutOfBoundsException: Index 5 out of bounds for length 0\nempty subAdd java.lang.IndexOutOfBoundsException: Index: 5, Size: 0\nempty subRemove false\nsingle java.util.Collections$SingletonList java.util.AbstractList$RandomAccessSubList\nsingle remove java.lang.UnsupportedOperationException\nsingle removeFound java.lang.UnsupportedOperationException\nsingle clear java.lang.UnsupportedOperationException\nsingle sort ok\nsingle swap java.lang.UnsupportedOperationException\nsingle subSet java.lang.IndexOutOfBoundsException: Index 5 out of bounds for length 1\nsingle subAdd java.lang.IndexOutOfBoundsException: Index: 5, Size: 1\nsingle subRemove java.lang.UnsupportedOperationException\ncopies java.util.Collections$CopiesList java.util.Collections$CopiesList\ncopies remove false false false false\ncopies removeFound java.lang.UnsupportedOperationException\ncopies clear java.lang.UnsupportedOperationException\ncopies sort java.lang.UnsupportedOperationException\ncopies swap java.lang.UnsupportedOperationException\ncopies subSet java.lang.UnsupportedOperationException\ncopies subAdd java.lang.UnsupportedOperationException\ncopies subRemove java.lang.UnsupportedOperationException\nof java.util.ImmutableCollections$List12 java.util.ImmutableCollections$SubList\nof remove java.lang.UnsupportedOperationException\nof removeFound java.lang.UnsupportedOperationException\nof clear java.lang.UnsupportedOperationException\nof sort java.lang.UnsupportedOperationException\nof swap java.lang.UnsupportedOperationException\nof subSet java.lang.UnsupportedOperationException\nof subAdd java.lang.UnsupportedOperationException\nof subRemove java.lang.UnsupportedOperationException\nunmod java.util.Collections$UnmodifiableRandomAccessList java.util.Collections$UnmodifiableRandomAccessList\nunmod remove java.lang.UnsupportedOperationException\nunmod removeFound java.lang.UnsupportedOperationException\nunmod clear java.lang.UnsupportedOperationException\nunmod sort java.lang.UnsupportedOperationException\nunmod swap java.lang.UnsupportedOperationException\nunmod subSet java.lang.UnsupportedOperationException\nunmod subAdd java.lang.UnsupportedOperationException\nunmod subRemove java.lang.UnsupportedOperationException\nstackLi java.lang.IndexOutOfBoundsException: Index: 5\n',
+  });
+});
+
+test("Java's array streams, descending iterators, wrapper equality, replaceAll, and failed class initialization behave as the JDK's", () => {
+  const program = `import java.util.*;
+import java.util.stream.*;
+public class Main {
+  static class Failure extends RuntimeException { Failure(String m) { super(m); } public String toString() { System.out.println("toString"); return "failure"; } }
+  static class Bad { static int x = fail(); static int fail() { throw new Failure("detail"); } }
+  public static void main(String[] args) {
+    int[] a = {1, 2};
+    System.out.println(Arrays.toString(IntStream.of(a).peek(x -> a[1] = 9).toArray()));
+    Deque<Integer> d = new ArrayDeque<>(List.of(1, 2, 3, 4));
+    Iterator<Integer> it = d.descendingIterator();
+    while (it.hasNext()) if (it.next() % 2 == 0) it.remove();
+    Iterator<Integer> stale = d.descendingIterator();
+    d.clear();
+    System.out.println(d + " " + stale.hasNext());
+    List<Integer> root = new ArrayList<>(List.of(1, 2));
+    List<Integer> view = root.subList(0, 1);
+    List<Integer> wrapper = Collections.unmodifiableList(view);
+    root.add(3);
+    System.out.println(wrapper.equals(view));
+    try { for (int x : root) root.replaceAll(y -> y * 2); } catch (ConcurrentModificationException e) { System.out.println("CME " + root); }
+    for (int i = 0; i < 2; i++) {
+      try { System.out.println(Bad.x); } catch (Throwable e) { System.out.println(e + " / " + e.getCause()); }
+    }
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[1, 9]\n[] true\ntrue\nCME [2, 4, 6]\ntoString\njava.lang.ExceptionInInitializerError / failure\njava.lang.NoClassDefFoundError: Could not initialize class Main$Bad / java.lang.ExceptionInInitializerError: Exception Main$Failure: detail [in thread "main"]\n',
+  });
+});
+
+test("Java's @FunctionalInterface interfaces count inherited defaults, Object's methods, and overrides as javac does", () => {
+  const program = `import java.util.function.*;
+interface A { void a(); }
+@FunctionalInterface interface B extends A { default void a() { System.out.println("a"); } void b(); }
+@FunctionalInterface interface Named { void equals(String text); }
+@FunctionalInterface interface Increment extends Function<Integer, Integer> { Integer apply(Integer x); }
+public class Main {
+  public static void main(String[] args) {
+    B b = () -> System.out.println("b");
+    b.a();
+    b.b();
+    Named named = text -> System.out.println(text);
+    named.equals("named");
+    Increment increment = x -> x + 1;
+    System.out.println(increment.apply(1));
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout: 'a\nb\nnamed\n2\n' });
+});
+
+test("Java's List.of, Set.of, and Map.of reject null lookups as the JDK's do, unlike Stream.toList's lists", () => {
+  const program = `import java.util.*; import java.util.function.*; import java.util.stream.*;
+public class Main { static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) {
+  t("l2", () -> List.of(1, 2).contains(null)); t("l3", () -> List.of(1,2,3).indexOf(null)); t("l3last", () -> List.of(1,2,3).lastIndexOf(null)); t("l0", () -> List.of().contains(null));
+  t("s", () -> Set.of(1,2).contains(null)); t("s1", () -> Set.of(1).contains(null)); t("mg", () -> Map.of(1,"a").get(null)); t("mk", () -> Map.of(1,"a").containsKey(null)); t("mv", () -> Map.of(1,"a").containsValue(null)); t("md", () -> Map.of(1,"a").getOrDefault(null, "d"));
+  t("copy", () -> List.copyOf(new ArrayList<>(List.of(1))).contains(null)); t("all", () -> List.of(1).containsAll(Arrays.asList(1, null)));
+  t("sub", () -> List.of(1,2,3).subList(0, 2).contains(null)); t("toList", () -> Stream.of(1, 2).toList().contains(null)); t("toListSub", () -> Stream.of(1, 2, 3).toList().subList(0, 2).indexOf(null));
+  t("unmod", () -> Collections.unmodifiableList(new ArrayList<>(List.of(1))).contains(null)); t("empty", () -> Collections.emptyList().contains(null)); t("asList", () -> Arrays.asList(1).contains(null));
+  t("get", () -> List.of(1).get(0)); t("contains", () -> List.of(1).contains(1));
+ } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'l2 java.lang.NullPointerException\nl3 java.lang.NullPointerException\nl3last java.lang.NullPointerException\nl0 java.lang.NullPointerException\ns java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\ns1 java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nmg java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nmk java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nmv java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nmd java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\ncopy java.lang.NullPointerException\nall java.lang.NullPointerException\nsub java.lang.NullPointerException\ntoList false\ntoListSub -1\nunmod false\nempty false\nasList false\nget 1\ncontains true\n',
+  });
+});
+
+test("Java's unmodifiable wrappers and sublists look null up as the collection they read does", () => {
+  const program = `import java.util.*; import java.util.function.*; import java.util.stream.*;
+public class Main { static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) {
+  Set<String> hs = new HashSet<>(); hs.add(null); t("uset", () -> Collections.unmodifiableSet(hs).contains(null));
+  Map<String, String> hm = new HashMap<>(); hm.put(null, "v"); t("umap", () -> Collections.unmodifiableMap(hm).get(null) + " " + Collections.unmodifiableMap(hm).containsKey(null) + " " + Collections.unmodifiableMap(hm).containsValue(null) + " " + Collections.unmodifiableMap(hm).getOrDefault(null, "d"));
+  t("ulistOf", () -> Collections.unmodifiableList(List.of(1)).contains(null)); t("ulist", () -> Collections.unmodifiableList(new ArrayList<>(Arrays.asList(1, null))).indexOf(null));
+  t("usetOf", () -> Collections.unmodifiableSet(Set.of(1)).contains(null)); t("umapOf", () -> Collections.unmodifiableMap(Map.of(1, 2)).get(null));
+  t("subUlistOf", () -> Collections.unmodifiableList(List.of(1, 2, 3)).subList(0, 2).contains(null)); t("alsub", () -> new ArrayList<>(Arrays.asList(1, null)).subList(0, 2).indexOf(null)); t("toListU", () -> Collections.unmodifiableList(Stream.of(1).toList()).contains(null));
+  t("tree", () -> new TreeMap<String, String>().containsValue(null));
+ } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'uset true\numap v true false v\nulistOf java.lang.NullPointerException\nulist 1\nusetOf java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\numapOf java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nsubUlistOf java.lang.NullPointerException\nalsub 1\ntoListU false\ntree false\n',
+  });
+});
+
+test("Java's map views look null up as their map does", () => {
+  const program = `import java.util.*; import java.util.function.*;
+public class Main { static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) { Map<Integer,String> m3 = Map.of(1,"a",2,"b",3,"c"); Map<Integer,String> m1 = Map.of(1, "a");
+  t("ks", () -> m3.keySet().contains(null)); t("vs", () -> m3.values().contains(null)); t("ksAll", () -> m3.keySet().containsAll(Arrays.asList(1, null))); t("uks", () -> Collections.unmodifiableMap(m3).keySet().contains(null));
+  t("es", () -> m3.entrySet().contains(null)); t("m1vs", () -> m1.values().contains(null)); t("m1ks", () -> m1.keySet().contains(null));
+  Map<Integer, String> h = new HashMap<>(); h.put(null, null); t("hks", () -> h.keySet().contains(null) + " " + h.values().contains(null)); t("uhks", () -> Collections.unmodifiableMap(h).keySet().contains(null));
+  t("tm", () -> new TreeMap<Integer, String>(Map.of(1, "x")).values().contains(null)); } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'ks java.lang.NullPointerException\nvs java.lang.NullPointerException\nksAll java.lang.NullPointerException\nuks java.lang.NullPointerException\nes false\nm1vs java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nm1ks java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nhks true true\nuhks true\ntm false\n',
+  });
+});
+
+test("Java's sets remove the elements of a smaller collection one by one, as AbstractSet.removeAll does", () => {
+  const program = `import java.util.*; import java.util.function.*;
+public class Main { static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) {
+  Set<String> l = new LinkedHashSet<>(Arrays.asList(null, "keep", "remove")); t("lhs", () -> l.removeAll(List.of("remove")) + " " + l);
+  Set<String> h = new HashSet<>(Arrays.asList(null, "x")); t("hs", () -> h.removeAll(Set.of("x")) + " " + h);
+  Set<String> h2 = new HashSet<>(Arrays.asList(null, "x")); t("hsBig", () -> h2.removeAll(List.of("x", "y", "z")) + " " + h2);
+  Set<String> h3 = new HashSet<>(Arrays.asList(null, "x")); t("retain", () -> h3.retainAll(List.of("x")) + " " + h3);
+  List<String> al = new ArrayList<>(Arrays.asList(null, "x")); t("al", () -> al.removeAll(List.of("x")) + " " + al);
+  TreeSet<Integer> ts = new TreeSet<>(List.of(1, 2, 3)); t("ts", () -> ts.removeAll(List.of(2, 2)) + " " + ts);
+  Map<String, Integer> m = new HashMap<>(Map.of("a", 1, "b", 2, "c", 3)); t("ks", () -> m.keySet().removeAll(List.of("a")) + " " + m);
+  Set<Integer> s1 = new HashSet<>(List.of(1, 2, 3)); t("dupe", () -> s1.removeAll(List.of(4)) + " " + s1);
+  t("single", () -> Collections.singleton(1).removeAll(List.of()));
+ } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'lhs true [null, keep]\nhs true [null]\nhsBig java.lang.NullPointerException\nretain java.lang.NullPointerException\nal java.lang.NullPointerException\nts true [1, 3]\nks true {b=2, c=3}\ndupe false [1, 2, 3]\nsingle false\n',
+  });
+});
+
+test("Java's EnumSet and map key sets remove null as their JDK classes do", () => {
+  const program = `import java.util.*; import java.util.function.*;
+public class Main { static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ enum E { A, B, C }
+ public static void main(String[] a) { List<Integer> n = Collections.singletonList(null); EnumSet<E> es = EnumSet.of(E.A, E.B, E.C); t("enum", () -> es.removeAll(Arrays.asList(null, E.B)) + " " + es);
+  t("tmks", () -> new TreeMap<>(Map.of(1, 1, 2, 2)).keySet().removeAll(n)); t("hmks", () -> new HashMap<>(Map.of(1, 1, 2, 2)).keySet().removeAll(n)); t("mofks", () -> Map.of(1, 1, 2, 2).keySet().removeAll(n));
+  t("lhmks", () -> new LinkedHashMap<>(Map.of(1, 1, 2, 2)).keySet().removeAll(n)); t("es", () -> Map.of(1, 1, 2, 2).entrySet().removeAll(n)); t("hes", () -> new HashMap<>(Map.of(1, 1, 2, 2)).entrySet().removeAll(n));
+  t("single", () -> Collections.singleton(1).removeAll(n)); t("empty", () -> Collections.emptySet().removeAll(List.of())); t("useto", () -> Collections.unmodifiableSet(new HashSet<>(List.of(1, 2))).removeAll(n));
+ } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'enum true [A, C]\ntmks java.lang.NullPointerException\nhmks false\nmofks false\nlhmks false\nes false\nhes false\nsingle false\nempty false\nuseto java.lang.UnsupportedOperationException\n',
+  });
+});
+
+test("Java's EnumMap finds no key that is not a constant of its enum", () => {
+  const program = `import java.util.*; import java.util.function.*;
+public class Main { enum E { A, B, C } static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) { EnumMap<E, Integer> m = new EnumMap<>(E.class); m.put(E.A, 1); m.put(E.B, 2); m.put(E.C, 3);
+  t("ksr", () -> m.keySet().remove(null) + " " + m); t("ksra", () -> m.keySet().removeAll(Arrays.asList(null, E.B)) + " " + m);
+  t("get", () -> m.get(null)); t("ck", () -> m.containsKey(null)); t("rm", () -> m.remove(null)); t("god", () -> m.getOrDefault(null, 9)); t("cv", () -> m.containsValue(null)); t("other", () -> m.get("x")); t("put", () -> m.put(null, 1)); } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'ksr false {A=1, B=2, C=3}\nksra true {A=1, C=3}\nget null\nck false\nrm null\ngod 9\ncv false\nother null\nput java.lang.NullPointerException: Cannot invoke "Object.getClass()" because "key" is null\n',
+  });
+});
+
+test("Java's unmodifiable wrappers look values up through the collection they wrap", () => {
+  const program = `import java.util.*; import java.util.function.*;
+public class Main { enum E { A, B, C } enum F { X } static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) { Set<E> u = Collections.unmodifiableSet(EnumSet.of(E.A, E.B, E.C));
+  t("d1", () -> Collections.disjoint(u, Collections.singletonList(null))); t("d2", () -> Collections.disjoint(u, List.of(F.X))); t("c", () -> u.contains(null) + " " + u.contains(F.X) + " " + u.contains(E.A) + " " + u);
+  Map<E, Integer> m = Collections.unmodifiableMap(new EnumMap<>(Map.of(E.A, 1))); t("m", () -> m.get(null) + " " + m.containsKey(F.X) + " " + m.getOrDefault(F.X, 5) + " " + m.containsValue(1));
+  Set<Integer> ts = Collections.unmodifiableSet(new TreeSet<>(List.of(1))); t("ts", () -> ts.contains(null));
+  List<Integer> ul = Collections.unmodifiableList(new ArrayList<>(List.of(1, 2))); t("ul", () -> ul.indexOf(2) + " " + ul.contains(null) + " " + ul.lastIndexOf(1));
+ } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'd1 true\nd2 true\nc false false true [A, B, C]\nm null false 5 true\nts java.lang.NullPointerException\nul 1 false 0\n',
+  });
+});
+
+test("Java's functional interfaces compare inherited methods as their parameterized superinterfaces give them", () => {
+  const program = `import java.util.function.*;
+interface A<T> { int size(T value); }
+interface B { int size(String value); }
+@FunctionalInterface interface C extends A<String>, B {}
+interface G<T> { T get(T x); }
+interface H extends G<Integer> { Integer get(Integer x); }
+interface S2 extends Function<String, Integer> { }
+interface Ap { Integer apply(String s); }
+@FunctionalInterface interface S3 extends Function<String, Integer>, Ap { }
+interface D<T> { void a(T x); }
+@FunctionalInterface interface D2 extends D<String> { default void a(String x) {} void b(); }
+public class Main { public static void main(String[] args) { C c = x -> x.length(); A<String> a = c; System.out.println(a.size("abc")); H h = x -> x + 1; System.out.println(h.get(1)); S2 s2 = String::length; System.out.println(s2.apply("ab")); S3 s3 = String::length; System.out.println(((Function<String, Integer>) s3).apply("abcd")); D2 d = () -> System.out.println("b"); d.a("q"); d.b(); } }`;
+  expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout: '3\n2\n2\n4\nb\n' });
+});
+
+test("Java's lambdas implement every inherited method their functional method stands for", () => {
+  const program = `import java.util.function.*;
+interface A<T> { int size(T x); }
+interface B { int size(String x); }
+@FunctionalInterface interface C extends A<String>, B {}
+@FunctionalInterface interface R extends B, A<String> {}
+interface Ap { Integer apply(String s); }
+@FunctionalInterface interface F extends Function<String,Integer>, Ap {}
+public class Main {
+ static void t(String label, Runnable run) { try {run.run();} catch(Throwable e) {System.out.println(label+" "+e.getClass().getSimpleName());} }
+ public static void main(String[] args) {
+  t("lambda",()->{ C c=x->x.length(); B b=c; System.out.println("lambda "+b.size("abc")); });
+  t("reference",()->{ F f=String::length; Ap ap=f; System.out.println("reference "+ap.apply("abcd")); });
+  t("reversed",()->{ R r=x->x.length(); A<String> a=r; System.out.println("reversed "+a.size("abcde")); });
+ }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'lambda 3\nreference 4\nreversed 5\n',
+  });
+});
+
+test("Java's TreeMap key sets remove a key their map's comparator finds", () => {
+  const program = `import java.util.*;
+public class Main { public static void main(String[] a) { TreeMap<String,Integer> t = new TreeMap<>(String.CASE_INSENSITIVE_ORDER); t.put("a",1); t.put("b",2); System.out.println(t.keySet().remove("A") + " " + t); t.put("c",3); t.put("d",4); System.out.println(t.keySet().removeAll(List.of("C")) + " " + t);
+ TreeMap<String,Integer> l = new TreeMap<>(Comparator.comparing(String::length)); l.put("ab", 1); System.out.println(l.keySet().remove("zz") + " " + l); TreeMap<Integer, Integer> n = new TreeMap<>(Map.of(1, 1)); System.out.println(n.keySet().remove(2) + " " + n.keySet().remove(1) + " " + n);
+ TreeSet<String> ts = new TreeSet<>(String.CASE_INSENSITIVE_ORDER); ts.add("a"); System.out.println(ts.remove("A") + " " + ts); } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true {b=2}\ntrue {b=2, d=4}\ntrue {}\nfalse true {}\ntrue []\n',
+  });
+});
+
+test("Java's EnumMap rejects a null key wherever a method puts it", () => {
+  const program = `import java.util.*;
+public class Main { enum E { A } public static void main(String[] a) { EnumMap<E,Integer> m = new EnumMap<>(E.class); m.put(E.A,1);
+ try { m.computeIfAbsent(null, k -> 5); } catch (Exception e) { System.out.println(e); } try { m.merge(null, 1, Integer::sum); } catch (Exception e) { System.out.println(e); } try { m.putIfAbsent(null, 1); } catch (Exception e) { System.out.println(e); } try { m.put(null, 1); } catch (Exception e) { System.out.println(e); } System.out.println(m.computeIfPresent(null, (k, v) -> 1)); m.merge(E.A, 1, Integer::sum); System.out.println(m); } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'java.lang.NullPointerException: Cannot invoke "Object.getClass()" because "key" is null\njava.lang.NullPointerException: Cannot invoke "Object.getClass()" because "key" is null\njava.lang.NullPointerException: Cannot invoke "Object.getClass()" because "key" is null\njava.lang.NullPointerException: Cannot invoke "Object.getClass()" because "key" is null\nnull\n{A=2}\n',
+  });
+});
+
+test("Java's TreeMap key sets decide membership by their map's comparator", () => {
+  const program = `import java.util.*;
+
+public class Main {
+  public static void main(String[] args) {
+    TreeMap<String, Integer> tm = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+    tm.put("Apple", 1);
+    tm.put("banana", 2);
+    Set<String> keys = tm.keySet();
+    System.out.println(tm.containsKey("BANANA"));
+    System.out.println(keys.contains("BANANA"));
+    System.out.println(keys.containsAll(List.of("APPLE", "BANANA")));
+    System.out.println(Collections.disjoint(keys, List.of("APPLE")));
+    try { new TreeMap<Integer, Integer>(Map.of(1, 2)).keySet().contains(null); System.out.println("no exception"); }
+    catch (NullPointerException e) { System.out.println("NPE"); }
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\ntrue\nfalse\nNPE\n' });
+});
+
+test("Java's sets compare as AbstractSet.equals does, through their own lookups", () => {
+  const program = `import java.util.*;
+
+public class Main {
+  public static void main(String[] args) {
+    TreeMap<String, Integer> ci = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+    ci.put("Ab", 1);
+    Set<String> keys = ci.keySet();
+    System.out.println(keys.contains("AB"));
+    System.out.println(keys.equals(Set.of("ab")));
+    System.out.println(Collections.unmodifiableMap(ci).keySet().contains("AB"));
+    System.out.println(Collections.unmodifiableMap(ci).keySet().containsAll(List.of("AB")));
+    System.out.println(new TreeSet<>(List.of("x")).equals(Set.of(1)));
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\ntrue\ntrue\ntrue\nfalse\n',
+  });
+});
+
+test("Java's EnumMap subclasses look keys up as EnumMap does", () => {
+  const program = `import java.util.*;
+public class Main {
+ enum Color { RED, BLUE }
+ static class ColorMap extends EnumMap<Color,Integer> { ColorMap() { super(Color.class); } }
+ public static void main(String[] args) {
+  ColorMap m = new ColorMap(); m.put(Color.RED, 1);
+  System.out.println(m.get(null));
+  System.out.println(m.containsKey(null));
+ }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout: 'null\nfalse\n' });
+});
+
+test("Java's entry sets look an entry up by its key in their map", () => {
+  const program = `import java.util.*;
+public class Main { public static void main(String[] a) { TreeMap<String,Integer> ci = new TreeMap<>(String.CASE_INSENSITIVE_ORDER); ci.put("ab", 1); System.out.println(ci.entrySet().contains(Map.entry("AB", 1)) + " " + ci.entrySet().contains(Map.entry("AB", 2)) + " " + ci.entrySet().contains("x") + " " + ci.entrySet().contains(null));
+ Map<String,Integer> h = new HashMap<>(Map.of("a", 1)); System.out.println(h.entrySet().contains(Map.entry("a", 1)) + " " + Collections.unmodifiableMap(h).entrySet().contains(Map.entry("a", 1)) + " " + Map.of("a", 1).entrySet().contains(Map.entry("a", 1)) + " " + h.entrySet().equals(Map.of("a", 1).entrySet())); } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true false false false\ntrue true true true\n',
+  });
+});
+
+test("Java's views of an unmodifiable map reject every change at once", () => {
+  const program = `import java.util.*; import java.util.function.*;
+public class Main { static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) { Map<String,Integer> view = Collections.unmodifiableMap(new HashMap<>(Map.of("a",80,"b",90)));
+  t("vri", () -> view.values().removeIf(v -> v < 50)); t("ksr", () -> view.keySet().remove("z")); t("ksra", () -> view.keySet().removeAll(List.of("z"))); t("ksrt", () -> view.keySet().retainAll(List.of("a","b"))); t("esri", () -> view.entrySet().removeIf(e -> e.getValue() < 50));
+  t("clr", () -> { Collections.unmodifiableMap(new HashMap<>()).keySet().clear(); return "ok"; }); t("ok", () -> view.keySet().contains("a") + " " + view.values() + " " + view.entrySet().size());
+  Map<String,Integer> h = new HashMap<>(Map.of("a", 1)); t("hm", () -> h.keySet().remove("z") + " " + h.values().removeIf(v -> v > 5) + " " + h.keySet().retainAll(List.of("a")));
+  t("mof", () -> Map.of("a", 1).keySet().remove("z")); } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'vri java.lang.UnsupportedOperationException\nksr java.lang.UnsupportedOperationException\nksra java.lang.UnsupportedOperationException\nksrt java.lang.UnsupportedOperationException\nesri java.lang.UnsupportedOperationException\nclr java.lang.UnsupportedOperationException\nok true [80, 90] 2\nhm false false false\nmof false\n',
+  });
+});
+
+test("Java's Map.of views reject a removal with the message of their iterator's remove", () => {
+  const program = `import java.util.*; import java.util.function.*;
+public class Main { static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) { t("ra", () -> Map.of(1,1,2,2).keySet().retainAll(List.of(1))); t("va", () -> Map.of(1,1,2,2).values().removeAll(List.of(2))); t("kr", () -> Map.of(1,1).keySet().remove(1)); t("vr", () -> Map.of(1,1,2,2).values().remove(2)); t("ri", () -> Map.of(1,1,2,2).entrySet().removeIf(e -> e.getKey() == 2)); t("al", () -> Arrays.asList(1,2).removeIf(x -> true)); } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'ra java.lang.UnsupportedOperationException: remove\nva java.lang.UnsupportedOperationException: remove\nkr java.lang.UnsupportedOperationException: remove\nvr java.lang.UnsupportedOperationException: remove\nri java.lang.UnsupportedOperationException: remove\nal java.lang.UnsupportedOperationException: remove\n',
+  });
+});
+
+test("Java's one-entry Map.of entry set rejects every change at once, as Set.of does", () => {
+  const program = `import java.util.*; import java.util.function.*;
+public class Main { static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) { Map<Integer,Integer> one = Map.of(1, 1); t("r", () -> one.entrySet().remove(Map.entry(1, 1))); t("rt", () -> one.entrySet().retainAll(List.of())); t("ri", () -> one.entrySet().removeIf(e -> true)); t("rif", () -> one.entrySet().removeIf(e -> false)); t("ra", () -> one.entrySet().removeAll(List.of()));
+  t("two", () -> Map.of(1, 1, 2, 2).entrySet().removeIf(e -> e.getKey() == 2)); t("c", () -> one.entrySet().contains(Map.entry(1, 1)) + " " + one.entrySet()); } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'r java.lang.UnsupportedOperationException\nrt java.lang.UnsupportedOperationException\nri java.lang.UnsupportedOperationException\nrif java.lang.UnsupportedOperationException\nra java.lang.UnsupportedOperationException\ntwo java.lang.UnsupportedOperationException: remove\nc true [1=1]\n',
+  });
+});
+
+test("Java's map entry sets clear as their JDK classes do", () => {
+  const program = `import java.util.*; import java.util.function.*;
+public class Main { static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) { t("m2", () -> { Map.of(1,1,2,2).entrySet().clear(); return "ok"; }); t("sm", () -> { Collections.singletonMap(1,1).entrySet().clear(); return "ok"; }); t("em", () -> { Collections.emptyMap().entrySet().clear(); return "ok"; });
+  t("hm", () -> { Map<Integer,Integer> h = new HashMap<>(Map.of(1, 1)); h.entrySet().clear(); h.put(2, 2); h.values().clear(); return h; }); t("m0", () -> { Map.of().entrySet().clear(); return "ok"; }); } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'm2 java.lang.UnsupportedOperationException: remove\nsm java.lang.UnsupportedOperationException\nem ok\nhm {}\nm0 ok\n',
   });
 });

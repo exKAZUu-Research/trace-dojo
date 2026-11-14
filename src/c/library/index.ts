@@ -2,11 +2,13 @@ import type { LibraryEntry } from '../compiler';
 import { ProgramAbort } from '../errors';
 import { FILE_NAME } from '../preprocessor';
 import type { NativeFunction } from '../runtime';
-import { CTYPE_FUNCTIONS, MATH_FUNCTIONS } from './mathFunctions';
+import { classificationCall, constantCall, CTYPE_FUNCTIONS, MATH_FUNCTIONS } from './mathFunctions';
+import { PLATFORM_HEADER_FUNCTIONS } from './platformHeaderFunctions';
+import { PLATFORM_DEFINED_FUNCTIONS, PLATFORM_UNMODELED } from './platformHeaders';
 import { vaStartCall } from './stdarg';
 import { STDIO_FUNCTIONS, VARARG_FUNCTIONS } from './stdioFunctions';
 import { STDLIB_FUNCTIONS } from './stdlibFunctions';
-import { STRING_FUNCTIONS } from './stringFunctions';
+import { comparisonCall, STRING_FUNCTIONS } from './stringFunctions';
 import { asAddress, asNumber, bytesToText, readCString } from './support';
 import { TIME_FUNCTIONS } from './timeFunctions';
 import { newTurtleCall, removeCall, TURTLE_FUNCTIONS } from './turtleFunctions';
@@ -56,6 +58,29 @@ const UNSUPPORTED: Record<string, string> = {
   wcstombs: 'マルチバイト文字の変換（wcstombs）',
   at_quick_exit: 'at_quick_exit',
 };
+const EXTENSION_NAMES = [
+  'strcasecmp',
+  'strncasecmp',
+  'strlcpy',
+  'strlcat',
+  'isascii',
+  'toascii',
+  'random',
+  'srandom',
+  'initstate',
+  'setstate',
+  'drand48',
+  'erand48',
+  'lrand48',
+  'nrand48',
+  'mrand48',
+  'jrand48',
+  'srand48',
+  'seed48',
+  'lcong48',
+];
+for (const name of EXTENSION_NAMES) UNSUPPORTED[name] = `標準 C ライブラリ以外の関数（${name}）`;
+
 // These give the last bits of macOS's own algorithms, which no portable formula reproduces.
 for (const name of ['erf', 'erfc', 'tgamma', 'lgamma']) {
   for (const suffix of ['', 'f', 'l']) UNSUPPORTED[`${name}${suffix}`] = `${name}${suffix}`;
@@ -78,17 +103,51 @@ const NATIVES: Record<string, NativeFunction> = {
   atoll: STDLIB_FUNCTIONS.atol,
 };
 
-const SPECIAL_CALLS = { new_turtle: newTurtleCall, remove: removeCall, __builtin_va_start: vaStartCall };
+const PLATFORM_FUNCTIONS = new Set(Object.values(PLATFORM_HEADER_FUNCTIONS).flat());
+const UNMODELED = new Set(Object.values(PLATFORM_UNMODELED).flat());
+const EXTENSIONS = new Set([...PLATFORM_FUNCTIONS, 'strdup', 'strndup', ...EXTENSION_NAMES]);
+
+const SPECIAL_CALLS = {
+  __builtin_va_start: vaStartCall,
+  __builtin_huge_val: constantCall,
+  __builtin_huge_valf: constantCall,
+  __builtin_inff: constantCall,
+  __builtin_nanf: constantCall,
+  strcmp: comparisonCall,
+  strncmp: comparisonCall,
+  memcmp: comparisonCall,
+  __builtin_fpclassify: classificationCall,
+  __builtin_isnormal: classificationCall,
+  new_turtle: newTurtleCall,
+  remove: removeCall,
+};
 
 /** The interpreter's implementation of a library function, or why it leaves the function out. */
 export function libraryEntry(name: string): LibraryEntry | undefined {
+  if (name.startsWith('__trace_platform_'))
+    return { kind: 'unsupported', feature: `標準 C ライブラリ以外の関数（${name.slice('__trace_platform_'.length)}）` };
+  const canDefine = EXTENSIONS.has(name) && !UNMODELED.has(name) && !PLATFORM_DEFINED_FUNCTIONS.has(name);
+  const declaration = { canDefine, hasDefinition: PLATFORM_DEFINED_FUNCTIONS.has(name) };
   const feature = UNSUPPORTED[name];
-  if (feature) return { kind: 'unsupported', feature };
+  if (feature)
+    return {
+      kind: 'unsupported',
+      feature,
+      ...declaration,
+    };
   const run = NATIVES[name];
-  if (!run) return undefined;
+  if (!run)
+    return PLATFORM_FUNCTIONS.has(name)
+      ? {
+          kind: 'unsupported',
+          feature: `標準 C ライブラリ以外の関数（${name}）`,
+          ...declaration,
+        }
+      : undefined;
   return {
     kind: 'native',
     run,
+    ...declaration,
     ...(name in SPECIAL_CALLS ? { special: SPECIAL_CALLS[name as keyof typeof SPECIAL_CALLS] } : {}),
   };
 }

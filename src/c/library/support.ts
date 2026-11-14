@@ -1,5 +1,6 @@
-import type { Scalar, Value } from '../arith';
+import type { RecordValue, Scalar, Value } from '../arith';
 import { CRuntimeError } from '../errors';
+import { type PointerBytes, replacePointerBytes, slicePointerBytes } from '../pointerBounds';
 import type { Runtime } from '../runtime';
 import { type CType, INT_PROPERTIES } from '../types';
 
@@ -11,7 +12,7 @@ export function readCString(runtime: Runtime, address: number, limit = Number.PO
   let end = start;
   while (end - start < limit) {
     if (end >= block.size) throw new CRuntimeError('unterminatedString');
-    if (block.initialized[end] === 0) throw new CRuntimeError('uninitialized');
+    if (block.initialized[end] !== 255) throw new CRuntimeError('uninitialized');
     if (block.bytes[end] === 0) break;
     end++;
   }
@@ -26,38 +27,42 @@ export function readBytes(runtime: Runtime, address: number, size: number): Uint
   const block = runtime.memory.locate(address, size);
   const offset = address - block.base;
   for (let index = offset; index < offset + size; index++) {
-    if (block.initialized[index] === 0) throw new CRuntimeError('uninitialized');
+    if (block.initialized[index] !== 255) throw new CRuntimeError('uninitialized');
   }
   runtime.spend(Math.ceil(size / 64));
   return block.bytes.slice(offset, offset + size);
 }
 
 /** Reads bytes and which of them hold values, for functions that copy memory as it is. */
-export function readRaw(
-  runtime: Runtime,
-  address: number,
-  size: number
-): { bytes: Uint8Array; initialized: Uint8Array } {
+export function readRaw(runtime: Runtime, address: number, size: number): RecordValue {
   if (size === 0) return { bytes: new Uint8Array(), initialized: new Uint8Array() };
   if (address === 0) throw new CRuntimeError('nullArgument');
   const block = runtime.memory.locate(address, size);
   const offset = address - block.base;
   runtime.spend(Math.ceil(size / 64));
   return {
+    pointerBytes: slicePointerBytes(block.pointerBytes, offset, size),
     bytes: block.bytes.slice(offset, offset + size),
     initialized: block.initialized.slice(offset, offset + size),
   };
 }
 
-export function writeBytes(runtime: Runtime, address: number, bytes: Uint8Array, initialized?: Uint8Array): void {
+export function writeBytes(
+  runtime: Runtime,
+  address: number,
+  bytes: Uint8Array,
+  initialized?: Uint8Array,
+  pointerBytes?: PointerBytes
+): void {
   if (bytes.length === 0) return;
   if (address === 0) throw new CRuntimeError('nullArgument');
   const block = runtime.memory.locate(address, bytes.length);
   if (block.isReadOnly) throw new CRuntimeError('readOnly');
   const offset = address - block.base;
+  replacePointerBytes(block.pointerBytes, offset, bytes.length, pointerBytes);
   block.bytes.set(bytes, offset);
   if (initialized) block.initialized.set(initialized, offset);
-  else block.initialized.fill(1, offset, offset + bytes.length);
+  else block.initialized.fill(255, offset, offset + bytes.length);
   runtime.spend(Math.ceil(bytes.length / 64));
 }
 

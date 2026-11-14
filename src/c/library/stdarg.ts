@@ -13,11 +13,11 @@ export const vaStartCall: SpecialCall = (compiler, call) => {
   if (last.kind !== 'identifier' || last.name !== lastParam?.name) {
     compiler.error(row, 'va_start の2つ目には、関数の最後の名前付きの引数を書いてください。');
   }
-  const { store } = compiler.vaList(args[0], row, 'va_start');
+  const list = compiler.vaList(args[0], row, 'va_start');
   return {
     type: VOID,
     value: (frame) => {
-      store(frame, frame.varargs);
+      list.resolve(frame).store(frame.varargs);
       return 0;
     },
     isCall: true,
