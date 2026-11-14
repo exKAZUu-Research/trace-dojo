@@ -20,6 +20,7 @@ import {
   implicitConversionError,
   indexError,
   rangeError,
+  rubyError,
   runtimeError,
   typeError,
 } from './errors';
@@ -52,8 +53,9 @@ function* modify(self: RArray): Gen<void> {
 
 function grow(length: number, self?: RArray): void {
   if (length > 10_000_000) throw argumentError('array size too big');
-  if (self) rt().chargeSlots(Math.max(0, length - self.items.length));
-  rt().spend(Math.floor(length / 64));
+  const added = self ? Math.max(0, length - self.items.length) : length;
+  if (self) rt().chargeSlots(added);
+  rt().spend(Math.floor(added / 64));
 }
 
 function* toAry(value: Value): Gen<RArray> {
@@ -261,7 +263,7 @@ def('Array', 'values_at', [0, -1], function* (self: RArray, args) {
         let end = arg.end === NIL ? self.items.length : Number(yield* toIndex(arg.end));
         if (end < 0) end += self.items.length;
         if (!arg.exclusive && arg.end !== NIL) end++;
-        grow(values.length + Math.max(0, end - start));
+        grow(Math.max(0, end - start));
         for (let index = start; index < end; index++) values.push(self.items[index] ?? NIL);
       } else {
         values.push(yield* elementAt(self, arg));
@@ -757,7 +759,12 @@ function* arrayUnion(self: RArray, others: Value[]): Gen {
       rt().held.push(array);
     }
     const all = [...self.items];
-    for (const array of arrays) for (const item of array.items) all.push(item);
+    rt().chargeSlots(all.length);
+    for (const array of arrays) {
+      rt().chargeSlots(array.items.length);
+      rt().spend(Math.ceil(array.items.length / 64));
+      for (const item of array.items) all.push(item);
+    }
     rt().heldArrays.push(all);
     if (all.length > 16) return arr(yield* uniqValues(all, undefined));
     const result: Value[] = [];
@@ -797,6 +804,7 @@ def('Array', 'intersect?', 1, function* (self: RArray, [other]) {
 /** `join`: elements' bytes with a separator, nested arrays joined on an explicit stack. */
 function* join(self: RArray, separator: RString): Gen<RString> {
   const stack: JoinFrame[] = [];
+  const chunks: Uint8Array[] = [];
   const seen = new Set<RArray>();
   const held = rt().held.length;
   try {
@@ -804,18 +812,17 @@ function* join(self: RArray, separator: RString): Gen<RString> {
     while (stack.length > 0) {
       const frame = stack.at(-1) as JoinFrame;
       if (frame.index >= frame.source.items.length) {
-        const joined = finishJoinFrame(frame);
         stack.pop();
         seen.delete(frame.source);
         rt().held.pop();
-        if (stack.length === 0) return joined;
-        appendJoinPart(stack.at(-1) as JoinFrame, joined);
+        if (stack.length === 0) return finishJoinFrame(frame, chunks);
+        mergeJoinFrame(stack.at(-1) as JoinFrame, frame);
         continue;
       }
-      if (frame.index > 0) appendJoinPart(frame, separator);
+      if (frame.index > 0) appendJoinPart(frame, separator, chunks);
       const value = frame.source.items[frame.index++];
       if (value instanceof RString) {
-        appendJoinPart(frame, value);
+        appendJoinPart(frame, value, chunks);
         continue;
       }
       if (value instanceof RArray) {
@@ -825,14 +832,14 @@ function* join(self: RArray, separator: RString): Gen<RString> {
       if (respondsTo(value, 'to_str', true)) {
         const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
         if (converted instanceof RString) {
-          appendJoinPart(frame, converted);
+          appendJoinPart(frame, converted, chunks);
           continue;
         }
         if (converted !== NIL) throw joinStringConversionError(value, converted);
       }
       const nested = yield* tryAry(value);
       if (nested) yield* enterJoinArray(nested);
-      else appendJoinPart(frame, yield* toSValue(value));
+      else appendJoinPart(frame, yield* toSValue(value), chunks);
     }
     throw new Error('Join stack emptied without a result');
   } finally {
@@ -844,7 +851,7 @@ function* join(self: RArray, separator: RString): Gen<RString> {
     if (stack.length >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
     seen.add(source);
     rt().held.push(source);
-    stack.push({ source, index: 0, chunks: [], length: 0, binary: false, ascii: true });
+    stack.push({ source, index: 0, length: 0, binary: false, ascii: true });
     yield* preflightJoinFirst(source);
   }
 }
@@ -852,25 +859,36 @@ function* join(self: RArray, separator: RString): Gen<RString> {
 interface JoinFrame {
   source: RArray;
   index: number;
-  chunks: Uint8Array[];
   length: number;
   binary: boolean;
   ascii: boolean;
 }
 
-function appendJoinPart(frame: JoinFrame, part: RString): void {
+function appendJoinPart(frame: JoinFrame, part: RString, chunks: Uint8Array[]): void {
   frame.binary = combinedStringEncoding(frame.binary, frame.ascii, part);
   const bytes = stringBytes(part);
   frame.length += bytes.length;
   if (frame.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
-  frame.chunks.push(bytes);
+  chunks.push(bytes);
   if (frame.ascii) frame.ascii = bytes.every((byte) => byte < 0x80);
 }
 
-function finishJoinFrame(frame: JoinFrame): RString {
+function mergeJoinFrame(parent: JoinFrame, child: JoinFrame): void {
+  if (parent.binary !== child.binary && !parent.ascii && !child.ascii) {
+    const left = parent.binary ? 'BINARY (ASCII-8BIT)' : 'utf8';
+    const right = child.binary ? 'BINARY (ASCII-8BIT)' : 'utf8';
+    throw rubyError(rt().c['Encoding::CompatibilityError'], `incompatible character encodings: ${left} and ${right}`);
+  }
+  if (parent.binary !== child.binary && parent.ascii && !child.ascii) parent.binary = child.binary;
+  parent.ascii &&= child.ascii;
+  parent.length += child.length;
+  if (parent.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+}
+
+function finishJoinFrame(frame: JoinFrame, chunks: Uint8Array[]): RString {
   const bytes = new Uint8Array(frame.length);
   let offset = 0;
-  for (const chunk of frame.chunks) {
+  for (const chunk of chunks) {
     bytes.set(chunk, offset);
     offset += chunk.length;
   }
@@ -970,10 +988,13 @@ def('Array', 'product', [0, -1], function* (self: RArray, others, block) {
       rt().held.push(array);
     }
     for (const array of converted) {
+      rt().chargeSlots(array.items.length);
+      rt().spend(Math.ceil(array.items.length / 64));
       const items = [...array.items];
       arrays.push(items);
       rt().heldArrays.push(items);
     }
+    rt().chargeSlots(self.items.length);
     const receiver = [...self.items];
     arrays.unshift(receiver);
     rt().heldArrays.push(receiver);

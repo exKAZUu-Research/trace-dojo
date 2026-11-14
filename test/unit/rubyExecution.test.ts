@@ -2504,6 +2504,16 @@ test('Array flatten charges each appended element once', () => {
   expect(run('p Array.new(20000,1).flatten.size')).toMatchObject({ stdout: '20000\n' });
 });
 
+test('Array growth charges newly appended elements', () => {
+  expect(run('a=[];20000.times{|i|a<<i};p a.size,Array.new(20000){1}.size')).toMatchObject({
+    stdout: '20000\n20000\n',
+  });
+});
+
+test('Array join streams nested bytes without repeated reconstruction', () => {
+  expect(run('a="x"*900000;500.times{a=[a]};p a.join.size')).toMatchObject({ stdout: '900000\n' });
+});
+
 test('Array join enforces String storage as an execution limit', () => {
   expect(run('begin;Array.new(2,"a"*600000).join;rescue=>e;p e.class;end;p :after')).toEqual({
     kind: 'limitExceeded',

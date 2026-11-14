@@ -1,3 +1,4 @@
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   addressOf,
   comparisonFailed,
@@ -520,37 +521,61 @@ for (const name of ['==', '===', 'eql?'])
 def('Enumerator', ['inspect', 'to_s'], 0, function* (self: RObject) {
   const source = sourceOf(self);
   if (self.cls === rt().c['Enumerator::Chain']) {
-    const elements: string[] = [];
-    for (const value of [source.recv, ...source.held().slice(1)]) elements.push(yield* inspect(value));
-    return str(`#<Enumerator::Chain: [${elements.join(', ')}]>`);
+    const elements = new BoundedTextParts('#<Enumerator::Chain: []>'.length);
+    for (const value of [source.recv, ...source.held().slice(1)]) elements.add(yield* inspect(value));
+    return str(`#<Enumerator::Chain: [${elements.text()}]>`);
   }
   if (source.iterate) {
-    const argumentsText: string[] = [];
-    for (const arg of source.args) argumentsText.push(yield* inspect(arg));
-    return str(
-      `#<Enumerator: #<Enumerator::Generator:${source.generatorAddress ?? addressOf(self)}>:each${argumentsText.length > 0 ? `(${argumentsText.join(', ')})` : ''}>`
-    );
+    const prefix = `#<Enumerator: #<Enumerator::Generator:${source.generatorAddress ?? addressOf(self)}>:each`;
+    const argumentsText = new BoundedTextParts(prefix.length + (source.args.length > 0 ? 3 : 1));
+    for (const arg of source.args) argumentsText.add(yield* inspect(arg));
+    return str(`${prefix}${argumentsText.count > 0 ? `(${argumentsText.text()})` : ''}>`);
   }
   if (source.arithmetic) {
     const receiver = yield* inspect(source.recv);
-    const argumentsText: string[] = [];
-    for (const arg of source.args) argumentsText.push(yield* inspect(arg));
+    const prefix = `(${source.recv instanceof RRange ? `(${receiver})` : receiver}.${source.method}`;
+    const argumentsText = new BoundedTextParts(prefix.length + 3);
+    for (const arg of source.args) argumentsText.add(yield* inspect(arg));
     if (source.keywords)
       for (const entry of source.keywords.map.values())
-        argumentsText.push(
+        argumentsText.add(
           `${entry.key instanceof RSymbol ? entry.key.name : yield* inspect(entry.key)}: ${yield* inspect(entry.value)}`
         );
-    const argumentsList = argumentsText.length > 0 ? `(${argumentsText.join(', ')})` : '';
-    return str(`(${source.recv instanceof RRange ? `(${receiver})` : receiver}.${source.method}${argumentsList})`);
+    const argumentsList = argumentsText.count > 0 ? `(${argumentsText.text()})` : '';
+    return str(`${prefix}${argumentsList})`);
   }
   let text = `#<Enumerator: ${yield* inspect(source.recv)}:${source.method}`;
   if (source.args.length > 0) {
-    const parts: string[] = [];
-    for (const arg of source.args) parts.push(yield* inspect(arg));
-    text += `(${parts.join(', ')})`;
+    const parts = new BoundedTextParts(text.length + 3);
+    for (const arg of source.args) parts.add(yield* inspect(arg));
+    text += `(${parts.text()})`;
   }
   return str(`${text}>`);
 });
+
+class BoundedTextParts {
+  private readonly parts: string[] = [];
+  private length: number;
+
+  constructor(prefixLength: number) {
+    this.length = prefixLength;
+  }
+
+  get count(): number {
+    return this.parts.length;
+  }
+
+  add(part: string): void {
+    this.length += part.length + (this.parts.length > 0 ? 2 : 0);
+    if (this.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+    rt().spend(Math.ceil(part.length / 256));
+    this.parts.push(part);
+  }
+
+  text(): string {
+    return this.parts.join(', ');
+  }
+}
 for (const name of ['next', 'peek', 'rewind', 'next_values', 'peek_values', 'feed', 'lazy', 'produce']) {
   def('Enumerator', name, [0, -1], () => {
     throw new UnsupportedFeatureError(`外部イテレータ（Enumerator#${name}）`);
