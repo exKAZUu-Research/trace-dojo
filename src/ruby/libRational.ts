@@ -250,6 +250,7 @@ function floorDivide(a: bigint, b: bigint): bigint {
 function* roundTo(self: RObject, args: Value[], mode: 'floor' | 'ceil' | 'round'): Gen {
   const { numerator, denominator } = fractionOf(self);
   const digits = args.length > 0 ? yield* toInt(args[0]) : 0n;
+  chargePowerOfTen(digits < 0n ? -digits : digits);
   const scale = 10n ** (digits < 0n ? -digits : digits);
   const n = digits >= 0n ? numerator * scale : numerator;
   const d = digits >= 0n ? denominator : denominator * scale;
@@ -315,15 +316,21 @@ function parseRationalText(text: string, exact: boolean): RObject | undefined {
   if (sign === '-') numerator = -numerator;
   const exponent = exponentText ? Number(exponentText.replaceAll('_', '')) : 0;
   if (!Number.isSafeInteger(exponent)) throw new ExecutionLimitError('operations');
-  const estimatedWork = Math.ceil((Math.abs(exponent) * Math.log2(Math.abs(exponent) + 1)) / 64);
-  if (estimatedWork > LIMITS.maxOperations) throw new ExecutionLimitError('operations');
-  rt().spend(estimatedWork);
+  chargePowerOfTen(BigInt(Math.abs(exponent)));
   const scale = fraction.length - exponent;
   const denominator = BigInt(denominatorText?.replaceAll('_', '') ?? '1');
   return makeRational(
     scale < 0 ? numerator * 10n ** BigInt(-scale) : numerator,
     (scale > 0 ? 10n ** BigInt(scale) : 1n) * denominator
   );
+}
+
+function chargePowerOfTen(magnitude: bigint): void {
+  if (magnitude > BigInt(LIMITS.maxOperations)) throw new ExecutionLimitError('operations');
+  const digits = Number(magnitude);
+  const estimatedWork = Math.ceil((digits * Math.log2(digits + 1)) / 64);
+  if (estimatedWork > LIMITS.maxOperations) throw new ExecutionLimitError('operations');
+  rt().spend(estimatedWork);
 }
 
 def(

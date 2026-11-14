@@ -17,6 +17,19 @@ const withoutLines = (items: TraceItem[]): unknown[] =>
 
 const rubyTrace = (program: string): TraceItem[] => traceProgram('ruby', program, program).traceItems;
 
+test('Struct, Data and value objects remain visible in the variable trace', () => {
+  const program =
+    'S=Struct.new(:a)\nD=Data.define(:x)\ns=S.new(1)\nd=D.new(2)\nr=1/3r\nt=Time.utc(2024)\nre=/a/\np s.a\n';
+  const last = rubyTrace(program).at(-1);
+  expect(last?.referenceVars).toMatchObject({
+    s: { kind: 'object', entries: { a: { kind: 'value', value: 1 } } },
+    d: { kind: 'object', entries: { x: { kind: 'value', value: 2 } } },
+    r: { kind: 'value', value: '(1/3)' },
+    t: { kind: 'value', value: '2024-01-01 00:00:00 UTC' },
+    re: { kind: 'value', value: '/a/' },
+  });
+});
+
 test('user methods sharing declaration names keep atomic call steps', () => {
   for (const name of ['private', 'include']) {
     const program = `class A\n def ${name} # atomic\n  $x=1\n end\n def go\n  ${name}\n end\nend\nA.new.go`;

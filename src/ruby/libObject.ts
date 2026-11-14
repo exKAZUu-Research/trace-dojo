@@ -963,6 +963,7 @@ def('NilClass', 'to_f', 0, () => 0);
 def('NilClass', 'inspect', 0, () => str('nil'));
 def('NilClass', '&', 1, () => false);
 def('NilClass', '|', 1, (_self, [other]) => truthy(other));
+def('NilClass', '^', 1, (_self, [other]) => truthy(other));
 def('NilClass', 'nil?', 0, () => true);
 def('TrueClass', ['to_s', 'inspect'], 0, () => frozenCoreString('true'));
 def('TrueClass', '&', 1, (_self, [other]) => truthy(other));

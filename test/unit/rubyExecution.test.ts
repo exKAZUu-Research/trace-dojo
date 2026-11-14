@@ -50,6 +50,51 @@ p /a\/b/.source, /a\/b/ == Regexp.new("a/b")
   });
 });
 
+test('literal braces and Unicode word boundaries match Ruby', () => {
+  expect(
+    run(String.raw`p "Hello {name}!".gsub(/{(\w+)}/) { $1.upcase }
+p "a]b" =~ /]/
+p "café au" =~ /é\b/
+p "日本語 text".scan(/\b\S+\b/)
+`)
+  ).toMatchObject({ kind: 'executed', stdout: '"Hello NAME!"\n1\n3\n["日本語", "text"]\n' });
+});
+
+test('Time inspection and UTC names retain Ruby values', () => {
+  expect(run('p Time.at(1.1).utc; p Time.utc(99); p Time.new(2024, 1, 1, 0, 0, 0, "Z")')).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '1970-01-01 00:00:01 225179981368525/2251799813685248 UTC\n0099-01-01 00:00:00 UTC\n2024-01-01 00:00:00 UTC\n',
+  });
+});
+
+test('keyword method arity and nil regexp guards match Ruby', () => {
+  expect(
+    run(
+      'class C; def f(k: 1); end; define_method(:g) { |k: 1| }; end; p C.new.method(:f).arity, C.new.method(:g).arity; p nil =~ /a/, :abc =~ /a/, nil ^ true'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '-1\n-1\nnil\n0\ntrue\n',
+  });
+});
+
+test('const_defined? rejects a non-constant name', () => {
+  expect(run('String.const_defined?(:upcase)')).toMatchObject({
+    uncaughtException: 'wrong constant name upcase (NameError)',
+  });
+});
+
+test('Data rejects mixed positional and keyword construction', () => {
+  expect(run('D=Data.define(:a,:b); D.new(1,b:2)')).toMatchObject({
+    uncaughtException: 'wrong number of arguments (given 2, expected 0) (ArgumentError)',
+  });
+});
+
+test('large Rational rounding precision stays within the execution budget', () => {
+  expect(run('p Rational(1,2).round(10000000000)')).toMatchObject({ kind: 'limitExceeded' });
+});
+
 test('imaginary unit remains unsupported', () => {
   expect(run('p 1.i')).toMatchObject({
     uncaughtException: 'Numeric#i（複素数）は、この採点環境では使えません。',

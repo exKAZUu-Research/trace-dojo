@@ -242,6 +242,10 @@ export function translate(source: string, extended: boolean, multiline = false):
         continue;
       }
     }
+    if (inClass === 0 && (char === '{' || char === '}' || char === ']')) {
+      out += `\\${char}`;
+      continue;
+    }
     if (inClass === 0 && char === '+' && /[*+?]/.test(source[index - 1] ?? '') && source[index - 2] !== '\\') {
       throw unsupportedSyntax('強欲な量指定子（*+ など）');
     }
@@ -345,6 +349,16 @@ function translateEscape(
     }
     case 'G': {
       throw unsupportedSyntax(String.raw`\G`);
+    }
+    case 'b': {
+      if (inClass) return String.raw`\b`;
+      const word = `[${POSIX_CLASSES.word}]`;
+      return `(?:(?<=${word})(?!${word})|(?<!${word})(?=${word}))`;
+    }
+    case 'B': {
+      if (inClass) throw unsupportedSyntax(String.raw`文字クラス内の\B`);
+      const word = `[${POSIX_CLASSES.word}]`;
+      return `(?:(?<=${word})(?=${word})|(?<!${word})(?!${word}))`;
     }
     case 'R': {
       return String.raw`(?:\r\n|[\n\v\f\r\u0085  ])`;
@@ -677,6 +691,10 @@ function regexpInspect(regexp: RObject): string {
   const data = dataOf(regexp);
   const source = data.source.replaceAll(/(?<!\\)\//g, String.raw`\/`);
   return `/${source}/${data.multiline ? 'm' : ''}${data.ignoreCase ? 'i' : ''}${data.extended ? 'x' : ''}`;
+}
+
+export function regexpDisplayOf(value: RObject): string | undefined {
+  return isRegexp(value) ? regexpInspect(value) : undefined;
 }
 
 def('Regexp', 'source', 0, (self: RObject) => str(dataOf(self).source));
@@ -1157,6 +1175,10 @@ def('String', '=~', 1, function* (self: RString, [pattern]) {
   const state = execAt(pattern, self.s, 0);
   setLastMatch(state);
   return state ? BigInt(charIndex(self.s, (state.groups[0] as readonly [number, number])[0])) : NIL;
+});
+def('NilClass', '=~', 1, () => setLastMatch(undefined));
+def('Symbol', '=~', 1, function* (self: RSymbol, [pattern]) {
+  return yield* callMethod(str(self.name), '=~', [pattern]);
 });
 
 function* asRegexp(pattern: Value): Gen<RObject> {

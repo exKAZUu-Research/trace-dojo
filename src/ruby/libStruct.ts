@@ -49,6 +49,12 @@ function valuesOf(self: RObject): Value[] {
   return (self.data as StructValues).values;
 }
 
+export function structEntriesOf(value: RObject): [string, Value][] | undefined {
+  const data = value.data;
+  if (!(data instanceof StructValues)) return undefined;
+  return layoutOf(value.cls).members.map((name, index) => [name, data.values[index]]);
+}
+
 function* memberIndex(self: RObject, key: Value): Gen<number> {
   const { members } = layoutOf(self.cls);
   if (key instanceof RSymbol || key instanceof RString) {
@@ -329,6 +335,8 @@ sundef('Data', ['new', '[]']);
 
 function* constructData(self: RClass, args: Value[], block: RProc | undefined, keywords?: RHash): Gen<RObject> {
   const { members } = layoutOf(self);
+  if (args.length > 0 && keywords && keywords.map.size > 0)
+    throw argumentError(`wrong number of arguments (given ${args.length + 1}, expected 0)`);
   if (args.length > members.length) {
     throw argumentError(
       `wrong number of arguments (given ${args.length}, expected ${members.length === 0 ? 0 : `0..${members.length}`})`

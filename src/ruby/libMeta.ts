@@ -276,11 +276,7 @@ function methodArity(method: RMethod): number {
   const { body } = method;
   switch (body.kind) {
     case 'user': {
-      const { params } = body.def;
-      const required = params.required.length + params.post.length;
-      const requiredKeywords = params.keywords.some((keyword) => !keyword.value);
-      if (params.rest !== undefined || params.optional.length > 0) return -required - 1 - (requiredKeywords ? 1 : 0);
-      return required + (requiredKeywords ? 1 : 0);
+      return methodParamsArity(body.def.params);
     }
     case 'native': {
       return body.min === body.max ? body.min : -body.min - 1;
@@ -292,12 +288,22 @@ function methodArity(method: RMethod): number {
       return 1;
     }
     case 'proc': {
-      return procArity(body.proc);
+      return body.proc.body.kind === 'native' ? procArity(body.proc) : methodParamsArity(body.proc.body.def.params);
     }
     default: {
       return 0;
     }
   }
+}
+
+function methodParamsArity(params: Params | undefined): number {
+  if (!params) return 0;
+  const positional = params.required.length + params.post.length;
+  const requiredKeywords = params.keywords.some((keyword) => !keyword.value);
+  const required = positional + Number(requiredKeywords);
+  if (params.rest !== undefined || params.optional.length > 0) return -required - 1;
+  if (!requiredKeywords && (params.keywords.length > 0 || params.keywordRest !== undefined)) return -required - 1;
+  return required;
 }
 
 // Instance variables ---------------------------------------------------------------------------------------------------
@@ -537,7 +543,7 @@ def('Module', 'const_set', 2, function* (self: RClass, [name, value]) {
   return value;
 });
 def('Module', 'const_defined?', [1, 2], function* (self: RClass, args) {
-  const constant = yield* nameOf(args[0]);
+  const constant = yield* constantName(args[0]);
   if (args.length > 1 && !truthy(args[1])) return self.constants.has(constant);
   return self.ancestors().some((module) => module.constants.has(constant)) || rt().c.Object.constants.has(constant);
 });

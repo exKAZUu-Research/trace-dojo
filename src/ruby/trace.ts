@@ -5,6 +5,9 @@ import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { formatFloat, strInspect, symInspect } from './conversions';
+import { regexpDisplayOf } from './libRegexp';
+import { structEntriesOf } from './libStruct';
+import { timeDisplayOf } from './libTime';
 import {
   type HashEntry,
   NIL,
@@ -179,7 +182,27 @@ function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: num
       entries: { x: { kind: 'value', value: value.turtle.x }, y: { kind: 'value', value: value.turtle.y } },
     };
   }
-  if (value instanceof RObject && value.data !== undefined) return undefined;
+  if (value instanceof RObject && value.data !== undefined) {
+    if (value.cls === rt().c.Rational) {
+      const { numerator, denominator } = value.data as { numerator: bigint; denominator: bigint };
+      return { kind: 'value', value: `(${numerator}/${denominator})` };
+    }
+    const nativeText = timeDisplayOf(value) ?? regexpDisplayOf(value);
+    if (nativeText !== undefined) return { kind: 'value', value: nativeText };
+    const members = structEntriesOf(value);
+    if (!members) return undefined;
+    seen.add(value);
+    try {
+      const entries: Record<string, DisplayNode> = {};
+      for (const [name, member] of members) {
+        entries[name] = displayNodeOf(member, seen, budget) ?? NULL_NODE;
+        if (budget.remaining <= 0) break;
+      }
+      return { kind: 'object', entries };
+    } finally {
+      seen.delete(value);
+    }
+  }
   seen.add(value);
   try {
     return containerNodeOf(value as RBasic, seen, budget);

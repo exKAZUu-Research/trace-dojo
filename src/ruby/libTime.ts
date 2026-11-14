@@ -213,13 +213,33 @@ sdef(
     if (args.length === 1 && args[0] instanceof RString && /^\d{4}-\d{2}-\d{2}(?:[ T].*)?$/.test(args[0].s))
       throw new UnsupportedFeatureError('Time.new の文字列形式');
     if (args.length === 7 && args[6] !== NIL)
-      return yield* buildTime(args.slice(0, 6), yield* parseOffset(args[6]), 'fixed', undefined, exactOffset(args[6]));
+      return yield* buildTime(
+        args.slice(0, 6),
+        yield* parseOffset(args[6]),
+        args[6] instanceof RString && (args[6].s === 'UTC' || args[6].s === 'Z') ? 'utc' : 'fixed',
+        undefined,
+        exactOffset(args[6])
+      );
     return yield* buildTime(args, LOCAL_OFFSET, 'local');
   },
   { keywords: true }
 );
-sdef('Time', ['local', 'mktime'], [1, 7], (_self, args) => buildTime(args.slice(0, 6), LOCAL_OFFSET, 'local', args[6]));
-sdef('Time', ['utc', 'gm'], [1, 7], (_self, args) => buildTime(args.slice(0, 6), 0, 'utc', args[6]));
+sdef('Time', ['local', 'mktime'], [1, 10], (_self, args) =>
+  buildTime(
+    args.length === 10 ? [args[5], args[4], args[3], args[2], args[1], args[0]] : args.slice(0, 6),
+    LOCAL_OFFSET,
+    'local',
+    args.length === 10 ? undefined : args[6]
+  )
+);
+sdef('Time', ['utc', 'gm'], [1, 10], (_self, args) =>
+  buildTime(
+    args.length === 10 ? [args[5], args[4], args[3], args[2], args[1], args[0]] : args.slice(0, 6),
+    0,
+    'utc',
+    args.length === 10 ? undefined : args[6]
+  )
+);
 sdef(
   'Time',
   'at',
@@ -388,7 +408,8 @@ function padOffset(value: string, width: number | undefined, flag: string): stri
 function calendarDirective(data: TimeData, date: Date, directive: string, flag: string): string | undefined {
   switch (directive) {
     case 'Y': {
-      return String(date.getUTCFullYear());
+      const year = date.getUTCFullYear();
+      return year < 0 ? `-${String(-year).padStart(4, '0')}` : String(year).padStart(4, '0');
     }
     case 'C': {
       return pad(Math.floor(date.getUTCFullYear() / 100), 2, flag);
@@ -551,9 +572,28 @@ function clockDirective(
 
 function timeText(data: TimeData, withFraction: boolean): string {
   let text = strftime(data, '%Y-%m-%d %H:%M:%S');
-  const fraction = ((data.nanoseconds % 1_000_000_000n) + 1_000_000_000n) % 1_000_000_000n;
-  if (withFraction && fraction !== 0n) text += `.${String(fraction).padStart(9, '0').replace(/0+$/, '')}`;
+  if (withFraction) {
+    const denominator = data.remainderDenominator * 1_000_000_000n;
+    const numerator = ((data.exactNumerator() % denominator) + denominator) % denominator;
+    if (numerator !== 0n) {
+      let a = numerator;
+      let b = denominator;
+      while (b !== 0n) [a, b] = [b, a % b];
+      const reducedNumerator = numerator / a;
+      const reducedDenominator = denominator / a;
+      text +=
+        1_000_000_000n % reducedDenominator === 0n
+          ? `.${String((reducedNumerator * 1_000_000_000n) / reducedDenominator)
+              .padStart(9, '0')
+              .replace(/0+$/, '')}`
+          : ` ${reducedNumerator}/${reducedDenominator}`;
+    }
+  }
   return `${text} ${data.zone === 'utc' ? 'UTC' : offsetText(data.offset, false)}`;
+}
+
+export function timeDisplayOf(value: RObject): string | undefined {
+  return value.data instanceof TimeData ? timeText(value.data, true) : undefined;
 }
 
 def('Time', 'to_s', 0, (self: RObject) => str(timeText(dataOf(self), false)));
