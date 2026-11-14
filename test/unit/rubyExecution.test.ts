@@ -2591,6 +2591,18 @@ test('numeric String conversions retain US-ASCII encoding', () => {
   });
 });
 
+test('String each_char yields characters with US-ASCII encoding', () => {
+  expect(run('s=[[],"a"].join;t=s.each_char.first;t<<128;p t.bytes;s.each_char{|c|c<<128;p c.bytes}')).toMatchObject({
+    stdout: '[97, 128]\n[97, 128]\n',
+  });
+});
+
+test('format retains US-ASCII template encoding', () => {
+  expect(run('s=([[]].join % []);s<<128;p s.bytes;s=format([[],"a"].join(":"));s<<128;p s.bytes')).toMatchObject({
+    stdout: '[128]\n[58, 97, 128]\n',
+  });
+});
+
 test('interpolation retains the first empty binary segment when another follows', () => {
   expect(
     run(

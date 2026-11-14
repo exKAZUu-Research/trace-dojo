@@ -604,9 +604,11 @@ def('String', 'each_char', 0, function* (self: RString, _args, block) {
   if (!block) return makeEnumerator(self, 'each_char', []);
   const bytes = stringBytes(self);
   const binary = self.binary;
+  const usAscii = self.usAscii;
   const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   for (let offset = 0; offset < bytes.length;) {
     const { char, width } = characterFromBytes(bytes, offset, binary, decoder);
+    char.usAscii = usAscii;
     offset += width;
     yield* callBlock(block, [char], false);
   }

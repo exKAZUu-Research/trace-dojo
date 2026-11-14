@@ -13,7 +13,7 @@ import {
 } from './conversions';
 import { def } from './define';
 import { argumentCountError, argumentError, runtimeError, typeError } from './errors';
-import { eachEntry, hashGetOrInsert, hashSet, hashUpdateEntry } from './hashes';
+import { eachEntryUntil, hashGetOrInsert, hashSet, hashUpdateEntry } from './hashes';
 import { callBlock, callMethod, callProc, flattenGenerator, type Gen, nativeProc, respondsTo } from './interp';
 import { tryAry } from './libArray';
 import {
@@ -62,11 +62,9 @@ export function* iterate(collection: Value, visit: Visit, args: Value[] = []): G
     return;
   }
   if (args.length === 0 && collection instanceof RHash && !isOverridden(collection)) {
-    let stopped = false;
-    yield* eachEntry(collection, function* (entry) {
-      if (stopped) return;
+    yield* eachEntryUntil(collection, function* (entry) {
       runtime.spend();
-      if ((yield* visit(arr([entry.key, entry.value]))) === STOP) stopped = true;
+      return (yield* visit(arr([entry.key, entry.value]))) === STOP;
     });
     return;
   }
