@@ -6006,6 +6006,7 @@ test('conversion failures preserve resolved method errors and dynamic fallback e
 
 test('regexp matching stays fast for ordinary literal patterns', () => {
   expect(run('n=0;20000.times{n+=1 if "abc".match?(/b/)};p n')).toMatchObject({ stdout: '20000\n' });
+  expect(run(String.raw`n=0;20000.times{n+=1 if "123".match?(/\d+/)};p n`)).toMatchObject({ stdout: '20000\n' });
   expect(run('p(/[[:word:]]/.match?("Ⅻ"))')).toMatchObject({ stdout: 'true\n' });
 });
 
