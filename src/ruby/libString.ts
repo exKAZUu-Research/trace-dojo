@@ -1317,9 +1317,11 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
   let text = self.s;
   const sourceLength = stringBytes(self).length;
   let position = 0;
+  let matched = false;
   for (;;) {
     const index = text.indexOf(target, position);
     if (index === -1) break;
+    matched = true;
     setLiteralMatch(text, target, index);
     const mode = stringTextMode(self);
     const foundByte = textByteLength(text.slice(0, index), mode);
@@ -1335,7 +1337,7 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
     position = modified ? textIndexAtByte(text, nextByte, mode) : index + target.length;
     if (position > text.length) break;
   }
-  if (found.length === 0 && !block) setLiteralMatch(text, target, -1);
+  if (!matched) setLiteralMatch(text, target, -1);
   if (!block) return arr(found);
   return self;
 });

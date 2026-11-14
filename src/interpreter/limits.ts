@@ -36,6 +36,10 @@ export class ExecutionBudget {
   private nextClockCheck = OPERATIONS_PER_CLOCK_CHECK;
   private deadline = performance.now() + LIMITS.maxMilliseconds;
 
+  get remainingMilliseconds(): number {
+    return Math.max(0, Math.ceil(this.deadline - performance.now()));
+  }
+
   spend(cost = 1): void {
     if (!Number.isFinite(cost)) throw new ExecutionLimitError('operations');
     // A negative charge (such as a scan over an empty range computed backward) must never refill the budget.

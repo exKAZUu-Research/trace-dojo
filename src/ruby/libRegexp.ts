@@ -1,3 +1,5 @@
+import vm from 'node:vm';
+
 // code-gauge-allow-file fileNcss 558 -- The libRegexp module keeps one concern's cases together.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { inspect, rEquals, strInspect, toIndex, toS, toStr } from './conversions';
@@ -403,7 +405,20 @@ export function execAt(regexp: RObject, text: string, start: number): MatchState
   const { js } = dataOf(regexp);
   rt().spend(Math.ceil(text.length / 64));
   js.lastIndex = unitIndex(text, start);
-  const result = js.exec(text);
+  const remaining = rt().budget.remainingMilliseconds;
+  if (remaining === 0) throw new ExecutionLimitError('time');
+  let result: RegExpExecArray | null;
+  try {
+    result = vm.runInNewContext(
+      'regexp.exec(input)',
+      { regexp: js, input: text },
+      { timeout: remaining }
+    ) as RegExpExecArray | null;
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT')
+      throw new ExecutionLimitError('time');
+    throw error;
+  }
   if (!result?.indices) return undefined;
   const names: string[] = [];
   const namedGroups: Record<string, number> = Object.create(null) as Record<string, number>;
