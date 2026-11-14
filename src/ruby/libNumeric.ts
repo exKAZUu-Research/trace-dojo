@@ -369,10 +369,10 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
       const name = entry.key instanceof RSymbol ? entry.key.name : '';
       if (name === 'to') {
         if (args.length > 0) throw argumentError('to is given twice');
-        limit = entry.value;
+        limit = entry.value instanceof RFloat ? entry.value.value : entry.value;
       } else if (name === 'by') {
         if (args.length > 1) throw argumentError('step is given twice');
-        step = entry.value;
+        step = entry.value instanceof RFloat ? entry.value.value : entry.value;
       } else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
     }
   }

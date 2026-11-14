@@ -1466,11 +1466,7 @@ def('String', 'partition', 1, function* (self: RString, [separator]) {
   const text = needle.s;
   const index = self.s.indexOf(text);
   if (index === -1) return arr([textResult(self, self.s), textResult(self, ''), textResult(self, '')]);
-  return arr([
-    textResult(self, self.s.slice(0, index)),
-    stringFromBytes(stringBytes(needle), needle.binary),
-    textResult(self, self.s.slice(index + text.length)),
-  ]);
+  return arr([textResult(self, self.s.slice(0, index)), needle, textResult(self, self.s.slice(index + text.length))]);
 });
 def('String', 'rpartition', 1, function* (self: RString, [separator]) {
   regexpUnsupported(separator);
@@ -1480,11 +1476,7 @@ def('String', 'rpartition', 1, function* (self: RString, [separator]) {
   const text = needle.s;
   const index = self.s.lastIndexOf(text);
   if (index === -1) return arr([textResult(self, ''), textResult(self, ''), textResult(self, self.s)]);
-  return arr([
-    textResult(self, self.s.slice(0, index)),
-    stringFromBytes(stringBytes(needle), needle.binary),
-    textResult(self, self.s.slice(index + text.length)),
-  ]);
+  return arr([textResult(self, self.s.slice(0, index)), needle, textResult(self, self.s.slice(index + text.length))]);
 });
 def('String', 'each_grapheme_cluster', 0, () => {
   throw new UnsupportedFeatureError('each_grapheme_cluster');

@@ -1968,6 +1968,7 @@ test('binary String segments keep source bytes and encoding', () => {
   expect(run('s=255.chr+"a";x=s.partition("a")[1];x<<256;p x.bytes')).toMatchObject({
     stdout: '[97, 196, 128]\n',
   });
+  expect(run('n="b";x="abc".partition(n)[1];x<<"!";p n')).toMatchObject({ stdout: '"b!"\n' });
 });
 
 test('shuffle detects receiver changes from its randomizer', () => {
@@ -3163,6 +3164,12 @@ test('boxed Float endpoints preserve Range and arithmetic sequence behavior', ()
     run('p (1..Float::INFINITY).first(2),(1..3).step(Float::INFINITY).class,(1..3).step(Float::INFINITY).size')
   ).toMatchObject({
     stdout: '[1, 2]\nEnumerator::ArithmeticSequence\n1\n',
+  });
+});
+
+test('boxed Float keyword step limits produce Float sequence values', () => {
+  expect(run('p 1.step(to:Float::INFINITY,by:1).first(2)')).toMatchObject({
+    stdout: '[1.0, 2.0]\n',
   });
 });
 
