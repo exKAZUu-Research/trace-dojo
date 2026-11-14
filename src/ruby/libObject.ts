@@ -98,7 +98,7 @@ function objectId(value: Value): bigint {
   if (value === true) return 20n;
   if (value === false) return 0n;
   if (value instanceof RBasic) return BigInt(value.id);
-  if (value instanceof RSymbol) return BigInt(hashString(value.name) * 8 + 12);
+  if (value instanceof RSymbol) return BigInt(value.id);
   return 16n;
 }
 
@@ -164,7 +164,7 @@ def('Kernel', 'dup', 0, function* (self) {
 def(
   'Kernel',
   'clone',
-  [0, 1],
+  0,
   function* (self, _args, _block, keywords) {
     let freezeOption: Value | undefined;
     if (keywords) {
@@ -173,7 +173,7 @@ def(
           freezeOption = entry.value;
           if (freezeOption !== true && freezeOption !== false && freezeOption !== NIL)
             throw argumentError(`unexpected value for freeze: ${realClassOf(freezeOption).name}`);
-        }
+        } else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
       }
     }
     return yield* copyObject(self, true, freezeOption);
@@ -184,9 +184,10 @@ def(
 // code-gauge-allow functionCognitiveComplexity 18 -- Object copying preserves each value kind, singleton methods, copy hooks, and clone freeze options.
 // code-gauge-allow functionNcss 39 -- Object copying preserves each value kind, singleton methods, copy hooks, and clone freeze options.
 function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
-  if (!(self instanceof RBasic) || self instanceof RClass) return self;
+  if (!(self instanceof RBasic)) return self;
   let copy: RBasic;
-  if (self instanceof RString) {
+  if (self instanceof RClass) copy = copyClass(self);
+  else if (self instanceof RString) {
     const string = new RString(self.cls, self.s);
     string.binary = self.binary;
     string.rawBytes = self.rawBytes ? Uint8Array.from(self.rawBytes) : undefined;
@@ -205,14 +206,35 @@ function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
     object.data = copyData(self.data);
     copy = object;
   } else if (self instanceof RProc) {
-    return self;
+    const proc = new RProc(self.cls, self.body, self.self, self.outer);
+    proc.isLambda = self.isLambda;
+    proc.captured = self.captured ? [...self.captured] : undefined;
+    proc.breakTag = self.breakTag;
+    copy = proc;
+  } else if (self instanceof RRange) {
+    copy = new RRange(self.cls, self.begin, self.end, self.exclusive);
+    copy.frozen = false;
   } else {
     return self;
   }
   if (self.ivars) copy.ivars = new Map(self.ivars);
-  if (clone && self.singleton) copySingleton(self.singleton, copy);
+  if ((clone || self instanceof RClass) && self.singleton) copySingleton(self.singleton, copy);
   yield* initializeCopy(copy, self, clone, freezeOption);
   if (clone) copy.frozen = freezeOption === true || (freezeOption !== false && self.frozen);
+  return copy;
+}
+
+function copyClass(source: RClass): RClass {
+  const copy = new RClass(source.cls, undefined, source.superclass, source.isModule, source.isSingleton);
+  copy.instanceKind = source.instanceKind;
+  copy.isUserDefined = source.isUserDefined;
+  for (const included of source.includes) copy.includes.push(included);
+  for (const prepended of source.prepends) copy.prepends.push(prepended);
+  for (const [name, value] of source.constants) copy.constants.set(name, value);
+  for (const [name, value] of source.classVariables) copy.classVariables.set(name, value);
+  for (const [name, method] of source.methods)
+    copy.methods.set(name, { ...method, owner: method.owner === source ? copy : method.owner });
+  invalidateMethodCaches();
   return copy;
 }
 

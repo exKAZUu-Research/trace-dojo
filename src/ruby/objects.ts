@@ -15,6 +15,7 @@ export const NIL = new RNil();
 
 /** Symbols are interned, so that two symbols with the same name are the same object. */
 export class RSymbol {
+  readonly id = (nextObjectId += 8);
   private constructor(readonly name: string) {}
 
   static of(name: string): RSymbol {

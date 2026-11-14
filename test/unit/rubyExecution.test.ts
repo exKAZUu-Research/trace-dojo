@@ -2513,6 +2513,38 @@ test('rescue class evaluation stops after a match', () => {
   });
 });
 
+test('distinct Symbols receive distinct object IDs', () => {
+  expect(run('p :Aa.object_id == :BB.object_id, :ab.object_id == :bC.object_id')).toMatchObject({
+    stdout: 'false\nfalse\n',
+  });
+});
+
+test('copied classes and modules have independent identities and methods', () => {
+  expect(
+    run('class A;end;B=A.dup;class B;def x;2;end;end;begin;p A.new.x;rescue=>e;p e.class;end;p B.new.x')
+  ).toMatchObject({ stdout: 'NoMethodError\n2\n' });
+  expect(run('module M;end;p M.dup == M')).toMatchObject({ stdout: 'false\n' });
+});
+
+test('copied Procs retain behavior with independent identity and freezing', () => {
+  expect(run('p=proc{2};q=p.dup;q.freeze;p p.frozen?,p.equal?(q),q.call')).toMatchObject({
+    stdout: 'false\nfalse\n2\n',
+  });
+});
+
+test('Range copies have distinct identity and Ruby frozen states', () => {
+  expect(run('a=1..3;b=a.dup;c=a.clone;p a.equal?(b),a.equal?(c),a.frozen?,b.frozen?,c.frozen?')).toMatchObject({
+    stdout: 'false\nfalse\ntrue\nfalse\ntrue\n',
+  });
+});
+
+test('clone validates positional and keyword arguments', () => {
+  expect(run('begin;p "x".clone(1);rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  });
+  expect(run('begin;p "x".clone(foo:1);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'ArgumentError\n' });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(

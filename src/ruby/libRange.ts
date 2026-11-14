@@ -536,8 +536,6 @@ function* stepSuccessorRange(self: RRange, step: bigint, block: RProc): Gen {
   });
   return self;
 }
-def('Range', 'dup', 0, (self) => self);
-def('Range', 'frozen?', 0, () => true);
 sdef('Range', 'new', [2, 3], function* (_self, [begin, end, exclusive = false]) {
   return yield* makeRange(begin, end, truthyValue(exclusive));
 });
