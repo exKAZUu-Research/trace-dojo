@@ -2346,6 +2346,12 @@ test('Hash group_by hashes each new grouping key once', () => {
   });
 });
 
+test('Hash invert rejects source insertion during value hashing', () => {
+  expect(
+    run('class K;def hash;$h[:c]=3;0;end;end;$h={a:K.new};begin;$h.invert;rescue=>e;p e.class;end;p $h.keys')
+  ).toMatchObject({ stdout: 'RuntimeError\n[:a]\n' });
+});
+
 test('Math.log handles large Integer bases', () => {
   expect(run('p Math.log(10**400,10**400),Math.log(10**500,10**400)')).toMatchObject({
     stdout: '1.0\n1.25\n',

@@ -483,8 +483,12 @@ def('Hash', 'transform_keys!', [0, 1], function* (self: RHash, args, block) {
 });
 def('Hash', 'invert', 0, function* (self: RHash) {
   const hash = newHash();
-  for (const entry of self.map.values()) yield* hashSet(hash, entry.value, entry.key);
-  return hash;
+  return yield* whileHeld(hash, function* () {
+    yield* eachEntry(self, function* (entry) {
+      yield* hashSet(hash, entry.value, entry.key);
+    });
+    return hash;
+  });
 });
 def('Hash', 'slice', [0, -1], function* (self: RHash, keys) {
   const hash = newHash();
