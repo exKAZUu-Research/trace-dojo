@@ -70,6 +70,7 @@ def(
       yield* toIndexExact(capacity);
     }
     if (block && args.length > 0) throw argumentError('wrong number of arguments (given 1, expected 0)');
+    if (block) validateDefaultProc(block);
     self.defaultValue = block ? NIL : (args[0] ?? NIL);
     self.defaultProc = block;
     return NIL;
@@ -530,10 +531,8 @@ def('Hash', 'filter_map', 0, function* (self: RHash, _args, block) {
   }
 });
 def('Hash', 'compact', 0, function* (self: RHash) {
-  const hash = new RHash(self.cls);
-  hash.defaultValue = self.defaultValue;
-  hash.defaultProc = self.defaultProc;
-  for (const [slot, entry] of self.map) if (entry.value !== NIL) copyEntry(hash, slot, entry);
+  const hash = copy(self, true);
+  for (const [slot, entry] of hash.map) if (entry.value === NIL) hash.map.delete(slot);
   return hash;
 });
 def('Hash', 'compact!', 0, function* (self: RHash) {
@@ -588,6 +587,7 @@ def('Hash', 'default_proc=', 1, function* (self: RHash, [proc]) {
   yield* modify(self);
   if (proc === NIL) {
     self.defaultProc = undefined;
+    self.defaultValue = NIL;
     return proc;
   }
   const converted =
@@ -598,8 +598,15 @@ def('Hash', 'default_proc=', 1, function* (self: RHash, [proc]) {
         : proc;
   if (!(converted instanceof RProc))
     throw typeError(`wrong default_proc type ${realClassOf(proc).name} (expected Proc)`);
-  if (converted.isLambda) {
-    const body = converted.body;
+  validateDefaultProc(converted);
+  self.defaultValue = NIL;
+  self.defaultProc = converted;
+  return proc;
+});
+
+function validateDefaultProc(proc: RProc): void {
+  if (proc.isLambda) {
+    const body = proc.body;
     const params = body.kind === 'block' ? body.def.params : undefined;
     const min = params ? params.required.length + params.post.length : body.kind === 'native' ? body.arity : 0;
     const max =
@@ -610,9 +617,7 @@ def('Hash', 'default_proc=', 1, function* (self: RHash, [proc]) {
           : Infinity;
     if (min > 2 || max < 2) throw typeError(`default_proc takes two arguments (2 for ${min})`);
   }
-  self.defaultProc = converted;
-  return proc;
-});
+}
 def('Hash', 'group_by', 0, function* (self: RHash, _args, block) {
   if (!block) return makeEnumerator(self, 'group_by', []);
   const groups = newHash();

@@ -53,7 +53,7 @@ function* modify(self: RArray): Gen<void> {
 }
 
 function grow(length: number, self?: RArray): void {
-  if (length > 10_000_000) throw argumentError('array size too big');
+  if (length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
   const added = self ? Math.max(0, length - self.items.length) : length;
   if (self) rt().chargeSlots(added);
   rt().spend(Math.floor(added / 64));
@@ -297,12 +297,23 @@ def('Array', 'eql?', 1, (self: RArray, [other]) => rEql(self, other));
 def('Array', '<=>', 1, function* (self: RArray, [other]) {
   const compared = other instanceof RArray ? other : yield* tryAry(other);
   if (!compared) return NIL;
-  const length = Math.min(self.items.length, compared.items.length);
-  for (let index = 0; index < length; index++) {
-    const result = yield* callMethod(self.items[index] ?? NIL, '<=>', [compared.items[index] ?? NIL]);
-    if (result !== 0n) return result;
+  if (self === compared) return 0n;
+  const pairs = rt().arrayComparisonPairs;
+  const active = pairs.get(self) ?? new Set<RArray>();
+  if (active.has(compared)) return 0n;
+  active.add(compared);
+  pairs.set(self, active);
+  try {
+    const length = Math.min(self.items.length, compared.items.length);
+    for (let index = 0; index < length; index++) {
+      const result = yield* callMethod(self.items[index] ?? NIL, '<=>', [compared.items[index] ?? NIL]);
+      if (result !== 0n) return result;
+    }
+    return BigInt(Math.sign(self.items.length - compared.items.length));
+  } finally {
+    active.delete(compared);
+    if (active.size === 0) pairs.delete(self);
   }
-  return BigInt(Math.sign(self.items.length - compared.items.length));
 });
 
 // Modification --------------------------------------------------------------------------------------------------------

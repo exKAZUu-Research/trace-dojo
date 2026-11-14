@@ -1764,11 +1764,13 @@ test('Array mutation and selection follow callback boundaries', () => {
   expect(run('class A;def to_ary;$a.clear;[];end;end;$a=[A.new];p $a.flatten!.equal?($a)')).toMatchObject({
     stdout: 'true\n',
   });
-  expect(run('begin;[1].repeated_combination(4294967296){break};rescue=>e;p e.class;end')).toMatchObject({
-    stdout: 'ArgumentError\n',
+  expect(run('begin;[1].repeated_combination(4294967296){break};rescue=>e;p e.class;end')).toEqual({
+    kind: 'limitExceeded',
+    limit: 'storage',
   });
-  expect(run('begin;[1].repeated_permutation(4294967296){break};rescue=>e;p e.class;end')).toMatchObject({
-    stdout: 'ArgumentError\n',
+  expect(run('begin;[1].repeated_permutation(4294967296){break};rescue=>e;p e.class;end')).toEqual({
+    kind: 'limitExceeded',
+    limit: 'storage',
   });
   expect(run('begin;[1,2].sample(random:Random.new(1),foo:2);rescue=>e;p e.class;end')).toMatchObject({
     stdout: 'ArgumentError\n',
@@ -2484,6 +2486,43 @@ test('Hash merge preserves receiver subclass and instance state', () => {
       'class H<Hash;def initialize;@a=7;super;end;attr_reader :a;end;h=H.new;h[:a]=1;j=h.merge(b:2);p [j.class,j.a,j]'
     )
   ).toMatchObject({ stdout: '[H, 7, {a: 1, b: 2}]\n' });
+});
+
+test('Hash compact preserves subclass instance state', () => {
+  expect(
+    run(
+      'class H<Hash;def initialize;@x=2;super;end;attr_reader :x;end;h=H.new;h[:a]=1;h[:b]=nil;p [h.compact.class,h.compact.x,h.compact]'
+    )
+  ).toMatchObject({ stdout: '[H, 2, {a: 1}]\n' });
+});
+
+test('Hash default_proc assignment clears stored default values', () => {
+  expect(
+    run('h=Hash.new(3);h.default_proc=nil;p h.default,h[:a];h.default_proc=proc{|h,k|4};p h.default,h[:a]')
+  ).toMatchObject({
+    stdout: 'nil\nnil\nnil\n4\n',
+  });
+});
+
+test('Hash constructor validates default lambda arity', () => {
+  expect(
+    run(
+      'begin;Hash.new(&->(a){1});rescue=>e;p e.class,e.message;end;begin;Hash.new(&->(a,b,c){1});rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({ stdout: 'TypeError\n"default_proc takes two arguments (2 for 1)"\nTypeError\n' });
+});
+
+test('Array growth reports storage limits before catchable size errors', () => {
+  expect(run('begin;Array.new(10000001);rescue=>e;p e.class;end;p :after')).toEqual({
+    kind: 'limitExceeded',
+    limit: 'storage',
+  });
+});
+
+test('recursive Arrays compare without host stack overflow', () => {
+  expect(run('a=[];a<<a;p a<=>a;b=[];b<<b;p a<=>b;a<<1;b<<2;p a<=>b')).toMatchObject({
+    stdout: '0\n0\n-1\n',
+  });
 });
 
 test('Hash any? stops at first match and guards callback insertion', () => {

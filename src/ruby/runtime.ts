@@ -8,6 +8,7 @@ import type { CoreClasses } from './bootstrap';
 import { collectGarbage } from './garbageCollection';
 import {
   NIL,
+  type RArray,
   type RClass,
   type RMethod,
   type RObject,
@@ -158,6 +159,7 @@ export class Runtime implements TracedRuntime<Frame> {
   /** The tags of the `catch` blocks running now, innermost last, which `throw` must match. */
   readonly catchTags: Value[] = [];
   readonly comparablePairs = new Map<Value, Set<Value>>();
+  readonly arrayComparisonPairs = new Map<RArray, Set<RArray>>();
   /** The row of the statement running now, which a call records as its frame's call row. */
   currentRow = 0;
   containerVersion = 0;
