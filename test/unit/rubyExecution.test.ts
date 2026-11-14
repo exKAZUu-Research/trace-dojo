@@ -5148,6 +5148,25 @@ test('regexp String helpers honor argument position, capture and freeze', () => 
   });
 });
 
+test('inherited singleton methods bind to subclass objects', () => {
+  expect(
+    run(
+      'class A;def self.s = 1;end;class B < A;end;B.singleton_class.send(:define_method,:t,A.method(:s).unbind);p A.method(:s).unbind.bind(B).call,B.t'
+    )
+  ).toMatchObject({ stdout: '1\n1\n' });
+  expect(run('o=Object.new;def o.s = 2;o.method(:s).unbind.bind(Object.new)')).toMatchObject({
+    uncaughtException: expect.stringContaining('singleton method called for a different object'),
+  });
+});
+
+test('singleton method descriptions identify the attached object', () => {
+  const result = run('o=Object.new;def o.s = 1;p o.method(:s),o.method(:s).unbind');
+  expect(result).toMatchObject({ kind: 'executed' });
+  if (result.kind !== 'executed') throw new Error('Ruby program did not execute');
+  expect(result.stdout).toContain('#<Method: #<Object:');
+  expect(result.stdout).toContain('#<UnboundMethod: #<Class:#<Object:');
+});
+
 test('Data copies remain frozen and Rational copies preserve identity', () => {
   expect(
     run(

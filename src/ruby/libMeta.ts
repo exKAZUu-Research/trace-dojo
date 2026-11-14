@@ -169,10 +169,10 @@ function unboundMethod(method: RMethod, name = method.name): RObject {
   return unbound;
 }
 
-function methodDescription(self: RObject): string {
+function* methodDescription(self: RObject): Gen<string> {
   const { recv, method, name } = self.data as MethodData;
   const unbound = self.cls === rt().c.UnboundMethod;
-  const owner = methodOwnerPrefix(method, recv, unbound);
+  const owner = yield* methodOwnerPrefix(method, recv, unbound);
   const definition =
     method.body.kind === 'user'
       ? method.body.def
@@ -200,12 +200,11 @@ function methodDescription(self: RObject): string {
   return `#<${kind}: ${owner}${name}${name === method.name ? '' : `(${method.name})`}(${signature})${row === undefined ? '' : ` main.rb:${row + 1}`}>`;
 }
 
-function methodOwnerPrefix(method: RMethod, recv: Value, unbound: boolean): string {
+function* methodOwnerPrefix(method: RMethod, recv: Value, unbound: boolean): Gen<string> {
   if (!method.owner.isSingleton) return `${className(method.owner)}#`;
   const attached = method.owner.attached as Value;
-  if (unbound)
-    return `#<Class:${attached instanceof RClass ? className(attached) : className(realClassOf(attached))}>#`;
-  return `${attached instanceof RClass ? className(attached) : className(realClassOf(recv))}.`;
+  const name = attached instanceof RClass ? className(attached) : yield* inspect(attached);
+  return unbound ? `#<Class:${name}>#` : `${attached instanceof RClass ? name : yield* inspect(recv)}.`;
 }
 
 /** What `parameters` lists for parameters a program wrote: each one's kind and, when it has one, its name. */
@@ -262,7 +261,9 @@ for (const owner of ['Method', 'UnboundMethod']) {
   });
   def(owner, 'name', 0, (self: RObject) => sym((self.data as MethodData).name));
   def(owner, 'owner', 0, (self: RObject) => (self.data as MethodData).method.owner);
-  def(owner, ['inspect', 'to_s'], 0, (self: RObject) => str(methodDescription(self)));
+  def(owner, ['inspect', 'to_s'], 0, function* (self: RObject) {
+    return str(yield* methodDescription(self));
+  });
   def(owner, 'source_location', 0, () => {
     throw new UnsupportedFeatureError(`${owner}#source_location`);
   });
@@ -458,14 +459,13 @@ function validBoundMethod(self: RObject, recv: Value): RMethod {
 
 function assertMethodOwner(owner: RClass, target: Value, defining: boolean): void {
   if (owner.isModule) return;
-  if (owner.isSingleton) {
-    if (defining ? target !== owner : target !== owner.attached)
-      throw typeError("can't bind singleton method to a different class");
-    return;
-  }
   const compatible = defining ? target instanceof RClass && target.ancestors().includes(owner) : isA(target, owner);
-  if (!compatible)
-    throw typeError(`bind argument must be ${defining ? 'a subclass' : 'an instance'} of ${className(owner)}`);
+  if (compatible) return;
+  if (owner.isSingleton)
+    throw typeError(
+      defining ? "can't bind singleton method to a different class" : 'singleton method called for a different object'
+    );
+  throw typeError(`bind argument must be ${defining ? 'a subclass' : 'an instance'} of ${className(owner)}`);
 }
 def(
   'BasicObject',
