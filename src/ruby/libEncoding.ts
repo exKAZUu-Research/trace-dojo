@@ -59,19 +59,19 @@ def(
 );
 
 /** Runs the blocks `at_exit` and `END` registered, the last registered first. */
-export function* runAtExit(): Gen<void> {
+export function* runAtExit(): Gen<(RubyError | ExitSignal)[]> {
   const runtime = rt();
-  let pending: RubyError | ExitSignal | undefined;
+  const errors: (RubyError | ExitSignal)[] = [];
   while (runtime.atExit.length > 0) {
     try {
       yield* callProc(runtime.atExit.pop() as never, []);
     } catch (error) {
       if (error instanceof RubyError) runtime.globals.set('$!', error.exception);
       else if (!(error instanceof ExitSignal)) throw error;
-      pending = error;
+      errors.push(error);
     }
   }
-  if (pending) throw pending;
+  return errors;
 }
 
 /** The text after `__END__`, which `DATA` reads as a file opened at its start. */

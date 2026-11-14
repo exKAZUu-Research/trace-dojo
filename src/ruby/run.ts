@@ -56,19 +56,25 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: F
     frame.defaultVisibility = 'private';
     runtime.pushFrame(frame);
     try {
-      let uncaughtException: string | undefined;
+      let mainError: unknown;
       if (program.data !== undefined) runtime.c.Object.constants.set('DATA', makeData(program.data));
       try {
         runToEnd(evalBody(program.body, frame));
       } catch (error) {
         if (error instanceof RubyError) runtime.globals.set('$!', error.exception);
-        uncaughtException = describeUncaught(runtime, error, frame);
+        mainError = error;
       }
+      let hookErrors: (RubyError | ExitSignal)[] = [];
       try {
-        runToEnd(runAtExit());
+        hookErrors = runToEnd(runAtExit());
       } catch (error) {
-        uncaughtException = describeUncaught(runtime, error, frame);
+        if (error instanceof RubyError || error instanceof ExitSignal) hookErrors.push(error);
+        else throw error;
       }
+      const messages = (mainError === undefined ? hookErrors : [...hookErrors, mainError])
+        .map((error) => describeUncaught(runtime, error, frame))
+        .filter(Boolean);
+      const uncaughtException = messages.length > 0 ? messages.join('\n') : undefined;
       onEnd?.(frame);
       runtime.collectGarbage();
       return {

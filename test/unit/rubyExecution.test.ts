@@ -4966,9 +4966,12 @@ test('literal Regexp named captures assign locals on match and clear them on mis
   expect(run(source)).toMatchObject({ stdout: '"2024"\nnil\nnil\n' });
 });
 
-test('exit handler exceptions supersede the main exception', () => {
+test('exit handler exceptions preserve every uncaught error', () => {
   expect(run('at_exit { raise "handler" }; raise "main"')).toMatchObject({
-    uncaughtException: 'handler (RuntimeError)',
+    uncaughtException: 'handler (RuntimeError)\nmain (RuntimeError)',
+  });
+  expect(run('at_exit { raise "h0" }; at_exit { raise "h1" }; at_exit { raise "h2" }')).toMatchObject({
+    uncaughtException: 'h2 (RuntimeError)\nh1 (RuntimeError)\nh0 (RuntimeError)',
   });
 });
 
