@@ -537,9 +537,12 @@ function* flatten(source: RArray, depth: number, seen: Set<RArray>, expanded?: {
 }
 
 def('Array', 'flatten', [0, 1], function* (self: RArray, args) {
-  const depth = args.length > 0 && args[0] !== NIL ? yield* toIndex(args[0]) : -1;
-  return arr(yield* flatten(self, depth, new Set([self])));
+  return yield* nativeFlatten(self, args[0]);
 });
+export function* nativeFlatten(self: RArray, depthValue?: Value): Gen<RArray> {
+  const depth = depthValue !== undefined && depthValue !== NIL ? yield* toIndex(depthValue) : -1;
+  return arr(yield* flatten(self, depth, new Set([self])));
+}
 def('Array', 'flatten!', [0, 1], function* (self: RArray, args) {
   yield* modify(self);
   const depth = args.length > 0 && args[0] !== NIL ? yield* toIndex(args[0]) : -1;

@@ -2379,6 +2379,19 @@ test('abort uses replacement stderr and reports failure status', () => {
   expect(run('begin;abort;rescue SystemExit=>e;p e.status,e.success?;end')).toMatchObject({
     stdout: '1\nfalse\n',
   });
+  expect(
+    run(
+      String.raw`class W;def write(x);$v<<x;end;end;$v=[];$stderr=W.new;begin;abort "a\n";rescue SystemExit;end;begin;abort "";rescue SystemExit;end;$stderr=STDERR;p $v`
+    )
+  ).toMatchObject({ stdout: '["a\\n", "\\n"]\n' });
+  expect(
+    run(
+      'class W;def write(x);$v<<x;$stderr=STDERR;end;end;$v=[];$stderr=W.new;begin;abort "hi";rescue SystemExit;end;p $v'
+    )
+  ).toMatchObject({ stdout: '["hi", "\\n"]\n' });
+  expect(
+    run('class A;def to_str;"yes";end;def to_s;"no";end;end;begin;abort A.new;rescue SystemExit=>e;p e.message;end')
+  ).toMatchObject({ stdout: '"yes"\n' });
 });
 
 test('SystemExit initializes status and message independently', () => {
@@ -2443,6 +2456,34 @@ test('Hash invert rejects source insertion during value hashing', () => {
   expect(
     run('class K;def hash;$h[:c]=3;0;end;end;$h={a:K.new};begin;$h.invert;rescue=>e;p e.class;end;p $h.keys')
   ).toMatchObject({ stdout: 'RuntimeError\n[:a]\n' });
+});
+
+test('Hash reinitialization resets defaults while retaining entries', () => {
+  expect(
+    run('class H<Hash;def reset;initialize;end;end;h=H.new(3);h[:x]=1;h.reset;p [h[:missing],h.size]')
+  ).toMatchObject({ stdout: '[nil, 1]\n' });
+});
+
+test('Hash fetch_values uses native lookup despite subclass fetch overrides', () => {
+  expect(
+    run(
+      'class H<Hash;def fetch(k);puts :fetch;99;end;end;h=H[:a,1];p h.fetch_values(:a),h.fetch_values(:missing){|k|0}'
+    )
+  ).toMatchObject({ stdout: '[1]\n[0]\n' });
+});
+
+test('Hash flatten does not dispatch reopened Array flatten', () => {
+  expect(run('class Array;def flatten(*args);puts :called;[:wrong];end;end;p({a:[1,2]}.flatten)')).toMatchObject({
+    stdout: '[:a, [1, 2]]\n',
+  });
+});
+
+test('Hash merge preserves receiver subclass and instance state', () => {
+  expect(
+    run(
+      'class H<Hash;def initialize;@a=7;super;end;attr_reader :a;end;h=H.new;h[:a]=1;j=h.merge(b:2);p [j.class,j.a,j]'
+    )
+  ).toMatchObject({ stdout: '[H, 7, {a: 1, b: 2}]\n' });
 });
 
 test('Hash any? stops at first match and guards callback insertion', () => {

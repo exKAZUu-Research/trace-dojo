@@ -31,7 +31,7 @@ import {
   respondsTo,
 } from './interp';
 import { curry, makeEnumerator, sizedEnumerator } from './libEnumerator';
-import { writeStderr } from './libIo';
+import { writeStderrLine } from './libIo';
 import { kernelFloat, kernelInteger } from './libNumeric';
 import {
   invalidateMethodCaches,
@@ -470,11 +470,12 @@ def(
   'abort',
   [0, 1],
   function* (_self, [message]) {
+    let converted: RString | undefined;
     if (message !== undefined) {
-      yield* writeStderr(yield* toStrValue(message));
-      yield* writeStderr('\n');
+      converted = yield* toStrValue(message);
+      yield* writeStderrLine(converted);
     }
-    const error = rubyError(rt().c.SystemExit, message ?? str('exit'));
+    const error = rubyError(rt().c.SystemExit, converted ?? str('exit'));
     error.exception.ivars = new Map([['@__status', 1n]]);
     throw error;
   },

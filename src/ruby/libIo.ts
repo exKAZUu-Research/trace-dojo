@@ -81,8 +81,10 @@ function* write(target: Value, value: string | Value): Gen<void> {
   yield* callMethod(target, 'write', [text]);
 }
 
-export function* writeStderr(value: string | Value): Gen<void> {
-  yield* write(rt().globals.get('$stderr') ?? NIL, value);
+export function* writeStderrLine(message: RString): Gen<void> {
+  const target = rt().globals.get('$stderr') ?? NIL;
+  if (message.s.length > 0) yield* write(target, message);
+  if (!message.s.endsWith('\n')) yield* write(target, '\n');
 }
 
 function checkWritable(self: RObject): void {

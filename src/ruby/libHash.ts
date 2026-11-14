@@ -22,7 +22,7 @@ import {
   structuralHashValue,
 } from './hashes';
 import { callBlock, callMethod, callProc, type Gen, nativeProc, respondsTo } from './interp';
-import { tryAry } from './libArray';
+import { nativeFlatten, tryAry } from './libArray';
 import { sum } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { type HashEntry, isRubyFloat, NIL, RArray, RHash, RProc, RSymbol, type Value } from './objects';
@@ -69,12 +69,9 @@ def(
       validateFloatCapacity(capacity);
       yield* toIndexExact(capacity);
     }
-    if (block) {
-      if (args.length > 0) throw argumentError('wrong number of arguments (given 1, expected 0)');
-      self.defaultProc = block;
-    } else if (args.length > 0) {
-      self.defaultValue = args[0];
-    }
+    if (block && args.length > 0) throw argumentError('wrong number of arguments (given 1, expected 0)');
+    self.defaultValue = block ? NIL : (args[0] ?? NIL);
+    self.defaultProc = block;
     return NIL;
   },
   { visibility: 'private', keywords: true }
@@ -149,17 +146,21 @@ def('Hash', ['[]=', 'store'], 2, function* (self: RHash, [key, value]) {
   return value;
 });
 def('Hash', 'fetch', [1, 2], function* (self: RHash, args, block) {
-  const entry = yield* hashGet(self, args[0]);
+  return yield* fetchValue(self, args[0], args[1], block);
+});
+
+function* fetchValue(self: RHash, key: Value, fallback: Value | undefined, block: RProc | undefined): Gen<Value> {
+  const entry = yield* hashGet(self, key);
   if (entry) return entry.value;
-  if (block) return yield* callBlock(block, [args[0]]);
-  if (args.length > 1) return args[1];
-  const error = rubyError(rt().c.KeyError, `key not found: ${yield* inspect(args[0])}`);
+  if (block) return yield* callBlock(block, [key]);
+  if (fallback !== undefined) return fallback;
+  const error = rubyError(rt().c.KeyError, `key not found: ${yield* inspect(key)}`);
   error.exception.ivars = new Map([
-    ['@__key', args[0]],
+    ['@__key', key],
     ['@__receiver', self],
   ]);
   throw error;
-});
+}
 def('Hash', ['key?', 'has_key?', 'include?', 'member?'], 1, function* (self: RHash, [key]) {
   return (yield* hashGet(self, key)) !== undefined;
 });
@@ -195,7 +196,7 @@ def('Hash', 'fetch_values', [0, -1], function* (self: RHash, keys, block) {
   const values: Value[] = [];
   rt().heldArrays.push(values);
   try {
-    for (const key of keys) values.push(yield* callMethod(self, 'fetch', [key], undefined, block));
+    for (const key of keys) values.push(yield* fetchValue(self, key, undefined, block));
     return arr(values);
   } finally {
     rt().heldArrays.pop();
@@ -249,8 +250,12 @@ def('Hash', 'default=', 1, function* (self: RHash, [value]) {
 });
 def('Hash', 'default_proc', 0, (self: RHash) => self.defaultProc ?? NIL);
 
-function copy(self: RHash): RHash {
+function copy(self: RHash, preserveClass = false): RHash {
   const hash = newHash();
+  if (preserveClass) {
+    hash.cls = self.cls;
+    hash.ivars = self.ivars ? new Map(self.ivars) : undefined;
+  }
   hash.defaultValue = self.defaultValue;
   hash.defaultProc = self.defaultProc;
   for (const [slot, entry] of self.map) {
@@ -391,7 +396,7 @@ def('Hash', 'rassoc', 1, function* (self: RHash, [value]) {
 def('Hash', 'flatten', [0, 1], function* (self: RHash, args) {
   const pairs = arr(snapshot(self.map.values()).map((entry) => arr([entry.key, entry.value])));
   const depth = args.length > 0 ? args[0] : 1n;
-  return yield* callMethod(pairs, 'flatten', [depth]);
+  return yield* nativeFlatten(pairs, depth);
 });
 def('Hash', 'to_proc', 0, (self: RHash) => {
   const proc = nativeProc(1, ([key]) => hashFetch(self, key), true);
@@ -422,7 +427,7 @@ function* merge(target: RHash, others: Value[], block: RProc | undefined): Gen<R
 }
 
 def('Hash', 'merge', [0, -1], function* (self: RHash, others, block) {
-  const result = copy(self);
+  const result = copy(self, true);
   result.defaultValue = self.defaultValue;
   result.defaultProc = self.defaultProc;
   return yield* merge(result, others, block);
