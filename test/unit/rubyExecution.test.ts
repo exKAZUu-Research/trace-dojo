@@ -5949,3 +5949,29 @@ test('END uses the nearest block for implicit argument rules', () => {
     expect(run(source)).toMatchObject({ kind: 'compileError' });
   expect(run('f=proc{it;proc{END{p it}}};g=f.call(1);g.call(2)')).toMatchObject({ stdout: '2\n' });
 });
+
+test('Regexp accepts negated POSIX classes and class-local escapes', () => {
+  expect(run(String.raw`p /[[:^digit:]]+/.match("a1z")[0];p /a[[:^alpha:]x]*/.match("a1z")[0]`)).toMatchObject({
+    stdout: '"a"\n"a1"\n',
+  });
+  expect(
+    run(
+      String.raw`p /[\11]/.match("a\t")[0].inspect;p /[\1]/.match("a\x01")[0].inspect;p /[\8]/.match("a8")[0].inspect`
+    )
+  ).toMatchObject({
+    stdout: '"\\"\\\\t\\""\n"\\"\\\\u0001\\""\n"\\"8\\""\n',
+  });
+  expect(run(String.raw`p /[^]]+/.match("ab]")[0]`)).toMatchObject({ stdout: '"ab"\n' });
+  expect(run('"hello" =~ "zzz"')).toMatchObject({
+    uncaughtException: 'type mismatch: String given (TypeError)',
+  });
+});
+
+test('Struct and Data singleton constructors follow their super chains', () => {
+  expect(run('S=Struct.new(:a);def S.new(*) = super;p S.new(1)')).toMatchObject({
+    uncaughtException: 'no implicit conversion of Integer into String (TypeError)',
+  });
+  expect(run('D=Data.define(:x);def D.new(*) = super;p D.new(x:9)')).toMatchObject({
+    uncaughtException: expect.stringContaining("super: no superclass method 'new'"),
+  });
+});

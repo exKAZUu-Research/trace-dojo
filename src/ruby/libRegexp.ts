@@ -67,6 +67,8 @@ export function translate(source: string, extended: boolean, multiline = false):
   rejectNestedRepetition(source, extended);
   let out = '';
   let inClass = 0;
+  let classStart = 0;
+  let negatedClassBodies: string[] = [];
   let atomStart = 0;
   const groupStarts: number[] = [];
   const dotallStack: boolean[] = [];
@@ -84,6 +86,18 @@ export function translate(source: string, extended: boolean, multiline = false):
     if (char === '\\') {
       if (inClass === 0) atomStart = out.length;
       const next = source[++index] ?? '\\';
+      if (inClass > 0 && /^[0-7]$/.test(next)) {
+        const octal = /^[0-7]{0,2}/.exec(source.slice(index + 1))?.[0] ?? '';
+        out += `\\x${Number.parseInt(next + octal, 8)
+          .toString(16)
+          .padStart(2, '0')}`;
+        index += octal.length;
+        continue;
+      }
+      if (inClass > 0 && /^[89]$/.test(next)) {
+        out += next;
+        continue;
+      }
       if (next === 'x' && /^[0-9a-fA-F]{2}/.test(source.slice(index + 1))) {
         out += `\\x${source.slice(index + 1, index + 3)}`;
         index += 2;
@@ -121,8 +135,8 @@ export function translate(source: string, extended: boolean, multiline = false):
       if (inClass > 0 && posix) {
         const body = POSIX_CLASSES[posix[2]];
         if (!body) throw unsupportedSyntax(`[:${posix[2]}:]`);
-        if (posix[1]) throw unsupportedSyntax(`[:^${posix[2]}:]`);
-        out += body;
+        if (posix[1]) negatedClassBodies.push(body);
+        else out += body;
         index += posix[0].length - 1;
         continue;
       }
@@ -132,13 +146,27 @@ export function translate(source: string, extended: boolean, multiline = false):
         continue;
       }
       atomStart = out.length;
+      classStart = out.length;
+      negatedClassBodies = [];
       inClass++;
       out += char;
       continue;
     }
     if (char === ']' && inClass > 0) {
+      if (out.slice(classStart + 1) === '^') {
+        out += String.raw`\]`;
+        continue;
+      }
       inClass--;
-      out += char;
+      if (negatedClassBodies.length > 0) {
+        const regularBody = out.slice(classStart + 1);
+        const alternatives = [
+          ...(regularBody && regularBody !== '^' ? [`[${regularBody}]`] : []),
+          ...negatedClassBodies.map((body) => `(?:(?![${body}])[\\s\\S])`),
+        ];
+        out =
+          out.slice(0, classStart) + (alternatives.length === 1 ? alternatives[0] : `(?:${alternatives.join('|')})`);
+      } else out += char;
       continue;
     }
     if (inClass > 0 && char === '&' && source[index + 1] === '&') throw unsupportedSyntax('文字クラスの積集合（&&）');
@@ -1037,7 +1065,7 @@ function* asGen(value: Gen | Value): Gen {
 }
 
 def('String', '=~', 1, function* (self: RString, [pattern]) {
-  if (pattern instanceof RString) throw typeError('wrong argument type String (expected Regexp)');
+  if (pattern instanceof RString) throw typeError('type mismatch: String given');
   if (!isRegexp(pattern)) {
     return yield* callMethod(pattern, '=~', [self]);
   }

@@ -10,6 +10,7 @@ interface NativeSpec {
   singleton: boolean;
   visibility: Visibility;
   takesKeywords: boolean;
+  undefined?: boolean;
   /** Builds the method from the one defined before it, for a method that handles one more kind of argument. */
   wrap?: (previous: NativeFn) => NativeFn;
 }
@@ -45,6 +46,20 @@ export function sdef(
   options: DefineOptions = {}
 ): void {
   register(owner, names, arity, fn, true, options);
+}
+
+export function sundef(owner: string, names: string | string[]): void {
+  specs.push({
+    owner,
+    names: typeof names === 'string' ? [names] : names,
+    min: 0,
+    max: -1,
+    fn: () => undefined as never,
+    singleton: true,
+    visibility: 'public',
+    takesKeywords: false,
+    undefined: true,
+  });
 }
 
 function register(
@@ -109,7 +124,9 @@ export function installNatives(runtime: Runtime): void {
         name,
         owner: target,
         visibility: spec.visibility,
-        body: { kind: 'native', fn: spec.fn, min: spec.min, max: spec.max, takesKeywords: spec.takesKeywords },
+        body: spec.undefined
+          ? { kind: 'undefined' }
+          : { kind: 'native', fn: spec.fn, min: spec.min, max: spec.max, takesKeywords: spec.takesKeywords },
       });
     }
   }

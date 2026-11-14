@@ -1,18 +1,9 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { addressOf, inspect, rEql, rEquals, toIndex } from './conversions';
-import { def, sdef } from './define';
+import { def, sdef, sundef } from './define';
 import { argumentError, frozenError, indexError, nameError, typeError } from './errors';
 import { digest, hashKeyOf, hashSet } from './hashes';
-import {
-  addMethod,
-  assertMutableClass,
-  callBlock,
-  callMethod,
-  callProc,
-  type Gen,
-  invoke,
-  methodMissing,
-} from './interp';
+import { addMethod, assertMutableClass, callBlock, callMethod, callProc, type Gen, invoke } from './interp';
 import { tryAry } from './libArray';
 import { makeEnumerator } from './libEnumerator';
 import { nameOf } from './libMeta';
@@ -120,15 +111,20 @@ function* newStructClass(superclass: RClass, members: string[], layout: Omit<Lay
   cls.isUserDefined = true;
   layouts.set(cls, { ...layout, members });
   defineAccessors(cls, members, layout.kind === 'struct');
-  if (layout.kind === 'struct') {
-    const singleton = singletonClassOf(cls);
+  const singleton = singletonClassOf(cls);
+  for (const name of ['new', '[]']) {
     addMethod(singleton, {
-      name: '[]',
+      name,
       owner: singleton,
       visibility: 'public',
       body: {
         kind: 'native',
-        fn: (self, args, block, keywords) => callMethod(self, 'new', args, keywords, block),
+        fn: (self, args, block, keywords) =>
+          layout.kind === 'data'
+            ? constructData(self as RClass, args, block, keywords)
+            : name === 'new'
+              ? constructStruct(self as RClass, args, block, keywords)
+              : callMethod(self, 'new', args, keywords, block),
         min: 0,
         max: -1,
         takesKeywords: true,
@@ -139,6 +135,14 @@ function* newStructClass(superclass: RClass, members: string[], layout: Omit<Lay
   return cls;
 }
 
+function* constructStruct(self: RClass, args: Value[], block: RProc | undefined, keywords?: RHash): Gen<RObject> {
+  const object = new RObject(self);
+  object.data = new StructValues(layoutOf(self).members.map(() => NIL));
+  const initialize = self.findMethod('initialize');
+  if (initialize) yield* invoke(initialize, object, args, keywords, block, false);
+  return object;
+}
+
 // Struct ---------------------------------------------------------------------------------------------------------------
 
 sdef(
@@ -146,16 +150,10 @@ sdef(
   'new',
   [0, -1],
   // code-gauge-allow functionCognitiveComplexity 19 -- Ruby's method takes these argument forms, which the branches mirror.
-  function* (self: RClass, args, block, keywords) {
-    if (self !== rt().c.Struct) {
-      const object = new RObject(self);
-      object.data = new StructValues(layoutOf(self).members.map(() => NIL));
-      const initialize = self.findMethod('initialize');
-      if (initialize) {
-        yield* invoke(initialize, object, args, keywords, block, false);
-      }
-      return object;
-    }
+  function* (_self: RClass, args, block, keywords) {
+    const first = args[0];
+    if (first !== undefined && first !== NIL && !(first instanceof RString) && !(first instanceof RSymbol))
+      throw typeError(`no implicit conversion of ${realClassOf(first).name} into String`);
     let keywordInit: boolean | undefined;
     if (keywords) {
       for (const entry of keywords.map.values()) {
@@ -164,10 +162,10 @@ sdef(
         else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
       }
     }
-    let names = args;
-    if (args[0] instanceof RString) names = args.slice(1);
-    if (names.length === 0 && !keywordInit) throw argumentError('wrong number of arguments (given 0, expected 1+)');
-    const name = args[0] instanceof RString ? args[0].s : undefined;
+    const names = first instanceof RString || first === NIL ? args.slice(1) : args;
+    if (names.length === 0 && !keywordInit && first !== NIL)
+      throw argumentError('wrong number of arguments (given 0, expected 1+)');
+    const name = first instanceof RString ? first.s : undefined;
     if (name !== undefined) {
       if (!/^[\p{Lu}\p{Lt}][\p{L}\p{M}\p{N}_]*$/u.test(name))
         throw nameError(`identifier ${name} needs to be constant`);
@@ -317,29 +315,24 @@ sdef('Data', 'define', [0, -1], function* (_self, args, block) {
   if (block) yield* callProc(block, [cls], { self: cls, definee: cls });
   return cls;
 });
-sdef(
-  'Data',
-  ['new', '[]'],
-  [0, -1],
-  function* (self: RClass, args, block, keywords) {
-    if (self === rt().c.Data) methodMissing(self, 'new', {});
-    const { members } = layoutOf(self);
-    if (args.length > members.length) {
-      throw argumentError(
-        `wrong number of arguments (given ${args.length}, expected ${members.length === 0 ? 0 : `0..${members.length}`})`
-      );
-    }
-    const hash: RHash = keywords ?? newHash();
-    for (const [index, value] of args.entries()) yield* hashSet(hash, sym(members[index]), value);
-    const object = new RObject(self);
-    object.data = new StructValues(members.map(() => NIL));
-    const initialize = self.findMethod('initialize');
-    if (initialize) yield* invoke(initialize, object, [], hash.map.size > 0 ? hash : undefined, block, false);
-    object.frozen = true;
-    return object;
-  },
-  { keywords: true }
-);
+sundef('Data', ['new', '[]']);
+
+function* constructData(self: RClass, args: Value[], block: RProc | undefined, keywords?: RHash): Gen<RObject> {
+  const { members } = layoutOf(self);
+  if (args.length > members.length) {
+    throw argumentError(
+      `wrong number of arguments (given ${args.length}, expected ${members.length === 0 ? 0 : `0..${members.length}`})`
+    );
+  }
+  const hash: RHash = keywords ?? newHash();
+  for (const [index, value] of args.entries()) yield* hashSet(hash, sym(members[index]), value);
+  const object = new RObject(self);
+  object.data = new StructValues(members.map(() => NIL));
+  const initialize = self.findMethod('initialize');
+  if (initialize) yield* invoke(initialize, object, [], hash.map.size > 0 ? hash : undefined, block, false);
+  object.frozen = true;
+  return object;
+}
 
 def(
   'Data',
