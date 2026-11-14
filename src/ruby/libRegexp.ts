@@ -8,7 +8,12 @@ import { callBlock, callMethod, type Gen } from './interp';
 import { makeEnumerator } from './libEnumerator';
 import { setText } from './libString';
 import { type NativeFn, NIL, RArray, RHash, RObject, type RProc, RString, RSymbol, type Value } from './objects';
-import { regexpCaptureNames } from './regexpCaptureNames';
+import {
+  regexpCaptureNames,
+  regexpCommentEnd,
+  regexpHasNumberedBackref,
+  regexpLineCommentEnd,
+} from './regexpCaptureNames';
 import { type Frame, rt, UnsupportedFeatureError } from './runtime';
 import { arr, newHash, str, sym, truthy } from './values';
 
@@ -30,7 +35,7 @@ const POSIX_CLASSES: Record<string, string> = {
   space: String.raw` \t\r\n\f\v`,
   punct: String.raw`\p{P}`,
   xdigit: '0-9A-Fa-f',
-  word: String.raw`\p{L}\p{M}\p{N}_`,
+  word: String.raw`\p{L}\p{M}\p{Nd}\p{Pc}`,
   cntrl: String.raw`\p{Cc}`,
   print: String.raw`\P{C}`,
   graph: String.raw`\p{L}\p{M}\p{N}\p{P}\p{S}`,
@@ -57,18 +62,20 @@ const SYNTAX = String.raw`^$\.*+?()[]{}|/-`;
 
 /** Translates a Ruby (Onigmo) expression into JavaScript's syntax, rejecting what has no counterpart. */
 export function translate(source: string, extended: boolean, multiline = false): string {
-  rejectNestedRepetition(source);
+  rejectNestedRepetition(source, extended);
   let out = '';
   let inClass = 0;
   let atomStart = 0;
   const groupStarts: number[] = [];
+  const dotallStack: boolean[] = [];
+  let dotall = multiline;
   const namedCaptures = regexpCaptureNames(source, extended).length > 0;
   for (let index = 0; index < source.length; index++) {
     const char = source[index];
     if (extended && inClass === 0) {
       if (/\s/.test(char)) continue;
       if (char === '#') {
-        while (index < source.length && source[index] !== '\n') index++;
+        index = regexpLineCommentEnd(source, index);
         continue;
       }
     }
@@ -89,7 +96,7 @@ export function translate(source: string, extended: boolean, multiline = false):
           continue;
         }
       }
-      if (next === '0' || (/^[1-7]$/.test(next) && /^[0-7]{2}/.test(source.slice(index + 1)))) {
+      if (next === '0' || (/^[1-7]$/.test(next) && /^[0-7]/.test(source.slice(index + 1)))) {
         const octal = /^[0-7]{0,2}/.exec(source.slice(index + 1))?.[0] ?? '';
         out += `\\x${Number.parseInt(next + octal, 8)
           .toString(16)
@@ -145,13 +152,16 @@ export function translate(source: string, extended: boolean, multiline = false):
         const on = enabled.replaceAll('m', 's').replaceAll('x', '');
         const off = disabled.replaceAll('m', 's').replaceAll('x', '');
         groupStarts.push(out.length);
+        dotallStack.push(dotall);
+        if (enabled.includes('m')) dotall = true;
+        if (disabled.includes('m')) dotall = false;
         out += on || off ? `(?${on}${off ? `-${off}` : ''}:` : '(?:';
         index += scoped[0].length + 1;
         continue;
       }
       if (/^[imx-]+[:)]/.test(rest)) throw unsupportedSyntax('中のオプションの指定（(?i) など）');
       if (rest.startsWith('#')) {
-        const end = source.indexOf(')', index);
+        const end = regexpCommentEnd(source, index + 3);
         if (end === -1) throw rubyError(rt().c.RegexpError, `invalid pattern: /${source}/`);
         index = end;
         continue;
@@ -159,11 +169,18 @@ export function translate(source: string, extended: boolean, multiline = false):
     }
     if (inClass === 0 && char === '(' && source[index + 1] !== '?' && namedCaptures) {
       groupStarts.push(out.length);
+      dotallStack.push(dotall);
       out += '(?:';
       continue;
     }
-    if (inClass === 0 && char === '(') groupStarts.push(out.length);
-    if (inClass === 0 && char === ')') atomStart = groupStarts.pop() ?? out.length;
+    if (inClass === 0 && char === '(') {
+      groupStarts.push(out.length);
+      dotallStack.push(dotall);
+    }
+    if (inClass === 0 && char === ')') {
+      atomStart = groupStarts.pop() ?? out.length;
+      dotall = dotallStack.pop() ?? multiline;
+    }
     if (inClass === 0 && char === '{') {
       const interval = /^\{(?:\d+(?:,\d*)?|,\d+)\}/.exec(source.slice(index));
       if (interval) {
@@ -182,11 +199,11 @@ export function translate(source: string, extended: boolean, multiline = false):
     }
     if (inClass === 0 && char === '.') {
       atomStart = out.length;
-      out += multiline ? String.raw`[\s\S]` : String.raw`[^\n]`;
+      out += dotall ? String.raw`[\s\S]` : String.raw`[^\n]`;
       continue;
     }
     if (inClass === 0 && char === '^') {
-      out += String.raw`(?<![^\n])`;
+      out += String.raw`(?:(?<![\s\S])|(?<=\n)(?=[\s\S]))`;
       continue;
     }
     if (inClass === 0 && char === '$') {
@@ -206,15 +223,28 @@ export function translate(source: string, extended: boolean, multiline = false):
   return out;
 }
 
-function rejectNestedRepetition(source: string): void {
+function rejectNestedRepetition(source: string, extended: boolean): void {
   const groups: boolean[] = [];
   let inClass = false;
-  let closedGroupRepeated = false;
+  let closedGroupRisky = false;
   for (let index = 0; index < source.length; index++) {
     const char = source[index];
+    if (extended && !inClass) {
+      if (/\s/.test(char)) continue;
+      if (char === '#') {
+        index = regexpLineCommentEnd(source, index);
+        if (index >= source.length) break;
+        continue;
+      }
+    }
+    if (!inClass && source.startsWith('(?#', index)) {
+      index = regexpCommentEnd(source, index + 3);
+      if (index < 0) break;
+      continue;
+    }
     if (char === '\\') {
       index++;
-      closedGroupRepeated = false;
+      closedGroupRisky = false;
       continue;
     }
     if (char === '[') inClass = true;
@@ -222,18 +252,22 @@ function rejectNestedRepetition(source: string): void {
     if (inClass) continue;
     if (char === '(') {
       groups.push(false);
-      closedGroupRepeated = false;
+      closedGroupRisky = false;
       continue;
     }
     if (char === ')') {
-      closedGroupRepeated = groups.pop() ?? false;
-      if (closedGroupRepeated && groups.length > 0) groups[groups.length - 1] = true;
+      closedGroupRisky = groups.pop() ?? false;
+      if (closedGroupRisky && groups.length > 0) groups[groups.length - 1] = true;
       continue;
     }
-    const unbounded = char === '+' || char === '*' || (char === '{' && /^\{\d+,\}/.test(source.slice(index)));
-    if (unbounded && closedGroupRepeated) throw unsupportedSyntax('入れ子の繰り返し');
-    if (unbounded && groups.length > 0) groups[groups.length - 1] = true;
-    if (!'?*+{}'.includes(char)) closedGroupRepeated = false;
+    const quantified =
+      char === '+' ||
+      char === '*' ||
+      (char === '?' && source[index - 1] !== '(') ||
+      (char === '{' && /^\{(?:\d+(?:,\d*)?|,\d+)\}/.test(source.slice(index)));
+    if (quantified && closedGroupRisky) throw unsupportedSyntax('入れ子の繰り返し');
+    if ((quantified || char === '|') && groups.length > 0) groups[groups.length - 1] = true;
+    if (!'?*+{}'.includes(char)) closedGroupRisky = false;
   }
 }
 
@@ -307,6 +341,8 @@ export function makeRegexp(
   source: string,
   options: { ignoreCase?: boolean; multiline?: boolean; extended?: boolean }
 ): RObject {
+  if (regexpCaptureNames(source, options.extended).length > 0 && regexpHasNumberedBackref(source, options.extended))
+    throw rubyError(rt().c.RegexpError, `numbered backref/call is not allowed. (use name): /${source}/`);
   const regexp = new RObject(rt().c.Regexp);
   const translated = translate(source, options.extended ?? false, options.multiline ?? false);
   let js: RegExp;
@@ -338,6 +374,7 @@ function dataOf(regexp: RObject): RegexpData {
 
 export interface MatchState {
   text: string;
+  literal?: boolean;
   groups: (readonly [number, number] | undefined)[];
   names: string[];
   namedGroups: Record<string, number>;
@@ -369,7 +406,7 @@ export function execAt(regexp: RObject, text: string, start: number): MatchState
   const result = js.exec(text);
   if (!result?.indices) return undefined;
   const names: string[] = [];
-  const namedGroups: Record<string, number> = {};
+  const namedGroups: Record<string, number> = Object.create(null) as Record<string, number>;
   const nameOrder = regexpCaptureNames(js.source);
   for (const [position, name] of nameOrder.entries()) {
     if (!(name in namedGroups)) names.push(name);
@@ -408,6 +445,7 @@ export function setLiteralMatch(text: string, target: string, from: number): voi
   }
   setLastMatch({
     text,
+    literal: true,
     groups: [[from, from + target.length]],
     names: [],
     namedGroups: {},
@@ -482,7 +520,10 @@ function* optionsOf(value: Value | undefined): Gen<{ ignoreCase: boolean; multil
 }
 
 sdef('Regexp', ['new', 'compile'], [1, 2], function* (_self, [source, options]) {
-  if (isRegexp(source)) return source;
+  if (isRegexp(source)) {
+    const data = dataOf(source);
+    return makeRegexp(data.source, data);
+  }
   return makeRegexp(yield* toStr(source), yield* optionsOf(options));
 });
 sdef('Regexp', ['escape', 'quote'], 1, function* (_self, [value]) {
@@ -560,7 +601,9 @@ def('Regexp', ['==', 'eql?'], 1, (self: RObject, [other]) => {
   );
 });
 def('Regexp', 'hash', 0, (self: RObject) => BigInt(dataOf(self).source.length));
-def('Regexp', 'names', 0, (self: RObject) => arr(regexpCaptureNames(dataOf(self).js.source).map((name) => str(name))));
+def('Regexp', 'names', 0, (self: RObject) =>
+  arr([...new Set(regexpCaptureNames(dataOf(self).js.source))].map((name) => str(name)))
+);
 
 function* subjectText(value: Value): Gen<string | undefined> {
   if (value === NIL) return undefined;
@@ -687,6 +730,10 @@ def('MatchData', 'string', 0, (self: RObject) => str(stateOf(self).text));
 def('MatchData', 'regexp', 0, (self: RObject) => stateOf(self).regexp);
 def('MatchData', 'inspect', 0, (self: RObject) => {
   const state = stateOf(self);
+  if (state.literal) {
+    const range = state.groups[0] as readonly [number, number];
+    return str(`#<MatchData: ${state.text.slice(range[0], range[1])}>`);
+  }
   const parts = state.groups.map((range, group) => {
     const shown = range ? strInspect(state.text.slice(range[0], range[1])) : 'nil';
     if (group === 0) return shown;

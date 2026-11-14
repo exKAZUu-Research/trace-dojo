@@ -5590,7 +5590,9 @@ test('Regexp capture names follow comments, Unicode and duplicate alternatives',
 
 test('Regexp literals reject numbered backreferences beside named captures', () => {
   expect(run(String.raw`puts :before;m=/((a)|z)(?<x>b)\1/.match("aba")`)).toMatchObject({ kind: 'compileError' });
-  expect(run(String.raw`p Regexp.new("((a)|z)(?<x>b)\\1").class`)).toMatchObject({ stdout: 'Regexp\n' });
+  expect(run(String.raw`p Regexp.new("((a)|z)(?<x>b)\\1").class`)).toMatchObject({
+    uncaughtException: expect.stringContaining('(RegexpError)'),
+  });
 });
 
 test('anonymous forwarding resolves only method parameters', () => {
@@ -5881,4 +5883,69 @@ test('prepend preserves repeated module positions for super', () => {
   const local =
     'class Object;def x;"A";end;end;module M;def x;"M"+super;end;end;class C;include M;prepend M;end;p C.ancestors.take(4);p C.new.x';
   expect(run(local)).toMatchObject({ stdout: '[M, C, M, Object]\n"MMA"\n' });
+});
+
+test('Regexp retains scoped lines, Unicode words and literal match metadata', () => {
+  expect(run(String.raw`p "foo\nbar\n".gsub(/^/,"> ");p "ab\nc"[/(?m:b.c)/];p "ab\nc"[/(?-m:b.c)/m]`)).toMatchObject({
+    stdout: '"> foo\\n> bar\\n"\n"b\\nc"\nnil\n',
+  });
+  expect(run('p(/[[:word:]]/.match?("‿"));p(/[[:word:]]/.match?("²"))')).toMatchObject({
+    stdout: 'true\nfalse\n',
+  });
+  expect(run('"hello".sub("ell","x");p $~')).toMatchObject({ stdout: '#<MatchData: ell>\n' });
+  expect(run('m=/(?<constructor>a)/.match("a");p m.names,m[:constructor],/(?<x>a)|(?<x>b)/.names')).toMatchObject({
+    stdout: '["constructor"]\n"a"\n["x"]\n',
+  });
+});
+
+test('Regexp rejects unsafe matching and validates runtime backreferences', () => {
+  for (const source of [String.raw`p(/^(a|a)+$/.match?("a"*24+"!"))`, String.raw`p(/^(?:a*){12}$/.match?("a"*24+"!"))`])
+    expect(run(source)).toMatchObject({ uncaughtException: expect.stringContaining('使えません。') });
+  expect(run(String.raw`p /(?<x>a)\101/.match("aA")[0]`)).toMatchObject({ stdout: '"aA"\n' });
+  expect(run(String.raw`p Regexp.new("(?<x>a)b\\1")`)).toMatchObject({
+    uncaughtException: expect.stringContaining('(RegexpError)'),
+  });
+  expect(
+    run('r=Regexp.new(/a/);r.instance_variable_set(:@x,1);p r.frozen?,r.instance_variable_get(:@x)')
+  ).toMatchObject({
+    stdout: 'false\n1\n',
+  });
+});
+
+test('dynamic conversion hooks and exact numeric readers match Ruby', () => {
+  expect(run('class A;def method_missing(n,*);super;end;end;begin;"p"+A.new;rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'TypeError\n',
+  });
+  expect(
+    run(
+      'class A;def respond_to_missing?(n,*)=[:to_ary,:to_a,:to_hash].include?(n);def method_missing(n,*)=n==:to_hash ? {a:1} : [1,2];end;p Array(A.new),Hash(A.new),[*A.new];proc{|a,b|p a,b}.call(A.new)'
+    )
+  ).toMatchObject({ stdout: '[1, 2]\n{a: 1}\n[1, 2]\n1\n2\n' });
+  expect(run('p "1e3".to_r,".5/10".to_r,Rational("1e3")')).toMatchObject({
+    stdout: '(1000/1)\n(1/20)\n(1000/1)\n',
+  });
+  expect(
+    run('class C;def respond_to_missing?(n,*)=n==:foo;def method_missing(n,*)=1;end;c=C.new;p defined?(c.foo)')
+  ).toMatchObject({
+    stdout: '"method"\n',
+  });
+});
+
+test('Time rejects excessive precision and accepts extended offsets', () => {
+  expect(run('p Time.at(0).round(1000000000)')).toMatchObject({ kind: 'limitExceeded' });
+  expect(run('p Time.at(0).strftime("%1000000000N")')).toMatchObject({ kind: 'limitExceeded' });
+  expect(
+    run('p Time.new(2000,1,1,0,0,0,"+09:00:01").utc_offset,Time.new(2000,1,1,0,0,0,"F").utc_offset')
+  ).toMatchObject({
+    stdout: '32401\n21600\n',
+  });
+  expect(run('Time.at("5")')).toMatchObject({
+    uncaughtException: "can't convert String into an exact number (TypeError)",
+  });
+});
+
+test('END uses the nearest block for implicit argument rules', () => {
+  for (const source of ['p [1].map{END{p _1};[2].map{_1}}', 'p [1].map{[2].map{_1};END{p _1}}'])
+    expect(run(source)).toMatchObject({ kind: 'compileError' });
+  expect(run('f=proc{it;proc{END{p it}}};g=f.call(1);g.call(2)')).toMatchObject({ stdout: '2\n' });
 });

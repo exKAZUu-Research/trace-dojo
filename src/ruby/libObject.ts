@@ -14,6 +14,7 @@ import {
   toInt,
   toRubyInt,
   toStrValue,
+  tryImplicitConversion,
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentCountError, argumentError, frozenError, nameError, rubyError, typeError } from './errors';
@@ -561,13 +562,15 @@ def(
   1,
   function* (_self, [value]) {
     if (value instanceof RArray) return value;
-    if (respondsTo(value, 'to_ary', true)) {
-      const converted = yield* callMethod(value, 'to_ary', [], undefined, undefined, { fcall: true });
+    const arrayValue = yield* tryImplicitConversion(value, 'to_ary');
+    if (arrayValue !== undefined) {
+      const converted = arrayValue;
       if (converted instanceof RArray) return converted;
       if (converted !== NIL) throw collectionConversionError(value, converted, 'Array', 'to_ary');
     }
-    if (respondsTo(value, 'to_a', true)) {
-      const converted = yield* callMethod(value, 'to_a', [], undefined, undefined, { fcall: true });
+    const listValue = yield* tryImplicitConversion(value, 'to_a');
+    if (listValue !== undefined) {
+      const converted = listValue;
       if (converted instanceof RArray) return converted;
       if (converted !== NIL) throw collectionConversionError(value, converted, 'Array', 'to_a');
     }
@@ -582,8 +585,9 @@ def(
   function* (_self, [value]) {
     if (value instanceof RHash) return value;
     if (value === NIL) return newHash();
-    if (respondsTo(value, 'to_hash', true)) {
-      const converted = yield* callMethod(value, 'to_hash', [], undefined, undefined, { fcall: true });
+    const hashValue = yield* tryImplicitConversion(value, 'to_hash');
+    if (hashValue !== undefined) {
+      const converted = hashValue;
       if (converted instanceof RHash) return converted;
       if (converted !== NIL) throw collectionConversionError(value, converted, 'Hash', 'to_hash');
     }

@@ -18,7 +18,7 @@ import {
   RSymbol,
   type Value,
 } from './objects';
-import { rt } from './runtime';
+import { rt, RubyError } from './runtime';
 import {
   asciiString,
   classOf,
@@ -72,8 +72,8 @@ export function* toInt(value: Value): Gen<bigint> {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'number') return floatToInt(value);
   if (value instanceof RFloat) return floatToInt(value.value);
-  if (value !== NIL && (yield* respondsToConversion(value, 'to_int'))) {
-    const converted = yield* callMethod(value, 'to_int', [], undefined, undefined, { fcall: true });
+  const converted = value === NIL ? undefined : yield* tryImplicitConversion(value, 'to_int');
+  if (converted !== undefined) {
     if (typeof converted === 'bigint') return converted;
     const name = realClassOf(value).name;
     throw typeError(`can't convert ${name} to Integer (${name}#to_int gives ${realClassOf(converted).name})`);
@@ -88,6 +88,16 @@ function* respondsToConversion(value: Value, name: string): Gen<boolean> {
   return truthy(
     yield* callMethod(value, 'respond_to?', [RSymbol.of(name), true], undefined, undefined, { fcall: true })
   );
+}
+
+export function* tryImplicitConversion(value: Value, name: string): Gen<Value | undefined> {
+  if (!(yield* respondsToConversion(value, name))) return undefined;
+  try {
+    return yield* callMethod(value, name, [], undefined, undefined, { fcall: true });
+  } catch (error) {
+    if (error instanceof RubyError && error.exception.cls === rt().c.NoMethodError) return undefined;
+    throw error;
+  }
 }
 
 export function* toIndex(value: Value): Gen<number> {
@@ -127,8 +137,8 @@ export function* toStr(value: Value): Gen<string> {
 
 export function* toStrValue(value: Value): Gen<RString> {
   if (value instanceof RString) return value;
-  if (yield* respondsToConversion(value, 'to_str')) {
-    const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
+  const converted = yield* tryImplicitConversion(value, 'to_str');
+  if (converted !== undefined) {
     if (converted instanceof RString) return converted;
     const name = realClassOf(value).name;
     throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
@@ -165,8 +175,8 @@ export function* toFloat(value: Value): Gen<number> {
   if (typeof value === 'bigint') return intToFloat(value);
   if (value === NIL) throw typeError("can't convert nil into Float");
   if (value instanceof RString) throw typeError("can't convert String into Float");
-  if (isA(value, rt().c.Numeric) && (yield* respondsToConversion(value, 'to_f'))) {
-    const converted = yield* callMethod(value, 'to_f', [], undefined, undefined, { fcall: true });
+  const converted = isA(value, rt().c.Numeric) ? yield* tryImplicitConversion(value, 'to_f') : undefined;
+  if (converted !== undefined) {
     if (typeof converted === 'number' || converted instanceof RFloat) return Number(converted);
     throw typeError(
       `can't convert ${realClassOf(value).name} to Float (${realClassOf(value).name}#to_f gives ${realClassOf(converted).name})`
@@ -177,9 +187,8 @@ export function* toFloat(value: Value): Gen<number> {
 
 export function* toStepFloat(value: Value): Gen<number> {
   if (value instanceof RString) throw typeError('no implicit conversion to float from string');
-  if (!(yield* respondsToConversion(value, 'to_f')))
-    throw typeError(`can't convert ${realClassOf(value).name} into Float`);
-  const converted = yield* callMethod(value, 'to_f', [], undefined, undefined, { fcall: true });
+  const converted = yield* tryImplicitConversion(value, 'to_f');
+  if (converted === undefined) throw typeError(`can't convert ${realClassOf(value).name} into Float`);
   if (typeof converted !== 'number' && !(converted instanceof RFloat)) {
     const name = realClassOf(value).name;
     throw typeError(`can't convert ${name} to Float (${name}#to_f gives ${realClassOf(converted).name})`);

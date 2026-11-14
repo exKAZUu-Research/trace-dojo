@@ -295,11 +295,32 @@ function* rationalOf(value: Value): Gen<RObject> {
   if (typeof value === 'bigint') return makeRational(value, 1n);
   if (isRubyFloat(value)) return floatToRational(Number(value));
   if (isRational(value)) return value;
-  const text = (yield* toStr(value)).trim().replaceAll('_', '');
-  const match = /^([+-]?\d+)(?:\.(\d+))?(?:\/(\d+))?$/.exec(text);
-  if (!match) throw argumentError(`invalid value for convert(): ${JSON.stringify(text)}`);
-  const [, whole, fraction = '', denominator = '1'] = match;
-  return makeRational(BigInt(whole + fraction), 10n ** BigInt(fraction.length) * BigInt(denominator));
+  const text = (yield* toStr(value)).trim();
+  const result = parseRationalText(text, true);
+  if (!result) throw argumentError(`invalid value for convert(): ${JSON.stringify(text)}`);
+  return result;
+}
+
+function parseRationalText(text: string, exact: boolean): RObject | undefined {
+  const digits = String.raw`\d(?:_?\d)*`;
+  const pattern = new RegExp(
+    `^([+-]?)(${digits}(?:\\.${digits})?|\\.${digits})(?:[eE]([+-]?${digits}))?(?:/([+-]?${digits}))?`
+  );
+  const match = pattern.exec(text);
+  if (!match || (exact && match[0].length !== text.length)) return undefined;
+  const [, sign, decimal, exponentText, denominatorText] = match;
+  const [whole, fraction = ''] = decimal.replaceAll('_', '').split('.');
+  let numerator = BigInt(`${whole || '0'}${fraction}`);
+  if (sign === '-') numerator = -numerator;
+  const exponent = exponentText ? Number(exponentText.replaceAll('_', '')) : 0;
+  if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > 10_000)
+    throw new UnsupportedFeatureError('大きすぎる有理数の指数');
+  const scale = fraction.length - exponent;
+  const denominator = BigInt(denominatorText?.replaceAll('_', '') ?? '1');
+  return makeRational(
+    scale < 0 ? numerator * 10n ** BigInt(-scale) : numerator,
+    (scale > 0 ? 10n ** BigInt(scale) : 1n) * denominator
+  );
 }
 
 def(
@@ -314,6 +335,5 @@ def(
   { visibility: 'private' }
 );
 def('String', 'to_r', 0, function* (self: RString) {
-  const match = /^\s*([+-]?\d[\d_]*(?:\.\d+)?(?:\/\d+)?)/.exec(self.s);
-  return match ? yield* rationalOf(str(match[1])) : makeRational(0n, 1n);
+  return parseRationalText(self.s.trimStart(), false) ?? makeRational(0n, 1n);
 });

@@ -1,3 +1,4 @@
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { compareValues, toFloat, toInt, toStr } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, typeError } from './errors';
@@ -5,8 +6,8 @@ import { bigintRatio } from './floatMath';
 import type { Gen } from './interp';
 import { floatToRational, isRational } from './libRational';
 import { NIL, RObject, RString, type Value } from './objects';
-import { rt, UnsupportedFeatureError } from './runtime';
-import { arr, str } from './values';
+import { rt, RubyError, UnsupportedFeatureError } from './runtime';
+import { arr, realClassOf, str } from './values';
 
 /** The local time zone, which the grader fixes to Japan's (no daylight saving time). */
 const LOCAL_OFFSET = 9 * 3600;
@@ -122,6 +123,19 @@ function* secondsValue(arg: Value): Gen<number> {
   return yield* toFloat(arg);
 }
 
+function* exactNumber(value: Value): Gen<number> {
+  try {
+    return yield* toFloat(value);
+  } catch (error) {
+    if (error instanceof RubyError && error.exception.cls === rt().c.TypeError) {
+      const message = error.exception.exception?.message;
+      if (message instanceof RString && message.s.endsWith('into Float'))
+        throw typeError(`can't convert ${realClassOf(value).name} into an exact number`);
+    }
+    throw error;
+  }
+}
+
 function* parseOffset(value: Value): Gen<number> {
   if (value === NIL) return LOCAL_OFFSET;
   if (typeof value === 'bigint' || typeof value === 'number' || isRational(value)) {
@@ -131,10 +145,15 @@ function* parseOffset(value: Value): Gen<number> {
   }
   const text = yield* toStr(value);
   if (text === 'UTC' || text === 'Z') return 0;
-  const match = /^([+-])(\d{2}):?(\d{2})$/.exec(text);
-  if (!match || Number(match[3]) > 59)
+  if (/^[A-IK-Y]$/.test(text)) {
+    const letter = text.codePointAt(0) as number;
+    return (letter <= 73 ? letter - 64 : letter <= 77 ? letter - 65 : -(letter - 77)) * 3600;
+  }
+  const match = /^([+-])(\d{2}):?(\d{2})(?::(\d{2}))?$/.exec(text);
+  if (!match || Number(match[3]) > 59 || Number(match[4] ?? 0) > 59)
     throw argumentError(`"+HH:MM", "-HH:MM", "UTC" or "A".."I","K".."Z" expected for utc_offset: ${text}`);
-  const offset = (match[1] === '-' ? -1 : 1) * (Number(match[2]) * 3600 + Number(match[3]) * 60);
+  const offset =
+    (match[1] === '-' ? -1 : 1) * (Number(match[2]) * 3600 + Number(match[3]) * 60 + Number(match[4] ?? 0));
   if (Math.abs(offset) >= 86_400) throw argumentError('utc_offset out of range');
   return offset;
 }
@@ -197,7 +216,7 @@ sdef('Time', 'at', [1, 2], function* (_self, args) {
   const first = offsetFraction(
     typeof seconds === 'bigint' || typeof seconds === 'number' || isRational(seconds)
       ? seconds
-      : yield* toFloat(seconds),
+      : yield* exactNumber(seconds),
     0
   );
   const second =
@@ -206,7 +225,7 @@ sdef('Time', 'at', [1, 2], function* (_self, args) {
       : offsetFraction(
           typeof microseconds === 'bigint' || typeof microseconds === 'number' || isRational(microseconds)
             ? microseconds
-            : yield* toFloat(microseconds),
+            : yield* exactNumber(microseconds),
           0
         );
   return makeExactTime(
@@ -270,26 +289,43 @@ function pad(value: number, width: number, flag: string): string {
 }
 
 function strftime(data: TimeData, format: string): string {
+  if (format.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
   const date = data.fields();
-  return format.replaceAll(
+  let outputLength = format.length;
+  const result = format.replaceAll(
     /%([-_0^#]*)(\d*)(:{0,3})([a-zA-Z%+])/g,
     (whole, flags: string, widthText: string, colons: string, directive: string) => {
+      const finish = (value: string): string => {
+        outputLength += value.length - whole.length;
+        if (outputLength > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+        return value;
+      };
+      const width = widthText ? Number(widthText) : undefined;
+      if (width !== undefined && width > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
       if (colons && directive !== 'z') throw new UnsupportedFeatureError(`Time#strftime(${whole})`);
       const flag = /([-_0])[^-_0]*$/.exec(flags)?.[1] ?? '';
       const rendered =
         calendarDirective(data, date, directive, flag) ?? clockDirective(data, date, directive, flag, colons, whole);
       if (rendered === undefined) throw new UnsupportedFeatureError(`Time#strftime(${whole})`);
-      const width = widthText ? Number(widthText) : undefined;
       if ((directive === 'N' || directive === 'L') && width !== undefined) {
-        return fractionDigits(data, width);
+        chargePrecision(width);
+        return finish(fractionDigits(data, width));
       }
       let result = caseText(rendered, directive, flags);
-      if (directive === 'z') return padOffset(result, width, flag);
+      if (directive === 'z') return finish(padOffset(result, width, flag));
       if (width !== undefined && flag !== '-')
         result = result.padStart(width, flag === '_' || (flag !== '0' && defaultSpacePad(directive)) ? ' ' : '0');
-      return result;
+      return finish(result);
     }
   );
+  if (result.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+  return result;
+}
+
+function chargePrecision(digits: number): void {
+  if (!Number.isSafeInteger(digits) || digits * digits > LIMITS.maxOperations * 64)
+    throw new ExecutionLimitError('operations');
+  rt().spend(Math.ceil((digits * digits) / 64));
 }
 
 function fractionDigits(data: TimeData, width: number): string {
@@ -590,6 +626,7 @@ def('Time', 'round', [0, 1], function* (self: RObject, args) {
   const digits = args.length > 0 ? Number(yield* toInt(args[0])) : 0;
   const data = dataOf(self);
   if (digits > 9) {
+    chargePrecision(digits);
     const scale = 10n ** BigInt(digits - 9);
     const rounded = floorDivide(
       2n * data.exactNumerator() * scale + data.remainderDenominator,
@@ -609,7 +646,7 @@ def('Time', '+', 1, function* (self: RObject, [seconds]) {
   const delta = offsetFraction(
     typeof seconds === 'bigint' || typeof seconds === 'number' || isRational(seconds)
       ? seconds
-      : yield* toFloat(seconds),
+      : yield* exactNumber(seconds),
     0
   );
   return makeExactTime(
@@ -629,7 +666,7 @@ def('Time', '-', 1, function* (self: RObject, [other]) {
     );
   }
   const delta = offsetFraction(
-    typeof other === 'bigint' || typeof other === 'number' || isRational(other) ? other : yield* toFloat(other),
+    typeof other === 'bigint' || typeof other === 'number' || isRational(other) ? other : yield* exactNumber(other),
     0
   );
   return makeExactTime(

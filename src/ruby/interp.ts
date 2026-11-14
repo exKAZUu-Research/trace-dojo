@@ -13,7 +13,15 @@ import type {
   StrPart,
   Target,
 } from './ast';
-import { caseEquals, combinedStringEncoding, inspect, numericCompare, toS, toSValue } from './conversions';
+import {
+  caseEquals,
+  combinedStringEncoding,
+  inspect,
+  numericCompare,
+  toS,
+  toSValue,
+  tryImplicitConversion,
+} from './conversions';
 import {
   argumentCountError,
   argumentError,
@@ -532,8 +540,8 @@ function* evalList(items: Expr[], frame: Frame): Gen<Value[]> {
 export function* splatItems(value: Value): Gen<Value[]> {
   if (value instanceof RArray) return [...value.items];
   if (value === NIL) return [];
-  if (respondsTo(value, 'to_a', true)) {
-    const converted = yield* callMethod(value, 'to_a', [], undefined, undefined, { fcall: true });
+  const converted = yield* tryImplicitConversion(value, 'to_a');
+  if (converted !== undefined) {
     if (converted instanceof RArray) return [...converted.items];
     if (converted === NIL) return [value];
     throw typeError(
@@ -576,8 +584,9 @@ function* copyHashSplat(hash: RHash, value: Value, frame: Frame, literal: boolea
   if (value === NIL) return;
   if (!(value instanceof RHash)) {
     const source = value;
-    if (!respondsTo(source, 'to_hash', true)) throw implicitConversionError(source, 'Hash');
-    value = yield* callMethod(source, 'to_hash', [], undefined, undefined, { fcall: true });
+    const converted = yield* tryImplicitConversion(source, 'to_hash');
+    if (converted === undefined) throw implicitConversionError(source, 'Hash');
+    value = converted;
     if (!(value instanceof RHash))
       throw typeError(
         `can't convert ${realClassOf(source).name} to Hash (${realClassOf(source).name}#to_hash gives ${realClassOf(value).name})`
@@ -971,8 +980,8 @@ export function* destructure(target: MultiTarget, value: Value, frame: Frame): G
 
 function* toAryForAssignment(value: Value): Gen<Value[]> {
   if (value instanceof RArray) return assignmentItems(value.items);
-  if (respondsTo(value, 'to_ary', true)) {
-    const converted = yield* callMethod(value, 'to_ary', [], undefined, undefined, { fcall: true });
+  const converted = yield* tryImplicitConversion(value, 'to_ary');
+  if (converted !== undefined) {
     if (converted instanceof RArray) return assignmentItems(converted.items);
     if (converted !== NIL)
       throw typeError(
@@ -1177,7 +1186,13 @@ function* definedText(e: Expr, frame: Frame): Gen {
         }
       }
       const method = classOf(recv).findMethod(e.name);
-      if (!method || (method.visibility === 'private' && !e.fcall)) return NIL;
+      if (!method) {
+        const hook = classOf(recv).findMethod('respond_to_missing?');
+        return hook && truthy(yield* invoke(hook, recv, [RSymbol.of(e.name), true], undefined, undefined, false))
+          ? text('method')
+          : NIL;
+      }
+      if (method.visibility === 'private' && !e.fcall) return NIL;
       return text('method');
     }
     case 'yield': {
@@ -1942,8 +1957,8 @@ function* implicitSuperArgs(frame: Frame): Gen<{ args: Value[]; keywords: RHash 
 
 function* superKeywordRest(value: Value): Gen<RHash> {
   if (value instanceof RHash) return value;
-  if (respondsTo(value, 'to_hash', true)) {
-    const converted = yield* callMethod(value, 'to_hash', [], undefined, undefined, { fcall: true });
+  const converted = yield* tryImplicitConversion(value, 'to_hash');
+  if (converted !== undefined) {
     if (converted instanceof RHash) return converted;
     const name = realClassOf(value).name;
     throw typeError(`can't convert ${name} to Hash (${name}#to_hash gives ${realClassOf(converted).name})`);

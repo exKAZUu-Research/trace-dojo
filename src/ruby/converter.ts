@@ -534,12 +534,7 @@ export class Converter {
       if (resolved) return resolved;
     }
     if (/^_[1-9]$/.test(name) && this.ctx.inBlock && this.ctx.scope.kind !== 'end') {
-      if (this.ctx.scope.innerNumberedUsed) this.fail(node, '内側のブロックで番号付き引数が既に使われています。');
-      for (let parent = this.ctx.scope.parent; parent?.kind === 'block'; parent = parent.parent)
-        if (parent.numberedUsed) this.fail(node, '外側のブロックで番号付き引数が既に使われています。');
-      if (this.ctx.implicit === undefined && depth < 0)
-        this.fail(node, '明示的な引数と番号付き引数は一緒に使えません。');
-      this.ctx.scope.numberedUsed = true;
+      this.checkNumberedUse(node, this.ctx.scope, depth);
     }
     if (name === 'it' && depth > 0 && this.ctx.implicit && this.ctx.scope.implicitDeclaration(name)) {
       this.ctx.implicit.add(name);
@@ -571,21 +566,38 @@ export class Converter {
 
   private endImplicitIdentifier(node: Node, name: string, depth: number): Expr | undefined {
     if (name !== 'it' && !/^_[1-9]$/.test(name)) return undefined;
+    let block = this.ctx.scope.parent;
+    let endDepth = 1;
+    while (block?.kind === 'end') {
+      block = block.parent;
+      endDepth++;
+    }
     if (!this.ctx.implicit) {
-      if (depth < 0)
-        for (let parent = this.ctx.scope.parent; parent; parent = parent.parent)
-          if (parent.kind === 'block') this.fail(node, '明示的な引数と暗黙の引数は一緒に使えません。');
+      if (depth < 0 && block?.kind === 'block') this.fail(node, '明示的な引数と暗黙の引数は一緒に使えません。');
       return undefined;
     }
-    if (depth >= 0) return { k: 'lvar', name, depth };
+    if (block?.kind !== 'block') return undefined;
+    const blockDepth = block.depthOf(name);
+    if (/^_[1-9]$/.test(name)) this.checkNumberedUse(node, block, blockDepth);
+    if (name === 'it' && blockDepth > 0 && block.implicitDeclaration(name)) {
+      block.declareOwn(name);
+      block.implicitNames.add(name);
+      this.ctx.implicit.add(name);
+      return { k: 'lvar', name, depth: endDepth };
+    }
+    if (blockDepth >= 0) return { k: 'lvar', name, depth: endDepth + blockDepth };
     this.ctx.implicit.add(name);
-    const bindingDepth = this.ctx.scope.declare(name);
-    for (let parent = this.ctx.scope.parent; parent; parent = parent.parent)
-      if (parent.kind === 'block') {
-        parent.implicitNames.add(name);
-        break;
-      }
-    return { k: 'lvar', name, depth: bindingDepth };
+    block.declareOwn(name);
+    block.implicitNames.add(name);
+    return { k: 'lvar', name, depth: endDepth };
+  }
+
+  private checkNumberedUse(node: Node, scope: LocalScope, depth: number): void {
+    if (scope.innerNumberedUsed) this.fail(node, '内側のブロックで番号付き引数が既に使われています。');
+    for (let parent = scope.parent; parent?.kind === 'block'; parent = parent.parent)
+      if (parent.numberedUsed) this.fail(node, '外側のブロックで番号付き引数が既に使われています。');
+    if (this.ctx.implicit === undefined && depth < 0) this.fail(node, '明示的な引数と番号付き引数は一緒に使えません。');
+    scope.numberedUsed = true;
   }
 
   private scopeResolution(node: Node): Expr {
@@ -665,7 +677,10 @@ export class Converter {
     if (literal) parts.push(literal);
     if (parts.every((part) => typeof part === 'string')) {
       const source = parts.join('');
-      if (regexpCaptureNames(source, flags.includes('x')).length > 0 && regexpHasNumberedBackref(source))
+      if (
+        regexpCaptureNames(source, flags.includes('x')).length > 0 &&
+        regexpHasNumberedBackref(source, flags.includes('x'))
+      )
         this.fail(node, '名前付きキャプチャと番号付き後方参照は一緒に使えません。');
       try {
         new RegExp(translate(source, flags.includes('x'), flags.includes('m')), 'u');
