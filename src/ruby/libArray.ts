@@ -658,7 +658,11 @@ function* joinValue(value: Value, separator: RString, seen: Set<RArray>): Gen<RS
   }
   if (value instanceof RArray) return yield* join(value, separator, seen);
   const converted = yield* tryAry(value);
-  return converted ? yield* join(converted, separator, seen) : yield* toSValue(value);
+  return converted
+    ? yield* whileHeld(converted, function* () {
+        return yield* join(converted, separator, seen);
+      })
+    : yield* toSValue(value);
 }
 
 function joinStringConversionError(value: Value, converted: Value): unknown {

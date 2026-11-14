@@ -9,7 +9,7 @@ import { classOf, realClassOf, stringBytes, stringFromBytes } from './values';
 type Doc =
   | { kind: 'text'; text: string; deferred?: Value }
   | { kind: 'break'; text: string }
-  | { kind: 'group'; indent: number; parts: Doc[]; source?: RArray };
+  | { kind: 'group'; indent: number; parts: Doc[]; source?: RArray | RHash; itemValues?: Value[] };
 
 /** `pp` prints to a stream that is not a terminal, where Ruby's width is 80 columns less one. */
 const WIDTH = 79;
@@ -27,27 +27,50 @@ export function* writePretty(value: Value, write: (part: string) => Gen<void>): 
     return;
   }
   if (callbacks === 1) {
-    const prefix = staticPrefix(yield* build(value, new Set(), { nodes: 0, textLength: 0 }, true));
-    if (prefix) yield* write(prefix);
-    const rendered = yield* prettyInspect(value);
-    yield* write(rendered.slice(prefix.length));
+    const doc = yield* build(value, new Set(), { nodes: 0, textLength: 0 }, true);
+    const hashes = new Set<RHash>();
+    holdHashes(doc, hashes);
+    try {
+      const prefix = staticPrefix(doc);
+      if (prefix) yield* write(prefix);
+      const rendered = yield* prettyInspect(value);
+      yield* write(rendered.slice(prefix.length));
+    } finally {
+      for (const hash of hashes) hash.iterating--;
+    }
     return;
   }
   const doc = yield* build(value, new Set(), { nodes: 0, textLength: 0 }, true);
+  const hashes = new Set<RHash>();
+  holdHashes(doc, hashes);
   let emitted = '';
   const flushPrefix = function* (): Gen<void> {
     const prefix = staticPrefix(doc);
     yield* write(prefix.slice(emitted.length));
     emitted = prefix;
   };
-  yield* flushPrefix();
-  for (let node = firstDeferred(doc); node; node = firstDeferred(doc)) {
-    node.text = yield* inspect(node.deferred as Value);
-    node.deferred = undefined;
-    yield* reconcileArrays(doc, node);
+  try {
     yield* flushPrefix();
+    for (let node = firstDeferred(doc); node; node = firstDeferred(doc)) {
+      node.text = yield* inspect(node.deferred as Value);
+      node.deferred = undefined;
+      yield* reconcileContainers(doc, node);
+      holdHashes(doc, hashes);
+      yield* flushPrefix();
+    }
+    yield* write(`${layout(doc)}\n`.slice(emitted.length));
+  } finally {
+    for (const hash of hashes) hash.iterating--;
   }
-  yield* write(`${layout(doc)}\n`.slice(emitted.length));
+}
+
+function holdHashes(doc: Doc, held: Set<RHash>): void {
+  if (doc.kind !== 'group') return;
+  if (doc.source instanceof RHash && !held.has(doc.source)) {
+    doc.source.iterating++;
+    held.add(doc.source);
+  }
+  for (const part of doc.parts) holdHashes(part, held);
 }
 
 function firstDeferred(doc: Doc): Extract<Doc, { kind: 'text' }> | undefined {
@@ -60,24 +83,48 @@ function firstDeferred(doc: Doc): Extract<Doc, { kind: 'text' }> | undefined {
   return undefined;
 }
 
-function* reconcileArrays(doc: Doc, resolved: Doc): Gen<boolean> {
+function* reconcileContainers(doc: Doc, resolved: Doc): Gen<boolean> {
   if (doc === resolved) return true;
   if (doc.kind !== 'group') return false;
   for (const [position, part] of doc.parts.entries()) {
-    if (!(yield* reconcileArrays(part, resolved))) continue;
-    if (doc.source) {
-      const index = Math.floor((position - 1) / 3);
-      const end = doc.parts.at(-1) as Doc;
-      const remainder: Doc[] = [];
-      for (let next = index + 1; next < doc.source.items.length; next++) {
-        remainder.push({ kind: 'text', text: ',' }, breakable());
-        remainder.push(yield* build(doc.source.items[next], new Set([doc.source]), { nodes: 0, textLength: 0 }, true));
-      }
-      doc.parts = [...doc.parts.slice(0, position + 1), ...remainder, end];
-    }
+    if (!(yield* reconcileContainers(part, resolved))) continue;
+    const index = Math.floor((position - 1) / 3);
+    if (doc.source instanceof RArray) yield* reconcileArray(doc, doc.source, index);
+    if (doc.source instanceof RHash) yield* reconcileHash(doc, doc.source, index);
     return true;
   }
   return false;
+}
+
+function* reconcileArray(doc: Extract<Doc, { kind: 'group' }>, source: RArray, index: number): Gen<void> {
+  const previous = doc.itemValues as Value[];
+  let changed = index + 1;
+  while (changed < previous.length && changed < source.items.length && previous[changed] === source.items[changed])
+    changed++;
+  if (changed === previous.length && changed === source.items.length) return;
+  const end = doc.parts.at(-1) as Doc;
+  const remainder: Doc[] = [];
+  for (let next = changed; next < source.items.length; next++) {
+    remainder.push({ kind: 'text', text: ',' }, breakable());
+    remainder.push(yield* build(source.items[next], new Set([source]), { nodes: 0, textLength: 0 }, true));
+  }
+  doc.parts = [...doc.parts.slice(0, changed * 3 - 1), ...remainder, end];
+  doc.itemValues = [...source.items];
+}
+
+function* reconcileHash(doc: Extract<Doc, { kind: 'group' }>, source: RHash, index: number): Gen<void> {
+  const previous = doc.itemValues as Value[];
+  const entries = [...source.map.values()];
+  for (let next = index + 1; next < entries.length; next++) {
+    const value = entries[next].value;
+    if (previous[next] === value) continue;
+    const pairDoc = doc.parts[next * 3 + 1];
+    if (pairDoc.kind !== 'group') continue;
+    const valueDoc = pairDoc.parts.at(-1);
+    if (valueDoc?.kind !== 'group') continue;
+    valueDoc.parts[1] = yield* build(value, new Set([source]), { nodes: 0, textLength: 0 }, true);
+    previous[next] = value;
+  }
 }
 
 function staticPrefix(doc: Doc): string {
@@ -116,8 +163,21 @@ function breakable(separator = ' '): Doc {
   return { kind: 'break', text: separator };
 }
 
-function group(indent: number, open: string, parts: Doc[], close: string, budget: BuildBudget, source?: RArray): Doc {
-  return { kind: 'group', indent, parts: [text(open, budget), ...parts, text(close, budget)], source };
+function group(
+  indent: number,
+  open: string,
+  parts: Doc[],
+  close: string,
+  budget: BuildBudget,
+  source?: RArray | RHash
+): Doc {
+  const itemValues =
+    source instanceof RArray
+      ? [...source.items]
+      : source instanceof RHash
+        ? [...source.map.values()].map((entry) => entry.value)
+        : undefined;
+  return { kind: 'group', indent, parts: [text(open, budget), ...parts, text(close, budget)], source, itemValues };
 }
 
 /** Whether the program redefined how a value is shown, which then decides its text as a whole. */
@@ -156,7 +216,7 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = fa
         first = false;
         parts.push({ kind: 'group', indent: 0, parts: yield* pair(key, item, seen, budget, defer) });
       }
-      return group(1, '{', parts, '}', budget);
+      return group(1, '{', parts, '}', budget, value);
     } finally {
       value.iterating--;
       seen.delete(value);

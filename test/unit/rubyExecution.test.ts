@@ -2234,6 +2234,24 @@ test('pp guards Hash entries during callback inspection', () => {
   ).toMatchObject({
     stdout: '2\n',
   });
+  expect(
+    run(
+      'class A;def inspect;$h[:b]=2;"x";end;end;class B;def inspect;"y";end;end;$h={a:A.new,c:B.new};begin;pp $h;rescue=>e;p e.class;end;p $h.size'
+    )
+  ).toMatchObject({ stdout: '{a:RuntimeError\n2\n' });
+});
+
+test('pp reads replacement Hash values after earlier inspect callbacks', () => {
+  expect(
+    run('class A;def inspect;$h[:b]=9;"x";end;end;class B;def inspect;"y";end;end;$h={a:A.new,b:B.new};pp $h;p $h[:b]')
+  ).toMatchObject({ stdout: '{a: x, b: 9}\n9\n' });
+});
+
+test('pp streams repeated inspect values within the execution budget', () => {
+  vi.restoreAllMocks();
+  const result = run('class A;def inspect;"x";end;end;pp Array.new(2000,A.new)');
+  expect(result).toMatchObject({ kind: 'executed' });
+  if (result.kind === 'executed') expect(result.stdout).toHaveLength(8000);
 });
 
 test('pp follows Array mutations during element inspection', () => {
