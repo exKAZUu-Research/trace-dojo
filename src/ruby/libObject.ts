@@ -275,7 +275,6 @@ function copyData(data: unknown): unknown {
 }
 
 def('Kernel', 'extend', [1, -1], function* (self, modules) {
-  if (!(self instanceof RBasic) || self instanceof RFloat) throw typeError("can't define singleton");
   for (const module of modules) {
     if (!(module instanceof RClass) || !module.isModule) {
       throw typeError(`wrong argument type ${realClassOf(module).name} (expected Module)`);
@@ -692,7 +691,7 @@ def(
   'extend_object',
   1,
   (self: RClass, [target]) => {
-    if (!(target instanceof RBasic)) throw typeError("can't define singleton");
+    if (!(target instanceof RBasic) || target instanceof RFloat) throw typeError("can't define singleton");
     if (target.frozen)
       throw frozenError(target, target instanceof RClass ? (target.name ?? '') : (realClassOf(target).name ?? ''));
     const singleton = singletonClassOf(target);

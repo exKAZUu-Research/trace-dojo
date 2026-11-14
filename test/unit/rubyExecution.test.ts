@@ -1812,6 +1812,9 @@ test('boxed Floats keep immutable clone and singleton rules', () => {
   ).toMatchObject({
     stdout: 'ArgumentError\nTypeError\n',
   });
+  expect(run('module M;def self.extend_object(x);puts :hook;end;end;Float::MAX.extend(M)')).toMatchObject({
+    stdout: 'hook\n',
+  });
 });
 
 test('lambda requires a literal block', () => {
@@ -1873,6 +1876,7 @@ test('warn validates keyword options before writing', () => {
   ).toMatchObject({
     stdout: 'ArgumentError\n',
   });
+  expect(run('begin;warn(uplevel:-1);puts :ok;rescue=>e;p e.class;end')).toMatchObject({ stdout: 'ok\n' });
 });
 
 test('deep Ruby containers remain within the interpreter stack', () => {
