@@ -79,6 +79,9 @@ const SYNTAX = String.raw`^$\.*+?()[]{}|/-`;
 
 /** Translates a Ruby (Onigmo) expression into JavaScript's syntax, rejecting what has no counterpart. */
 export function translate(source: string, extended: boolean, multiline = false): string {
+  if (/(?<!\\)\(\?<([A-Za-z_][\w-]*-[\w-]*)>/.test(source)) throw unsupportedSyntax('ハイフン付きキャプチャ名');
+  if (/\\(?:[1-9]|k<)/.test(source) && /(?<!\\)\((?!\?:|\?=|\?!|\?<=|\?<!)[^()]*\)(?:[?*]|\{0,)/.test(source))
+    throw unsupportedSyntax('省略可能なキャプチャへの後方参照');
   rejectNestedRepetition(source, extended);
   let out = '';
   let inClass = 0;
@@ -422,6 +425,7 @@ export function makeRegexp(
   source: string,
   options: { ignoreCase?: boolean; multiline?: boolean; extended?: boolean }
 ): RObject {
+  if (hasVariableLengthLookbehind(source)) throw rubyError(rt().c.RegexpError, `invalid pattern: /${source}/`);
   if (regexpCaptureNames(source, options.extended).length > 0 && regexpHasNumberedBackref(source, options.extended))
     throw rubyError(rt().c.RegexpError, `numbered backref/call is not allowed. (use name): /${source}/`);
   const regexp = new RObject(rt().c.Regexp);
@@ -444,6 +448,14 @@ export function makeRegexp(
   };
   regexp.data = data;
   return regexp;
+}
+
+export function hasVariableLengthLookbehind(source: string): boolean {
+  for (const match of source.matchAll(/\(\?<([=!])((?:\\.|[^)])*)\)/g)) {
+    const body = match[2].replaceAll(/\[(?:\\.|[^\]])*\]/g, '');
+    if (/(?<!\\)[*+?]/.test(body) || /\{\d+,\d*\}/.test(body)) return true;
+  }
+  return false;
 }
 
 export function normalizeSlashLiteralSource(source: string): string {
@@ -520,9 +532,12 @@ function unitIndex(text: string, char: number): number {
 export function execAt(regexp: RObject, text: string, start: number): MatchState | undefined {
   if (start < 0 || start > charIndex(text, text.length)) return undefined;
   const data = dataOf(regexp);
+  if (data.ignoreCase && requiresMultiCharacterFold(data.source, text))
+    throw new UnsupportedFeatureError('Unicode の複数文字 casefold');
   const { js } = data;
-  rt().spend(Math.ceil(text.length / 64));
-  js.lastIndex = unitIndex(text, start);
+  rt().spend();
+  const startUnit = unitIndex(text, start);
+  js.lastIndex = startUnit;
   let result: RegExpExecArray | null;
   if (data.safeNative || (text.length <= 8 && data.source.length <= 16)) result = js.exec(text);
   else {
@@ -538,6 +553,7 @@ export function execAt(regexp: RObject, text: string, start: number): MatchState
       throw error;
     }
   }
+  rt().spend(Math.ceil(((result?.index ?? text.length) - startUnit) / 64));
   if (!result?.indices) return undefined;
   const names: string[] = [];
   const namedGroups: Record<string, number> = Object.create(null) as Record<string, number>;
@@ -547,6 +563,16 @@ export function execAt(regexp: RObject, text: string, start: number): MatchState
     if (!(name in namedGroups) || result.indices[position + 1] !== undefined) namedGroups[name] = position + 1;
   }
   return { text, groups: [...result.indices], names, namedGroups, regexp };
+}
+
+function requiresMultiCharacterFold(source: string, text: string): boolean {
+  if ([...source].some((char) => char.toUpperCase().length > char.length || char.toLowerCase().length > char.length))
+    return true;
+  const upperSource = source.toUpperCase();
+  return [...text].some((char) => {
+    const expanded = char.toUpperCase();
+    return expanded.length > char.length && upperSource.includes(expanded);
+  });
 }
 
 function matchData(state: MatchState): RObject {
@@ -727,6 +753,13 @@ function escapedRegexpSource(source: string): string {
   return source.replaceAll(/(\\*)\//g, (_match, slashes: string) =>
     slashes.length % 2 === 0 ? `${slashes}\\/` : `${slashes}/`
   );
+}
+
+function literalRegexpText(regexp: RObject): string | undefined {
+  const data = dataOf(regexp);
+  if (data.ignoreCase || data.extended) return undefined;
+  const syntax = String.raw`\\^$.*+?()[]{}|`;
+  return [...data.source].some((char) => syntax.includes(char)) ? undefined : data.source;
 }
 
 export function regexpValueDisplayOf(value: RObject): string | undefined {
@@ -959,7 +992,7 @@ def('MatchData', 'deconstruct_keys', 1, function* (self: RObject, [keys]) {
 
 // String's regular-expression forms ------------------------------------------------------------------------------------
 
-/** Expands `\1`, `\k<name>`, `\0`, `\&`, `\\`, `` \` ``, and `\'` in a replacement string. */
+/** Expands capture references and match-context escapes in a replacement string. */
 function expand(replacement: string, state: MatchState, limit: number): string {
   const whole = state.groups[0] as readonly [number, number];
   const parts: string[] = [];
@@ -971,7 +1004,7 @@ function expand(replacement: string, state: MatchState, limit: number): string {
     parts.push(part);
   };
   let position = 0;
-  for (const match of replacement.matchAll(/\\(k<(\w+)>|[0-9&\\`'])/g)) {
+  for (const match of replacement.matchAll(/\\(k<(\w+)>|[0-9&+\\`'])/g)) {
     append(replacement.slice(position, match.index));
     const [, code, name] = match;
     let part: string;
@@ -984,6 +1017,12 @@ function expand(replacement: string, state: MatchState, limit: number): string {
       switch (code) {
         case '&': {
           part = state.text.slice(whole[0], whole[1]);
+          break;
+        }
+        case '+': {
+          const group = state.groups.findLastIndex((range, index) => index > 0 && range !== undefined);
+          const value = group > 0 ? groupText(state, group) : NIL;
+          part = value === NIL ? '' : (value as RString).s;
           break;
         }
         case '\\': {
@@ -1234,12 +1273,16 @@ for (const [name, last] of [
     const regexp = args[0] as RObject;
     let state = execAt(regexp, self.s, 0);
     if (last && state) {
-      const length = charIndex(self.s, self.s.length);
-      for (let position = length; position >= 0; position--) {
-        const candidate = execAt(regexp, self.s, position);
-        if (candidate && charIndex(self.s, (candidate.groups[0] as readonly [number, number])[0]) === position) {
-          state = candidate;
-          break;
+      const literal = literalRegexpText(regexp);
+      if (literal !== undefined) {
+        const index = self.s.lastIndexOf(literal);
+        state = index === -1 ? undefined : execAt(regexp, self.s, charIndex(self.s, index));
+      } else {
+        for (;;) {
+          const from = (state.groups[0] as readonly [number, number])[0];
+          const next = execAt(regexp, self.s, charIndex(self.s, from) + 1);
+          if (!next) break;
+          state = next;
         }
       }
     }

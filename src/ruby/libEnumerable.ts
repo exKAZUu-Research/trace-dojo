@@ -97,6 +97,21 @@ export function* iterate(collection: Value, visit: Visit, args: Value[] = []): G
   }
 }
 
+export function* iterateYielded(collection: Value, visit: (args: Value[]) => Gen<unknown>, args: Value[] = []): Gen {
+  const signal = new StopSignal();
+  const block = nativeProc(-1, function* (yielded) {
+    rt().spend();
+    if ((yield* visit(yielded)) === STOP) throw signal;
+    return NIL;
+  });
+  try {
+    return yield* callMethod(collection, 'each', args, undefined, block, { fcall: true });
+  } catch (error) {
+    if (error !== signal) throw error;
+    return NIL;
+  }
+}
+
 /** The helpers Range provides to {@link iterate}, set by its module to avoid an import cycle. */
 export const rangeHelpers: { iterateRange: (range: RRange, visit: Visit) => Gen<void> } = {
   iterateRange: () => {

@@ -6508,3 +6508,93 @@ test('regexp split clears an unrelated prior match', () => {
 test('Rational text accepts decimal denominators', () => {
   expect(run('p Rational("1/2.5"), "1/2.5".to_r')).toMatchObject({ stdout: '(2/5)\n(2/5)\n' });
 });
+
+test('Lazy preserves source yield argument lists', () => {
+  expect(
+    run(
+      'e=Enumerator.new{|y|y.yield 1,2};p e.lazy.map{|*args|args}.force; Enumerator.new{|y|y.yield}.lazy.each{|*args|p args}'
+    )
+  ).toMatchObject({
+    stdout: '[[1, 2]]\n[]\n',
+  });
+});
+
+test('regexp replacement expands the last participating capture', () => {
+  expect(run(String.raw`p "abc".sub(/(a)(b)?/, "\\+"), "a".sub(/(a)(b)?/, "\\+")`)).toMatchObject({
+    stdout: '"bc"\n"a"\n',
+  });
+});
+
+test('finite fractional sleeps remain within the virtual clock', () => {
+  expect(run('p sleep(0.0005), sleep(Rational(1,3))')).toMatchObject({ stdout: '0\n0\n' });
+});
+
+test('Range minmax uses endpoints without iterating custom values', () => {
+  expect(
+    run(
+      'class T;include Comparable;attr_reader :n;def initialize(n);@n=n;end;def <=>(o);n<=>o.n;end;end;p (T.new(1)..T.new(3)).minmax.map(&:n), ("b"..."d").minmax'
+    )
+  ).toMatchObject({
+    stdout: '[1, 3]\n["b", "c"]\n',
+  });
+});
+
+test('Rational arithmetic charges large native allocations', () => {
+  expect(run('r=2r;22.times{r=r*r};p r.numerator.bit_length')).toMatchObject({
+    kind: 'limitExceeded',
+    limit: 'operations',
+  });
+});
+
+test('DATA class cannot construct an unsupported File', () => {
+  expect(run('DATA.class.new.read\n__END__\na\n')).toMatchObject({
+    uncaughtException: 'File オブジェクトの生成は、この採点環境では使えません。',
+  });
+});
+
+test('class-variable reflection validates names', () => {
+  expect(run('class A;end;A.class_variable_set(:count,1)')).toMatchObject({
+    uncaughtException: "'count' is not allowed as a class variable name (NameError)",
+  });
+});
+
+test('strftime year flags override default padding', () => {
+  expect(run('p Time.utc(42).strftime("%-Y %_Y %G"), Time.utc(-1).strftime("%-Y %_Y %0Y")')).toMatchObject({
+    stdout: '"42   42 0042"\n"-1    -1 -0001"\n',
+  });
+});
+
+test('untranslatable regexp names and backreferences fail explicitly', () => {
+  expect(run(String.raw`p /(?<n-1>\w)/.names`)).toMatchObject({
+    uncaughtException: '正規表現のハイフン付きキャプチャ名は、この採点環境では使えません。',
+  });
+  expect(run(String.raw`p "b".match?(/(a)?b\1/)`)).toMatchObject({
+    uncaughtException: '正規表現の省略可能なキャプチャへの後方参照は、この採点環境では使えません。',
+  });
+});
+
+test('variable-length lookbehind is a compile error', () => {
+  expect(run(String.raw`puts :before; p /(?<=a+)b/.match?("aab")`)).toMatchObject({ kind: 'compileError' });
+});
+
+test('unrepresentable multi-character case folds fail explicitly', () => {
+  expect(run(String.raw`p "ß".match?(/ss/i)`)).toMatchObject({
+    uncaughtException: 'Unicode の複数文字 casefold は、この採点環境では使えません。',
+  });
+});
+
+test('underscore pattern targets receive matched values', () => {
+  expect(run('1 => _; p _; [1,2] => [_,_]; p _')).toMatchObject({ stdout: '1\n2\n' });
+});
+
+test('CRLF heredocs normalize source line endings', () => {
+  expect(run('s=<<~EOS\r\n  a\r\nEOS\r\np s')).toMatchObject({ stdout: '"a\\n"\n' });
+});
+
+test('compound equality dispatches native value eql?', () => {
+  expect(
+    run('S=Struct.new(:x);a=S.new(1r);b=S.new(1r);p a.eql?(b),{a=>:hit}[b],[Time.at(0)].eql?([Time.at(0)])')
+  ).toMatchObject({
+    stdout: 'true\n:hit\ntrue\n',
+  });
+});

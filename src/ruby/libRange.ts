@@ -201,13 +201,14 @@ def('Range', 'max', [0, 1], function* (self: RRange, args, block) {
   if (self.exclusive) {
     if (typeof self.end === 'bigint' && typeof self.begin === 'bigint') return self.end - 1n;
     if (isRubyFloat(self.end)) throw typeError('cannot exclude non Integer end value');
+    if (self.begin instanceof RString && self.end instanceof RString)
+      return yield* callEnumerable(self, 'max', [], undefined);
     throw typeError('cannot exclude end value with non Integer begin value');
   }
   return self.end;
 });
 def('Range', 'minmax', 0, function* (self: RRange, _args, block) {
-  if (block || (!linearEndpoint(self.begin) && !linearEndpoint(self.end)))
-    return yield* callEnumerable(self, 'minmax', [], block);
+  if (block) return yield* callEnumerable(self, 'minmax', [], block);
   return arr([yield* callMethod(self, 'min', []), yield* callMethod(self, 'max', [])]);
 });
 

@@ -1,5 +1,5 @@
 import type { Params } from './ast';
-import { className, inspect, toStr, tryImplicitConversion } from './conversions';
+import { className, inspect, tryImplicitConversion } from './conversions';
 import { def } from './define';
 import { argumentError, frozenError, nameError, typeError } from './errors';
 import { hashGet } from './hashes';
@@ -52,6 +52,13 @@ function* ivarName(value: Value): Gen<string> {
   if (!/^@[A-Za-z_\u0080-￿][\w\u0080-￿]*$/u.test(name)) {
     throw nameError(`'${name}' is not allowed as an instance variable name`, NIL, name);
   }
+  return name;
+}
+
+function* classVariableName(value: Value): Gen<string> {
+  const name = yield* nameOf(value);
+  if (!/^@@[A-Za-z_\u0080-￿][\w\u0080-￿]*$/u.test(name))
+    throw nameError(`'${name}' is not allowed as a class variable name`, NIL, name);
   return name;
 }
 
@@ -617,7 +624,7 @@ def('Module', 'constants', [0, 1], () => {
   throw new UnsupportedFeatureError('Module#constants（定数の並び順）');
 });
 def('Module', 'class_variable_get', 1, function* (self: RClass, [name]) {
-  const variable = yield* toStr(str(yield* nameOf(name)));
+  const variable = yield* classVariableName(name);
   for (const module of self.ancestors()) {
     const value = module.classVariables.get(variable);
     if (value !== undefined) return value;
@@ -625,11 +632,11 @@ def('Module', 'class_variable_get', 1, function* (self: RClass, [name]) {
   throw nameError(`uninitialized class variable ${variable} in ${className(self)}`, self, variable);
 });
 def('Module', 'class_variable_set', 2, function* (self: RClass, [name, value]) {
-  setClassVariable(self, yield* nameOf(name), value);
+  setClassVariable(self, yield* classVariableName(name), value);
   return value;
 });
 def('Module', 'class_variable_defined?', 1, function* (self: RClass, [name]) {
-  const variable = yield* nameOf(name);
+  const variable = yield* classVariableName(name);
   return self.ancestors().some((module) => module.classVariables.has(variable));
 });
 def('Module', 'class_variables', [0, 1], () => {

@@ -4,6 +4,7 @@ import { def } from './define';
 import { argumentError, floatDomainError, typeError, zeroDivisionError } from './errors';
 import { exactDecimal } from './floatFormat';
 import { bigintRatio } from './floatMath';
+import { chargeIntegerResult, integerBits } from './integerBudget';
 import { callMethod, type Gen } from './interp';
 import { isRubyFloat, NIL, RArray, RObject, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
@@ -19,12 +20,29 @@ interface Fraction {
 function gcd(a: bigint, b: bigint): bigint {
   let x = a < 0n ? -a : a;
   let y = b < 0n ? -b : b;
+  const bits = Math.max(integerBits(x), integerBits(y));
+  rt().spend(Math.ceil((bits * Math.log2(bits + 1)) / 256));
   while (y !== 0n) [x, y] = [y, x % y];
   return x;
 }
 
+function boundedMultiply(left: bigint, right: bigint): bigint {
+  const leftBits = integerBits(left);
+  const rightBits = integerBits(right);
+  chargeIntegerResult(leftBits + rightBits, (leftBits * rightBits) / 1024);
+  return left * right;
+}
+
+function boundedAdd(left: bigint, right: bigint): bigint {
+  const leftBits = integerBits(left);
+  const rightBits = integerBits(right);
+  chargeIntegerResult(Math.max(leftBits, rightBits) + 1, leftBits + rightBits);
+  return left + right;
+}
+
 export function makeRational(numerator: bigint, denominator: bigint): RObject {
   if (denominator === 0n) throw zeroDivisionError();
+  chargeIntegerResult(Math.max(integerBits(numerator), integerBits(denominator)), 0);
   const sign = denominator < 0n ? -1n : 1n;
   const divisor = gcd(numerator, denominator) || 1n;
   const rational = new RObject(rt().c.Rational);
@@ -75,17 +93,23 @@ function* arithmetic(self: RObject, other: Value, op: string): Gen {
   }
   switch (op) {
     case '+': {
-      return makeRational(a.numerator * b.denominator + b.numerator * a.denominator, a.denominator * b.denominator);
+      return makeRational(
+        boundedAdd(boundedMultiply(a.numerator, b.denominator), boundedMultiply(b.numerator, a.denominator)),
+        boundedMultiply(a.denominator, b.denominator)
+      );
     }
     case '-': {
-      return makeRational(a.numerator * b.denominator - b.numerator * a.denominator, a.denominator * b.denominator);
+      return makeRational(
+        boundedAdd(boundedMultiply(a.numerator, b.denominator), -boundedMultiply(b.numerator, a.denominator)),
+        boundedMultiply(a.denominator, b.denominator)
+      );
     }
     case '*': {
-      return makeRational(a.numerator * b.numerator, a.denominator * b.denominator);
+      return makeRational(boundedMultiply(a.numerator, b.numerator), boundedMultiply(a.denominator, b.denominator));
     }
     default: {
       if (b.numerator === 0n) throw zeroDivisionError();
-      return makeRational(a.numerator * b.denominator, a.denominator * b.numerator);
+      return makeRational(boundedMultiply(a.numerator, b.denominator), boundedMultiply(a.denominator, b.numerator));
     }
   }
 }

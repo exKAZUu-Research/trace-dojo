@@ -27,7 +27,7 @@ import {
   respondsTo,
   runToEnd,
 } from './interp';
-import { iterate, STOP, zipCollections } from './libEnumerable';
+import { iterate, iterateYielded, STOP, zipCollections } from './libEnumerable';
 import { rangeSize } from './libRange';
 import { setSize } from './libSet';
 import {
@@ -1009,7 +1009,7 @@ def('Enumerator::Lazy', 'each_with_index', 0, function* (self: RObject, _args, b
 });
 
 /** Runs a lazy chain: each element of the source passes the steps in turn, and `take` ends the iteration. */
-function* runLazy(self: RObject, visit: (value: Value) => Gen<unknown>, args: Value[] = []): Gen {
+function* runLazy(self: RObject, visit: (value: Value, yielded?: Value[]) => Gen<unknown>, args: Value[] = []): Gen {
   const data = self.data as LazyData;
   const states: LazyState[] = data.steps.map((step) => ({
     seen: 0,
@@ -1022,16 +1022,17 @@ function* runLazy(self: RObject, visit: (value: Value) => Gen<unknown>, args: Va
   const arrays = rt().heldArrays;
   const arrayMark = arrays.length;
   let visitorStopped = false;
-  const visitWithStop = function* (value: Value): Gen<unknown> {
-    const outcome = yield* visit(value);
+  const visitWithStop = function* (value: Value, yielded?: Value[]): Gen<unknown> {
+    const outcome = yield* visit(value, yielded);
     if (outcome === STOP) visitorStopped = true;
     return outcome;
   };
   try {
-    const result = yield* iterate(
+    const result = yield* iterateYielded(
       data.source,
-      function* (value) {
-        return yield* streamLazyStep(data.steps, states, 0, value, visitWithStop);
+      function* (yielded) {
+        const value = yielded.length === 1 ? yielded[0] : arr(yielded);
+        return yield* streamLazyStep(data.steps, states, 0, value, visitWithStop, yielded);
       },
       args
     );
@@ -1066,46 +1067,50 @@ function* streamLazyStep(
   states: LazyState[],
   position: number,
   item: Value,
-  visit: (value: Value) => Gen<unknown>
+  visit: (value: Value, yielded?: Value[]) => Gen<unknown>,
+  yielded: Value[] = [item]
 ): Gen<unknown> {
   const step = steps[position];
-  if (!step) return yield* visit(item);
+  if (!step) return yield* visit(item, yielded);
   const state = states[position];
-  const next = (value: Value): Gen<unknown> => streamLazyStep(steps, states, position + 1, value, visit);
+  const next = (value: Value, args: Value[] = [value]): Gen<unknown> =>
+    streamLazyStep(steps, states, position + 1, value, visit, args);
   switch (step.kind) {
     case 'map': {
-      return yield* next(yield* callProc(step.block, [item]));
+      return yield* next(yield* callProc(step.block, yielded));
     }
     case 'select':
     case 'reject': {
-      return truthy(yield* callProc(step.block, [item])) === (step.kind === 'select') ? yield* next(item) : undefined;
+      return truthy(yield* callProc(step.block, yielded)) === (step.kind === 'select')
+        ? yield* next(item, yielded)
+        : undefined;
     }
     case 'filter_map': {
-      const mapped = yield* callProc(step.block, [item]);
+      const mapped = yield* callProc(step.block, yielded);
       return truthy(mapped) ? yield* next(mapped) : undefined;
     }
     case 'flat_map': {
-      return yield* streamFlattened(yield* callProc(step.block, [item]), next);
+      return yield* streamFlattened(yield* callProc(step.block, yielded), next);
     }
     case 'take_while': {
-      return truthy(yield* callProc(step.block, [item])) ? yield* next(item) : STOP;
+      return truthy(yield* callProc(step.block, yielded)) ? yield* next(item, yielded) : STOP;
     }
     case 'drop_while': {
-      if (state.dropping && truthy(yield* callProc(step.block, [item]))) return undefined;
+      if (state.dropping && truthy(yield* callProc(step.block, yielded))) return undefined;
       state.dropping = false;
-      return yield* next(item);
+      return yield* next(item, yielded);
     }
     case 'take': {
       if (state.seen >= step.count) return STOP;
       state.seen++;
-      const result = yield* next(item);
+      const result = yield* next(item, yielded);
       return result === STOP || state.seen >= step.count ? STOP : undefined;
     }
     case 'drop': {
-      return state.seen++ >= step.count ? yield* next(item) : undefined;
+      return state.seen++ >= step.count ? yield* next(item, yielded) : undefined;
     }
     case 'compact': {
-      return item === NIL ? undefined : yield* next(item);
+      return item === NIL ? undefined : yield* next(item, yielded);
     }
     case 'with_index': {
       const index = state.index++;
@@ -1206,33 +1211,43 @@ def('Enumerator::Lazy', 'each', [0, -1], function* (self: RObject, args, block) 
     const data = self.data as LazyData;
     return makeLazy(makeEnumerator(data.source, 'each', args), data.steps);
   }
-  return yield* runLazy(self, (value) => callProc(block, [value], { used: false }), args);
+  return yield* runLazy(self, (value, yielded) => callProc(block, yielded ?? [value], { used: false }), args);
 });
 def('Enumerator::Lazy', ['force', 'to_a'], [0, -1], function* (self: RObject, args) {
   const items: Value[] = [];
-  yield* runLazy(
-    self,
-    function* (value) {
-      items.push(value);
-      yield* [];
-    },
-    args
-  );
-  return arr(items);
+  rt().heldArrays.push(items);
+  try {
+    yield* runLazy(
+      self,
+      function* (value) {
+        items.push(value);
+        yield* [];
+      },
+      args
+    );
+    return arr(items);
+  } finally {
+    rt().heldArrays.pop();
+  }
 });
 def('Enumerator::Lazy', 'first', [0, 1], function* (self: RObject, args) {
   const items: Value[] = [];
   const count = args.length > 0 ? Number(yield* toInt(args[0])) : 1;
   if (count < 0) throw argumentError('attempt to take negative size');
-  if (count > 0) {
-    yield* runLazy(self, function* (value) {
-      items.push(value);
-      yield* [];
-      return items.length >= count ? STOP : undefined;
-    });
+  rt().heldArrays.push(items);
+  try {
+    if (count > 0) {
+      yield* runLazy(self, function* (value) {
+        items.push(value);
+        yield* [];
+        return items.length >= count ? STOP : undefined;
+      });
+    }
+    if (args.length === 0) return items[0] ?? NIL;
+    return arr(items);
+  } finally {
+    rt().heldArrays.pop();
   }
-  if (args.length === 0) return items[0] ?? NIL;
-  return arr(items);
 });
 def('Enumerator::Lazy', 'eager', 0, function* (self: RObject) {
   return makeEnumerator(self, 'each', []);

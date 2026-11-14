@@ -23,7 +23,7 @@ import type {
   Use,
 } from './ast';
 import { decodeDoubleQuoted, decodeSingleQuoted } from './escapes';
-import { translate } from './libRegexp';
+import { hasVariableLengthLookbehind, translate } from './libRegexp';
 import { regexpCaptureNames, regexpHasNumberedBackref } from './regexpCaptureNames';
 import { UnsupportedFeatureError } from './runtime';
 
@@ -688,6 +688,7 @@ export class Converter {
         regexpHasNumberedBackref(source, flags.includes('x'))
       )
         this.fail(node, '名前付きキャプチャと番号付き後方参照は一緒に使えません。');
+      if (hasVariableLengthLookbehind(source)) this.fail(node, '正規表現の書き方に誤りがあります。');
       try {
         new RegExp(translate(source, flags.includes('x'), flags.includes('m')), 'u');
       } catch (error) {
@@ -1504,10 +1505,6 @@ export class Converter {
     const name = node.text;
     this.checkReservedBinding(node, name);
     if (this.alternativeDepth > 0 && !name.startsWith('_')) this.fail(node, '選択パターンでは変数を束縛できません。');
-    if (name === '_') {
-      this.ctx.scope.declare(name);
-      return undefined;
-    }
     if (!name.startsWith('_') && this.patternBindings.has(name))
       this.fail(node, `パターンの変数「${name}」が重複しています。`);
     this.patternBindings.add(name);
@@ -1702,6 +1699,8 @@ export class Converter {
         pieces.push(child);
       }
     }
+    for (const [index, piece] of pieces.entries())
+      if (typeof piece === 'string') pieces[index] = piece.replaceAll('\r\n', '\n');
     if (typeof pieces[0] === 'string') pieces[0] = pieces[0].replace(/^\n/, '');
     // The indentation before an indented terminator (`<<-` and `<<~`) is not part of the text.
     const last = pieces.at(-1);

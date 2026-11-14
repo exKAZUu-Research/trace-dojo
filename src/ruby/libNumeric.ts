@@ -25,6 +25,7 @@ import {
   roundedDouble,
 } from './floatMath';
 import { exactFloatPower } from './floatPower';
+import { chargeIntegerResult, integerBits } from './integerBudget';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { makeRational } from './libRational';
@@ -117,14 +118,6 @@ function intPow(base: bigint, exponent: bigint): Value {
   const outputBits = BigInt((magnitude & (magnitude - 1n)) === 0n ? bits - 1 : bits) * exponent + 1n;
   chargeIntegerResult(Number(outputBits), Number(outputBits));
   return base ** exponent;
-}
-
-function integerBits(value: bigint): number {
-  return (value < 0n ? -value : value).toString(2).length;
-}
-
-function chargeIntegerResult(bits: number, cost: number): void {
-  rt().spend(Math.ceil(bits / 256) + Math.ceil(cost / 4096));
 }
 
 function floatPow(base: number, exponent: number): Value {

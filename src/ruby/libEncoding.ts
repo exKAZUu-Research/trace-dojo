@@ -1,4 +1,4 @@
-import { def } from './define';
+import { def, sdef } from './define';
 import { rubyError } from './errors';
 import { callProc, type Gen, requireBlock } from './interp';
 import { makeEnumerator } from './libEnumerator';
@@ -86,6 +86,7 @@ export function* runAtExit(): Gen<(RubyError | ExitSignal | UnsupportedFeatureEr
 export function makeData(text: string, file: string): RObject {
   const data = new RObject(rt().c.File);
   data.data = { text: file, position: file.length - text.length };
+  dataFiles.add(data);
   return data;
 }
 
@@ -94,20 +95,31 @@ interface DataState {
   position: number;
 }
 
+const dataFiles = new WeakSet<RObject>();
+
+function dataState(self: RObject): DataState {
+  if (!dataFiles.has(self)) throw new UnsupportedFeatureError('File オブジェクトの生成');
+  return self.data as DataState;
+}
+
 function remaining(self: RObject): string {
-  const state = self.data as DataState;
+  const state = dataState(self);
   return state.text.slice(state.position);
 }
 
+sdef('File', ['new', 'allocate'], [0, -1], () => {
+  throw new UnsupportedFeatureError('File オブジェクトの生成');
+});
 def('File', 'read', 0, (self: RObject) => {
   const text = remaining(self);
-  (self.data as DataState).position = (self.data as DataState).text.length;
+  const state = dataState(self);
+  state.position = state.text.length;
   return str(text);
 });
 def('File', 'gets', 0, (self: RObject) => readLine(self));
 
 function readLine(self: RObject): Value {
-  const state = self.data as DataState;
+  const state = dataState(self);
   if (state.position >= state.text.length) return NIL;
   const end = state.text.indexOf('\n', state.position);
   const line = state.text.slice(state.position, end === -1 ? undefined : end + 1);
@@ -118,7 +130,8 @@ def('File', 'readlines', 0, (self: RObject) => {
   const lines = remaining(self)
     .split(/(?<=\n)/)
     .filter((line) => line.length > 0);
-  (self.data as DataState).position = (self.data as DataState).text.length;
+  const state = dataState(self);
+  state.position = state.text.length;
   return arr(lines.map((line) => str(line)));
 });
 def('File', 'each_line', 0, function* (self: RObject, _args, block) {
@@ -128,7 +141,7 @@ def('File', 'each_line', 0, function* (self: RObject, _args, block) {
   return self;
 });
 def('File', 'rewind', 0, (self: RObject) => {
-  (self.data as DataState).position = 0;
+  dataState(self).position = 0;
   return 0n;
 });
 def('File', 'eof?', 0, (self: RObject) => remaining(self).length === 0);

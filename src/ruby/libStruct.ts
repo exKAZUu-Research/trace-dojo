@@ -401,20 +401,25 @@ function* deconstructKeys(self: RObject, keys: Value): Gen<RHash> {
 
 function* structToHash(self: RObject, block: RProc | undefined): Gen<RHash> {
   const hash = newHash();
-  for (const [index, name] of layoutOf(self.cls).members.entries()) {
-    const value = valuesOf(self)[index];
-    if (!block) {
-      yield* hashSet(hash, sym(name), value);
-      continue;
+  rt().held.push(hash);
+  try {
+    for (const [index, name] of layoutOf(self.cls).members.entries()) {
+      const value = valuesOf(self)[index];
+      if (!block) {
+        yield* hashSet(hash, sym(name), value);
+        continue;
+      }
+      const converted = yield* callBlock(block, [sym(name), value]);
+      const pair = converted instanceof RArray ? converted : yield* tryAry(converted);
+      if (!pair) throw typeError(`wrong element type ${realClassOf(converted).name} (expected array)`);
+      if (pair.items.length !== 2)
+        throw argumentError(`element has wrong array length (expected 2, was ${pair.items.length})`);
+      yield* hashSet(hash, pair.items[0], pair.items[1]);
     }
-    const converted = yield* callBlock(block, [sym(name), value]);
-    const pair = converted instanceof RArray ? converted : yield* tryAry(converted);
-    if (!pair) throw typeError(`wrong element type ${realClassOf(converted).name} (expected array)`);
-    if (pair.items.length !== 2)
-      throw argumentError(`element has wrong array length (expected 2, was ${pair.items.length})`);
-    yield* hashSet(hash, pair.items[0], pair.items[1]);
+    return hash;
+  } finally {
+    rt().held.pop();
   }
-  return hash;
 }
 def(
   'Data',

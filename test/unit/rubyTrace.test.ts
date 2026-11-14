@@ -783,3 +783,16 @@ test('Method#to_proc retains its bound receiver in trace roots', () => {
   const result = traceProgram('ruby', program, program);
   expect(result.finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
 });
+
+test('Lazy and Struct collectors retain earlier Turtle results', () => {
+  for (const program of [
+    'a=[1,2].lazy.map{|v|Turtle.new(v,0)}.force',
+    'S=Struct.new(:a,:b);h=S.new(1,2).to_h{|k,v|[k,Turtle.new(v,0)]}',
+  ]) {
+    const result = traceProgram('ruby', program, program);
+    expect(result.finalTurtles).toMatchObject([
+      { x: 1, y: 0 },
+      { x: 2, y: 0 },
+    ]);
+  }
+});

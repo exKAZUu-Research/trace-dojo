@@ -423,14 +423,16 @@ function padOffset(value: string, width: number | undefined, flag: string): stri
   return `${value[0]}${value.slice(1).padStart(target - 1, '0')}`;
 }
 
-function formatYear(year: number): string {
+function formatYear(year: number, flag: string): string {
+  if (flag === '-') return String(year);
+  if (flag === '_') return String(year).padStart(year < 0 ? 5 : 4, ' ');
   return year < 0 ? `-${String(-year).padStart(4, '0')}` : String(year).padStart(4, '0');
 }
 
 function calendarDirective(data: TimeData, date: Date, directive: string, flag: string): string | undefined {
   switch (directive) {
     case 'Y': {
-      return formatYear(date.getUTCFullYear());
+      return formatYear(date.getUTCFullYear(), flag);
     }
     case 'C': {
       return pad(Math.floor(date.getUTCFullYear() / 100), 2, flag);
@@ -480,7 +482,7 @@ function calendarDirective(data: TimeData, date: Date, directive: string, flag: 
       return pad(isoWeek(date).week, 2, flag);
     }
     case 'G': {
-      return formatYear(isoWeek(date).year);
+      return formatYear(isoWeek(date).year, flag);
     }
     case 'g': {
       return pad(((isoWeek(date).year % 100) + 100) % 100, 2, flag);
@@ -802,7 +804,7 @@ def(
     if (!Number.isFinite(seconds)) throw rangeError(`${Number.isNaN(seconds) ? 'NaN' : 'Inf'} out of Time range`);
     const slept = (runtime.slept ?? 0) + seconds;
     const clock = Date.now() + slept * 1000;
-    if (!Number.isSafeInteger(clock) || Math.abs(clock) > 8_640_000_000_000_000)
+    if (!Number.isFinite(clock) || Math.abs(clock) > 8_640_000_000_000_000)
       throw new UnsupportedFeatureError('JavaScript の日付範囲外の sleep');
     runtime.slept = slept;
     return BigInt(Math.round(seconds));

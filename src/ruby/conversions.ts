@@ -665,6 +665,10 @@ export function* rEql(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = new 
   if (a instanceof RArray) return b instanceof RArray && (yield* eqlArray(a, b, pairs));
   if (a instanceof RHash) return b instanceof RHash && (yield* eqlHash(a, b, pairs));
   if (a instanceof RRange) return b instanceof RRange && (yield* eqlRange(a, b, pairs));
+  if (a instanceof RObject && b instanceof RObject) {
+    const method = classOf(a).findMethod('eql?');
+    if (method && method.owner !== rt().c.Kernel) return truthy(yield* callMethod(a, 'eql?', [b]));
+  }
   return a === b;
 }
 
