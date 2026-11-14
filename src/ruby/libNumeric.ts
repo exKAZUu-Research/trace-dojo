@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 679 -- The libNumeric module keeps one concern's cases together.
+// code-gauge-allow-file fileNcss 674 -- The libNumeric module keeps one concern's cases together.
 import {
   comparisonFailed,
   floatToInt,
@@ -25,8 +25,10 @@ import {
   roundedDouble,
 } from './floatMath';
 import { exactFloatPower } from './floatPower';
+import { chargeIntegerResult, integerBits } from './integerBudget';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
+import { makeRational } from './libRational';
 import { boxFloat, NIL, RArray, RFloat, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { platformGamma, platformLog2, platformLog10, platformLogGamma } from './platformMath';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
@@ -103,7 +105,10 @@ function intPow(base: bigint, exponent: bigint): Value {
     if (base === 1n) return 1n;
     if (base === -1n) return exponent % 2n === 0n ? 1n : -1n;
     if (base === 0n) throw zeroDivisionError();
-    throw new UnsupportedFeatureError('負の指数の累乗（結果が有理数になるもの）');
+    const bits = integerBits(base);
+    const outputBits = BigInt(bits) * -exponent + 1n;
+    chargeIntegerResult(Number(outputBits), Number(outputBits));
+    return makeRational(1n, base ** -exponent);
   }
   if (exponent === 0n) return 1n;
   if (base === 0n || base === 1n) return base;
@@ -113,14 +118,6 @@ function intPow(base: bigint, exponent: bigint): Value {
   const outputBits = BigInt((magnitude & (magnitude - 1n)) === 0n ? bits - 1 : bits) * exponent + 1n;
   chargeIntegerResult(Number(outputBits), Number(outputBits));
   return base ** exponent;
-}
-
-function integerBits(value: bigint): number {
-  return (value < 0n ? -value : value).toString(2).length;
-}
-
-function chargeIntegerResult(bits: number, cost: number): void {
-  rt().spend(Math.ceil(bits / 256) + Math.ceil(cost / 4096));
 }
 
 function floatPow(base: number, exponent: number): Value {
@@ -258,8 +255,15 @@ for (const owner of ['Integer', 'Float']) {
   });
   def(owner, 'quo', 1, (self: Num, [other]) => {
     if (!isNum(other)) return coerceBinary(self, other, 'quo', typeof self === 'bigint' ? 'Rational' : 'Float');
-    if (typeof self === 'bigint' && typeof other === 'bigint') {
-      throw new UnsupportedFeatureError('Integer#quo（有理数）');
+    if (typeof self === 'bigint' && typeof other === 'bigint') return makeRational(self, other);
+    if (typeof self === 'bigint' && typeof other === 'number' && Number.isFinite(other) && other !== 0) {
+      const fraction = floatFraction(other);
+      if (typeof fraction.numerator === 'bigint') {
+        const leftBits = integerBits(self);
+        const rightBits = integerBits(fraction.denominator);
+        chargeIntegerResult(leftBits + rightBits, (leftBits * rightBits) / 1024);
+        return bigintRatio(self * fraction.denominator, fraction.numerator);
+      }
     }
     return Number(self) / Number(other);
   });
@@ -290,9 +294,6 @@ for (const owner of ['Integer', 'Float']) {
   def(owner, 'to_f', 0, Number);
   def(owner, 'to_c', 0, () => {
     throw new UnsupportedFeatureError('to_c（複素数）');
-  });
-  def(owner, ['to_r', 'rationalize'], [0, 1], () => {
-    throw new UnsupportedFeatureError('to_r（有理数）');
   });
   def(
     owner,
@@ -553,6 +554,7 @@ def('Integer', 'chr', [0, 1], (self: bigint, args) => {
   if (self < 0n || self > 255n) throw rangeError(`${self} out of char range`);
   const char = str(String.fromCodePoint(Number(self)));
   char.binary = self > 127n;
+  char.usAscii = self <= 127n;
   return char;
 });
 def('Integer', 'ord', 0, (self) => self);

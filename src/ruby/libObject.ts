@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 583 -- The libObject module keeps one concern's cases together.
+// code-gauge-allow-file fileNcss 578 -- The libObject module keeps one concern's cases together.
 import {
   anonymousClassName,
   anyToS,
@@ -14,6 +14,7 @@ import {
   toInt,
   toRubyInt,
   toStrValue,
+  tryImplicitConversion,
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentCountError, argumentError, frozenError, nameError, rubyError, typeError } from './errors';
@@ -41,6 +42,7 @@ import {
   RClass,
   RFloat,
   RHash,
+  type RMethod,
   RObject,
   RProc,
   RRange,
@@ -202,6 +204,10 @@ function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
     if (clone && freezeOption === false) throw argumentError(`can't unfreeze ${realClassOf(self).name}`);
     return self;
   }
+  if (self instanceof RObject && self.cls === rt().c.Rational) {
+    if (clone && freezeOption === false) throw argumentError("can't unfreeze Rational");
+    return self;
+  }
   let copy: RBasic;
   if (self instanceof RClass) copy = copyClass(self);
   else if (self instanceof RString) {
@@ -216,6 +222,7 @@ function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
     for (const [key, entry] of self.map) hash.map.set(key, { ...entry });
     hash.defaultValue = self.defaultValue;
     hash.defaultProc = self.defaultProc;
+    hash.byIdentity = self.byIdentity;
     copy = hash;
   } else if (self instanceof RObject) {
     const object = new RObject(self.cls);
@@ -240,6 +247,7 @@ function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
   if ((clone || self instanceof RClass) && self.singleton) copySingleton(self.singleton, copy);
   yield* initializeCopy(copy, self, clone, freezeOption);
   if (clone) copy.frozen = freezeOption === true || (freezeOption !== false && self.frozen);
+  if (self instanceof RObject && self.cls.isSubclassOf(rt().c.Data)) copy.frozen = true;
   return copy;
 }
 
@@ -314,10 +322,6 @@ def('Kernel', ['to_enum', 'enum_for'], [0, -1], function* (self, args, block) {
   if (method instanceof RString || respondsTo(method, 'to_str', true))
     return makeEnumerator(self, (yield* toStrValue(method)).s, rest, undefined, { sizeBlock: block });
   throw typeError(`${yield* inspect(method)} is not a symbol nor a string`);
-});
-
-def('Kernel', 'instance_variables', 0, () => {
-  throw new UnsupportedFeatureError('instance_variables');
 });
 
 // Kernel functions ----------------------------------------------------------------------------------------------------
@@ -522,10 +526,7 @@ def(
   },
   { ...PRIVATE, keywords: true }
 );
-for (const [name, feature] of [
-  ['Rational', '有理数（Rational）'],
-  ['Complex', '複素数（Complex）'],
-] as const) {
+for (const [name, feature] of [['Complex', '複素数（Complex）']] as const) {
   const reject = (): never => {
     throw new UnsupportedFeatureError(feature);
   };
@@ -539,8 +540,9 @@ def(
   1,
   function* (_self, [value]) {
     if (value instanceof RString) return value;
-    if (respondsTo(value, 'to_str', true)) {
-      const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
+    const stringValue = yield* tryImplicitConversion(value, 'to_str');
+    if (stringValue !== undefined) {
+      const converted = stringValue;
       if (converted instanceof RString) return converted;
       if (converted !== NIL)
         throw typeError(
@@ -561,13 +563,15 @@ def(
   1,
   function* (_self, [value]) {
     if (value instanceof RArray) return value;
-    if (respondsTo(value, 'to_ary', true)) {
-      const converted = yield* callMethod(value, 'to_ary', [], undefined, undefined, { fcall: true });
+    const arrayValue = yield* tryImplicitConversion(value, 'to_ary');
+    if (arrayValue !== undefined) {
+      const converted = arrayValue;
       if (converted instanceof RArray) return converted;
       if (converted !== NIL) throw collectionConversionError(value, converted, 'Array', 'to_ary');
     }
-    if (respondsTo(value, 'to_a', true)) {
-      const converted = yield* callMethod(value, 'to_a', [], undefined, undefined, { fcall: true });
+    const listValue = yield* tryImplicitConversion(value, 'to_a');
+    if (listValue !== undefined) {
+      const converted = listValue;
       if (converted instanceof RArray) return converted;
       if (converted !== NIL) throw collectionConversionError(value, converted, 'Array', 'to_a');
     }
@@ -582,8 +586,9 @@ def(
   function* (_self, [value]) {
     if (value instanceof RHash) return value;
     if (value === NIL) return newHash();
-    if (respondsTo(value, 'to_hash', true)) {
-      const converted = yield* callMethod(value, 'to_hash', [], undefined, undefined, { fcall: true });
+    const hashValue = yield* tryImplicitConversion(value, 'to_hash');
+    if (hashValue !== undefined) {
+      const converted = hashValue;
       if (converted instanceof RHash) return converted;
       if (converted !== NIL) throw collectionConversionError(value, converted, 'Hash', 'to_hash');
     }
@@ -607,18 +612,17 @@ for (const [name, feature] of [
   ['readline', '標準入力（readline）'],
   ['readlines', '標準入力（readlines）'],
   ['open', 'ファイルの読み書き（open）'],
+  ['__dir__', 'ファイルの場所（__dir__）'],
   ['system', '外部コマンドの実行（system）'],
   ['exec', '外部コマンドの実行（exec）'],
   ['spawn', '外部コマンドの実行（spawn）'],
   ['`', '外部コマンドの実行（`...`）'],
   ['fork', 'プロセスの生成（fork）'],
   ['trap', 'シグナル（trap）'],
-  ['sleep', 'sleep'],
   ['eval', '文字列の評価（eval）'],
   ['binding', 'binding'],
   ['caller', '呼び出し履歴（caller）'],
   ['caller_locations', '呼び出し履歴（caller_locations）'],
-  ['at_exit', 'at_exit'],
   ['set_trace_func', 'set_trace_func'],
   ['select', 'select'],
   ['syscall', 'syscall'],
@@ -635,25 +639,12 @@ for (const [name, feature] of [
   );
 }
 for (const [name, feature] of [
-  ['send', 'send（名前によるメソッドの呼び出し）'],
-  ['__send__', '__send__（名前によるメソッドの呼び出し）'],
-  ['public_send', 'public_send（名前によるメソッドの呼び出し）'],
-  ['respond_to?', 'respond_to?'],
-  ['method', 'method（Method オブジェクト）'],
-  ['public_method', 'public_method'],
   ['singleton_method', 'singleton_method'],
   ['methods', 'methods'],
   ['public_methods', 'public_methods'],
   ['private_methods', 'private_methods'],
   ['protected_methods', 'protected_methods'],
   ['singleton_methods', 'singleton_methods'],
-  ['instance_variable_get', 'instance_variable_get'],
-  ['instance_variable_set', 'instance_variable_set'],
-  ['instance_variable_defined?', 'instance_variable_defined?'],
-  ['remove_instance_variable', 'remove_instance_variable'],
-  ['instance_eval', 'instance_eval'],
-  ['instance_exec', 'instance_exec'],
-  ['define_singleton_method', 'define_singleton_method'],
 ] as const) {
   def('Kernel', name, [0, -1], () => {
     throw new UnsupportedFeatureError(feature);
@@ -748,35 +739,12 @@ def('Module', 'include', [1, -1], function* (self: RClass, modules) {
   }
   return self;
 });
-def('Module', 'prepend', [1, -1], () => {
-  throw new UnsupportedFeatureError('prepend');
-});
+
 for (const name of [
-  'define_method',
-  'alias_method',
-  'remove_method',
-  'undef_method',
-  'instance_method',
-  'public_instance_method',
-  'method_defined?',
-  'public_method_defined?',
-  'private_method_defined?',
-  'protected_method_defined?',
   'instance_methods',
   'public_instance_methods',
   'private_instance_methods',
-  'class_eval',
-  'module_eval',
-  'class_exec',
-  'module_exec',
-  'const_get',
-  'const_set',
-  'const_defined?',
-  'constants',
-  'class_variable_get',
-  'class_variable_set',
-  'class_variables',
-  'class_variable_defined?',
+  'public_instance_method',
   'remove_const',
   'refine',
   'using',
@@ -865,7 +833,7 @@ function* setVisibility(self: RClass, args: Value[], visibility: Visibility): Ge
           name
         );
       }
-      if (method.owner === self) method.visibility = visibility;
+      if (method.owner === self) (self.methods.get(name) as RMethod).visibility = visibility;
       else addMethod(self, { name, owner: self, visibility, body: { kind: 'visibility' } });
     }
   invalidateMethodCaches();
@@ -995,6 +963,7 @@ def('NilClass', 'to_f', 0, () => 0);
 def('NilClass', 'inspect', 0, () => str('nil'));
 def('NilClass', '&', 1, () => false);
 def('NilClass', '|', 1, (_self, [other]) => truthy(other));
+def('NilClass', '^', 1, (_self, [other]) => truthy(other));
 def('NilClass', 'nil?', 0, () => true);
 def('TrueClass', ['to_s', 'inspect'], 0, () => frozenCoreString('true'));
 def('TrueClass', '&', 1, (_self, [other]) => truthy(other));
@@ -1152,6 +1121,8 @@ def('NoMethodError', 'private_call?', 0, (self: RObject) => self.ivars?.get('@__
 def('FrozenError', 'receiver', 0, (self: RObject) => exceptionMetadata(self, '@__receiver', 'receiver'));
 def('KeyError', 'key', 0, (self: RObject) => exceptionMetadata(self, '@__key', 'key'));
 def('KeyError', 'receiver', 0, (self: RObject) => exceptionMetadata(self, '@__receiver', 'receiver'));
+def('NoMatchingPatternKeyError', 'key', 0, (self: RObject) => exceptionMetadata(self, '@__key', 'key'));
+def('NoMatchingPatternKeyError', 'matchee', 0, (self: RObject) => exceptionMetadata(self, '@__matchee', 'matchee'));
 def('StopIteration', 'result', 0, (self: RObject) => self.ivars?.get('@result') ?? NIL);
 def(
   'SystemExit',
@@ -1261,9 +1232,6 @@ def(
 def('Proc', 'to_proc', 0, (self) => self);
 def('Proc', 'lambda?', 0, (self: RProc) => self.isLambda);
 def('Proc', 'arity', 0, (self: RProc) => BigInt(procArity(self)));
-def('Proc', 'parameters', 0, () => {
-  throw new UnsupportedFeatureError('Proc#parameters');
-});
 def('Proc', ['inspect', 'to_s'], 0, (self: RProc) => str(inspectProc(self)));
 def('Proc', 'curry', [0, 1], function* (self: RProc, args) {
   const arity = args.length > 0 ? yield* toRubyInt(args[0]) : procArity(self);
@@ -1291,11 +1259,11 @@ sdef('Proc', 'new', 0, (_self, _args, block) => requireProcBlock(block));
 export function procArity(proc: RProc): number {
   if (proc.body.kind === 'native') return proc.body.arity;
   const { params } = proc.body.def;
-  if (!params) return proc.isLambda ? 0 : -1;
+  if (!params) return 0;
   const positional = params.required.length + params.post.length;
   const requiredKeywords = params.keywords.some((keyword) => !keyword.value);
   const required = positional + Number(requiredKeywords);
-  if (params.rest !== undefined || params.optional.length > 0) return -required - 1;
+  if (params.rest !== undefined || (proc.isLambda && params.optional.length > 0)) return -required - 1;
   if (proc.isLambda && !requiredKeywords && (params.keywords.length > 0 || params.keywordRest !== undefined))
     return -positional - 1;
   return required;

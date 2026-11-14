@@ -153,6 +153,8 @@ export class RHash extends RBasic {
   defaultProc?: RProc;
   /** How many iterations over the hash are in progress, during which adding a key is an error. */
   iterating = 0;
+  /** Whether keys compare by identity, after `compare_by_identity`. */
+  byIdentity = false;
   iterationError?: string;
 }
 
@@ -198,7 +200,8 @@ export type ProcBody =
 export type NativeProc = (
   args: Value[],
   block: RProc | undefined,
-  used: boolean
+  used: boolean,
+  keywords?: RHash
 ) => Value | Generator<unknown, Value, unknown>;
 
 export type Visibility = 'public' | 'private' | 'protected';
@@ -222,14 +225,17 @@ export type MethodBody =
   | { kind: 'native'; fn: NativeFn; min: number; max: number; takesKeywords: boolean }
   | { kind: 'reader'; ivar: string }
   | { kind: 'writer'; ivar: string }
+  | { kind: 'proc'; proc: RProc }
   | { kind: 'visibility' }
   | { kind: 'undefined' };
 
 export interface RMethod {
   name: string;
+  superName?: string;
   owner: RClass;
   visibility: Visibility;
   body: MethodBody;
+  lookupIndex?: number;
 }
 
 /** A class or module. */
@@ -280,15 +286,93 @@ export class RClass extends RBasic {
     if (this.ancestorCache?.version === hierarchyVersion.value) return this.ancestorCache.list;
     const list: RClass[] = [];
     const seen = new Set<RClass>();
+    const seenPrepended = new Set<RClass>();
+    const active = new Set<RClass>();
     const superAncestors = this.superclass ? this.superclass.ancestors() : [];
     const inSuper = new Set(superAncestors);
-    const addModule = (module: RClass): void => {
-      if (seen.has(module) || inSuper.has(module)) return;
-      seen.add(module);
+    const chainMemo = new Map<RClass, RClass[]>();
+    const mergedPrepends = (modules: RClass[], inherited = new Set<RClass>()): RClass[] => {
+      const chains = modules.map((module) =>
+        fullPrependChain(module, new Set(inherited)).filter((item) => !inherited.has(item))
+      );
+      const prerequisites = new Map<RClass, Set<RClass>>();
+      const ranks = new Map<RClass, number>();
+      const addEdge = (before: RClass, after: RClass): void => {
+        if (before !== after) prerequisites.get(after)?.add(before);
+      };
+      for (const chain of chains) {
+        for (const [index, item] of chain.entries()) {
+          if (!prerequisites.has(item)) {
+            prerequisites.set(item, new Set());
+            ranks.set(item, ranks.size);
+          }
+          if (index > 0) addEdge(chain[index - 1], item);
+        }
+      }
+      const directRoots = modules.filter((module, position) =>
+        chains.every((chain, index) => index === position || chain.indexOf(module) <= chain.indexOf(modules[index]))
+      );
+      for (let index = 1; index < directRoots.length; index++) addEdge(directRoots[index - 1], directRoots[index]);
+      const result: RClass[] = [];
+      const emitted = new Set<RClass>();
+      while (emitted.size < prerequisites.size) {
+        rt().spend(prerequisites.size);
+        const ready = [...prerequisites].filter(
+          ([item, before]) => !emitted.has(item) && [...before].every((prior) => emitted.has(prior))
+        );
+        const unblocked = ready.filter(([item]) =>
+          chains.every((chain, index) => {
+            const root = modules[index];
+            return emitted.has(root) || chain.indexOf(item) <= chain.indexOf(root) || !chain.includes(item);
+          })
+        );
+        const candidates =
+          unblocked.length > 0
+            ? unblocked
+            : ready.length > 0
+              ? ready
+              : [...prerequisites].filter(([item]) => !emitted.has(item));
+        const choice = candidates.toSorted(
+          ([left], [right]) => (ranks.get(left) ?? 0) - (ranks.get(right) ?? 0)
+        )[0]?.[0];
+        if (!choice) throw new Error('Missing prepend ancestor');
+        emitted.add(choice);
+        result.push(choice);
+      }
+      return result;
+    };
+    const fullPrependChain = (module: RClass, active: Set<RClass>): RClass[] => {
+      if (active.has(module)) return [];
+      const cached = chainMemo.get(module);
+      if (cached) return cached;
       rt().spend();
-      for (const prepended of module.prepends) addModule(prepended);
+      active.add(module);
+      const members = [
+        ...mergedPrepends(module.prepends, active),
+        module,
+        ...module.includes.flatMap((item) => fullPrependChain(item, active)),
+      ];
+      active.delete(module);
+      const seenInChain = new Set<RClass>();
+      const chain = members.filter((item) => !seenInChain.has(item) && !!seenInChain.add(item));
+      chainMemo.set(module, chain);
+      return chain;
+    };
+    const addModule = (module: RClass, placement: 'prepend' | 'body' = 'body'): void => {
+      const visited = placement === 'prepend' ? seenPrepended : seen;
+      if (visited.has(module) || active.has(module) || (placement !== 'prepend' && inSuper.has(module))) return;
+      visited.add(module);
+      active.add(module);
+      rt().spend();
+      for (const prepended of mergedPrepends(module.prepends))
+        if (!seenPrepended.has(prepended) && !active.has(prepended)) {
+          seenPrepended.add(prepended);
+          rt().spend();
+          list.push(prepended);
+        }
       list.push(module);
-      for (const included of module.includes) addModule(included);
+      for (const included of module.includes) addModule(included, placement);
+      active.delete(module);
     };
     addModule(this);
     for (const ancestor of superAncestors) list.push(ancestor);
@@ -305,12 +389,15 @@ export class RClass extends RBasic {
     if (cache.has(name)) return cache.get(name);
     let found: RMethod | undefined;
     let visibility: Visibility | undefined;
-    for (const module of this.ancestors()) {
+    for (const [index, module] of this.ancestors().entries()) {
       const method = module.methods.get(name);
       if (method) {
         if (method.body.kind === 'visibility') visibility ??= method.visibility;
         else {
-          found = method.body.kind === 'undefined' ? undefined : visibility ? { ...method, visibility } : method;
+          found =
+            method.body.kind === 'undefined'
+              ? undefined
+              : { ...method, lookupIndex: index, visibility: visibility ?? method.visibility };
           break;
         }
       }
@@ -320,12 +407,15 @@ export class RClass extends RBasic {
   }
 
   /** The method after `owner`'s in this class's ancestors, which `super` calls. */
-  findSuperMethod(name: string, owner: RClass): RMethod | undefined {
+  findSuperMethod(name: string, owner: RClass, lookupIndex?: number): RMethod | undefined {
     const ancestors = this.ancestors();
-    const index = ancestors.indexOf(owner);
-    for (const module of ancestors.slice(index + 1)) {
+    const index =
+      lookupIndex !== undefined && ancestors[lookupIndex] === owner ? lookupIndex : ancestors.indexOf(owner);
+    for (let position = index + 1; position < ancestors.length; position++) {
+      const module = ancestors[position];
       const method = module.methods.get(name);
-      if (method && method.body.kind !== 'visibility') return method.body.kind === 'undefined' ? undefined : method;
+      if (method && method.body.kind !== 'visibility')
+        return method.body.kind === 'undefined' ? undefined : { ...method, lookupIndex: position };
     }
     return undefined;
   }

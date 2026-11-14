@@ -10,6 +10,10 @@ interface NativeSpec {
   singleton: boolean;
   visibility: Visibility;
   takesKeywords: boolean;
+  undefined?: boolean;
+  ifMissing?: boolean;
+  /** Builds the method from the one defined before it, for a method that handles one more kind of argument. */
+  wrap?: (previous: NativeFn) => NativeFn;
 }
 
 const specs: NativeSpec[] = [];
@@ -18,6 +22,7 @@ export interface DefineOptions {
   visibility?: Visibility;
   /** Whether the method receives keyword arguments apart, instead of as a trailing Hash. */
   keywords?: boolean;
+  ifMissing?: boolean;
 }
 
 /**
@@ -45,6 +50,20 @@ export function sdef(
   register(owner, names, arity, fn, true, options);
 }
 
+export function sundef(owner: string, names: string | string[]): void {
+  specs.push({
+    owner,
+    names: typeof names === 'string' ? [names] : names,
+    min: 0,
+    max: -1,
+    fn: () => undefined as never,
+    singleton: true,
+    visibility: 'public',
+    takesKeywords: false,
+    undefined: true,
+  });
+}
+
 function register(
   owner: string,
   names: string | string[],
@@ -63,6 +82,25 @@ function register(
     singleton,
     visibility: options.visibility ?? 'public',
     takesKeywords: options.keywords ?? false,
+    ifMissing: options.ifMissing,
+  });
+}
+
+/**
+ * Extends native instance methods defined earlier: `wrap` receives each one's function and returns the new one, which
+ * keeps its arity.
+ */
+export function extend(owner: string, names: string[], wrap: (previous: NativeFn) => NativeFn): void {
+  specs.push({
+    owner,
+    names,
+    min: 0,
+    max: 0,
+    fn: () => undefined as never,
+    singleton: false,
+    visibility: 'public',
+    takesKeywords: false,
+    wrap,
   });
 }
 
@@ -73,16 +111,33 @@ export function setSingletonFactory(factory: (cls: RClass) => RClass): void {
 }
 
 export function installNatives(runtime: Runtime): void {
-  for (const spec of specs) {
+  // Extensions apply after every definition, whatever order the modules that register them load in.
+  for (const spec of [...specs.filter((each) => !each.wrap), ...specs.filter((each) => each.wrap)]) {
     const owner = runtime.c[spec.owner];
     if (!owner) throw new Error(`Unknown library class: ${spec.owner}`);
     const target = spec.singleton ? (singletonOf as (cls: RClass) => RClass)(owner) : owner;
+    const wrapped = new Map<NativeFn, NativeFn>();
     for (const name of spec.names) {
+      if (spec.ifMissing && target.ancestors().some((ancestor) => ancestor.methods.has(name))) continue;
+      if (spec.wrap) {
+        const previous = target.methods.get(name);
+        if (previous?.body.kind !== 'native') throw new Error(`No native ${spec.owner}#${name} to extend`);
+        const original = previous.body.fn;
+        let fn = wrapped.get(original);
+        if (!fn) {
+          fn = spec.wrap(original);
+          wrapped.set(original, fn);
+        }
+        previous.body = { ...previous.body, fn };
+        continue;
+      }
       target.methods.set(name, {
         name,
         owner: target,
         visibility: spec.visibility,
-        body: { kind: 'native', fn: spec.fn, min: spec.min, max: spec.max, takesKeywords: spec.takesKeywords },
+        body: spec.undefined
+          ? { kind: 'undefined' }
+          : { kind: 'native', fn: spec.fn, min: spec.min, max: spec.max, takesKeywords: spec.takesKeywords },
       });
     }
   }

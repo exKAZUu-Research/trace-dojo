@@ -13,7 +13,15 @@ import type {
   StrPart,
   Target,
 } from './ast';
-import { caseEquals, combinedStringEncoding, inspect, numericCompare, toS, toSValue } from './conversions';
+import {
+  caseEquals,
+  combinedStringEncoding,
+  inspect,
+  numericCompare,
+  toS,
+  toSValue,
+  tryImplicitConversion,
+} from './conversions';
 import {
   argumentCountError,
   argumentError,
@@ -26,6 +34,8 @@ import {
   typeError,
 } from './errors';
 import { hashGet, hashSet, hashSetStored } from './hashes';
+import { makeRational } from './libRational';
+import { lastMatch, makeRegexp, matchGlobal, normalizeSlashLiteralSource } from './libRegexp';
 import {
   boxFloat,
   invalidateMethodCaches,
@@ -44,10 +54,12 @@ import {
   type Visibility,
 } from './objects';
 import { bindParams } from './params';
+import { type DeconstructionCache, guardFailed, matchPattern, noMatchingPattern } from './patterns';
 import {
   BreakSignal,
   Frame,
   NextSignal,
+  RedoSignal,
   RetrySignal,
   ReturnSignal,
   rootValues,
@@ -67,6 +79,7 @@ import {
   range,
   realClassOf,
   singletonClassOf,
+  str,
   stringBytes,
   stringFromBytes,
   truthy,
@@ -302,7 +315,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
       const value = e.value ? yield* ev(e.value, frame) : NIL;
       if (!e.inBlock) throw new BreakSignal(value, undefined);
       const proc = frame.extra.proc as RProc;
-      if (!proc.isLambda && !proc.callSiteState?.active)
+      if (!frame.extra.isLambda && !proc.callSiteState?.active)
         throw rubyError(rt().c.LocalJumpError, 'break from proc-closure');
       throw new BreakSignal(value, proc.breakTag);
     }
@@ -355,6 +368,112 @@ export function* ev(e: Expr, frame: Frame): Gen {
     case 'blockpass': {
       throw new Error('A block argument outside a call');
     }
+    case 'sclass': {
+      const target = yield* ev(e.target, frame);
+      if (!(target instanceof RBasic)) throw typeError("can't define singleton");
+      return yield* runModuleBody(singletonClassOf(target), e.body, frame);
+    }
+    case 'alias': {
+      const owner = frame.kind === 'class' ? (frame.self as RClass) : (frame.extra.definee ?? frame.cref[0]);
+      const method = owner.findMethod(e.oldName);
+      if (!method) {
+        throw nameError(`undefined method '${e.oldName}' for class '${owner.name}'`, owner, e.oldName);
+      }
+      assertMutableClass(owner);
+      owner.methods.set(e.newName, { ...method });
+      invalidateMethodCaches();
+      return NIL;
+    }
+    case 'undef': {
+      const owner = frame.kind === 'class' ? (frame.self as RClass) : (frame.extra.definee ?? frame.cref[0]);
+      for (const name of e.names) {
+        if (!owner.findMethod(name))
+          throw nameError(`undefined method '${name}' for class '${owner.name}'`, owner, name);
+        addMethod(owner, { name, owner, visibility: 'public', body: { kind: 'undefined' } });
+      }
+      return NIL;
+    }
+    case 'redo': {
+      throw new RedoSignal();
+    }
+    case 'defined': {
+      return yield* definedText(e.e, frame);
+    }
+    case 'caseIn': {
+      const subject = yield* ev(e.subject, frame);
+      const mark = frame.temporaries.length;
+      const arraysMark = rt().heldArrays.length;
+      frame.temporaries.push(subject);
+      const cache: DeconstructionCache = { subject };
+      try {
+        for (const clause of e.clauses) {
+          rt().currentRow = clause.row;
+          const matched = yield* matchPattern(clause.pattern, subject, frame, cache);
+          if (cache.items) rt().heldArrays.push(cache.items);
+          if (!matched) continue;
+          if (clause.guard && truthy(yield* ev(clause.guard.cond, frame)) === clause.guard.unless) {
+            guardFailed();
+            continue;
+          }
+          return yield* evalBody(clause.body, frame);
+        }
+        if (e.else) return yield* evalBody(e.else, frame);
+        throw yield* noMatchingPattern(subject, e.clauses.length === 1);
+      } finally {
+        frame.temporaries.length = mark;
+        rt().heldArrays.length = arraysMark;
+      }
+    }
+    case 'matchPattern': {
+      const value = yield* ev(e.value, frame);
+      const matched = yield* matchPattern(e.pattern, value, frame, { subject: value });
+      if (e.raise && !matched) throw yield* noMatchingPattern(value, true);
+      return e.raise ? NIL : matched;
+    }
+    case 'rational': {
+      return makeRational(e.numerator, e.denominator);
+    }
+    case 'atExit': {
+      if (rt().registeredEndBlocks.has(e.block)) return NIL;
+      rt().registeredEndBlocks.add(e.block);
+      const proc = makeBlock(e.block, frame);
+      rt().atExit.push(proc);
+      return proc;
+    }
+    case 'encoding': {
+      return constInModule(rt().c.Encoding, 'UTF_8');
+    }
+    case 'regex': {
+      const staticLiteral = e.parts.every((part) => typeof part === 'string' || 'text' in part);
+      const cached = staticLiteral ? rt().regexpLiterals.get(e) : undefined;
+      if (cached) return cached;
+      let source = '';
+      for (const part of e.parts) {
+        if (typeof part === 'string') source += e.slashDelimited ? normalizeSlashLiteralSource(part) : part;
+        else if ('text' in part) source += e.slashDelimited ? normalizeSlashLiteralSource(part.text) : part.text;
+        else {
+          const value = yield* ev(part, frame);
+          source += yield* toS(value);
+        }
+      }
+      const regexp = makeRegexp(source, {
+        ignoreCase: e.flags.includes('i'),
+        multiline: e.flags.includes('m'),
+        extended: e.flags.includes('x'),
+      });
+      regexp.frozen = true;
+      if (staticLiteral) rt().regexpLiterals.set(e, regexp);
+      return regexp;
+    }
+    case 'matchWrite': {
+      const result = yield* ev(e.match, frame);
+      const match = lastMatch();
+      for (const target of e.names) {
+        const value = match === NIL ? NIL : yield* callMethod(match, '[]', [str(target.name)]);
+        frame.scope.assign(target.name, target.depth, value);
+      }
+      return result;
+    }
   }
 }
 
@@ -388,7 +507,7 @@ function* interpolateString(parts: StrPart[], frame: Frame): Gen<RString> {
       typeof part === 'string'
         ? stringFromBytes(new TextEncoder().encode(part))
         : 'text' in part
-          ? stringFromBytes(Uint8Array.from(part.bytes))
+          ? stringFromBytes(Uint8Array.from(part.bytes ?? new TextEncoder().encode(part.text)))
           : yield* toSValue(yield* ev(part, frame));
     const bytes = stringBytes(segment);
     binary =
@@ -437,8 +556,8 @@ function* evalList(items: Expr[], frame: Frame): Gen<Value[]> {
 export function* splatItems(value: Value): Gen<Value[]> {
   if (value instanceof RArray) return [...value.items];
   if (value === NIL) return [];
-  if (respondsTo(value, 'to_a', true)) {
-    const converted = yield* callMethod(value, 'to_a', [], undefined, undefined, { fcall: true });
+  const converted = yield* tryImplicitConversion(value, 'to_a');
+  if (converted !== undefined) {
     if (converted instanceof RArray) return [...converted.items];
     if (converted === NIL) return [value];
     throw typeError(
@@ -481,8 +600,9 @@ function* copyHashSplat(hash: RHash, value: Value, frame: Frame, literal: boolea
   if (value === NIL) return;
   if (!(value instanceof RHash)) {
     const source = value;
-    if (!respondsTo(source, 'to_hash', true)) throw implicitConversionError(source, 'Hash');
-    value = yield* callMethod(source, 'to_hash', [], undefined, undefined, { fcall: true });
+    const converted = yield* tryImplicitConversion(source, 'to_hash');
+    if (converted === undefined) throw implicitConversionError(source, 'Hash');
+    value = converted;
     if (!(value instanceof RHash))
       throw typeError(
         `can't convert ${realClassOf(source).name} to Hash (${realClassOf(source).name}#to_hash gives ${realClassOf(value).name})`
@@ -541,6 +661,7 @@ function inspectForFrozen(self: RBasic): string {
 }
 
 function globalGet(name: string): Value {
+  if (/^\$(?:[~&`'+]|[1-9]\d*)$/.test(name)) return matchGlobal(name);
   const unsupported = unsupportedGlobal(name);
   if (unsupported) throw new UnsupportedFeatureError(unsupported);
   if (name === '$_') return rt().frame.home.scope.vars.get(name) ?? NIL;
@@ -561,8 +682,6 @@ const UNSUPPORTED_GLOBALS: Record<string, string> = {
   $LOAD_PATH: '$LOAD_PATH',
   $LOADED_FEATURES: '$LOADED_FEATURES',
   '$:': '$:',
-  '$~': '正規表現のマッチの結果（$~）',
-  $1: '正規表現のマッチの結果（$1）',
   '$*': 'コマンドライン引数（$*）',
   $DEBUG: '$DEBUG',
   $VERBOSE: '$VERBOSE',
@@ -615,6 +734,10 @@ function classVariableGet(frame: Frame, name: string): Value {
 function classVariableSet(frame: Frame, name: string, value: Value): void {
   const holder = classVariableHolder(frame);
   if (holder === rt().c.Object) throw rubyError(rt().c.RuntimeError, 'class variable access from toplevel');
+  setClassVariable(holder, name, value);
+}
+
+export function setClassVariable(holder: RClass, name: string, value: Value): void {
   for (const module of holder.ancestors()) {
     if (module.classVariables.has(name)) {
       assertMutableClass(module);
@@ -671,6 +794,7 @@ function missingConstant(module: RClass, name: string, scoped = false): never {
 
 function constSet(module: RClass, name: string, value: Value): void {
   assertMutableClass(module);
+  assertNoDefinitionHook(module, 'const');
   if (module.constants.has(name)) {
     rt().io.stderr.write(`warning: already initialized constant ${name}\n`);
   }
@@ -877,8 +1001,8 @@ export function* destructure(target: MultiTarget, value: Value, frame: Frame): G
 
 function* toAryForAssignment(value: Value): Gen<Value[]> {
   if (value instanceof RArray) return assignmentItems(value.items);
-  if (respondsTo(value, 'to_ary', true)) {
-    const converted = yield* callMethod(value, 'to_ary', [], undefined, undefined, { fcall: true });
+  const converted = yield* tryImplicitConversion(value, 'to_ary');
+  if (converted !== undefined) {
     if (converted instanceof RArray) return assignmentItems(converted.items);
     if (converted !== NIL)
       throw typeError(
@@ -1010,7 +1134,7 @@ function* evalWhile(e: Extract<Expr, { k: 'while' }>, frame: Frame): Gen {
     }
     first = false;
     try {
-      yield* evalBody(e.body, frame);
+      yield* evalRedoable(e.body, frame);
     } catch (error) {
       if (error instanceof BreakSignal && error.tag === undefined) return error.value;
       if (error instanceof NextSignal) continue;
@@ -1018,6 +1142,129 @@ function* evalWhile(e: Extract<Expr, { k: 'while' }>, frame: Frame): Gen {
     }
   }
   return NIL;
+}
+
+/** Runs a loop's or block's body, running it again from its start on `redo`. */
+function* evalRedoable(body: Body, frame: Frame): Gen {
+  for (;;) {
+    try {
+      return (yield evalBody(body, frame)) as Value;
+    } catch (error) {
+      if (error instanceof RedoSignal) continue;
+      throw error;
+    }
+  }
+}
+
+/** What `defined?` says an expression is, without evaluating it except for a receiver. */
+function text(value: string | undefined): Value {
+  return value === undefined ? NIL : str(value);
+}
+
+function* definedText(e: Expr, frame: Frame): Gen {
+  switch (e.k) {
+    case 'seq': {
+      return e.body.length === 1 ? yield* definedText(e.body[0].e, frame) : text('expression');
+    }
+    case 'lvar': {
+      return text('local-variable');
+    }
+    case 'ivar': {
+      return text(frame.self instanceof RBasic && frame.self.ivars?.has(e.name) ? 'instance-variable' : undefined);
+    }
+    case 'gvar': {
+      const matchVariable = /^\$(?:[~&`'+]|[1-9]\d*)$/.test(e.name);
+      return text(
+        rt().globals.has(e.name) || (matchVariable && (e.name === '$~' || matchGlobal(e.name) !== NIL))
+          ? 'global-variable'
+          : undefined
+      );
+    }
+    case 'cvar': {
+      const holder = frame.cref[0];
+      return text(
+        holder.ancestors().some((module) => module.classVariables.has(e.name)) ? 'class variable' : undefined
+      );
+    }
+    case 'const': {
+      try {
+        yield* ev(e, frame);
+        return text('constant');
+      } catch (error) {
+        if (error instanceof RubyError) return NIL;
+        throw error;
+      }
+    }
+    case 'call': {
+      for (const arg of e.args) if ((yield* definedText(arg, frame)) === NIL) return NIL;
+      let recv: Value = frame.self;
+      if (e.recv) {
+        try {
+          recv = yield* ev(e.recv, frame);
+        } catch (error) {
+          if (error instanceof RubyError) return NIL;
+          throw error;
+        }
+      }
+      const method = classOf(recv).findMethod(e.name);
+      if (!method) {
+        const hook = classOf(recv).findMethod('respond_to_missing?');
+        return hook && truthy(yield* invoke(hook, recv, [RSymbol.of(e.name), false], undefined, undefined, false))
+          ? text('method')
+          : NIL;
+      }
+      if (method.visibility === 'private' && !e.fcall) return NIL;
+      if (method.visibility === 'protected' && !e.fcall && !isA(frame.self, method.owner)) return NIL;
+      return text('method');
+    }
+    case 'yield': {
+      return text(frame.home.extra.block ? 'yield' : undefined);
+    }
+    case 'super': {
+      const method = frame.home.extra.method;
+      return text(
+        method &&
+          classOf(frame.home.self).findSuperMethod(method.superName ?? method.name, method.owner, method.lookupIndex)
+          ? 'super'
+          : undefined
+      );
+    }
+    case 'self': {
+      return text('self');
+    }
+    case 'nil': {
+      return text('nil');
+    }
+    case 'true': {
+      return text('true');
+    }
+    case 'false': {
+      return text('false');
+    }
+    case 'array': {
+      for (const item of e.items) if ((yield* definedText(item, frame)) === NIL) return NIL;
+      return text('expression');
+    }
+    case 'splat': {
+      return e.e ? yield* definedText(e.e, frame) : text('expression');
+    }
+    case 'hash': {
+      for (const item of e.items) {
+        if ('splat' in item) {
+          if ((yield* definedText(item.splat, frame)) === NIL) return NIL;
+        } else if ((yield* definedText(item.key, frame)) === NIL || (yield* definedText(item.value, frame)) === NIL)
+          return NIL;
+      }
+      return text('expression');
+    }
+    case 'asgn':
+    case 'opasgn': {
+      return text('assignment');
+    }
+    default: {
+      return text('expression');
+    }
+  }
 }
 
 function* evalFor(e: Extract<Expr, { k: 'for' }>, frame: Frame): Gen {
@@ -1030,7 +1277,7 @@ function* evalFor(e: Extract<Expr, { k: 'for' }>, frame: Frame): Gen {
       runtime.steps.stepBinding(e.row, e.target.k === 'mlhs' || storesAnswer(item));
     });
     try {
-      yield* evalBody(e.body, frame);
+      yield* evalRedoable(e.body, frame);
     } catch (error) {
       if (error instanceof NextSignal) return NIL;
       throw error;
@@ -1208,6 +1455,7 @@ function* matchesRescueClass(expressions: Expr[], exception: Value, frame: Frame
 
 // Definitions ---------------------------------------------------------------------------------------------------------
 
+// code-gauge-allow functionNcss 33 -- One case per kind of expression or Ruby rule.
 function* defineMethod(def: MethodDef, singleton: Expr | undefined, frame: Frame): Gen {
   const runtime = rt();
   let owner: RClass;
@@ -1218,6 +1466,9 @@ function* defineMethod(def: MethodDef, singleton: Expr | undefined, frame: Frame
     owner = singletonClassOf(object);
   } else if (frame.kind === 'class') {
     owner = frame.self as RClass;
+    visibility = frame.defaultVisibility;
+  } else if (frame.extra.definee) {
+    owner = frame.extra.definee;
     visibility = frame.defaultVisibility;
   } else if (frame.extra.definitionTarget) {
     owner = frame.extra.definitionTarget;
@@ -1246,14 +1497,39 @@ function* defineMethod(def: MethodDef, singleton: Expr | undefined, frame: Frame
 }
 
 const PRIVATE_METHOD_NAMES = new Set(['initialize', 'initialize_copy', 'initialize_clone', 'initialize_dup']);
+const CLASS_METHOD_HOOKS = new Set(['method_added', 'method_removed', 'method_undefined', 'const_added']);
+const SINGLETON_METHOD_HOOKS = new Set([
+  'singleton_method_added',
+  'singleton_method_removed',
+  'singleton_method_undefined',
+]);
 
 export function addMethod(owner: RClass, method: RMethod): void {
   assertMutableClass(owner);
+  if (method.name === 'respond_to_missing?' && !owner.isSingleton && method.body.kind !== 'visibility')
+    method.visibility = 'private';
+  if (
+    owner.isSingleton &&
+    ((owner.attached instanceof RClass && CLASS_METHOD_HOOKS.has(method.name)) ||
+      SINGLETON_METHOD_HOOKS.has(method.name)) &&
+    (method.body.kind === 'user' || method.body.kind === 'proc')
+  )
+    throw new UnsupportedFeatureError(`メソッド・定数フック（${method.name}）`);
+  if (method.body.kind !== 'visibility')
+    assertNoDefinitionHook(owner, method.body.kind === 'undefined' ? 'undefined' : 'added');
   owner.methods.set(method.name, method);
   invalidateMethodCaches();
 }
 
-function assertMutableClass(owner: RClass): void {
+export function assertNoDefinitionHook(owner: RClass, action: 'added' | 'removed' | 'undefined' | 'const'): void {
+  const target = owner.isSingleton ? owner.attached : owner;
+  const hookName =
+    action === 'const' ? 'const_added' : owner.isSingleton ? `singleton_method_${action}` : `method_${action}`;
+  if (target !== undefined && classOf(target).findMethod(hookName))
+    throw new UnsupportedFeatureError(`メソッド・定数フック（${hookName}）`);
+}
+
+export function assertMutableClass(owner: RClass): void {
   const target = owner.attached instanceof RBasic ? owner.attached : owner;
   if (target.frozen)
     throw frozenError(target, target instanceof RClass ? (target.name ?? '') : (realClassOf(target).name ?? ''));
@@ -1348,6 +1624,7 @@ function* runModuleBody(module: RClass, body: Body, frame: Frame): Gen {
 export interface CallOptions {
   /** Whether the call has no explicit receiver, which may call private methods. */
   fcall?: boolean;
+  explicitSelf?: boolean;
   /** Whether the call is a bare name, which reports a missing method as a missing variable too. */
   vcall?: boolean;
   /** Whether the caller uses the result, which decides whether the method's last statement is a step. */
@@ -1378,11 +1655,21 @@ function* evalCall(e: Call, frame: Frame): Gen {
     rt().currentRow = e.row;
     try {
       if (!e.block)
-        return yield* callMethod(recv, e.name, args, keywords, block, { fcall: e.fcall, vcall: e.vcall, used });
+        return yield* callMethod(recv, e.name, args, keywords, block, {
+          fcall: e.fcall,
+          explicitSelf: e.recv?.k === 'self',
+          vcall: e.vcall,
+          used,
+        });
       const proc = block as RProc;
       if (proc.callSiteState) proc.callSiteState.active = true;
       try {
-        return yield* callMethod(recv, e.name, args, keywords, proc, { fcall: e.fcall, vcall: e.vcall, used });
+        return yield* callMethod(recv, e.name, args, keywords, proc, {
+          fcall: e.fcall,
+          explicitSelf: e.recv?.k === 'self',
+          vcall: e.vcall,
+          used,
+        });
       } catch (error) {
         if (error instanceof BreakSignal && error.tag === proc.breakTag) return error.value;
         throw error;
@@ -1443,21 +1730,55 @@ export function* callMethod(
 ): Gen {
   rt().spend();
   const method = classOf(recv).findMethod(name);
-  if (!method) methodMissing(recv, name, options);
+  if (!method) return yield* callMethodMissing(recv, name, args, keywords, block, options);
   if (recv instanceof RClass && !recv.isModule && name === 'module_function' && method.owner === rt().c.Module)
     methodMissing(recv, name, options);
-  if (method.visibility !== 'public' && !options.fcall) {
+  if (method.visibility !== 'public' && !options.fcall && !options.explicitSelf) {
     if (method.visibility === 'private') {
-      throw noMethodError(`private method '${name}' called for ${receiverDescription(recv)}`, recv, name);
+      return yield* callMethodMissing(recv, name, args, keywords, block, options, 'private');
     }
     if (method.visibility === 'protected' && !isA(rt().frame.self, method.owner)) {
-      throw noMethodError(`protected method '${name}' called for ${receiverDescription(recv)}`, recv, name);
+      return yield* callMethodMissing(recv, name, args, keywords, block, options, 'protected');
     }
   }
   return yield* invoke(method, recv, args, keywords, block, options.used ?? true);
 }
 
-function methodMissing(recv: Value, name: string, options: CallOptions): never {
+/** Calls the program's `method_missing` for a method no class defines, or raises Ruby's error for it. */
+function* callMethodMissing(
+  recv: Value,
+  name: string,
+  args: Value[],
+  keywords: RHash | undefined,
+  block: RProc | undefined,
+  options: CallOptions,
+  visibility?: 'private' | 'protected'
+): Gen {
+  const handler = classOf(recv).findMethod('method_missing');
+  if (handler && handler.body.kind !== 'native') {
+    return yield* invoke(
+      handler,
+      recv,
+      [RSymbol.of(name), ...args],
+      keywords,
+      block,
+      options.used ?? true,
+      visibility ?? (options.vcall ? 'vcall' : undefined)
+    );
+  }
+  if (visibility)
+    throw noMethodError(`${visibility} method '${name}' called for ${receiverDescription(recv)}`, recv, name);
+  methodMissing(recv, name, options);
+}
+
+export function methodMissing(
+  recv: Value,
+  name: string,
+  options: CallOptions,
+  visibility?: 'private' | 'protected'
+): never {
+  if (visibility)
+    throw noMethodError(`${visibility} method '${name}' called for ${receiverDescription(recv)}`, recv, name);
   if (options.vcall) {
     throw nameError(`undefined local variable or method '${name}' for ${receiverDescription(recv)}`, recv, name);
   }
@@ -1473,7 +1794,8 @@ export function* invoke(
   args: Value[],
   keywords: RHash | undefined,
   block: RProc | undefined,
-  used: boolean
+  used: boolean,
+  missingReason?: 'vcall' | 'private' | 'protected'
 ): Gen {
   const runtime = rt();
   const { body } = method;
@@ -1518,7 +1840,10 @@ export function* invoke(
       return value as Value;
     }
     case 'user': {
-      return yield* invokeUser(method, body.def, body.cref, recv, args, keywords, block, used);
+      return yield* invokeUser(method, body.def, body.cref, recv, args, keywords, block, used, missingReason);
+    }
+    case 'proc': {
+      return yield* callProc(body.proc, args, { keywords, block, self: recv, used, method, lambdaArgs: true });
     }
     case 'undefined': {
       throw noMethodError(`undefined method '${method.name}' for ${receiverDescription(recv)}`, recv, method.name);
@@ -1538,12 +1863,14 @@ function* invokeUser(
   args: Value[],
   keywords: RHash | undefined,
   block: RProc | undefined,
-  used: boolean
+  used: boolean,
+  missingReason?: 'vcall' | 'private' | 'protected'
 ): Gen {
   const runtime = rt();
   runtime.userCallVersion++;
   const frame = new Frame('method', recv, new Scope(), cref, runtime.currentRow, def.isAtomic, used, {
     method,
+    missingReason,
     def,
     block,
     args,
@@ -1587,7 +1914,8 @@ let overflowDepth: number | undefined;
 function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
   const home = frame.home;
   const method = home.extra.method;
-  if (!method || home.kind !== 'method') {
+  const procMethod = home.kind === 'block' && method?.body.kind === 'proc';
+  if (!method || (home.kind !== 'method' && !procMethod)) {
     throw rubyError(rt().c.RuntimeError, 'super called outside of method');
   }
   let args: Value[];
@@ -1595,6 +1923,11 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
   if (e.args) {
     ({ args, keywords } = yield* evalArgs(e.args, frame));
   } else {
+    if (procMethod)
+      throw rubyError(
+        rt().c.RuntimeError,
+        'implicit argument passing of super from method defined by define_method() is not supported. Specify all arguments explicitly.'
+      );
     ({ args, keywords } = yield* implicitSuperArgs(home));
   }
   const mark = frame.temporaries.length;
@@ -1604,21 +1937,23 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
     let block: RProc | undefined = home.extra.block;
     if (e.block) block = makeBlock(e.block, frame);
     else if (e.blockArg) block = yield* toBlock(yield* ev(e.blockArg, frame));
-    const superMethod = classOf(home.self).findSuperMethod(method.name, method.owner);
+    const superName = method.superName ?? method.name;
+    const superMethod = classOf(home.self).findSuperMethod(superName, method.owner, method.lookupIndex);
     if (!superMethod) {
       throw noMethodError(
-        `super: no superclass method '${method.name}' for ${receiverDescription(home.self)}`,
+        `super: no superclass method '${superName}' for ${receiverDescription(home.self)}`,
         home.self,
         method.name
       );
     }
     const used = e.used === 1 || (e.used === 2 && frame.resultUsed);
     rt().currentRow = e.row;
-    if (!e.block) return yield* invoke(superMethod, home.self, args, keywords, block, used);
+    const missingReason = method.name === 'method_missing' ? home.extra.missingReason : undefined;
+    if (!e.block) return yield* invoke(superMethod, home.self, args, keywords, block, used, missingReason);
     const proc = block as RProc;
     if (proc.callSiteState) proc.callSiteState.active = true;
     try {
-      return yield* invoke(superMethod, home.self, args, keywords, proc, used);
+      return yield* invoke(superMethod, home.self, args, keywords, proc, used, missingReason);
     } catch (error) {
       if (error instanceof BreakSignal && error.tag === proc.breakTag) return error.value;
       throw error;
@@ -1645,12 +1980,7 @@ function* implicitSuperArgs(frame: Frame): Gen<{ args: Value[]; keywords: RHash 
   try {
     for (const param of params.optional) args.push(scope.lookup(param.name, 0));
     if (params.rest !== undefined) {
-      const passedOptional = Math.min(
-        params.optional.length,
-        Math.max(0, original.length - params.required.length - params.post.length)
-      );
-      const anonymous = original.slice(params.required.length + passedOptional, original.length - params.post.length);
-      const rest = params.rest === '' ? arr(anonymous) : scope.lookup(params.rest, 0);
+      const rest = scope.lookup(params.rest, 0);
       for (const item of yield* splatItems(rest)) args.push(item);
     }
     for (const [index, param] of params.post.entries())
@@ -1665,12 +1995,10 @@ function* implicitSuperArgs(frame: Frame): Gen<{ args: Value[]; keywords: RHash 
           yield* hashSet(keywordHash, RSymbol.of(keyword.name), scope.lookup(keyword.name, 0));
         }
         if (params.keywordRest !== undefined) {
-          const rest = params.keywordRest === '' ? frame.extra.keywords : scope.lookup(params.keywordRest, 0);
+          const rest = scope.lookup(params.keywordRest, 0);
           if (rest !== undefined && rest !== NIL) {
             const converted = yield* superKeywordRest(rest);
-            const named =
-              params.keywordRest === '' ? new Set(params.keywords.map((keyword) => keyword.name)) : undefined;
-            yield* whileHeld(converted, () => addSuperKeywordRest(keywordHash, converted, named));
+            yield* whileHeld(converted, () => addSuperKeywordRest(keywordHash, converted));
           }
         }
         if (keywordHash.map.size === 0) keywords = undefined;
@@ -1686,8 +2014,8 @@ function* implicitSuperArgs(frame: Frame): Gen<{ args: Value[]; keywords: RHash 
 
 function* superKeywordRest(value: Value): Gen<RHash> {
   if (value instanceof RHash) return value;
-  if (respondsTo(value, 'to_hash', true)) {
-    const converted = yield* callMethod(value, 'to_hash', [], undefined, undefined, { fcall: true });
+  const converted = yield* tryImplicitConversion(value, 'to_hash');
+  if (converted !== undefined) {
     if (converted instanceof RHash) return converted;
     const name = realClassOf(value).name;
     throw typeError(`can't convert ${name} to Hash (${name}#to_hash gives ${realClassOf(converted).name})`);
@@ -1695,10 +2023,8 @@ function* superKeywordRest(value: Value): Gen<RHash> {
   throw implicitConversionError(value, 'Hash');
 }
 
-function* addSuperKeywordRest(target: RHash, rest: RHash, named: Set<string> | undefined): Gen<void> {
+function* addSuperKeywordRest(target: RHash, rest: RHash): Gen<void> {
   for (const [slot, entry] of rest.map) {
-    const key = entry.key;
-    if (key instanceof RSymbol && named?.has(key.name)) continue;
     yield* hashSetStored(target, slot, entry);
   }
 }
@@ -1722,7 +2048,7 @@ export function makeBlock(def: BlockDef, frame: Frame): RProc {
 
 export function nativeProc(
   arity: number,
-  call: (args: Value[], block: RProc | undefined, used: boolean) => Value | Gen,
+  call: (args: Value[], block: RProc | undefined, used: boolean, keywords?: RHash) => Value | Gen,
   lambda = false
 ): RProc {
   const proc = new RProc(rt().c.Proc, { kind: 'native', arity, lambda, call }, NIL, undefined);
@@ -1739,6 +2065,12 @@ export interface ProcCallOptions {
   /** The row of the `yield` or `call` that runs the block; undefined when library code runs it. */
   callRow?: number;
   self?: Value;
+  /** The module where `def` in the block defines methods, for `class_eval` and `instance_eval`. */
+  definee?: RClass;
+  /** The method a proc is the body of (`define_method`), which `super` in it continues. */
+  method?: RMethod;
+  /** Whether the arguments bind strictly, as a method's do, for a proc that is a method's body. */
+  lambdaArgs?: boolean;
   definitionTarget?: RClass;
 }
 
@@ -1750,10 +2082,11 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
   runtime.spend();
   const { body } = proc;
   if (body.kind === 'native') {
-    if (body.lambda && body.arity >= 0 && args.length !== body.arity) {
-      throw argumentCountError(args.length, body.arity, body.arity);
+    const count = args.length + Number(options.keywords !== undefined);
+    if (body.lambda && body.arity >= 0 && count !== body.arity) {
+      throw argumentCountError(count, body.arity, body.arity);
     }
-    const result = body.call(args, options.block, options.used ?? true);
+    const result = body.call(args, options.block, options.used ?? true, options.keywords);
     const value = isGenerator(result) ? yield* result : result;
     return typeof value === 'number' ? boxFloat(value) : value;
   }
@@ -1768,16 +2101,17 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
     false,
     options.used ?? true,
     {
-      home: outer.home,
+      home: options.method ? undefined : outer.home,
       outer,
       proc,
       args,
       keywords: options.keywords,
       blockDef: def,
-      isLambda: proc.isLambda,
-      block: options.block ?? outer.home.extra.block,
-      method: outer.home.extra.method,
+      isLambda: proc.isLambda || options.lambdaArgs,
+      block: options.method ? options.block : (options.block ?? outer.home.extra.block),
+      method: options.method ?? outer.home.extra.method,
       def: outer.home.extra.def,
+      definee: options.definee ?? outer.extra.definee,
       definitionTarget: options.definitionTarget ?? outer.extra.definitionTarget,
     }
   );
@@ -1785,20 +2119,26 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
   runtime.pushFrame(frame);
   const savedRow = runtime.currentRow;
   try {
-    if (!def.params && proc.isLambda && (args.length > 0 || options.keywords)) {
+    if (!def.params && (proc.isLambda || options.lambdaArgs) && (args.length > 0 || options.keywords)) {
       throw argumentCountError(args.length + (options.keywords ? 1 : 0), 0, 0);
     }
     if (def.params) {
-      yield* bindParams(def.params, frame, args, options.keywords, proc.isLambda ? 'lambda' : 'proc');
+      yield* bindParams(
+        def.params,
+        frame,
+        args,
+        options.keywords,
+        proc.isLambda || options.lambdaArgs ? 'lambda' : 'proc'
+      );
       if (hasParams(def.params)) {
         runtime.currentRow = def.row;
         runtime.steps.stepBinding(def.row, storesAnswers(def.params, frame));
       }
     }
-    return (yield evalBody(def.body, frame)) as Value;
+    return yield* evalRedoable(def.body, frame);
   } catch (error) {
     if (error instanceof NextSignal) return error.value;
-    if (proc.isLambda) {
+    if (proc.isLambda || options.lambdaArgs) {
       if (error instanceof ReturnSignal && error.target === frame) return error.value;
       if (error instanceof BreakSignal && error.tag === proc.breakTag) return error.value;
     }

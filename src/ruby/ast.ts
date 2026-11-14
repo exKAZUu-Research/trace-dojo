@@ -21,7 +21,7 @@ export interface Stmt {
 
 export type Body = Stmt[];
 
-export type StrPart = string | Expr | { text: string; bytes: number[] };
+export type StrPart = string | Expr | { text: string; binary?: boolean; bytes?: number[] };
 
 /** A local variable, found `depth` block scopes out from the scope that refers to it. */
 export interface LocalRef {
@@ -50,15 +50,19 @@ export interface MultiTarget {
 export interface Params {
   required: ParamTarget[];
   optional: { name: string; value: Expr }[];
-  /** The name of `*rest`, or '' for an anonymous `*`. */
+  /** The name of `*rest`, or `*` for an anonymous `*`. */
   rest?: string;
   post: ParamTarget[];
   keywords: { name: string; value?: Expr }[];
-  /** The name of `**opts`, or '' for an anonymous `**`. */
+  /** The name of `**opts`, or `**` for an anonymous `**`. */
   keywordRest?: string;
   block?: string;
+  /** Whether the parameters end with `**nil`, which accepts no keywords. */
+  noKeywords?: boolean;
   /** Whether a block's parameter list ends with a comma (`|a,|`), which splats one array argument. */
   trailingComma: boolean;
+  /** Whether the block names no parameters and uses `it` or numbered parameters (`_1`) instead. */
+  implicit?: boolean;
 }
 
 export type ParamTarget = string | MultiTarget;
@@ -130,7 +134,42 @@ export type Expr =
   | { k: 'class'; scope?: Expr; top?: boolean; name: string; superclass?: Expr; body: Body; row: number }
   | { k: 'module'; scope?: Expr; top?: boolean; name: string; body: Body; row: number }
   | { k: 'lambda'; block: BlockDef }
-  | { k: 'rescueMod'; body: Expr; handler: Expr };
+  | { k: 'rescueMod'; body: Expr; handler: Expr }
+  | { k: 'regex'; parts: StrPart[]; flags: string; slashDelimited: boolean }
+  | { k: 'matchWrite'; match: Expr; names: LocalRef[] }
+  | { k: 'sclass'; target: Expr; body: Body; row: number }
+  | { k: 'alias'; newName: string; oldName: string }
+  | { k: 'undef'; names: string[] }
+  | { k: 'redo' }
+  | { k: 'defined'; e: Expr }
+  | { k: 'caseIn'; subject: Expr; clauses: InClause[]; else?: Body; row: number }
+  | { k: 'matchPattern'; value: Expr; pattern: Pattern; raise: boolean }
+  | { k: 'rational'; numerator: bigint; denominator: bigint }
+  | { k: 'atExit'; block: BlockDef }
+  | { k: 'encoding' };
+
+export interface InClause {
+  pattern: Pattern;
+  guard?: { cond: Expr; unless: boolean };
+  body: Body;
+  row: number;
+}
+
+/** A pattern of `case`/`in`, `=>`, and `in`. */
+export type Pattern =
+  | { k: 'value'; e: Expr }
+  | { k: 'bind'; target: LocalRef | undefined }
+  | { k: 'pin'; e: Expr }
+  | { k: 'array'; cls?: Expr; pre: Pattern[]; rest?: { target: LocalRef | undefined }; post: Pattern[] }
+  | { k: 'find'; cls?: Expr; before: LocalRef | undefined; middle: Pattern[]; after: LocalRef | undefined }
+  | {
+      k: 'hash';
+      cls?: Expr;
+      pairs: { key: string; pattern?: Pattern; target?: LocalRef }[];
+      rest?: LocalRef | 'nil' | 'any';
+    }
+  | { k: 'alt'; options: Pattern[] }
+  | { k: 'as'; pattern: Pattern; target: LocalRef };
 
 export type HashItem = { key: Expr; value: Expr } | { splat: Expr };
 
@@ -154,4 +193,7 @@ export interface Call {
 export interface Program {
   body: Body;
   locals: string[];
+  /** The text after `__END__`, which `DATA` reads. */
+  data?: string;
+  dataFile?: string;
 }

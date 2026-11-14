@@ -17,6 +17,20 @@ const withoutLines = (items: TraceItem[]): unknown[] =>
 
 const rubyTrace = (program: string): TraceItem[] => traceProgram('ruby', program, program).traceItems;
 
+test('Struct, Data and value objects remain visible in the variable trace', () => {
+  const program =
+    'S=Struct.new(:a)\nD=Data.define(:x)\ns=S.new(1)\nd=D.new(2)\nr=1/3r\nt=Time.utc(2024)\nre=/a/\nm=/a(b)/.match("ab")\np s.a\n';
+  const last = rubyTrace(program).at(-1);
+  expect(last?.referenceVars).toMatchObject({
+    s: { kind: 'object', entries: { a: { kind: 'value', value: 1 } } },
+    d: { kind: 'object', entries: { x: { kind: 'value', value: 2 } } },
+    r: { kind: 'value', value: '(1/3)' },
+    t: { kind: 'value', value: '2024-01-01 00:00:00 UTC' },
+    re: { kind: 'value', value: '/a/' },
+    m: { kind: 'value', value: '#<MatchData "ab" 1:"b">' },
+  });
+});
+
 test('user methods sharing declaration names keep atomic call steps', () => {
   for (const name of ['private', 'include']) {
     const program = `class A\n def ${name} # atomic\n  $x=1\n end\n def go\n  ${name}\n end\nend\nA.new.go`;
@@ -468,6 +482,27 @@ c = Counter.new`);
   ]);
 });
 
+test('a pattern binds its variables without a step of its own, as a condition records none', () => {
+  const items = rubyTrace(`t = Turtle.new
+moves = [[:forward, 2], [:turn]]
+moves.each do |move|
+  case move
+  in [:forward, n]
+    n.times { t.前に進む }
+  in [:turn]
+    t.右を向く
+  end
+end`);
+  expect(items.map(({ line, vars }) => [line, vars.n])).toEqual([
+    [0, undefined],
+    [1, undefined],
+    [2, undefined],
+    [6, 2],
+    [6, 2],
+    [8, undefined],
+  ]);
+  expect(items.at(-1)?.turtles).toEqual([{ x: 0, y: 2, color: '#', dir: 'E' }]);
+});
 test('Enumerator with_index preserves direct each_with_index steps', () => {
   const traces = ['each_with_index', 'each.with_index'].map((method) =>
     rubyTrace(`t = Turtle.new
@@ -713,4 +748,96 @@ test('trace variables keep special local names as own properties', () => {
     expect(Object.hasOwn(trace.finalVars, '__proto__')).toBe(true);
     expect(Object.hasOwn(trace.traceItems.at(-1)?.referenceVars ?? {}, '__proto__')).toBe(value.startsWith('['));
   }
+});
+
+test('suspended external iterators and installed method blocks retain reachable Turtles', () => {
+  const suspended =
+    'e=Enumerator.new do |y|\n t=Turtle.new\n y<<nil\n t.forward\n y<<nil\nend\ne.next\nx=1\ne.next\nx=2';
+  expect(traceProgram('ruby', suspended, suspended).finalTurtles).toHaveLength(1);
+  const installed = 't=Turtle.new;Object.define_method(:keep){t};x=1';
+  expect(traceProgram('ruby', installed, installed).finalTurtles).toHaveLength(1);
+});
+
+test('chained external iterators retain Turtles in suspended frames', () => {
+  const program =
+    'class C\ninclude Enumerable\ndef each\nt=Turtle.new\nyield nil\nt.forward\nyield nil\nend\nend\ne=C.new.chain([])\ne.next\nx=1\ne.next\nx=2';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
+test('Struct trace nodes include instance variables beside members', () => {
+  const program =
+    'class Point < Struct.new(:x)\n def initialize(x); super(x); @label="origin"; end\nend\np=Point.new(1)\nputs p.x';
+  expect(rubyTrace(program).at(-1)?.referenceVars).toMatchObject({
+    p: { kind: 'object', entries: { x: { kind: 'value', value: 1 }, '@label': { kind: 'value', value: 'origin' } } },
+  });
+});
+
+test('exit handlers keep captured turtles reachable through final recording', () => {
+  const program = 'def setup\n t=Turtle.new\n at_exit { t.forward }\nend\nsetup\nx=1\n';
+  const result = traceProgram('ruby', program, program);
+  expect(result.finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
+});
+
+test('Method#to_proc retains its bound receiver in trace roots', () => {
+  const program = 'cb=Turtle.new.method(:forward).to_proc\nx=1\ncb.call';
+  const result = traceProgram('ruby', program, program);
+  expect(result.finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
+});
+
+test('Lazy and Struct collectors retain earlier Turtle results', () => {
+  for (const program of [
+    'a=[1,2].lazy.map{|v|Turtle.new(v,0)}.force',
+    'S=Struct.new(:a,:b);h=S.new(1,2).to_h{|k,v|[k,Turtle.new(v,0)]}',
+  ]) {
+    const result = traceProgram('ruby', program, program);
+    expect(result.finalTurtles).toMatchObject([
+      { x: 1, y: 0 },
+      { x: 2, y: 0 },
+    ]);
+  }
+});
+
+test('pattern subjects stay rooted while pins run', () => {
+  const program = 'def check; x=1; Array; end\ncase [Turtle.new]\nin ^(check) => a\n a[0].forward\nend';
+  const result = traceProgram('ruby', program, program);
+  expect(result.finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
+});
+
+test('nested pattern callbacks retain pending deconstructed turtles', () => {
+  for (const program of [
+    'class A;def deconstruct;[Turtle.new(1,0),Turtle.new(2,0)];end;end;def check;x=1;Turtle;end;A.new=>[^(check)=>a,b];a.forward;b.forward',
+    'class A;def deconstruct_keys(ks);{a:Turtle.new(1,0),b:Turtle.new(2,0)};end;end;def check;x=1;Turtle;end;A.new=>{a:^(check)=>a,b:b};a.forward;b.forward',
+  ]) {
+    expect(traceProgram('ruby', program, program).finalTurtles).toMatchObject([
+      { x: 1, y: 1 },
+      { x: 2, y: 1 },
+    ]);
+  }
+  const acrossClauses =
+    'class A;def deconstruct;[Turtle.new];end;end;class T;def self.===(o);x=1;true;end;end;case A.new;in [Integer];in T[t];t.forward;end';
+  expect(traceProgram('ruby', acrossClauses, acrossClauses).finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
+  const failedMatch =
+    'class A;def deconstruct_keys(ks);{a:Turtle.new};end;def inspect;@n=1;"A";end;end;begin;A.new=>{b:};rescue NoMatchingPatternKeyError=>e;t=e.matchee[:a];t.forward;end';
+  expect(traceProgram('ruby', failedMatch, failedMatch).finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
+});
+
+test('Lazy callbacks retain pending flattened and deduplicated turtles', () => {
+  const flattened = 'a=[1].lazy.flat_map{|x|[Turtle.new(1,0),Turtle.new(2,0)]}.map{|t|t.forward;t}.force';
+  expect(traceProgram('ruby', flattened, flattened).finalTurtles).toMatchObject([
+    { x: 1, y: 1 },
+    { x: 2, y: 1 },
+  ]);
+  const deduplicated = 'class K;def hash;q=1;0;end;end\na=[1].lazy.map{Turtle.new}.uniq{|t|K.new}.force';
+  expect(traceProgram('ruby', deduplicated, deduplicated).finalTurtles).toMatchObject([{ x: 0, y: 0 }]);
+});
+
+test('exhausted Enumerator retains its StopIteration result', () => {
+  const program =
+    'e=Enumerator.new do |y|\n t=Turtle.new\n y << 1\n t\nend\ne.next\nbegin\n e.next\nrescue StopIteration\nend\nx=1\nbegin\n e.next\nrescue StopIteration => ex\n ex.result.forward\nend\n';
+  expect(traceProgram('ruby', program, program).finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
+});
+
+test('match globals retain their instance variables during trace collection', () => {
+  const program = '/a/ =~ "a"\n$~.instance_variable_set(:@t,Turtle.new)\nx=1\n$~.instance_variable_get(:@t).forward\n';
+  expect(traceProgram('ruby', program, program).finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
 });

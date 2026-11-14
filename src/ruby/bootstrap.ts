@@ -1,5 +1,6 @@
 import { installNatives, setSingletonFactory } from './define';
 import { rubyError } from './errors';
+import { installEncodings } from './libEncoding';
 import { installMathConstants } from './libNumeric';
 import { defineMainObject } from './libObject';
 import { NIL, RClass, RObject, type Value } from './objects';
@@ -128,7 +129,8 @@ export function bootstrap(runtime: Runtime): void {
   const exception = defineClass('Exception', object);
   exception.instanceKind = 'exception';
   for (const [name, parent] of EXCEPTION_TREE) defineClass(name, c[parent]);
-  const encoding = defineModule('Encoding');
+  const encoding = defineClass('Encoding', object);
+  encoding.instanceKind = 'none';
   defineClass('CompatibilityError', c.EncodingError, encoding);
   const math = defineModule('Math');
   defineClass('DomainError', c.ArgumentError, math);
@@ -141,13 +143,31 @@ export function bootstrap(runtime: Runtime): void {
   defineClass('ArithmeticSequence', enumerator, enumerator);
   defineClass('Chain', enumerator, enumerator);
   defineClass('Yielder', object, enumerator);
+  defineClass('Generator', object, enumerator);
+  defineClass('Lazy', enumerator, enumerator);
   defineClass('IO', object);
+  defineClass('Method', object);
+  defineClass('UnboundMethod', object);
+  defineClass('Struct', object).includes.push(c.Enumerable);
+  defineClass('Data', object);
+  const regexp = defineClass('Regexp', object);
+  regexp.constants.set('IGNORECASE', 1n);
+  regexp.constants.set('EXTENDED', 2n);
+  regexp.constants.set('MULTILINE', 4n);
+  defineClass('MatchData', object);
+  defineClass('Time', object).includes.push(c.Comparable);
+  defineClass('Rational', numeric).instanceKind = 'none';
+  defineClass('NoMatchingPatternError', c.StandardError);
+  defineClass('NoMatchingPatternKeyError', c.NoMatchingPatternError);
+  defineClass('File', c.IO);
+  object.constants.delete('File');
   const set = defineClass('Set', object);
   set.includes.push(c.Enumerable);
 
   setSingletonFactory(singletonClassOf);
   installNatives(runtime);
   installMathConstants();
+  installEncodings(runtime);
   object.constants.delete('IO');
 
   const main = new RObject(object);

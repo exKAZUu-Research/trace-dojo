@@ -81,6 +81,7 @@ export interface FrameExtra {
   definitionTarget?: RClass;
   /** The running method. */
   method?: RMethod;
+  missingReason?: 'vcall' | 'private' | 'protected';
   def?: MethodDef;
   /** The block the method received, which `yield` calls. */
   block?: RProc;
@@ -95,6 +96,10 @@ export interface FrameExtra {
   blockDef?: BlockDef;
   /** For a lambda's frame, where `return` returns from the lambda itself. */
   isLambda?: boolean;
+  /** The MatchData of the last match a method this frame called made, which `$~` and `$1` read. */
+  lastMatch?: Value;
+  /** The module where `def` defines methods, for a block that `class_eval` or `instance_eval` runs. */
+  definee?: RClass;
   /** Whether this frame's method has returned, after which a `return` in a block it made cannot reach it. */
   finished?: boolean;
 }
@@ -125,6 +130,8 @@ export class ReturnSignal {
 
 export class RetrySignal {}
 
+export class RedoSignal {}
+
 export class ThrowSignal {
   constructor(
     readonly tag: Value,
@@ -154,15 +161,24 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly globals = new Map<string, Value>();
   readonly symbols = new Map<string, RSymbol>();
   readonly coreStrings = new Map<string, RString>();
+  readonly regexpLiterals = new WeakMap<object, RObject>();
   /** Values native code holds while it calls back into the program, such as the array `each` iterates. */
   readonly held: Value[] = [];
   currentNumericReceiver?: Value;
   readonly heldArrays: Value[][] = [];
   /** The tags of the `catch` blocks running now, innermost last, which `throw` must match. */
   readonly catchTags: Value[] = [];
+  /** The blocks `at_exit` and `END` registered, which run when the program ends, the last first. */
+  readonly atExit: RProc[] = [];
+  readonly registeredEndBlocks = new WeakSet<object>();
+  readonly completedExitHandlers: RProc[] = [];
   readonly comparablePairs = new Map<Value, Set<Value>>();
   readonly arrayComparisonPairs = new Map<RArray, Set<RArray>>();
   arrayComparisonDepth = 0;
+  readonly structComparisonPairs = new Map<RObject, Set<RObject>>();
+  structComparisonDepth = 0;
+  readonly structHashing = new Set<RObject>();
+  structHashDepth = 0;
   /** The row of the statement running now, which a call records as its frame's call row. */
   currentRow = 0;
   containerVersion = 0;
@@ -170,6 +186,8 @@ export class Runtime implements TracedRuntime<Frame> {
   setInspectDepth = 0;
   /** The fake addresses `inspect` shows for objects, assigned in the order the program shows them. */
   readonly addresses = new Map<object, number>();
+  readonly methodHashIds = new WeakMap<object, number>();
+  nextMethodHashId = 1;
   c!: CoreClasses;
   mainObject!: RObject;
   /** The state of the default random number generator, which `srand` reseeds. */

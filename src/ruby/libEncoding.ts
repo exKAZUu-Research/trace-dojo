@@ -1,0 +1,157 @@
+import { def, sdef } from './define';
+import { rubyError } from './errors';
+import { callProc, type Gen, requireBlock } from './interp';
+import { makeEnumerator } from './libEnumerator';
+import { NIL, RObject, type RProc, type RString, type Value } from './objects';
+import { ExitSignal, ReturnSignal, rt, RubyError, type Runtime, UnsupportedFeatureError } from './runtime';
+import { arr, str, stringBytes } from './values';
+
+/** Creates the encodings a program can name: strings here are UTF-8, or ASCII-8BIT when they hold bytes. */
+export function installEncodings(runtime: Runtime): void {
+  const encoding = runtime.c.Encoding;
+  for (const [constant, name] of [
+    // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby names the encoding this way.
+    ['UTF_8', 'UTF-8'],
+    ['ASCII_8BIT', 'ASCII-8BIT'],
+    ['BINARY', 'ASCII-8BIT'],
+    ['US_ASCII', 'US-ASCII'],
+  ] as const) {
+    const existing = [...encoding.constants.values()].find((value) => value instanceof RObject && value.data === name);
+    if (existing) {
+      encoding.constants.set(constant, existing);
+      continue;
+    }
+    const object = new RObject(encoding);
+    object.data = name;
+    encoding.constants.set(constant, object);
+  }
+}
+
+def('Encoding', ['to_s', 'name'], 0, (self: RObject) => str(self.data as string));
+def('Encoding', 'inspect', 0, (self: RObject) =>
+  str(self.data === 'ASCII-8BIT' ? '#<Encoding:BINARY (ASCII-8BIT)>' : `#<Encoding:${self.data as string}>`)
+);
+def(
+  'String',
+  'encoding',
+  0,
+  (self: RString) =>
+    rt().c.Encoding.constants.get(self.binary ? 'ASCII_8BIT' : self.usAscii ? 'US_ASCII' : 'UTF_8') as Value
+);
+def('String', 'valid_encoding?', 0, (self: RString) => {
+  if (self.usAscii) return stringBytes(self).every((byte) => byte < 0x80);
+  if (self.binary || !self.rawBytes) return true;
+  try {
+    new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(stringBytes(self));
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+def(
+  'Kernel',
+  'at_exit',
+  0,
+  (_self, _args, block) => {
+    const proc = requireBlock(block);
+    rt().atExit.push(proc);
+    return proc;
+  },
+  { visibility: 'private' }
+);
+
+/** Runs the blocks `at_exit` and `END` registered, the last registered first. */
+export function* runAtExit(): Gen<(RubyError | ExitSignal | UnsupportedFeatureError)[]> {
+  const runtime = rt();
+  const errors: (RubyError | ExitSignal | UnsupportedFeatureError)[] = [];
+  while (runtime.atExit.length > 0) {
+    const handler = runtime.atExit.pop() as RProc;
+    runtime.completedExitHandlers.push(handler);
+    try {
+      yield* callProc(handler, []);
+    } catch (error) {
+      if (error instanceof ReturnSignal) {
+        const converted = rubyError(runtime.c.LocalJumpError, 'unexpected return');
+        converted.exception.ivars = new Map([['@__hookReturn', true]]);
+        error = converted;
+      }
+      if (error instanceof RubyError) runtime.globals.set('$!', error.exception);
+      else if (!(error instanceof ExitSignal) && !(error instanceof UnsupportedFeatureError)) throw error;
+      errors.push(error);
+    }
+  }
+  return errors;
+}
+
+export function makeData(text: string, file: string): RObject {
+  const data = new RObject(rt().c.File);
+  data.data = { text: file, position: file.length - text.length };
+  dataFiles.add(data);
+  return data;
+}
+
+interface DataState {
+  text: string;
+  position: number;
+}
+
+const dataFiles = new WeakSet<RObject>();
+
+function dataState(self: RObject): DataState {
+  if (!dataFiles.has(self)) throw new UnsupportedFeatureError('File オブジェクトの生成');
+  return self.data as DataState;
+}
+
+function remaining(self: RObject): string {
+  const state = dataState(self);
+  return state.text.slice(state.position);
+}
+
+sdef('File', ['new', 'allocate'], [0, -1], () => {
+  throw new UnsupportedFeatureError('File オブジェクトの生成');
+});
+def('File', 'inspect', 0, (self: RObject) => {
+  dataState(self);
+  return str('#<File:main.rb>');
+});
+def('File', 'read', 0, (self: RObject) => {
+  const text = remaining(self);
+  const state = dataState(self);
+  state.position = state.text.length;
+  return str(text);
+});
+def('File', 'gets', 0, (self: RObject) => readLine(self));
+
+function readLine(self: RObject): Value {
+  const state = dataState(self);
+  if (state.position >= state.text.length) return NIL;
+  const end = state.text.indexOf('\n', state.position);
+  const line = state.text.slice(state.position, end === -1 ? undefined : end + 1);
+  state.position += line.length;
+  return str(line);
+}
+def('File', 'readlines', 0, (self: RObject) => {
+  const lines = remaining(self)
+    .split(/(?<=\n)/)
+    .filter((line) => line.length > 0);
+  const state = dataState(self);
+  state.position = state.text.length;
+  return arr(lines.map((line) => str(line)));
+});
+def('File', 'each_line', 0, function* (self: RObject, _args, block) {
+  if (!block) return makeEnumerator(self, 'each_line', []);
+  let line: Value;
+  while ((line = readLine(self)) !== NIL) yield* callProc(block, [line], { used: false });
+  return self;
+});
+def('File', 'rewind', 0, (self: RObject) => {
+  dataState(self).position = 0;
+  return 0n;
+});
+def('File', 'eof?', 0, (self: RObject) => remaining(self).length === 0);
+for (const name of ['lineno', 'each', 'getc', 'readline', 'close', 'pos']) {
+  def('File', name, [0, -1], () => {
+    throw new UnsupportedFeatureError(`DATA.${name}`);
+  });
+}

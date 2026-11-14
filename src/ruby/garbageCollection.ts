@@ -8,9 +8,11 @@ export function collectGarbage(runtime: Runtime): void {
   const reached = new Set<TurtleState>();
   const visited = new Set<object>();
   const pending: Value[] = [];
-  for (const frame of runtime.frames) pushFrame(frame, pending);
+  for (const frame of runtime.frames) pushFrameReferences(frame, pending);
   for (const value of runtime.globals.values()) pending.push(value);
   for (const value of runtime.held) pending.push(value);
+  for (const handler of runtime.atExit) pending.push(handler);
+  for (const handler of runtime.completedExitHandlers) pending.push(handler);
   for (const values of runtime.heldArrays) for (const value of values) pending.push(value);
   pending.push(runtime.c.Object);
   while (pending.length > 0) {
@@ -23,7 +25,7 @@ export function collectGarbage(runtime: Runtime): void {
   runtime.world.retain((turtle) => reached.has(turtle));
 }
 
-function pushFrame(frame: Frame, pending: Value[]): void {
+export function pushFrameReferences(frame: Frame, pending: Value[]): void {
   pending.push(frame.self);
   for (const value of frame.temporaries) pending.push(value);
   for (const value of frame.handling) pending.push(value);
@@ -34,6 +36,7 @@ function pushFrame(frame: Frame, pending: Value[]): void {
   if (extra.args) for (const arg of extra.args) pending.push(arg);
   if (extra.keywords) pending.push(extra.keywords);
   if (extra.proc) pending.push(extra.proc);
+  if (extra.lastMatch) pending.push(extra.lastMatch);
 }
 
 /** Pushes the values an object refers to. */
@@ -58,6 +61,7 @@ function pushReferences(value: RBasic, pending: Value[]): void {
   } else if (value instanceof RClass) {
     for (const item of value.constants.values()) pending.push(item);
     for (const item of value.classVariables.values()) pending.push(item);
+    for (const method of value.methods.values()) if (method.body.kind === 'proc') pending.push(method.body.proc);
     for (const item of value.includes) pending.push(item);
     for (const item of value.prepends) pending.push(item);
     if (value.superclass) pending.push(value.superclass);
@@ -68,7 +72,7 @@ function pushProcReferences(value: RProc, pending: Value[]): void {
   pending.push(value.self);
   if (value.captured) for (const item of value.captured) pending.push(item);
   const outer = value.outer as unknown as Frame | undefined;
-  if (outer) pushFrame(outer, pending);
+  if (outer) pushFrameReferences(outer, pending);
 }
 
 /** Visits the values that a library object's native state holds, such as an enumerator's receiver. */

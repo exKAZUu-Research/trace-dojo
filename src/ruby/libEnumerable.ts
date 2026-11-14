@@ -37,7 +37,7 @@ import {
   RSymbol,
   type Value,
 } from './objects';
-import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
+import { rt, whileHeld } from './runtime';
 import { isUniformKey, platformSort, uniformSort } from './sorting';
 import { arr, newHash, realClassOf, truthy } from './values';
 
@@ -52,26 +52,26 @@ type Visit = (value: Value) => Gen<unknown>;
  * `[key, value]` pairs, a Range's members, or whatever `each` yields (several values packed into an array). The
  * visitor returns {@link STOP} to end the iteration.
  */
-export function* iterate(collection: Value, visit: Visit, args: Value[] = []): Gen<void> {
+export function* iterate(collection: Value, visit: Visit, args: Value[] = []): Gen {
   const runtime = rt();
   if (args.length === 0 && collection instanceof RArray && !isOverridden(collection)) {
     for (let index = 0; index < collection.items.length; index++) {
       runtime.spend();
-      if ((yield* visit(collection.items[index])) === STOP) return;
+      if ((yield* visit(collection.items[index])) === STOP) return NIL;
     }
-    return;
+    return collection;
   }
   if (args.length === 0 && collection instanceof RHash && !isOverridden(collection)) {
     yield* eachEntryUntil(collection, function* (entry) {
       runtime.spend();
       return (yield* visit(arr([entry.key, entry.value]))) === STOP;
     });
-    return;
+    return collection;
   }
   if (args.length === 0 && collection instanceof RRange && !isOverridden(collection)) {
     const { iterateRange } = rangeHelpers;
     yield* iterateRange(collection, visit);
-    return;
+    return collection;
   }
   const signal = new StopSignal();
   const block = nativeProc(-1, function* (args) {
@@ -81,7 +81,10 @@ export function* iterate(collection: Value, visit: Visit, args: Value[] = []): G
     return NIL;
   });
   try {
-    yield* args.length === 0 && collection instanceof RObject && collection.cls.isSubclassOf(runtime.c.Enumerator)
+    return yield* args.length === 0 &&
+    collection instanceof RObject &&
+    collection.cls.isSubclassOf(runtime.c.Enumerator) &&
+    collection.cls !== runtime.c['Enumerator::Lazy']
       ? iterateEnumerator(collection, function* (value) {
           runtime.spend();
           if ((yield* visit(value)) === STOP) throw signal;
@@ -90,6 +93,22 @@ export function* iterate(collection: Value, visit: Visit, args: Value[] = []): G
       : callMethod(collection, 'each', args, undefined, block, { fcall: true });
   } catch (error) {
     if (error !== signal) throw error;
+    return NIL;
+  }
+}
+
+export function* iterateYielded(collection: Value, visit: (args: Value[]) => Gen<unknown>, args: Value[] = []): Gen {
+  const signal = new StopSignal();
+  const block = nativeProc(-1, function* (yielded) {
+    rt().spend();
+    if ((yield* visit(yielded)) === STOP) throw signal;
+    return NIL;
+  });
+  try {
+    return yield* callMethod(collection, 'each', args, undefined, block, { fcall: true });
+  } catch (error) {
+    if (error !== signal) throw error;
+    return NIL;
   }
 }
 
@@ -1232,9 +1251,6 @@ def('Enumerable', 'chain', [0, -1], (self, others) => {
 });
 def('Enumerable', 'compact', 0, function* (self) {
   return arr((yield* toArray(self)).filter((value) => value !== NIL));
-});
-def('Enumerable', 'lazy', 0, () => {
-  throw new UnsupportedFeatureError('遅延評価（lazy）');
 });
 
 def('Enumerable', 'to_set', [0, -1], function* (self, args, block) {

@@ -6,6 +6,7 @@ import type { Program } from './ast';
 import { bootstrap } from './bootstrap';
 import { describeException } from './describe';
 import { evalBody, runToEnd, STACK_OVERFLOW } from './interp';
+import { makeData, runAtExit } from './libEncoding';
 import { parseRuby } from './parse';
 import {
   BreakSignal,
@@ -55,12 +56,27 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: F
     frame.defaultVisibility = 'private';
     runtime.pushFrame(frame);
     try {
-      let uncaughtException: string | undefined;
+      let mainError: unknown;
+      if (program.data !== undefined)
+        runtime.c.Object.constants.set('DATA', makeData(program.data, program.dataFile ?? program.data));
       try {
         runToEnd(evalBody(program.body, frame));
       } catch (error) {
-        uncaughtException = describeUncaught(runtime, error, frame);
+        if (error instanceof RubyError) runtime.globals.set('$!', error.exception);
+        mainError = error;
       }
+      let hookErrors: (RubyError | ExitSignal | UnsupportedFeatureError)[] = [];
+      try {
+        hookErrors = runToEnd(runAtExit());
+      } catch (error) {
+        if (error instanceof RubyError || error instanceof ExitSignal || error instanceof UnsupportedFeatureError)
+          hookErrors.push(error);
+        else throw error;
+      }
+      const messages = (mainError === undefined ? hookErrors : [...hookErrors, mainError])
+        .map((error) => describeUncaught(runtime, error, frame))
+        .filter(Boolean);
+      const uncaughtException = messages.length > 0 ? messages.join('\n') : undefined;
       onEnd?.(frame);
       runtime.collectGarbage();
       return {
@@ -83,6 +99,7 @@ function describeUncaught(runtime: Runtime, error: unknown, frame: Frame): strin
   if (error instanceof ReturnSignal && error.target === frame) return undefined;
   if (error instanceof RubyError) {
     if (isA(error.exception, runtime.c.SystemExit)) return undefined;
+    if (error.exception.ivars?.get('@__hookReturn') === true) return 'unexpected return';
     return describeException(error.exception);
   }
   if (error instanceof ThrowSignal || error instanceof BreakSignal || error instanceof NextSignal) {

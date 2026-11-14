@@ -134,6 +134,7 @@ def('Range', ['to_a', 'to_ary', 'entries'], 0, function* (self: RRange) {
   if (self.end === NIL) throw rangeError('cannot convert endless range to an array');
   return arr(yield* toArray(self));
 });
+// code-gauge-allow duplicateLines 16 -- The similar lines handle different Ruby methods or values.
 def('Range', ['begin', 'first'], [0, 1], function* (self: RRange, args) {
   if (self.begin === NIL) throw rangeError('cannot get the first element of beginless range');
   if (args.length === 0) {
@@ -195,15 +196,25 @@ def('Range', 'max', [0, 1], function* (self: RRange, args, block) {
   }
   if (block || args.length > 0) return yield* callEnumerable(self, 'max', args, block);
   if (self.end === NIL) throw rangeError('cannot get the maximum of endless range');
+  if (self.exclusive && !isA(self.end, rt().c.Numeric)) return yield* callEnumerable(self, 'max', [], undefined);
   const order = yield* spaceship(self.begin, self.end);
-  if (order === undefined || order > 0 || (order === 0 && self.exclusive)) return NIL;
+  if (order === undefined || order > 0) return NIL;
   if (self.exclusive) {
-    if (typeof self.end === 'bigint' && typeof self.begin === 'bigint') return self.end - 1n;
-    if (isRubyFloat(self.end)) throw typeError('cannot exclude non Integer end value');
-    throw typeError('cannot exclude end value with non Integer begin value');
+    if (typeof self.end !== 'bigint') throw typeError('cannot exclude non Integer end value');
+    if (order === 0) return NIL;
+    if (typeof self.begin !== 'bigint') throw typeError('cannot exclude end value with non Integer begin value');
+    return self.end - 1n;
   }
   return self.end;
 });
+def('Range', 'minmax', 0, function* (self: RRange, _args, block) {
+  if (block) return yield* callEnumerable(self, 'minmax', [], block);
+  return arr([yield* callMethod(self, 'min', []), yield* callMethod(self, 'max', [])]);
+});
+
+function linearEndpoint(value: Value): boolean {
+  return value !== NIL && (isA(value, rt().c.Numeric) || isA(value, rt().c.Time));
+}
 
 function* callEnumerable(self: RRange, name: string, args: Value[], block: RProc | undefined): Gen {
   const method = rt().c.Enumerable.methods.get(name);
@@ -259,7 +270,8 @@ def('Range', 'count', [0, 1], function* (self: RRange, args, block) {
 def('Range', 'exclude_end?', 0, (self: RRange) => self.exclusive);
 def('Range', ['include?', 'member?'], 1, function* (self: RRange, [value]) {
   if (value instanceof RRange) return false;
-  if (isRubyNumber(self.begin) || self.begin === NIL) return yield* rangeCovers(self, value);
+  if (linearEndpoint(self.begin) || linearEndpoint(self.end) || self.begin === NIL)
+    return yield* rangeCovers(self, value);
   let found = false;
   yield* iterateRange(self, function* (item) {
     if (yield* rEquals(item, value)) {

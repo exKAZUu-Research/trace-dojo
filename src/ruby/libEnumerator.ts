@@ -1,6 +1,7 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   addressOf,
+  caseEquals,
   comparisonFailed,
   inspect,
   numericCompare,
@@ -9,11 +10,25 @@ import {
   toIndexExact,
   toInt,
   toStepFloat,
+  tryImplicitConversion,
 } from './conversions';
 import { def, sdef } from './define';
-import { argumentCountError, argumentError, floatDomainError, rangeError } from './errors';
+import { argumentCountError, argumentError, floatDomainError, rangeError, rubyError, typeError } from './errors';
 import { floatStepCount } from './floatMath';
-import { callMethod, callProc, type Gen, isGenerator, nativeProc, runToEnd } from './interp';
+import { pushFrameReferences } from './garbageCollection';
+import { hashGet, hashSet } from './hashes';
+import {
+  callMethod,
+  callProc,
+  flattenGenerator,
+  type Gen,
+  isGenerator,
+  nativeProc,
+  requireBlock,
+  respondsTo,
+  runToEnd,
+} from './interp';
+import { iterate, iterateYielded, STOP, zipCollections } from './libEnumerable';
 import { rangeSize } from './libRange';
 import { setSize } from './libSet';
 import {
@@ -23,17 +38,19 @@ import {
   RArray,
   RHash,
   RObject,
-  type RProc,
+  RProc,
   RRange,
   RString,
   RSymbol,
   type Value,
 } from './objects';
-import { rt, UnsupportedFeatureError } from './runtime';
-import { arr, str, stringBytes, stringCharacterCount } from './values';
+import { type Frame, rt, RubyError, UnsupportedFeatureError } from './runtime';
+import { arr, isA, newHash, realClassOf, str, stringBytes, stringCharacterCount, truthy } from './values';
 
 /** What an enumerator iterates: a method of a receiver, called with the block it is given. */
 export interface EnumeratorSource {
+  /** The state of `next`: the suspended iteration and the calls it was inside when it suspended. */
+  cursor?: Cursor;
   recv: Value;
   method: string;
   args: Value[];
@@ -80,6 +97,7 @@ export function makeEnumerator(
         ...this.args,
         ...(this.keywords ? [this.keywords] : []),
         ...(this.sizeBlock ? [this.sizeBlock] : []),
+        ...cursorRoots(this.cursor),
       ];
     },
   };
@@ -283,19 +301,35 @@ export function customEnumerator(recv: Value, method: string, held: Value[], ite
   const enumerator = makeEnumerator(recv, method, []);
   const source = enumerator.data as EnumeratorSource;
   source.iterate = iterate;
-  source.held = () => [recv, ...held];
+  source.held = () => [recv, ...held, ...cursorRoots(source.cursor)];
   source.generatorAddress = addressOf(enumerator);
   return enumerator;
 }
 
 function sourceOf(self: RObject): EnumeratorSource {
+  if (self.cls === rt().c['Enumerator::Lazy']) {
+    const data = self.data as LazyData;
+    data.enumerator ??= {
+      recv: self,
+      method: 'each',
+      args: [],
+      size: () => lazySize(self),
+      iterate: (block) => callMethod(self, 'each', [], undefined, block),
+      held: () => [self, ...data.held()],
+    };
+    return data.enumerator;
+  }
   return self.data as EnumeratorSource;
 }
 
 /** Runs the enumerator's method, passing each yielded value (several packed into an array) to `visit`. */
 export function* iterateEnumerator(self: RObject, visit: (value: Value) => Gen): Gen {
+  return yield* iterateEnumeratorArgs(self, (args) => visit(args.length === 1 ? args[0] : arr(args)));
+}
+
+function* iterateEnumeratorArgs(self: RObject, visit: (args: Value[]) => Gen): Gen {
   const source = sourceOf(self);
-  const block = nativeProc(-1, (args) => visit(args.length === 1 ? args[0] : arr(args)));
+  const block = nativeProc(-1, visit);
   return yield* runSource(source, block);
 }
 
@@ -305,7 +339,9 @@ function* runSource(source: EnumeratorSource, block: RProc, args: Value[] = []):
     if (source.method === 'chain' && count > 0) throw argumentCountError(count, 0, 0);
     return yield* source.iterate(block);
   }
-  return yield* callMethod(source.recv, source.method, [...source.args, ...args], source.keywords, block);
+  return yield* callMethod(source.recv, source.method, [...source.args, ...args], source.keywords, block, {
+    fcall: true,
+  });
 }
 
 def('Enumerator', 'each', [0, -1], function* (self: RObject, args, block) {
@@ -591,15 +627,6 @@ class BoundedTextParts {
     return this.parts.join(', ');
   }
 }
-for (const name of ['next', 'peek', 'rewind', 'next_values', 'peek_values', 'feed', 'lazy', 'produce']) {
-  def('Enumerator', name, [0, -1], () => {
-    throw new UnsupportedFeatureError(`外部イテレータ（Enumerator#${name}）`);
-  });
-}
-sdef('Enumerator', 'new', [0, -1], () => {
-  throw new UnsupportedFeatureError('Enumerator.new');
-});
-
 /** A curried lambda: it collects arguments until it has `arity`, then calls `proc` with them. */
 export function curry(proc: RProc, arity: number, collected: Value[]): Value {
   const curried = nativeProc(
@@ -614,3 +641,680 @@ export function curry(proc: RProc, arity: number, collected: Value[]): Value {
   curried.captured = [proc, ...collected];
   return curried;
 }
+
+// External iteration ---------------------------------------------------------------------------------------------------
+
+/** A value the iteration hands to `next`, suspending the generators that run the enumerator's method. */
+class Suspension {
+  constructor(readonly args: Value[]) {}
+}
+
+interface Cursor {
+  runner: Generator<unknown, Value, unknown>;
+  /** The frames, held values, and catch tags of the suspended calls, put back while the iteration resumes. */
+  frames: Frame[];
+  held: Value[];
+  catchTags: Value[];
+  peeked: Value[][];
+  feed?: Value;
+  feedSet: boolean;
+  started: boolean;
+  result?: Value;
+}
+
+function cursorRoots(cursor: Cursor | undefined): Value[] {
+  if (!cursor) return [];
+  const values = [...cursor.held, ...cursor.catchTags, ...cursor.peeked.flat()];
+  if (cursor.feedSet) values.push(cursor.feed as Value);
+  if (cursor.result !== undefined) values.push(cursor.result);
+  for (const frame of cursor.frames) pushFrameReferences(frame, values);
+  return values;
+}
+
+function startCursor(self: RObject): Cursor {
+  const runner = flattenGenerator(
+    (function* () {
+      return yield* iterateEnumeratorArgs(self, function* (args) {
+        return (yield new Suspension(args)) as Value;
+      });
+    })()
+  );
+  return { runner, frames: [], held: [], catchTags: [], peeked: [], feedSet: false, started: false };
+}
+
+/** Resumes the iteration until it yields its next value, or raises StopIteration when it has ended. */
+function nextValues(self: RObject): Value[] {
+  const source = sourceOf(self);
+  source.cursor ??= startCursor(self);
+  const cursor = source.cursor;
+  if (cursor.peeked.length > 0) return cursor.peeked.shift() as Value[];
+  if (cursor.result !== undefined) throw stopIteration(cursor.result);
+  const runtime = rt();
+  const frameBase = runtime.frames.length;
+  const heldBase = runtime.held.length;
+  const row = runtime.currentRow;
+  const callerTags = runtime.catchTags.splice(0);
+  runtime.frames.push(...cursor.frames);
+  runtime.held.push(...cursor.held);
+  runtime.catchTags.push(...cursor.catchTags);
+  let step: IteratorResult<unknown, Value>;
+  let failed = false;
+  try {
+    const feed = cursor.started && cursor.feedSet ? cursor.feed : NIL;
+    if (cursor.started) {
+      cursor.feedSet = false;
+      cursor.feed = undefined;
+    }
+    step = cursor.runner.next(feed);
+    cursor.started = true;
+  } catch (error) {
+    failed = true;
+    throw error;
+  } finally {
+    cursor.frames = runtime.frames.splice(frameBase);
+    cursor.held = runtime.held.splice(heldBase);
+    cursor.catchTags = runtime.catchTags.splice(0);
+    runtime.catchTags.push(...callerTags);
+    runtime.currentRow = row;
+    if (failed) source.cursor = undefined;
+  }
+  if (step.done) {
+    cursor.result = step.value;
+    throw stopIteration(step.value);
+  }
+  if (!(step.value instanceof Suspension)) throw new Error('An enumerator suspended for another reason');
+  return step.value.args;
+}
+
+function nextValue(self: RObject): Value {
+  const args = nextValues(self);
+  return args.length === 0 ? NIL : args.length === 1 ? args[0] : arr(args);
+}
+
+function stopIteration(result: Value): unknown {
+  const error = rubyError(rt().c.StopIteration, 'iteration reached an end');
+  error.exception.ivars = new Map([['@result', result]]);
+  return error;
+}
+
+def('Enumerator', 'next', 0, (self: RObject) => nextValue(self));
+def('Enumerator', 'peek', 0, (self: RObject) => {
+  const args = nextValues(self);
+  (sourceOf(self).cursor as Cursor).peeked.unshift(args);
+  return args.length === 0 ? NIL : args.length === 1 ? args[0] : arr(args);
+});
+def('Enumerator', 'rewind', 0, function* (self: RObject) {
+  const receiver = sourceOf(self).recv;
+  if (receiver !== self && respondsTo(receiver, 'rewind')) yield* callMethod(receiver, 'rewind', []);
+  sourceOf(self).cursor = undefined;
+  return self;
+});
+def('Enumerator', 'next_values', 0, (self: RObject) => {
+  return arr(nextValues(self));
+});
+def('Enumerator', 'peek_values', 0, (self: RObject) => {
+  const args = nextValues(self);
+  (sourceOf(self).cursor as Cursor).peeked.unshift(args);
+  return arr(args);
+});
+def('Enumerator', 'feed', 1, (self: RObject, [value]) => {
+  const source = sourceOf(self);
+  source.cursor ??= startCursor(self);
+  if (source.cursor.feedSet) throw typeError('feed value already set');
+  source.cursor.feed = value;
+  source.cursor.feedSet = true;
+  return NIL;
+});
+
+// Enumerator.new and its yielder --------------------------------------------------------------------------------------
+
+/** The object `Enumerator.new` iterates: its block, which receives a yielder. */
+interface GeneratorData {
+  block: RProc;
+  held(): Value[];
+}
+
+sdef('Enumerator', 'new', [0, 1], function* (_self, args, block) {
+  const runtime = rt();
+  const generator = new RObject(runtime.c['Enumerator::Generator']);
+  const data: GeneratorData = {
+    block: requireBlock(block),
+    held() {
+      return [this.block];
+    },
+  };
+  generator.data = data;
+  const enumerator = makeEnumerator(generator, 'each', []);
+  const [size] = args;
+  if (size !== undefined) {
+    const source = enumerator.data as EnumeratorSource;
+    if (size instanceof RProc || respondsTo(size, 'call')) {
+      source.size = () => callMethod(size, 'call', []);
+      const previousHeld = source.held?.bind(source);
+      source.held = () => [...(previousHeld?.() ?? []), size];
+    } else {
+      const normalized = size === NIL || (isRubyFloat(size) && Number(size) === Infinity) ? size : yield* toInt(size);
+      source.size = () => normalized;
+    }
+  }
+  return enumerator;
+});
+def('Enumerator::Generator', 'each', [0, -1], function* (self: RObject, args, block) {
+  const producer = (self.data as GeneratorData | undefined)?.block;
+  if (!producer) throw argumentError('uninitialized generator');
+  const yielder = new RObject(rt().c['Enumerator::Yielder']);
+  const consumer = requireBlock(block);
+  const data: { consumer: RProc; held(): Value[] } = {
+    consumer,
+    held() {
+      return [this.consumer];
+    },
+  };
+  yielder.data = data;
+  return yield* callProc(producer, [yielder, ...args]);
+});
+
+def(
+  'Enumerator::Generator',
+  'initialize',
+  0,
+  (self: RObject, _args, block) => {
+    if (!block) throw rubyError(rt().c.LocalJumpError, 'no block given');
+    self.data = { block, held: () => [block] } satisfies GeneratorData;
+    return NIL;
+  },
+  { visibility: 'private' }
+);
+
+function consumerOf(self: RObject): RProc {
+  const consumer = (self.data as { consumer?: RProc } | undefined)?.consumer;
+  if (!consumer) throw argumentError('uninitialized yielder');
+  return consumer;
+}
+
+def(
+  'Enumerator::Yielder',
+  'initialize',
+  0,
+  (self: RObject, _args, block) => {
+    if (!block) throw rubyError(rt().c.LocalJumpError, 'no block given');
+    self.data = { consumer: block, held: () => [block] };
+    return NIL;
+  },
+  { visibility: 'private' }
+);
+
+def('Enumerator::Yielder', ['<<'], 1, function* (self: RObject, [value]) {
+  yield* callProc(consumerOf(self), [value]);
+  return self;
+});
+def('Enumerator::Yielder', ['yield', 'call'], [0, -1], function* (self: RObject, args) {
+  return yield* callProc(consumerOf(self), args);
+});
+def('Enumerator::Yielder', 'to_proc', 0, (self: RObject) => nativeProc(-1, (args) => callProc(consumerOf(self), args)));
+sdef('Enumerator', 'produce', [0, 1], function* (_self, args, block) {
+  const step = requireBlock(block);
+  const runtime = rt();
+  const generator = new RObject(runtime.c['Enumerator::Generator']);
+  const producer = nativeProc(1, function* ([yielder]) {
+    try {
+      let value = args.length > 0 ? args[0] : yield* callProc(step, []);
+      for (;;) {
+        yield* callMethod(yielder, '<<', [value]);
+        value = yield* callProc(step, [value]);
+      }
+    } catch (error) {
+      if (error instanceof RubyError && isA(error.exception, runtime.c.StopIteration)) return NIL;
+      throw error;
+    }
+  });
+  generator.data = {
+    block: producer,
+    held() {
+      return [step, ...args];
+    },
+  };
+  return makeEnumerator(generator, 'each', []);
+});
+
+// Lazy -----------------------------------------------------------------------------------------------------------------
+
+type LazyStep = (
+  | { kind: 'map' | 'select' | 'reject' | 'take_while' | 'drop_while' | 'filter_map' | 'flat_map'; block: RProc }
+  | { kind: 'take' | 'drop'; count: number }
+  | { kind: 'compact' }
+  | { kind: 'with_index'; offset: bigint; block?: RProc }
+  | { kind: 'grep' | 'grep_v'; pattern: Value; block?: RProc }
+  | { kind: 'uniq'; block?: RProc }
+  | { kind: 'zip'; others: Value[] }
+  | { kind: 'each_slice' | 'each_cons'; count: number }
+  | { kind: 'each_entry' }
+  | { kind: 'each_with_object'; memo: Value }
+) & { label?: string; args?: Value[] };
+
+interface LazyData {
+  source: Value;
+  steps: LazyStep[];
+  enumerator?: EnumeratorSource;
+  held(): Value[];
+}
+
+function* lazySize(self: RObject): Gen {
+  const { source, steps } = self.data as LazyData;
+  if (!respondsTo(source, 'size')) return NIL;
+  let size = yield* callMethod(source, 'size', []);
+  for (const step of steps) size = nextLazySize(size, step);
+  return size;
+}
+
+function nextLazySize(size: Value, step: LazyStep): Value {
+  if (size === NIL) return NIL;
+  if (step.kind === 'take') {
+    if (typeof size === 'bigint') return size < BigInt(step.count) ? size : BigInt(step.count);
+    if (isRubyFloat(size)) return Number(size) < step.count ? size : BigInt(step.count);
+    return size;
+  }
+  if (step.kind === 'drop') {
+    if (typeof size === 'bigint') return size > BigInt(step.count) ? size - BigInt(step.count) : 0n;
+    if (isRubyFloat(size)) return Math.max(0, Number(size) - step.count);
+    return size;
+  }
+  if (step.kind === 'each_slice' && typeof size === 'bigint')
+    return (size + BigInt(step.count - 1)) / BigInt(step.count);
+  if (step.kind === 'each_cons' && typeof size === 'bigint')
+    return size >= BigInt(step.count) ? size - BigInt(step.count) + 1n : 0n;
+  return ['map', 'with_index', 'zip', 'each_entry', 'each_with_object'].includes(step.kind) ? size : NIL;
+}
+
+function makeLazy(source: Value, steps: LazyStep[]): RObject {
+  const lazy = new RObject(rt().c['Enumerator::Lazy']);
+  const data: LazyData = {
+    source,
+    steps,
+    held() {
+      return [
+        this.source,
+        ...this.steps.flatMap((step) => ('block' in step && step.block ? [step.block] : [])),
+        ...this.steps.flatMap((step) => step.args ?? []),
+        ...this.steps.flatMap((step) => ('pattern' in step ? [step.pattern] : 'others' in step ? step.others : [])),
+        ...cursorRoots(this.enumerator?.cursor),
+      ];
+    },
+  };
+  lazy.data = data;
+  return lazy;
+}
+
+def('Enumerable', 'lazy', 0, (self) => makeLazy(self, []));
+def('Enumerator::Lazy', 'lazy', 0, (self) => self);
+
+for (const kind of [
+  'map',
+  'collect',
+  'select',
+  'filter',
+  'reject',
+  'take_while',
+  'drop_while',
+  'filter_map',
+  'flat_map',
+  'collect_concat',
+  'find_all',
+] as const) {
+  def('Enumerator::Lazy', kind, 0, (self: RObject, _args, block) => {
+    const data = self.data as LazyData;
+    const normalized =
+      kind === 'collect'
+        ? 'map'
+        : kind === 'filter' || kind === 'find_all'
+          ? 'select'
+          : kind === 'collect_concat'
+            ? 'flat_map'
+            : kind;
+    return makeLazy(data.source, [...data.steps, { kind: normalized, block: requireBlock(block), label: kind }]);
+  });
+}
+for (const kind of ['grep', 'grep_v'] as const) {
+  def('Enumerator::Lazy', kind, 1, (self: RObject, [pattern], block) => {
+    const data = self.data as LazyData;
+    return makeLazy(data.source, [...data.steps, { kind, pattern, block, args: [pattern] }]);
+  });
+}
+def('Enumerator::Lazy', 'uniq', 0, (self: RObject, _args, block) => {
+  const data = self.data as LazyData;
+  return makeLazy(data.source, [...data.steps, { kind: 'uniq', block }]);
+});
+for (const kind of ['each_slice', 'each_cons'] as const) {
+  def('Enumerator::Lazy', kind, 1, function* (self: RObject, [count], block) {
+    const size = Number(yield* toInt(count));
+    if (size <= 0) throw argumentError('invalid slice size');
+    const data = self.data as LazyData;
+    const lazy = makeLazy(data.source, [...data.steps, { kind, count: size, args: [count] }]);
+    if (!block) return lazy;
+    yield* runLazy(lazy, (value) => callProc(block, [value], { used: false }));
+    return self;
+  });
+}
+def('Enumerator::Lazy', 'each_entry', 0, function* (self: RObject, _args, block) {
+  const data = self.data as LazyData;
+  const lazy = makeLazy(data.source, [...data.steps, { kind: 'each_entry' }]);
+  if (!block) return lazy;
+  yield* runLazy(lazy, (value) => callProc(block, [value], { used: false }));
+  return self;
+});
+for (const name of ['each_with_object', 'with_object']) {
+  def('Enumerator::Lazy', name, 1, function* (self: RObject, [memo], block) {
+    if (block) {
+      yield* runLazy(self, (value) => callProc(block, [value, memo], { used: false }));
+      return memo;
+    }
+    const data = self.data as LazyData;
+    return makeLazy(data.source, [...data.steps, { kind: 'each_with_object', memo, label: name, args: [memo] }]);
+  });
+}
+for (const name of ['slice_when', 'slice_before', 'slice_after', 'chunk', 'chunk_while'])
+  def('Enumerator::Lazy', name, [0, -1], () => {
+    throw new UnsupportedFeatureError(`Enumerator::Lazy#${name}`);
+  });
+def('Enumerator::Lazy', 'zip', [0, -1], function* (self: RObject, others, block) {
+  if (block) return yield* zipCollections(self, others, block);
+  for (const other of others)
+    if (!(other instanceof RArray) && !respondsTo(other, 'each', true))
+      throw typeError(`wrong argument type ${realClassOf(other).name} (must respond to :each)`);
+  const data = self.data as LazyData;
+  return makeLazy(data.source, [...data.steps, { kind: 'zip', others, args: others }]);
+});
+for (const kind of ['take', 'drop'] as const) {
+  def('Enumerator::Lazy', kind, 1, function* (self: RObject, [count]) {
+    const data = self.data as LazyData;
+    const n = Number(yield* toInt(count));
+    if (n < 0) throw argumentError(`attempt to ${kind} negative size`);
+    return makeLazy(data.source, [...data.steps, { kind, count: n, args: [count] }]);
+  });
+}
+def('Enumerator::Lazy', 'compact', 0, (self: RObject) => {
+  const data = self.data as LazyData;
+  return makeLazy(data.source, [...data.steps, { kind: 'compact' }]);
+});
+def('Enumerator::Lazy', 'with_index', [0, 1], function* (self: RObject, args, block) {
+  const data = self.data as LazyData;
+  const offset = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : 0n;
+  return makeLazy(data.source, [...data.steps, { kind: 'with_index', offset, block, args }]);
+});
+def('Enumerator::Lazy', 'each_with_index', 0, function* (self: RObject, _args, block) {
+  if (!block) return yield* callMethod(self, 'with_index', []);
+  let index = 0n;
+  return yield* runLazy(self, (value) => callProc(block, [value, index++], { used: false }));
+});
+
+/** Runs a lazy chain: each element of the source passes the steps in turn, and `take` ends the iteration. */
+function* runLazy(self: RObject, visit: (value: Value, yielded?: Value[]) => Gen<unknown>, args: Value[] = []): Gen {
+  const data = self.data as LazyData;
+  const states: LazyState[] = data.steps.map((step) => ({
+    seen: 0,
+    dropping: true,
+    index: 'offset' in step ? step.offset : 0n,
+  }));
+  const takeZero = data.steps.some((step) => step.kind === 'take' && step.count === 0);
+  if (takeZero) return NIL;
+  const held = rt().held.length;
+  const arrays = rt().heldArrays;
+  const arrayMark = arrays.length;
+  let visitorStopped = false;
+  const visitWithStop = function* (value: Value, yielded?: Value[]): Gen<unknown> {
+    const outcome = yield* visit(value, yielded);
+    if (outcome === STOP) visitorStopped = true;
+    return outcome;
+  };
+  try {
+    const result = yield* iterateYielded(
+      data.source,
+      function* (yielded) {
+        const value = yielded.length === 0 ? NIL : yielded.length === 1 ? yielded[0] : arr(yielded);
+        const args = yielded.length === 0 && data.steps.length > 0 ? [NIL] : yielded;
+        return yield* streamLazyStep(data.steps, states, 0, value, visitWithStop, args);
+      },
+      args
+    );
+    if (!visitorStopped)
+      for (const [position, step] of data.steps.entries()) {
+        const buffer = states[position].buffer;
+        if (step.kind === 'each_slice' && buffer && buffer.length > 0) {
+          states[position].buffer = [];
+          const outcome = yield* streamLazyStep(data.steps, states, position + 1, arr(buffer), visitWithStop);
+          if (outcome === STOP) break;
+        }
+      }
+    return data.steps.length === 0 ? result : NIL;
+  } finally {
+    for (const state of states) for (const iterator of state.iterators ?? []) iterator?.return();
+    rt().held.length = held;
+    arrays.length = arrayMark;
+  }
+}
+
+interface LazyState {
+  seen: number;
+  dropping: boolean;
+  index: bigint;
+  keys?: RHash;
+  iterators?: (Generator<unknown, void, unknown> | undefined)[];
+  buffer?: Value[];
+}
+
+function* streamLazyStep(
+  steps: LazyStep[],
+  states: LazyState[],
+  position: number,
+  item: Value,
+  visit: (value: Value, yielded?: Value[]) => Gen<unknown>,
+  yielded: Value[] = [item]
+): Gen<unknown> {
+  const held = rt().held;
+  const rootIndex = held.push(item) - 1;
+  try {
+    const step = steps[position];
+    if (!step) return yield* visit(item, yielded);
+    const state = states[position];
+    const next = (value: Value, args: Value[] = [value]): Gen<unknown> =>
+      streamLazyStep(steps, states, position + 1, value, visit, args);
+    switch (step.kind) {
+      case 'map': {
+        return yield* next(yield* callProc(step.block, yielded));
+      }
+      case 'select':
+      case 'reject': {
+        return truthy(yield* callProc(step.block, yielded)) === (step.kind === 'select')
+          ? yield* next(item, yielded)
+          : undefined;
+      }
+      case 'filter_map': {
+        const mapped = yield* callProc(step.block, yielded);
+        return truthy(mapped) ? yield* next(mapped) : undefined;
+      }
+      case 'flat_map': {
+        return yield* streamFlattened(yield* callProc(step.block, yielded), next);
+      }
+      case 'take_while': {
+        return truthy(yield* callProc(step.block, yielded)) ? yield* next(item, yielded) : STOP;
+      }
+      case 'drop_while': {
+        if (state.dropping && truthy(yield* callProc(step.block, yielded))) return undefined;
+        state.dropping = false;
+        return yield* next(item, yielded);
+      }
+      case 'take': {
+        if (state.seen >= step.count) return STOP;
+        state.seen++;
+        const result = yield* next(item, yielded);
+        return result === STOP || state.seen >= step.count ? STOP : undefined;
+      }
+      case 'drop': {
+        return state.seen++ >= step.count ? yield* next(item, yielded) : undefined;
+      }
+      case 'compact': {
+        return item === NIL ? undefined : yield* next(item, yielded);
+      }
+      case 'with_index': {
+        const index = state.index++;
+        if (step.block) yield* callProc(step.block, [item, index]);
+        return step.block ? yield* next(item) : yield* next(arr([item, index]), [item, index]);
+      }
+      case 'grep':
+      case 'grep_v': {
+        if (truthy(yield* caseEquals(step.pattern, item)) !== (step.kind === 'grep')) return;
+        return step.block ? yield* next(yield* callProc(step.block, [item])) : yield* next(item, yielded);
+      }
+      case 'uniq': {
+        const key = step.block ? yield* callProc(step.block, [item]) : item;
+        if (!state.keys) {
+          state.keys = newHash();
+          rt().held.push(state.keys);
+        }
+        if (yield* hashGet(state.keys, key)) return;
+        yield* hashSet(state.keys, key, true);
+        return yield* next(item, yielded);
+      }
+      case 'zip': {
+        state.iterators ??= step.others.map((other) =>
+          other instanceof RArray
+            ? undefined
+            : flattenGenerator(
+                (function* (): Gen<void> {
+                  yield* iterate(other, function* (value) {
+                    yield value;
+                  });
+                })()
+              )
+        );
+        const tuple: Value[] = [item];
+        const index = state.seen++;
+        for (const [position, other] of step.others.entries()) {
+          const result = state.iterators[position]?.next();
+          tuple.push(
+            other instanceof RArray ? (other.items[index] ?? NIL) : result?.done ? NIL : (result?.value as Value)
+          );
+        }
+        const arrays = rt().heldArrays;
+        arrays.push(tuple);
+        try {
+          return yield* next(arr(tuple));
+        } finally {
+          arrays.pop();
+        }
+      }
+      case 'each_slice':
+      case 'each_cons': {
+        if (!state.buffer) {
+          state.buffer = [];
+          rt().heldArrays.push(state.buffer);
+        }
+        state.buffer.push(item);
+        if (state.buffer.length < step.count) return;
+        const values = arr([...state.buffer]);
+        if (step.kind === 'each_slice') state.buffer.length = 0;
+        else state.buffer.shift();
+        return yield* next(values);
+      }
+      case 'each_entry': {
+        return yield* next(item);
+      }
+      case 'each_with_object': {
+        return yield* next(arr([item, step.memo]), [item, step.memo]);
+      }
+    }
+  } finally {
+    held.splice(rootIndex, 1);
+  }
+}
+
+function* streamFlattened(mapped: Value, next: (value: Value) => Gen<unknown>): Gen<unknown> {
+  const held = rt().held;
+  const rootIndex = held.push(mapped) - 1;
+  try {
+    if (mapped instanceof RArray) {
+      for (const item of mapped.items) if ((yield* next(item)) === STOP) return STOP;
+      return;
+    }
+    if (mapped instanceof RObject && respondsTo(mapped, 'force') && respondsTo(mapped, 'each')) {
+      let stopped = false;
+      yield* iterate(mapped, function* (item) {
+        if ((yield* next(item)) === STOP) {
+          stopped = true;
+          return STOP;
+        }
+      });
+      return stopped ? STOP : undefined;
+    }
+    const array = yield* tryImplicitConversion(mapped, 'to_ary');
+    if (array !== undefined) {
+      if (array instanceof RArray) return yield* streamFlattened(array, next);
+      if (array !== NIL)
+        throw typeError(
+          `can't convert ${realClassOf(mapped).name} to Array (${realClassOf(mapped).name}#to_ary gives ${realClassOf(array).name})`
+        );
+    }
+    return yield* next(mapped);
+  } finally {
+    held.splice(rootIndex, 1);
+  }
+}
+
+def('Enumerator::Lazy', 'each', [0, -1], function* (self: RObject, args, block) {
+  if (!block) {
+    if (args.length === 0) return self;
+    const data = self.data as LazyData;
+    return makeLazy(makeEnumerator(data.source, 'each', args), data.steps);
+  }
+  return yield* runLazy(self, (value, yielded) => callProc(block, yielded ?? [value], { used: false }), args);
+});
+def('Enumerator::Lazy', ['force', 'to_a'], [0, -1], function* (self: RObject, args) {
+  const items: Value[] = [];
+  rt().heldArrays.push(items);
+  try {
+    yield* runLazy(
+      self,
+      function* (value) {
+        items.push(value);
+        yield* [];
+      },
+      args
+    );
+    return arr(items);
+  } finally {
+    rt().heldArrays.pop();
+  }
+});
+def('Enumerator::Lazy', 'first', [0, 1], function* (self: RObject, args) {
+  const items: Value[] = [];
+  const count = args.length > 0 ? Number(yield* toInt(args[0])) : 1;
+  if (count < 0) throw argumentError('attempt to take negative size');
+  rt().heldArrays.push(items);
+  try {
+    if (count > 0) {
+      yield* runLazy(self, function* (value) {
+        items.push(value);
+        yield* [];
+        return items.length >= count ? STOP : undefined;
+      });
+    }
+    if (args.length === 0) return items[0] ?? NIL;
+    return arr(items);
+  } finally {
+    rt().heldArrays.pop();
+  }
+});
+def('Enumerator::Lazy', 'eager', 0, function* (self: RObject) {
+  return makeEnumerator(self, 'each', []);
+});
+def('Enumerator::Lazy', ['inspect', 'to_s'], 0, function* (self: RObject) {
+  const data = self.data as LazyData;
+  let text = `#<Enumerator::Lazy: ${yield* inspect(data.source)}>`;
+  for (const step of data.steps) {
+    const argumentsText: string[] = [];
+    for (const argument of step.args ?? []) argumentsText.push(yield* inspect(argument));
+    const suffix = argumentsText.length > 0 ? `(${argumentsText.join(', ')})` : '';
+    text = `#<Enumerator::Lazy: ${text}:${step.label ?? step.kind}${suffix}>`;
+  }
+  return str(text);
+});

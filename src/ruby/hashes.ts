@@ -1,9 +1,9 @@
 import { inspect, toInt } from './conversions';
 import { frozenError, runtimeError } from './errors';
 import { callMethod, callProc, type Gen, isGenerator, runToEnd } from './interp';
-import { type HashEntry, RArray, RBasic, RHash, RRange, RString, type Value } from './objects';
+import { type HashEntry, NIL, RArray, RBasic, RHash, RRange, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
-import { classOf, snapshot, str, stringBytes, truthy } from './values';
+import { classOf, sameIdentity, snapshot, str, stringBytes, truthy } from './values';
 
 interface HashTraversal {
   cycle: boolean;
@@ -83,7 +83,7 @@ function* structuralHash(value: RArray | RRange | RHash, ancestors: RBasic[], tr
   return BigInt(`0x${digest(JSON.stringify(parts))}`);
 }
 
-function digest(text: string): string {
+export function digest(text: string): string {
   let value = 2_166_136_261;
   for (let index = 0; index < text.length; index++)
     value = Math.imul(value ^ (text.codePointAt(index) as number), 16_777_619);
@@ -107,6 +107,15 @@ export function stringKeyEquals(left: RString, other: Value): boolean {
 
 /** Finds the entry for `key`, checking equality even when distinct keys have the same hash. */
 function* findEntry(hash: RHash, key: Value): Gen<{ base: string; slot: string; entry: HashEntry | undefined }> {
+  if (hash.byIdentity) {
+    const identity =
+      key instanceof RBasic || key instanceof RSymbol
+        ? `o${key.id}`
+        : key === NIL
+          ? 'nil'
+          : `${typeof key}:${String(key)}`;
+    return yield* findEntryInBucket(hash, key, `h${digest(identity)}`);
+  }
   const keyHash = key instanceof RString ? stringKeyHash(key) : yield* toInt(yield* callMethod(key, 'hash', []));
   const base = `h${digest(String(keyHash))}`;
   return yield* findEntryInBucket(hash, key, base);
@@ -122,10 +131,12 @@ function* findEntryInBucket(
     const entry = hash.map.get(slot);
     if (
       entry &&
-      (entry.key === key ||
-        (key instanceof RString
-          ? stringKeyEquals(key, entry.key)
-          : truthy(yield* callMethod(key, 'eql?', [entry.key]))))
+      (sameIdentity(entry.key, key) ||
+        (hash.byIdentity
+          ? false
+          : key instanceof RString
+            ? stringKeyEquals(key, entry.key)
+            : truthy(yield* callMethod(key, 'eql?', [entry.key]))))
     )
       return { base, slot, entry };
   }
@@ -177,7 +188,8 @@ export function* hashGetOrInsert(
     const value = isGenerator(created) ? yield* created : created;
     rt().held.push(value);
     if (recheckFrozen && hash.frozen) throw frozenError(hash, yield* inspect(hash));
-    const stored = key instanceof RString && key.cls === rt().c.String && !key.frozen ? frozenCopy(key) : key;
+    const stored =
+      key instanceof RString && key.cls === rt().c.String && !key.frozen && !hash.byIdentity ? frozenCopy(key) : key;
     return { entry: insertHashEntry(hash, base, slot, stored, value), inserted: true };
   } finally {
     rt().held.length = held;
@@ -202,7 +214,8 @@ export function* hashSet(hash: RHash, key: Value, value: Value): Gen<boolean> {
     key,
     value,
     () => findEntry(hash, key),
-    () => (key instanceof RString && key.cls === rt().c.String && !key.frozen ? frozenCopy(key) : key)
+    () =>
+      key instanceof RString && key.cls === rt().c.String && !key.frozen && !hash.byIdentity ? frozenCopy(key) : key
   );
 }
 
@@ -310,6 +323,7 @@ export function rehash(hash: RHash): void {
   if (hash.iterating > 0) throw runtimeError('rehash during iteration');
   if (hash.frozen) throw frozenError(hash, runToEnd(inspect(hash)));
   const replacement = new RHash(hash.cls);
+  replacement.byIdentity = hash.byIdentity;
   const held = rt().held.length;
   rt().held.push(replacement);
   hash.iterating++;

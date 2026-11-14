@@ -35,7 +35,8 @@ import { hashDefault, hashGet, stringKeyEquals, stringKeyHash } from './hashes';
 import { callBlock, callMethod, type Gen, invoke, nativeProc, requireBlock } from './interp';
 import { makeEnumerator } from './libEnumerator';
 import { parseFloatLenient, parseIntegerLenient } from './libNumeric';
-import { NIL, RArray, RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
+import { type MatchState, setLastMatch, setLiteralMatch } from './libRegexp';
+import { NIL, RArray, RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { successorBytes, transformInvalid } from './stringTransforms';
 import {
@@ -78,7 +79,7 @@ function modify(self: RString): void {
   if (self.frozen) throw frozenError(self, strInspect(self.s));
 }
 
-function setText(self: RString, text: string): void {
+export function setText(self: RString, text: string): void {
   modify(self);
   rt().checkStringLength(text.length);
   const value = str(text);
@@ -197,14 +198,40 @@ def(
   'String',
   'initialize',
   [0, 1],
-  function* (self: RString, args) {
+  function* (self: RString, args, _block, keywords) {
+    let sourceBytes: Uint8Array | undefined;
+    if (args.length === 0) self.binary = true;
     if (args.length > 0) {
       const source = yield* toStrValue(args[0]);
-      setBytes(self, stringBytes(source), source.binary);
+      sourceBytes = stringBytes(source);
+      setBytes(self, sourceBytes, source.binary);
+      self.usAscii = source.usAscii;
     }
+    if (keywords)
+      for (const entry of keywords.map.values()) {
+        const key = entry.key instanceof RSymbol ? entry.key.name : undefined;
+        if (key === 'capacity') {
+          const capacity = yield* toIndex(entry.value);
+          if (capacity > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+        } else if (key === 'encoding') {
+          const encoding =
+            entry.value instanceof RString
+              ? entry.value.s
+              : entry.value instanceof RObject && entry.value.cls === rt().c.Encoding
+                ? (entry.value.data as string)
+                : yield* toStr(entry.value);
+          if (encoding === 'ASCII-8BIT' || encoding === 'BINARY')
+            setBytes(self, sourceBytes ?? stringBytes(self), true);
+          // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby spells the encoding name UTF-8.
+          else if (encoding === 'UTF-8' || encoding === 'US-ASCII') {
+            setBytes(self, sourceBytes ?? stringBytes(self), false);
+            self.usAscii = encoding === 'US-ASCII';
+          } else throw new UnsupportedFeatureError(`String.new の文字コード ${encoding}`);
+        } else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
+      }
     return NIL;
   },
-  { visibility: 'private' }
+  { visibility: 'private', keywords: true }
 );
 sdef(
   'String',
@@ -219,7 +246,7 @@ sdef(
   { keywords: true }
 );
 def('String', ['to_s', 'to_str'], 0, (self: RString) => (self.cls === rt().c.String ? self : copyStringEncoding(self)));
-function copyStringEncoding(self: RString): RString {
+export function copyStringEncoding(self: RString): RString {
   const copy = stringFromBytes(stringBytes(self), self.binary);
   copy.usAscii = self.usAscii;
   return copy;
@@ -286,9 +313,6 @@ def('String', 'to_i', [0, 1], function* (self: RString, args) {
 def('String', 'to_f', 0, (self: RString) => parseFloatLenient(self.s));
 def('String', 'to_c', 0, () => {
   throw new UnsupportedFeatureError('String#to_c（複素数）');
-});
-def('String', 'to_r', 0, () => {
-  throw new UnsupportedFeatureError('String#to_r（有理数）');
 });
 def('String', 'hex', 0, (self: RString) => parseIntegerLenient(self.s, 16));
 def('String', 'oct', 0, (self: RString) => parseIntegerLenient(self.s, 8));
@@ -1205,12 +1229,18 @@ function* substitute(
   let position = 0;
   let positionByte = 0;
   let matched = false;
+  let lastFound = -1;
+  let lastSearchStartByte = 0;
+  let lastState: MatchState | undefined;
   for (;;) {
     const found = text.indexOf(target, position);
     if (found === -1) break;
     const mode = stringTextMode(self);
     const foundByte = textByteLength(text.slice(0, found), mode);
     matched = true;
+    lastFound = found;
+    lastSearchStartByte = positionByte;
+    lastState = setLiteralMatch(self, text, target, found);
     const piece = yield* substitutionPiece(self, target, replacement, block, text, found, foundByte);
     if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
     const modified = (global || mutating) && self.s !== text;
@@ -1231,6 +1261,14 @@ function* substitute(
     if (!global) break;
     rt().spend();
   }
+  if (global)
+    setLiteralMatch(
+      self,
+      text,
+      target,
+      lastFound < 0 ? -1 : text.indexOf(target, textIndexAtByte(text, lastSearchStartByte, stringTextMode(self)))
+    );
+  else setLastMatch(lastState);
   if (positionByte <= sourceLength) append(active.slice(positionByte));
   return { value: stringFromBytes(joinChunks(chunks, length), resultBinary), matched };
 }
@@ -1317,9 +1355,12 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
   let text = self.s;
   const sourceLength = stringBytes(self).length;
   let position = 0;
+  let lastIndex = -1;
   for (;;) {
     const index = text.indexOf(target, position);
     if (index === -1) break;
+    lastIndex = index;
+    setLiteralMatch(self, text, target, index);
     const mode = stringTextMode(self);
     const foundByte = textByteLength(text.slice(0, index), mode);
     const match = textResult(self, target);
@@ -1334,6 +1375,7 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
     position = modified ? textIndexAtByte(text, nextByte, mode) : index + target.length;
     if (position > text.length) break;
   }
+  setLiteralMatch(self, text, target, lastIndex);
   if (!block) return arr(found);
   return self;
 });
@@ -1341,11 +1383,14 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
 function* scanEmpty(self: RString, block: RProc | undefined): Gen<Value> {
   const sourceLength = stringBytes(self).length;
   const found: Value[] = [];
+  let lastIndex = 0;
   for (let offset = 0; offset <= sourceLength;) {
     const bytes = stringBytes(self);
     const first = bytes[offset];
     const width = self.binary || first < 0xc2 || first >= 0xf5 ? 1 : first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
     const match = textResult(self, '');
+    lastIndex = textIndexAtByte(self.s, offset, stringTextMode(self));
+    setLiteralMatch(self, self.s, '', lastIndex);
     if (block) {
       yield* callBlock(block, [match], false);
       if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
@@ -1354,6 +1399,7 @@ function* scanEmpty(self: RString, block: RProc | undefined): Gen<Value> {
     offset += width;
     rt().spend();
   }
+  setLiteralMatch(self, self.s, '', lastIndex);
   return block ? self : arr(found);
 }
 
@@ -1566,6 +1612,8 @@ def('String', 'reverse!', 0, (self: RString) => {
 
 const isSpace = (char: string): boolean => ' \t\n\v\f\r'.includes(char);
 
+// code-gauge-allow functionNcss 40 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionCognitiveComplexity 23 -- Ruby's method takes these argument forms, which the branches mirror.
 export function succ(text: string): string {
   return stringFromBytes(successorBytes(stringBytes(str(text)))).s;
 }
@@ -1727,18 +1775,7 @@ def('String', 'rpartition', 1, function* (self: RString, [separator]) {
 def('String', 'each_grapheme_cluster', 0, () => {
   throw new UnsupportedFeatureError('each_grapheme_cluster');
 });
-for (const name of [
-  'encoding',
-  'force_encoding',
-  'encode',
-  'unicode_normalize',
-  'unpack',
-  'unpack1',
-  'crypt',
-  'b',
-  'scrub',
-  'valid_encoding?',
-]) {
+for (const name of ['force_encoding', 'encode', 'unicode_normalize', 'unpack', 'unpack1', 'crypt', 'b', 'scrub']) {
   def('String', name, [0, -1], () => {
     throw new UnsupportedFeatureError(`String#${name}（文字コード）`);
   });

@@ -1,4 +1,4 @@
-import { inspect, inspectHash, rEql, rEquals, toIndexExact } from './conversions';
+import { inspect, inspectHash, rEql, rEquals, toIndexExact, tryImplicitConversion } from './conversions';
 import { def, sdef } from './define';
 import {
   argumentError,
@@ -26,7 +26,7 @@ import { nativeFlatten, tryAry } from './libArray';
 import { sum } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { type HashEntry, isRubyFloat, NIL, RArray, RHash, RProc, RSymbol, type Value } from './objects';
-import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
+import { rt, whileHeld } from './runtime';
 import { arr, newHash, realClassOf, snapshot, truthy } from './values';
 
 function* modify(self: RHash): Gen<void> {
@@ -35,8 +35,8 @@ function* modify(self: RHash): Gen<void> {
 
 function* toHash(value: Value): Gen<RHash> {
   if (value instanceof RHash) return value;
-  if (respondsTo(value, 'to_hash', true)) {
-    const converted = yield* callMethod(value, 'to_hash', [], undefined, undefined, { fcall: true });
+  const converted = yield* tryImplicitConversion(value, 'to_hash');
+  if (converted !== undefined) {
     if (converted instanceof RHash) return converted;
     const name = realClassOf(value).name;
     throw typeError(`can't convert ${name} to Hash (${name}#to_hash gives ${realClassOf(converted).name})`);
@@ -99,7 +99,10 @@ sdef('Hash', '[]', [0, -1], function* (self, args) {
     const source = args.length === 1 ? yield* hashLiteralSource(args[0]) : undefined;
     if (source) rt().held.push(source);
     if (source instanceof RHash) {
-      for (const [slot, entry] of source.map) copyEntry(hash, slot, entry);
+      for (const [slot, entry] of source.map) {
+        if (source.byIdentity) yield* hashSet(hash, entry.key, entry.value);
+        else copyEntry(hash, slot, entry);
+      }
       return hash;
     }
     if (source instanceof RArray) {
@@ -122,16 +125,18 @@ sdef('Hash', '[]', [0, -1], function* (self, args) {
 
 function* hashLiteralSource(value: Value): Gen<RHash | RArray | undefined> {
   if (value instanceof RHash || value instanceof RArray) return value;
-  if (respondsTo(value, 'to_hash', true)) {
-    const converted = yield* callMethod(value, 'to_hash', [], undefined, undefined, { fcall: true });
+  const hashValue = yield* tryImplicitConversion(value, 'to_hash');
+  if (hashValue !== undefined) {
+    const converted = hashValue;
     if (converted instanceof RHash) return converted;
     if (converted !== NIL)
       throw typeError(
         `can't convert ${realClassOf(value).name} to Hash (${realClassOf(value).name}#to_hash gives ${realClassOf(converted).name})`
       );
   }
-  if (respondsTo(value, 'to_ary', true)) {
-    const converted = yield* callMethod(value, 'to_ary', [], undefined, undefined, { fcall: true });
+  const arrayValue = yield* tryImplicitConversion(value, 'to_ary');
+  if (arrayValue !== undefined) {
+    const converted = arrayValue;
     if (converted instanceof RArray) return converted;
     if (converted !== NIL)
       throw typeError(
@@ -224,10 +229,12 @@ def('Hash', 'to_h', 0, function* (self: RHash, _args, block) {
   });
 });
 def('Hash', 'to_hash', 0, (self) => self);
+def('Hash', 'deconstruct_keys', 1, (self) => self);
 def('Hash', 'to_a', 0, (self: RHash) => arr([...self.map.values()].map((entry) => arr([entry.key, entry.value]))));
 def('Hash', '==', 1, (self: RHash, [other]) => rEquals(self, other));
 def('Hash', 'eql?', 1, function* (self: RHash, [other]) {
   if (!(other instanceof RHash) || self.map.size !== other.map.size) return false;
+  if (self.map.size > 0 && self.byIdentity !== other.byIdentity) return false;
   self.iterating++;
   try {
     for (const entry of self.map.values()) {
@@ -253,6 +260,7 @@ def('Hash', 'default_proc', 0, (self: RHash) => self.defaultProc ?? NIL);
 
 function copy(self: RHash, preserveClass = false): RHash {
   const hash = newHash();
+  hash.byIdentity = self.byIdentity;
   if (preserveClass) {
     hash.cls = self.cls;
     hash.ivars = self.ivars ? new Map(self.ivars) : undefined;
@@ -290,6 +298,7 @@ def('Hash', 'each_value', 0, function* (self: RHash, _args, block) {
 
 function* filtered(self: RHash, block: RProc, keep: boolean): Gen<RHash> {
   const hash = newHash();
+  hash.byIdentity = self.byIdentity;
   yield* whileHeld(hash, () =>
     eachEntry(self, function* (entry, slot) {
       if (truthy(yield* pair(block, entry.key, entry.value)) === keep) copyEntry(hash, slot, entry);
@@ -441,6 +450,7 @@ def('Hash', ['merge!', 'update'], [0, -1], function* (self: RHash, others, block
 def('Hash', 'transform_values', 0, function* (self: RHash, _args, block) {
   if (!block) return makeEnumerator(self, 'transform_values', []);
   const hash = newHash();
+  hash.byIdentity = self.byIdentity;
   yield* whileHeld(hash, () =>
     eachEntry(self, function* (entry) {
       yield* hashSet(hash, entry.key, yield* callBlock(block, [entry.value]));
@@ -461,9 +471,10 @@ def('Hash', 'transform_values!', 0, function* (self: RHash, _args, block) {
   return self;
 });
 
-function* transformKeys(self: RHash, args: Value[], block: RProc | undefined): Gen<RHash> {
+function* transformKeys(self: RHash, args: Value[], block: RProc | undefined, preserveMode = false): Gen<RHash> {
   const mapping = args.length > 0 ? yield* toHash(args[0]) : undefined;
   const hash = newHash();
+  hash.byIdentity = preserveMode && self.byIdentity;
   yield* whileHeld(mapping ?? NIL, () =>
     whileHeld(hash, () =>
       eachEntry(self, function* (entry) {
@@ -483,7 +494,7 @@ def('Hash', 'transform_keys', [0, 1], function* (self: RHash, args, block) {
 def('Hash', 'transform_keys!', [0, 1], function* (self: RHash, args, block) {
   if (!block && args.length === 0) return makeEnumerator(self, 'transform_keys!', []);
   yield* modify(self);
-  const result = yield* transformKeys(self, args, block);
+  const result = yield* transformKeys(self, args, block, true);
   yield* modify(self);
   self.map = result.map;
   self.bucketVersion = -1;
@@ -500,6 +511,7 @@ def('Hash', 'invert', 0, function* (self: RHash) {
 });
 def('Hash', 'slice', [0, -1], function* (self: RHash, keys) {
   const hash = newHash();
+  hash.byIdentity = self.byIdentity;
   return yield* whileHeld(hash, function* () {
     for (const key of keys) {
       const entry = yield* hashGet(self, key);
@@ -581,9 +593,15 @@ def('Hash', 'rehash', 0, (self: RHash) => {
   rehash(self);
   return self;
 });
-def('Hash', ['compare_by_identity'], 0, () => {
-  throw new UnsupportedFeatureError('compare_by_identity');
+def('Hash', 'compare_by_identity', 0, function* (self: RHash) {
+  if (self.byIdentity) return self;
+  yield* modify(self);
+  if (self.iterating > 0) throw runtimeError('compare_by_identity during iteration');
+  self.byIdentity = true;
+  rehash(self);
+  return self;
 });
+def('Hash', 'compare_by_identity?', 0, (self: RHash) => self.byIdentity);
 def('Hash', 'default_proc=', 1, function* (self: RHash, [proc]) {
   yield* modify(self);
   if (proc === NIL) {

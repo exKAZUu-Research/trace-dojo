@@ -1,8 +1,8 @@
 import type { Params, ParamTarget } from './ast';
-import { inspect } from './conversions';
+import { inspect, tryImplicitConversion } from './conversions';
 import { argumentError, expectedArity, typeError } from './errors';
 import { hashSetStored } from './hashes';
-import { callMethod, destructure, ev, type Gen, respondsTo } from './interp';
+import { destructure, ev, type Gen } from './interp';
 import { NIL, RArray, type RHash, RSymbol, type Value } from './objects';
 import { type Frame, rootValues } from './runtime';
 import { arr, newHash, realClassOf } from './values';
@@ -21,6 +21,7 @@ export function* bindParams(
   const { scope } = frame;
   const takesKeywords = params.keywords.length > 0 || params.keywordRest !== undefined;
   let args = given;
+  if (keywords && params.noKeywords) throw argumentError('no keywords accepted');
   if (keywords && !takesKeywords) {
     args = [...args, keywords];
     keywords = undefined;
@@ -31,10 +32,10 @@ export function* bindParams(
     if (args.length === 1 && autoSplats(params)) {
       const value = args[0];
       let array = value instanceof RArray ? value : undefined;
-      if (!array && respondsTo(value, 'to_ary', true)) {
-        const converted = yield* callMethod(value, 'to_ary', [], undefined, undefined, { fcall: true });
+      if (!array) {
+        const converted = yield* tryImplicitConversion(value, 'to_ary');
         if (converted instanceof RArray) array = converted;
-        else if (converted !== NIL)
+        else if (converted !== undefined && converted !== NIL)
           throw typeError(
             `can't convert ${realClassOf(value).name} to Array (${realClassOf(value).name}#to_ary gives ${realClassOf(converted).name})`
           );
@@ -65,7 +66,7 @@ export function* bindParams(
     if (params.rest !== undefined) {
       const restCount = Math.max(0, args.length - index - params.post.length);
       const rest = arr(args.slice(index, index + restCount));
-      if (params.rest !== '') scope.vars.set(params.rest, rest);
+      scope.vars.set(params.rest, rest);
       index += restCount;
     }
     for (const param of params.post) yield* bindParam(param, args[index++] ?? NIL, frame);
