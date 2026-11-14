@@ -23,11 +23,13 @@ import type {
   Use,
 } from './ast';
 import { decodeDoubleQuoted, decodeSingleQuoted } from './escapes';
+import { regexpCaptureNames } from './regexpCaptureNames';
 
 /** The local variables of one scope; a block's scope sees its parents' variables. */
 class LocalScope {
   readonly names: string[] = [];
   private readonly set = new Set<string>();
+  readonly implicitNames = new Set<string>();
 
   constructor(
     readonly kind: 'top' | 'method' | 'class' | 'block',
@@ -50,6 +52,17 @@ class LocalScope {
       depth++;
     }
     return -1;
+  }
+
+  implicitDeclaration(name: string): boolean {
+    for (
+      let scope: LocalScope | undefined = this.self();
+      scope;
+      scope = scope.kind === 'block' ? scope.parent : undefined
+    ) {
+      if (scope.set.has(name)) return scope.implicitNames.has(name);
+    }
+    return false;
   }
 
   declare(name: string): number {
@@ -476,10 +489,17 @@ export class Converter {
   private identifier(node: Node, use: Use): Expr {
     const name = node.text;
     const depth = this.ctx.scope.depthOf(name);
+    if (name === 'it' && depth > 0 && this.ctx.implicit && this.ctx.scope.implicitDeclaration(name)) {
+      this.ctx.implicit.add(name);
+      this.ctx.scope.declareOwn(name);
+      this.ctx.scope.implicitNames.add(name);
+      return { k: 'lvar', name, depth: 0 };
+    }
     if (depth >= 0) return { k: 'lvar', name, depth };
     if (this.ctx.implicit && (name === 'it' || /^_[1-9]$/.test(name))) {
       this.ctx.implicit.add(name);
       this.ctx.scope.declareOwn(name);
+      this.ctx.scope.implicitNames.add(name);
       return { k: 'lvar', name, depth: 0 };
     }
     if (name === '__FILE__') return { k: 'str', parts: ['main.rb'] };
@@ -916,6 +936,19 @@ export class Converter {
     const left = this.valueExpr(leftNode);
     // Ruby checks only the left operand of `&&` and `||` for a value.
     const right = LOGICAL_OPERATORS.has(operator) ? this.expr(rightNode) : this.valueExpr(rightNode);
+    if (
+      operator === '=~' &&
+      leftNode.type === 'regex' &&
+      left.k === 'regex' &&
+      left.parts.every((part) => typeof part === 'string')
+    ) {
+      const names = regexpCaptureNames(left.parts.join('')).map((name) => ({
+        k: 'lvar' as const,
+        name,
+        depth: this.ctx.scope.declare(name),
+      }));
+      if (names.length > 0) return { k: 'matchWrite', match: this.operatorCall(node, left, operator, [right]), names };
+    }
     switch (operator) {
       case '&&':
       case 'and': {
@@ -1535,23 +1568,14 @@ function methodNameOf(node: Node): string {
 /** Removes the indentation that every line of a `<<~` heredoc shares, from the starts of its lines. */
 // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of syntax node.
 function dedent(pieces: (string | Node)[]): void {
-  let atLineStart = true;
+  const source = pieces.map((piece) => (typeof piece === 'string' ? piece : '\uFFFC')).join('');
   let indent = Number.POSITIVE_INFINITY;
-  for (const piece of pieces) {
-    if (typeof piece !== 'string') {
-      atLineStart = false;
-      continue;
-    }
-    for (const [index, line] of piece.split('\n').entries()) {
-      if (index > 0) atLineStart = true;
-      if (!atLineStart) continue;
-      const blanks = /^[ \t]*/.exec(line)?.[0].length ?? 0;
-      if (blanks < line.length) indent = Math.min(indent, blanks);
-      atLineStart = false;
-    }
+  for (const line of source.split('\n')) {
+    const blanks = /^[ \t]*/.exec(line)?.[0].length ?? 0;
+    if (blanks < line.length) indent = Math.min(indent, blanks);
   }
   if (!Number.isFinite(indent) || indent === 0) return;
-  atLineStart = true;
+  let atLineStart = true;
   for (const [position, piece] of pieces.entries()) {
     if (typeof piece !== 'string') {
       atLineStart = false;
@@ -1714,6 +1738,9 @@ function childrenOf(e: Expr): Expr[] {
     }
     case 'call': {
       return [...(e.recv ? [e.recv] : []), ...e.args];
+    }
+    case 'matchWrite': {
+      return [e.match];
     }
     case 'and':
     case 'or': {

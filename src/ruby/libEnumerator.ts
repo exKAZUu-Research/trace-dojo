@@ -306,8 +306,12 @@ function sourceOf(self: RObject): EnumeratorSource {
 
 /** Runs the enumerator's method, passing each yielded value (several packed into an array) to `visit`. */
 export function* iterateEnumerator(self: RObject, visit: (value: Value) => Gen): Gen {
+  return yield* iterateEnumeratorArgs(self, (args) => visit(args.length === 1 ? args[0] : arr(args)));
+}
+
+function* iterateEnumeratorArgs(self: RObject, visit: (args: Value[]) => Gen): Gen {
   const source = sourceOf(self);
-  const block = nativeProc(-1, (args) => visit(args.length === 1 ? args[0] : arr(args)));
+  const block = nativeProc(-1, visit);
   return yield* runSource(source, block);
 }
 
@@ -624,7 +628,7 @@ export function curry(proc: RProc, arity: number, collected: Value[]): Value {
 
 /** A value the iteration hands to `next`, suspending the generators that run the enumerator's method. */
 class Suspension {
-  constructor(readonly value: Value) {}
+  constructor(readonly args: Value[]) {}
 }
 
 interface Cursor {
@@ -632,15 +636,15 @@ interface Cursor {
   /** The frames, held values, and catch tags of the suspended calls, put back while the iteration resumes. */
   frames: Frame[];
   held: Value[];
-  peeked: Value[];
+  peeked: Value[][];
   result?: Value;
 }
 
 function startCursor(self: RObject): Cursor {
   const runner = flattenGenerator(
     (function* () {
-      return yield* iterateEnumerator(self, function* (value) {
-        return (yield new Suspension(value)) as Value;
+      return yield* iterateEnumeratorArgs(self, function* (args) {
+        return (yield new Suspension(args)) as Value;
       });
     })()
   );
@@ -648,11 +652,11 @@ function startCursor(self: RObject): Cursor {
 }
 
 /** Resumes the iteration until it yields its next value, or raises StopIteration when it has ended. */
-function nextValue(self: RObject): Value {
+function nextValues(self: RObject): Value[] {
   const source = sourceOf(self);
   source.cursor ??= startCursor(self);
   const cursor = source.cursor;
-  if (cursor.peeked.length > 0) return cursor.peeked.shift() as Value;
+  if (cursor.peeked.length > 0) return cursor.peeked.shift() as Value[];
   if (cursor.result !== undefined) throw stopIteration(cursor.result);
   const runtime = rt();
   const frameBase = runtime.frames.length;
@@ -673,7 +677,12 @@ function nextValue(self: RObject): Value {
     throw stopIteration(step.value);
   }
   if (!(step.value instanceof Suspension)) throw new Error('An enumerator suspended for another reason');
-  return step.value.value;
+  return step.value.args;
+}
+
+function nextValue(self: RObject): Value {
+  const args = nextValues(self);
+  return args.length === 0 ? NIL : args.length === 1 ? args[0] : arr(args);
 }
 
 function stopIteration(result: Value): unknown {
@@ -684,17 +693,21 @@ function stopIteration(result: Value): unknown {
 
 def('Enumerator', 'next', 0, (self: RObject) => nextValue(self));
 def('Enumerator', 'peek', 0, (self: RObject) => {
-  const value = nextValue(self);
-  (sourceOf(self).cursor as Cursor).peeked.unshift(value);
-  return value;
+  const args = nextValues(self);
+  (sourceOf(self).cursor as Cursor).peeked.unshift(args);
+  return args.length === 0 ? NIL : args.length === 1 ? args[0] : arr(args);
 });
 def('Enumerator', 'rewind', 0, (self: RObject) => {
   sourceOf(self).cursor = undefined;
   return self;
 });
 def('Enumerator', 'next_values', 0, (self: RObject) => {
-  const value = nextValue(self);
-  return arr([value]);
+  return arr(nextValues(self));
+});
+def('Enumerator', 'peek_values', 0, (self: RObject) => {
+  const args = nextValues(self);
+  (sourceOf(self).cursor as Cursor).peeked.unshift(args);
+  return arr(args);
 });
 
 // Enumerator.new and its yielder --------------------------------------------------------------------------------------

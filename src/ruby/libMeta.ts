@@ -107,10 +107,13 @@ function methodObject(recv: Value, method: RMethod): RObject {
   return object;
 }
 
-function* findForMethodObject(self: Value, name: string): Gen<RMethod> {
+function* findForMethodObject(self: Value, name: string, publicOnly = false): Gen<RMethod> {
   const method = classOf(self).findMethod(name);
-  if (method) return method;
-  if (yield* respondsToName(self, name, true)) {
+  if (method) {
+    if (!publicOnly || method.visibility === 'public') return method;
+    throw nameError(`method '${name}' for class '${realClassOf(self).name}' is ${method.visibility}`, self, name);
+  }
+  if (yield* respondsToName(self, name, !publicOnly)) {
     const missing = classOf(self).findMethod('method_missing') as RMethod;
     return {
       name,
@@ -129,8 +132,11 @@ function* findForMethodObject(self: Value, name: string): Gen<RMethod> {
   throw nameError(`undefined method '${name}' for ${description}`, self, name);
 }
 
-def('Kernel', ['method', 'public_method'], 1, function* (self, [name]) {
+def('Kernel', 'method', 1, function* (self, [name]) {
   return methodObject(self, yield* findForMethodObject(self, yield* nameOf(name)));
+});
+def('Kernel', 'public_method', 1, function* (self, [name]) {
+  return methodObject(self, yield* findForMethodObject(self, yield* nameOf(name), true));
 });
 def(
   'Method',

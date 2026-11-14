@@ -136,6 +136,7 @@ export type Expr =
   | { k: 'lambda'; block: BlockDef }
   | { k: 'rescueMod'; body: Expr; handler: Expr }
   | { k: 'regex'; parts: StrPart[]; flags: string }
+  | { k: 'matchWrite'; match: Expr; names: LocalRef[] }
   | { k: 'sclass'; target: Expr; body: Body; row: number }
   | { k: 'alias'; newName: string; oldName: string }
   | { k: 'undef'; names: string[] }

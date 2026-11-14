@@ -27,7 +27,7 @@ import {
 } from './errors';
 import { hashGet, hashSet, hashSetStored } from './hashes';
 import { makeRational } from './libRational';
-import { isRegexp, makeRegexp, matchGlobal } from './libRegexp';
+import { lastMatch, makeRegexp, matchGlobal } from './libRegexp';
 import {
   boxFloat,
   invalidateMethodCaches,
@@ -428,7 +428,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
         else if ('text' in part) source += part.text;
         else {
           const value = yield* ev(part, frame);
-          source += isRegexp(value) ? (value.data as { source: string }).source : yield* toS(value);
+          source += yield* toS(value);
         }
       }
       return makeRegexp(source, {
@@ -436,6 +436,15 @@ export function* ev(e: Expr, frame: Frame): Gen {
         multiline: e.flags.includes('m'),
         extended: e.flags.includes('x'),
       });
+    }
+    case 'matchWrite': {
+      const result = yield* ev(e.match, frame);
+      const match = lastMatch();
+      for (const target of e.names) {
+        const value = match === NIL ? NIL : yield* callMethod(match, '[]', [str(target.name)]);
+        frame.scope.assign(target.name, target.depth, value);
+      }
+      return result;
     }
   }
 }
@@ -1976,7 +1985,7 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
   runtime.pushFrame(frame);
   const savedRow = runtime.currentRow;
   try {
-    if (!def.params && proc.isLambda && (args.length > 0 || options.keywords)) {
+    if (!def.params && (proc.isLambda || options.lambdaArgs) && (args.length > 0 || options.keywords)) {
       throw argumentCountError(args.length + (options.keywords ? 1 : 0), 0, 0);
     }
     if (def.params) {
@@ -1995,7 +2004,7 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
     return yield* evalRedoable(def.body, frame);
   } catch (error) {
     if (error instanceof NextSignal) return error.value;
-    if (proc.isLambda) {
+    if (proc.isLambda || options.lambdaArgs) {
       if (error instanceof ReturnSignal && error.target === frame) return error.value;
       if (error instanceof BreakSignal && error.tag === proc.breakTag) return error.value;
     }

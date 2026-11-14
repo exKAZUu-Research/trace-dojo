@@ -6,6 +6,7 @@ import { hashGet, hashSet } from './hashes';
 import { callBlock, callMethod, type Gen } from './interp';
 import { makeEnumerator } from './libEnumerator';
 import { type NativeFn, NIL, RArray, RHash, RObject, type RProc, RString, RSymbol, type Value } from './objects';
+import { regexpCaptureNames } from './regexpCaptureNames';
 import { type Frame, rt, UnsupportedFeatureError } from './runtime';
 import { arr, newHash, str, sym, truthy } from './values';
 
@@ -56,6 +57,7 @@ const SYNTAX = String.raw`^$\.*+?()[]{}|/-`;
 export function translate(source: string, extended: boolean): string {
   let out = '';
   let inClass = 0;
+  const namedCaptures = regexpCaptureNames(source).length > 0;
   for (let index = 0; index < source.length; index++) {
     const char = source[index];
     if (extended && inClass === 0) {
@@ -99,16 +101,28 @@ export function translate(source: string, extended: boolean): string {
     if (inClass > 0 && char === '&' && source[index + 1] === '&') throw unsupportedSyntax('文字クラスの積集合（&&）');
     if (inClass === 0 && char === '(' && source[index + 1] === '?') {
       const rest = source.slice(index + 2);
-      if (rest.startsWith('>')) {
-        out += '(?:';
-        index += 2;
+      if (rest.startsWith('>')) throw unsupportedSyntax('アトミックグループ（(?>)）');
+      const scoped = /^([imx]*)(?:-([imx]*))?:/.exec(rest);
+      if (scoped) {
+        const enabled = scoped[1];
+        const disabled = scoped[2] ?? '';
+        if (enabled.includes('x') || (extended && disabled.includes('x')))
+          throw unsupportedSyntax('中のオプションの指定（(?x:...)）');
+        const on = enabled.replaceAll('m', 's').replaceAll('x', '');
+        const off = disabled.replaceAll('m', 's').replaceAll('x', '');
+        out += on || off ? `(?${on}${off ? `-${off}` : ''}:` : '(?:';
+        index += scoped[0].length + 1;
         continue;
       }
-      if (/^[imx-]+[:)]/.test(rest)) throw unsupportedSyntax('正規表現の中のオプションの指定（(?i) など）');
+      if (/^[imx-]+[:)]/.test(rest)) throw unsupportedSyntax('中のオプションの指定（(?i) など）');
       if (rest.startsWith('#')) {
         index = source.indexOf(')', index);
         continue;
       }
+    }
+    if (inClass === 0 && char === '(' && source[index + 1] !== '?' && namedCaptures) {
+      out += '(?:';
+      continue;
     }
     if (inClass === 0 && char === '+' && /[*+?}]/.test(source[index - 1] ?? '') && source[index - 2] !== '\\') {
       throw unsupportedSyntax('強欲な量指定子（*+ など）');
@@ -168,13 +182,13 @@ function translateEscape(
     }
     default: {
       if (/[dDwWsSbBnrtfv0-9xuc]/.test(next)) return `\\${next}`;
-      return SYNTAX.includes(next) ? `\\${next}` : next;
+      return SYNTAX.includes(next) && (next !== '-' || inClass) ? `\\${next}` : next;
     }
   }
 }
 
 function unsupportedSyntax(feature: string): unknown {
-  return new UnsupportedFeatureError(`正規表現の ${feature}`);
+  return new UnsupportedFeatureError(`正規表現の${feature}`);
 }
 
 export function makeRegexp(
@@ -222,7 +236,12 @@ export interface MatchState {
 /** Character positions from UTF-16 offsets, as Ruby counts positions in characters. */
 function charIndex(text: string, unit: number): number {
   if (!/[\uD800-\uDFFF]/.test(text)) return unit;
-  return text.slice(0, unit).length;
+  let count = 0;
+  for (let index = 0; index < unit; index++) {
+    if ((text.codePointAt(index) as number) > 0xff_ff) index++;
+    count++;
+  }
+  return count;
 }
 
 function unitIndex(text: string, char: number): number {
@@ -239,7 +258,7 @@ export function execAt(regexp: RObject, text: string, start: number): MatchState
   if (!result?.indices) return undefined;
   const names: string[] = [];
   const namedGroups: Record<string, number> = {};
-  const nameOrder = [...js.source.matchAll(/\(\?<([A-Za-z_]\w*)>/g)].map((match) => match[1]);
+  const nameOrder = regexpCaptureNames(js.source);
   for (const [position, name] of nameOrder.entries()) {
     names.push(name);
     namedGroups[name] = position + 1;
@@ -397,9 +416,7 @@ def('Regexp', ['==', 'eql?'], 1, (self: RObject, [other]) => {
   );
 });
 def('Regexp', 'hash', 0, (self: RObject) => BigInt(dataOf(self).source.length));
-def('Regexp', 'names', 0, (self: RObject) =>
-  arr([...dataOf(self).js.source.matchAll(/\(\?<([A-Za-z_]\w*)>/g)].map((m) => str(m[1])))
-);
+def('Regexp', 'names', 0, (self: RObject) => arr(regexpCaptureNames(dataOf(self).js.source).map((name) => str(name))));
 
 function* subjectText(value: Value): Gen<string | undefined> {
   if (value === NIL) return undefined;

@@ -1,6 +1,6 @@
 import { compareValues, toFloat, toInt, toStr } from './conversions';
 import { def, sdef } from './define';
-import { argumentError, typeError } from './errors';
+import { argumentError, frozenError, typeError } from './errors';
 import type { Gen } from './interp';
 import { NIL, RObject, RString, type Value } from './objects';
 import { rt } from './runtime';
@@ -93,10 +93,18 @@ sdef('Time', ['new', 'local', 'mktime'], [0, 7], function* (self, args) {
   return yield* buildTime(args, LOCAL_OFFSET, 'local');
 });
 sdef('Time', ['utc', 'gm'], [1, 7], (_self, args) => buildTime(args, 0, 'utc'));
-sdef('Time', 'at', [1, 2], function* (_self, [seconds]) {
-  if (typeof seconds === 'bigint') return makeTime(seconds * 1_000_000_000n);
-  if (seconds instanceof RObject && seconds.data instanceof TimeData) return makeTime(seconds.data.nanoseconds);
-  return makeTime(BigInt(Math.round((yield* toFloat(seconds)) * 1e9)));
+sdef('Time', 'at', [1, 2], function* (_self, args) {
+  const [seconds, microseconds] = args;
+  if (seconds instanceof RObject && seconds.data instanceof TimeData) {
+    if (microseconds !== undefined) throw typeError("can't convert Time into an exact number");
+    return makeTime(seconds.data.nanoseconds);
+  }
+  const nanoseconds =
+    typeof seconds === 'bigint' ? seconds * 1_000_000_000n : BigInt(Math.round((yield* toFloat(seconds)) * 1e9));
+  if (microseconds === undefined) return makeTime(nanoseconds);
+  const additional =
+    typeof microseconds === 'bigint' ? microseconds * 1000n : BigInt(Math.round((yield* toFloat(microseconds)) * 1e3));
+  return makeTime(nanoseconds + additional);
 });
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -297,11 +305,26 @@ def('Time', ['utc_offset', 'gmt_offset', 'gmtoff'], 0, (self: RObject) => BigInt
 def('Time', ['utc?', 'gmt?'], 0, (self: RObject) => dataOf(self).zone === 'utc');
 def('Time', 'to_i', 0, (self: RObject) => floorDivide(dataOf(self).nanoseconds, 1_000_000_000n));
 def('Time', 'to_f', 0, (self: RObject) => Number(dataOf(self).nanoseconds) / 1e9);
-def('Time', ['utc', 'getutc', 'gmtime', 'getgm'], 0, (self: RObject) => makeTime(dataOf(self).nanoseconds, 0, 'utc'));
-def('Time', ['localtime', 'getlocal'], [0, 1], function* (self: RObject, args) {
-  if (args.length > 0) return makeTime(dataOf(self).nanoseconds, yield* parseOffset(args[0]), 'fixed');
-  return makeTime(dataOf(self).nanoseconds);
+def('Time', ['getutc', 'getgm'], 0, (self: RObject) => makeTime(dataOf(self).nanoseconds, 0, 'utc'));
+def('Time', ['utc', 'gmtime'], 0, (self: RObject) => changeZone(self, 0, 'utc'));
+def('Time', 'getlocal', [0, 1], function* (self: RObject, args) {
+  return args.length > 0
+    ? makeTime(dataOf(self).nanoseconds, yield* parseOffset(args[0]), 'fixed')
+    : makeTime(dataOf(self).nanoseconds);
 });
+def('Time', 'localtime', [0, 1], function* (self: RObject, args) {
+  return args.length > 0
+    ? changeZone(self, yield* parseOffset(args[0]), 'fixed')
+    : changeZone(self, LOCAL_OFFSET, 'local');
+});
+
+function changeZone(self: RObject, offset: number, zone: TimeData['zone']): RObject {
+  const data = dataOf(self);
+  if (data.offset === offset && data.zone === zone) return self;
+  if (self.frozen) throw frozenError(self, timeText(data, true));
+  self.data = new TimeData(data.nanoseconds, offset, zone);
+  return self;
+}
 def('Time', 'to_a', 0, (self: RObject) => {
   const data = dataOf(self);
   const date = data.fields();
@@ -320,6 +343,10 @@ def('Time', 'to_a', 0, (self: RObject) => {
 });
 def('Time', 'round', [0, 1], function* (self: RObject, args) {
   const digits = args.length > 0 ? Number(yield* toInt(args[0])) : 0;
+  if (digits >= 9) {
+    const data = dataOf(self);
+    return makeTime(data.nanoseconds, data.offset, data.zone);
+  }
   const unit = 10n ** BigInt(9 - digits);
   const data = dataOf(self);
   const rounded = floorDivide(data.nanoseconds + unit / 2n, unit) * unit;

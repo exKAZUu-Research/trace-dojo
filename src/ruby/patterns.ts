@@ -140,8 +140,7 @@ function* matchHash(pattern: Extract<Pattern, { k: 'hash' }>, value: Value, fram
   let hash: RHash;
   if (value instanceof RHash) hash = value;
   else if (respondsTo(value, 'deconstruct_keys')) {
-    const keys =
-      pattern.rest === undefined || pattern.rest === 'nil' ? arr(pattern.pairs.map((pair) => sym(pair.key))) : NIL;
+    const keys = pattern.rest === undefined ? arr(pattern.pairs.map((pair) => sym(pair.key))) : NIL;
     const result = yield* callMethod(value, 'deconstruct_keys', [keys]);
     if (!(result instanceof RHash)) throw typeError('deconstruct_keys must return Hash');
     hash = result;

@@ -4884,3 +4884,84 @@ test('exit handlers continue after an exception and expose it to earlier handler
     uncaughtException: expect.stringContaining('oops'),
   });
 });
+
+test('nested parameterless blocks bind their own implicit it', () => {
+  expect(run('p [[1,2],[3]].map { it.map { it + 1 } }')).toMatchObject({
+    stdout: '[[2, 3], [4]]\n',
+  });
+  expect(run('it=9;p [1].map { it }')).toMatchObject({ stdout: '[9]\n' });
+});
+
+test('squiggly heredocs measure indentation before interpolation', () => {
+  const source = 'x=5;s=<<~EOS\n  #{x}\n    b\nEOS\np s';
+  expect(run(source)).toMatchObject({ stdout: '"5\\n  b\\n"\n' });
+});
+
+test('hash patterns with nil rest request every deconstructed key', () => {
+  const source =
+    'class X;def deconstruct_keys(keys);p keys;keys ? {a:1} : {a:1,b:2};end;end;case X.new;in {a:,**nil};puts :yes;else;puts :no;end';
+  expect(run(source)).toMatchObject({ stdout: 'nil\nno\n' });
+});
+
+test('Time.at includes microseconds and normalizes negative values', () => {
+  expect(run('p Time.at(0,500000).to_f,Time.at(0,-500000).to_f,Time.at(1,1.5).nsec')).toMatchObject({
+    stdout: '0.5\n-0.5\n1500\n',
+  });
+});
+
+test('define_method treats return in its body as a method return', () => {
+  expect(
+    run('class A;define_method(:value){return 42};define_method(:other,proc{return 7});end;p A.new.value,A.new.other')
+  ).toMatchObject({
+    stdout: '42\n7\n',
+  });
+});
+
+test('public_method rejects private and protected methods', () => {
+  const source =
+    'class A;private;def secret;42;end;protected;def guarded;7;end;end;p A.new.method(:secret).call;[:secret,:guarded].each{|name|begin;A.new.public_method(name);rescue NameError=>e;p e.class;end}';
+  expect(run(source)).toMatchObject({ stdout: '42\nNameError\nNameError\n' });
+});
+
+test('external Enumerator values retain the original yield arguments', () => {
+  const source =
+    'e=Enumerator.new{|y|y.yield 1,2;y.yield [3,4];y.yield};p e.peek_values,e.next_values,e.next_values,e.next_values';
+  expect(run(source)).toMatchObject({ stdout: '[1, 2]\n[1, 2]\n[[3, 4]]\n[]\n' });
+});
+
+test('Time zone mutation is distinct from copying and checks frozen receivers', () => {
+  const source =
+    't=Time.at(0);u=t.getutc;p t.utc?,u.utc?;p t.utc.equal?(t),t.utc?;t.localtime;p t.utc?;t.freeze;begin;t.utc;rescue FrozenError=>e;p e.class;end';
+  expect(run(source)).toMatchObject({ stdout: 'false\ntrue\ntrue\ntrue\nfalse\nFrozenError\n' });
+});
+
+test('Time rounds at finer than nanosecond precision', () => {
+  expect(run('p Time.at(0,500000).round(10).to_f')).toMatchObject({ stdout: '0.5\n' });
+});
+
+test('Regexp rejects atomic groups whose backtracking differs', () => {
+  expect(run('p /(?>a|ab)c/.match?("abc")')).toMatchObject({
+    uncaughtException: expect.stringContaining('使えません。'),
+  });
+});
+
+test('Regexp indices count Unicode characters and named groups retain numbering', () => {
+  expect(run('p /x/.match("😀x").begin(0), /x/ =~ "😀x"')).toMatchObject({ stdout: '1\n1\n' });
+  expect(run('p /(?<foo>a)(b)(?<bar>c)/.match("abc").named_captures')).toMatchObject({
+    stdout: '{"foo" => "a", "bar" => "c"}\n',
+  });
+});
+
+test('Regexp translation handles escaped hyphens and scoped options', () => {
+  expect(run(String.raw`p "123-4567" =~ /\d{3}\-\d{4}/`)).toMatchObject({ stdout: '0\n' });
+  const source = 'word=/hello/i;p "HELLO world" =~ /#{word} world/;p(/#{word} world/.source);p Regexp.union("a",/b/)';
+  expect(run(source)).toMatchObject({ stdout: '0\n"(?i-mx:hello) world"\n/a|(?-mix:b)/\n' });
+  expect(run('p "hello" =~ /(?i)L/')).toMatchObject({
+    uncaughtException: '正規表現の中のオプションの指定（(?i) など）は、この採点環境では使えません。',
+  });
+});
+
+test('literal Regexp named captures assign locals on match and clear them on miss', () => {
+  const source = String.raw`year="none";if /(?<year>\d+)-/ =~ "2024-01";p year;end;p((/(?<month>\d+)/ =~ "none"),month)`;
+  expect(run(source)).toMatchObject({ stdout: '"2024"\nnil\nnil\n' });
+});
