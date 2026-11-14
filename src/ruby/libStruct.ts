@@ -119,7 +119,7 @@ function* newStructClass(superclass: RClass, members: string[], layout: Omit<Lay
       visibility: 'public',
       body: {
         kind: 'native',
-        fn: (_self, args, block, keywords) => callMethod(cls, 'new', args, keywords, block),
+        fn: (self, args, block, keywords) => callMethod(self, 'new', args, keywords, block),
         min: 0,
         max: -1,
         takesKeywords: true,

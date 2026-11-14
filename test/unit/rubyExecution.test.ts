@@ -5356,6 +5356,33 @@ test('missing-key pattern exceptions retain key and matchee', () => {
   });
 });
 
+test('unavailable features inside exit handlers return a program result', () => {
+  expect(run('at_exit { DATA.close }; p 1\n__END__\na\n')).toMatchObject({
+    stdout: '1\n',
+    uncaughtException: expect.stringContaining('は、この採点環境では使えません。'),
+  });
+});
+
+test('inherited Struct brackets construct the receiver class', () => {
+  expect(run('Base=Struct.new(:a,:b);class Sub<Base;end;p Sub[1,2].class==Sub')).toMatchObject({
+    stdout: 'true\n',
+  });
+});
+
+test('Time UTC and local constructors include the seventh microsecond field', () => {
+  expect(run('p Time.utc(2000,3,4,5,6,7,500000).usec,Time.local(2000,3,4,5,6,7,250000).usec')).toMatchObject({
+    stdout: '500000\n250000\n',
+  });
+});
+
+test('Time strftime uses directive-specific padding and case rules', () => {
+  expect(
+    run('t=Time.at(1709179509,123456.789).localtime("+09:30");p t.strftime("%6L|%10e|%#A|%010A|%10z|%_z|%:::z|%10:z")')
+  ).toMatchObject({
+    stdout: '"123456|        29|THURSDAY|00Thursday|+000000930| +930|+09:30|+000009:30"\n',
+  });
+});
+
 test('Data copies remain frozen and Rational copies preserve identity', () => {
   expect(
     run(

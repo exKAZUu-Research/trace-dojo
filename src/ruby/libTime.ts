@@ -87,7 +87,7 @@ function* parseOffset(value: Value): Gen<number> {
   return (match[1] === '-' ? -1 : 1) * (Number(match[2]) * 3600 + Number(match[3]) * 60);
 }
 
-function* buildTime(args: Value[], offset: number, zone: TimeData['zone']): Gen {
+function* buildTime(args: Value[], offset: number, zone: TimeData['zone'], microseconds?: Value): Gen {
   const { fields, seconds } = yield* fieldArgs(args);
   const [year, month, day, hour, minute] = fields;
   const whole = Math.floor(seconds);
@@ -96,20 +96,26 @@ function* buildTime(args: Value[], offset: number, zone: TimeData['zone']): Gen 
   date.setUTCHours(hour, minute, whole);
   const utcMs = date.getTime() - offset * 1000;
   const fraction = BigInt(Math.round((seconds - whole) * 1e9));
-  return makeTime(BigInt(utcMs) * 1_000_000n + fraction, offset, zone);
+  const micros =
+    microseconds === undefined
+      ? 0n
+      : typeof microseconds === 'bigint'
+        ? microseconds * 1000n
+        : BigInt(Math.floor((yield* toFloat(microseconds)) * 1000));
+  return makeTime(BigInt(utcMs) * 1_000_000n + fraction + micros, offset, zone);
 }
 
 sdef('Time', 'now', 0, () => makeTime(nowNanoseconds()));
-sdef('Time', ['new', 'local', 'mktime'], [0, 7], function* (self, args) {
+sdef('Time', 'new', [0, 7], function* (_self, args) {
   if (args.length === 0) return makeTime(nowNanoseconds());
   if (args.length === 1 && args[0] instanceof RString && /^\d{4}-\d{2}-\d{2}(?:[ T].*)?$/.test(args[0].s))
     throw new UnsupportedFeatureError('Time.new の文字列形式');
   if (args.length === 7 && args[6] !== NIL)
     return yield* buildTime(args.slice(0, 6), yield* parseOffset(args[6]), 'fixed');
-  void self;
   return yield* buildTime(args, LOCAL_OFFSET, 'local');
 });
-sdef('Time', ['utc', 'gm'], [1, 7], (_self, args) => buildTime(args, 0, 'utc'));
+sdef('Time', ['local', 'mktime'], [1, 7], (_self, args) => buildTime(args.slice(0, 6), LOCAL_OFFSET, 'local', args[6]));
+sdef('Time', ['utc', 'gm'], [1, 7], (_self, args) => buildTime(args.slice(0, 6), 0, 'utc', args[6]));
 sdef('Time', 'at', [1, 2], function* (_self, args) {
   const [seconds, microseconds] = args;
   if (seconds instanceof RObject && seconds.data instanceof TimeData) {
@@ -182,7 +188,7 @@ function pad(value: number, width: number, flag: string): string {
 function strftime(data: TimeData, format: string): string {
   const date = data.fields();
   return format.replaceAll(
-    /%([-_0^#]*)(\d*)(:{0,2})([a-zA-Z%+])/g,
+    /%([-_0^#]*)(\d*)(:{0,3})([a-zA-Z%+])/g,
     (whole, flags: string, widthText: string, colons: string, directive: string) => {
       if (colons && directive !== 'z') throw new UnsupportedFeatureError(`Time#strftime(${whole})`);
       const flag = /([-_0])[^-_0]*$/.exec(flags)?.[1] ?? '';
@@ -190,20 +196,40 @@ function strftime(data: TimeData, format: string): string {
         calendarDirective(data, date, directive, flag) ?? clockDirective(data, date, directive, flag, colons, whole);
       if (rendered === undefined) throw new UnsupportedFeatureError(`Time#strftime(${whole})`);
       const width = widthText ? Number(widthText) : undefined;
-      if (directive === 'N' && width !== undefined)
-        return width <= 9 ? rendered.slice(0, width) : rendered.padEnd(width, '0');
-      let result = flags.includes('^') ? rendered.toUpperCase() : rendered;
-      if (flags.includes('#'))
-        result = result.replaceAll(/[a-zA-Z]/g, (char) =>
-          char === char.toUpperCase() ? char.toLowerCase() : char.toUpperCase()
-        );
-      if (width !== undefined && flag !== '-') {
-        const numeric = 'CYymdejHkIlMSLNuwzUVGgs'.includes(directive);
-        result = result.padStart(width, flag === '_' || !numeric ? ' ' : '0');
+      if ((directive === 'N' || directive === 'L') && width !== undefined) {
+        const digits = clockDirective(data, date, 'N', flag, '', whole) as string;
+        return width <= 9 ? digits.slice(0, width) : digits.padEnd(width, '0');
       }
+      let result = caseText(rendered, directive, flags);
+      if (directive === 'z') return padOffset(result, width, flag);
+      if (width !== undefined && flag !== '-')
+        result = result.padStart(width, flag === '_' || (flag !== '0' && defaultSpacePad(directive)) ? ' ' : '0');
       return result;
     }
   );
+}
+
+function caseText(rendered: string, directive: string, flags: string): string {
+  const text = flags.includes('^') ? rendered.toUpperCase() : rendered;
+  if (!flags.includes('#')) return text;
+  if ('aAbBhP'.includes(directive)) return text.toUpperCase();
+  if ('pZ'.includes(directive)) return text.toLowerCase();
+  return text;
+}
+
+function defaultSpacePad(directive: string): boolean {
+  return 'eklaAbBh pPZcvrn t'.includes(directive);
+}
+
+function padOffset(value: string, width: number | undefined, flag: string): string {
+  if (flag === '-') return value;
+  const target = width ?? value.length;
+  if (flag === '_') {
+    const body = value.slice(1).replace(/^0+/, '') || '0';
+    const compact = `${value[0]}${body}`;
+    return compact.padStart(width ?? value.length, ' ');
+  }
+  return `${value[0]}${value.slice(1).padStart(target - 1, '0')}`;
 }
 
 function calendarDirective(data: TimeData, date: Date, directive: string, flag: string): string | undefined {
@@ -322,7 +348,14 @@ function clockDirective(
     }
     case 'z': {
       const value = offsetText(data.offset, colons.length > 0);
-      return colons.length === 2 ? `${value}:${String(Math.abs(data.offset) % 60).padStart(2, '0')}` : value;
+      if (colons.length === 2) return `${value}:${String(Math.abs(data.offset) % 60).padStart(2, '0')}`;
+      if (colons.length === 3)
+        return Math.abs(data.offset) % 60 !== 0
+          ? `${value}:${String(Math.abs(data.offset) % 60).padStart(2, '0')}`
+          : Math.abs(data.offset) % 3600 !== 0
+            ? value
+            : value.slice(0, 3);
+      return value;
     }
     case 'Z': {
       const zone = zoneName(data);

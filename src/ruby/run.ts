@@ -65,11 +65,12 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: F
         if (error instanceof RubyError) runtime.globals.set('$!', error.exception);
         mainError = error;
       }
-      let hookErrors: (RubyError | ExitSignal)[] = [];
+      let hookErrors: (RubyError | ExitSignal | UnsupportedFeatureError)[] = [];
       try {
         hookErrors = runToEnd(runAtExit());
       } catch (error) {
-        if (error instanceof RubyError || error instanceof ExitSignal) hookErrors.push(error);
+        if (error instanceof RubyError || error instanceof ExitSignal || error instanceof UnsupportedFeatureError)
+          hookErrors.push(error);
         else throw error;
       }
       const messages = (mainError === undefined ? hookErrors : [...hookErrors, mainError])

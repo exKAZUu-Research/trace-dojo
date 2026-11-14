@@ -60,15 +60,15 @@ def(
 );
 
 /** Runs the blocks `at_exit` and `END` registered, the last registered first. */
-export function* runAtExit(): Gen<(RubyError | ExitSignal)[]> {
+export function* runAtExit(): Gen<(RubyError | ExitSignal | UnsupportedFeatureError)[]> {
   const runtime = rt();
-  const errors: (RubyError | ExitSignal)[] = [];
+  const errors: (RubyError | ExitSignal | UnsupportedFeatureError)[] = [];
   while (runtime.atExit.length > 0) {
     try {
       yield* callProc(runtime.atExit.pop() as never, []);
     } catch (error) {
       if (error instanceof RubyError) runtime.globals.set('$!', error.exception);
-      else if (!(error instanceof ExitSignal)) throw error;
+      else if (!(error instanceof ExitSignal) && !(error instanceof UnsupportedFeatureError)) throw error;
       errors.push(error);
     }
   }
