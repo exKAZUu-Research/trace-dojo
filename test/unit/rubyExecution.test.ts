@@ -1821,6 +1821,16 @@ test('Set operations hash members as an operand yields them', () => {
   });
 });
 
+test('Set operand traversal rejects insertion from member hashes', () => {
+  expect(
+    run(
+      'class K;attr_accessor :on;def hash;$s.add(9) if @on;0;end;end;k=K.new;$s=Set[k];k.on=true;begin;(Set[]|$s);rescue=>e;p e.class;end;p $s.size'
+    )
+  ).toMatchObject({
+    stdout: 'RuntimeError\n1\n',
+  });
+});
+
 test('Set operations use each added to immediate classes', () => {
   expect(run('class Integer;def each;yield 2;end;end;p Set[1]|3,Set[1]^3')).toMatchObject({
     stdout: 'Set[1, 2]\nSet[1, 2]\n',
@@ -1954,6 +1964,9 @@ test('binary String segments keep source bytes and encoding', () => {
     )
   ).toMatchObject({
     stdout: '[255]\n[255]\n[255]\n[255]\n',
+  });
+  expect(run('s=255.chr+"a";x=s.partition("a")[1];x<<256;p x.bytes')).toMatchObject({
+    stdout: '[97, 196, 128]\n',
   });
 });
 

@@ -65,6 +65,16 @@ test('Hash callback results remain reachable during later entries', () => {
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
+test('uniq roots the selected value while its key is hashed', () => {
+  const program = 'class K;def hash;x=1;0;end;end;a=[Turtle.new,2];b=a.uniq{|x|a.clear;K.new}';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
+test('Array intersection roots pending values during key hashing', () => {
+  const program = 'class K;def hash;$a.clear;$b.clear;q=1;0;end;end;$a=[Turtle.new,1];$b=[K.new,$a[0]];c=$a & $b';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
 test('pending expression values remain visible in Turtle traces', () => {
   const programs = [
     'def v;x=1;42;end;h={Turtle.new=>v}',

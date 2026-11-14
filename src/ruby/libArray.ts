@@ -646,6 +646,7 @@ def('Array', '*', 1, function* (self: RArray, [count]) {
 });
 def('Array', ['&', 'intersection'], [0, -1], function* (self: RArray, others) {
   const held = rt().held.length;
+  const heldArrays = rt().heldArrays.length;
   try {
     const arrays: RArray[] = [];
     for (const other of others) {
@@ -654,15 +655,19 @@ def('Array', ['&', 'intersection'], [0, -1], function* (self: RArray, others) {
       rt().held.push(array);
     }
     let result = yield* uniqValues(self, undefined);
+    rt().heldArrays.push(result);
     for (const array of arrays) {
       const keys = newHash();
+      rt().held.push(keys);
       for (const item of array.items) yield* hashSet(keys, item, true);
       const kept: Value[] = [];
+      rt().heldArrays.push(kept);
       for (const item of result) if (yield* hashGet(keys, item)) kept.push(item);
       result = kept;
     }
     return arr(result);
   } finally {
+    rt().heldArrays.length = heldArrays;
     rt().held.length = held;
   }
 });

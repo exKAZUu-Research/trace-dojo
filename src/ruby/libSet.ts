@@ -69,7 +69,9 @@ function* other(value: Value): Gen<Value[]> {
 
 function* eachOther(value: Value, visit: (item: Value) => Gen<void>): Gen<void> {
   if (value instanceof RObject && value.data instanceof SetData) {
-    for (const entry of membersOf(value).map.values()) yield* visit(entry.key);
+    yield* eachEntry(membersOf(value), function* (entry) {
+      yield* visit(entry.key);
+    });
     return;
   }
   if (!respondsTo(value, 'each')) throw typeError('value must be enumerable');
