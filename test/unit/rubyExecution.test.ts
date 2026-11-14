@@ -2029,6 +2029,10 @@ test('Numeric step uses relational coercion for custom limits', () => {
   });
 });
 
+test('indexed method calls accept block arguments', () => {
+  expect(run('class A;def [];yield;end;end;p A.new[&proc{42}]')).toMatchObject({ stdout: '42\n' });
+});
+
 test('ArithmeticSequence last computes ratios before infinite-step results', () => {
   for (const source of [
     'Float::INFINITY.step(1.0, Float::INFINITY).last',

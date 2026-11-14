@@ -40,6 +40,7 @@ function pushFrame(frame: Frame, pending: Value[]): void {
 // code-gauge-allow functionCognitiveComplexity 18 -- The walker visits each runtime value kind and its reachable fields.
 // code-gauge-allow functionNcss 31 -- The walker visits each runtime value kind and its reachable fields.
 function pushReferences(value: RBasic, pending: Value[]): void {
+  pending.push(value.cls);
   if (value.ivars) for (const item of value.ivars.values()) pending.push(item);
   if (value.singleton) pending.push(value.singleton);
   if (value instanceof RObject) {

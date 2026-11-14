@@ -47,6 +47,11 @@ test('transpose snapshots earlier row values before later conversions', () => {
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
+test('anonymous class instances retain class Turtles', () => {
+  const program = 'c=Class.new;c::X=Turtle.new;o=c.new;c=nil;x=1;t=o.class::X;t.forward';
+  expect(traceProgram('ruby', program, program).finalTurtles).toMatchObject([{ y: 1 }]);
+});
+
 test('Array combination snapshots keep later Turtles reachable', () => {
   const program = 'a=[1,Turtle.new];a.permutation(1){|x|a.clear if x[0]==1;$v=x[0]}';
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);

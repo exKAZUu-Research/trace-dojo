@@ -524,37 +524,7 @@ export class Converter {
   }
 
   private argumentList(node: Node): { args: Expr[]; blockArg?: Expr } {
-    const args: Expr[] = [];
-    const pairs: Node[] = [];
-    let blockArg: Expr | undefined;
-    for (const child of namedChildren(node)) {
-      switch (child.type) {
-        case 'comment': {
-          break;
-        }
-        case 'pair':
-        case 'hash_splat_argument': {
-          pairs.push(child);
-          break;
-        }
-        case 'block_argument': {
-          const value = namedChildren(child)[0];
-          if (!value) this.unsupported(child, '名前のない & 引数の受け渡し');
-          blockArg = this.value(value);
-          break;
-        }
-        case 'forward_argument': {
-          this.unsupported(child, '引数の転送（...）');
-          break;
-        }
-        default: {
-          if (pairs.length > 0) this.fail(child, 'キーワード引数の後に位置引数は書けません。');
-          args.push(this.argument(child));
-        }
-      }
-    }
-    if (pairs.length > 0) args.push({ k: 'hash', items: this.hashItems(pairs), braces: false });
-    return { args, blockArg };
+    return this.argumentListFrom(namedChildren(node));
   }
 
   // Assignments -------------------------------------------------------------------------------------------------------
@@ -754,16 +724,35 @@ export class Converter {
   private argumentListFrom(nodes: Node[]): { args: Expr[]; blockArg?: Expr } {
     const args: Expr[] = [];
     const pairs: Node[] = [];
+    let blockArg: Expr | undefined;
     for (const child of nodes) {
-      if (child.type === 'pair' || child.type === 'hash_splat_argument') pairs.push(child);
-      else if (child.type === 'block_argument') this.unsupported(child, '[] への & 引数');
-      else {
-        if (pairs.length > 0) this.fail(child, 'キーワード引数の後に位置引数は書けません。');
-        args.push(this.argument(child));
+      switch (child.type) {
+        case 'comment': {
+          break;
+        }
+        case 'pair':
+        case 'hash_splat_argument': {
+          pairs.push(child);
+          break;
+        }
+        case 'block_argument': {
+          const value = namedChildren(child)[0];
+          if (!value) this.unsupported(child, '名前のない & 引数の受け渡し');
+          blockArg = this.value(value);
+          break;
+        }
+        case 'forward_argument': {
+          this.unsupported(child, '引数の転送（...）');
+          break;
+        }
+        default: {
+          if (pairs.length > 0) this.fail(child, 'キーワード引数の後に位置引数は書けません。');
+          args.push(this.argument(child));
+        }
       }
     }
     if (pairs.length > 0) args.push({ k: 'hash', items: this.hashItems(pairs), braces: false });
-    return { args };
+    return { args, blockArg };
   }
 
   private binary(node: Node): Expr {
