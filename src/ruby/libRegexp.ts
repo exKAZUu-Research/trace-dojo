@@ -561,19 +561,19 @@ function groupText(state: MatchState, group: number): Value {
 }
 
 /** Sets `$~` for the method frame that called a matching method, as Ruby keeps it per frame. */
-function setLastMatch(state: MatchState | undefined): Value {
+export function setLastMatch(state: MatchState | undefined): Value {
   const frame = callerFrame();
   const match = state ? matchData(state) : NIL;
   frame.extra.lastMatch = match;
   return match;
 }
 
-export function setLiteralMatch(source: RString, text: string, target: string, from: number): void {
+export function setLiteralMatch(source: RString, text: string, target: string, from: number): MatchState | undefined {
   if (from < 0) {
     setLastMatch(undefined);
-    return;
+    return undefined;
   }
-  setLastMatch({
+  const state: MatchState = {
     text,
     snapshot: copyStringEncoding(source),
     literal: true,
@@ -581,7 +581,9 @@ export function setLiteralMatch(source: RString, text: string, target: string, f
     names: [],
     namedGroups: Object.create(null) as Record<string, number>,
     regexp: makeRegexp(escapeRegexpSource(target), {}),
-  });
+  };
+  setLastMatch(state);
+  return state;
 }
 
 function callerFrame(): Frame {

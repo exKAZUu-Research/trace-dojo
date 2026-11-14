@@ -35,7 +35,7 @@ import { hashDefault, hashGet, stringKeyEquals, stringKeyHash } from './hashes';
 import { callBlock, callMethod, type Gen, invoke, nativeProc, requireBlock } from './interp';
 import { makeEnumerator } from './libEnumerator';
 import { parseFloatLenient, parseIntegerLenient } from './libNumeric';
-import { setLiteralMatch } from './libRegexp';
+import { type MatchState, setLastMatch, setLiteralMatch } from './libRegexp';
 import { NIL, RArray, RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { successorBytes, transformInvalid } from './stringTransforms';
@@ -1228,15 +1228,14 @@ function* substitute(
   let position = 0;
   let positionByte = 0;
   let matched = false;
-  let lastFound = -1;
+  let lastState: MatchState | undefined;
   for (;;) {
     const found = text.indexOf(target, position);
     if (found === -1) break;
     const mode = stringTextMode(self);
     const foundByte = textByteLength(text.slice(0, found), mode);
     matched = true;
-    lastFound = found;
-    setLiteralMatch(self, text, target, found);
+    lastState = setLiteralMatch(self, text, target, found);
     const piece = yield* substitutionPiece(self, target, replacement, block, text, found, foundByte);
     if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
     const modified = (global || mutating) && self.s !== text;
@@ -1257,7 +1256,7 @@ function* substitute(
     if (!global) break;
     rt().spend();
   }
-  setLiteralMatch(self, text, target, lastFound);
+  setLastMatch(lastState);
   if (positionByte <= sourceLength) append(active.slice(positionByte));
   return { value: stringFromBytes(joinChunks(chunks, length), resultBinary), matched };
 }
