@@ -247,7 +247,7 @@ export function* inspectArray(array: RArray): Gen<string> {
     const parts: string[] = [];
     let length = 2;
     for (let index = 0; index < array.items.length; index++)
-      length = pushInspected(parts, yield* inspect(array.items[index]), length, 2);
+      length = pushInspected(parts, (yield inspect(array.items[index])) as string, length, 2);
     return `[${parts.join(', ')}]`;
   } finally {
     inspecting.delete(array);
@@ -264,10 +264,15 @@ export function* inspectHash(hash: RHash): Gen<string> {
     let length = 2;
     for (const { key, value } of hash.map.values()) {
       if (key instanceof RSymbol) {
-        const name = isSimpleSymbol(key.name) ? key.name : yield* inspect(str(key.name));
-        length = pushInspected(parts, `${name}: ${yield* inspect(value)}`, length, 2);
+        const name = isSimpleSymbol(key.name) ? key.name : ((yield inspect(str(key.name))) as string);
+        length = pushInspected(parts, `${name}: ${(yield inspect(value)) as string}`, length, 2);
       } else {
-        length = pushInspected(parts, `${yield* inspect(key)} => ${yield* inspect(value)}`, length, 2);
+        length = pushInspected(
+          parts,
+          `${(yield inspect(key)) as string} => ${(yield inspect(value)) as string}`,
+          length,
+          2
+        );
       }
     }
     return `{${parts.join(', ')}}`;
@@ -283,8 +288,8 @@ function isSimpleSymbol(name: string): boolean {
 }
 
 export function* inspectRange(value: RRange): Gen<string> {
-  const begin = value.begin === NIL && value.end !== NIL ? '' : yield* inspect(value.begin);
-  const end = value.end === NIL && value.begin !== NIL ? '' : yield* inspect(value.end);
+  const begin = value.begin === NIL && value.end !== NIL ? '' : ((yield inspect(value.begin)) as string);
+  const end = value.end === NIL && value.begin !== NIL ? '' : ((yield inspect(value.end)) as string);
   if (begin.length + end.length + 3 > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
   return `${begin}${value.exclusive ? '...' : '..'}${end}`;
 }
@@ -298,7 +303,8 @@ export function* inspectObject(object: RBasic): Gen<string> {
   try {
     const parts: string[] = [];
     let length = name.length + 24;
-    for (const [key, value] of ivars) length = pushInspected(parts, `${key}=${yield* inspect(value)}`, length, 2);
+    for (const [key, value] of ivars)
+      length = pushInspected(parts, `${key}=${(yield inspect(value)) as string}`, length, 2);
     return `#<${name}:${addressOf(object)} ${parts.join(', ')}>`;
   } finally {
     inspecting.delete(object);
@@ -481,8 +487,8 @@ export function* rEquals(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = n
       (yield* eqlContainer(a, b, pairs, function* () {
         return (
           a.exclusive === b.exclusive &&
-          (yield* rEquals(a.begin, b.begin, pairs)) &&
-          (yield* rEquals(a.end, b.end, pairs))
+          ((yield rEquals(a.begin, b.begin, pairs)) as boolean) &&
+          ((yield rEquals(a.end, b.end, pairs)) as boolean)
         );
       }))
     );
@@ -502,7 +508,7 @@ function* equalsArrays(a: RArray, b: RArray, pairs: Map<RBasic, Set<RBasic>>): G
       const left = a.items[index];
       const right = b.items[index];
       if (left === right) continue;
-      if (!(yield* rEquals(left, right, pairs))) return false;
+      if (!((yield rEquals(left, right, pairs)) as boolean)) return false;
       length = a.items.length;
       if (length !== b.items.length) return false;
     }
@@ -520,7 +526,7 @@ function* compareHashEntries(a: RHash, b: RHash, equals: (left: Value, right: Va
   try {
     for (const entry of a.map.values()) {
       const other = yield* hashGet(b, entry.key);
-      if (!other || !(yield* equals(entry.value, other.value))) return false;
+      if (!other || !((yield equals(entry.value, other.value)) as boolean)) return false;
     }
     return true;
   } finally {
@@ -553,7 +559,7 @@ function* eqlArray(a: RArray, b: RArray, pairs: Map<RBasic, Set<RBasic>>): Gen<b
   return yield* eqlContainer(a, b, pairs, function* () {
     if (a.items.length !== b.items.length) return false;
     for (let index = 0; index < a.items.length; index++)
-      if (!(yield* rEql(a.items[index], b.items[index], pairs))) return false;
+      if (!((yield rEql(a.items[index], b.items[index], pairs)) as boolean)) return false;
     return true;
   });
 }
@@ -564,7 +570,11 @@ function* eqlHash(a: RHash, b: RHash, pairs: Map<RBasic, Set<RBasic>>): Gen<bool
 
 function* eqlRange(a: RRange, b: RRange, pairs: Map<RBasic, Set<RBasic>>): Gen<boolean> {
   return yield* eqlContainer(a, b, pairs, function* () {
-    return a.exclusive === b.exclusive && (yield* rEql(a.begin, b.begin, pairs)) && (yield* rEql(a.end, b.end, pairs));
+    return (
+      a.exclusive === b.exclusive &&
+      ((yield rEql(a.begin, b.begin, pairs)) as boolean) &&
+      ((yield rEql(a.end, b.end, pairs)) as boolean)
+    );
   });
 }
 

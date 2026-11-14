@@ -4,7 +4,7 @@ import { def } from './define';
 import { argumentError, typeError } from './errors';
 import { exportBinaryInspect, formatString } from './format';
 import { callMethod, type Gen, respondsTo } from './interp';
-import { NIL, RArray, RObject, RString, type Value, type Visibility } from './objects';
+import { NIL, RArray, type RHash, RObject, RString, RSymbol, type Value, type Visibility } from './objects';
 import { writePretty } from './prettyPrint';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { arr, classOf, realClassOf, str, stringBytes, stringCharacters, stringFromBytes, truthy } from './values';
@@ -38,7 +38,7 @@ function* writePuts(target: Value, args: Value[]): Gen<void> {
       return yield* whileHeld(array, function* () {
         seen.add(array);
         try {
-          for (let index = 0; index < array.items.length; index++) yield* visit(array.items[index], seen);
+          for (let index = 0; index < array.items.length; index++) yield visit(array.items[index], seen);
         } finally {
           seen.delete(array);
         }
@@ -175,12 +175,33 @@ def(
   'warn',
   [0, -1],
   function* (_self, args, _block, keywords) {
-    void keywords;
+    yield* validateWarnKeywords(keywords);
     if (args.length > 0) yield* writePuts(rt().globals.get('$stderr') ?? NIL, args);
     return NIL;
   },
   { ...PRIVATE, keywords: true }
 );
+
+// code-gauge-allow functionCognitiveComplexity 25 -- Warn validates independent uplevel and category keyword protocols.
+function* validateWarnKeywords(keywords: RHash | undefined): Gen<void> {
+  if (!keywords) return;
+  for (const entry of keywords.map.values()) {
+    const name = entry.key instanceof RSymbol ? entry.key.name : '';
+    if (name === 'uplevel') {
+      if (entry.value === NIL) continue;
+      const level = yield* toInt(entry.value);
+      if (level < 0n) throw argumentError(`negative level (${level})`);
+    } else if (name === 'category') {
+      if (entry.value === NIL) continue;
+      let category: string;
+      if (entry.value instanceof RSymbol) category = entry.value.name;
+      else if (entry.value instanceof RString) category = entry.value.s;
+      else throw typeError(`no implicit conversion of ${realClassOf(entry.value).name} into Symbol`);
+      if (!['deprecated', 'experimental', 'performance', 'strict_unused_block'].includes(category))
+        throw argumentError(`unknown category: ${category}`);
+    } else throw argumentError(`unknown keyword: :${name}`);
+  }
+}
 
 function* charOf(value: Value): Gen<RString> {
   if (value instanceof RString) return stringCharacters(value)[0] ?? str('');

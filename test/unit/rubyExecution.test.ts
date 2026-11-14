@@ -1863,6 +1863,19 @@ test('Proc curry validates native arity bounds', () => {
   expect(run('begin;proc{}.curry(10**30);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'RangeError\n' });
 });
 
+test('warn validates keyword options before writing', () => {
+  expect(run('begin;warn("x",foo:1);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'ArgumentError\n' });
+  expect(run('begin;warn("x",uplevel:-1);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'ArgumentError\n' });
+  expect(run('begin;warn("x",category: :bad);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'ArgumentError\n' });
+});
+
+test('deep Ruby containers remain within the interpreter stack', () => {
+  expect(run('a=1;5000.times{a=[a]};puts a')).toMatchObject({ stdout: '1\n' });
+  const inspected = run('a=1;5000.times{a=[a]};p a');
+  expect(inspected).toMatchObject({ stdout: `${'['.repeat(5000)}1${']'.repeat(5000)}\n` });
+  expect(run('a=1;b=1;5000.times{a=[a];b=[b]};p a==b,a.eql?(b)')).toMatchObject({ stdout: 'true\ntrue\n' });
+});
+
 test('shuffle detects receiver changes from its randomizer', () => {
   expect(
     run(
