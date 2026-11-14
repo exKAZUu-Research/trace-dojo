@@ -1029,3 +1029,12 @@ func main(){var m sync.RWMutex;done:=make(chan int,3);m.Lock();for _,n:=range []
     uncaughtException: undefined,
   });
 });
+
+test('comparable intersections use strict comparability without changing interface satisfaction', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main\nimport "fmt"\ntype C interface{~struct{X any}|~int;comparable}\nfunc f[T C](x T)T{return x+1}\nfunc g[T interface{~[2]struct{X any}|~int;comparable}](x T)T{return x*2}\nfunc closeIt[T interface{~chan int|~struct{X any};comparable}](x T){close(x)}\nfunc accept[T comparable](x T){fmt.Println(x==x)}\nfunc main(){fmt.Println(f(3),g(4));c:=make(chan int);closeIt(c);_,ok:=<-c;fmt.Println(ok);accept(struct{X any}{1});m:=map[struct{X any}]int{{1}:2};fmt.Println(m[struct{X any}{1}])}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '4 8\nfalse\ntrue\n2\n', uncaughtException: undefined });
+});

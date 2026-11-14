@@ -289,3 +289,12 @@ test('omitted constant diagnostics identify the active spec for 1/(iota-1)', () 
     diagnostics: [expect.objectContaining({ row: 3 })],
   });
 });
+
+test('strictly comparable struct terms remain in operation constraints', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;func f[T interface{~struct{X *any}|~int;comparable}](x T)T{return x+1};func main(){}'
+    )
+  ).toMatchObject({ kind: 'compileError' });
+});

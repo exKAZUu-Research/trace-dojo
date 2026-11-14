@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 482 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
+// code-gauge-allow-file fileNcss 486 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
 import type { Span } from './ast';
 import type { CalleeSummary } from './entities';
 import { utf8Decode } from './literals';
@@ -276,7 +276,7 @@ export function underlying(type: Type): Type {
 
 export function effectiveTerms(constraint: InterfaceType): TypeTerm[] | undefined {
   const set = constraint.typeSet;
-  return set?.comparable ? set.terms?.filter((term) => isComparable(term.type)) : set?.terms;
+  return set?.comparable ? set.terms?.filter((term) => comparableType(term.type, false, new Set())) : set?.terms;
 }
 
 /**
@@ -687,16 +687,14 @@ export function describeType(type: Type): string {
 // Comparison --------------------------------------------------------------------------------------------------------
 
 /** Whether `==` compares values of the type, which Go decides from the type alone. */
-export function isComparable(type: Type, seen = new Set<Type>()): boolean {
+export function isComparable(type: Type): boolean {
+  return comparableType(type, true, new Set());
+}
+
+function comparableType(type: Type, dynamic: boolean, seen: Set<Type>): boolean {
   if (seen.has(type)) return true;
-  if (type.kind === 'typeParam') {
-    return (
-      Boolean(type.constraint.typeSet?.comparable) ||
-      (effectiveTerms(type.constraint)?.every((term) => isComparable(term.type)) ?? false)
-    );
-  }
-  const under = underlying(type);
   seen.add(type);
+  const under = type.kind === 'typeParam' ? type.constraint : underlying(type);
   switch (under.kind) {
     case 'slice':
     case 'map':
@@ -704,10 +702,17 @@ export function isComparable(type: Type, seen = new Set<Type>()): boolean {
       return false;
     }
     case 'struct': {
-      return !under.nonComparable && under.fields.every((field) => isComparable(field.type, seen));
+      return !under.nonComparable && under.fields.every((field) => comparableType(field.type, dynamic, seen));
     }
     case 'array': {
-      return isComparable(under.element, seen);
+      return comparableType(under.element, dynamic, seen);
+    }
+    case 'interface': {
+      if (dynamic && type.kind !== 'typeParam') return true;
+      return (
+        Boolean(under.typeSet?.comparable) ||
+        (under.typeSet?.terms?.every((term) => comparableType(term.type, false, seen)) ?? false)
+      );
     }
     default: {
       return true;
