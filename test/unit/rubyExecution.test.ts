@@ -6712,6 +6712,9 @@ test('inherited definition hooks also block removal silently skipping callbacks'
   ).toMatchObject({
     uncaughtException: 'メソッド・定数フック（method_removed）は、この採点環境では使えません。',
   });
+  expect(run('module H;def method_removed(n);end;end;class A;extend H;end;p A.remove_method(*[])==A')).toMatchObject({
+    stdout: 'true\n',
+  });
 });
 
 test('exclusive Range max follows successor iteration for Symbols', () => {
@@ -6755,4 +6758,11 @@ test('MatchData source snapshots preserve binary bytes and freezing', () => {
   expect(run('s=255.chr;m=/./.match(s);p m.string.encoding,m.string.bytes,m.string.frozen?')).toMatchObject({
     stdout: '#<Encoding:BINARY (ASCII-8BIT)>\n[255]\ntrue\n',
   });
+  for (const source of [
+    's=255.chr;/./=~s;p $~.string.encoding,$~.string.bytes',
+    's=255.chr;s =~ /./;p $~.string.encoding,$~.string.bytes',
+    'o=Object.new;def o.to_str;255.chr;end;m=/./.match(o);p m.string.encoding,m.string.bytes',
+  ]) {
+    expect(run(source)).toMatchObject({ stdout: '#<Encoding:BINARY (ASCII-8BIT)>\n[255]\n' });
+  }
 });

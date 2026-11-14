@@ -2,7 +2,7 @@ import vm from 'node:vm';
 
 // code-gauge-allow-file fileNcss 558 -- The libRegexp module keeps one concern's cases together.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { inspect, rEquals, strInspect, toIndex, toS, toStr, tryImplicitConversion } from './conversions';
+import { inspect, rEquals, strInspect, toIndex, toS, toStr, toStrValue, tryImplicitConversion } from './conversions';
 import { def, extend, sdef } from './define';
 import { argumentError, frozenError, indexError, rubyError, typeError } from './errors';
 import { digest, hashDefault, hashGet, hashSet } from './hashes';
@@ -756,37 +756,33 @@ def('Regexp', 'names', 0, (self: RObject) =>
   arr([...new Set(regexpCaptureNames(dataOf(self).js.source))].map((name) => str(name)))
 );
 
-function* subjectText(value: Value): Gen<string | undefined> {
+function* subjectText(value: Value): Gen<RString | undefined> {
   if (value === NIL) return undefined;
-  if (value instanceof RSymbol) return value.name;
-  return yield* toStr(value);
+  if (value instanceof RSymbol) return str(value.name);
+  return yield* toStrValue(value);
 }
 
 def('Regexp', 'match', [1, 2], function* (self: RObject, args, block) {
-  const text = yield* subjectText(args[0]);
-  if (text === undefined) return setLastMatch(undefined);
+  const subject = yield* subjectText(args[0]);
+  if (subject === undefined) return setLastMatch(undefined);
+  const text = subject.s;
   const start = args.length > 1 ? yield* toIndex(args[1]) : 0;
-  const match = setLastMatch(
-    execAt(
-      self,
-      text,
-      start < 0 ? start + charIndex(text, text.length) : start,
-      args[0] instanceof RString ? args[0] : undefined
-    )
-  );
+  const match = setLastMatch(execAt(self, text, start < 0 ? start + charIndex(text, text.length) : start, subject));
   if (block && match !== NIL) return yield* callBlock(block, [match]);
   return match;
 });
 def('Regexp', 'match?', [1, 2], function* (self: RObject, args) {
-  const text = yield* subjectText(args[0]);
-  if (text === undefined) return false;
+  const subject = yield* subjectText(args[0]);
+  if (subject === undefined) return false;
+  const text = subject.s;
   const start = args.length > 1 ? yield* toIndex(args[1]) : 0;
   return execAt(self, text, start < 0 ? start + charIndex(text, text.length) : start) !== undefined;
 });
 def('Regexp', '=~', 1, function* (self: RObject, [value]) {
-  const text = yield* subjectText(value);
-  if (text === undefined) return setLastMatch(undefined);
-  const state = execAt(self, text, 0);
+  const subject = yield* subjectText(value);
+  if (subject === undefined) return setLastMatch(undefined);
+  const text = subject.s;
+  const state = execAt(self, text, 0, subject);
   setLastMatch(state);
   return state ? BigInt(charIndex(text, (state.groups[0] as readonly [number, number])[0])) : NIL;
 });
@@ -801,7 +797,8 @@ def('Regexp', '===', 1, function* (self: RObject, [value]) {
     const name = realClassOf(value).name;
     throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
   }
-  const state = execAt(self, converted instanceof RString ? converted.s : converted.name, 0);
+  const subject = converted instanceof RString ? converted : str(converted.name);
+  const state = execAt(self, subject.s, 0, subject);
   setLastMatch(state);
   yield* [];
   return state !== undefined;
@@ -1291,7 +1288,7 @@ def('String', '=~', 1, function* (self: RString, [pattern]) {
   if (!isRegexp(pattern)) {
     return yield* callMethod(pattern, '=~', [self]);
   }
-  const state = execAt(pattern, self.s, 0);
+  const state = execAt(pattern, self.s, 0, self);
   setLastMatch(state);
   return state ? BigInt(charIndex(self.s, (state.groups[0] as readonly [number, number])[0])) : NIL;
 });

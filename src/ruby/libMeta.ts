@@ -469,12 +469,13 @@ def('Module', 'alias_method', 2, function* (self: RClass, [newName, oldName]) {
 });
 def('Module', 'remove_method', [0, -1], function* (self: RClass, names) {
   assertMutableClass(self);
-  assertNoDefinitionHook(self, 'removed');
   for (const value of names) {
     const name = yield* nameOf(value);
-    if (!self.methods.delete(name)) {
+    if (!self.methods.has(name)) {
       throw nameError(`method '${name}' not defined in ${className(self)}`, self, name);
     }
+    assertNoDefinitionHook(self, 'removed');
+    self.methods.delete(name);
   }
   invalidateMethodCaches();
   return self;
