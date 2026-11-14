@@ -1229,7 +1229,7 @@ function* substitute(
   let positionByte = 0;
   let matched = false;
   let lastFound = -1;
-  let lastSearchStart = 0;
+  let lastSearchStartByte = 0;
   let lastState: MatchState | undefined;
   for (;;) {
     const found = text.indexOf(target, position);
@@ -1238,7 +1238,7 @@ function* substitute(
     const foundByte = textByteLength(text.slice(0, found), mode);
     matched = true;
     lastFound = found;
-    lastSearchStart = position;
+    lastSearchStartByte = positionByte;
     lastState = setLiteralMatch(self, text, target, found);
     const piece = yield* substitutionPiece(self, target, replacement, block, text, found, foundByte);
     if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
@@ -1260,7 +1260,13 @@ function* substitute(
     if (!global) break;
     rt().spend();
   }
-  if (global) setLiteralMatch(self, text, target, lastFound < 0 ? -1 : text.indexOf(target, lastSearchStart));
+  if (global)
+    setLiteralMatch(
+      self,
+      text,
+      target,
+      lastFound < 0 ? -1 : text.indexOf(target, textIndexAtByte(text, lastSearchStartByte, stringTextMode(self)))
+    );
   else setLastMatch(lastState);
   if (positionByte <= sourceLength) append(active.slice(positionByte));
   return { value: stringFromBytes(joinChunks(chunks, length), resultBinary), matched };
