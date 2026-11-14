@@ -16,7 +16,7 @@ import {
   typeEntity,
   typeParam,
 } from '../native';
-import { type Suspending } from '../runtime';
+import { runToEnd, type Suspending } from '../runtime';
 import { boundsPanic, plainPanic, runtimeErrorPanic } from '../runtimeErrors';
 import { appendValues, grownCapacity } from '../sliceOps';
 import {
@@ -37,7 +37,7 @@ import {
 import { Cell, copyValue, type GoFunc, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 import { iteratorOf, seq2Of, seqOf } from './iter';
 import { zeroValue } from './reflection';
-import { pdqsort, type SortData, stableSort } from './sorting';
+import { pdqsort, resumeSort, type SortData, stableSort } from './sorting';
 import {
   BOOL,
   callFunction,
@@ -107,22 +107,33 @@ function swapSliceElements(slice: Slice, i: number, j: number): void {
   slice.set(j, left);
 }
 
-/** Sorts a slice's elements in place, as the slices and sort packages do. */
 function sortSlice(slice: Value, isLess: (a: Value, b: Value) => boolean, stable = false): undefined {
-  if (!(slice instanceof Slice)) return undefined;
-  const { length } = slice;
+  runToEnd(resumeSortSlice(slice, isLess, stable));
+  return undefined;
+}
+
+function* resumeSortSlice(
+  slice: Value,
+  isLess: (a: Value, b: Value) => boolean | Suspending<boolean>,
+  stable: boolean
+): Suspending<void> {
+  if (!(slice instanceof Slice)) return;
   const runtime = currentRuntime();
   let comparisons = 0;
-  const data: SortData = {
+  const data: SortData<boolean | Suspending<boolean>> = {
     less: (i, j) => {
       if (++comparisons % 16 === 0) runtime.spend();
       return isLess(slice.get(i), slice.get(j));
     },
     swap: (i, j) => swapSliceElements(slice, i, j),
   };
-  if (stable) stableSort(data, length);
-  else pdqsort(data, length);
-  return undefined;
+  yield* resumeSort(data, slice.length, stable);
+}
+
+function resumableLess(fnValue: Value): (a: Value, b: Value) => Suspending<boolean> {
+  return function* (a, b) {
+    return Number((yield* resumeFunction(fnValue, [a, b])) as bigint) < 0;
+  };
 }
 
 function cmpResult(fnValue: Value): (a: Value, b: Value) => number {
@@ -415,12 +426,14 @@ function* collect(seq: Value): Suspending<Value[]> {
   );
 }
 
-function* sortCollected(seq: Value, less: (a: Value, b: Value) => boolean, stable = false): Suspending<Value> {
+function* sortCollected(
+  seq: Value,
+  isLess: (a: Value, b: Value) => boolean | Suspending<boolean>,
+  stable = false
+): Suspending<Value> {
   const slice = newSlice(yield* collect(seq));
-  return currentRuntime().withRoots([slice], () => {
-    sortSlice(slice, less, stable);
-    return slice.length === 0 ? undefined : slice;
-  });
+  yield* currentRuntime().resumeWithRoots([slice], resumeSortSlice(slice, isLess, stable));
+  return slice.length === 0 ? undefined : slice;
 }
 
 const slicesMembers: Record<string, Entity> = {
@@ -1056,8 +1069,7 @@ Object.assign(slicesMembers, {
       funcType([SEQ(e), funcType([e, e], [INT])], [sliceOf(e)]),
       () =>
         function* ([seq, cmpFn]) {
-          const order = cmpResult(cmpFn);
-          return yield* sortCollected(seq, (a, b) => order(a, b) < 0);
+          return yield* sortCollected(seq, resumableLess(cmpFn));
         }
     );
   })(),
@@ -1069,8 +1081,7 @@ Object.assign(slicesMembers, {
       funcType([SEQ(e), funcType([e, e], [INT])], [sliceOf(e)]),
       () =>
         function* ([seq, cmpFn]) {
-          const order = cmpResult(cmpFn);
-          return yield* sortCollected(seq, (a, b) => order(a, b) < 0, true);
+          return yield* sortCollected(seq, resumableLess(cmpFn), true);
         }
     );
   })(),
