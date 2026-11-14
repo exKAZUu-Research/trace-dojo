@@ -239,20 +239,27 @@ function* restOf(hash: RHash, pairs: { key: string }[]): Gen<RHash> {
  * says why it failed.
  */
 export function* noMatchingPattern(value: Value, single: boolean): Gen<unknown> {
-  const subject = yield* inspect(value);
   const failure = lastFailure;
   lastFailure = undefined;
-  if (!single || !failure) return rubyError(rt().c.NoMatchingPatternError, subject);
-  const error = rubyError(
-    failure.missingKey === undefined ? rt().c.NoMatchingPatternError : rt().c.NoMatchingPatternKeyError,
-    `${subject}: ${typeof failure.description === 'string' ? failure.description : yield* failure.description()}`
-  );
-  if (failure.missingKey !== undefined)
-    error.exception.ivars = new Map([
-      ['@__key', failure.missingKey],
-      ['@__matchee', failure.matchee ?? value],
-    ]);
-  return error;
+  const mark = rt().held.length;
+  if (failure?.missingKey !== undefined) rt().held.push(failure.missingKey);
+  if (failure?.matchee !== undefined) rt().held.push(failure.matchee);
+  try {
+    const subject = yield* inspect(value);
+    if (!single || !failure) return rubyError(rt().c.NoMatchingPatternError, subject);
+    const error = rubyError(
+      failure.missingKey === undefined ? rt().c.NoMatchingPatternError : rt().c.NoMatchingPatternKeyError,
+      `${subject}: ${typeof failure.description === 'string' ? failure.description : yield* failure.description()}`
+    );
+    if (failure.missingKey !== undefined)
+      error.exception.ivars = new Map([
+        ['@__key', failure.missingKey],
+        ['@__matchee', failure.matchee ?? value],
+      ]);
+    return error;
+  } finally {
+    rt().held.length = mark;
+  }
 }
 
 export { rEquals, truthy };

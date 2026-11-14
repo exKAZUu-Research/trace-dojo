@@ -1030,6 +1030,8 @@ function* substituteRegexp(
   block: RProc | undefined,
   global: boolean
 ): Gen<{ text: string; matched: boolean }> {
+  const replacementText =
+    replacement === undefined || replacement instanceof RHash ? undefined : yield* toStr(replacement);
   let text = self.s;
   const sourceLength = stringBytes(self).length;
   const chunks: string[] = [];
@@ -1051,8 +1053,8 @@ function* substituteRegexp(
       const key = str(text.slice(from, to));
       const entry = yield* hashGet(replacement, key);
       piece = yield* toS(entry ? entry.value : yield* hashDefault(replacement, key));
-    } else if (replacement !== undefined) {
-      piece = expand(yield* toStr(replacement), state, LIMITS.maxStringLength - length - (from - position));
+    } else if (replacementText !== undefined) {
+      piece = expand(replacementText, state, LIMITS.maxStringLength - length - (from - position));
     } else {
       piece = yield* toS(yield* callBlock(block as RProc, [str(text.slice(from, to))]));
     }
@@ -1070,15 +1072,19 @@ function* substituteRegexp(
 }
 
 function wrapFirst(
-  name: string,
+  names: string | string[],
   handle: (self: RString, args: Value[], block: RProc | undefined, previous: NativeFn) => Gen | Value,
   anyRegexp = false
 ): void {
-  extend('String', [name], (previous) => (self: RString, args, block, keywords) => {
-    if (args.length > 0 && (anyRegexp ? args.some(isRegexp) : isRegexp(args[0])))
-      return handle(self, args, block, previous);
-    return previous(self, args, block, keywords);
-  });
+  extend(
+    'String',
+    typeof names === 'string' ? [names] : names,
+    (previous) => (self: RString, args, block, keywords) => {
+      if (args.length > 0 && (anyRegexp ? args.some(isRegexp) : isRegexp(args[0])))
+        return handle(self, args, block, previous);
+      return previous(self, args, block, keywords);
+    }
+  );
 }
 
 for (const [name, global, bang] of [
@@ -1187,15 +1193,13 @@ for (const name of ['index', 'rindex'] as const) {
     return NIL;
   });
 }
-for (const name of ['[]', 'slice'] as const) {
-  wrapFirst(name, function* (self, args) {
-    const state = execAt(args[0] as RObject, self.s, 0, self);
-    setLastMatch(state);
-    if (!state) return NIL;
-    if (args.length > 1) return yield* matchIndex(setLastMatch(state) as RObject, args[1]);
-    return groupText(state, 0);
-  });
-}
+wrapFirst(['[]', 'slice'], function* (self, args) {
+  const state = execAt(args[0] as RObject, self.s, 0, self);
+  setLastMatch(state);
+  if (!state) return NIL;
+  if (args.length > 1) return yield* matchIndex(setLastMatch(state) as RObject, args[1]);
+  return groupText(state, 0);
+});
 wrapFirst('slice!', function* (self, args) {
   if (self.frozen) throw frozenError(self, strInspect(self.s));
   const state = execAt(args[0] as RObject, self.s, 0, self);

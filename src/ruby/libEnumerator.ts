@@ -1125,7 +1125,7 @@ function* streamLazyStep(
     case 'with_index': {
       const index = state.index++;
       if (step.block) yield* callProc(step.block, [item, index]);
-      return step.block ? yield* next(item, yielded) : yield* next(arr([item, index]), [item, index]);
+      return step.block ? yield* next(item) : yield* next(arr([item, index]), [item, index]);
     }
     case 'grep':
     case 'grep_v': {

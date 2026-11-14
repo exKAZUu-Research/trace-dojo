@@ -116,12 +116,19 @@ export function installNatives(runtime: Runtime): void {
     const owner = runtime.c[spec.owner];
     if (!owner) throw new Error(`Unknown library class: ${spec.owner}`);
     const target = spec.singleton ? (singletonOf as (cls: RClass) => RClass)(owner) : owner;
+    const wrapped = new Map<NativeFn, NativeFn>();
     for (const name of spec.names) {
       if (spec.ifMissing && target.ancestors().some((ancestor) => ancestor.methods.has(name))) continue;
       if (spec.wrap) {
         const previous = target.methods.get(name);
         if (previous?.body.kind !== 'native') throw new Error(`No native ${spec.owner}#${name} to extend`);
-        previous.body = { ...previous.body, fn: spec.wrap(previous.body.fn) };
+        const original = previous.body.fn;
+        let fn = wrapped.get(original);
+        if (!fn) {
+          fn = spec.wrap(original);
+          wrapped.set(original, fn);
+        }
+        previous.body = { ...previous.body, fn };
         continue;
       }
       target.methods.set(name, {

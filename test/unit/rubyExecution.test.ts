@@ -6536,6 +6536,9 @@ test('Lazy preserves source yield argument lists', () => {
       'e=Enumerator.new{|y|y.yield 1,2};p e.lazy.uniq.map{|*a|a}.force,e.lazy.grep(Array).map{|*a|a}.force,e.lazy.with_index.map{|*a|a}.force,e.lazy.each_with_object(nil).map{|*a|a}.force'
     )
   ).toMatchObject({ stdout: '[[1, 2]]\n[[1, 2]]\n[[[1, 2], 0]]\n[[[1, 2], nil]]\n' });
+  expect(run('e=Enumerator.new{|y|y.yield 1,2};p e.lazy.with_index{|v,i|nil}.map{|*a|a}.force')).toMatchObject({
+    stdout: '[[[1, 2]]]\n',
+  });
 });
 
 test('regexp replacement expands the last participating capture', () => {
@@ -6668,6 +6671,15 @@ test('regexp replacement Hash uses its default callback', () => {
   });
 });
 
+test('regexp substitution converts string-like replacements once before matching', () => {
+  expect(run('class R;def initialize;@n=0;end;def to_str;@n+=1;@n.to_s;end;end;p "ab".gsub(/./,R.new)')).toMatchObject({
+    stdout: '"11"\n',
+  });
+  expect(run('p "ab".gsub(/z/,1)')).toMatchObject({
+    uncaughtException: 'no implicit conversion of Integer into String (TypeError)',
+  });
+});
+
 test('define_method gives break method-body control flow', () => {
   expect(run('class A; define_method(:f) { break 3 }; end; p A.new.f')).toMatchObject({ stdout: '3\n' });
 });
@@ -6704,6 +6716,11 @@ test('Method and UnboundMethod wrappers compare by binding and body', () => {
   expect(run('s="a";p s.method(:size)==s.method(:length),{s.method(:size)=>:hit}[s.method(:length)]')).toMatchObject({
     stdout: 'true\n:hit\n',
   });
+  expect(
+    run(
+      's="abc";p s.method(:slice)==s.method(:[]),{s.method(:slice)=>:hit}[s.method(:[])],String.instance_method(:slice)==String.instance_method(:[])'
+    )
+  ).toMatchObject({ stdout: 'true\n:hit\ntrue\n' });
 });
 
 test('inherited definition hooks also block removal silently skipping callbacks', () => {

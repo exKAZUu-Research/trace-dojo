@@ -816,4 +816,7 @@ test('nested pattern callbacks retain pending deconstructed turtles', () => {
   const acrossClauses =
     'class A;def deconstruct;[Turtle.new];end;end;class T;def self.===(o);x=1;true;end;end;case A.new;in [Integer];in T[t];t.forward;end';
   expect(traceProgram('ruby', acrossClauses, acrossClauses).finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
+  const failedMatch =
+    'class A;def deconstruct_keys(ks);{a:Turtle.new};end;def inspect;@n=1;"A";end;end;begin;A.new=>{b:};rescue NoMatchingPatternKeyError=>e;t=e.matchee[:a];t.forward;end';
+  expect(traceProgram('ruby', failedMatch, failedMatch).finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
 });
