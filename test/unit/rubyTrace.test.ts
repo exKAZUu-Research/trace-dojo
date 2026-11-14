@@ -796,3 +796,9 @@ test('Lazy and Struct collectors retain earlier Turtle results', () => {
     ]);
   }
 });
+
+test('pattern subjects stay rooted while pins run', () => {
+  const program = 'def check; x=1; Array; end\ncase [Turtle.new]\nin ^(check) => a\n a[0].forward\nend';
+  const result = traceProgram('ruby', program, program);
+  expect(result.finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
+});

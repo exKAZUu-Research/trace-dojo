@@ -170,6 +170,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly catchTags: Value[] = [];
   /** The blocks `at_exit` and `END` registered, which run when the program ends, the last first. */
   readonly atExit: RProc[] = [];
+  readonly registeredEndBlocks = new WeakSet<object>();
   readonly completedExitHandlers: RProc[] = [];
   readonly comparablePairs = new Map<Value, Set<Value>>();
   readonly arrayComparisonPairs = new Map<RArray, Set<RArray>>();

@@ -137,13 +137,28 @@ function* newStructClass(superclass: RClass, members: string[], layout: Omit<Lay
       },
     });
   }
+  addMethod(singleton, {
+    name: 'allocate',
+    owner: singleton,
+    visibility: 'public',
+    body: {
+      kind: 'native',
+      fn: (self) => {
+        const object = new RObject(self as RClass);
+        object.data = new StructValues(layoutOf(self as RClass).members.map(() => NIL));
+        return object;
+      },
+      min: 0,
+      max: 0,
+      takesKeywords: false,
+    },
+  });
   yield* [];
   return cls;
 }
 
 function* constructStruct(self: RClass, args: Value[], block: RProc | undefined, keywords?: RHash): Gen<RObject> {
-  const object = new RObject(self);
-  object.data = new StructValues(layoutOf(self).members.map(() => NIL));
+  const object = (yield* callMethod(self, 'allocate', [])) as RObject;
   const initialize = self.findMethod('initialize');
   if (initialize) yield* invoke(initialize, object, args, keywords, block, false);
   return object;
@@ -344,8 +359,7 @@ function* constructData(self: RClass, args: Value[], block: RProc | undefined, k
   }
   const hash: RHash = keywords ?? newHash();
   for (const [index, value] of args.entries()) yield* hashSet(hash, sym(members[index]), value);
-  const object = new RObject(self);
-  object.data = new StructValues(members.map(() => NIL));
+  const object = (yield* callMethod(self, 'allocate', [])) as RObject;
   const initialize = self.findMethod('initialize');
   if (initialize) yield* invoke(initialize, object, [], hash.map.size > 0 ? hash : undefined, block, false);
   object.frozen = true;
@@ -371,7 +385,7 @@ def(
       }
     }
     const missing = members.filter((name) => !given.has(name)).map((name) => `:${name}`);
-    if (missing.length > 0)
+    if (missing.length > 0 && (keywords?.map.size ?? 0) < members.length)
       throw argumentError(`missing keyword${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`);
     if (unknown.length > 0)
       throw argumentError(`unknown keyword${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}`);

@@ -199,10 +199,12 @@ def(
   'initialize',
   [0, 1],
   function* (self: RString, args, _block, keywords) {
+    let sourceBytes: Uint8Array | undefined;
     if (args.length === 0) self.binary = true;
     if (args.length > 0) {
       const source = yield* toStrValue(args[0]);
-      setBytes(self, stringBytes(source), source.binary);
+      sourceBytes = stringBytes(source);
+      setBytes(self, sourceBytes, source.binary);
     }
     if (keywords)
       for (const entry of keywords.map.values()) {
@@ -218,10 +220,11 @@ def(
               : entry.value instanceof RObject && entry.value.cls === rt().c.Encoding
                 ? (entry.value.data as string)
                 : yield* toStr(entry.value);
-          if (encoding === 'ASCII-8BIT' || encoding === 'BINARY') self.binary = true;
+          if (encoding === 'ASCII-8BIT' || encoding === 'BINARY')
+            setBytes(self, sourceBytes ?? stringBytes(self), true);
           // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby spells the encoding name UTF-8.
           else if (encoding === 'UTF-8' || encoding === 'US-ASCII') {
-            self.binary = false;
+            setBytes(self, sourceBytes ?? stringBytes(self), false);
             self.usAscii = encoding === 'US-ASCII';
           } else throw new UnsupportedFeatureError(`String.new の文字コード ${encoding}`);
         } else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);

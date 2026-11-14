@@ -46,33 +46,39 @@ export function guardFailed(): void {
 /** Whether a value matches a pattern, binding the pattern's variables in the frame as it goes, as Ruby does. */
 export function* matchPattern(pattern: Pattern, value: Value, frame: Frame, cache?: DeconstructionCache): Gen<boolean> {
   rt().spend();
-  switch (pattern.k) {
-    case 'value':
-    case 'pin': {
-      return yield* checked(yield* ev(pattern.e, frame), value);
+  const mark = frame.temporaries.length;
+  frame.temporaries.push(value);
+  try {
+    switch (pattern.k) {
+      case 'value':
+      case 'pin': {
+        return yield* checked(yield* ev(pattern.e, frame), value);
+      }
+      case 'bind': {
+        bind(pattern.target, value, frame);
+        return true;
+      }
+      case 'as': {
+        if (!(yield* matchPattern(pattern.pattern, value, frame, cache))) return false;
+        bind(pattern.target, value, frame);
+        return true;
+      }
+      case 'alt': {
+        for (const option of pattern.options) if (yield* matchPattern(option, value, frame, cache)) return true;
+        return false;
+      }
+      case 'array': {
+        return yield* matchArray(pattern, value, frame, cache);
+      }
+      case 'find': {
+        return yield* matchFind(pattern, value, frame, cache);
+      }
+      case 'hash': {
+        return yield* matchHash(pattern, value, frame);
+      }
     }
-    case 'bind': {
-      bind(pattern.target, value, frame);
-      return true;
-    }
-    case 'as': {
-      if (!(yield* matchPattern(pattern.pattern, value, frame, cache))) return false;
-      bind(pattern.target, value, frame);
-      return true;
-    }
-    case 'alt': {
-      for (const option of pattern.options) if (yield* matchPattern(option, value, frame, cache)) return true;
-      return false;
-    }
-    case 'array': {
-      return yield* matchArray(pattern, value, frame, cache);
-    }
-    case 'find': {
-      return yield* matchFind(pattern, value, frame, cache);
-    }
-    case 'hash': {
-      return yield* matchHash(pattern, value, frame);
-    }
+  } finally {
+    frame.temporaries.length = mark;
   }
 }
 

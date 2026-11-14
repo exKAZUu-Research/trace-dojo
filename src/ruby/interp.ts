@@ -401,18 +401,24 @@ export function* ev(e: Expr, frame: Frame): Gen {
     }
     case 'caseIn': {
       const subject = yield* ev(e.subject, frame);
+      const mark = frame.temporaries.length;
+      frame.temporaries.push(subject);
       const cache = { subject };
-      for (const clause of e.clauses) {
-        rt().currentRow = clause.row;
-        if (!(yield* matchPattern(clause.pattern, subject, frame, cache))) continue;
-        if (clause.guard && truthy(yield* ev(clause.guard.cond, frame)) === clause.guard.unless) {
-          guardFailed();
-          continue;
+      try {
+        for (const clause of e.clauses) {
+          rt().currentRow = clause.row;
+          if (!(yield* matchPattern(clause.pattern, subject, frame, cache))) continue;
+          if (clause.guard && truthy(yield* ev(clause.guard.cond, frame)) === clause.guard.unless) {
+            guardFailed();
+            continue;
+          }
+          return yield* evalBody(clause.body, frame);
         }
-        return yield* evalBody(clause.body, frame);
+        if (e.else) return yield* evalBody(e.else, frame);
+        throw yield* noMatchingPattern(subject, e.clauses.length === 1);
+      } finally {
+        frame.temporaries.length = mark;
       }
-      if (e.else) return yield* evalBody(e.else, frame);
-      throw yield* noMatchingPattern(subject, e.clauses.length === 1);
     }
     case 'matchPattern': {
       const value = yield* ev(e.value, frame);
@@ -424,6 +430,8 @@ export function* ev(e: Expr, frame: Frame): Gen {
       return makeRational(e.numerator, e.denominator);
     }
     case 'atExit': {
+      if (rt().registeredEndBlocks.has(e.block)) return NIL;
+      rt().registeredEndBlocks.add(e.block);
       const proc = makeBlock(e.block, frame);
       rt().atExit.push(proc);
       return proc;

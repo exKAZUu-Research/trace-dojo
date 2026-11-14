@@ -37,7 +37,7 @@ import {
   RArray,
   RHash,
   RObject,
-  type RProc,
+  RProc,
   RRange,
   RString,
   RSymbol,
@@ -784,8 +784,18 @@ sdef('Enumerator', 'new', [0, 1], function* (_self, args, block) {
   generator.data = data;
   const enumerator = makeEnumerator(generator, 'each', []);
   const [size] = args;
-  if (size !== undefined) (enumerator.data as EnumeratorSource).size = () => size;
-  yield* [];
+  if (size !== undefined) {
+    const source = enumerator.data as EnumeratorSource;
+    if (size instanceof RProc || respondsTo(size, 'call')) {
+      source.size = () => callMethod(size, 'call', []);
+      const previousHeld = source.held?.bind(source);
+      source.held = () => [...(previousHeld?.() ?? []), size];
+    } else {
+      const normalized =
+        size === NIL || (isRubyFloat(size) && !Number.isFinite(Number(size))) ? size : yield* toInt(size);
+      source.size = () => normalized;
+    }
+  }
   return enumerator;
 });
 def('Enumerator::Generator', 'each', [0, -1], function* (self: RObject, args, block) {

@@ -6598,3 +6598,35 @@ test('compound equality dispatches native value eql?', () => {
     stdout: 'true\n:hit\ntrue\n',
   });
 });
+
+test('Data reports unknown keywords before missing ones when counts match', () => {
+  expect(run('Coord=Data.define(:lat,:lng);Coord.new(lat:1,lon:2)')).toMatchObject({
+    uncaughtException: 'unknown keyword: :lon (ArgumentError)',
+  });
+});
+
+test('Struct and Data allocate nil-filled member storage', () => {
+  expect(run('S=Struct.new(:x);D=Data.define(:x);p S.allocate,D.allocate')).toMatchObject({
+    stdout: '#<struct S x=nil>\n#<data D x=nil>\n',
+  });
+});
+
+test('String.new retains UTF-8 bytes when choosing binary encoding', () => {
+  expect(run('s=String.new("é",encoding:"ASCII-8BIT");p s.bytes,s.bytesize')).toMatchObject({
+    stdout: '[195, 169]\n2\n',
+  });
+});
+
+test('END registers each syntax site once', () => {
+  expect(run('3.times { |i| END { puts "END #{i}" } }')).toMatchObject({ stdout: 'END 0\n' });
+});
+
+test('Enumerator.new normalizes numeric size and calls size Procs', () => {
+  expect(run('p Enumerator.new(-> {3}){|y|y<<1}.size, Enumerator.new(2.5){|y|}.size')).toMatchObject({
+    stdout: '3\n2\n',
+  });
+});
+
+test('regexp replacement Hash uses its default callback', () => {
+  expect(run('h=Hash.new{|_,k|k.upcase};p "abc".gsub(/./,h)')).toMatchObject({ stdout: '"ABC"\n' });
+});

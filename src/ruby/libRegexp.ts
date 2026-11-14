@@ -5,7 +5,7 @@ import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { inspect, rEquals, strInspect, toIndex, toS, toStr, tryImplicitConversion } from './conversions';
 import { def, extend, sdef } from './define';
 import { argumentError, frozenError, indexError, rubyError, typeError } from './errors';
-import { digest, hashGet, hashSet } from './hashes';
+import { digest, hashDefault, hashGet, hashSet } from './hashes';
 import { callBlock, callMethod, type Gen } from './interp';
 import { makeEnumerator } from './libEnumerator';
 import { setText } from './libString';
@@ -1074,8 +1074,9 @@ function* substituteRegexp(
     const [from, to] = state.groups[0] as readonly [number, number];
     let piece: string;
     if (replacement instanceof RHash) {
-      const entry = yield* hashGet(replacement, str(text.slice(from, to)));
-      piece = yield* toS(entry ? entry.value : replacement.defaultValue);
+      const key = str(text.slice(from, to));
+      const entry = yield* hashGet(replacement, key);
+      piece = yield* toS(entry ? entry.value : yield* hashDefault(replacement, key));
     } else if (replacement !== undefined) {
       piece = expand(yield* toStr(replacement), state, LIMITS.maxStringLength - length - (from - position));
     } else {
