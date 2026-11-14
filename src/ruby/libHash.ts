@@ -450,6 +450,7 @@ def('Hash', ['merge!', 'update'], [0, -1], function* (self: RHash, others, block
 def('Hash', 'transform_values', 0, function* (self: RHash, _args, block) {
   if (!block) return makeEnumerator(self, 'transform_values', []);
   const hash = newHash();
+  hash.byIdentity = self.byIdentity;
   yield* whileHeld(hash, () =>
     eachEntry(self, function* (entry) {
       yield* hashSet(hash, entry.key, yield* callBlock(block, [entry.value]));

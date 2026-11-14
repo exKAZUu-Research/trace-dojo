@@ -6813,12 +6813,12 @@ test('Time constructor validates field widths before calendar bounds', () => {
   });
 });
 
-test('Hash value transforms drop identity comparison', () => {
+test('Hash value transforms retain identity comparison', () => {
   expect(
     run(
       'h={}.compare_by_identity;a="a";b="a";h[a]=1;h[b]=2;v=h.transform_values{|x|x};p v,v.size,v.compare_by_identity?'
     )
-  ).toMatchObject({ stdout: '{"a" => 2}\n1\nfalse\n' });
+  ).toMatchObject({ stdout: '{"a" => 1, "a" => 2}\n2\ntrue\n' });
 });
 
 test('respond_to_missing? definitions remain private', () => {
