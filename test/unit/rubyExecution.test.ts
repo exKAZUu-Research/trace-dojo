@@ -2419,6 +2419,18 @@ test('warn preserves binary bytes and skips disabled warning level conversion', 
   ).toMatchObject({ stdout: '[[255, 10]]\n' });
 });
 
+test('warn assembles many short messages within operation limits', () => {
+  expect(run('warn(*Array.new(20000,"x"));puts :ok')).toMatchObject({ stdout: 'ok\n' });
+});
+
+test('warn resolves stderr after message conversion', () => {
+  expect(
+    run(
+      'class W;def initialize(n);@n=n;end;def write(s);$v<<[@n,s];end;end;class A;def to_s;$stderr=$b;"x";end;end;$v=[];$b=W.new(2);$stderr=W.new(1);warn A.new;$stderr=STDERR;p $v'
+    )
+  ).toMatchObject({ stdout: '[[2, "x\\n"]]\n' });
+});
+
 test('Range cover excludes empty Range arguments', () => {
   expect(run('p (1..3).cover?(2...2),(1..3).cover?(3..2),(1..3).cover?(2..2)')).toMatchObject({
     stdout: 'false\nfalse\ntrue\n',

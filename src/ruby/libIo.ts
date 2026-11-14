@@ -1,3 +1,4 @@
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { OutputChannel } from '../interpreter/programIo';
 import { combinedStringEncoding, inspectValue, toIndexExact, toInt, toSValue } from './conversions';
 import { def } from './define';
@@ -189,12 +190,11 @@ def(
   function* (_self, args, _block, keywords) {
     yield* validateWarnKeywords(keywords, args.length > 0);
     if (args.length > 0 && warnCategoryEnabled(keywords)) {
-      const target = rt().globals.get('$stderr') ?? NIL;
       const parts: RString[] = [];
       yield* emitPuts(args, function* (part) {
         parts.push(part instanceof RString ? part : str(part));
       });
-      yield* write(target, combineWarningParts(parts));
+      yield* write(rt().globals.get('$stderr') ?? NIL, combineWarningParts(parts));
     }
     return NIL;
   },
@@ -211,7 +211,8 @@ function combineWarningParts(parts: RString[]): RString {
     const bytes = stringBytes(part);
     if (ascii) ascii = bytes.every((byte) => byte < 0x80);
     length += bytes.length;
-    rt().checkStringLength(length);
+    if (length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+    rt().spend(Math.ceil(bytes.length / 256));
     chunks.push(bytes);
   }
   const joined = new Uint8Array(length);
