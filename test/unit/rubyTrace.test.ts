@@ -42,6 +42,11 @@ test('Array conversion results stay reachable during transpose and product', () 
   expect(traceProgram('ruby', product, product).finalTurtles).toHaveLength(1);
 });
 
+test('Array combination snapshots keep later Turtles reachable', () => {
+  const program = 'a=[1,Turtle.new];a.permutation(1){|x|a.clear if x[0]==1;$v=x[0]}';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
 test('pending expression values remain visible in Turtle traces', () => {
   const programs = [
     'def v;x=1;42;end;h={Turtle.new=>v}',

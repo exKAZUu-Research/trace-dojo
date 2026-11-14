@@ -1698,6 +1698,25 @@ test('Array product and set operations read receivers after operand conversion',
   });
 });
 
+test('Array equality searches and extrema follow current storage', () => {
+  expect(run('class X;def ==(x);$a.clear;false;end;end;$a=[X.new,9];p $a.include?(9),$a')).toMatchObject({
+    stdout: 'false\n[]\n',
+  });
+  expect(run('$a=[3,2,1];p $a.min{|x,y|$a.clear;x<=>y},$a')).toMatchObject({
+    stdout: '2\n[]\n',
+  });
+});
+
+test('shuffle detects receiver changes from its randomizer', () => {
+  expect(
+    run(
+      'class R;def rand(n);$a.replace([8]);0;end;end;$a=[1,2,3];begin;$a.shuffle!(random:R.new);rescue=>e;p e.class,e.message;end;p $a'
+    )
+  ).toMatchObject({
+    stdout: 'RuntimeError\n"modified during shuffle"\n[8]\n',
+  });
+});
+
 test('Array delete retains contents when an equality callback raises', () => {
   expect(
     run(

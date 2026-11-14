@@ -14,7 +14,15 @@ import {
   toSValue,
 } from './conversions';
 import { def, sdef } from './define';
-import { argumentError, frozenError, implicitConversionError, indexError, rangeError, typeError } from './errors';
+import {
+  argumentError,
+  frozenError,
+  implicitConversionError,
+  indexError,
+  rangeError,
+  runtimeError,
+  typeError,
+} from './errors';
 import { hashGet, hashSet, structuralHashValue } from './hashes';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import {
@@ -749,13 +757,15 @@ function joinStringConversionError(value: Value, converted: Value): unknown {
   return typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
 }
 def('Array', 'assoc', 1, function* (self: RArray, [key]) {
-  for (const item of self.items) {
+  for (let index = 0; index < self.items.length; index++) {
+    const item = self.items[index];
     if (item instanceof RArray && item.items.length > 0 && (yield* rEquals(item.items[0], key))) return item;
   }
   return NIL;
 });
 def('Array', 'rassoc', 1, function* (self: RArray, [value]) {
-  for (const item of self.items) {
+  for (let index = 0; index < self.items.length; index++) {
+    const item = self.items[index];
     if (item instanceof RArray && item.items.length > 1 && (yield* rEquals(item.items[1], value))) return item;
   }
   return NIL;
@@ -918,46 +928,61 @@ for (const [name, generate] of [
     const size = args.length > 0 ? yield* toIndex(args[0]) : self.items.length;
     if (!block) return makeEnumerator(self, name, args);
     const items = [...self.items];
-    yield* generate(items, size, function* (combination) {
-      yield* call(block, arr(combination), false);
-    });
+    rt().heldArrays.push(items);
+    try {
+      yield* generate(items, size, function* (combination) {
+        yield* call(block, arr(combination), false);
+      });
+    } finally {
+      rt().heldArrays.pop();
+    }
     return self;
   });
 }
-// code-gauge-allow duplicateLines 16 -- Both repeated iterators yield index tuples, but their carry rules differ.
+// code-gauge-allow duplicateLines 23 -- Both repeated iterators yield index tuples, but their carry rules differ.
 def('Array', 'repeated_combination', 1, function* (self: RArray, [sizeValue], block) {
   const size = yield* toIndex(sizeValue);
   if (!block) return makeEnumerator(self, 'repeated_combination', [sizeValue]);
   const items = [...self.items];
   if (size < 0 || (items.length === 0 && size > 0)) return self;
   const indices = Array.from({ length: size }, () => 0);
-  for (;;) {
-    rt().spend();
-    yield* call(block, arr(indices.map((index) => items[index])), false);
-    let position = size - 1;
-    while (position >= 0 && indices[position] === items.length - 1) position--;
-    if (position < 0) return self;
-    indices[position]++;
-    for (let next = position + 1; next < size; next++) indices[next] = indices[position];
+  rt().heldArrays.push(items);
+  try {
+    for (;;) {
+      rt().spend();
+      yield* call(block, arr(indices.map((index) => items[index])), false);
+      let position = size - 1;
+      while (position >= 0 && indices[position] === items.length - 1) position--;
+      if (position < 0) return self;
+      indices[position]++;
+      for (let next = position + 1; next < size; next++) indices[next] = indices[position];
+    }
+  } finally {
+    rt().heldArrays.pop();
   }
 });
-// code-gauge-allow duplicateLines 16 -- Both repeated iterators yield index tuples, but their carry rules differ.
+// code-gauge-allow duplicateLines 23 -- Both repeated iterators yield index tuples, but their carry rules differ.
 def('Array', 'repeated_permutation', 1, function* (self: RArray, [sizeValue], block) {
   const size = yield* toIndex(sizeValue);
   if (!block) return makeEnumerator(self, 'repeated_permutation', [sizeValue]);
   const items = [...self.items];
   if (size < 0 || (items.length === 0 && size > 0)) return self;
   const indices = Array.from({ length: size }, () => 0);
-  for (;;) {
-    rt().spend();
-    yield* call(block, arr(indices.map((index) => items[index])), false);
-    let position = size - 1;
-    while (position >= 0 && indices[position] === items.length - 1) {
-      indices[position] = 0;
-      position--;
+  rt().heldArrays.push(items);
+  try {
+    for (;;) {
+      rt().spend();
+      yield* call(block, arr(indices.map((index) => items[index])), false);
+      let position = size - 1;
+      while (position >= 0 && indices[position] === items.length - 1) {
+        indices[position] = 0;
+        position--;
+      }
+      if (position < 0) return self;
+      indices[position]++;
     }
-    if (position < 0) return self;
-    indices[position]++;
+  } finally {
+    rt().heldArrays.pop();
   }
 });
 
@@ -1010,7 +1035,7 @@ def('Array', 'rindex', [0, 1], function* (self: RArray, args, block) {
   return NIL;
 });
 def('Array', 'include?', 1, function* (self: RArray, [target]) {
-  for (const item of self.items) if (yield* rEquals(item, target)) return true;
+  for (let index = 0; index < self.items.length; index++) if (yield* rEquals(self.items[index], target)) return true;
   return false;
 });
 def('Array', 'count', [0, 1], function* (self: RArray, args, block) {
@@ -1039,7 +1064,8 @@ def('Array', 'max', [0, 1], function* (self: RArray, args, block) {
   if (args.length > 0 && args[0] !== NIL) return yield* nmin(self.items, args[0], undefined, block, true);
   if (!block) return yield* arrayExtreme(self, true);
   let result: Value | undefined;
-  for (const item of self.items) {
+  for (let index = 0; index < self.items.length; index++) {
+    const item = self.items[index];
     if (result === undefined) result = item;
     else if ((yield* blockCompare(block, item, result)) > 0) result = item;
   }
@@ -1049,7 +1075,8 @@ def('Array', 'min', [0, 1], function* (self: RArray, args, block) {
   if (args.length > 0 && args[0] !== NIL) return yield* nmin(self.items, args[0], undefined, block, false);
   if (!block) return yield* arrayExtreme(self, false);
   let result: Value | undefined;
-  for (const item of self.items) {
+  for (let index = 0; index < self.items.length; index++) {
+    const item = self.items[index];
     if (result === undefined) result = item;
     else if ((yield* blockCompare(block, item, result)) < 0) result = item;
   }
@@ -1153,7 +1180,7 @@ def(
   [0, 1],
   function* (self: RArray, _args, _block, keywords) {
     yield* modify(self);
-    yield* shuffle(self.items, yield* randomOption(keywords));
+    yield* shuffle(self.items, yield* randomOption(keywords), self);
     return self;
   },
   { keywords: true }
@@ -1168,10 +1195,12 @@ function* randomOption(keywords: RHash | undefined): Gen<Value | undefined> {
   return undefined;
 }
 
-function* shuffle(items: Value[], randomizer: Value | undefined): Gen<void> {
+function* shuffle(items: Value[], randomizer: Value | undefined, owner?: RArray): Gen<void> {
   let index = items.length;
+  const version = owner?.version;
   while (index > 1) {
     const other = yield* randomIndex(randomizer, index);
+    if (owner && (owner.version !== version || owner.items !== items)) throw runtimeError('modified during shuffle');
     index--;
     [items[index], items[other]] = [items[other], items[index]];
   }
