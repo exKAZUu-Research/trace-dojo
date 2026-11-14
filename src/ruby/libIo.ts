@@ -81,6 +81,10 @@ function* write(target: Value, value: string | Value): Gen<void> {
   yield* callMethod(target, 'write', [text]);
 }
 
+export function* writeStderr(value: string | Value): Gen<void> {
+  yield* write(rt().globals.get('$stderr') ?? NIL, value);
+}
+
 function checkWritable(self: RObject): void {
   if (self.frozen) throw frozenError(self, `#<IO:<${self.data === 'stdout' ? 'STDOUT' : 'STDERR'}>>`);
 }

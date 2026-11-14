@@ -25,6 +25,11 @@ test('user methods sharing declaration names keep atomic call steps', () => {
   }
 });
 
+test('class literal initializers trace reopened operator effects', () => {
+  const program = 'class Integer\n def +(x) # atomic\n  $g=7\n end\nend\nclass C\n Y=1\n X=1+2\nend';
+  expect(rubyTrace(program).some((item) => item.line === 8 && item.vars.$g === 7)).toBe(true);
+});
+
 test('allocated Float values remain visible in traces', () => {
   const program = 'a=Float::MAX;b=[Float::INFINITY]';
   const trace = traceProgram('ruby', program, program);

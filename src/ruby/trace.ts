@@ -6,6 +6,7 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { formatFloat, strInspect, symInspect } from './conversions';
 import {
+  type HashEntry,
   NIL,
   RArray,
   RBasic,
@@ -207,7 +208,11 @@ function containerNodeOf(value: RBasic, seen: Set<object>, budget: { remaining: 
     return { kind: 'array', entries };
   }
   if (value instanceof RHash) {
-    const ordered = [...value.map.values()];
+    const ordered: HashEntry[] = [];
+    for (const entry of value.map.values()) {
+      if (ordered.length >= Math.max(1, budget.remaining)) break;
+      ordered.push(entry);
+    }
     const labels = keyLabels(ordered.map((entry) => entry.key));
     for (const [index, entry] of ordered.entries()) {
       Object.defineProperty(entries, labels[index], {
@@ -217,7 +222,11 @@ function containerNodeOf(value: RBasic, seen: Set<object>, budget: { remaining: 
         writable: true,
       });
       if (budget.remaining <= 0) {
-        if (index + 1 < ordered.length) markTruncated(entries, labels[index + 1]);
+        if (index + 1 < value.map.size) {
+          let marker = '…';
+          while (Object.hasOwn(entries, marker)) marker += '…';
+          markTruncated(entries, marker);
+        }
         break;
       }
     }

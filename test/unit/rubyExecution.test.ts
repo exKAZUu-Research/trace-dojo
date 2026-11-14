@@ -2370,6 +2370,30 @@ test('active exception global rejects learner assignment', () => {
   });
 });
 
+test('abort uses replacement stderr and reports failure status', () => {
+  expect(
+    run(
+      'class W;def write(x);$v<<x;end;end;$v=[];$stderr=W.new;begin;abort "oops";rescue SystemExit=>e;p e.status,e.success?;end;$stderr=STDERR;p $v'
+    )
+  ).toMatchObject({ stdout: '1\nfalse\n["oops", "\\n"]\n' });
+  expect(run('begin;abort;rescue SystemExit=>e;p e.status,e.success?;end')).toMatchObject({
+    stdout: '1\nfalse\n',
+  });
+});
+
+test('SystemExit initializes status and message independently', () => {
+  expect(
+    run(
+      'e=SystemExit.new(3);p e.status,e.success?,e.message;e=SystemExit.new(2,"bad");p e.status,e.message;e=SystemExit.new("text");p e.status,e.message'
+    )
+  ).toMatchObject({ stdout: '3\nfalse\n"SystemExit"\n2\n"bad"\n0\n"text"\n' });
+  expect(
+    run(
+      'class A;def to_int;2;end;end;class S<SystemExit;end;p SystemExit.new(A.new).status,SystemExit.new(1.5).status,SystemExit.new(false).status,S.new(4,"x").message'
+    )
+  ).toMatchObject({ stdout: '2\n1\n1\n"x"\n' });
+});
+
 test('process and option globals report unsupported runtime state', () => {
   for (const name of ['$$', '$-p', '$-l', '$-a']) {
     expect(run(`p ${name}`)).toMatchObject({

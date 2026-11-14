@@ -143,7 +143,14 @@ function* evalStmt(statement: Stmt, frame: Frame): Gen {
   let { step } = statement;
   if (step === 'none' && e.k === 'call' && e.fcall && classOf(frame.self).findMethod(e.name)?.body.kind === 'user')
     step = 'call';
-  if (step === 'none' || step === 'constant') return yield* ev(e, frame);
+  if (step === 'none') return yield* ev(e, frame);
+  if (step === 'constant') {
+    const mark = runtime.steps.statementMark();
+    const userCalls = runtime.userCallVersion;
+    const value = yield* ev(e, frame);
+    if (runtime.userCallVersion !== userCalls) runtime.steps.completeStatement(statement.row, false, mark);
+    return value;
+  }
   const used = statement.use === 1 || (statement.use === 2 && frame.resultUsed);
   if (used && step !== 'assign') return yield* ev(e, frame);
   const { steps } = runtime;
@@ -1534,6 +1541,7 @@ function* invokeUser(
   used: boolean
 ): Gen {
   const runtime = rt();
+  runtime.userCallVersion++;
   const frame = new Frame('method', recv, new Scope(), cref, runtime.currentRow, def.isAtomic, used, {
     method,
     def,

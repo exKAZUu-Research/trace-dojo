@@ -1185,7 +1185,7 @@ function classBodyStepKind(e: Expr, step: StepKind): StepKind {
   return step;
 }
 
-/** Whether an expression is made of literals and operators over them, which nothing a program does can change. */
+/** Whether an expression uses only literals and operators on them. */
 function isLiteral(e: Expr): boolean {
   switch (e.k) {
     case 'nil':

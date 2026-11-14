@@ -11,8 +11,8 @@ import {
   inspectProc,
   rEql,
   rEquals,
+  toInt,
   toRubyInt,
-  toStr,
   toStrValue,
 } from './conversions';
 import { def, sdef } from './define';
@@ -31,6 +31,7 @@ import {
   respondsTo,
 } from './interp';
 import { curry, makeEnumerator, sizedEnumerator } from './libEnumerator';
+import { writeStderr } from './libIo';
 import { kernelFloat, kernelInteger } from './libNumeric';
 import {
   invalidateMethodCaches,
@@ -469,8 +470,13 @@ def(
   'abort',
   [0, 1],
   function* (_self, [message]) {
-    if (message !== undefined) rt().io.stderr.write(`${yield* toStr(message)}\n`);
-    throw rubyError(rt().c.SystemExit, message ?? str('exit'));
+    if (message !== undefined) {
+      yield* writeStderr(yield* toStrValue(message));
+      yield* writeStderr('\n');
+    }
+    const error = rubyError(rt().c.SystemExit, message ?? str('exit'));
+    error.exception.ivars = new Map([['@__status', 1n]]);
+    throw error;
   },
   PRIVATE
 );
@@ -1040,6 +1046,35 @@ def('FrozenError', 'receiver', 0, (self: RObject) => self.ivars?.get('@__receive
 def('KeyError', 'key', 0, (self: RObject) => self.ivars?.get('@__key') ?? NIL);
 def('KeyError', 'receiver', 0, (self: RObject) => self.ivars?.get('@__receiver') ?? NIL);
 def('StopIteration', 'result', 0, (self: RObject) => self.ivars?.get('@result') ?? NIL);
+def(
+  'SystemExit',
+  'initialize',
+  [0, 2],
+  function* (self: RObject, args) {
+    if (self.frozen) throw frozenError(self, yield* inspectException(self));
+    const first = args[0];
+    const status = first === undefined ? undefined : yield* systemExitStatus(first);
+    if (status === undefined && args.length > 1) throw argumentCountError(args.length, 0, 1);
+    (self.exception as NonNullable<RObject['exception']>).message =
+      status === undefined ? (first ?? NIL) : (args[1] ?? NIL);
+    self.ivars ??= new Map();
+    self.ivars.set('@__status', status ?? 0n);
+    return NIL;
+  },
+  PRIVATE
+);
+
+function* systemExitStatus(value: Value): Gen<bigint | undefined> {
+  if (value === true) return 0n;
+  if (value === false) return 1n;
+  if (typeof value === 'bigint' || typeof value === 'number' || value instanceof RFloat) return yield* toInt(value);
+  if (value !== NIL && respondsTo(value, 'to_int', true)) {
+    const converted = yield* callMethod(value, 'to_int', [], undefined, undefined, { fcall: true });
+    if (typeof converted === 'bigint') return converted;
+  }
+  return undefined;
+}
+
 def('SystemExit', 'status', 0, (self: RObject) => self.ivars?.get('@__status') ?? 0n);
 def('SystemExit', 'success?', 0, (self: RObject) => (self.ivars?.get('@__status') ?? 0n) === 0n);
 
