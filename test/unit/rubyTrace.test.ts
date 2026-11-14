@@ -103,6 +103,11 @@ test('Array difference roots pending values during key hashing', () => {
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
+test('Array union roots pending values during eql callbacks', () => {
+  const program = 'class K;def eql?(x);$a.clear;q=1;false;end;end;$a=[Turtle.new(0,0),K.new,Turtle.new(1,0)];b=$a|[]';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(2);
+});
+
 test('Array concat roots early conversion results', () => {
   const program =
     'class A;def to_ary;[Turtle.new];end;end;class B;def to_ary;q=1;[];end;end;a=[];a.concat(A.new,B.new)';

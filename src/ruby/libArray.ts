@@ -736,6 +736,7 @@ function* arrayUnion(self: RArray, others: Value[]): Gen {
     }
     const all = [...self.items];
     for (const array of arrays) for (const item of array.items) all.push(item);
+    rt().heldArrays.push(all);
     if (all.length > 16) return arr(yield* uniqValues(all, undefined));
     const result: Value[] = [];
     rt().heldArrays.push(result);
