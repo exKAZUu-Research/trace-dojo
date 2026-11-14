@@ -154,15 +154,24 @@ def('Set', ['|', 'union', '+'], 1, function* (self: RObject, [value]) {
 def('Set', ['&', 'intersection'], 1, function* (self: RObject, [value]) {
   const result = (yield* callMethod(self.cls, 'new', [])) as RObject;
   return yield* whileHeld(result, function* () {
-    const right = yield* newSet(yield* other(value));
-    return yield* whileHeld(right, function* () {
-      yield* eachEntry(membersOf(self), function* (entry) {
-        if (yield* hashGet(membersOf(right), entry.key)) yield* callMethod(result, 'add', [entry.key]);
-      });
-      return result;
-    });
+    yield* addIntersectionMembers(self, value, result);
+    return result;
   });
 });
+function* addIntersectionMembers(self: RObject, value: Value, result: RObject): Gen<void> {
+  if (value instanceof RObject && value.data instanceof SetData) {
+    const scanSelf = membersOf(value).map.size > membersOf(self).map.size;
+    const scanned = scanSelf ? self : value;
+    const lookup = scanSelf ? value : self;
+    yield* eachEntry(membersOf(scanned), function* (entry) {
+      if (yield* hashGet(membersOf(lookup), entry.key)) yield* callMethod(result, 'add', [entry.key]);
+    });
+  } else {
+    yield* eachOther(value, function* (item) {
+      if (yield* hashGet(membersOf(self), item)) yield* callMethod(result, 'add', [item]);
+    });
+  }
+}
 def('Set', ['-', 'difference'], 1, function* (self: RObject, [value]) {
   const result = (yield* callMethod(self, 'dup', [])) as RObject;
   return yield* whileHeld(result, function* () {

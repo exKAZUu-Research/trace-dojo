@@ -1990,6 +1990,12 @@ test('Set intersection initializes before iterating the operand', () => {
   expect(run(source)).toMatchObject({ stdout: 'init\nstart\ninit\neach\nRuntimeError\n' });
 });
 
+test('Set intersection avoids rehashing unrelated receiver members', () => {
+  const source =
+    'class K;attr_accessor :bad;def hash;raise "bad" if @bad;0;end;end;k=K.new;s=Set[k];k.bad=true;p (s & Set[]).size,(s.intersection(Set[2])).size';
+  expect(run(source)).toMatchObject({ stdout: '0\n0\n' });
+});
+
 test('Set symmetric difference invokes subclass initialization with its operand', () => {
   expect(
     run('class S<Set;def initialize(x,y);super(x);end;end;s=S.new([1],2);begin;s ^ Set[2];rescue=>e;p e.message;end')
