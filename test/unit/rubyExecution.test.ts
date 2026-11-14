@@ -5342,6 +5342,20 @@ test('Hash equality observes identity comparison for nonempty hashes', () => {
   ).toMatchObject({ stdout: 'false\nfalse\n' });
 });
 
+test('one-argument respond_to? and dynamic conversion hooks work in containers', () => {
+  expect(
+    run(
+      'class Ghost;def respond_to?(name);name.to_s.start_with?("get_")||super;end;end;p [Ghost.new].flatten.size;a,b=Ghost.new;p b'
+    )
+  ).toMatchObject({ stdout: '1\nnil\n' });
+  expect(
+    run('class Ghost;def method_missing(n,*a)="ghost #{n}";end;begin;puts Ghost.new;rescue=>e;p e.class,e.message;end')
+  ).toMatchObject({ stdout: 'TypeError\n"can\'t convert Ghost to Array (Ghost#to_ary gives String)"\n' });
+  expect(run('class G;def method_missing(n,*a)="ghost #{n}";end;puts [G.new,1].join(",")')).toMatchObject({
+    stdout: 'ghost to_str,1\n',
+  });
+});
+
 test('Hash.[] rehashes keys when dropping identity comparison', () => {
   expect(
     run('h={}.compare_by_identity;a="a";b="a";h[a]=1;h[b]=2;m=Hash[h];p m.compare_by_identity?,m[a],m[b],m.size')
@@ -5710,6 +5724,9 @@ test('Regexp line boundaries and character classes follow Ruby semantics', () =>
       String.raw`p(/a$/.match?("a\r\n"));p "\u3000" =~ /\s/;p "a\rb" =~ /a.b/;p "a\rb".scan(/^./);p(/[[:word:]]/.match?("é"))`
     )
   ).toMatchObject({ stdout: 'false\nnil\n0\n["a"]\ntrue\n' });
+  expect(run(String.raw`p "ab1" =~ /\p{Alnum}+/, "x" =~ /\p{Arabic}/, " ".match?(/\p{Blank}/)`)).toMatchObject({
+    stdout: '0\nnil\ntrue\n',
+  });
 });
 
 test('Regexp literals freeze while constructed regexps and matches remain mutable', () => {
@@ -6558,6 +6575,9 @@ test('Lazy preserves source yield argument lists', () => {
   expect(
     run('class A;def to_ary;1;end;end;begin;[0].lazy.flat_map{A.new}.force;rescue=>e;p e.class,e.message;end')
   ).toMatchObject({ stdout: 'TypeError\n"can\'t convert A to Array (A#to_ary gives Integer)"\n' });
+  expect(run('begin;(1..3).lazy.collect.to_a;rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'ArgumentError\n"tried to call lazy map without a block"\n',
+  });
 });
 
 test('regexp replacement expands the last participating capture', () => {
@@ -6662,6 +6682,10 @@ test('Struct and Data allocate nil-filled member storage', () => {
   expect(run('D=Data.define(:x);def D.allocate;puts :custom;super;end;p D.new(1)')).toMatchObject({
     stdout: '#<data D x=1>\n',
   });
+});
+
+test('Struct dig returns nil for missing names and indexes', () => {
+  expect(run('S=Struct.new(:a);p S.new(1).dig(:b),S.new(1).dig(2)')).toMatchObject({ stdout: 'nil\nnil\n' });
 });
 
 test('String.new retains UTF-8 bytes when choosing binary encoding', () => {
@@ -6879,6 +6903,16 @@ test('MatchData source snapshots preserve binary bytes and freezing', () => {
   expect(run('s="éaba";i=0;s.gsub("a"){i+=1;s[0]="xx" if i==2;"z"};p $~&.begin(0),$~&.string')).toMatchObject({
     stdout: '4\n"xxaba"\n',
   });
+  expect(run('m=/./.match(255.chr);p m[0].bytes,m.string.bytes,m[0].encoding')).toMatchObject({
+    stdout: '[255]\n[255]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  });
+  expect(run('s=255.chr;p s.split(/x/).first.bytes,s.partition(/x/).first.bytes,s[/./].bytes')).toMatchObject({
+    stdout: '[255]\n[255]\n[255]\n',
+  });
+  expect(run('p 233.chr.gsub(/x/, "").bytes,233.chr.gsub(/x/, "").encoding')).toMatchObject({
+    stdout: '[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  });
+  expect(run(String.raw`p 233.chr.gsub(/./, "\\&").bytes`)).toMatchObject({ stdout: '[233]\n' });
 });
 
 test('Time constructor validates field widths before calendar bounds', () => {

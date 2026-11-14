@@ -1,6 +1,13 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { OutputChannel } from '../interpreter/programIo';
-import { combinedStringEncoding, inspectValue, toIndexExact, toInt, toSValue } from './conversions';
+import {
+  combinedStringEncoding,
+  inspectValue,
+  toIndexExact,
+  toInt,
+  toSValue,
+  tryImplicitConversion,
+} from './conversions';
 import { def } from './define';
 import { argumentError, frozenError, typeError } from './errors';
 import { exportBinaryInspect, formatString } from './format';
@@ -26,10 +33,10 @@ function* emitPuts(args: Value[], emit: (part: string | RString) => Gen<void>, i
   const visit = function* (value: Value, seen: Set<RArray>): Gen<void> {
     rt().spend();
     let array = value instanceof RArray ? value : undefined;
-    if (!array && respondsTo(value, 'to_ary', true)) {
-      const converted = yield* callMethod(value, 'to_ary', [], undefined, undefined, { fcall: true });
+    if (!array) {
+      const converted = yield* tryImplicitConversion(value, 'to_ary');
       if (converted instanceof RArray) array = converted;
-      else if (converted !== NIL) {
+      else if (converted !== undefined && converted !== NIL) {
         throw typeError(
           `can't convert ${realClassOf(value).name} to Array (${realClassOf(value).name}#to_ary gives ${realClassOf(converted).name})`
         );

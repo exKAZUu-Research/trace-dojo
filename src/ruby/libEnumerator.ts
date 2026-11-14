@@ -654,6 +654,7 @@ interface Cursor {
   /** The frames, held values, and catch tags of the suspended calls, put back while the iteration resumes. */
   frames: Frame[];
   held: Value[];
+  heldArrays: Value[][];
   catchTags: Value[];
   peeked: Value[][];
   feed?: Value;
@@ -664,7 +665,7 @@ interface Cursor {
 
 function cursorRoots(cursor: Cursor | undefined): Value[] {
   if (!cursor) return [];
-  const values = [...cursor.held, ...cursor.catchTags, ...cursor.peeked.flat()];
+  const values = [...cursor.held, ...cursor.heldArrays.flat(), ...cursor.catchTags, ...cursor.peeked.flat()];
   if (cursor.feedSet) values.push(cursor.feed as Value);
   if (cursor.result !== undefined) values.push(cursor.result);
   for (const frame of cursor.frames) pushFrameReferences(frame, values);
@@ -679,7 +680,7 @@ function startCursor(self: RObject): Cursor {
       });
     })()
   );
-  return { runner, frames: [], held: [], catchTags: [], peeked: [], feedSet: false, started: false };
+  return { runner, frames: [], held: [], heldArrays: [], catchTags: [], peeked: [], feedSet: false, started: false };
 }
 
 /** Resumes the iteration until it yields its next value, or raises StopIteration when it has ended. */
@@ -692,10 +693,12 @@ function nextValues(self: RObject): Value[] {
   const runtime = rt();
   const frameBase = runtime.frames.length;
   const heldBase = runtime.held.length;
+  const arraysBase = runtime.heldArrays.length;
   const row = runtime.currentRow;
   const callerTags = runtime.catchTags.splice(0);
   runtime.frames.push(...cursor.frames);
   runtime.held.push(...cursor.held);
+  runtime.heldArrays.push(...cursor.heldArrays);
   runtime.catchTags.push(...cursor.catchTags);
   let step: IteratorResult<unknown, Value>;
   let failed = false;
@@ -713,6 +716,7 @@ function nextValues(self: RObject): Value[] {
   } finally {
     cursor.frames = runtime.frames.splice(frameBase);
     cursor.held = runtime.held.splice(heldBase);
+    cursor.heldArrays = runtime.heldArrays.splice(arraysBase);
     cursor.catchTags = runtime.catchTags.splice(0);
     runtime.catchTags.push(...callerTags);
     runtime.currentRow = row;
@@ -971,7 +975,8 @@ for (const kind of [
           : kind === 'collect_concat'
             ? 'flat_map'
             : kind;
-    return makeLazy(data.source, [...data.steps, { kind: normalized, block: requireBlock(block), label: kind }]);
+    if (!block) throw argumentError(`tried to call lazy ${normalized} without a block`);
+    return makeLazy(data.source, [...data.steps, { kind: normalized, block, label: kind }]);
   });
 }
 for (const kind of ['grep', 'grep_v'] as const) {

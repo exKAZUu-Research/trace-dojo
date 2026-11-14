@@ -123,7 +123,7 @@ function methodObject(recv: Value, method: RMethod, name = method.name): RObject
     method,
     name,
     held() {
-      return [this.recv];
+      return [this.recv, this.method.owner, ...(this.method.body.kind === 'proc' ? [this.method.body.proc] : [])];
     },
   };
   object.data = data;

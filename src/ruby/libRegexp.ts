@@ -2,13 +2,23 @@ import vm from 'node:vm';
 
 // code-gauge-allow-file fileNcss 558 -- The libRegexp module keeps one concern's cases together.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { inspect, rEquals, strInspect, toIndex, toS, toStr, toStrValue, tryImplicitConversion } from './conversions';
+import {
+  combinedStringEncoding,
+  inspect,
+  rEquals,
+  strInspect,
+  toIndex,
+  toStr,
+  toStrValue,
+  toSValue,
+  tryImplicitConversion,
+} from './conversions';
 import { def, extend, sdef } from './define';
 import { argumentError, frozenError, indexError, rubyError, typeError } from './errors';
 import { digest, hashDefault, hashGet, hashSet } from './hashes';
 import { callBlock, callMethod, type Gen } from './interp';
 import { makeEnumerator } from './libEnumerator';
-import { copyStringEncoding, setText } from './libString';
+import { copyStringEncoding, setBytes, sliceStringEncoding } from './libString';
 import {
   type NativeFn,
   NIL,
@@ -28,7 +38,7 @@ import {
   regexpLineCommentEnd,
 } from './regexpCaptureNames';
 import { type Frame, rt, UnsupportedFeatureError } from './runtime';
-import { arr, newHash, realClassOf, str, stringBytes, sym, truthy } from './values';
+import { arr, newHash, realClassOf, str, stringBytes, stringFromBytes, sym, truthy } from './values';
 
 export interface RegexpData {
   source: string;
@@ -349,16 +359,31 @@ function translateEscape(
     case 'P': {
       const property = /^\{(\^?)(\w+)\}/.exec(source.slice(index + 1));
       if (!property) return `\\${next}`;
-      const name = PROPERTY_NAMES[property[2].toLowerCase()] ?? property[2];
+      const rawName = property[2];
+      const key = rawName.toLowerCase();
       skip(property[0].length);
       const negated = (next === 'P') !== (property[1] === '^');
-      if (name === 'Word') {
-        const body = POSIX_CLASSES.word;
+      const body = POSIX_CLASSES[key];
+      if (body !== undefined) {
         if (inClass && negated) {
           addNegatedClass(body);
           return '';
         }
         return inClass ? body : `[${negated ? '^' : ''}${body}]`;
+      }
+      let name = PROPERTY_NAMES[key] ?? rawName;
+      if (name === rawName) {
+        try {
+          new RegExp(`\\p{${name}}`, 'u');
+        } catch {
+          const script = `${rawName[0].toUpperCase()}${rawName.slice(1).toLowerCase()}`;
+          try {
+            new RegExp(`\\p{Script=${script}}`, 'u');
+            name = `Script=${script}`;
+          } catch {
+            throw unsupportedSyntax(`Unicode プロパティ ${rawName}`);
+          }
+        }
       }
       return `\\${negated ? 'P' : 'p'}{${name}}`;
     }
@@ -558,7 +583,7 @@ function stateOf(match: RObject): MatchState {
 
 function groupText(state: MatchState, group: number): Value {
   const range = state.groups[group];
-  return range ? str(state.text.slice(range[0], range[1])) : NIL;
+  return range ? sliceStringEncoding(state.snapshot ?? str(state.text), range[0], range[1]) : NIL;
 }
 
 /** Sets `$~` for the method frame that called a matching method, as Ruby keeps it per frame. */
@@ -879,11 +904,11 @@ def('MatchData', 'names', 0, (self: RObject) => arr(stateOf(self).names.map((nam
 def('MatchData', ['to_s'], 0, (self: RObject) => groupText(stateOf(self), 0));
 def('MatchData', 'pre_match', 0, (self: RObject) => {
   const state = stateOf(self);
-  return str(state.text.slice(0, (state.groups[0] as readonly [number, number])[0]));
+  return sliceStringEncoding(state.snapshot ?? str(state.text), 0, (state.groups[0] as readonly [number, number])[0]);
 });
 def('MatchData', 'post_match', 0, (self: RObject) => {
   const state = stateOf(self);
-  return str(state.text.slice((state.groups[0] as readonly [number, number])[1]));
+  return sliceStringEncoding(state.snapshot ?? str(state.text), (state.groups[0] as readonly [number, number])[1]);
 });
 for (const [name, side] of [
   ['begin', 0],
@@ -969,61 +994,55 @@ def('MatchData', 'deconstruct_keys', 1, function* (self: RObject, [keys]) {
 // String's regular-expression forms ------------------------------------------------------------------------------------
 
 /** Expands capture references and match-context escapes in a replacement string. */
-function expand(replacement: string, state: MatchState, limit: number): string {
+function expand(replacement: RString, state: MatchState, limit: number): RString {
   const whole = state.groups[0] as readonly [number, number];
-  const parts: string[] = [];
-  let length = 0;
-  const append = (part: string): void => {
-    length += part.length;
-    if (length > limit) throw new ExecutionLimitError('storage');
-    rt().spend(Math.ceil(part.length / 256));
-    parts.push(part);
-  };
+  const source = state.snapshot ?? str(state.text);
+  const parts: RString[] = [];
   let position = 0;
-  for (const match of replacement.matchAll(/\\(k<([\p{ID_Start}_][\p{ID_Continue}_]*)>|[0-9&+\\`'])/gu)) {
-    append(replacement.slice(position, match.index));
+  for (const match of replacement.s.matchAll(/\\(k<([\p{ID_Start}_][\p{ID_Continue}_]*)>|[0-9&+\\`'])/gu)) {
+    parts.push(sliceStringEncoding(replacement, position, match.index));
     const [, code, name] = match;
-    let part: string;
+    let part: RString;
     if (name !== undefined) {
       const group = state.namedGroups[name];
       if (group === undefined) throw indexError(`undefined group name reference: ${name}`);
       const value = groupText(state, group);
-      part = value === NIL ? '' : (value as RString).s;
+      part = value === NIL ? str('') : (value as RString);
     } else {
       switch (code) {
         case '&': {
-          part = state.text.slice(whole[0], whole[1]);
+          part = sliceStringEncoding(source, whole[0], whole[1]);
           break;
         }
         case '+': {
           const group = state.groups.findLastIndex((range, index) => index > 0 && range !== undefined);
           const value = group > 0 ? groupText(state, group) : NIL;
-          part = value === NIL ? '' : (value as RString).s;
+          part = value === NIL ? str('') : (value as RString);
           break;
         }
         case '\\': {
-          part = '\\';
+          part = sliceStringEncoding(replacement, match.index + 1, match.index + 2);
           break;
         }
         case '`': {
-          part = state.text.slice(0, whole[0]);
+          part = sliceStringEncoding(source, 0, whole[0]);
           break;
         }
         case "'": {
-          part = state.text.slice(whole[1]);
+          part = sliceStringEncoding(source, whole[1]);
           break;
         }
         default: {
           const value = groupText(state, Number(code));
-          part = value === NIL ? '' : (value as RString).s;
+          part = value === NIL ? str('') : (value as RString);
         }
       }
     }
-    append(part);
+    parts.push(part);
     position = match.index + match[0].length;
   }
-  append(replacement.slice(position));
-  return parts.join('');
+  parts.push(sliceStringEncoding(replacement, position));
+  return concatRegexpPieces(parts, limit);
 }
 
 function* substituteRegexp(
@@ -1032,17 +1051,17 @@ function* substituteRegexp(
   replacement: Value | undefined,
   block: RProc | undefined,
   global: boolean
-): Gen<{ text: string; matched: boolean }> {
+): Gen<{ value: RString; matched: boolean }> {
   const replacementText =
-    replacement === undefined || replacement instanceof RHash ? undefined : yield* toStr(replacement);
+    replacement === undefined || replacement instanceof RHash ? undefined : yield* toStrValue(replacement);
   let text = self.s;
   const sourceLength = stringBytes(self).length;
-  const chunks: string[] = [];
+  const chunks: RString[] = [];
   let length = 0;
-  const append = (part: string): void => {
-    length += part.length;
+  const append = (part: RString): void => {
+    length += stringBytes(part).length;
     if (length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
-    rt().spend(Math.ceil(part.length / 256));
+    rt().spend(Math.ceil(stringBytes(part).length / 256));
     chunks.push(part);
   };
   let position = 0;
@@ -1051,27 +1070,48 @@ function* substituteRegexp(
   while (state) {
     const [from, to] = state.groups[0] as readonly [number, number];
     setLastMatch(state);
-    let piece: string;
+    let piece: RString;
     if (replacement instanceof RHash) {
-      const key = str(text.slice(from, to));
+      const key = sliceStringEncoding(self, from, to);
       const entry = yield* hashGet(replacement, key);
-      piece = yield* toS(entry ? entry.value : yield* hashDefault(replacement, key));
+      piece = yield* toSValue(entry ? entry.value : yield* hashDefault(replacement, key));
     } else if (replacementText !== undefined) {
-      piece = expand(replacementText, state, LIMITS.maxStringLength - length - (from - position));
+      piece = expand(replacementText, state, LIMITS.maxStringLength - length);
     } else {
-      piece = yield* toS(yield* callBlock(block as RProc, [str(text.slice(from, to))]));
+      piece = yield* toSValue(yield* callBlock(block as RProc, [sliceStringEncoding(self, from, to)]));
     }
     if (stringBytes(self).length !== sourceLength) throw rubyError(rt().c.RuntimeError, 'string modified');
     text = self.s;
-    append(text.slice(position, from));
+    append(sliceStringEncoding(self, position, from));
     append(piece);
     position = to;
     last = state;
     state = global ? execAt(regexp, text, charIndex(text, to) + (from === to ? 1 : 0), self) : undefined;
   }
   setLastMatch(last);
-  append(text.slice(position));
-  return { text: chunks.join(''), matched: last !== undefined };
+  append(sliceStringEncoding(self, position));
+  return { value: concatRegexpPieces(chunks, LIMITS.maxStringLength), matched: last !== undefined };
+}
+
+function concatRegexpPieces(parts: RString[], limit: number): RString {
+  const buffers = parts.map(stringBytes);
+  const length = buffers.reduce((sum, bytes) => sum + bytes.length, 0);
+  if (length > limit) throw new ExecutionLimitError('storage');
+  let binary = parts[0]?.binary ?? false;
+  let ascii = true;
+  for (const [index, part] of parts.entries()) {
+    if (index > 0) binary = combinedStringEncoding(binary, ascii, part);
+    ascii &&= buffers[index].every((byte) => byte < 0x80);
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const buffer of buffers) {
+    bytes.set(buffer, offset);
+    offset += buffer.length;
+  }
+  const result = stringFromBytes(bytes, binary);
+  result.usAscii = !binary && parts.every((part) => part.usAscii);
+  return result;
 }
 
 function wrapFirst(
@@ -1103,9 +1143,10 @@ for (const [name, global, bang] of [
       throw argumentError('wrong number of arguments (given 1, expected 2)');
     }
     const result = yield* substituteRegexp(self, args[0] as RObject, args[1], block, global);
-    if (!bang) return str(result.text);
+    if (!bang) return result.value;
     if (!result.matched) return NIL;
-    setText(self, result.text);
+    setBytes(self, stringBytes(result.value), result.value.binary);
+    self.usAscii = result.value.usAscii;
     return self;
   });
 }
@@ -1140,7 +1181,7 @@ wrapFirst('split', function* (self, args) {
   const text = self.s;
   const limit = args.length > 1 ? yield* toIndex(args[1]) : 0;
   if (limit !== 1) setLastMatch(undefined);
-  const parts: string[] = [];
+  const parts: RString[] = [];
   let fields = 0;
   let position = 0;
   let searchFrom = 0;
@@ -1158,20 +1199,20 @@ wrapFirst('split', function* (self, args) {
       }
     }
     if (!(from === to && from === position)) {
-      parts.push(text.slice(position, from));
+      parts.push(sliceStringEncoding(self, position, from));
       fields++;
       for (let group = 1; group < state.groups.length; group++) {
         const value = groupText(state, group);
-        if (value !== NIL) parts.push((value as RString).s);
+        if (value !== NIL) parts.push(value as RString);
       }
       position = to;
     }
     searchFrom = charIndex(text, to) + (from === to ? 1 : 0);
   }
-  parts.push(text.slice(position));
+  parts.push(sliceStringEncoding(self, position));
   if (text.length === 0) return arr([]);
-  if (limit === 0) while (parts.length > 0 && parts.at(-1) === '') parts.pop();
-  return arr(parts.map((part) => str(part)));
+  if (limit === 0) while (parts.length > 0 && parts.at(-1)?.s === '') parts.pop();
+  return arr(parts);
 });
 for (const name of ['index', 'rindex'] as const) {
   wrapFirst(name, function* (self, args) {
@@ -1212,8 +1253,13 @@ wrapFirst('slice!', function* (self, args) {
   if (range === 'unmatched') return str('');
   if (!range) return NIL;
   const [from, to] = range;
-  const removed = str(self.s.slice(from, to));
-  setText(self, self.s.slice(0, from) + self.s.slice(to));
+  const removed = sliceStringEncoding(self, from, to);
+  const remainder = concatRegexpPieces(
+    [sliceStringEncoding(self, 0, from), sliceStringEncoding(self, to)],
+    LIMITS.maxStringLength
+  );
+  setBytes(self, stringBytes(remainder), remainder.binary);
+  self.usAscii = remainder.usAscii;
   return removed;
 });
 function* sliceCaptureRange(state: MatchState, key: Value): Gen<readonly [number, number] | 'unmatched' | undefined> {
@@ -1279,10 +1325,17 @@ for (const [name, last] of [
       }
     }
     setLastMatch(state);
-    if (!state) return last ? arr([str(''), str(''), str(self.s)]) : arr([str(self.s), str(''), str('')]);
+    if (!state)
+      return last
+        ? arr([str(''), str(''), copyStringEncoding(self)])
+        : arr([copyStringEncoding(self), str(''), str('')]);
     const [from, to] = state.groups[0] as readonly [number, number];
     yield* [];
-    return arr([str(self.s.slice(0, from)), str(self.s.slice(from, to)), str(self.s.slice(to))]);
+    return arr([
+      sliceStringEncoding(self, 0, from),
+      sliceStringEncoding(self, from, to),
+      sliceStringEncoding(self, to),
+    ]);
   });
 }
 

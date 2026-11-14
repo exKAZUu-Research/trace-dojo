@@ -710,13 +710,11 @@ def('Array', '-', 1, arrayDifference);
 def('Array', 'difference', [0, -1], arrayDifference);
 def('Array', '*', 1, function* (self: RArray, [count]) {
   if (count instanceof RString) return yield* join(self, count);
-  if (respondsTo(count, 'to_str', true)) {
-    const separator = yield* callMethod(count, 'to_str', [], undefined, undefined, { fcall: true });
-    if (separator instanceof RString) return yield* join(self, separator);
-    if (separator !== NIL) {
-      const name = realClassOf(count).name;
-      throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(separator).name})`);
-    }
+  const separator = yield* tryImplicitConversion(count, 'to_str');
+  if (separator instanceof RString) return yield* join(self, separator);
+  if (separator !== undefined && separator !== NIL) {
+    const name = realClassOf(count).name;
+    throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(separator).name})`);
   }
   const times = yield* toIndex(count);
   if (times < 0) throw argumentError('negative argument');
@@ -850,14 +848,12 @@ function* join(self: RArray, separator: RString): Gen<RString> {
         yield* enterJoinArray(value);
         continue;
       }
-      if (respondsTo(value, 'to_str', true)) {
-        const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
-        if (converted instanceof RString) {
-          appendJoinPart(frame, converted, output);
-          continue;
-        }
-        if (converted !== NIL) throw joinStringConversionError(value, converted);
+      const converted = yield* tryImplicitConversion(value, 'to_str');
+      if (converted instanceof RString) {
+        appendJoinPart(frame, converted, output);
+        continue;
       }
+      if (converted !== undefined && converted !== NIL) throw joinStringConversionError(value, converted);
       const nested = yield* tryAry(value);
       if (nested) yield* enterJoinArray(nested);
       else appendJoinPart(frame, yield* toSValue(value), output);
@@ -951,10 +947,9 @@ function finishJoinFrame(frame: JoinFrame, chunks: Uint8Array[]): RString {
 function* preflightJoinFirst(self: RArray): Gen<void> {
   for (const first of self.items) {
     if (first instanceof RString) continue;
-    if (respondsTo(first, 'to_str', true)) {
-      const converted = yield* callMethod(first, 'to_str', [], undefined, undefined, { fcall: true });
-      if (!(converted instanceof RString) && converted !== NIL) throw joinStringConversionError(first, converted);
-    }
+    const converted = yield* tryImplicitConversion(first, 'to_str');
+    if (!(converted instanceof RString) && converted !== undefined && converted !== NIL)
+      throw joinStringConversionError(first, converted);
     break;
   }
 }

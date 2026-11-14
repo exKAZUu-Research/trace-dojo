@@ -271,7 +271,17 @@ def('Struct', 'each_pair', 0, function* (self: RObject, _args, block) {
 });
 def('Struct', ['size', 'length'], 0, (self: RObject) => BigInt(valuesOf(self).length));
 def('Struct', 'dig', [1, -1], function* (self: RObject, args) {
-  const value = valuesOf(self)[yield* memberIndex(self, args[0])];
+  const members = layoutOf(self.cls).members;
+  const key = args[0];
+  let index: number;
+  if (key instanceof RSymbol || key instanceof RString)
+    index = members.indexOf(key instanceof RSymbol ? key.name : key.s);
+  else {
+    index = yield* toIndex(key);
+    if (index < 0) index += members.length;
+  }
+  if (index < 0 || index >= members.length) return NIL;
+  const value = valuesOf(self)[index];
   if (args.length === 1 || value === NIL) return value;
   return yield* callMethod(value, 'dig', args.slice(1));
 });

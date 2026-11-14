@@ -88,7 +88,7 @@ export function setText(self: RString, text: string): void {
   self.usAscii &&= !/[^\u0000-\u007F]/.test(text);
 }
 
-function setBytes(self: RString, bytes: Uint8Array, binary = self.binary): void {
+export function setBytes(self: RString, bytes: Uint8Array, binary = self.binary): void {
   modify(self);
   rt().checkStringLength(bytes.length);
   const result = stringFromBytes(bytes, binary);
@@ -250,6 +250,15 @@ export function copyStringEncoding(self: RString): RString {
   const copy = stringFromBytes(stringBytes(self), self.binary);
   copy.usAscii = self.usAscii;
   return copy;
+}
+
+export function sliceStringEncoding(self: RString, from: number, to = self.s.length): RString {
+  const mode = stringTextMode(self);
+  const begin = textByteLength(self.s.slice(0, from), mode);
+  const end = textByteLength(self.s.slice(0, to), mode);
+  const slice = stringFromBytes(stringBytes(self).slice(begin, end), self.binary);
+  slice.usAscii = self.usAscii;
+  return slice;
 }
 def('String', 'inspect', 0, (self: RString) =>
   str(self.rawBytes ? inspectRawBytes(self.rawBytes) : self.binary ? binaryInspect(self.s) : strInspect(self.s))
