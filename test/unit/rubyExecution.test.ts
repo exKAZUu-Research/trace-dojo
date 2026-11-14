@@ -3836,6 +3836,17 @@ test('begin modifier loops remain post-tested with rescue and ensure', () => {
   });
 });
 
+test('modifier loop conditions resolve body locals in source order', () => {
+  expect(run('a=1 until a;p a')).toMatchObject({ stdout: '1\n' });
+  expect(run('a=1 while a;p a')).toMatchObject({ stdout: 'nil\n' });
+});
+
+test('Hash splat copying follows source deletions during key callbacks', () => {
+  const source =
+    'class K;attr_accessor :on;def hash;$h.clear if @on;0;end;end;k=K.new;$h={k=>1,a:2};k.on=true;x={**$h};p x.size,$h.size';
+  expect(run(source)).toMatchObject({ stdout: '1\n0\n' });
+});
+
 test('invalid trailing Array elements and repeated rest targets fail before execution', () => {
   for (const source of ['p [a:1,2]', 'p [a:1,*[2]]', 'a,*b,*c=[1,2,3]', '[1].each{|(a,*b,*c)|p a}'])
     expect(run(source).kind).toBe('compileError');

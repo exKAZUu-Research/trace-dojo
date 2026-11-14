@@ -94,7 +94,7 @@ test('uniq roots the selected value while its key is hashed', () => {
 
 test('Array intersection roots pending values during key hashing', () => {
   const program =
-    'class K;def hash;$a.clear;$b.clear;q=1;0;end;end;$a=[Turtle.new,1]+Array.new(20,1);$b=[K.new,$a[0]]+Array.new(20,9);c=$a & $b';
+    'class K;def hash;$a.clear;$b.clear;q=1;0;end;end;$a=[Turtle.new,1]+Array.new(20,1);$b=[$a[0],K.new]+Array.new(20,9);c=$a.intersection($b)';
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
@@ -106,6 +106,12 @@ test('Array difference roots pending values during key hashing', () => {
 test('Array union roots pending values during eql callbacks', () => {
   const program = 'class K;def eql?(x);$a.clear;q=1;false;end;end;$a=[Turtle.new(0,0),K.new,Turtle.new(1,0)];b=$a|[]';
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(2);
+});
+
+test('implicit super roots converted keyword rests while copying', () => {
+  const program =
+    'class K;def hash;q=1;0;end;end;class X;def to_hash;{K.new=>1,t:Turtle.new};end;end;class A;def f(**x);$v=x;end;end;class B<A;def f(**x);x=X.new;super;end;end;B.new.f';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
 test('Array concat roots early conversion results', () => {

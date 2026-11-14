@@ -67,7 +67,6 @@ import {
   range,
   realClassOf,
   singletonClassOf,
-  snapshot,
   stringBytes,
   stringFromBytes,
   truthy,
@@ -449,24 +448,7 @@ function* evalHash(e: Extract<Expr, { k: 'hash' }>, frame: Frame): Gen<RHash> {
 function* fillHash(hash: RHash, e: Extract<Expr, { k: 'hash' }>, frame: Frame): Gen<void> {
   for (const item of e.items) {
     if ('splat' in item) {
-      let value = yield* ev(item.splat, frame);
-      if (value === NIL) continue;
-      if (!(value instanceof RHash)) {
-        const source = value;
-        if (!respondsTo(source, 'to_hash', true)) throw implicitConversionError(source, 'Hash');
-        value = yield* callMethod(source, 'to_hash', [], undefined, undefined, { fcall: true });
-        if (!(value instanceof RHash))
-          throw typeError(
-            `can't convert ${realClassOf(source).name} to Hash (${realClassOf(source).name}#to_hash gives ${realClassOf(value).name})`
-          );
-      }
-      const sourceMark = frame.temporaries.length;
-      frame.temporaries.push(value);
-      try {
-        for (const entry of snapshot(value.map.values())) yield* hashSet(hash, entry.key, entry.value);
-      } finally {
-        frame.temporaries.length = sourceMark;
-      }
+      yield* copyHashSplat(hash, yield* ev(item.splat, frame), frame);
       continue;
     }
     const key = yield* ev(item.key, frame);
@@ -477,6 +459,28 @@ function* fillHash(hash: RHash, e: Extract<Expr, { k: 'hash' }>, frame: Frame): 
     } finally {
       frame.temporaries.length = mark;
     }
+  }
+}
+
+function* copyHashSplat(hash: RHash, value: Value, frame: Frame): Gen<void> {
+  if (value === NIL) return;
+  if (!(value instanceof RHash)) {
+    const source = value;
+    if (!respondsTo(source, 'to_hash', true)) throw implicitConversionError(source, 'Hash');
+    value = yield* callMethod(source, 'to_hash', [], undefined, undefined, { fcall: true });
+    if (!(value instanceof RHash))
+      throw typeError(
+        `can't convert ${realClassOf(source).name} to Hash (${realClassOf(source).name}#to_hash gives ${realClassOf(value).name})`
+      );
+  }
+  const sourceMark = frame.temporaries.length;
+  frame.temporaries.push(value);
+  value.iterating++;
+  try {
+    for (const entry of value.map.values()) yield* hashSet(hash, entry.key, entry.value);
+  } finally {
+    value.iterating--;
+    frame.temporaries.length = sourceMark;
   }
 }
 
@@ -1608,7 +1612,7 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
 
 /** The arguments `super` without parentheses passes: the method's parameters' current values. */
 // code-gauge-allow functionCognitiveComplexity 28 -- Implicit super converts current positional and keyword rests alongside declared parameters.
-// code-gauge-allow functionNcss 37 -- Implicit super roots reconstructed arguments while their conversions run.
+// code-gauge-allow functionNcss 38 -- Implicit super roots reconstructed arguments while their conversions run.
 function* implicitSuperArgs(frame: Frame): Gen<{ args: Value[]; keywords: RHash | undefined }> {
   const def = frame.extra.def as MethodDef;
   const { params } = def;
@@ -1633,11 +1637,12 @@ function* implicitSuperArgs(frame: Frame): Gen<{ args: Value[]; keywords: RHash 
       args.push(value(param, original[original.length - params.post.length + index] ?? NIL));
     let keywords: RHash | undefined;
     if (params.keywords.length > 0 || params.keywordRest !== undefined) {
-      keywords = newHash();
-      rt().held.push(keywords);
+      const keywordHash = newHash();
+      keywords = keywordHash;
+      rt().held.push(keywordHash);
       try {
         for (const keyword of params.keywords) {
-          yield* hashSet(keywords, RSymbol.of(keyword.name), scope.lookup(keyword.name, 0));
+          yield* hashSet(keywordHash, RSymbol.of(keyword.name), scope.lookup(keyword.name, 0));
         }
         if (params.keywordRest !== undefined) {
           const rest = params.keywordRest === '' ? frame.extra.keywords : scope.lookup(params.keywordRest, 0);
@@ -1645,10 +1650,10 @@ function* implicitSuperArgs(frame: Frame): Gen<{ args: Value[]; keywords: RHash 
             const converted = yield* superKeywordRest(rest);
             const named =
               params.keywordRest === '' ? new Set(params.keywords.map((keyword) => keyword.name)) : undefined;
-            addSuperKeywordRest(keywords, converted, named);
+            yield* whileHeld(converted, () => addSuperKeywordRest(keywordHash, converted, named));
           }
         }
-        if (keywords.map.size === 0) keywords = undefined;
+        if (keywordHash.map.size === 0) keywords = undefined;
       } finally {
         rt().held.pop();
       }
@@ -1670,11 +1675,11 @@ function* superKeywordRest(value: Value): Gen<RHash> {
   throw implicitConversionError(value, 'Hash');
 }
 
-function addSuperKeywordRest(target: RHash, rest: RHash, named: Set<string> | undefined): void {
+function* addSuperKeywordRest(target: RHash, rest: RHash, named: Set<string> | undefined): Gen<void> {
   for (const entry of rest.map.values()) {
     const key = entry.key;
     if (key instanceof RSymbol && named?.has(key.name)) continue;
-    runToEnd(hashSet(target, key, entry.value));
+    yield* hashSet(target, key, entry.value);
   }
 }
 

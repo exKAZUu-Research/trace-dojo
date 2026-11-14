@@ -285,12 +285,12 @@ export class Converter {
       case 'while_modifier':
       case 'until_modifier': {
         const bodyNode = required(node.childForFieldName('body'));
-        const cond = this.value(required(node.childForFieldName('condition')));
         const doWhile = bodyNode.type === 'begin';
         const flattenBegin = doWhile && !namedChildren(bodyNode).some((c) => RESCUE_CLAUSES.has(c.type));
         const body = this.loopBody(() =>
           flattenBegin ? this.body(namedChildren(bodyNode), 0) : [this.statement(bodyNode, 0)]
         );
+        const cond = this.value(required(node.childForFieldName('condition')));
         return { k: 'while', cond, body, until: node.type === 'until_modifier', doWhile };
       }
       case 'for': {
