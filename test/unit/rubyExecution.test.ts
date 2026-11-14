@@ -2015,6 +2015,12 @@ test('Set subclasses use overridden insertion and deletion methods', () => {
   ).toMatchObject({
     stdout: 'start\ndeleted\n[1]\n',
   });
+  expect(run('class S<Set;def add(x);puts :add;super(x*2);end;end;p (S.new|Set[1]).to_a')).toMatchObject({
+    stdout: 'add\n[2]\n',
+  });
+  expect(run('class S<Set;def delete(x);puts :del;super;end;end;p (S[1]-Set[2]).to_a')).toMatchObject({
+    stdout: 'del\n[1]\n',
+  });
   expect(
     run(
       'class S<Set;def add(x);puts :add;super(x*2);end;def delete(x);puts :del;super;end;end;s=S.new;puts :start;s.merge([1]);s.subtract([2]);p s.to_a'
@@ -2029,6 +2035,13 @@ test('Set flatten dispatches subclass insertion methods', () => {
     run('class S<Set;def add(x);puts :add;super(x*2);end;end;s=S[1];puts :flatten;p s.flatten.to_a')
   ).toMatchObject({
     stdout: 'add\nflatten\nadd\n[4]\n',
+  });
+  expect(
+    run(
+      'class S<Set;def add(x);puts :add;super(x.is_a?(Integer) ? x*2 : x);end;end;s=S[Set[1]];puts :start;p s.flatten!.to_a'
+    )
+  ).toMatchObject({
+    stdout: 'add\nstart\nadd\n[2]\n',
   });
 });
 
@@ -2259,6 +2272,15 @@ test('String codepoint iteration yields a valid prefix before invalid bytes', ()
   expect(run('s="bba";s.each_codepoint{|x|p x;s[0,2]="é" if x==98}')).toMatchObject({
     stdout: '98\n169\n97\n',
   });
+});
+
+test('String character and byte iterators use their Ruby mutation boundaries', () => {
+  expect(run('s="x"*100000;10.times{p s.each_char.first};10.times{p s.ord,s.chr}')).toMatchObject({
+    stdout: '"x"\n'.repeat(10) + '120\n"x"\n'.repeat(10),
+  });
+  expect(run('s="abc";s.each_char{|x|p x;s.clear}')).toMatchObject({ stdout: '"a"\n"b"\n"c"\n' });
+  expect(run('s="abc";s.each_byte{|x|p x;s.clear}')).toMatchObject({ stdout: '97\n' });
+  expect(run('s="ab";s.each_byte{|x|p x;s<<"c" if x==97}')).toMatchObject({ stdout: '97\n98\n99\n' });
 });
 
 test('String translation checks source and replacement pattern encodings', () => {

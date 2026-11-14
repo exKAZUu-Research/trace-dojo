@@ -164,7 +164,7 @@ def('Set', ['|', 'union', '+'], 1, function* (self: RObject, [value]) {
   const result = (yield* callMethod(self, 'dup', [])) as RObject;
   return yield* whileHeld(result, function* () {
     yield* eachOther(value, function* (item) {
-      yield* hashSet(membersOf(result), item, true);
+      yield* result.cls === rt().c.Set ? hashSet(membersOf(result), item, true) : callMethod(result, 'add', [item]);
     });
     return result;
   });
@@ -194,7 +194,7 @@ def('Set', ['-', 'difference'], 1, function* (self: RObject, [value]) {
   const result = (yield* callMethod(self, 'dup', [])) as RObject;
   return yield* whileHeld(result, function* () {
     yield* eachOther(value, function* (item) {
-      yield* hashDelete(membersOf(result), item);
+      yield* result.cls === rt().c.Set ? hashDelete(membersOf(result), item) : callMethod(result, 'delete', [item]);
     });
     return result;
   });
@@ -379,9 +379,15 @@ def('Set', 'flatten!', 0, function* (self: RObject) {
   )
     return NIL;
   const values = yield* flattenMembers(self, new Set());
-  membersOf(self).map.clear();
-  for (const value of values) yield* hashSet(membersOf(self), value, true);
-  return self;
+  rt().heldArrays.push(values);
+  try {
+    membersOf(self).map.clear();
+    for (const value of values)
+      yield* self.cls === rt().c.Set ? hashSet(membersOf(self), value, true) : callMethod(self, 'add', [value]);
+    return self;
+  } finally {
+    rt().heldArrays.pop();
+  }
 });
 def('Set', 'classify', 0, function* (self: RObject, _args, block) {
   if (!block) return makeEnumerator(self, 'classify', []);

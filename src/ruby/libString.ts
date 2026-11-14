@@ -51,6 +51,12 @@ import {
 } from './values';
 
 type StringTextMode = 'binary' | 'mixed' | 'utf8';
+interface StringByteCursor {
+  text?: string;
+  rawBytes?: Uint8Array;
+  binary?: boolean;
+  bytes: Uint8Array;
+}
 
 // Characters ----------------------------------------------------------------------------------------------------------
 
@@ -558,23 +564,22 @@ def('String', 'getbyte', 1, function* (self: RString, [index]) {
 });
 def('String', 'each_char', 0, function* (self: RString, _args, block) {
   if (!block) return makeEnumerator(self, 'each_char', []);
-  for (const char of stringCharacters(self)) yield* callBlock(block, [char], false);
+  const bytes = stringBytes(self);
+  const binary = self.binary;
+  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+  for (let offset = 0; offset < bytes.length;) {
+    const { char, width } = characterFromBytes(bytes, offset, binary, decoder);
+    offset += width;
+    yield* callBlock(block, [char], false);
+  }
   return self;
 });
 def('String', 'each_codepoint', 0, function* (self: RString, _args, block) {
   if (!block) return makeEnumerator(self, 'each_codepoint', []);
   const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
-  let text: string | undefined;
-  let rawBytes: Uint8Array | undefined;
-  let binary: boolean | undefined;
-  let bytes: Uint8Array = new Uint8Array();
+  const cursor: StringByteCursor = { bytes: new Uint8Array() };
   for (let offset = 0; ;) {
-    if (text !== self.s || rawBytes !== self.rawBytes || binary !== self.binary) {
-      text = self.s;
-      rawBytes = self.rawBytes;
-      binary = self.binary;
-      bytes = stringBytes(self);
-    }
+    const bytes = currentStringBytes(self, cursor);
     if (offset >= bytes.length) break;
     const { point, width } = codepointAtByte(bytes, offset, self.binary, decoder);
     offset += width;
@@ -648,16 +653,61 @@ function* graphemeSegments(self: RString): Iterable<RString> {
 }
 def('String', 'each_byte', 0, function* (self: RString, _args, block) {
   if (!block) return makeEnumerator(self, 'each_byte', []);
-  for (const byte of stringBytes(self)) yield* callBlock(block, [BigInt(byte)], false);
+  const cursor: StringByteCursor = { bytes: new Uint8Array() };
+  for (let offset = 0; ; offset++) {
+    const bytes = currentStringBytes(self, cursor);
+    if (offset >= bytes.length) break;
+    yield* callBlock(block, [BigInt(bytes[offset])], false);
+  }
   return self;
 });
 def('String', 'ord', 0, (self: RString) => {
-  if (self.s.length === 0) throw argumentError('empty string');
-  const first = stringCharacters(self)[0];
+  const first = firstStringCharacter(self);
+  if (!first) throw argumentError('empty string');
   if (first.rawBytes && !first.binary) throw argumentError('invalid byte sequence in UTF-8');
   return BigInt(first.s.codePointAt(0) as number);
 });
-def('String', 'chr', 0, (self: RString) => stringCharacters(self)[0] ?? stringFromBytes(new Uint8Array(), self.binary));
+def(
+  'String',
+  'chr',
+  0,
+  (self: RString) => firstStringCharacter(self) ?? stringFromBytes(new Uint8Array(), self.binary)
+);
+function currentStringBytes(self: RString, cursor: StringByteCursor): Uint8Array {
+  if (cursor.text !== self.s || cursor.rawBytes !== self.rawBytes || cursor.binary !== self.binary) {
+    cursor.text = self.s;
+    cursor.rawBytes = self.rawBytes;
+    cursor.binary = self.binary;
+    cursor.bytes = stringBytes(self);
+  }
+  return cursor.bytes;
+}
+function firstStringCharacter(self: RString): RString | undefined {
+  if (self.s.length === 0) return undefined;
+  if (self.binary) return stringFromBytes(Uint8Array.of(self.s.codePointAt(0) as number), true);
+  if (!self.rawBytes) return str(String.fromCodePoint(self.s.codePointAt(0) as number));
+  return characterFromBytes(self.rawBytes, 0, false, new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })).char;
+}
+
+function characterFromBytes(
+  bytes: Uint8Array,
+  offset: number,
+  binary: boolean,
+  decoder: TextDecoder
+): { char: RString; width: number } {
+  const first = bytes[offset];
+  const candidate = binary || first < 0x80 ? 1 : utf8SequenceWidth(first);
+  let width = 1;
+  if (candidate > 1 && offset + candidate <= bytes.length) {
+    try {
+      decoder.decode(bytes.subarray(offset, offset + candidate));
+      width = candidate;
+    } catch {
+      width = 1;
+    }
+  }
+  return { char: stringFromBytes(bytes.slice(offset, offset + width), binary), width };
+}
 def('String', 'sum', [0, 1], function* (self: RString, args) {
   let total = 0n;
   for (const byte of stringBytes(self)) total += BigInt(byte);
