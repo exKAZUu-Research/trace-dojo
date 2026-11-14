@@ -1,8 +1,9 @@
 import { def } from './define';
+import { rubyError } from './errors';
 import { callProc, type Gen, requireBlock } from './interp';
 import { makeEnumerator } from './libEnumerator';
 import { NIL, RObject, type RString, type Value } from './objects';
-import { ExitSignal, rt, RubyError, type Runtime, UnsupportedFeatureError } from './runtime';
+import { ExitSignal, ReturnSignal, rt, RubyError, type Runtime, UnsupportedFeatureError } from './runtime';
 import { arr, str, stringBytes } from './values';
 
 /** Creates the encodings a program can name: strings here are UTF-8, or ASCII-8BIT when they hold bytes. */
@@ -67,6 +68,7 @@ export function* runAtExit(): Gen<(RubyError | ExitSignal | UnsupportedFeatureEr
     try {
       yield* callProc(runtime.atExit.pop() as never, []);
     } catch (error) {
+      if (error instanceof ReturnSignal) error = rubyError(runtime.c.LocalJumpError, 'unexpected return');
       if (error instanceof RubyError) runtime.globals.set('$!', error.exception);
       else if (!(error instanceof ExitSignal) && !(error instanceof UnsupportedFeatureError)) throw error;
       errors.push(error);

@@ -5363,6 +5363,13 @@ test('unavailable features inside exit handlers return a program result', () => 
   });
 });
 
+test('return from an exit handler reports LocalJumpError', () => {
+  expect(run('at_exit { return }; p :end')).toMatchObject({
+    stdout: ':end\n',
+    uncaughtException: 'unexpected return (LocalJumpError)',
+  });
+});
+
 test('inherited Struct brackets construct the receiver class', () => {
   expect(run('Base=Struct.new(:a,:b);class Sub<Base;end;p Sub[1,2].class==Sub')).toMatchObject({
     stdout: 'true\n',
