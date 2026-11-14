@@ -1713,6 +1713,44 @@ test('Array to_h follows current contents after block callbacks', () => {
   });
 });
 
+test('Hash mutation callbacks cannot write after freezing', () => {
+  expect(run('h={a:1,b:2};begin;h.delete_if{|k,v|h.freeze;true};rescue=>e;p e.class;end;p h.size')).toMatchObject({
+    stdout: 'FrozenError\n2\n',
+  });
+  expect(
+    run('h={a:1,b:2};begin;h.transform_values!{|v|h.freeze;v+1};rescue=>e;p e.class;end;p h.values')
+  ).toMatchObject({
+    stdout: 'FrozenError\n[1, 2]\n',
+  });
+});
+
+test('Hash association searches reject insertion during comparisons', () => {
+  expect(
+    run('class X;def ==(v);$h[:b]=2;false;end;end;$h={X.new=>1};begin;p $h.assoc(0);rescue=>e;p e.class;end;p $h.size')
+  ).toMatchObject({
+    stdout: 'RuntimeError\n1\n',
+  });
+});
+
+test('Hash copy methods do not rehash retained keys', () => {
+  expect(
+    run(
+      'class K;attr_accessor :bad;def hash;raise "bad" if @bad;0;end;end;k=K.new;h={k=>1};k.bad=true;p h.compact.size,h.select{true}.size,h.reject{false}.size'
+    )
+  ).toMatchObject({
+    stdout: '1\n1\n1\n',
+  });
+});
+
+test('Hash implicit conversions accept private methods and report invalid results', () => {
+  expect(run('class A;private;def to_proc;proc{|h,k|7};end;end;h={};h.default_proc=A.new;p h[:x]')).toMatchObject({
+    stdout: '7\n',
+  });
+  expect(run('class A;def to_hash;1;end;end;begin;{}.merge(A.new);rescue=>e;p e.message;end')).toMatchObject({
+    stdout: '"can\'t convert A to Hash (A#to_hash gives Integer)"\n',
+  });
+});
+
 test('shuffle detects receiver changes from its randomizer', () => {
   expect(
     run(

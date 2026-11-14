@@ -19,6 +19,8 @@ function* toHash(value: Value): Gen<RHash> {
   if (respondsTo(value, 'to_hash', true)) {
     const converted = yield* callMethod(value, 'to_hash', [], undefined, undefined, { fcall: true });
     if (converted instanceof RHash) return converted;
+    const name = realClassOf(value).name;
+    throw typeError(`can't convert ${name} to Hash (${name}#to_hash gives ${realClassOf(converted).name})`);
   }
   throw implicitConversionError(value, 'Hash');
 }
@@ -212,10 +214,14 @@ function copy(self: RHash): RHash {
   hash.defaultValue = self.defaultValue;
   hash.defaultProc = self.defaultProc;
   for (const [slot, entry] of self.map) {
-    rt().chargeSlots(1);
-    hash.map.set(slot, { ...entry });
+    copyEntry(hash, slot, entry);
   }
   return hash;
+}
+
+function copyEntry(hash: RHash, slot: string, entry: HashEntry): void {
+  rt().chargeSlots(1);
+  hash.map.set(slot, { ...entry });
 }
 
 // Iteration -----------------------------------------------------------------------------------------------------------
@@ -238,9 +244,11 @@ def('Hash', 'each_value', 0, function* (self: RHash, _args, block) {
 
 function* filtered(self: RHash, block: RProc, keep: boolean): Gen<RHash> {
   const hash = newHash();
-  yield* eachEntry(self, function* (entry) {
-    if (truthy(yield* pair(block, entry.key, entry.value)) === keep) yield* hashSet(hash, entry.key, entry.value);
-  });
+  yield* whileHeld(hash, () =>
+    eachEntry(self, function* (entry, slot) {
+      if (truthy(yield* pair(block, entry.key, entry.value)) === keep) copyEntry(hash, slot, entry);
+    })
+  );
   return hash;
 }
 
@@ -252,6 +260,7 @@ function* filterInPlace(self: RHash, block: RProc, keep: boolean): Gen<boolean> 
     for (const [slot, entry] of snapshot(self.map)) {
       if (self.map.get(slot) !== entry) continue;
       if (truthy(yield* pair(block, entry.key, entry.value)) !== keep) {
+        yield* modify(self);
         self.map.delete(slot);
         changed = true;
       }
@@ -318,14 +327,26 @@ def('Hash', 'shift', 0, function* (self: RHash) {
   return arr([first.value[1].key, first.value[1].value]);
 });
 def('Hash', 'assoc', 1, function* (self: RHash, [key]) {
-  for (const entry of snapshot(self.map.values()))
-    if (yield* rEquals(entry.key, key)) return arr([entry.key, entry.value]);
-  return NIL;
+  self.iterating++;
+  try {
+    for (const [slot, entry] of snapshot(self.map)) {
+      if (self.map.get(slot) === entry && (yield* rEquals(entry.key, key))) return arr([entry.key, entry.value]);
+    }
+    return NIL;
+  } finally {
+    self.iterating--;
+  }
 });
 def('Hash', 'rassoc', 1, function* (self: RHash, [value]) {
-  for (const entry of snapshot(self.map.values()))
-    if (yield* rEquals(entry.value, value)) return arr([entry.key, entry.value]);
-  return NIL;
+  self.iterating++;
+  try {
+    for (const [slot, entry] of snapshot(self.map)) {
+      if (self.map.get(slot) === entry && (yield* rEquals(entry.value, value))) return arr([entry.key, entry.value]);
+    }
+    return NIL;
+  } finally {
+    self.iterating--;
+  }
 });
 def('Hash', 'flatten', [0, 1], function* (self: RHash, args) {
   const pairs = arr(snapshot(self.map.values()).map((entry) => arr([entry.key, entry.value])));
@@ -379,7 +400,9 @@ def('Hash', 'transform_values!', 0, function* (self: RHash, _args, block) {
   if (!block) return makeEnumerator(self, 'transform_values!', []);
   yield* modify(self);
   yield* eachEntry(self, function* (entry) {
-    entry.value = yield* callBlock(block, [entry.value]);
+    const value = yield* callBlock(block, [entry.value]);
+    yield* modify(self);
+    entry.value = value;
     self.map.version++;
     rt().containerVersion++;
   });
@@ -409,6 +432,7 @@ def('Hash', 'transform_keys!', [0, 1], function* (self: RHash, args, block) {
   if (!block && args.length === 0) return makeEnumerator(self, 'transform_keys!', []);
   yield* modify(self);
   const result = yield* transformKeys(self, args, block);
+  yield* modify(self);
   self.map = result.map;
   self.bucketVersion = -1;
   return self;
@@ -451,7 +475,7 @@ def('Hash', 'compact', 0, function* (self: RHash) {
   const hash = new RHash(self.cls);
   hash.defaultValue = self.defaultValue;
   hash.defaultProc = self.defaultProc;
-  for (const entry of self.map.values()) if (entry.value !== NIL) yield* hashSet(hash, entry.key, entry.value);
+  for (const [slot, entry] of self.map) if (entry.value !== NIL) copyEntry(hash, slot, entry);
   return hash;
 });
 def('Hash', 'compact!', 0, function* (self: RHash) {
@@ -512,7 +536,11 @@ def('Hash', 'default_proc=', 1, function* (self: RHash, [proc]) {
     return proc;
   }
   const converted =
-    proc instanceof RProc ? proc : respondsTo(proc, 'to_proc') ? yield* callMethod(proc, 'to_proc', []) : proc;
+    proc instanceof RProc
+      ? proc
+      : respondsTo(proc, 'to_proc', true)
+        ? yield* callMethod(proc, 'to_proc', [], undefined, undefined, { fcall: true })
+        : proc;
   if (!(converted instanceof RProc))
     throw typeError(`wrong default_proc type ${realClassOf(proc).name} (expected Proc)`);
   if (converted.isLambda) {
