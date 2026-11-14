@@ -1139,7 +1139,12 @@ function* definedText(e: Expr, frame: Frame): Gen {
       return text(frame.self instanceof RBasic && frame.self.ivars?.has(e.name) ? 'instance-variable' : undefined);
     }
     case 'gvar': {
-      return text(rt().globals.has(e.name) ? 'global-variable' : undefined);
+      const matchVariable = /^\$(?:[~&`'+]|[1-9]\d*)$/.test(e.name);
+      return text(
+        rt().globals.has(e.name) || (matchVariable && (e.name === '$~' || matchGlobal(e.name) !== NIL))
+          ? 'global-variable'
+          : undefined
+      );
     }
     case 'cvar': {
       const holder = frame.cref[0];
@@ -1157,6 +1162,8 @@ function* definedText(e: Expr, frame: Frame): Gen {
       }
     }
     case 'call': {
+      for (const arg of e.args) if ((yield* definedText(arg, frame)) === NIL) return NIL;
+      if (e.blockArg && (yield* definedText(e.blockArg, frame)) === NIL) return NIL;
       let recv: Value = frame.self;
       if (e.recv) {
         try {
@@ -1183,6 +1190,28 @@ function* definedText(e: Expr, frame: Frame): Gen {
     }
     case 'self': {
       return text('self');
+    }
+    case 'nil': {
+      return text('nil');
+    }
+    case 'true': {
+      return text('true');
+    }
+    case 'false': {
+      return text('false');
+    }
+    case 'array': {
+      for (const item of e.items) if ((yield* definedText(item, frame)) === NIL) return NIL;
+      return text('expression');
+    }
+    case 'hash': {
+      for (const item of e.items) {
+        if ('splat' in item) {
+          if ((yield* definedText(item.splat, frame)) === NIL) return NIL;
+        } else if ((yield* definedText(item.key, frame)) === NIL || (yield* definedText(item.value, frame)) === NIL)
+          return NIL;
+      }
+      return text('expression');
     }
     case 'asgn':
     case 'opasgn': {

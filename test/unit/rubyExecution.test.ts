@@ -5213,6 +5213,20 @@ test('named Structs accept Unicode constant names', () => {
   expect(run('p Struct.new("Éclair",:x).name')).toMatchObject({ stdout: '"Struct::Éclair"\n' });
 });
 
+test('defined? checks nested arguments without invoking the call', () => {
+  expect(run('p defined?(puts(no_such_name)),defined?([missing_method]),defined?({a: missing_method})')).toMatchObject({
+    stdout: 'nil\nnil\nnil\n',
+  });
+});
+
+test('defined? describes literals and match globals', () => {
+  expect(
+    run('p defined?(nil),defined?(true),defined?(false),defined?($~),defined?($1);/(a)/ =~ "a";p defined?($1)')
+  ).toMatchObject({
+    stdout: '"nil"\n"true"\n"false"\n"global-variable"\nnil\n"global-variable"\n',
+  });
+});
+
 test('Data copies remain frozen and Rational copies preserve identity', () => {
   expect(
     run(
