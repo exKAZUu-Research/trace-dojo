@@ -58,10 +58,16 @@ function* inspectSet(self: RObject): Gen<string> {
   data.inspecting = true;
   runtime.setInspectDepth++;
   const parts: string[] = [];
+  let length = 5;
   const members = membersOf(self);
   members.iterating++;
   try {
-    for (const entry of members.map.values()) parts.push(yield* inspect(entry.key));
+    for (const entry of members.map.values()) {
+      const part = yield* inspect(entry.key);
+      length += part.length + (parts.length > 0 ? 2 : 0);
+      runtime.checkStringLength(length);
+      parts.push(part);
+    }
     return `Set[${parts.join(', ')}]`;
   } finally {
     members.iterating--;
