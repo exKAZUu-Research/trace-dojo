@@ -50,8 +50,14 @@ function* modify(self: RObject): Gen<void> {
 
 function* inspectSet(self: RObject): Gen<string> {
   const parts: string[] = [];
-  for (const entry of membersOf(self).map.values()) parts.push(yield* inspect(entry.key));
-  return `Set[${parts.join(', ')}]`;
+  const members = membersOf(self);
+  members.iterating++;
+  try {
+    for (const entry of members.map.values()) parts.push(yield* inspect(entry.key));
+    return `Set[${parts.join(', ')}]`;
+  } finally {
+    members.iterating--;
+  }
 }
 
 function* other(value: Value): Gen<Value[]> {
@@ -68,9 +74,9 @@ def(
   function* (self: RObject, args, block) {
     self.data = new SetData(newHash());
     if (args.length > 0 && args[0] !== NIL) {
-      for (const value of yield* toArray(args[0])) {
+      yield* iterate(args[0], function* (value) {
         yield* hashSet(membersOf(self), block ? yield* callBlock(block, [value]) : value, true);
-      }
+      });
     }
     return NIL;
   },
@@ -122,7 +128,12 @@ def('Set', ['inspect', 'to_s'], 0, function* (self: RObject) {
   return str(yield* inspectSet(self));
 });
 def('Set', ['|', 'union', '+'], 1, function* (self: RObject, [value]) {
-  return yield* newSet([...[...membersOf(self).map.values()].map((e) => e.key), ...(yield* other(value))]);
+  const result = new RObject(self.cls);
+  result.data = (self.data as SetData).copy();
+  return yield* whileHeld(result, function* () {
+    for (const item of yield* other(value)) yield* hashSet(membersOf(result), item, true);
+    return result;
+  });
 });
 def('Set', ['&', 'intersection'], 1, function* (self: RObject, [value]) {
   const right = yield* newSet(yield* other(value));
@@ -132,11 +143,12 @@ def('Set', ['&', 'intersection'], 1, function* (self: RObject, [value]) {
   return yield* newSet(kept);
 });
 def('Set', ['-', 'difference'], 1, function* (self: RObject, [value]) {
-  const right = yield* newSet(yield* other(value));
-  const kept: Value[] = [];
-  for (const entry of membersOf(self).map.values())
-    if (!(yield* hashGet(membersOf(right), entry.key))) kept.push(entry.key);
-  return yield* newSet(kept);
+  const result = new RObject(self.cls);
+  result.data = (self.data as SetData).copy();
+  return yield* whileHeld(result, function* () {
+    for (const item of yield* other(value)) yield* hashDelete(membersOf(result), item);
+    return result;
+  });
 });
 def('Set', '^', 1, function* (self: RObject, [value]) {
   const result = new RObject(self.cls);

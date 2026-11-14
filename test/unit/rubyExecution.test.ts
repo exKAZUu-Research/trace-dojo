@@ -1751,6 +1751,32 @@ test('Hash implicit conversions accept private methods and report invalid result
   });
 });
 
+test('Set construction interleaves source and mapping callbacks', () => {
+  expect(
+    run('class E;include Enumerable;def each;puts :before;yield 1;puts :after;end;end;Set.new(E.new){|x|puts :block;x}')
+  ).toMatchObject({
+    stdout: 'before\nblock\nafter\n',
+  });
+});
+
+test('Set union and difference copy stored member hashes', () => {
+  expect(
+    run(
+      'class K;attr_accessor :bad;def hash;raise "bad" if @bad;0;end;end;k=K.new;s=Set[k];k.bad=true;p (s|Set[]).size,(s-Set[]).size'
+    )
+  ).toMatchObject({
+    stdout: '1\n1\n',
+  });
+});
+
+test('Set inspection rejects insertion during member callbacks', () => {
+  expect(
+    run('class K;def inspect;$s.add(1);"k";end;end;$s=Set[K.new];begin;p $s.inspect;rescue=>e;p e.class;end;p $s.size')
+  ).toMatchObject({
+    stdout: 'RuntimeError\n1\n',
+  });
+});
+
 test('shuffle detects receiver changes from its randomizer', () => {
   expect(
     run(
