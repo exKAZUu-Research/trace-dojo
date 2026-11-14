@@ -2,7 +2,7 @@ import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { addressOf, inspect, rEql, rEquals, toIndex } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, indexError, nameError, typeError } from './errors';
-import { hashKeyOf, hashSet } from './hashes';
+import { digest, hashKeyOf, hashSet } from './hashes';
 import { addMethod, callBlock, callMethod, callProc, type Gen, invoke, methodMissing } from './interp';
 import { tryAry } from './libArray';
 import { makeEnumerator } from './libEnumerator';
@@ -255,9 +255,9 @@ function* structuralHash(self: RObject): Gen<bigint> {
   runtime.structHashDepth++;
   runtime.structHashing.add(self);
   try {
-    let key = className(self.cls);
-    for (const value of valuesOf(self)) key += yield* hashKeyOf(value);
-    return BigInt(key.length);
+    const parts = [className(self.cls)];
+    for (const value of valuesOf(self)) parts.push(yield* hashKeyOf(value));
+    return BigInt(`0x${digest(JSON.stringify(parts))}`);
   } finally {
     runtime.structHashDepth--;
     runtime.structHashing.delete(self);

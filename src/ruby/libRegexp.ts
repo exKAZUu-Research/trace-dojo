@@ -555,34 +555,55 @@ def('MatchData', 'deconstruct', 0, (self: RObject) =>
 // String's regular-expression forms ------------------------------------------------------------------------------------
 
 /** Expands `\1`, `\k<name>`, `\0`, `\&`, `\\`, `` \` ``, and `\'` in a replacement string. */
-function expand(replacement: string, state: MatchState): string {
+function expand(replacement: string, state: MatchState, limit: number): string {
   const whole = state.groups[0] as readonly [number, number];
-  return replacement.replaceAll(/\\(k<(\w+)>|[0-9&\\`'])/g, (_text, code: string, name: string | undefined) => {
+  const parts: string[] = [];
+  let length = 0;
+  const append = (part: string): void => {
+    length += part.length;
+    if (length > limit) throw new ExecutionLimitError('storage');
+    rt().spend(Math.ceil(part.length / 256));
+    parts.push(part);
+  };
+  let position = 0;
+  for (const match of replacement.matchAll(/\\(k<(\w+)>|[0-9&\\`'])/g)) {
+    append(replacement.slice(position, match.index));
+    const [, code, name] = match;
+    let part: string;
     if (name !== undefined) {
       const group = state.namedGroups[name];
       if (group === undefined) throw indexError(`undefined group name reference: ${name}`);
       const value = groupText(state, group);
-      return value === NIL ? '' : (value as RString).s;
+      part = value === NIL ? '' : (value as RString).s;
+    } else {
+      switch (code) {
+        case '&': {
+          part = state.text.slice(whole[0], whole[1]);
+          break;
+        }
+        case '\\': {
+          part = '\\';
+          break;
+        }
+        case '`': {
+          part = state.text.slice(0, whole[0]);
+          break;
+        }
+        case "'": {
+          part = state.text.slice(whole[1]);
+          break;
+        }
+        default: {
+          const value = groupText(state, Number(code));
+          part = value === NIL ? '' : (value as RString).s;
+        }
+      }
     }
-    switch (code) {
-      case '&': {
-        return state.text.slice(whole[0], whole[1]);
-      }
-      case '\\': {
-        return '\\';
-      }
-      case '`': {
-        return state.text.slice(0, whole[0]);
-      }
-      case "'": {
-        return state.text.slice(whole[1]);
-      }
-      default: {
-        const value = groupText(state, Number(code));
-        return value === NIL ? '' : (value as RString).s;
-      }
-    }
-  });
+    append(part);
+    position = match.index + match[0].length;
+  }
+  append(replacement.slice(position));
+  return parts.join('');
 }
 
 function* substituteRegexp(
@@ -610,7 +631,7 @@ function* substituteRegexp(
       const entry = yield* hashGet(replacement, str(text.slice(from, to)));
       piece = yield* toS(entry ? entry.value : replacement.defaultValue);
     } else if (replacement !== undefined) {
-      piece = expand(yield* toStr(replacement), state);
+      piece = expand(yield* toStr(replacement), state, LIMITS.maxStringLength - length - (from - position));
     } else {
       setLastMatch(state);
       piece = yield* toS(yield* callBlock(block as RProc, [str(text.slice(from, to))]));

@@ -5074,6 +5074,22 @@ test('cyclic Struct comparisons and hashes remain bounded', () => {
   });
 });
 
+test('Struct and Data keys distribute across hash buckets', () => {
+  for (const constructor of ['Struct.new(:x,:y)', 'Data.define(:x,:y)']) {
+    expect(run(`P=${constructor};h={};60.times{|i|60.times{|j|h[P.new(i,j)]=true}};p h.size`)).toMatchObject({
+      kind: 'executed',
+      stdout: '3600\n',
+    });
+  }
+});
+
+test('regexp replacement expansion stops at the storage limit', () => {
+  expect(run(String.raw`p ("a" * 100000).sub(/a+/, "\\&" * 20)`)).toMatchObject({
+    kind: 'limitExceeded',
+    limit: 'storage',
+  });
+});
+
 test('Data copies remain frozen and Rational copies preserve identity', () => {
   expect(
     run(

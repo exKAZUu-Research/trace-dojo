@@ -83,7 +83,7 @@ function* structuralHash(value: RArray | RRange | RHash, ancestors: RBasic[], tr
   return BigInt(`0x${digest(JSON.stringify(parts))}`);
 }
 
-function digest(text: string): string {
+export function digest(text: string): string {
   let value = 2_166_136_261;
   for (let index = 0; index < text.length; index++)
     value = Math.imul(value ^ (text.codePointAt(index) as number), 16_777_619);
