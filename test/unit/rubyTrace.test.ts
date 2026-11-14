@@ -52,6 +52,18 @@ test('anonymous class instances retain class Turtles', () => {
   expect(traceProgram('ruby', program, program).finalTurtles).toMatchObject([{ y: 1 }]);
 });
 
+test('for-loop indexed receivers stay reachable through index evaluation', () => {
+  const program =
+    'class P;def initialize;@t=Turtle.new;end;def []=(i,v);$p=self;@t.forward;end;end;def recv;P.new;end;def idx;x=1;0;end;for recv[idx] in [1];end';
+  expect(traceProgram('ruby', program, program).finalTurtles).toMatchObject([{ y: 1 }]);
+});
+
+test('boxed Float loop values record binding steps', () => {
+  const program = '[Float::MAX,Float::MAX].each do |x|\nend';
+  const items = traceProgram('ruby', program, program).traceItems;
+  expect(items.filter((item) => item.vars.x === Number.MAX_VALUE)).toHaveLength(2);
+});
+
 test('Array combination snapshots keep later Turtles reachable', () => {
   const program = 'a=[1,Turtle.new];a.permutation(1){|x|a.clear if x[0]==1;$v=x[0]}';
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);

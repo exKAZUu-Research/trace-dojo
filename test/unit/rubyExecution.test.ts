@@ -2033,6 +2033,29 @@ test('indexed method calls accept block arguments', () => {
   expect(run('class A;def [];yield;end;end;p A.new[&proc{42}]')).toMatchObject({ stdout: '42\n' });
 });
 
+test('frozen objects reject new singleton methods', () => {
+  expect(
+    run(
+      'class A;def f;freeze;def self.x;1;end;end;end;a=A.new;begin;a.f;rescue=>e;p e.class;end;begin;p a.x;rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({
+    stdout: 'FrozenError\nNoMethodError\n',
+  });
+});
+
+test('implicit super converts reassigned rest parameters', () => {
+  expect(run('class A;def f(*x);p x;end;end;class B<A;def f(*x);x=5;super;end;end;B.new.f(1,2)')).toMatchObject({
+    stdout: '[5]\n',
+  });
+  expect(
+    run(
+      'class A;def f(**x);p x;end;end;class B<A;def f(**x);x=5;super;end;end;begin;B.new.f(a:1);rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({
+    stdout: 'TypeError\n',
+  });
+});
+
 test('implicit output conversions invoke private methods', () => {
   expect(run('class A;private;def to_s;"yes";end;def inspect;"shown";end;end;puts A.new;p A.new')).toMatchObject({
     stdout: 'yes\nshown\n',

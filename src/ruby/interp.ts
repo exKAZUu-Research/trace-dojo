@@ -800,10 +800,15 @@ export function* assign(target: Target, value: Value, frame: Frame): Gen<void> {
     }
     case 'index': {
       const recv = yield* ev(target.recv, frame);
-      const { args } = yield* evalArgs(target.args, frame);
-      yield* atCallRow(target.row, () =>
-        callMethod(recv, '[]=', [...args, value], undefined, undefined, { fcall: target.recv.k === 'self' })
-      );
+      frame.temporaries.push(recv);
+      try {
+        const { args } = yield* evalArgs(target.args, frame);
+        yield* atCallRow(target.row, () =>
+          callMethod(recv, '[]=', [...args, value], undefined, undefined, { fcall: target.recv.k === 'self' })
+        );
+      } finally {
+        frame.temporaries.pop();
+      }
       return;
     }
     case 'attr': {
@@ -1024,7 +1029,7 @@ function* evalFor(e: Extract<Expr, { k: 'for' }>, frame: Frame): Gen {
  * reference, as Java's null in a variable of a class type does.
  */
 export function storesAnswer(value: Value): boolean {
-  return typeof value !== 'object' || value instanceof RString || value instanceof RSymbol;
+  return typeof value !== 'object' || value instanceof RFloat || value instanceof RString || value instanceof RSymbol;
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- Case evaluates optional subjects, when predicates, guards, and the else body in Ruby order.
@@ -1226,8 +1231,9 @@ export function addMethod(owner: RClass, method: RMethod): void {
 }
 
 function assertMutableClass(owner: RClass): void {
-  const target = owner.attached instanceof RClass ? owner.attached : owner;
-  if (target.frozen) throw frozenError(target, target.name ?? '');
+  const target = owner.attached instanceof RBasic ? owner.attached : owner;
+  if (target.frozen)
+    throw frozenError(target, target instanceof RClass ? (target.name ?? '') : (realClassOf(target).name ?? ''));
 }
 
 function* moduleContainer(e: { scope?: Expr; top?: boolean }, frame: Frame): Gen<RClass> {
@@ -1565,7 +1571,7 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
   if (e.args) {
     ({ args, keywords } = yield* evalArgs(e.args, frame));
   } else {
-    ({ args, keywords } = implicitSuperArgs(home));
+    ({ args, keywords } = yield* implicitSuperArgs(home));
   }
   const mark = frame.temporaries.length;
   rootValues(frame, args);
@@ -1601,8 +1607,9 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
 }
 
 /** The arguments `super` without parentheses passes: the method's parameters' current values. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Implicit super reconstructs positional and keyword values from every declared parameter kind.
-function implicitSuperArgs(frame: Frame): { args: Value[]; keywords: RHash | undefined } {
+// code-gauge-allow functionCognitiveComplexity 28 -- Implicit super converts current positional and keyword rests alongside declared parameters.
+// code-gauge-allow functionNcss 37 -- Implicit super roots reconstructed arguments while their conversions run.
+function* implicitSuperArgs(frame: Frame): Gen<{ args: Value[]; keywords: RHash | undefined }> {
   const def = frame.extra.def as MethodDef;
   const { params } = def;
   const scope = frame.scope;
@@ -1610,34 +1617,57 @@ function implicitSuperArgs(frame: Frame): { args: Value[]; keywords: RHash | und
   const value = (name: ParamTarget, originalValue: Value): Value =>
     typeof name === 'string' ? scope.lookup(name, 0) : originalValue;
   const args: Value[] = params.required.map((param, index) => value(param, original[index] ?? NIL));
-  for (const param of params.optional) args.push(scope.lookup(param.name, 0));
-  if (params.rest !== undefined) {
-    const passedOptional = Math.min(
-      params.optional.length,
-      Math.max(0, original.length - params.required.length - params.post.length)
-    );
-    const anonymous = original.slice(params.required.length + passedOptional, original.length - params.post.length);
-    const rest = params.rest === '' ? arr(anonymous) : scope.lookup(params.rest, 0);
-    if (rest instanceof RArray) for (const item of rest.items) args.push(item);
-  }
-  for (const [index, param] of params.post.entries())
-    args.push(value(param, original[original.length - params.post.length + index] ?? NIL));
-  let keywords: RHash | undefined;
-  if (params.keywords.length > 0 || params.keywordRest !== undefined) {
-    keywords = newHash();
-    for (const keyword of params.keywords) {
-      runToEnd(hashSet(keywords, RSymbol.of(keyword.name), scope.lookup(keyword.name, 0)));
+  rt().heldArrays.push(args);
+  try {
+    for (const param of params.optional) args.push(scope.lookup(param.name, 0));
+    if (params.rest !== undefined) {
+      const passedOptional = Math.min(
+        params.optional.length,
+        Math.max(0, original.length - params.required.length - params.post.length)
+      );
+      const anonymous = original.slice(params.required.length + passedOptional, original.length - params.post.length);
+      const rest = params.rest === '' ? arr(anonymous) : scope.lookup(params.rest, 0);
+      for (const item of yield* splatItems(rest)) args.push(item);
     }
-    if (params.keywordRest !== undefined) {
-      const rest = params.keywordRest === '' ? frame.extra.keywords : scope.lookup(params.keywordRest, 0);
-      if (rest instanceof RHash) {
-        const named = params.keywordRest === '' ? new Set(params.keywords.map((keyword) => keyword.name)) : undefined;
-        addSuperKeywordRest(keywords, rest, named);
+    for (const [index, param] of params.post.entries())
+      args.push(value(param, original[original.length - params.post.length + index] ?? NIL));
+    let keywords: RHash | undefined;
+    if (params.keywords.length > 0 || params.keywordRest !== undefined) {
+      keywords = newHash();
+      rt().held.push(keywords);
+      try {
+        for (const keyword of params.keywords) {
+          yield* hashSet(keywords, RSymbol.of(keyword.name), scope.lookup(keyword.name, 0));
+        }
+        if (params.keywordRest !== undefined) {
+          const rest = params.keywordRest === '' ? frame.extra.keywords : scope.lookup(params.keywordRest, 0);
+          if (rest !== undefined && rest !== NIL) {
+            const converted = yield* superKeywordRest(rest);
+            const named =
+              params.keywordRest === '' ? new Set(params.keywords.map((keyword) => keyword.name)) : undefined;
+            addSuperKeywordRest(keywords, converted, named);
+          }
+        }
+        if (keywords.map.size === 0) keywords = undefined;
+      } finally {
+        rt().held.pop();
       }
     }
-    if (keywords.map.size === 0) keywords = undefined;
+    return { args, keywords };
+  } finally {
+    rt().heldArrays.pop();
   }
-  return { args, keywords };
+}
+
+function* superKeywordRest(value: Value): Gen<RHash> {
+  if (value instanceof RHash) return value;
+  if (respondsTo(value, 'to_hash', true)) {
+    const converted = yield* callMethod(value, 'to_hash', [], undefined, undefined, { fcall: true });
+    if (converted instanceof RHash) return converted;
+    const name = realClassOf(value).name;
+    throw typeError(`can't convert ${name} to Hash (${name}#to_hash gives ${realClassOf(converted).name})`);
+  }
+  throw implicitConversionError(value, 'Hash');
 }
 
 function addSuperKeywordRest(target: RHash, rest: RHash, named: Set<string> | undefined): void {
