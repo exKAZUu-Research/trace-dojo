@@ -65,7 +65,8 @@ function* inspectSet(self: RObject): Gen<string> {
     for (const entry of members.map.values()) {
       const part = yield* inspect(entry.key);
       length += part.length + (parts.length > 0 ? 2 : 0);
-      runtime.checkStringLength(length);
+      if (length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+      runtime.spend(Math.ceil(part.length / 256));
       parts.push(part);
     }
     return `Set[${parts.join(', ')}]`;

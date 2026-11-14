@@ -2470,6 +2470,10 @@ test('Set identity equality skips member hash callbacks', () => {
   });
 });
 
+test('Set inspection charges new member text once', () => {
+  expect(run('s=Set.new(1..10000);p s.inspect.size')).toMatchObject({ stdout: '58897\n' });
+});
+
 test('Range cover dispatches the receiver endpoint comparison', () => {
   expect(
     run(

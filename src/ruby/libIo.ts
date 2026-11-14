@@ -190,9 +190,9 @@ def(
   function* (_self, args, _block, keywords) {
     yield* validateWarnKeywords(keywords, args.length > 0);
     if (args.length > 0 && warnCategoryEnabled(keywords)) {
-      const parts: RString[] = [];
+      const parts: WarningParts = { chunks: [], binary: false, ascii: true, length: 0 };
       yield* emitPuts(args, function* (part) {
-        parts.push(part instanceof RString ? part : str(part));
+        appendWarningPart(parts, part instanceof RString ? part : str(part));
       });
       yield* write(rt().globals.get('$stderr') ?? NIL, combineWarningParts(parts));
     }
@@ -201,27 +201,31 @@ def(
   { ...PRIVATE, keywords: true }
 );
 
-function combineWarningParts(parts: RString[]): RString {
-  let binary = false;
-  let ascii = true;
-  let length = 0;
-  const chunks: Uint8Array[] = [];
-  for (const part of parts) {
-    binary = combinedStringEncoding(binary, ascii, part);
-    const bytes = stringBytes(part);
-    if (ascii) ascii = bytes.every((byte) => byte < 0x80);
-    length += bytes.length;
-    if (length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
-    rt().spend(Math.ceil(bytes.length / 256));
-    chunks.push(bytes);
-  }
-  const joined = new Uint8Array(length);
+interface WarningParts {
+  chunks: Uint8Array[];
+  binary: boolean;
+  ascii: boolean;
+  length: number;
+}
+
+function appendWarningPart(parts: WarningParts, part: RString): void {
+  parts.binary = combinedStringEncoding(parts.binary, parts.ascii, part);
+  const bytes = stringBytes(part);
+  parts.length += bytes.length;
+  if (parts.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+  if (parts.ascii) parts.ascii = bytes.every((byte) => byte < 0x80);
+  rt().spend(Math.ceil(bytes.length / 256));
+  parts.chunks.push(bytes);
+}
+
+function combineWarningParts(parts: WarningParts): RString {
+  const joined = new Uint8Array(parts.length);
   let offset = 0;
-  for (const chunk of chunks) {
+  for (const chunk of parts.chunks) {
     joined.set(chunk, offset);
     offset += chunk.length;
   }
-  return stringFromBytes(joined, binary);
+  return stringFromBytes(joined, parts.binary);
 }
 
 function warnCategoryEnabled(keywords: RHash | undefined): boolean {
