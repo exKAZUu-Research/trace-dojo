@@ -690,7 +690,7 @@ def('Array', '*', 1, function* (self: RArray, [count]) {
   for (let index = 0; index < times; index++) for (const item of self.items) items.push(item);
   return arr(items);
 });
-function* arrayIntersection(self: RArray, others: Value[]): Gen {
+function* arrayIntersection(self: RArray, others: Value[], liveReceiver = false): Gen {
   const held = rt().held.length;
   const heldArrays = rt().heldArrays.length;
   try {
@@ -700,19 +700,28 @@ function* arrayIntersection(self: RArray, others: Value[]): Gen {
       arrays.push(array);
       rt().held.push(array);
     }
-    let result = [...self.items];
+    let result = liveReceiver ? [] : [...self.items];
     rt().heldArrays.push(result);
-    for (const array of arrays) {
+    for (let operandIndex = 0; operandIndex < arrays.length; operandIndex++) {
+      const array = arrays[operandIndex];
+      const source = liveReceiver && operandIndex === 0 ? self : undefined;
+      const sourceLength = (): number => source?.items.length ?? result.length;
+      const sourceItem = (index: number): Value => (source?.items[index] ?? result[index]) as Value;
       const kept: Value[] = [];
       rt().heldArrays.push(kept);
-      if (result.length <= 16 && array.items.length <= 16) {
-        for (const item of result)
+      if (sourceLength() <= 16 && array.items.length <= 16) {
+        for (let index = 0; index < sourceLength(); index++) {
+          const item = sourceItem(index);
           if ((yield* includesByEql(array.items, item)) && !(yield* includesByEql(kept, item))) kept.push(item);
+        }
       } else {
         const keys = newHash();
         rt().held.push(keys);
         for (const item of array.items) yield* hashSet(keys, item, true);
-        for (const item of result) if (yield* hashDelete(keys, item)) kept.push(item);
+        for (let index = 0; index < sourceLength(); index++) {
+          const item = sourceItem(index);
+          if (yield* hashDelete(keys, item)) kept.push(item);
+        }
       }
       result = kept;
     }
@@ -722,8 +731,8 @@ function* arrayIntersection(self: RArray, others: Value[]): Gen {
     rt().held.length = held;
   }
 }
-def('Array', '&', 1, arrayIntersection);
-def('Array', 'intersection', [0, -1], arrayIntersection);
+def('Array', '&', 1, (self: RArray, others: Value[]) => arrayIntersection(self, others, true));
+def('Array', 'intersection', [0, -1], (self: RArray, others: Value[]) => arrayIntersection(self, others));
 function* arrayUnion(self: RArray, others: Value[]): Gen {
   const held = rt().held.length;
   const heldArrays = rt().heldArrays.length;

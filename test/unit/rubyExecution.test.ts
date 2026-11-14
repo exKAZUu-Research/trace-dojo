@@ -1713,6 +1713,13 @@ test('Array intersect predicate compares small operands without hashing', () => 
   });
 });
 
+test('Array intersection operator follows receiver edits during equality callbacks', () => {
+  const source = 'class K;def eql?(x);$a.clear;false;end;end;$a=[K.new,2];p ($a & [1,2]),$a';
+  expect(run(source)).toMatchObject({ stdout: '[]\n[]\n' });
+  const named = 'class K;def eql?(x);$a.clear;false;end;end;$a=[K.new,2];p $a.intersection([1,2]),$a';
+  expect(run(named)).toMatchObject({ stdout: '[2]\n[]\n' });
+});
+
 test('Hash constructor copies stored key hashes without callbacks', () => {
   const source = `class K
   attr_accessor :bad
