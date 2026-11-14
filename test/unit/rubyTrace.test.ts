@@ -460,6 +460,12 @@ test('ArithmeticSequence keeps keyword arguments reachable', () => {
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
+test('Range first keeps collected successors reachable', () => {
+  const program =
+    'class P;attr_reader :n;def initialize(n);@n=n;@t=Turtle.new(n,0);end;def <=>(o);n<=>o.n;end;def succ;q=1;P.new(n+1);end;end;a=(P.new(0)..P.new(4)).first(4)';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(4);
+});
+
 test('converted Hash sources keep later Turtle values alive during insertion', () => {
   for (const operation of ['h={**A.new}', 'h={}.merge(A.new)']) {
     const program = `class K; def hash; x=1; 0; end; end; class A; def to_hash; {K.new=>1, 2=>Turtle.new}; end; end; ${operation}`;

@@ -1,6 +1,7 @@
 import {
   combinedStringEncoding,
   compareValues,
+  comparisonFailed,
   inspect,
   inspectRange,
   numericCompare,
@@ -9,6 +10,7 @@ import {
   rEquals,
   spaceship,
   toIndex,
+  toStepFloat,
   toSValue,
 } from './conversions';
 import { def, sdef } from './define';
@@ -135,12 +137,17 @@ def('Range', ['begin', 'first'], [0, 1], function* (self: RRange, args) {
   const count = yield* toIndex(args[0]);
   if (count < 0) throw argumentError('negative array size (or size too big)');
   const items: Value[] = [];
-  yield* iterateRange(self, function* (value) {
-    if (count === 0) return STOP;
-    items.push(value);
-    yield* [];
-    return items.length >= count ? STOP : undefined;
-  });
+  rt().heldArrays.push(items);
+  try {
+    yield* iterateRange(self, function* (value) {
+      if (count === 0) return STOP;
+      items.push(value);
+      yield* [];
+      return items.length >= count ? STOP : undefined;
+    });
+  } finally {
+    rt().heldArrays.pop();
+  }
   return arr(items);
 });
 def('Range', 'begin', 0, (self: RRange) => self.begin);
@@ -205,6 +212,8 @@ def('Range', 'sum', [0, 1], function* (self: RRange, args, block) {
     const initial = args.length > 0 ? args[0] : 0n;
     if (last < self.begin) return initial;
     const total = ((self.begin + last) * (last - self.begin + 1n)) / 2n;
+    if (typeof initial !== 'bigint' && typeof initial !== 'number')
+      return (yield* toStepFloat(initial)) + Number(total);
     return yield* callMethod(initial, '+', [total]);
   }
   return yield* sum(self, args, block);
@@ -412,6 +421,7 @@ function* bsearchDecision(block: RProc, value: Value): Gen<'left' | 'right' | 'f
   const result = yield* callBlock(block, [value]);
   if (result === true) return 'left';
   if (result === false || result === NIL) return 'right';
+  if (typeof result === 'number' && Number.isNaN(result)) throw comparisonFailed(result, 0n);
   if (typeof result === 'bigint' || typeof result === 'number')
     return Number(result) === 0 ? 'found' : Number(result) < 0 ? 'left' : 'right';
   throw typeError(`wrong argument type ${yield* inspect(result)} (must be numeric, true, false or nil)`);
@@ -431,21 +441,24 @@ def('Range', 'hash', 0, function* (self: RRange) {
 for (const method of ['step', '%'])
   def('Range', method, [0, 1], function* (self: RRange, args, block) {
     const step = args.length > 0 ? args[0] : 1n;
-    if (typeof step !== 'bigint' && typeof step !== 'number')
+    if (typeof step !== 'bigint' && typeof step !== 'number' && !respondsTo(step, 'coerce', true))
       throw typeError('no implicit conversion of String into Integer');
-    if (Number(step) < 0) throw argumentError("step can't be negative");
-    if (Number(step) === 0) throw argumentError("step can't be 0");
+    if (typeof step === 'bigint' || typeof step === 'number') {
+      if (Number(step) < 0) throw argumentError("step can't be negative");
+      if (Number(step) === 0) throw argumentError("step can't be 0");
+    }
     if (!block) return makeEnumerator(self, method, args);
     return yield* stepRange(self, step, block);
   });
 
-function* stepRange(self: RRange, step: bigint | number, block: RProc): Gen {
+function* stepRange(self: RRange, step: Value, block: RProc): Gen {
   const { begin, end } = self;
   if (typeof begin === 'bigint' && typeof step === 'bigint' && (typeof end === 'bigint' || end === NIL)) {
     return yield* stepIntegerRange(self, begin, step, block);
   }
   if (
     (typeof begin === 'bigint' || typeof begin === 'number') &&
+    (typeof step === 'bigint' || typeof step === 'number') &&
     (typeof end === 'bigint' || typeof end === 'number' || end === NIL)
   ) {
     return yield* stepNumericRange(self, Number(begin), Number(step), block);
@@ -469,7 +482,7 @@ function* stepIntegerRange(self: RRange, begin: bigint, step: bigint, block: RPr
 function* stepNumericRange(self: RRange, start: number, by: number, block: RProc): Gen {
   const { end, exclusive } = self;
   const count = end === NIL ? Number.POSITIVE_INFINITY : floatStepCount(start, Number(end), by, exclusive);
-  if (Number.isNaN(count)) throw rangeError('NaN');
+  if (Number.isNaN(count)) return self;
   for (let index = 0; index < count; index++) {
     rt().spend();
     let value = fusedMultiplyAdd(index, by, start);
@@ -482,7 +495,7 @@ function* stepNumericRange(self: RRange, start: number, by: number, block: RProc
   return self;
 }
 
-function* stepCustomRange(self: RRange, step: bigint | number, block: RProc): Gen {
+function* stepCustomRange(self: RRange, step: Value, block: RProc): Gen {
   const { end, exclusive } = self;
   let value = self.begin;
   if (end !== NIL) {

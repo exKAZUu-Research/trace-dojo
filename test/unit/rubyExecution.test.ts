@@ -2407,6 +2407,34 @@ test('Random draws from custom arithmetic ranges', () => {
   ).toMatchObject({ stdout: '2\n' });
 });
 
+test('Integer Range sum converts a custom initial value', () => {
+  expect(
+    run('class A;def +(x);puts :add;self;end;end;begin;p (1..3).sum(A.new);rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'TypeError\n',
+  });
+  expect(run('class A;private;def to_f;2.5;end;end;p (1..3).sum(A.new)')).toMatchObject({ stdout: '8.5\n' });
+});
+
+test('Range step accepts numeric-like custom increments', () => {
+  expect(run('class N;private;def coerce(x);[x,2];end;end;p (1..5).step(N.new).first(4)')).toMatchObject({
+    stdout: '[1, 3, 5]\n',
+  });
+});
+
+test('binary search rejects NaN comparison results', () => {
+  expect(run('begin;p (1..5).bsearch{Float::NAN};rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'ArgumentError\n"comparison of Float with 0 failed"\n',
+  });
+  expect(run('begin;p [1,2,3].bsearch{Float::NAN};rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'ArgumentError\n',
+  });
+});
+
+test('Range step with NaN yields no values', () => {
+  expect(run('p (1..3).step(Float::NAN).to_a')).toMatchObject({ stdout: '[]\n' });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(

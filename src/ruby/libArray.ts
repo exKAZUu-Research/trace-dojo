@@ -2,6 +2,7 @@
 import {
   combinedStringEncoding,
   compareValues,
+  comparisonFailed,
   inspect,
   inspectArray,
   rEql,
@@ -1024,6 +1025,7 @@ function* arrayBsearch(self: RArray, block: RProc, indexOnly: boolean): Gen {
     } else if (result === false || result === NIL) {
       low = middle + 1;
     } else if (typeof result === 'bigint' || typeof result === 'number') {
+      if (typeof result === 'number' && Number.isNaN(result)) throw comparisonFailed(result, 0n);
       if (Number(result) === 0)
         return middle >= self.items.length ? NIL : indexOnly ? BigInt(middle) : self.items[middle];
       if (Number(result) < 0) high = middle;
