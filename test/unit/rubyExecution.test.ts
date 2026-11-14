@@ -1777,6 +1777,33 @@ test('Set inspection rejects insertion during member callbacks', () => {
   });
 });
 
+test('Set comparison and replacement guard active iteration', () => {
+  expect(
+    run(
+      'class K;attr_accessor :on;def hash;$s.add(1) if @on;0;end;end;k=K.new;$s=Set[k];t=Set[k];k.on=true;begin;p $s.subset?(t);rescue=>e;p e.class;end;p $s.size'
+    )
+  ).toMatchObject({
+    stdout: 'RuntimeError\n1\n',
+  });
+  expect(run('s=Set[1,2];begin;s.each{s.replace(Set[])};rescue=>e;p e.class,e.message;end;p s.size')).toMatchObject({
+    stdout: 'RuntimeError\n"cannot replace set during iteration"\n2\n',
+  });
+});
+
+test('Set subclasses retain their result class', () => {
+  expect(
+    run('class S<Set;end;s=S[1];p s.class,(s|Set[]).class,(s-Set[]).class,(s&Set[1]).class,s.flatten.class')
+  ).toMatchObject({
+    stdout: 'S\nS\nS\nS\nS\n',
+  });
+});
+
+test('Set operations use each added to immediate classes', () => {
+  expect(run('class Integer;def each;yield 2;end;end;p Set[1]|3,Set[1]^3')).toMatchObject({
+    stdout: 'Set[1, 2]\nSet[1, 2]\n',
+  });
+});
+
 test('shuffle detects receiver changes from its randomizer', () => {
   expect(
     run(

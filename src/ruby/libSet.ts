@@ -1,11 +1,11 @@
 import { inspect, rEquals } from './conversions';
 import { def, sdef } from './define';
-import { argumentError, frozenError, typeError } from './errors';
+import { argumentError, frozenError, runtimeError, typeError } from './errors';
 import { eachEntry, hashDelete, hashDeleteEntry, hashGet, hashKeyOf, hashSet, rehash } from './hashes';
-import { callBlock, callMethod, type Gen } from './interp';
+import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { iterate, toArray } from './libEnumerable';
 import { makeEnumerator } from './libEnumerator';
-import { NIL, type RHash, RObject, type Value } from './objects';
+import { NIL, type RClass, type RHash, RObject, type Value } from './objects';
 import { rt, whileHeld } from './runtime';
 import { arr, newHash, str, truthy } from './values';
 
@@ -35,9 +35,9 @@ export function setSize(set: RObject): bigint {
   return BigInt(membersOf(set).map.size);
 }
 
-export function newSet(values: Iterable<Value>): Gen<RObject> {
+export function newSet(values: Iterable<Value>, cls: RClass = rt().c.Set): Gen<RObject> {
   return (function* () {
-    const set = new RObject(rt().c.Set);
+    const set = new RObject(cls);
     set.data = new SetData(newHash());
     for (const value of values) yield* hashSet(membersOf(set), value, true);
     return set;
@@ -63,7 +63,7 @@ function* inspectSet(self: RObject): Gen<string> {
 function* other(value: Value): Gen<Value[]> {
   if (value instanceof RObject && value.data instanceof SetData)
     return [...membersOf(value).map.values()].map((e) => e.key);
-  if (value === NIL || typeof value !== 'object') throw typeError('value must be enumerable');
+  if (!respondsTo(value, 'each')) throw typeError('value must be enumerable');
   return yield* toArray(value);
 }
 
@@ -74,6 +74,10 @@ def(
   function* (self: RObject, args, block) {
     self.data = new SetData(newHash());
     if (args.length > 0 && args[0] !== NIL) {
+      if (!block && args[0] instanceof RObject && args[0].data instanceof SetData) {
+        self.data = (args[0].data as SetData).copy();
+        return NIL;
+      }
       yield* iterate(args[0], function* (value) {
         yield* hashSet(membersOf(self), block ? yield* callBlock(block, [value]) : value, true);
       });
@@ -82,7 +86,7 @@ def(
   },
   { visibility: 'private' }
 );
-sdef('Set', '[]', [0, -1], (_self, args) => newSet(args));
+sdef('Set', '[]', [0, -1], (self, args) => callMethod(self, 'new', [arr(args)]));
 def('Set', 'each', 0, function* (self: RObject, _args, block) {
   if (!block) return makeEnumerator(self, 'each', []);
   yield* eachEntry(membersOf(self), function* (entry) {
@@ -128,8 +132,7 @@ def('Set', ['inspect', 'to_s'], 0, function* (self: RObject) {
   return str(yield* inspectSet(self));
 });
 def('Set', ['|', 'union', '+'], 1, function* (self: RObject, [value]) {
-  const result = new RObject(self.cls);
-  result.data = (self.data as SetData).copy();
+  const result = (yield* callMethod(self.cls, 'new', [self])) as RObject;
   return yield* whileHeld(result, function* () {
     for (const item of yield* other(value)) yield* hashSet(membersOf(result), item, true);
     return result;
@@ -137,14 +140,15 @@ def('Set', ['|', 'union', '+'], 1, function* (self: RObject, [value]) {
 });
 def('Set', ['&', 'intersection'], 1, function* (self: RObject, [value]) {
   const right = yield* newSet(yield* other(value));
-  const kept: Value[] = [];
-  for (const entry of membersOf(self).map.values())
-    if (yield* hashGet(membersOf(right), entry.key)) kept.push(entry.key);
-  return yield* newSet(kept);
+  const result = (yield* callMethod(self.cls, 'new', [self])) as RObject;
+  return yield* whileHeld(result, function* () {
+    for (const [slot, entry] of membersOf(result).map)
+      if (!(yield* hashGet(membersOf(right), entry.key))) membersOf(result).map.delete(slot);
+    return result;
+  });
 });
 def('Set', ['-', 'difference'], 1, function* (self: RObject, [value]) {
-  const result = new RObject(self.cls);
-  result.data = (self.data as SetData).copy();
+  const result = (yield* callMethod(self.cls, 'new', [self])) as RObject;
   return yield* whileHeld(result, function* () {
     for (const item of yield* other(value)) yield* hashDelete(membersOf(result), item);
     return result;
@@ -165,7 +169,7 @@ def('Set', '^', 1, function* (self: RObject, [value]) {
 });
 
 function* setFromEnumerable(value: Value): Gen<RObject> {
-  if (value === NIL || typeof value !== 'object') throw typeError('value must be enumerable');
+  if (!respondsTo(value, 'each')) throw typeError('value must be enumerable');
   const result = yield* newSet([]);
   return yield* whileHeld(result, function* () {
     yield* iterate(value, function* (item) {
@@ -176,8 +180,14 @@ function* setFromEnumerable(value: Value): Gen<RObject> {
 }
 
 function* subset(small: RObject, large: RObject): Gen<boolean> {
-  for (const entry of membersOf(small).map.values()) if (!(yield* hashGet(membersOf(large), entry.key))) return false;
-  return true;
+  const members = membersOf(small);
+  members.iterating++;
+  try {
+    for (const entry of members.map.values()) if (!(yield* hashGet(membersOf(large), entry.key))) return false;
+    return true;
+  } finally {
+    members.iterating--;
+  }
 }
 
 function setArg(value: Value): RObject {
@@ -242,6 +252,7 @@ def('Set', 'subtract', 1, function* (self: RObject, [value]) {
 });
 def('Set', 'replace', 1, function* (self: RObject, [value]) {
   yield* modify(self);
+  if (membersOf(self).iterating > 0) throw runtimeError('cannot replace set during iteration');
   const items = yield* other(value);
   membersOf(self).map.clear();
   for (const item of items) yield* hashSet(membersOf(self), item, true);
@@ -275,7 +286,7 @@ def('Set', ['map!', 'collect!'], 0, function* (self: RObject, _args, block) {
   }
 });
 def('Set', 'flatten', 0, function* (self: RObject) {
-  return yield* newSet(yield* flattenMembers(self, new Set()));
+  return yield* newSet(yield* flattenMembers(self, new Set()), self.cls);
 });
 def('Set', 'flatten!', 0, function* (self: RObject) {
   yield* modify(self);
