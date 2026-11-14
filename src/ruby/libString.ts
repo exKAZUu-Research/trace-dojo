@@ -1258,7 +1258,7 @@ function* substitute(
     if (!global) break;
     rt().spend();
   }
-  if (global) setLiteralMatch(self, text, target, lastFound);
+  if (global) setLiteralMatch(self, text, target, text.startsWith(target, lastFound) ? lastFound : -1);
   else setLastMatch(lastState);
   if (positionByte <= sourceLength) append(active.slice(positionByte));
   return { value: stringFromBytes(joinChunks(chunks, length), resultBinary), matched };
