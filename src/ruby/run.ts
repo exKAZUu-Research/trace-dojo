@@ -61,6 +61,7 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: F
       try {
         runToEnd(evalBody(program.body, frame));
       } catch (error) {
+        if (error instanceof RubyError) runtime.globals.set('$!', error.exception);
         uncaughtException = describeUncaught(runtime, error, frame);
       }
       try {

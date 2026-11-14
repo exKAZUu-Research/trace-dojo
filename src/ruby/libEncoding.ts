@@ -1,7 +1,7 @@
 import { def } from './define';
 import { callProc, type Gen, requireBlock } from './interp';
 import { NIL, RObject, type RString, type Value } from './objects';
-import { rt, type Runtime } from './runtime';
+import { ExitSignal, rt, RubyError, type Runtime } from './runtime';
 import { arr, str } from './values';
 
 /** Creates the encodings a program can name: strings here are UTF-8, or ASCII-8BIT when they hold bytes. */
@@ -52,7 +52,17 @@ def(
 /** Runs the blocks `at_exit` and `END` registered, the last registered first. */
 export function* runAtExit(): Gen<void> {
   const runtime = rt();
-  while (runtime.atExit.length > 0) yield* callProc(runtime.atExit.pop() as never, []);
+  let pending: RubyError | ExitSignal | undefined;
+  while (runtime.atExit.length > 0) {
+    try {
+      yield* callProc(runtime.atExit.pop() as never, []);
+    } catch (error) {
+      if (error instanceof RubyError) runtime.globals.set('$!', error.exception);
+      else if (!(error instanceof ExitSignal)) throw error;
+      pending = error;
+    }
+  }
+  if (pending) throw pending;
 }
 
 /** The text after `__END__`, which `DATA` reads as a file opened at its start. */

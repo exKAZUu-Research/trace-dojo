@@ -4869,3 +4869,18 @@ test('Array comparison limits nested comparisons through a cyclic left receiver'
   const source = 'b=1;600.times{b=[b]};a=[];a<<a;p(a<=>b)';
   expect(run(source)).toMatchObject({ kind: 'limitExceeded', limit: 'output' });
 });
+
+test('exit handlers continue after an exception and expose it to earlier handlers', () => {
+  expect(
+    run('at_exit { puts "first"; p $!.message }; at_exit { raise "oops" }; at_exit { puts "last" }')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'last\nfirst\n"oops"\n',
+    uncaughtException: expect.stringContaining('oops'),
+  });
+  expect(run('at_exit { puts "first" }; END { raise "oops" }; END { puts "last" }')).toMatchObject({
+    kind: 'executed',
+    stdout: 'last\nfirst\n',
+    uncaughtException: expect.stringContaining('oops'),
+  });
+});
