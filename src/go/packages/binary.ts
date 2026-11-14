@@ -1,6 +1,7 @@
 import type { Entity } from '../entities';
-import { addMethod, definePackage, fn, namedType } from '../native';
+import { addMethod, currentRuntime, definePackage, fn, namedType } from '../native';
 import { indexPanic } from '../runtimeErrors';
+import { appendValues } from '../sliceOps';
 import { BASIC, type Type } from '../types';
 import { GoStruct, Iface, type Slice, type Value } from '../values';
 import { BYTES, STRING } from './support';
@@ -41,7 +42,6 @@ function writeBytes(slice: Value, bytes: bigint[]): void {
 
 function byteOrder(name: string, littleEndian: boolean): Value {
   const type = namedType('binary', name, { kind: 'struct', fields: [] });
-  type.unsupported = new Set(['AppendUint16', 'AppendUint32', 'AppendUint64']);
   for (const [bits, type2] of [
     [16, UINT16],
     [32, UINT32],
@@ -53,14 +53,25 @@ function byteOrder(name: string, littleEndian: boolean): Value {
       const ordered = littleEndian ? bytes.toReversed() : bytes;
       return ordered.reduce((total, byte) => (total << 8n) | byte, 0n);
     });
-    addMethod(type, `PutUint${bits}`, fn([BYTES, type2], []), (_receiver, [b, value]) => {
+    const encoded = (value: Value): bigint[] => {
       const bytes = Array.from(
         { length: count },
         (_, index) => ((value as bigint) >> BigInt(8 * (count - 1 - index))) & 255n
       );
-      writeBytes(b, littleEndian ? bytes.toReversed() : bytes);
-      return;
+      return littleEndian ? bytes.toReversed() : bytes;
+    };
+    addMethod(type, `PutUint${bits}`, fn([BYTES, type2], []), (_receiver, [b, value]) => {
+      writeBytes(b, encoded(value));
     });
+    addMethod(type, `AppendUint${bits}`, fn([BYTES, type2], [BYTES]), (_receiver, [b, value]) =>
+      appendValues(
+        b as Slice | undefined,
+        encoded(value),
+        BASIC.uint8,
+        () => 0n,
+        (slots) => currentRuntime().allocate(slots)
+      )
+    );
   }
   addMethod(type, 'String', fn([], [STRING]), () => name);
   return new Iface(type, new GoStruct([]));
@@ -78,6 +89,15 @@ const BYTE_ORDER = namedType('binary', 'ByteOrder', {
     { name: 'Uint64', type: fn([BYTES], [UINT64]) },
   ],
 });
+const APPEND_BYTE_ORDER = namedType('binary', 'AppendByteOrder', {
+  kind: 'interface',
+  methods: [
+    { name: 'AppendUint16', type: fn([BYTES, UINT16], [BYTES]) },
+    { name: 'AppendUint32', type: fn([BYTES, UINT32], [BYTES]) },
+    { name: 'AppendUint64', type: fn([BYTES, UINT64], [BYTES]) },
+    { name: 'String', type: fn([], [STRING]) },
+  ],
+});
 const bigEndian = byteOrder('BigEndian', false);
 const littleEndian = byteOrder('LittleEndian', true);
 
@@ -87,6 +107,7 @@ export const BINARY_PACKAGE = definePackage(
     BigEndian: libraryVariable('BigEndian', (bigEndian as Iface).type, (bigEndian as Iface).value),
     LittleEndian: libraryVariable('LittleEndian', (littleEndian as Iface).type, (littleEndian as Iface).value),
     ByteOrder: { kind: 'type', name: 'ByteOrder', type: BYTE_ORDER },
+    AppendByteOrder: { kind: 'type', name: 'AppendByteOrder', type: APPEND_BYTE_ORDER },
   },
   [
     'Read',
@@ -96,7 +117,6 @@ export const BINARY_PACKAGE = definePackage(
     'PutUvarint',
     'Varint',
     'Uvarint',
-    'AppendByteOrder',
     'NativeEndian',
     'MaxVarintLen64',
     'Append',

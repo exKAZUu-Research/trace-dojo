@@ -1158,7 +1158,7 @@ export abstract class StatementCompiler extends CallCompiler {
         [],
         (args) => runBody(args)
       );
-      frame.temporaries.push(yieldFunction);
+      frame.temporaries.push([fn, yieldFunction]);
       try {
         if (fn.resume) yield* fn.resume([yieldFunction], statement.row);
         else fn.call([yieldFunction], statement.row);

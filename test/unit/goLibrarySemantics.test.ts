@@ -305,3 +305,34 @@ test('JSON string tags require the complete quoted scalar', () => {
     uncaughtException: undefined,
   });
 });
+
+test('quoted null clears tagged scalar pointers using the reference token rules', () => {
+  const source =
+    'package main\nimport("fmt";"encoding/json")\ntype S struct{I *int `json:"i,string"`; B *bool `json:"b,string"`;F *float64 `json:"f,string"`;T *string `json:"t,string"`}\nfunc main(){i,b,f,t:=1,true,1.5,"x";for _,text:=range []string{`{"i":"null","b":"null","f":"null","t":"null"}`,`{"i":null,"b":null,"f":null,"t":null}`,`{"i":"\\u006eull"}`}{s:=S{&i,&b,&f,&t};err:=json.Unmarshal([]byte(text),&s);fmt.Println(s.I==nil,s.B==nil,s.F==nil,s.T==nil,err)}}\n';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true true true true <nil>\ntrue true true true <nil>\nfalse false false false <nil>\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('byte order append methods grow and preserve endian order', () => {
+  const source =
+    'package main\nimport("fmt";"encoding/binary")\nfunc main(){for _,order:=range []binary.AppendByteOrder{binary.BigEndian,binary.LittleEndian}{b:=make([]byte,1,2);b[0]=9;b=order.AppendUint16(b,0x1234);b=order.AppendUint32(b,0x12345678);b=order.AppendUint64(b,0x123456789abcdef0);fmt.Println(b,len(b));var empty []byte;fmt.Println(order.AppendUint16(empty,1))}}\n';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[9 18 52 18 52 86 120 18 52 86 120 154 188 222 240] 15\n[0 1]\n[9 52 18 120 86 52 18 240 222 188 154 120 86 52 18] 15\n[1 0]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('compact hexadecimal literals respect normalized signed exponent bounds', () => {
+  const source =
+    'package main\nimport "fmt"\nconst x=0x1p2147483646\nconst y=0x1p-2147483649\nconst z=0x0p2147483648\nfunc main(){fmt.Println(x/x,y/y,z)}\n';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1 1 0\n',
+    uncaughtException: undefined,
+  });
+});

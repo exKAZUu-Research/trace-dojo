@@ -528,7 +528,9 @@ export function makePointerArshaler(type: Type, lookup: Lookup): Arshaler {
         pointer = newVariable(element);
         ref.set(pointer);
       }
-      return valFncs.unmarshal(dec, new Ref(pointer, false), uo);
+      const error = valFncs.unmarshal(dec, new Ref(pointer, false), uo);
+      if (!error && uo.stringify && dec.previousTokenOrValue() === '"null"') ref.set(undefined);
+      return error;
     },
   };
 }

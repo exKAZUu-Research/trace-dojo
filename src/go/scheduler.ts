@@ -35,7 +35,7 @@ export class Scheduler {
   spawn(body: (goroutine: Goroutine) => Suspending<unknown>, roots: unknown[] = []): Goroutine {
     const goroutine = new Goroutine(this.nextGoroutineId++);
     goroutine.body = body(goroutine);
-    goroutine.holding = roots;
+    goroutine.callRoots = roots;
     this.live.add(goroutine);
     this.runQueue.push(goroutine);
     return goroutine;
@@ -78,7 +78,7 @@ export class Scheduler {
     const stack: unknown[] = [];
     for (const goroutine of this.live) {
       pushFrameRoots(goroutine.frames, stack);
-      stack.push(...goroutine.holding);
+      stack.push(...goroutine.holding, ...goroutine.callRoots);
     }
     for (const timer of this.timers) stack.push(timer.channel, ...timer.roots);
     return stack;
@@ -150,6 +150,7 @@ export class Goroutine {
   blocked: Blocked | undefined;
   /** Values that only the blocked goroutine holds, such as a value waiting to be sent. */
   holding: unknown[] = [];
+  callRoots: unknown[] = [];
 
   constructor(readonly id: number) {}
 }

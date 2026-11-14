@@ -242,3 +242,30 @@ func main(){crash(make(chan int));fmt.Println("continued")}`;
     uncaughtException: 'panic: boom',
   });
 });
+
+test('native goroutine invocations retain receiver roots while callbacks run', () => {
+  const source = `package main
+import("fmt";"sync";"runtime")
+func build()*sync.Map{m:=new(sync.Map);m.Store("first",0);m.Store("t",NewTurtle(0,1));return m}
+func main(){p:=NewTurtle(0,0);go build().Range(func(k,v any)bool{if k=="first"{fmt.Println(p.CanMoveForward())};return true});runtime.Gosched()}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'false\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['_,t:=range slices.All(source())', 't:=range slices.Values(source())'])(
+  'range roots native iterator captures across a blocking body: %s',
+  (clause) => {
+    const source = `package main
+import("fmt";"slices")
+func source()[]*Turtle{return []*Turtle{nil,NewTurtle(0,1)}}
+func main(){p:=NewTurtle(0,0);gate:=make(chan bool);go func(){gate<-true}();for ${clause}{if t==nil{<-gate;fmt.Println(p.CanMoveForward())}}}`;
+    expect(executeProgram('go', source)).toMatchObject({
+      kind: 'executed',
+      stdout: 'false\n',
+      uncaughtException: undefined,
+    });
+  }
+);
