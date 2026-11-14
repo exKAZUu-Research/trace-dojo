@@ -1632,6 +1632,31 @@ test('Array deletion respects receiver changes from equality callbacks', () => {
   });
 });
 
+test('Array conversion callbacks cannot mutate frozen receivers', () => {
+  expect(
+    run(
+      'class X;def to_ary;$a.freeze;[1];end;end;class A<Array;def initialize;$a=self;super(X.new);end;end;begin;A.new;rescue=>e;p e.class;end;p $a'
+    )
+  ).toMatchObject({
+    stdout: 'FrozenError\n[]\n',
+  });
+  expect(
+    run('class I;def to_int;$a.freeze;0;end;end;$a=[1];begin;$a[I.new]=9;rescue=>e;p e.class;end;p $a')
+  ).toMatchObject({
+    stdout: 'FrozenError\n[1]\n',
+  });
+});
+
+test('Array delete retains contents when an equality callback raises', () => {
+  expect(
+    run(
+      'class X;def initialize(n);@n=n;end;def ==(v);raise "bad" if @n==2;true;end;end;$a=[X.new(1),X.new(2),3];begin;$a.delete(0);rescue;end;p $a.size'
+    )
+  ).toMatchObject({
+    stdout: '3\n',
+  });
+});
+
 test('ArithmeticSequence last computes ratios before infinite-step results', () => {
   for (const source of [
     'Float::INFINITY.step(1.0, Float::INFINITY).last',

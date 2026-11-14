@@ -87,6 +87,7 @@ def(
       const source = yield* tryAry(args[0]);
       if (source) {
         grow(source.items.length, self);
+        yield* modify(self);
         self.items = [...source.items];
         return NIL;
       }
@@ -95,6 +96,7 @@ def(
     if (size < 0) throw argumentError('negative array size');
     if (block) {
       grow(size);
+      yield* modify(self);
       self.items = [];
       for (let index = 0; index < size; index++) {
         const result = yield* call(block, BigInt(index));
@@ -109,6 +111,7 @@ def(
       const items: Value[] = [];
       const fill = args[1] ?? NIL;
       for (let index = 0; index < size; index++) items.push(fill);
+      yield* modify(self);
       self.items = items;
     }
     return NIL;
@@ -160,6 +163,7 @@ def('Array', '[]=', [2, 3], function* (self: RArray, args) {
   if (args.length === 2 && !(args[0] instanceof RRange)) {
     const index = yield* assignmentIndex(self, args[0]);
     grow(index + 1, self);
+    yield* modify(self);
     while (self.items.length < index) self.items.push(NIL);
     self.items[index] = value;
     return value;
@@ -190,6 +194,7 @@ def('Array', '[]=', [2, 3], function* (self: RArray, args) {
   const filled = Math.max(self.items.length, start);
   const removed = Math.min(count, Math.max(0, filled - start));
   grow(filled - removed + replacement.length, self);
+  yield* modify(self);
   while (self.items.length < start) self.items.push(NIL);
   self.items = [...self.items.slice(0, start), ...replacement, ...self.items.slice(start + count)];
   return value;
@@ -325,6 +330,7 @@ def('Array', 'insert', [1, -1], function* (self: RArray, args) {
       );
   }
   grow(Math.max(index, self.items.length) + args.length - 1, self);
+  yield* modify(self);
   while (self.items.length < index) self.items.push(NIL);
   self.items = [...self.items.slice(0, index), ...args.slice(1), ...self.items.slice(index)];
   return self;
@@ -334,6 +340,7 @@ def('Array', 'concat', [0, -1], function* (self: RArray, args) {
   const additions: Value[] = [];
   for (const arg of args) for (const item of (yield* toAry(arg)).items) additions.push(item);
   grow(self.items.length + additions.length, self);
+  yield* modify(self);
   for (const item of additions) self.items.push(item);
   return self;
 });
@@ -341,6 +348,7 @@ def('Array', 'replace', 1, function* (self: RArray, [other]) {
   yield* modify(self);
   const items = (yield* toAry(other)).items;
   grow(items.length, self);
+  yield* modify(self);
   self.items = [...items];
   return self;
 });
@@ -352,20 +360,17 @@ def('Array', 'clear', 0, function* (self: RArray) {
 def('Array', 'delete', 1, function* (self: RArray, [target], block) {
   let found: Value | undefined;
   let read = 0;
-  let write = 0;
-  try {
-    for (; read < self.items.length; read++) {
-      const item = self.items[read];
-      if (yield* rEquals(item, target)) {
-        yield* modify(self);
-        found = item;
-      } else self.items[write++] = item;
-    }
-  } finally {
-    if (write < read) self.items = [...self.items.slice(0, write), ...self.items.slice(read)];
+  const kept: Value[] = [];
+  for (; read < self.items.length; read++) {
+    const item = self.items[read];
+    if (yield* rEquals(item, target)) {
+      yield* modify(self);
+      found = item;
+    } else kept.push(item);
   }
   if (found === undefined) return block ? yield* call(block, target) : NIL;
   yield* modify(self);
+  self.items = [...kept, ...self.items.slice(read)];
   return found;
 });
 def('Array', 'delete_at', 1, function* (self: RArray, [indexValue]) {
