@@ -349,15 +349,25 @@ function* modPow(self: Num, exponent: Value, modulus: Value): Gen {
   }
   if (exponent < 0n) throw rangeError('Integer#pow() 1st argument cannot be negative when 2nd argument specified');
   if (modulus === 0n) throw zeroDivisionError();
+  const arithmeticCost = Math.max(2, Math.ceil((modulus < 0n ? -modulus : modulus).toString(16).length / 256));
   let result = 1n;
+  rt().spend(arithmeticCost);
   let base = floorMod(self, modulus);
+  rt().spend(arithmeticCost);
   let power = exponent;
   while (power > 0n) {
     rt().spend();
-    if (power & 1n) result = floorMod(result * base, modulus);
+    if (power & 1n) {
+      rt().spend(arithmeticCost);
+      result = floorMod(result * base, modulus);
+      rt().spend(arithmeticCost);
+    }
+    rt().spend(arithmeticCost);
     base = floorMod(base * base, modulus);
+    rt().spend(arithmeticCost);
     power >>= 1n;
   }
+  rt().spend(arithmeticCost);
   return floorMod(result, modulus);
 }
 
