@@ -1,9 +1,10 @@
-// code-gauge-allow-file fileNcss 486 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
+// code-gauge-allow-file fileNcss 488 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
 import type { Span } from './ast';
 import type { CalleeSummary } from './entities';
 import { utf8Decode } from './literals';
 import { quote } from './quote';
 import type { StackBuffers } from './runtime';
+import type { NativeState } from './values';
 
 export type BasicKind =
   | 'bool'
@@ -52,6 +53,7 @@ export interface Field {
 
 export interface StructType {
   nativeIdentity?: string;
+  nativeZero?: (state: NativeState | undefined) => boolean;
   nonComparable?: boolean;
   kind: 'struct';
   fields: Field[];

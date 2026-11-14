@@ -438,3 +438,32 @@ func main(){keep:=NewTurtle(2,2);go func(t *Turtle){select{}}(NewTurtle(0,0));${
     if (result.kind === 'executed') expect(result.finalTurtles).toEqual([expect.objectContaining({ x: 2, y: 2 })]);
   }
 });
+
+test('terminated workers release suspended native callbacks and accumulators', () => {
+  for (const body of [
+    'var m sync.Map;m.Store("t",NewTurtle(0,1));m.Range(func(_, _ any)bool{close(ready);<-make(chan int);return true})',
+    'slices.Collect(func(yield func(*Turtle)bool){yield(NewTurtle(0,1));close(ready);<-make(chan int)})',
+  ]) {
+    const source = `package main
+import(${body.startsWith('var') ? '"sync"' : '"slices"'})
+func main(){ready:=make(chan bool);go func(){${body}}();<-ready}`;
+    expect(executeProgram('go', source)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: undefined,
+      finalTurtles: [],
+    });
+  }
+});
+
+test('escaped Pull contexts own suspended native roots independently of their creator', () => {
+  for (const retain of [false, true]) {
+    const source = `package main
+import("fmt";"iter";"slices")
+func main(){ready:=make(chan func()(int,bool));go func(){next,_:=iter.Pull(func(yield func(int)bool){out:=slices.Collect(func(inner func(*Turtle)bool){inner(NewTurtle(0,1));yield(1)});_=out});next();ready<-next}();next:=<-ready;${retain ? '' : 'next=nil;'}_ = next;p:=NewTurtle(0,0);fmt.Println(p.CanMoveForward())}`;
+    expect(executeProgram('go', source)).toMatchObject({
+      kind: 'executed',
+      stdout: retain ? 'false\n' : 'true\n',
+      uncaughtException: undefined,
+    });
+  }
+});

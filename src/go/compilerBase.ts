@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 533 -- Resolves each Go type form together with its scope and diagnostic context.
+// code-gauge-allow-file fileNcss 546 -- Resolves each Go type form together with its scope and diagnostic context.
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import type { Expression, Span, TypeElementSyntax, TypeExpression, TypeParameter } from './ast';
 import type { Entity, FunctionContext, PackageEntity, TypeEntity, VarEntity } from './entities';
@@ -66,6 +66,9 @@ export abstract class CompilerBase {
   protected reporting = true;
   /** Whether a constraint is being resolved, where interfaces with type sets may appear. */
   private inConstraint = false;
+  private constraintParameterDepth = 0;
+  private readonly constraintMapKeys: { key: Type; span: Span }[] = [];
+  private readonly constraintTypeArguments: { params: TypeParamType[]; args: Type[]; span: Span }[] = [];
   /** The value of `iota` in the constant spec being compiled, which is undefined elsewhere. */
   protected iota: number | undefined;
   /** Whether the program uses goroutines, channels, locks, or sleeps, whose statements may block. */
@@ -360,7 +363,7 @@ export abstract class CompilerBase {
     }
     // A constraint may use a type parameter whose own constraint comes later in the list.
     if (this.inConstraint && containsTypeParam(type)) {
-      if (span) this.deferredMapKeys.push({ key: type, span });
+      if (span) this.constraintMapKeys.push({ key: type, span });
       return true;
     }
     return isComparable(type);
@@ -663,31 +666,45 @@ export abstract class CompilerBase {
       this.declare(parameter.name, { kind: 'type', name: parameter.name, type: declared[index] }, parameter);
       this.typeParamSpans.set(declared[index].id, parameter);
     }
-    const pendingKeys = this.deferredMapKeys.length;
-    for (const [index, parameter] of parameters.entries()) {
-      const constraint = this.resolveConstraint(parameter.constraint);
-      if (constraint.kind === 'typeParam') {
-        this.error(parameter.constraint, '型パラメータそのものは、型の制約に使えません。');
-        continue;
+    this.constraintParameterDepth++;
+    try {
+      for (const [index, parameter] of parameters.entries()) {
+        const constraint = this.resolveConstraint(parameter.constraint);
+        if (constraint.kind === 'typeParam') {
+          this.error(parameter.constraint, '型パラメータそのものは、型の制約に使えません。');
+          continue;
+        }
+        const under = underlying(constraint);
+        if (constraint === BASIC.invalid) continue;
+        if (constraint.kind === 'named') declared[index].constraintName = constraint;
+        // A constraint that is not an interface, `[T int]`, stands for the interface of that single type.
+        declared[index].constraint =
+          under.kind === 'interface'
+            ? under
+            : { kind: 'interface', methods: [], typeSet: { terms: [{ tilde: false, type: constraint }] } };
       }
-      const under = underlying(constraint);
-      if (constraint === BASIC.invalid) continue;
-      if (constraint.kind === 'named') declared[index].constraintName = constraint;
-      // A constraint that is not an interface, `[T int]`, stands for the interface of that single type.
-      declared[index].constraint =
-        under.kind === 'interface'
-          ? under
-          : { kind: 'interface', methods: [], typeSet: { terms: [{ tilde: false, type: constraint }] } };
+    } finally {
+      this.constraintParameterDepth--;
     }
-    for (const { key, span } of this.deferredMapKeys.splice(pendingKeys)) {
+    if (this.constraintParameterDepth === 0) this.checkDeferredConstraints();
+    return declared;
+  }
+
+  private checkDeferredConstraints(): void {
+    for (const { params, args, span } of this.constraintTypeArguments.splice(0))
+      this.checkTypeArguments(params, args, span);
+    for (const { key, span } of this.constraintMapKeys.splice(0)) {
       if (!isComparable(key))
         this.error(span, `${describeType(key)} は比較できない型なので、map のキーには使えません。`);
     }
-    return declared;
   }
 
   /** Checks that type arguments satisfy their constraints, reporting the first one that does not. */
   protected checkTypeArguments(params: TypeParamType[], args: Type[], span: Span): boolean {
+    if (this.constraintParameterDepth > 0 && args.some((arg) => containsTypeParam(arg))) {
+      this.constraintTypeArguments.push({ params, args, span });
+      return true;
+    }
     // A constraint may refer to the other type parameters, as `S ~[]E` does.
     const mapping = new Map(params.map((param, index) => [param.id, args[index]]));
     for (const [index, param] of params.entries()) {

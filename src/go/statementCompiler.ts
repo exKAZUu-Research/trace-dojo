@@ -64,6 +64,7 @@ import { closeChannel, goroutineFunction, receive, scheduler, select, type Selec
 import { sizeOf } from './sliceOps';
 import type { SliceTracking } from './slicePass';
 import { clobberMemory, define, enterLabel, joining, recordGoto, storeLocalMemory } from './ssaValues';
+import { StatementFlow } from './statementFlow';
 import {
   ANY,
   BASIC,
@@ -150,18 +151,16 @@ export abstract class StatementCompiler extends CallCompiler {
     labels.declarations.set(list, declarations);
     let compiled: Exec[];
     try {
-      let fallsThrough = true;
       compiled = statements.map((statement, index) => {
         labels.positions[labels.positions.length - 1] = index;
         if (statement.kind === 'labeled') {
           this.declareLabel(statement, labels, index);
           targets.set(statement.label, index);
-          fallsThrough = enterLabel(this.fn, statement.label, fallsThrough);
+          const fn = this.fn;
+          enterLabel(fn, statement.label, () => fn?.flow?.reaches(statement, true) ?? true);
         }
         if (declaresVariables(statement)) declarations.push(index);
-        const compiled = this.statement(statement);
-        fallsThrough &&= !isTerminating(statement, this.builtinPanicCalls);
-        return compiled;
+        return this.statement(statement);
       });
     } finally {
       labels.path.pop();
@@ -264,7 +263,8 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private gotoStatement(statement: Extract<Statement, { kind: 'goto' }>): Exec {
-    recordGoto(this.fn, statement.label);
+    const fn = this.fn;
+    recordGoto(fn, statement.label, () => fn?.flow?.reaches(statement) ?? true);
     const labels = this.labelState();
     labels.gotos.push({
       label: statement.label,
@@ -2238,8 +2238,7 @@ export abstract class StatementCompiler extends CallCompiler {
    * Compiles a function body in a new context: declares the receiver, parameters, and results, compiles the body,
    * and checks that it ends with a terminating statement when it has results.
    */
-  // code-gauge-allow functionCognitiveComplexity 28 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
-  // code-gauge-allow functionNcss 59 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   protected functionBody(
     name: string,
     signature: SignatureSyntax,
@@ -2253,6 +2252,10 @@ export abstract class StatementCompiler extends CallCompiler {
     const outerInAllocatedSlice = this.inAllocatedSlice;
     const fn = this.newFunctionContext(name, outer, NOOP);
     fn.info.isAtomic = isAtomic;
+    fn.flow = new StatementFlow(
+      body,
+      (statement) => statement.kind === 'expression' && isTerminating(statement, this.builtinPanicCalls)
+    );
     if (outer && !outer.recordsSteps) fn.recordsSteps = false;
     this.fn = fn;
     this.hoists = undefined;
@@ -2313,6 +2316,7 @@ export abstract class StatementCompiler extends CallCompiler {
       this.hoists = outerHoists;
       this.inAllocatedSlice = outerInAllocatedSlice;
     }
+    fn.flow.seal();
     if (!outer) for (const settle of fn.onComplete) settle();
     return fn;
   }

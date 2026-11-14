@@ -73,6 +73,7 @@ export class Scheduler {
       }
       this.current = goroutine;
       runtime.frames = goroutine.frames;
+      runtime.nativeRoots = goroutine.nativeRoots;
       const value = goroutine.resumeWith;
       goroutine.resumeWith = undefined;
       goroutine.holding = [];
@@ -96,7 +97,7 @@ export class Scheduler {
     const stack: unknown[] = [];
     for (const goroutine of this.live) {
       pushFrameRoots(goroutine.frames, stack);
-      stack.push(...goroutine.holding, ...goroutine.callRoots, goroutine.resumeWith?.value);
+      stack.push(goroutine.nativeRoots, ...goroutine.holding, ...goroutine.callRoots, goroutine.resumeWith?.value);
     }
     for (const timer of this.timers) stack.push(timer.channel, ...timer.roots);
     return stack;
@@ -171,6 +172,7 @@ export class Scheduler {
 
 export class Goroutine {
   readonly frames: Frame[] = [];
+  readonly nativeRoots: (readonly unknown[])[] = [];
   body: Suspending<unknown> | undefined;
   resumeWith: Completed | undefined;
   blocked: Blocked | undefined;

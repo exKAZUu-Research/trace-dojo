@@ -4,6 +4,7 @@ import type { Operand, StaticValue, Storage } from './operand';
 import type { FunctionInfo, LocalInfo, StackBuffers } from './runtime';
 import type { SliceTracking } from './slicePass';
 import type { SsaValues } from './ssaValues';
+import type { StatementFlow } from './statementFlow';
 import type { FuncType, NamedType, Type, TypeParamType } from './types';
 import type { GoFunc, Value } from './values';
 
@@ -175,6 +176,7 @@ export interface FunctionContext {
   /** Whether each float64 addition of two products adds them, which decides how Go's compiler orders operands. */
   sumsOfProducts: (() => boolean)[];
   ssa: SsaValues;
+  flow?: StatementFlow;
   loopDepth: number;
   breakDepth: number;
   recordsSteps: boolean;

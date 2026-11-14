@@ -1038,3 +1038,39 @@ test('comparable intersections use strict comparability without changing interfa
     )
   ).toMatchObject({ kind: 'executed', stdout: '4 8\nfalse\ntrue\n2\n', uncaughtException: undefined });
 });
+
+test('goto joins ignore dead edges while finding later reachable predecessors', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";func f(x,y,c float64)float64{defer func(){}();p:=x*y;goto L;p=0;goto L;L:return p+c};func g(x,y,c float64)float64{defer func(){}();p:=x*y;L:return p+c;p=0;goto L};func h(x,y,c float64)float64{defer func(){}();p:=0.0;goto B;A:goto C;C:return p+c;B:p=x*y;goto A};func k(x,y,c float64)float64{defer func(){}();p:=x*y;goto L;{p=0;goto L};L:return p+c};func main(){fmt.Println(f(1.0000000000000002,1.0000000000000002,-1.0000000000000004),g(1.0000000000000002,1.0000000000000002,-1.0000000000000004),h(1.0000000000000002,1.0000000000000002,-1.0000000000000004),k(1.0000000000000002,1.0000000000000002,-1.0000000000000004))}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '4.930380657631324e-32 4.930380657631324e-32 4.930380657631324e-32 4.930380657631324e-32\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('forward named type arguments are checked after complete constraint lists', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";type Key[T comparable]struct{V T};func f[M ~map[Key[T]]int,T comparable](m M)int{return len(m)};func g[S ~[]Key[T],T comparable](s S)int{return len(s)};func main(){fmt.Println(f(map[Key[int]]int{{1}:2}),g([]Key[string]{{"x"}}))}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '1 1\n', uncaughtException: undefined });
+});
+
+test('native big number zero checks retain payload and backing allocation state', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import("fmt";"math/big";"encoding/json");type S struct{I big.Int `json:",omitzero"`;R big.Rat `json:",omitzero"`;A [1]big.Int `json:",omitzero"`};func show(s *S){b,e:=json.Marshal(s);fmt.Println(string(b),e);b,e=json.Marshal(*s);fmt.Println(string(b),e)};func main(){s:=S{};show(&s);s.I.SetInt64(123);s.R.SetFrac64(1,2);s.A[0].SetInt64(4);show(&s);s.I.SetInt64(0);s.R.SetInt64(0);s.A[0].SetInt64(0);show(&s);z:=S{I:*big.NewInt(0),R:*big.NewRat(0,1)};show(&z);n:=S{};n.R.Num().SetInt64(1);n.R.Num().SetInt64(0);show(&n)}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '{} <nil>\n{} <nil>\n{"I":123,"R":"1/2","A":[4]} <nil>\n{"I":{},"R":{},"A":[{}]} <nil>\n{"I":0,"R":"0","A":[0]} <nil>\n{"I":{},"R":{},"A":[{}]} <nil>\n{"R":"0"} <nil>\n{"R":{}} <nil>\n{"R":"0"} <nil>\n{"R":{}} <nil>\n',
+    uncaughtException: undefined,
+  });
+});

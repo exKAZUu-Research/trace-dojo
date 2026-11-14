@@ -21,7 +21,7 @@ export interface SsaValues {
 }
 
 interface LabelJoin {
-  incoming: Map<VarEntity, Definition>[];
+  incoming: { definitions: Map<VarEntity, Definition>; reaches: () => boolean }[];
 }
 
 export interface Definition extends Negations {
@@ -70,21 +70,20 @@ export function newSsaValues(): SsaValues {
   return { definitions: new Map(), regions: [], stores: 0, versions: 0, labelJoins: new Map() };
 }
 
-export function recordGoto(fn: FunctionContext | undefined, label: string): void {
+export function recordGoto(fn: FunctionContext | undefined, label: string, reaches: () => boolean): void {
   if (!fn) return;
-  labelJoin(fn.ssa, label).incoming.push(new Map(fn.ssa.definitions));
+  labelJoin(fn.ssa, label).incoming.push({ definitions: new Map(fn.ssa.definitions), reaches });
 }
 
-export function enterLabel(fn: FunctionContext | undefined, label: string, fallsThrough: boolean): boolean {
-  if (!fn) return fallsThrough;
+export function enterLabel(fn: FunctionContext | undefined, label: string, reaches: () => boolean): void {
+  if (!fn) return;
   const ssa = fn.ssa;
   const join = labelJoin(ssa, label);
-  if (fallsThrough) join.incoming.push(new Map(ssa.definitions));
-  const chosen = join.incoming[0] ?? ssa.definitions;
+  join.incoming.push({ definitions: new Map(ssa.definitions), reaches });
+  const chosen = join.incoming.find((edge) => edge.reaches())?.definitions ?? ssa.definitions;
   ssa.definitions = new Map(
     [...chosen].map(([variable, definition]) => [variable, labelDefinition(ssa, join, variable, definition)])
   );
-  return join.incoming.length > 0;
 }
 
 function labelJoin(ssa: SsaValues, label: string): LabelJoin {
@@ -97,7 +96,8 @@ function labelJoin(ssa: SsaValues, label: string): LabelJoin {
 }
 
 function labelDefinition(ssa: SsaValues, join: LabelJoin, variable: VarEntity, fallback: Definition): Definition {
-  const sources = (): (Definition | undefined)[] => join.incoming.map((source) => source.get(variable));
+  const sources = (): (Definition | undefined)[] =>
+    join.incoming.filter((edge) => edge.reaches()).map((edge) => edge.definitions.get(variable));
   const resolve = (): Definition | undefined => uniqueDefinition(sources());
   const unresolvedVersion = ++ssa.versions;
   let checking = false;

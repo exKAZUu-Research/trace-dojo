@@ -677,8 +677,11 @@ function zeroJsonValue(ref: Ref, type: Type): boolean {
 function structuralZero(value: Value, type: Type): boolean {
   if (value === undefined) return true;
   const under = underlying(type);
-  if (under.kind === 'struct')
-    return under.fields.every((field, index) => structuralZero((value as GoStruct).fields[index], field.type));
+  if (under.kind === 'struct') {
+    const struct = value as GoStruct;
+    if (under.nativeZero) return under.nativeZero(struct.native);
+    return under.fields.every((field, index) => structuralZero(struct.fields[index], field.type));
+  }
   if (under.kind === 'array')
     return (value as GoArray).elements.every((element) => structuralZero(element, under.element));
   if (under.kind !== 'basic') return false;

@@ -40,6 +40,7 @@ function pull(sequence: Value, zeros: (() => Value)[]): Value[] {
 class PullSequence {
   private readonly runtime = currentRuntime();
   private readonly frames: Frame[] = [];
+  private readonly nativeRoots: (readonly unknown[])[] = [];
   private coroutine: Suspending<unknown> | undefined;
   private done = false;
   private nextActive = false;
@@ -51,7 +52,7 @@ class PullSequence {
     private sequence: Value,
     private readonly zeros: (() => Value)[]
   ) {
-    this.roots.push(sequence, this.frames);
+    this.roots.push(sequence, this.frames, this.nativeRoots);
     this.yieldFunction = nativeFunc(
       () => {
         throw new Error('iter.Pull resumes its iterator as a coroutine');
@@ -133,7 +134,9 @@ class PullSequence {
 
   private step(send: unknown): IteratorResult<unknown, unknown> {
     const outer = this.runtime.frames;
+    const outerRoots = this.runtime.nativeRoots;
     this.runtime.frames = this.frames;
+    this.runtime.nativeRoots = this.nativeRoots;
     try {
       return (this.coroutine as Suspending<unknown>).next(send);
     } catch (error) {
@@ -141,6 +144,7 @@ class PullSequence {
       throw error;
     } finally {
       this.runtime.frames = outer;
+      this.runtime.nativeRoots = outerRoots;
     }
   }
 

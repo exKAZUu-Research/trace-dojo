@@ -298,3 +298,10 @@ test('strictly comparable struct terms remain in operation constraints', () => {
     )
   ).toMatchObject({ kind: 'compileError' });
 });
+
+test('deferred nested generic arguments still reject incompatible final constraints', () => {
+  for (const constraint of ['any', '~[]int']) {
+    const source = `package main;type Key[T comparable]struct{V T};func f[S ~[]Key[T],T ${constraint}](s S){};func main(){}`;
+    expect(executeProgram('go', source)).toMatchObject({ kind: 'compileError' });
+  }
+});

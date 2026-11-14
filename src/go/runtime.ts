@@ -226,7 +226,7 @@ export class Runtime implements TracedRuntime<Frame> {
   /** The package-level variables, which pointers may refer to. */
   globals: Cell[] = [];
   private allocated = 0;
-  private readonly nativeRoots = new Set<readonly unknown[]>();
+  nativeRoots: (readonly unknown[])[] = [];
   private readonly stdoutDecoder = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
   private readonly stderrDecoder = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
 
@@ -362,21 +362,23 @@ export class Runtime implements TracedRuntime<Frame> {
 
   withRoots<T>(roots: readonly unknown[], run: () => T): T {
     const scope = [...roots];
-    this.nativeRoots.add(scope);
+    const scopes = this.nativeRoots;
+    scopes.push(scope);
     try {
       return run();
     } finally {
-      this.nativeRoots.delete(scope);
+      scopes.pop();
     }
   }
 
   *resumeWithRoots<T>(roots: readonly unknown[], run: Suspending<T>): Suspending<T> {
     const scope = [...roots];
-    this.nativeRoots.add(scope);
+    const scopes = this.nativeRoots;
+    scopes.push(scope);
     try {
       return yield* run;
     } finally {
-      this.nativeRoots.delete(scope);
+      scopes.pop();
     }
   }
 
