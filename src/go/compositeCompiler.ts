@@ -95,7 +95,10 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
     for (const item of expression.elements) {
       if (item.key) {
         const { value } = this.constantExpression(item.key);
-        if (value === undefined) return BASIC.invalid;
+        if (value === undefined) {
+          this.error(item.key, '配列やスライスのリテラルのキーには、0 以上の整数の定数を書いてください。');
+          return BASIC.invalid;
+        }
         next = Number(value);
       }
       next++;

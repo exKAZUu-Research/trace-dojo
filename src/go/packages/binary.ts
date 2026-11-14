@@ -40,7 +40,7 @@ function writeBytes(slice: Value, bytes: bigint[]): void {
 }
 
 function byteOrder(name: string, littleEndian: boolean): Value {
-  const type = namedType('binary', name, { kind: 'struct', fields: [] });
+  const type = namedType('binary', name[0].toLowerCase() + name.slice(1), { kind: 'struct', fields: [] });
   for (const [bits, type2] of [
     [16, UINT16],
     [32, UINT32],
@@ -72,6 +72,7 @@ function byteOrder(name: string, littleEndian: boolean): Value {
       )
     );
   }
+  addMethod(type, 'GoString', fn([], [STRING]), () => `binary.${name}`);
   addMethod(type, 'String', fn([], [STRING]), () => name);
   return new Iface(type, new GoStruct([]));
 }

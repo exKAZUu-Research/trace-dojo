@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 599 -- Groups the related generic collection adapters and their shared type constructors.
+// code-gauge-allow-file fileNcss 604 -- Groups the related generic collection adapters and their shared type constructors.
 // code-gauge-allow-file duplicateLines 26 -- Each map iterator adapter has a distinct yield signature but the same generic registration protocol.
 import { LIMITS } from '../../interpreter/limits';
 import type { Entity } from '../entities';
@@ -8,6 +8,7 @@ import {
   currentRuntime,
   definePackage,
   fn,
+  genericBlockingFunction,
   genericFunction,
   namedType,
   nativeFunc,
@@ -15,6 +16,7 @@ import {
   typeEntity,
   typeParam,
 } from '../native';
+import { type Suspending } from '../runtime';
 import { boundsPanic, plainPanic, runtimeErrorPanic } from '../runtimeErrors';
 import { appendValues, grownCapacity } from '../sliceOps';
 import {
@@ -43,6 +45,7 @@ import {
   FLOAT64,
   INT,
   receiverStruct,
+  resumeFunction,
   sliceValues,
   spendFor,
   STRING,
@@ -393,24 +396,27 @@ function cloneSlice(value: Value, element: Type): Value {
 const SEQ = (element: Type): Type => seqOf(element);
 
 /** Collects the values an iterator yields, by calling it with a yield function that accepts every value. */
-function collect(seq: Value): Value[] {
+function* collect(seq: Value): Suspending<Value[]> {
   const values: Value[] = [];
-  return currentRuntime().withRoots([seq, values], () => {
-    callFunction(seq, [
-      nativeFunc(
-        ([value]) => {
-          values.push(copyValue(value));
-          return true;
-        },
-        [values]
-      ),
-    ]);
-    return values;
-  });
+  return yield* currentRuntime().resumeWithRoots(
+    [seq, values],
+    (function* () {
+      yield* resumeFunction(seq, [
+        nativeFunc(
+          ([value]) => {
+            values.push(copyValue(value));
+            return true;
+          },
+          [values]
+        ),
+      ]);
+      return values;
+    })()
+  );
 }
 
-function sortCollected(seq: Value, less: (a: Value, b: Value) => boolean, stable = false): Value {
-  const slice = newSlice(collect(seq));
+function* sortCollected(seq: Value, less: (a: Value, b: Value) => boolean, stable = false): Suspending<Value> {
+  const slice = newSlice(yield* collect(seq));
   return currentRuntime().withRoots([slice], () => {
     sortSlice(slice, less, stable);
     return slice.length === 0 ? undefined : slice;
@@ -773,8 +779,8 @@ function deleteRange(slice: Value, from: number, to: number, types: Type[]): Val
 
 const SEQ2 = (key: Type, value: Type): Type => seq2Of(key, value);
 
-function insertPairs(map: GoMap | undefined, seq: Value): void {
-  callFunction(seq, [
+function* insertPairs(map: GoMap | undefined, seq: Value): Suspending<undefined> {
+  yield* resumeFunction(seq, [
     nativeFunc(
       ([key, value]) => {
         if (!map) plainPanic('assignment to entry in nil map');
@@ -794,29 +800,35 @@ function pairIterator(pairs: () => Iterable<[Value, Value]>, captured: Value[] =
 }
 
 Object.assign(slicesMembers, {
-  AppendSeq: sliceGeneric(
-    'AppendSeq',
-    EMPTY_INTERFACE,
-    (s, e) => ({ params: [s, SEQ(e)], results: [s] }),
-    (types) =>
-      ([slice, seq]) => {
-        let result = slice as Slice | undefined;
-        const roots: unknown[] = [result, seq];
-        return currentRuntime().withRoots([roots], () => {
-          callFunction(seq, [
-            nativeFunc(
-              ([value]) => {
-                result = appendValues(result, [value], types[1], () => zeroValue(types[1]), allocate);
-                roots[0] = result;
-                return true;
-              },
-              [roots]
-            ),
-          ]);
-          return result;
-        });
-      }
-  ),
+  AppendSeq: (() => {
+    const [s, e] = sliceParams(EMPTY_INTERFACE);
+    return genericBlockingFunction(
+      'AppendSeq',
+      [s, e],
+      funcType([s, SEQ(e)], [s]),
+      (types) =>
+        function* ([slice, seq]) {
+          let result = slice as Slice | undefined;
+          const roots: unknown[] = [result, seq];
+          return yield* currentRuntime().resumeWithRoots(
+            [roots],
+            (function* () {
+              yield* resumeFunction(seq, [
+                nativeFunc(
+                  ([value]) => {
+                    result = appendValues(result, [value], types[1], () => zeroValue(types[1]), allocate);
+                    roots[0] = result;
+                    return true;
+                  },
+                  [roots]
+                ),
+              ]);
+              return result;
+            })()
+          );
+        }
+    );
+  })(),
   Compare: sliceGeneric(
     'Compare',
     ORDERED,
@@ -941,16 +953,28 @@ Object.assign(slicesMembers, {
 Object.assign(slicesMembers, {
   Sorted: (() => {
     const e = typeParam('E', ORDERED);
-    return genericFunction('Sorted', [e], funcType([SEQ(e)], [sliceOf(e)]), () => ([seq]) => {
-      return sortCollected(seq, less);
-    });
+    return genericBlockingFunction(
+      'Sorted',
+      [e],
+      funcType([SEQ(e)], [sliceOf(e)]),
+      () =>
+        function* ([seq]) {
+          return yield* sortCollected(seq, less);
+        }
+    );
   })(),
   Collect: (() => {
     const e = typeParam('E', EMPTY_INTERFACE);
-    return genericFunction('Collect', [e], funcType([SEQ(e)], [sliceOf(e)]), () => ([seq]) => {
-      const values = collect(seq);
-      return values.length === 0 ? undefined : newSlice(values);
-    });
+    return genericBlockingFunction(
+      'Collect',
+      [e],
+      funcType([SEQ(e)], [sliceOf(e)]),
+      () =>
+        function* ([seq]) {
+          const values = yield* collect(seq);
+          return values.length === 0 ? undefined : newSlice(values);
+        }
+    );
   })(),
   Values: sliceGeneric(
     'Values',
@@ -1026,27 +1050,27 @@ Object.assign(slicesMembers, {
   ),
   SortedFunc: (() => {
     const e = typeParam('E', EMPTY_INTERFACE);
-    return genericFunction(
+    return genericBlockingFunction(
       'SortedFunc',
       [e],
       funcType([SEQ(e), funcType([e, e], [INT])], [sliceOf(e)]),
       () =>
-        ([seq, cmpFn]) => {
+        function* ([seq, cmpFn]) {
           const order = cmpResult(cmpFn);
-          return sortCollected(seq, (a, b) => order(a, b) < 0);
+          return yield* sortCollected(seq, (a, b) => order(a, b) < 0);
         }
     );
   })(),
   SortedStableFunc: (() => {
     const e = typeParam('E', EMPTY_INTERFACE);
-    return genericFunction(
+    return genericBlockingFunction(
       'SortedStableFunc',
       [e],
       funcType([SEQ(e), funcType([e, e], [INT])], [sliceOf(e)]),
       () =>
-        ([seq, cmpFn]) => {
+        function* ([seq, cmpFn]) {
           const order = cmpResult(cmpFn);
-          return sortCollected(seq, (a, b) => order(a, b) < 0, true);
+          return yield* sortCollected(seq, (a, b) => order(a, b) < 0, true);
         }
     );
   })(),
@@ -1124,24 +1148,36 @@ const mapsMembers: Record<string, Entity> = {
   Collect: (() => {
     const k = typeParam('K', COMPARABLE);
     const v = typeParam('V', EMPTY_INTERFACE);
-    return genericFunction(
+    return genericBlockingFunction(
       'Collect',
       [k, v],
       funcType([SEQ2(k, v)], [{ kind: 'map', key: k, value: v }]),
       (types) =>
-        ([seq]) => {
+        function* ([seq]) {
           const keyOf = mapKeyOf(types[0]);
           const map = new GoMap(keyOf);
-          insertPairs(map, seq);
-          return map;
+          return yield* currentRuntime().resumeWithRoots(
+            [map],
+            (function* () {
+              yield* insertPairs(map, seq);
+              return map;
+            })()
+          );
         }
     );
   })(),
   Insert: (() => {
     const [m, k, v] = mapParams();
-    return genericFunction('Insert', [m, k, v], funcType([m, SEQ2(k, v)], []), () => ([map, seq]) => {
-      insertPairs(map as GoMap | undefined, seq);
-    });
+    return genericBlockingFunction(
+      'Insert',
+      [m, k, v],
+      funcType([m, SEQ2(k, v)], []),
+      () =>
+        function* ([map, seq]) {
+          yield* insertPairs(map as GoMap | undefined, seq);
+          return;
+        }
+    );
   })(),
 
   Clone: (() => {

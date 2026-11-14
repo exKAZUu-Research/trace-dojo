@@ -34,7 +34,7 @@ import {
 } from './entities';
 import { checkKeyHashable, equalityOf, mapKeyOf } from './equality';
 import { fma } from './fma';
-import { containsTypeParam, substitute } from './generics';
+import { containsTypeParam, inferFromConstraints, substitute, unify } from './generics';
 import { utf8Decode } from './literals';
 import { currentRuntime, libraryCell } from './native';
 import {
@@ -417,7 +417,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return this.asValue(this.expression(expression));
   }
 
-  protected asValue(operand: Operand): Operand {
+  protected asValue(operand: Operand, allowGeneric = false): Operand {
+    if (operand.func?.generic && !allowGeneric) return this.instantiateFunctionValue(operand);
     switch (operand.mode) {
       case 'type': {
         this.error(operand.span, `${describeType(operand.type)} は型なので、値としては使えません。`);
@@ -729,8 +730,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
    * enters an interface, and structs and arrays are copied. Reports the mismatch as `context` says. The value escapes
    * unless `holder` is the local variable that receives it or links it to where it goes.
    */
-  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
-  // code-gauge-allow functionNcss 36 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  // code-gauge-allow functionCognitiveComplexity 27 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  // code-gauge-allow functionNcss 38 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   protected assign(
     operand: Operand,
     target: Type,
@@ -738,7 +739,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     holder?: VarEntity | ((value: Operand) => void)
   ): Eval {
     if (this.isInvalid(operand) || target === BASIC.invalid) return () => {};
-    let value = this.asValue(operand);
+    let value = this.asValue(operand, true);
+    if (value.func?.generic) value = this.instantiateFunctionValue(value, target);
     if (this.isInvalid(value)) return () => {};
     if (typeof holder === 'function') holder(value);
     else if (holder?.owner === undefined) this.escapeOperand(value);
@@ -959,12 +961,39 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return this.invalid(expression);
     }
     if (args.length < generic.typeParams.length) return { ...base, span: expression, typeArgs: args };
-    if (!this.checkTypeArguments(generic.typeParams, args, expression)) return this.invalid(expression);
+    return this.instantiatedFunction(base, args, expression);
+  }
+
+  private instantiateFunctionValue(operand: Operand, target?: Type): Operand {
+    const generic = (operand.func as FuncEntity).generic as NonNullable<FuncEntity['generic']>;
+    const mapping = new Map<number, Type>();
+    for (const [index, type] of (operand.typeArgs ?? []).entries()) mapping.set(generic.typeParams[index].id, type);
+    const signature = target && coreType(target);
+    if (signature?.kind === 'func') {
+      unify(generic.type, signature, mapping, generic.typeParams);
+      inferFromConstraints(generic.typeParams, mapping);
+    }
+    const missing = generic.typeParams.find((parameter) => !mapping.has(parameter.id));
+    if (missing) {
+      this.error(operand.span, `型引数 ${missing.name} を推論できません（型引数をすべて書いてください）。`);
+      return this.invalid(operand.span);
+    }
+    return this.instantiatedFunction(
+      operand,
+      generic.typeParams.map((parameter) => mapping.get(parameter.id) as Type),
+      operand.span
+    );
+  }
+
+  private instantiatedFunction(base: Operand, args: Type[], span: Span): Operand {
+    const entity = base.func as FuncEntity;
+    const generic = entity.generic as NonNullable<FuncEntity['generic']>;
+    if (!this.checkTypeArguments(generic.typeParams, args, span)) return this.invalid(span);
     const mapping = new Map<number, Type>(generic.typeParams.map((param, index) => [param.id, args[index]]));
     const type = substitute(generic.type, mapping, (named: NamedType, typeArgs: Type[]) =>
       this.instantiateNamed(named, typeArgs)
     ) as FuncType;
-    if (args.some((arg) => containsTypeParam(arg))) return { mode: 'value', type, span: expression, eval: () => {} };
+    if (args.some((arg) => containsTypeParam(arg))) return { mode: 'value', type, span, eval: () => {} };
     const instance = generic.instantiate(args);
     const func: FuncEntity = {
       kind: 'func',
@@ -977,7 +1006,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         ((values, row, stackBuffers) =>
           (instance.resume as NonNullable<GoFunc['resume']>)(values, row, undefined, stackBuffers)),
     };
-    return { mode: 'value', type, span: expression, eval: () => instance, func };
+    return { mode: 'value', type, span, eval: () => instance, func };
   }
 
   private unary(expression: Extract<Expression, { kind: 'unary' }>): Operand {

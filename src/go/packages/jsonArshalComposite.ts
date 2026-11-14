@@ -15,7 +15,7 @@ import {
   typeIdentityKey,
   underlying,
 } from '../types';
-import { type GoArray, GoMap, type GoStruct, Iface, Pointer, Slice, type Value } from '../values';
+import { Complex, type GoArray, GoMap, type GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 import {
   ALL_MARSHALER_TYPES,
   type Arshaler,
@@ -211,7 +211,6 @@ interface StructField {
   index: number[];
   type: Type;
   name: string;
-  quotedName: string;
   omitEmpty: boolean;
   omitZero: boolean;
   stringify: boolean;
@@ -269,7 +268,6 @@ function collectFields(entry: QueueEntry, queue: QueueEntry[], seen: Set<string>
         index,
         type: field.type,
         name,
-        quotedName: JSON.stringify(name),
         omitEmpty: options.includes('omitempty'),
         omitZero: options.includes('omitzero'),
         stringify: options.includes('string') && stringTagType(field.type),
@@ -304,7 +302,6 @@ function compareIndexes(x: number[], y: number[]): number {
   return x.length - y.length;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Preserves JSON field dominance, tags and typed value handling in the composite encoder.
 export function makeStructArshaler(type: Type, lookup: Lookup): Arshaler {
   const fields = makeStructFields(type);
   return {
@@ -320,10 +317,8 @@ export function makeStructArshaler(type: Type, lookup: Lookup): Arshaler {
           (field.omitZero && zeroJsonValue(value.get(), field.type))
         )
           continue;
-        enc.buf += (enc.tokens.last.length > 0 ? ',' : '') + field.quotedName;
-        enc.names[enc.names.length - 1] = field.name;
-        enc.tokens.last.length++;
-        err = marshalField(enc, value, field, mo, lookup);
+        err = enc.writeToken('"', field.name);
+        err ??= marshalField(enc, value, field, mo, lookup);
         if (err) return err;
       }
       return enc.writeToken('}');
@@ -676,11 +671,17 @@ function zeroJsonValue(value: Value, type: Type): boolean {
     variable.store(value);
     return callPointerMethod(type, variable, 'IsZero', []) as boolean;
   }
+  return structuralZero(value, type);
+}
+
+function structuralZero(value: Value, type: Type): boolean {
+  if (value === undefined) return true;
   const under = underlying(type);
   if (under.kind === 'struct')
-    return under.fields.every((field, index) => zeroJsonValue((value as GoStruct).fields[index], field.type));
+    return under.fields.every((field, index) => structuralZero((value as GoStruct).fields[index], field.type));
   if (under.kind === 'array')
-    return (value as GoArray).elements.every((element) => zeroJsonValue(element, under.element));
+    return (value as GoArray).elements.every((element) => structuralZero(element, under.element));
   if (under.kind !== 'basic') return false;
+  if (value instanceof Complex) return value.re === 0 && value.im === 0;
   return value === false || value === 0n || value === 0 || value === '';
 }

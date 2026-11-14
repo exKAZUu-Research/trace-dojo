@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 817 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+// code-gauge-allow-file fileNcss 835 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
 // oxlint-disable require-yield -- Statements that never block are generators like the others, so that all run alike.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { assignFailure, represent } from './assignability';
@@ -282,20 +282,24 @@ export class ProgramCompiler extends StatementCompiler {
     return entity;
   }
 
-  // code-gauge-allow functionNcss 35 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  private bindingAliases = false;
+  private readonly unboundAliases = new Set<TypeEntity>();
+  private readonly aliasCycles = new Set<TypeEntity>();
+  private readonly pendingAliases: { entity: TypeEntity; state: { spec: TypeSpec; scope: Scope } }[] = [];
+
+  // code-gauge-allow functionNcss 38 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   protected useType(entity: TypeEntity): void {
     const state = this.typeStates.get(entity);
-    if (!state || state.resolved) return;
+    if (!state) return;
+    if (this.unboundAliases.has(entity)) {
+      this.aliasCycles.add(entity);
+      return;
+    }
+    if (state.resolved) return;
+    if (this.bindingAliases && !state.spec.alias) return;
     state.resolved = true;
     if (state.spec.alias) {
-      // An alias names the type itself, which its uses then see.
-      entity.type = BASIC.invalid;
-      const outerFn = this.fn;
-      try {
-        entity.type = this.withScopeOf(this.scopeOfType(entity), () => this.resolveType(state.spec.type, false, true));
-      } finally {
-        this.fn = outerFn;
-      }
+      this.resolveAlias(entity, state);
       return;
     }
     const shell = entity.type as NamedType;
@@ -321,6 +325,39 @@ export class ProgramCompiler extends StatementCompiler {
       this.fn = outerFn;
       this.useTypeDepth--;
       if (this.useTypeDepth === 0) this.finishResolvedTypes();
+    }
+  }
+
+  private resolveAlias(entity: TypeEntity, state: { spec: TypeSpec; scope: Scope }): void {
+    const outerBinding = this.bindingAliases;
+    const outerReporting = this.reporting;
+    const outerFn = this.fn;
+    this.bindingAliases = true;
+    this.reporting = false;
+    this.unboundAliases.add(entity);
+    entity.type = BASIC.invalid;
+    try {
+      entity.type = this.withScopeOf(this.scopeOfType(entity), () => this.resolveType(state.spec.type, false, true));
+      this.pendingAliases.push({ entity, state });
+    } finally {
+      this.unboundAliases.delete(entity);
+      this.bindingAliases = outerBinding;
+      this.reporting = outerReporting;
+      this.fn = outerFn;
+    }
+    if (outerBinding) return;
+    for (const cyclic of this.aliasCycles)
+      this.error(cyclic.span as Span, `型の別名 ${cyclic.name} が循環しています。`);
+    this.aliasCycles.clear();
+    for (const pending of this.pendingAliases.splice(0)) {
+      const initial = pending.entity.type;
+      const resolved = this.withScopeOf(this.scopeOfType(pending.entity), () =>
+        this.resolveType(pending.state.spec.type, false, true)
+      );
+      if (initial !== resolved && initial.kind !== 'named' && initial.kind !== 'basic') {
+        for (const key of Object.keys(initial)) Reflect.deleteProperty(initial, key);
+        Object.assign(initial, resolved);
+      } else pending.entity.type = resolved;
     }
   }
 
@@ -641,7 +678,7 @@ export class ProgramCompiler extends StatementCompiler {
   ): (args: Type[]) => NonNullable<Method['code']> {
     const cache = new Map<string, NonNullable<Method['code']>>();
     return (args) => {
-      const key = args.map((arg) => typeKey(arg)).join(',');
+      const key = args.map((arg) => typeIdentityKey(arg)).join(',');
       const cached = cache.get(key);
       if (cached) return cached;
       const code: NonNullable<Method['code']> = {};
@@ -1271,35 +1308,6 @@ export class ProgramCompiler extends StatementCompiler {
 export function compileProgram(file: File, trace?: TraceSettings): CompiledProgram {
   const compiler = new ProgramCompiler(file, trace);
   return compiler.compile();
-}
-
-/** A key that tells apart non-identical type arguments, including type parameters of the same name. */
-function typeKey(type: Type): string {
-  switch (type.kind) {
-    case 'typeParam': {
-      return `${type.name}#${type.id}`;
-    }
-    case 'named': {
-      const args = type.typeArgs ? `[${type.typeArgs.map(typeKey).join(',')}]` : '';
-      return `${describeType(type)}@${type.span?.row ?? ''}:${type.span?.column ?? ''}${args}`;
-    }
-    case 'pointer':
-    case 'slice': {
-      return `${type.kind}(${typeKey(type.element)})`;
-    }
-    case 'array': {
-      return `[${type.length}](${typeKey(type.element)})`;
-    }
-    case 'map': {
-      return `map(${typeKey(type.key)},${typeKey(type.value)})`;
-    }
-    case 'chan': {
-      return `chan:${type.dir}(${typeKey(type.element)})`;
-    }
-    default: {
-      return describeType(type);
-    }
-  }
 }
 
 function containsTypeParams(type: Type): boolean {

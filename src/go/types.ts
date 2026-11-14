@@ -1,6 +1,8 @@
-// code-gauge-allow-file fileNcss 456 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
+// code-gauge-allow-file fileNcss 460 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
 import type { Span } from './ast';
 import type { CalleeSummary } from './entities';
+import { utf8Decode } from './literals';
+import { quote } from './quote';
 import type { StackBuffers } from './runtime';
 
 export type BasicKind =
@@ -565,7 +567,7 @@ function namedTypeId(type: NamedType): number {
  * `struct { X int }`.
  */
 // code-gauge-allow functionNcss 48 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
-// code-gauge-allow functionCognitiveComplexity 23 -- Formats each Go type constructor while delegating interface and function signatures.
+// code-gauge-allow functionCognitiveComplexity 26 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
 export function typeString(type: Type, qualify = true): string {
   switch (type.kind) {
     case 'basic': {
@@ -598,9 +600,12 @@ export function typeString(type: Type, qualify = true): string {
     }
     case 'struct': {
       if (type.fields.length === 0) return 'struct {}';
-      const fields = type.fields.map((field) =>
-        field.embedded ? typeString(field.type, qualify) : `${field.name} ${typeString(field.type, qualify)}`
-      );
+      const fields = type.fields.map((field) => {
+        const name = field.embedded
+          ? typeString(field.type, qualify)
+          : `${field.name} ${typeString(field.type, qualify)}`;
+        return field.tag ? `${name} ${utf8Decode(quote(field.tag))}` : name;
+      });
       return `struct { ${fields.join('; ')} }`;
     }
     case 'func': {

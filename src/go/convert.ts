@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 527 -- Mirrors the grammar node cases while preserving each source span for diagnostics.
+// code-gauge-allow-file fileNcss 532 -- Mirrors the grammar node cases while preserving each source span for diagnostics.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -280,7 +280,7 @@ export class Converter {
 
   // Types -------------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 41 -- Mirrors the grammar node cases while preserving each source span for diagnostics.
+  // code-gauge-allow functionNcss 46 -- Mirrors the grammar node cases while preserving each source span for diagnostics.
   convertType(node: Node): TypeExpression {
     const span = spanOf(node);
     switch (node.type) {
@@ -360,8 +360,15 @@ export class Converter {
         // `chan<- T` has the arrow after `chan`, `<-chan T` before it.
         const tokens = node.children.filter((child) => child !== null && !child.isNamed).map((child) => child?.type);
         const arrow = tokens.indexOf('<-');
-        const dir = arrow === -1 ? 'both' : arrow < tokens.indexOf('chan') ? 'receive' : 'send';
-        return { kind: 'chan', ...span, dir, element: this.convertType(required(node.childForFieldName('value'))) };
+        let dir: 'both' | 'receive' | 'send' =
+          arrow === -1 ? 'both' : arrow < tokens.indexOf('chan') ? 'receive' : 'send';
+        const child = required(node.childForFieldName('value'));
+        const element = this.convertType(child);
+        if (dir === 'both' && child.type === 'channel_type' && element.kind === 'chan' && element.dir === 'receive') {
+          dir = 'send';
+          element.dir = 'both';
+        }
+        return { kind: 'chan', ...span, dir, element };
       }
       case 'negated_type':
       case 'type_elem': {

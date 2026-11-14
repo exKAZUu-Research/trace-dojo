@@ -5,8 +5,8 @@ import { GoFatal, GoPanic, type Suspending } from '../runtime';
 import { nilPointerPanic } from '../runtimeErrors';
 import { type Goroutine, scheduler } from '../scheduler';
 import { ANY, BASIC, type FuncType, pointerTo } from '../types';
-import { Cell, GoFunc, GoStruct, Iface, type NativeState, Pointer, type Value } from '../values';
-import { BOOL, INT } from './support';
+import { Cell, GoStruct, Iface, type NativeState, Pointer, type Value } from '../values';
+import { BOOL, INT, resumeFunction as callFunction } from './support';
 
 /**
  * The state of a sync type, kept outside Go's view of its fields. Copying the struct copies the state, as copying a
@@ -26,12 +26,6 @@ function stateOf<T extends CloneableState<T>>(receiver: Value, key: string, make
   if (!struct) nilPointerPanic();
   if (!struct.native || !(key in struct.native)) struct.native = nativeState(key, make());
   return struct.native[key] as T;
-}
-
-/** Calls a function value from a library function that may block, such as `sync.Once.Do`. */
-function* callFunction(value: Value, args: Value[]): Suspending<Value | Value[]> {
-  if (!(value instanceof GoFunc)) nilPointerPanic();
-  return value.resume ? yield* value.resume(args) : value.call(args);
 }
 
 function stringPanic(message: string): never {
@@ -90,6 +84,7 @@ addBlockingMethod(WAIT_GROUP, 'Wait', NO_ARGS, function* (receiver) {
   const running = scheduler();
   state.waiters.push(running.current as Goroutine);
   yield* running.park('sync.WaitGroup.Wait');
+  if (state.counter !== 0) stringPanic('sync: WaitGroup is reused before previous Wait has returned');
   return;
 });
 /** `wg.Go(f)`: `wg.Add(1)` and a goroutine that calls f and then `wg.Done()`. */

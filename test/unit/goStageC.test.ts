@@ -131,3 +131,35 @@ test('range yield results may alias the predeclared bool', () => {
     uncaughtException: undefined,
   });
 });
+
+test('invalid recursive aliases, constraints, spread calls, ranges and receive declarations produce diagnostics', () => {
+  for (const body of [
+    'func main(){_= [...]int{1.5:1}}',
+    'func main(){_= [...]int{"s":1}}',
+    'func main(){const k=1.5;_= [...]int{k:1}}',
+    'type A=B;type B=A;func main(){}',
+    'type A=[]A;func main(){}',
+    'type A=map[int]A;func main(){}',
+    'type A=func(A);func main(){}',
+    'type A=interface{I};type I interface{M(A)};func main(){}',
+    'type N interface{~int|int};func main(){}',
+    'type A int;type N interface{~int|A};func main(){}',
+    'type N interface{int|comparable};func main(){}',
+    'type N interface{~any};func main(){}',
+    'type N int;func f[T int](x T)T{return x};func g[T ~int](x T)T{return f(x)};func main(){_=g(N(1))}',
+    'func f[T string](x T)T{return x};func g[T ~string](x T)T{return f(x)};func main(){}',
+    'func main(){var i int;for i=range 3.0{}}',
+    'func main(){var i int;for i=range 3+0i{}}',
+    'func main(){ch:=make(chan int,1);ch<-1;select{case _:=<-ch:}}',
+    'func main(){ch:=make(chan int,1);ch<-1;select{case _,_:=<-ch:}}',
+    'func main(){ch:=make(chan int,1);ch<-1;select{case x,x:=<-ch:_=x}}',
+    'func F[T,U any](x T)U{var z U;return z};func main(){f:=F[int];_=f}',
+    'func main(){xs:=[]int{1};_=len(xs...)}',
+    'func main(){xs:=[]int{1};copy(xs,xs...)}',
+    'func main(){xs:=[]int{1};println(xs...)}',
+    'func main(){xs:=[]int{1};defer println(xs...)}',
+    'func main(){xs:=[]int{1};go println(xs...)}',
+    'func main(){x:=make(chan<- chan int);_= <-x}',
+  ])
+    expect(executeProgram('go', 'package main;' + body)).toMatchObject({ kind: 'compileError' });
+});

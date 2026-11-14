@@ -105,7 +105,7 @@ export function checkKeyHashable(type: Type, value: Value): void {
 }
 
 // code-gauge-allow functionCognitiveComplexity 28 -- Visits every comparable Go value shape to build one canonical map key.
-// code-gauge-allow functionNcss 31 -- Visits every comparable Go value shape to build one canonical map key.
+// code-gauge-allow functionNcss 35 -- Visits every comparable Go value shape to build one canonical map key.
 function buildKey(type: Type): KeyOf {
   const under = underlying(type);
   switch (under.kind) {
@@ -126,8 +126,11 @@ function buildKey(type: Type): KeyOf {
       return (value) => (value === undefined ? 'nil' : `chan:${identityOf(value as object)}`);
     }
     case 'pointer': {
-      return (value) =>
-        value === undefined ? 'nil' : `${identityOf((value as Pointer).base)}:${String((value as Pointer).key)}`;
+      return (value) => {
+        if (value === undefined) return 'nil';
+        const [base, key] = (value as Pointer).address();
+        return `${identityOf(base)}:${String(key)}`;
+      };
     }
     case 'struct': {
       const fields = under.fields.map((field) => mapKeyOf(field.type));

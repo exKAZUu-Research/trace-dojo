@@ -26,5 +26,7 @@ test.each(programs)('%s prints what Go prints', (name) => {
   const runtime = new Runtime();
   const run = runProgram(runtime, compileProgram(parseGo(source)));
   expect(run.stdout).toBe(expectedOutput);
-  expect(run.uncaughtException?.split('\n').find((line) => /^(panic|fatal error): /.test(line))).toBe(expectedError);
+  if (expectedError === undefined) expect(run.uncaughtException).toBeUndefined();
+  else
+    expect(run.uncaughtException?.split('\n').find((line) => /^(panic|fatal error): /.test(line))).toBe(expectedError);
 });

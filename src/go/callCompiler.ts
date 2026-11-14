@@ -135,7 +135,7 @@ export abstract class CallCompiler extends CompositeCompiler {
         return this.invalid(expression);
       }
       default: {
-        const result = this.functionCall(expression, this.asValue(callee));
+        const result = this.functionCall(expression, this.asValue(callee, true));
         if (result.mode !== 'constant') this.runtimeCallCount++;
         clobberMemory(this.fn);
         return { ...result, isCall: true };
@@ -914,9 +914,10 @@ export abstract class CallCompiler extends CompositeCompiler {
 
   // Builtins --------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 57 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
+  // code-gauge-allow functionNcss 59 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   protected builtin(expression: Extract<Expression, { kind: 'call' }>, name: string): Operand {
     const { args } = expression;
+    if (!this.validBuiltinSpread(expression, name)) return this.invalid(expression);
     const count = (min: number, max = min): boolean => {
       if (args.length >= min && args.length <= max) return true;
       this.error(expression, `${name} の引数の数が合いません。`);
@@ -992,6 +993,13 @@ export abstract class CallCompiler extends CompositeCompiler {
   }
 
   /** `print` and `println`, which write to standard error in the runtime's own format, apart from fmt's. */
+  protected validBuiltinSpread(expression: Extract<Expression, { kind: 'call' }>, name: string): boolean {
+    if (!expression.spread || name === 'append') return true;
+    for (const argument of expression.args) this.expression(argument);
+    this.error(expression, `${name} には ... を付けた引数を渡せません。`);
+    return false;
+  }
+
   private printBuiltin(expression: Extract<Expression, { kind: 'call' }>, name: 'print' | 'println'): Operand {
     const operands = expression.args.map((arg) => this.defaulted(this.value(arg)));
     for (const operand of operands) {

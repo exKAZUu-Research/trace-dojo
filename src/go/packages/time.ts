@@ -464,8 +464,13 @@ function newTimer(delay: bigint, period?: bigint, callback?: { task: Value }): P
   );
 }
 
-const timerStateOf = (receiver: Value): TimerState =>
-  ((receiver as Pointer).load() as GoStruct).native?.timer as TimerState;
+function timerStateOf(receiver: Value, operation: string, allowZero = false): TimerState | undefined {
+  if (!(receiver instanceof Pointer)) nilPointerPanic();
+  const state = (receiver.load() as GoStruct).native?.timer as TimerState | undefined;
+  if (!state && !allowZero)
+    plainPanic(`time: ${operation.split('.')[1]} called on uninitialized ${operation.split('.')[0]}`);
+  return state;
+}
 
 /** Stops a timer, discarding a time it sent that no one took, as Go 1.23 does; tells whether it was pending. */
 function stopTimer(state: TimerState): boolean {
@@ -483,7 +488,8 @@ for (const type of [TIMER, TICKER]) {
     'Stop',
     fn([], type === TIMER ? [BOOL] : []),
     (receiver) => {
-      const stopped = stopTimer(timerStateOf(receiver));
+      const state = timerStateOf(receiver, `${type.name}.Stop`, type === TICKER);
+      const stopped = state ? stopTimer(state) : false;
       return type === TIMER ? stopped : undefined;
     },
     true
@@ -494,7 +500,7 @@ addMethod(
   'Reset',
   fn([DURATION], [BOOL]),
   (receiver, [delay]) => {
-    const state = timerStateOf(receiver);
+    const state = timerStateOf(receiver, 'Timer.Reset') as TimerState;
     const wasPending = stopTimer(state);
     arm(state, delay as bigint);
     return wasPending;
@@ -506,10 +512,11 @@ addMethod(
   'Reset',
   fn([DURATION], []),
   (receiver, [period]) => {
-    const state = timerStateOf(receiver);
+    const duration = positivePeriod(period as bigint, 'Ticker.Reset');
+    const state = timerStateOf(receiver, 'Ticker.Reset') as TimerState;
     stopTimer(state);
     const action = state.action as Extract<TimerState['action'], { kind: 'channel' }>;
-    action.period = positivePeriod(period as bigint, 'Ticker.Reset');
+    action.period = duration;
     arm(state, action.period);
     return;
   },

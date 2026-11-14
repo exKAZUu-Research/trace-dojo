@@ -1,10 +1,11 @@
 import type { Entity } from '../entities';
 import { currentRuntime, definePackage, genericFunction, genericNamedType, nativeFunc, typeParam } from '../native';
 import { type Frame, runToEnd, type Suspending } from '../runtime';
-import { nilPointerPanic } from '../runtimeErrors';
+import { nilPointerPanic, plainPanic } from '../runtimeErrors';
 import { BASIC, EMPTY_INTERFACE, funcType, type NamedType, type Type } from '../types';
 import { GoFunc, type Value } from '../values';
 import { zeroValue } from './reflection';
+import { resumeFunction } from './support';
 
 /** `iter.Seq[V]`: `func(yield func(V) bool)`. */
 const SEQ = genericNamedType('iter', 'Seq', [typeParam('V', EMPTY_INTERFACE)], ([value]) =>
@@ -32,87 +33,130 @@ interface Pulled {
  * `iter.Pull`: runs the iterator as a coroutine with frames of its own, which `next` resumes until the iterator's
  * yield hands over the next values; `stop` makes yield return false and lets the iterator finish.
  */
-// code-gauge-allow functionCognitiveComplexity 29 -- The next, stop and frame-switching closures share one iterator coroutine lifecycle.
-// code-gauge-allow functionNcss 51 -- The next, stop and frame-switching closures share one iterator coroutine lifecycle.
 function pull(sequence: Value, zeros: (() => Value)[]): Value[] {
-  const runtime = currentRuntime();
-  const frames: Frame[] = [];
-  let coroutine: Suspending<unknown> | undefined;
-  let done = false;
-  const finished = (): Value[] => [...zeros.map((zero) => zero()), false];
-  const yieldFunction = nativeFunc(
-    () => {
-      throw new Error('iter.Pull resumes its iterator as a coroutine');
-    },
-    [],
-    function* (args): Suspending<Value> {
-      const pulled: Pulled = { reason: 'pull', values: args };
-      return (yield pulled) as Value;
-    }
-  );
-  const step = (send: unknown): IteratorResult<unknown, unknown> => {
-    const outer = runtime.frames;
-    runtime.frames = frames;
+  return new PullSequence(sequence, zeros).functions();
+}
+
+class PullSequence {
+  private readonly runtime = currentRuntime();
+  private readonly frames: Frame[] = [];
+  private coroutine: Suspending<unknown> | undefined;
+  private done = false;
+  private nextActive = false;
+  private yieldNext = false;
+  private readonly yieldFunction: GoFunc;
+  private readonly roots: unknown[] = [];
+
+  constructor(
+    private sequence: Value,
+    private readonly zeros: (() => Value)[]
+  ) {
+    this.roots.push(sequence, this.frames);
+    this.yieldFunction = nativeFunc(
+      () => {
+        throw new Error('iter.Pull resumes its iterator as a coroutine');
+      },
+      [this.roots],
+      (args) => this.yieldValues(args)
+    );
+  }
+
+  functions(): Value[] {
+    const roots = [this.roots];
+    return [
+      nativeFunc(
+        () => runToEnd(this.next()),
+        roots,
+        () => this.next()
+      ),
+      nativeFunc(
+        () => runToEnd(this.stop()),
+        roots,
+        () => this.stop()
+      ),
+    ];
+  }
+
+  private *yieldValues(args: Value[]): Suspending<Value> {
+    if (this.done) return false;
+    if (!this.yieldNext) plainPanic(`${this.name}: yield called again before next`);
+    this.yieldNext = false;
+    const pulled: Pulled = { reason: 'pull', values: args };
+    return (yield pulled) as Value;
+  }
+
+  private *next(): Suspending<Value[]> {
+    if (this.nextActive) plainPanic(`${this.name}: next called again before yield`);
+    if (this.done) return this.finished();
+    this.nextActive = true;
+    this.yieldNext = true;
     try {
-      return (coroutine as Suspending<unknown>).next(send);
-    } catch (error) {
-      done = true;
-      throw error;
-    } finally {
-      runtime.frames = outer;
-    }
-  };
-  const resumeNext = function* (): Suspending<Value[]> {
-    if (done) return finished();
-    if (!(sequence instanceof GoFunc)) {
-      done = true;
-      nilPointerPanic();
-    }
-    let send: unknown = coroutine ? true : undefined;
-    coroutine ??= sequence.resume
-      ? sequence.resume([yieldFunction])
-      : (function* () {
-          return sequence.call([yieldFunction]);
-        })();
-    for (;;) {
-      const result = step(send);
-      if (result.done) {
-        done = true;
-        return finished();
+      const sequence = this.sequence;
+      if (!(sequence instanceof GoFunc)) {
+        this.finish();
+        nilPointerPanic();
       }
-      const value = result.value as Pulled | { reason: string };
-      if ('values' in value) return [...value.values, true];
-      // The iterator blocked its goroutine, which waits here as a whole.
-      send = yield value;
+      let send: unknown = this.coroutine ? true : undefined;
+      this.coroutine ??= resumeFunction(sequence, [this.yieldFunction]);
+      for (;;) {
+        const result = this.step(send);
+        if (result.done) {
+          this.finish();
+          return this.finished();
+        }
+        const value = result.value as Pulled | { reason: string };
+        if ('values' in value) return [...value.values, true];
+        send = yield value;
+      }
+    } finally {
+      this.nextActive = false;
     }
-  };
-  const stop = function* (): Suspending<undefined> {
-    if (done || !coroutine) {
-      done = true;
+  }
+
+  private *stop(): Suspending<undefined> {
+    if (this.done) return undefined;
+    this.done = true;
+    if (!this.coroutine) {
+      this.finish();
       return undefined;
     }
     let send: unknown = false;
     for (;;) {
-      const result = step(send);
-      if (result.done) break;
-      const value = result.value as Pulled | { reason: string };
-      send = 'values' in value ? false : yield value;
+      const result = this.step(send);
+      if (result.done) {
+        this.finish();
+        return undefined;
+      }
+      send = yield result.value as { reason: string };
     }
-    done = true;
-    return undefined;
-  };
-  return [
-    nativeFunc(
-      () => runToEnd(resumeNext()),
-      [sequence, frames],
-      () => resumeNext()
-    ),
-    nativeFunc(
-      () => runToEnd(stop()),
-      [sequence, frames],
-      () => stop()
-    ),
-  ];
+  }
+
+  private step(send: unknown): IteratorResult<unknown, unknown> {
+    const outer = this.runtime.frames;
+    this.runtime.frames = this.frames;
+    try {
+      return (this.coroutine as Suspending<unknown>).next(send);
+    } catch (error) {
+      this.finish();
+      throw error;
+    } finally {
+      this.runtime.frames = outer;
+    }
+  }
+
+  private finish(): void {
+    this.done = true;
+    this.coroutine = undefined;
+    this.sequence = undefined;
+    this.roots.length = 0;
+  }
+
+  private finished(): Value[] {
+    return [...this.zeros.map((zero) => zero()), false];
+  }
+  private get name(): string {
+    return this.zeros.length === 2 ? 'iter.Pull2' : 'iter.Pull';
+  }
 }
 
 const V = typeParam('V', EMPTY_INTERFACE);
@@ -147,7 +191,7 @@ export function iteratorOf(iterate: () => Iterable<Value[]>, captured: Value[] =
     if (!(callback instanceof GoFunc)) nilPointerPanic();
     for (const values of iterate()) {
       currentRuntime().spend();
-      const next = callback.resume ? yield* callback.resume(values) : callback.call(values);
+      const next = yield* resumeFunction(callback, values);
       if (next !== true) break;
     }
     return undefined;

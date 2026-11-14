@@ -232,6 +232,31 @@ export function genericFunction(
   signature: FuncType,
   impl: (typeArgs: Type[]) => NativeImpl
 ): FuncEntity {
+  return genericEntity(name, typeParams, signature, (args) => {
+    const run = impl(args);
+    return nativeFunc((values) => run(values));
+  });
+}
+
+export function genericBlockingFunction(
+  name: string,
+  typeParams: TypeParamType[],
+  signature: FuncType,
+  impl: (typeArgs: Type[]) => (args: Value[]) => Suspending<Value | Value[] | void>
+): FuncEntity {
+  return genericEntity(name, typeParams, signature, (args) => {
+    const run = impl(args);
+    const resume = (values: Value[]): Suspending<Value | Value[]> => run(values) as Suspending<Value | Value[]>;
+    return nativeFunc((values) => runToEnd(resume(values)), [], resume);
+  });
+}
+
+function genericEntity(
+  name: string,
+  typeParams: TypeParamType[],
+  signature: FuncType,
+  instantiate: (typeArgs: Type[]) => GoFunc
+): FuncEntity {
   return {
     kind: 'func',
     name,
@@ -239,10 +264,7 @@ export function genericFunction(
     generic: {
       typeParams,
       type: signature,
-      instantiate: (args) => {
-        const run = impl(args);
-        return nativeFunc((values) => run(values));
-      },
+      instantiate,
     },
     value: () => new GoFunc(() => {}),
   };

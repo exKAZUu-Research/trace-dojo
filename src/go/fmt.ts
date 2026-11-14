@@ -1,13 +1,16 @@
+// code-gauge-allow-file fileNcss 780 -- Transcribes Go formatting cases with their shared printer flags and token buffer.
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { chargeFormatting, formatFloat } from './floatFormat';
-import { decodeRune, encodeRune, RUNE_ERROR, runesOf } from './literals';
+import { decodeRune, encodeRune, RUNE_ERROR, runesOf, utf8Encode } from './literals';
 import { compareMapKeys } from './mapOrder';
 import { dynamicMethod } from './methods';
 import { currentRuntime, perRun } from './native';
 import { canBackquote, isPrint, quote, quoteRune } from './quote';
 import { GoPanic } from './runtime';
-import { ERROR_TYPE, isExported, missingMethod, type Type, typeString, underlying } from './types';
+import { ERROR_TYPE, isExported, missingMethod, type Type, typeString as displayTypeString, underlying } from './types';
 import { type Complex, type GoArray, GoFunc, GoMap, type GoStruct, Iface, Pointer, Slice, type Value } from './values';
+
+const typeString = (type: Type): string => utf8Encode(displayTypeString(type));
 
 const STRINGER = {
   kind: 'interface',
@@ -316,7 +319,6 @@ export class Printer {
 
   // Arguments -----------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Go's printArg.
   private printArg(arg: Value, verb: string): void {
     if (arg === undefined) {
       if (verb === 'T' || verb === 'v') this.pad('<nil>');
@@ -365,6 +367,8 @@ export class Printer {
   }
 
   /** Prints with the value's Format, Error, or String method, for the verbs that use them. */
+  // code-gauge-allow functionCognitiveComplexity 25 -- Transcribes Go formatting cases with their shared printer flags and token buffer.
+  // code-gauge-allow functionNcss 38 -- Transcribes Go formatting cases with their shared printer flags and token buffer.
   private handleMethods(iface: Iface, verb: string): boolean {
     if (Printer.formatter) {
       try {
@@ -533,6 +537,7 @@ export class Printer {
     this.buffer += this.flags.sharpV ? '}' : ']';
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Transcribes Go formatting cases with their shared printer flags and token buffer.
   private printList(
     value: Value,
     type: Type,
@@ -572,7 +577,6 @@ export class Printer {
     this.buffer += ']';
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per basic kind.
   private printBasic(value: Value, kind: string, verb: string, type: Type): void {
     switch (kind) {
       case 'bool': {
@@ -636,7 +640,6 @@ export class Printer {
     this.buffer += minus ? text + padding : padding + text;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- Go's fmtInteger with its verbs, precision, and prefixes.
   private fmtInteger(
     value: bigint,
     signed: boolean,
@@ -756,6 +759,7 @@ export class Printer {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- Go's fmtFloat, including the sharp flag and special values.
+  // code-gauge-allow functionNcss 52 -- Transcribes Go formatting cases with their shared printer flags and token buffer.
   private fmtFloat(value: number, size: 32 | 64, verb: string, raw: Value, type: Type | undefined): void {
     let format = verb;
     let precision = this.flags.precision ?? -1;
@@ -895,6 +899,8 @@ export class Printer {
   }
 
   /** Hexadecimal of a string's bytes, with spaces between bytes for the space flag and 0x prefixes for #. */
+  // code-gauge-allow functionCognitiveComplexity 24 -- Transcribes Go formatting cases with their shared printer flags and token buffer.
+  // code-gauge-allow functionNcss 33 -- Transcribes Go formatting cases with their shared printer flags and token buffer.
   private fmtSbx(text: string, digits: string): void {
     let length = text.length;
     if (this.flags.precision !== undefined && this.flags.precision < length) length = this.flags.precision;
@@ -1005,6 +1011,7 @@ function runeOf(value: bigint): number {
 
 /** Go's handling of the # flag for floats: keep the decimal point and, for %g, the trailing zeros. */
 /** The # flag of fmtFloat: a decimal point always, and trailing zeros up to the precision for %g and %x. */
+// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes Go formatting cases with their shared printer flags and token buffer.
 function sharpFloat(text: string, format: string, precision: number): string {
   let num = text;
   let digits = 0;

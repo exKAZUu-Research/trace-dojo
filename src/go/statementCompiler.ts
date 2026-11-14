@@ -501,7 +501,7 @@ export abstract class StatementCompiler extends CallCompiler {
 
   // code-gauge-allow functionCognitiveComplexity 30 -- Plain, compound, multiple, and comma-ok assignments.
   // code-gauge-allow functionNcss 41 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
-  private assignment(statement: Extract<SimpleStatement, { kind: 'assign' }>): Simple {
+  private assignment(statement: Extract<SimpleStatement, { kind: 'assign' }>, supplied?: Operand): Simple {
     const { operator, left, right } = statement;
     if (operator !== '=') return this.compoundAssignment(statement);
     const compiled: Operand[] = [];
@@ -521,7 +521,7 @@ export abstract class StatementCompiler extends CallCompiler {
       };
       return [
         compiledTargets,
-        this.rightSide(statement, right, left.length, typeOf, undefined, compiled, localAt),
+        this.rightSide(statement, right, left.length, typeOf, undefined, compiled, localAt, supplied),
       ] as const;
     });
     for (const [index, target] of targets.entries()) this.defineTarget(target, compiled[index], values, index);
@@ -604,8 +604,8 @@ export abstract class StatementCompiler extends CallCompiler {
    * Compiles the right side of an assignment or declaration for `count` targets: one value per target, a call with
    * several results, or a comma-ok form. `typeOf` gives each target's type, or undefined for `_` and new variables.
    */
-  // code-gauge-allow functionNcss 52 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
-  // code-gauge-allow functionParameterCount 7 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionParameterCount 8 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss 56 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   protected rightSide(
     span: Span,
     right: Expression[],
@@ -614,7 +614,8 @@ export abstract class StatementCompiler extends CallCompiler {
     defineTypes?: Type[],
     /** Receives the operand of each value when there is one value per target. */
     compiled?: Operand[],
-    targetLocal?: (index: number) => VarEntity | 'discard' | undefined
+    targetLocal?: (index: number) => VarEntity | 'discard' | undefined,
+    supplied?: Operand
   ): Eval[] | undefined {
     const convert = (operand: Operand, index: number): Eval => {
       const local = targetLocal?.(index);
@@ -638,6 +639,10 @@ export abstract class StatementCompiler extends CallCompiler {
       const read = defaulted.eval;
       return (frame) => copyValue(read(frame));
     };
+    if (supplied) {
+      if (compiled) compiled[0] = supplied;
+      return count === 2 ? commaOkResults(supplied, convert) : [convert(supplied, 0)];
+    }
     if (right.length === count) {
       return right.map((expression, index) => {
         const expressionOperand = this.expression(expression);
@@ -724,7 +729,7 @@ export abstract class StatementCompiler extends CallCompiler {
     );
   }
 
-  private shortVarDeclaration(statement: Extract<SimpleStatement, { kind: 'define' }>): Simple {
+  private shortVarDeclaration(statement: Extract<SimpleStatement, { kind: 'define' }>, supplied?: Operand): Simple {
     const { left, right } = statement;
     const names: { name: string; span: Span }[] = [];
     for (const target of left) {
@@ -762,7 +767,8 @@ export abstract class StatementCompiler extends CallCompiler {
         },
         types,
         compiled,
-        (index) => holders[index]
+        (index) => holders[index],
+        supplied
       )
     );
     if (!values) {
@@ -1087,7 +1093,7 @@ export abstract class StatementCompiler extends CallCompiler {
       try {
         for (const [key, value] of iterate(collection)) {
           frame.runtime.spend();
-          bind.assign(frame, key, value);
+          yield* bind.assign(frame, key, value);
           frame.runtime.steps.stepBinding(row, storesAnswer);
           const completion = yield* body(frame);
           if (breaks(completion, label)) return;
@@ -1131,7 +1137,7 @@ export abstract class StatementCompiler extends CallCompiler {
       const runBody = function* (args: Value[]): Suspending<Value> {
         protocol.enter();
         frame.runtime.spend();
-        bind.assign(frame, args[0], args[1]);
+        yield* bind.assign(frame, args[0], args[1]);
         frame.runtime.steps.stepBinding(row, bind.answered);
         const completion = yield* body(frame);
         if (breaks(completion, label)) {
@@ -1207,7 +1213,7 @@ export abstract class StatementCompiler extends CallCompiler {
     }
     if (type.kind === 'slice') return { read, keyType: BASIC.int, valueType: type.element, iterate: iterateSlice };
     if (type.kind === 'map') return { read, keyType: type.key, valueType: type.value, iterate: iterateMap };
-    if (isInteger(type) || (range.mode === 'constant' && isUntyped(range.type))) {
+    if (isInteger(type)) {
       const target =
         !statement.define && statement.key
           ? this.part(() => this.hoistingCalls(() => this.assignmentTarget(statement.key as Expression))).value.result
@@ -1247,69 +1253,78 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** Declares or resolves a range loop's targets, and tells whether one stores a value learners answer. */
-  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
-  // code-gauge-allow functionNcss 43 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private rangeTargets(
     statement: Extract<Statement, { kind: 'range' }>,
     keyType: Type,
     valueType: Type
-  ): { assign: (frame: Frame, key: Value, value: Value) => void; answered: boolean } {
+  ): { assign: (frame: Frame, key: Value, value: Value) => Suspending<void>; answered: boolean } {
     const targets = [statement.key, statement.value];
     const types = [keyType, valueType];
     let answered = false;
-    const prepares = targets.map((target, index): ((frame: Frame) => (value: Value) => void) | undefined => {
-      if (!target) return undefined;
-      const type = types[index];
-      if (stripParens(target).kind === 'name' && (stripParens(target) as { name: string }).name === '_')
-        return undefined;
-      if (isAnswerType(type)) answered = true;
-      if (statement.define) {
-        if (target.kind !== 'name') {
-          this.error(target, 'range の := の左辺には名前だけを書いてください。');
-          return undefined;
-        }
-        const variable = this.declareLocal(target.name, type, target);
-        untrackSlice(variable);
-        const copy = isValueKind(type);
-        return (frame) => (value) => declareValue(frame, variable, copy ? copyValue(value) : value);
-      }
-      const operand = this.assignmentTarget(target);
-      this.defineTarget(operand, undefined);
-      if (!operand || this.isInvalid(operand)) return undefined;
-      const localTarget = stripParens(target).kind === 'name' ? operand.variable?.entity : undefined;
-      const convert = this.assign(
-        { mode: 'value', type, span: target, callResult: true, eval: (frame) => frame.temporaries.at(-1) as Value },
-        operand.type,
-        '変数',
-        localTarget
-      );
-      const prepare = operand.prepareStore ?? ((frame: Frame) => (value: Value) => operand.store?.(frame, value));
-      return (frame) => {
-        const write = prepare(frame);
-        return (value) => {
-          frame.temporaries.push(value);
-          try {
-            write(convert(frame));
-          } finally {
-            frame.temporaries.pop();
-          }
-        };
-      };
-    });
+    const { value: prepares, hoists } = this.part(() =>
+      targets.map((target, index): ((frame: Frame) => (value: Value) => void) | undefined => {
+        const prepare = this.rangeTarget(target, types[index], statement.define);
+        if (prepare && isAnswerType(types[index])) answered = true;
+        return prepare;
+      })
+    );
     const [prepareKey, prepareValue] = prepares;
     return {
       answered,
-      assign: (frame, key, value) => {
+      *assign(frame, key, value) {
         frame.temporaries.push(key, value);
         try {
+          if (hoists) yield* runHoists(frame, hoists);
           const writeKey = prepareKey?.(frame);
           const writeValue = prepareValue?.(frame);
           writeKey?.(key);
           writeValue?.(value);
         } finally {
+          if (hoists) clearHoists(frame, hoists);
           frame.temporaries.length -= 2;
         }
       },
+    };
+  }
+
+  private rangeTarget(
+    target: Expression | undefined,
+    type: Type,
+    define: boolean
+  ): ((frame: Frame) => (value: Value) => void) | undefined {
+    if (!target) return undefined;
+    if (stripParens(target).kind === 'name' && (stripParens(target) as { name: string }).name === '_') return undefined;
+    if (define) {
+      if (target.kind !== 'name') {
+        this.error(target, 'range の := の左辺には名前だけを書いてください。');
+        return undefined;
+      }
+      const variable = this.declareLocal(target.name, type, target);
+      untrackSlice(variable);
+      const copy = isValueKind(type);
+      return (frame) => (value) => declareValue(frame, variable, copy ? copyValue(value) : value);
+    }
+    const operand = this.assignmentTarget(target);
+    this.defineTarget(operand, undefined);
+    if (!operand || this.isInvalid(operand)) return undefined;
+    const localTarget = stripParens(target).kind === 'name' ? operand.variable?.entity : undefined;
+    const convert = this.assign(
+      { mode: 'value', type, span: target, callResult: true, eval: (frame) => frame.temporaries.at(-1) as Value },
+      operand.type,
+      '変数',
+      localTarget
+    );
+    const prepare = operand.prepareStore ?? ((frame: Frame) => (value: Value) => operand.store?.(frame, value));
+    return (frame) => {
+      const write = prepare(frame);
+      return (value) => {
+        frame.temporaries.push(value);
+        try {
+          write(convert(frame));
+        } finally {
+          frame.temporaries.pop();
+        }
+      };
     };
   }
 
@@ -1711,7 +1726,7 @@ export abstract class StatementCompiler extends CallCompiler {
       return () => {};
     }
     if (callee.mode === 'method') return this.launchedMethod(call, callee, row, launch);
-    const value = this.asValue(callee);
+    const value = this.asValue(callee, true);
     if (this.isInvalid(value)) {
       for (const arg of call.args) this.expression(arg);
       return () => {};
@@ -1835,14 +1850,15 @@ export abstract class StatementCompiler extends CallCompiler {
     return (frame) => receiverFor(read(frame), path, POINTER_METHOD);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
-  // code-gauge-allow functionNcss 38 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionCognitiveComplexity 25 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss 40 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private launchedBuiltin(
     statement: Extract<Statement, { kind: 'defer' | 'go' }>,
     call: Extract<Expression, { kind: 'call' }>,
     name: string,
     launch: Launch
   ): Run {
+    if (!this.validBuiltinSpread(call, name)) return () => {};
     if (name === 'panic') {
       const values = call.args.map((arg) =>
         name === 'panic' ? this.assign(this.expression(arg), ANY, '引数') : this.defaulted(this.value(arg)).eval
@@ -2099,7 +2115,6 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss 44 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private selectCaseBinding(
     comm: Extract<Statement, { kind: 'select' }>['cases'][number]['comm'],
     receiveTypes: Map<Expression, Type>
@@ -2107,57 +2122,39 @@ export abstract class StatementCompiler extends CallCompiler {
     bind: ((frame: Frame, value: Value, ok: boolean) => void) | undefined;
     answered: boolean;
   } {
-    let bind: ((frame: Frame, value: Value, ok: boolean) => void) | undefined;
-    let answered = false;
-    if (comm?.kind === 'receive' && comm.left.length > 0) {
-      const element = receiveTypes.get(comm.channel) ?? BASIC.invalid;
-      const types = [element, BASIC.bool];
-      if (comm.left.length > 2) this.error(comm, 'select の case で受け取れる値は2つまでです。');
-      if (comm.define) {
-        const variables = comm.left.slice(0, 2).map((target, index) => {
-          if (target.kind !== 'name') {
-            this.error(target, ':= の左辺には名前だけを書いてください。');
-            return;
-          }
-          if (target.name === '_') return;
-          if (isAnswerType(types[index])) answered = true;
-          return this.declareLocal(target.name, types[index], target);
-        });
-        bind = (frame, value, ok) => {
-          if (variables[0]) declareValue(frame, variables[0], value);
-          if (variables[1]) declareValue(frame, variables[1], ok);
-        };
-      } else {
-        const prepares = comm.left.slice(0, 2).map((target, index) => {
-          const operand = this.assignmentTarget(target);
-          if (!operand || this.isInvalid(operand)) return;
-          if (isAnswerType(types[index])) answered = true;
-          const convert = this.assign(
-            { mode: 'value', type: types[index], span: target, eval: (frame) => frame.temporaries.at(-1) as Value },
-            operand.type,
-            '変数'
-          );
-          const prepare = operand.prepareStore ?? ((frame: Frame) => (value: Value) => operand.store?.(frame, value));
-          return (frame: Frame): ((value: Value) => void) => {
-            const write = prepare(frame);
-            return (value: Value): void => {
-              frame.temporaries.push(value);
-              try {
-                write(convert(frame));
-              } finally {
-                frame.temporaries.pop();
-              }
-            };
-          };
-        });
-        bind = (frame, value, ok) => {
-          const writers = prepares.map((prepare) => prepare?.(frame));
-          writers[0]?.(value);
-          writers[1]?.(ok);
-        };
-      }
+    if (comm?.kind !== 'receive' || comm.left.length === 0) return { bind: undefined, answered: false };
+    if (comm.left.length > 2) {
+      this.error(comm, 'select の case で受け取れる値は2つまでです。');
+      return { bind: undefined, answered: false };
     }
-    return { bind, answered };
+    const element = receiveTypes.get(comm.channel) ?? BASIC.invalid;
+    const received = new WeakMap<Frame, { value: Value; ok: boolean }>();
+    const read = (frame: Frame): { value: Value; ok: boolean } => received.get(frame) as { value: Value; ok: boolean };
+    const supplied: Operand = {
+      mode: 'value',
+      type: element,
+      span: comm,
+      callResult: true,
+      eval: (frame) => read(frame).value,
+      commaOk: (frame) => [read(frame).value, read(frame).ok],
+    };
+    const simple = comm.define
+      ? this.shortVarDeclaration({ ...comm, kind: 'define', right: [] }, supplied)
+      : this.assignment({ ...comm, kind: 'assign', operator: '=', right: [] }, supplied);
+    const answered = comm.left.some((target, index) =>
+      target.kind !== 'name' || target.name !== '_' ? isAnswerType(index === 0 ? element : BASIC.bool) : false
+    );
+    return {
+      answered,
+      bind: (frame, value, ok) => {
+        received.set(frame, { value, ok });
+        try {
+          simple.run(frame);
+        } finally {
+          received.delete(frame);
+        }
+      },
+    };
   }
 
   /** `for v := range ch`: receives until the channel is closed and empty. */
@@ -2180,7 +2177,7 @@ export abstract class StatementCompiler extends CallCompiler {
           const [received, ok] = yield* receive(value as Channel | undefined);
           if (!ok) return;
           frame.runtime.spend();
-          bind.assign(frame, received, undefined);
+          yield* bind.assign(frame, received, undefined);
           frame.runtime.steps.stepBinding(row, bind.answered);
           const completion = yield* body(frame);
           if (breaks(completion, label)) return;
@@ -2415,7 +2412,10 @@ function commaOkResults(operand: Operand, convert: Convert): Eval[] {
   operand.useCommaOk?.();
   let result: [Value, boolean] = [undefined, false];
   const first = convert({ ...operand, mode: 'value', eval: () => result[0] }, 0);
-  const second = convert({ mode: 'value', type: BASIC.untypedBool, span: operand.span, eval: () => result[1] }, 1);
+  const second = convert(
+    { mode: 'value', type: BASIC.untypedBool, span: operand.span, callResult: true, eval: () => result[1] },
+    1
+  );
   return [
     (frame) => {
       result = lookup(frame);

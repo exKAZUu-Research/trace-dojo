@@ -51,7 +51,15 @@ export class Pointer {
   }
 
   equals(other: Pointer): boolean {
-    return this.base === other.base && this.key === other.key;
+    const [base, key] = this.address();
+    const [otherBase, otherKey] = other.address();
+    return base === otherBase && key === otherKey;
+  }
+
+  address(): [Cell | Value[], number | 'v'] {
+    const value = this.load();
+    if (value instanceof GoArray) return arrayAddress(value.elements, 0);
+    return Array.isArray(this.base) ? arrayAddress(this.base, this.key as number) : [this.base, this.key];
   }
 }
 
@@ -84,6 +92,7 @@ export class SliceArrayPointer extends Pointer {
       },
       has: (_target, property) => typeof property === 'string' && /^\d+$/.test(property) && Number(property) < length,
     });
+    arrayViews.set(view, { array, offset });
     return new GoArray(view);
   }
 
@@ -91,6 +100,19 @@ export class SliceArrayPointer extends Pointer {
     const array = this.base as Value[];
     for (const [index, element] of (value as GoArray).elements.entries())
       array[(this.key as number) + index] = writeInPlace(array[(this.key as number) + index], element);
+  }
+}
+
+const arrayViews = new WeakMap<Value[], { array: Value[]; offset: number }>();
+
+function arrayAddress(elements: Value[], index: number): [Value[], number] {
+  let array = elements;
+  let offset = index;
+  for (;;) {
+    const view = arrayViews.get(array);
+    if (!view) return [array, offset];
+    offset += view.offset;
+    array = view.array;
   }
 }
 

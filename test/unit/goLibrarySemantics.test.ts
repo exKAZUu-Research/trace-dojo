@@ -513,3 +513,228 @@ test('rational strings support base prefixes, decimal and binary exponents and r
     uncaughtException: undefined,
   });
 });
+
+test('omitzero composites compare structural zeros independently of element methods', () => {
+  const source =
+    'package main;import("fmt";"encoding/json");type Inner int;func(i Inner)IsZero()bool{return i==42};type Outer struct{N Inner};func main(){for _,n:=range []Inner{0,42}{v:=struct{X Outer `json:",omitzero"`;Y [1]Inner `json:",omitzero"`;Z Inner `json:",omitzero"`}{Outer{n},[1]Inner{n},n};b,e:=json.Marshal(v);fmt.Println(string(b),e)}}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '{"Z":0} <nil>\n{"X":{"N":42},"Y":[42]} <nil>\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('JSON field names use configured escaping', () => {
+  const source =
+    'package main;import("fmt";"encoding/json";"bytes");func main(){v:=struct{X int `json:"<tag>&"`}{1};b,e:=json.Marshal(v);fmt.Println(string(b),e);var buf bytes.Buffer;enc:=json.NewEncoder(&buf);enc.SetEscapeHTML(false);enc.Encode(v);fmt.Print(buf.String())}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '{"\\u003ctag\\u003e\\u0026":1} <nil>\n{"<tag>&":1}\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('ticker invalid resets preserve old ticks and zero timers use Go panics', () => {
+  const source =
+    'package main;import("fmt";"time");func check(f func()){defer func(){fmt.Println(recover())}();f()};func main(){for _,d:=range []time.Duration{0,-1}{t:=time.NewTicker(1);check(func(){t.Reset(d)});<-t.C;fmt.Println("tick");t.Stop()};var t time.Timer;check(func(){t.Stop()});check(func(){t.Reset(1)});var k time.Ticker;k.Stop();check(func(){k.Reset(1)});check(func(){k.Reset(0)})}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'non-positive interval for Ticker.Reset\ntick\nnon-positive interval for Ticker.Reset\ntick\ntime: Stop called on uninitialized Timer\ntime: Reset called on uninitialized Timer\ntime: Reset called on uninitialized Ticker\nnon-positive interval for Ticker.Reset\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('big integer bases validate before parsing or formatting', () => {
+  const source =
+    'package main;import("fmt";"math/big");func check(f func()){defer func(){if p:=recover();p!=nil{fmt.Println(p)}}();f()};func main(){for _,b:=range []int{-1,1,63}{check(func(){v,ok:=new(big.Int).SetString("10",b);fmt.Println(v,ok)})};for _,b:=range []int{-1,0,1,63}{check(func(){fmt.Println(big.NewInt(62).Text(b))})};for _,b:=range []int{0,2,36,62}{x,ok:=new(big.Int).SetString("10",b);fmt.Println(x,ok);if b!=0{fmt.Println(big.NewInt(61).Text(b))}}}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'invalid number base -1\ninvalid number base 1\ninvalid number base 63\ninvalid base\ninvalid base\ninvalid base\ninvalid base\n10 true\n2 true\n111101\n36 true\n1p\n62 true\nZ\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('probable primes use Lucas and requested Miller Rabin rounds', () => {
+  const source =
+    'package main;import("fmt";"math/big");func main(){for _,s:=range []string{"0","2","61","63","97","1009","1373653","3215031751","3825123056546413051","18446744073709551557","1543267864443420616877677640751301","170141183460469231731687303715884105727"}{x,_:=new(big.Int).SetString(s,10);fmt.Print(s);for _,n:=range []int{0,1,20,50}{fmt.Print(" ",x.ProbablyPrime(n))};fmt.Println()};for _,bits:=range []uint{0,1,200000,999999}{x:=new(big.Int).Lsh(big.NewInt(1),bits);fmt.Println(x.TrailingZeroBits(),new(big.Int).Neg(x).TrailingZeroBits())}}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '0 false false false false\n2 true true true true\n61 true true true true\n63 false false false false\n97 true true true true\n1009 true true true true\n1373653 false false false false\n3215031751 false false false false\n3825123056546413051 false false false false\n18446744073709551557 true true true true\n1543267864443420616877677640751301 false false false false\n170141183460469231731687303715884105727 true true true true\n0 0\n1 1\n200000 200000\n999999 999999\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('binary endian values preserve Go type and format contracts', () => {
+  const source = String.raw`package main;import("fmt";"encoding/binary");func main(){for _,v:=range []any{binary.BigEndian,binary.LittleEndian}{fmt.Printf("%T %v %#v\n",v,v,v)}}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'binary.bigEndian BigEndian binary.BigEndian\nbinary.littleEndian LittleEndian binary.LittleEndian\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('native iterators copy value arguments while retaining references', () => {
+  const source =
+    'package main;import("fmt";"slices";"maps");type S struct{N int};func main(){a:=[]S{{1}};slices.Values(a)(func(v S)bool{v.N=9;return true});m:=map[int]S{1:{2}};maps.Values(m)(func(v S)bool{v.N=8;return true});b:=[][1]int{{3}};slices.All(b)(func(i int,v [1]int)bool{v[0]=7;return true});p:=&S{4};slices.Values([]*S{p})(func(v *S)bool{v.N=6;return true});fmt.Println(a[0].N,m[1].N,b[0][0],p.N)}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1 2 3 6\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('WaitGroup detects reuse before the previous waiter resumes', () => {
+  const source =
+    'package main;import("fmt";"sync";"time");func main(){var w sync.WaitGroup;w.Add(1);go func(){time.Sleep(time.Millisecond);w.Done();w.Add(1)}();defer func(){fmt.Println(recover())}();w.Wait();fmt.Println("returned")}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'sync: WaitGroup is reused before previous Wait has returned\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('channel directions bind arrows to the leftmost unparenthesized channel', () => {
+  const source = String.raw`package main;import "fmt";func produce(out chan<- chan int){c:=make(chan int,2);c<-7;out<-c};func main(){out:=make(chan chan int,1);produce(out);c:=<-out;c<-1;fmt.Println(<-c,<-c);var a chan<- chan int;var b chan (<-chan int);var d chan<- chan<- int;var e chan<- <-chan int;var f <-chan chan<- int;fmt.Printf("%T %T %T %T %T\n",a,b,d,e,f)}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '7 1\nchan<- chan int chan (<-chan int) chan<- chan<- int chan<- <-chan int <-chan chan<- int\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('tagged anonymous type names include Go quoted tags', () => {
+  const source =
+    'package main;import "fmt";func main(){fmt.Printf("%T %T\\n",struct{A int `json:"a"`}{},struct{B string `json:"名前"`}{})}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'struct { A int "json:\\"a\\"" } struct { B string "json:\\"名前\\"" }\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('generic method caches preserve nested type identities', () => {
+  const source =
+    'package main;import("fmt";"encoding/json");type R struct{};func(R)show[T any](x T){b,e:=json.Marshal(x);fmt.Println(string(b),e)};func first(){type N int;R{}.show(struct{X N}{1})};func second(){type N string;R{}.show(struct{X N}{"ok"})};func main(){first();second();R{}.show(struct{X int `json:"a"`}{2});R{}.show(struct{X int `json:"b"`}{3})}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '{"X":1} <nil>\n{"X":"ok"} <nil>\n{"a":2} <nil>\n{"b":3} <nil>\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('recursive aliases bind through named shells without losing their types', () => {
+  const source =
+    'package main;import "fmt";type A=*T;type T struct{next A;v int};type L=[]N;type N struct{children L;n int};type I=interface{J};type J interface{M(int)};type K=map[Key]int;type Key struct{n int};func main(){var t T;t.next=&T{v:3};n:=N{children:[]N{{n:4}}};m:=K{Key{2}:5};fmt.Println(t.next.v,n.children[0].n,m[Key{2}]);var i I;fmt.Println(i==nil)}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '3 4 5\ntrue\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('generic function values infer remaining types from assignment targets', () => {
+  const source =
+    'package main;import "fmt";func Map[T,U any](xs []T,f func(T)U)[]U{var out []U;for _,x:=range xs{out=append(out,f(x))};return out};func main(){var f func([]int,func(int)string)[]string=Map[int];var g func([]int,func(int)string)[]string=Map;fmt.Println(f([]int{1,2},func(x int)string{return fmt.Sprint(x)}),g([]int{3},func(x int)string{return fmt.Sprint(x)}))}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1 2] [3]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('array conversion pointers share canonical locations and map keys', () => {
+  const source =
+    'package main;import "fmt";func main(){arr:=[4]int{1,2,3,4};s:=arr[1:];p:=(*[2]int)(s);fmt.Println((*[4]int)(arr[:])==&arr,(*[2]int)(s)==p,&p[0]==&arr[1]);m:=map[*int]int{&p[0]:1,&s[0]:2};fmt.Println(len(m),m[&arr[1]]);q:=(*[1]int)(p[:][1:]);fmt.Println(&q[0]==&arr[2]);*p=[2]int{7,8};fmt.Println(arr)}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true true true\n1 2\ntrue\n[1 7 8 4]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('range destinations can suspend for collections channels and iterator functions', () => {
+  const source =
+    'package main;import "fmt";func main(){for kind:=range 3{a:=[]int{0};idx:=make(chan int);go func(){idx<-0}();switch kind{case 0:for _,a[<-idx]=range []int{7}{};case 1:c:=make(chan int,1);c<-8;close(c);for a[<-idx]=range c{};case 2:seq:=func(yield func(int)bool){yield(9)};for a[<-idx]=range seq{}};fmt.Println(a)}}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[7]\n[8]\n[9]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('select bindings share ordinary comma ok and declaration rules', () => {
+  const source = String.raw`package main;import "fmt";type B bool;func main(){ch:=make(chan int,2);ch<-1;ch<-2;var v int;var ok B;select{case v,ok=<-ch:fmt.Println(v,ok)};var a any;select{case v,a=<-ch:fmt.Printf("%d %T %v\n",v,a,a)};close(ch);select{case x,ok:=<-ch:fmt.Println(x,ok)}}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1 true\n2 bool true\n0 false\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('constraint unions preserve unrestricted interfaces and exact term inclusion', () => {
+  const source =
+    'package main;import "fmt";func F[T int|any](x T)T{return x};func exact[T int](x T)T{return x};func G[T int](x T)T{return exact(x)};func main(){fmt.Println(F("s"),F(3),G(2))}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 's 3 2\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('collection consumers suspend channel backed sequences', () => {
+  const source =
+    'package main;import("fmt";"slices";"maps");func seq()func(func(int)bool){return func(yield func(int)bool){c:=make(chan int);go func(){c<-2;c<-1;close(c)}();for v:=range c{if !yield(v){return}}}};func pairs(yield func(int,int)bool){c:=make(chan int);go func(){c<-3;close(c)}();for v:=range c{yield(v,v+1)}};func main(){fmt.Println(slices.Collect(seq()),slices.Sorted(seq()),slices.SortedFunc(seq(),func(a,b int)int{return a-b}),slices.SortedStableFunc(seq(),func(a,b int)int{return a-b}),slices.AppendSeq([]int{0},seq()));m:=maps.Collect(pairs);maps.Insert(m,pairs);fmt.Println(m[3],len(m))}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[2 1] [1 2] [1 2] [1 2] [0 2 1]\n4 1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Pull rejects recursive next calls with a recoverable Go panic', () => {
+  const source =
+    'package main;import("fmt";"iter");func main(){var next func()(int,bool);next,stop:=iter.Pull(func(yield func(int)bool){func(){defer func(){fmt.Println(recover())}();next()}();yield(7)});defer stop();fmt.Println(next());var n2 func()(int,int,bool);n2,s2:=iter.Pull2(func(yield func(int,int)bool){func(){defer func(){fmt.Println(recover())}();n2()}();yield(8,9)});defer s2();fmt.Println(n2())}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'iter.Pull: next called again before yield\n7 true\niter.Pull2: next called again before yield\n8 9 true\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Pull validates escaped yield calls and completion', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import("fmt";"iter");func main(){var saved func(int)bool;next,stop:=iter.Pull(func(yield func(int)bool){saved=yield;yield(1);yield(2)});fmt.Println(next());func(){defer func(){fmt.Println(recover())}();saved(3)}();stop();fmt.Println(saved(4));fmt.Println(next())}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '1 true\niter.Pull: yield called again before next\nfalse\n0 false\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Pull rejects overlapping next calls while a sequence waits', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import("fmt";"iter");func main(){entered:=make(chan int);c:=make(chan int);next,_:=iter.Pull(func(yield func(int)bool){close(entered);yield(<-c)});go func(){next()}();<-entered;defer func(){fmt.Println(recover())}();next()}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'iter.Pull: next called again before yield\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('omitzero handles structural complex zeros', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import("fmt";"encoding/json");func main(){v:=struct{A complex64 `json:",omitzero"`;B [1]complex128 `json:",omitzero"`;C struct{N complex64} `json:",omitzero"` }{};b,e:=json.Marshal(v);fmt.Println(string(b),e)}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '{} <nil>\n', uncaughtException: undefined });
+});

@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 437 -- Keeps each arithmetic algorithm beside its execution checks and host-allocation guards.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import { rationalToFloat } from '../constants';
 import type { Entity } from '../entities';
@@ -10,6 +9,7 @@ import { GoPanic } from '../runtime';
 import { nilPointerPanic } from '../runtimeErrors';
 import { BASIC, pointerTo, RUNE, type Type } from '../types';
 import { Cell, GoStruct, Iface, Pointer, type Value } from '../values';
+import { probablyPrime } from './bigPrime';
 import { parseRational } from './bigRatParser';
 import { STATE } from './fmt';
 import { BOOL, byteSlice, INT, STRING } from './support';
@@ -46,6 +46,7 @@ const newInt = (value: bigint): Pointer => {
 const DIGITS = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
 function text(value: bigint, base: number): string {
+  if (base < 2 || base > 62) throw new GoPanic(new Iface(BASIC.string, 'invalid base'));
   if (base <= 36) return value.toString(base);
   chargeBits(BigInt(bitLength(value)));
   let rest = value < 0n ? -value : value;
@@ -59,8 +60,9 @@ function text(value: bigint, base: number): string {
 }
 
 /** Int.SetString: digits in the base, or with base 0 a prefix that chooses it, with `_` between digits. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Keeps each arithmetic algorithm beside its execution checks and host-allocation guards.
+// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the arithmetic algorithm and its operand-sized resource accounting together.
 function parseInt(source: string, base: number): bigint | undefined {
+  if (base !== 0 && (base < 2 || base > 62)) throw new GoPanic(new Iface(BASIC.string, `invalid number base ${base}`));
   let rest = source;
   let negative = false;
   if (rest.startsWith('+') || rest.startsWith('-')) {
@@ -163,37 +165,6 @@ function sqrt(value: bigint): bigint {
     if (next >= estimate) return estimate;
     estimate = next;
   }
-}
-
-/** A deterministic Miller–Rabin test with the first prime bases, which is exact for the sizes programs use. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Keeps each arithmetic algorithm beside its execution checks and host-allocation guards.
-function probablyPrime(value: bigint): boolean {
-  if (value < 2n) return false;
-  const small = [2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n, 41n, 43n, 47n, 53n];
-  for (const prime of small) {
-    if (value === prime) return true;
-    if (value % prime === 0n) return false;
-  }
-  let d = value - 1n;
-  let s = 0;
-  while ((d & 1n) === 0n) {
-    d >>= 1n;
-    s++;
-  }
-  for (const base of small) {
-    let x = power(base, d, value);
-    if (x === 1n || x === value - 1n) continue;
-    let composite = true;
-    for (let round = 1; round < s; round++) {
-      x = (x * x) % value;
-      if (x === value - 1n) {
-        composite = false;
-        break;
-      }
-    }
-    if (composite) return false;
-  }
-  return true;
 }
 
 const bitLength = (value: bigint): number => (value === 0n ? 0 : (value < 0n ? -value : value).toString(2).length);
@@ -382,14 +353,12 @@ const methods: [string, Type[], Type[], (z: Value, args: Value[]) => Value | Val
     [],
     [BASIC.uint],
     (x) => {
-      let value = intOf(x);
+      const value = intOf(x);
       if (value === 0n) return 0n;
-      let count = 0n;
-      while ((value & 1n) === 0n) {
-        value >>= 1n;
-        count++;
-      }
-      return count;
+      const magnitude = value < 0n ? -value : value;
+      const bits = magnitude.toString(2);
+      currentRuntime().spend();
+      return BigInt(bits.length - bits.lastIndexOf('1') - 1);
     },
   ],
   [
@@ -398,7 +367,7 @@ const methods: [string, Type[], Type[], (z: Value, args: Value[]) => Value | Val
     [BOOL],
     (x, [n]) => {
       if ((n as bigint) < 0n) throw new GoPanic(new Iface(BASIC.string, 'negative n for ProbablyPrime'));
-      return probablyPrime(intOf(x));
+      return probablyPrime(intOf(x), n as bigint, power, sqrt);
     },
   ],
   ['Text', [INT], [STRING], (x, [base]) => (x === undefined ? '<nil>' : text(intOf(x), Number(base as bigint)))],

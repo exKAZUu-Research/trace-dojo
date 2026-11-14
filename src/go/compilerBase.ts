@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 513 -- Resolves each Go type form together with its scope and diagnostic context.
+// code-gauge-allow-file fileNcss 521 -- Resolves each Go type form together with its scope and diagnostic context.
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import type { Expression, Span, TypeElementSyntax, TypeExpression, TypeParameter } from './ast';
 import type { Entity, FunctionContext, PackageEntity, TypeEntity, VarEntity } from './entities';
@@ -577,6 +577,7 @@ export abstract class CompilerBase {
   }
 
   /** An element of an interface: an embedded interface, or a union of type terms, which may contain interfaces. */
+  // code-gauge-allow functionCognitiveComplexity 21 -- Resolves each Go type form together with its scope and diagnostic context.
   private resolveTypeElement(
     element: TypeElementSyntax
   ): { embedded: InterfaceType } | { terms: TypeTerm[] } | undefined {
@@ -590,17 +591,20 @@ export abstract class CompilerBase {
       return { embedded: underlying(resolved[0].type) as InterfaceType };
     }
     const terms: TypeTerm[] = [];
+    const concrete: TypeTerm[] = [];
+    let unrestricted = false;
     for (const term of resolved) {
       const under = underlying(term.type);
       if (under.kind === 'interface') {
-        if (under.methods.length > 0) {
+        if (term.tilde || under.typeSet?.comparable || under.methods.length > 0) {
           this.error(
             term.syntax.type,
             `メソッドを持つインターフェース ${describeType(term.type)} は、| で並べられません。`
           );
           continue;
         }
-        terms.push(...(under.typeSet?.terms ?? []));
+        if (!under.typeSet?.terms) unrestricted = true;
+        else terms.push(...under.typeSet.terms);
         continue;
       }
       if (term.tilde && !identical(term.type, under)) {
@@ -610,9 +614,12 @@ export abstract class CompilerBase {
         );
         continue;
       }
+      if (concrete.some((previous) => termIncludes(previous, term) || termIncludes(term, previous)))
+        this.error(term.syntax.type, '型集合の | には、重なり合う型を並べられません。');
+      concrete.push(term);
       terms.push({ tilde: term.tilde, type: term.type });
     }
-    return { terms };
+    return unrestricted ? { embedded: EMPTY_INTERFACE } : { terms };
   }
 
   protected resolveSignature(signature: {
@@ -690,11 +697,7 @@ export abstract class CompilerBase {
       if (!matches && type.kind !== 'typeParam') return '使える型の一覧にありません';
       if (type.kind === 'typeParam') {
         const own = type.constraint.typeSet?.terms;
-        const covered = own?.every((ownTerm) =>
-          set.terms?.some((term) =>
-            term.tilde ? identical(underlying(ownTerm.type), underlying(term.type)) : identical(ownTerm.type, term.type)
-          )
-        );
+        const covered = own?.every((ownTerm) => set.terms?.some((term) => termIncludes(term, ownTerm)));
         if (!covered) return '使える型の一覧にありません';
       }
     }
