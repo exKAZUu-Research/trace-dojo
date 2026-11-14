@@ -1835,6 +1835,34 @@ test('raise invokes private exception conversion', () => {
   });
 });
 
+test('Array conversion honors reopened NilClass methods', () => {
+  expect(run('class NilClass;def to_a;[1];end;end;p Array(nil)')).toMatchObject({ stdout: '[1]\n' });
+});
+
+test('Class.new rejects Class as a superclass', () => {
+  expect(run('begin;Class.new(Class);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'TypeError\n' });
+});
+
+test('inherited visibility preserves method ownership for super', () => {
+  expect(
+    run(
+      'class Z;def f;puts :z;end;end;class A<Z;def f;puts :a;super;end;end;class B<A;private :f;def g;f;end;end;B.new.g'
+    )
+  ).toMatchObject({
+    stdout: 'a\nz\n',
+  });
+});
+
+test('Comparable equality interprets comparison result signs', () => {
+  expect(run('class A;include Comparable;def <=>(x);-0.0;end;end;p A.new==A.new')).toMatchObject({
+    stdout: 'true\n',
+  });
+});
+
+test('Proc curry validates native arity bounds', () => {
+  expect(run('begin;proc{}.curry(10**30);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'RangeError\n' });
+});
+
 test('shuffle detects receiver changes from its randomizer', () => {
   expect(
     run(

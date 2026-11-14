@@ -4,13 +4,13 @@ import {
   anyToS,
   className,
   compareValues,
+  comparisonSign,
   inspect,
   inspectException,
   inspectObject,
   inspectProc,
   rEql,
   rEquals,
-  toInt,
   toRubyInt,
   toStr,
   toStrValue,
@@ -537,7 +537,6 @@ def(
   1,
   function* (_self, [value]) {
     if (value instanceof RArray) return value;
-    if (value === NIL) return arr([]);
     if (respondsTo(value, 'to_ary', true)) {
       const converted = yield* callMethod(value, 'to_ary', [], undefined, undefined, { fcall: true });
       if (converted instanceof RArray) return converted;
@@ -831,7 +830,7 @@ function* setVisibility(self: RClass, args: Value[], visibility: Visibility): Ge
       );
     }
     if (method.owner === self) method.visibility = visibility;
-    else addMethod(self, { ...method, owner: self, visibility });
+    else addMethod(self, { ...method, visibility });
   }
   invalidateMethodCaches();
   return args.length === 1 ? args[0] : arr(args);
@@ -905,6 +904,8 @@ sdef('Class', 'new', [0, 1], function* (_self, [superclass], block) {
   if (!(parent instanceof RClass) || parent.isModule) {
     throw typeError(`superclass must be an instance of Class (given an instance of ${realClassOf(parent).name})`);
   }
+  if (parent === runtime.c.Class) throw typeError("can't make subclass of Class");
+  if (parent.isSingleton) throw typeError("can't make subclass of singleton class");
   const cls = new RClass(runtime.c.Class, undefined, parent, false);
   cls.isUserDefined = true;
   const inherited = classOf(parent).findMethod('inherited');
@@ -1055,7 +1056,7 @@ def('Comparable', '==', 1, function* (self, [other]) {
   try {
     const result = yield* callMethod(self, '<=>', [other]);
     if (result === NIL) return false;
-    return result === 0n || result === 0;
+    return (yield* comparisonSign(result)) === 0;
   } catch (error) {
     if (error instanceof ComparableCycle && error.receiver === self && error.other === other) return false;
     throw error;
@@ -1113,7 +1114,7 @@ def('Proc', 'parameters', 0, () => {
 });
 def('Proc', ['inspect', 'to_s'], 0, (self: RProc) => str(inspectProc(self)));
 def('Proc', 'curry', [0, 1], function* (self: RProc, args) {
-  const arity = args.length > 0 ? Number(yield* toInt(args[0])) : procArity(self);
+  const arity = args.length > 0 ? yield* toRubyInt(args[0]) : procArity(self);
   if (args.length > 0 && self.isLambda) {
     const [minimum, maximum] = lambdaCurryBounds(self);
     if (arity < minimum || (maximum >= 0 && arity > maximum)) throw argumentCountError(arity, minimum, maximum);
