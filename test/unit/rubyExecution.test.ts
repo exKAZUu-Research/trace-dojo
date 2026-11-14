@@ -2360,6 +2360,16 @@ test('singleton_class returns immediate nil and boolean classes', () => {
   });
 });
 
+test('record separator assignments preserve US-ASCII encoding', () => {
+  expect(run('$/=[[]].join;s=$/.dup;s<<128;p s.bytes')).toMatchObject({ stdout: '[128]\n' });
+});
+
+test('active exception global rejects learner assignment', () => {
+  expect(run('begin;raise "bad";rescue;begin;$!=nil;rescue=>e;p e.class,e.message;end;p $!.class;end')).toMatchObject({
+    stdout: 'NameError\n"$! is a read-only variable"\nRuntimeError\n',
+  });
+});
+
 test('raise appends unknown keyword Hash once', () => {
   expect(run('begin;raise "x",foo:1,bar:2;rescue=>e;p e.class,e.message;end')).toMatchObject({
     stdout: 'TypeError\n"exception class/object expected"\n',

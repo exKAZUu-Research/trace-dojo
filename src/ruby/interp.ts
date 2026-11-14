@@ -562,6 +562,7 @@ const UNSUPPORTED_GLOBALS: Record<string, string> = {
 function globalSet(name: string, value: Value): void {
   const unsupported = unsupportedGlobal(name);
   if (unsupported) throw new UnsupportedFeatureError(unsupported);
+  if (name === '$!') throw nameError('$! is a read-only variable');
   if (name === '$_') {
     rt().frame.home.scope.vars.set(name, value);
     return;
@@ -574,7 +575,7 @@ function globalSet(name: string, value: Value): void {
     throw typeError(`value of ${name} must be String`);
   }
   if (name === '$/' && value instanceof RString) {
-    const separator = stringFromBytes(stringBytes(value), value.binary);
+    const separator = stringFromBytes(stringBytes(value), value.binary, value.usAscii);
     separator.frozen = true;
     rt().globals.set(name, separator);
     return;
