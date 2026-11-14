@@ -153,11 +153,14 @@ def('Set', ['|', 'union', '+'], 1, function* (self: RObject, [value]) {
 });
 def('Set', ['&', 'intersection'], 1, function* (self: RObject, [value]) {
   const right = yield* newSet(yield* other(value));
-  const result = (yield* callMethod(self.cls, 'new', [self])) as RObject;
-  return yield* whileHeld(result, function* () {
-    for (const [slot, entry] of membersOf(result).map)
-      if (!(yield* hashGet(membersOf(right), entry.key))) membersOf(result).map.delete(slot);
-    return result;
+  return yield* whileHeld(right, function* () {
+    const result = (yield* callMethod(self.cls, 'new', [])) as RObject;
+    return yield* whileHeld(result, function* () {
+      yield* eachEntry(membersOf(self), function* (entry) {
+        if (yield* hashGet(membersOf(right), entry.key)) yield* callMethod(result, 'add', [entry.key]);
+      });
+      return result;
+    });
   });
 });
 def('Set', ['-', 'difference'], 1, function* (self: RObject, [value]) {

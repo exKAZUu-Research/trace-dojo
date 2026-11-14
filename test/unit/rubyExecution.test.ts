@@ -1969,6 +1969,21 @@ test('Set subclasses retain their result class', () => {
   });
 });
 
+test('Set intersection initializes subclasses without arguments and keeps initialized members', () => {
+  expect(
+    run(
+      'class S<Set;def initialize(x=nil);super([9]);merge(x) if x;end;end;s=S.new([1,2]);p (s & Set[1]).to_a,s.intersection(Set[1]).to_a'
+    )
+  ).toMatchObject({
+    stdout: '[9, 1]\n[9, 1]\n',
+  });
+  expect(
+    run('class S<Set;def initialize(x,y);super(x);end;end;s=S.new([1],2);begin;s & Set[1];rescue=>e;p e.message;end')
+  ).toMatchObject({
+    stdout: '"wrong number of arguments (given 0, expected 2)"\n',
+  });
+});
+
 test('Set union and difference duplicate subclasses while flatten initializes them', () => {
   expect(
     run('class S<Set;def initialize(x,y);super(x);end;end;s=S.new([1],2);p (s|Set[2]).to_a,(s-Set[]).to_a')
