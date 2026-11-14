@@ -59,6 +59,7 @@ import { appendValues, inStackBuffer, type StackBuffer } from './sliceOps';
 import { sliceMode } from './slicePass';
 import { clobberMemory, reachingValue } from './ssaValues';
 import { newTurtle, TURTLE_POINTER } from './turtle';
+import { findTypeSource, typeFromSource, type TypeSource } from './typeInferenceSources';
 import {
   ANY,
   BASIC,
@@ -108,11 +109,11 @@ const MEMORYLESS_BUILTINS = new Set(['cap', 'complex', 'imag', 'len', 'max', 'mi
 interface InferenceOptions {
   written: Type[];
   spread: boolean;
-  choices?: (number | undefined)[];
+  choices?: (TypeSource | undefined)[];
 }
 
 export abstract class CallCompiler extends CompositeCompiler {
-  private readonly inferenceChoices = new WeakMap<Expression, (number | undefined)[]>();
+  private readonly inferenceChoices = new WeakMap<Expression, (TypeSource | undefined)[]>();
   // code-gauge-allow functionNcss 34 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   protected compileCall(expression: Extract<Expression, { kind: 'call' }>): Operand {
     const callee = this.expression(expression.callee);
@@ -449,14 +450,13 @@ export abstract class CallCompiler extends CompositeCompiler {
     });
     if (!mapping) return undefined;
     const typeArgs = generic.typeParams.map((param) => mapping.get(param.id) as Type);
-    if (this.reporting)
+    if (this.reporting) {
+      const operandTypes = operands.map((operand) => operand.type);
       this.inferenceChoices.set(
         expression.callee,
-        typeArgs.map((type) => {
-          const index = operands.findIndex((operand) => operand.type === type && !isUntyped(type));
-          return index !== -1 ? index : undefined;
-        })
+        typeArgs.map((type) => (isUntyped(type) ? undefined : findTypeSource(type, operandTypes)))
       );
+    }
     if (!this.checkTypeArguments(generic.typeParams, typeArgs, expression)) return undefined;
     if (!this.recordGenericInstantiation(generic.typeParams, typeArgs)) return undefined;
     const signature = substitute(generic.type, mapping, (named, args) =>
@@ -512,7 +512,7 @@ export abstract class CallCompiler extends CompositeCompiler {
   }
 
   /** Infers the type arguments of a generic call from its arguments: typed ones first, then untyped defaults. */
-  // code-gauge-allow functionNcss 54 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
+  // code-gauge-allow functionNcss 58 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   private inferTypeArguments(
     span: Span,
     generic: GenericFunc,
@@ -529,10 +529,16 @@ export abstract class CallCompiler extends CompositeCompiler {
       return undefined;
     }
     const mapping: Substitution = new Map(written.map((arg, index) => [typeParams[index].id, arg]));
+    const fixed = new Set(mapping.keys());
+    const operandTypes = operands.map((operand) => operand.type);
     for (const [index, source] of (choices ?? []).entries()) {
-      if (index >= written.length && source !== undefined) mapping.set(typeParams[index].id, operands[source].type);
+      const inferred = source && typeFromSource(source, operandTypes);
+      if (index >= written.length && inferred) {
+        mapping.set(typeParams[index].id, inferred);
+        fixed.add(typeParams[index].id);
+      }
     }
-    const inferredParams = typeParams.filter((_, index) => index >= written.length && choices?.[index] === undefined);
+    const inferredParams = typeParams.filter((parameter) => !fixed.has(parameter.id));
     const params = type.params;
     if ((!type.variadic || spread) && operands.length !== params.length) {
       this.error(
@@ -562,7 +568,7 @@ export abstract class CallCompiler extends CompositeCompiler {
         return undefined;
       }
     }
-    inferFromConstraints(typeParams, mapping);
+    inferFromConstraints(typeParams, mapping, fixed);
     const untypedByParam = new Map<number, { param: TypeParamType; operands: Operand[] }>();
     for (const [param, operand] of untyped) {
       if (param.kind === 'typeParam' && !mapping.has(param.id) && typeParams.includes(param)) {
@@ -586,7 +592,7 @@ export abstract class CallCompiler extends CompositeCompiler {
       }
       mapping.set(param.id, defaultType(chosen));
     }
-    inferFromConstraints(typeParams, mapping);
+    inferFromConstraints(typeParams, mapping, fixed);
     const missing = typeParams.find((param) => !mapping.has(param.id));
     if (missing) {
       this.error(span, `型引数 ${missing.name} を推論できません。`);

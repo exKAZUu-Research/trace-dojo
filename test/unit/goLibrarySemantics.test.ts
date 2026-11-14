@@ -1143,3 +1143,26 @@ test('custom zero methods and pointer fields avoid opaque structural inspection'
     uncaughtException: undefined,
   });
 });
+
+test('generic inference preserves nested operand types and instance-local identities', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main\nimport "fmt"\ntype B chan int\ntype Box[T any] struct { V T }\nfunc ps[T any](a []T,b T)T{return b}\nfunc pp[T any](a *T,b T)T{return b}\nfunc pm[T any](a map[int]T,b T)T{return b}\nfunc pa[T any](a [1]T,b T)T{return b}\nfunc pt[T any](a struct{V T},b T)T{return b}\nfunc pf[T any](a func()T,b T)T{return b}\nfunc pn[T any](a Box[T],b T)T{return b}\nfunc F[C ~chan int](c C){\n d:=make(chan int)\n fmt.Printf("%T %T %T %T %T %T %T\\n",ps([]chan int{d},c),pp(&d,c),pm(map[int]chan int{0:d},c),pa([1]chan int{d},c),pt(struct{V chan int}{d},c),pf(func()chan int{return d},c),pn(Box[chan int]{d},c))\n type Local struct{V C}\n fmt.Printf("%T\\n",ps([]Local{},Local{c}).V)\n}\nfunc main(){F(make(chan int));F(make(B))}\n'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'chan int chan int chan int chan int chan int chan int chan int\nchan int\nchan int chan int chan int chan int chan int chan int chan int\nmain.B\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('written type arguments stay fixed during function value inference', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;type B chan int;func p[T any,U any](a T,b U)T{return a};func main(){var f func(B,int)B=p[chan int];_=f}'
+    )
+  ).toMatchObject({ kind: 'compileError' });
+});

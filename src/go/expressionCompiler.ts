@@ -976,10 +976,16 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const generic = (operand.func as FuncEntity).generic as NonNullable<FuncEntity['generic']>;
     const mapping = new Map<number, Type>();
     for (const [index, type] of (operand.typeArgs ?? []).entries()) mapping.set(generic.typeParams[index].id, type);
+    const fixed = new Set(mapping.keys());
     const signature = target && coreType(target);
     if (signature?.kind === 'func') {
-      unify(generic.type, signature, mapping, generic.typeParams);
-      inferFromConstraints(generic.typeParams, mapping);
+      unify(
+        generic.type,
+        signature,
+        mapping,
+        generic.typeParams.filter((param) => !fixed.has(param.id))
+      );
+      inferFromConstraints(generic.typeParams, mapping, fixed);
     }
     const missing = generic.typeParams.find((parameter) => !mapping.has(parameter.id));
     if (missing) {

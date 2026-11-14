@@ -185,7 +185,12 @@ function bindTypeArgument(param: TypeParamType, arg: Type, mapping: Substitution
 
 /** Infers type parameters from the core types of the constraints of already-inferred ones, such as `S ~[]E`. */
 // code-gauge-allow functionCognitiveComplexity 18 -- Visits the Go type shapes while retaining substitution and inference context.
-export function inferFromConstraints(params: readonly TypeParamType[], mapping: Substitution): void {
+export function inferFromConstraints(
+  params: readonly TypeParamType[],
+  mapping: Substitution,
+  fixed: ReadonlySet<number> = new Set()
+): void {
+  const inferred = params.filter((param) => !fixed.has(param.id));
   for (let changed = true; changed;) {
     changed = false;
     for (const param of params) {
@@ -195,7 +200,7 @@ export function inferFromConstraints(params: readonly TypeParamType[], mapping: 
       const core = terms[0].type;
       if (bound) {
         const before = mapping.size;
-        unify(core, terms[0].tilde ? underlying(bound) : bound, mapping, params);
+        unify(core, terms[0].tilde ? underlying(bound) : bound, mapping, inferred);
         if (mapping.size !== before) changed = true;
       } else if (!containsUnbound(core, params, mapping)) {
         mapping.set(param.id, core);
