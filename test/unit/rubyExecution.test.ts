@@ -5090,6 +5090,43 @@ test('regexp replacement expansion stops at the storage limit', () => {
   });
 });
 
+test('neutral Rational powers keep the execution budget usable', () => {
+  expect(run('p Rational(1,1)**(10**400);p Rational(0,1)**(10**400)')).toMatchObject({
+    kind: 'executed',
+    stdout: '(1/1)\n(0/1)\n',
+  });
+});
+
+test('unterminated regexp comments fail without stalling execution', () => {
+  expect(run('Regexp.new("a(?#x")')).toMatchObject({
+    uncaughtException: expect.stringContaining('RegexpError'),
+  });
+});
+
+test('module methods bind across receiver and definition targets', () => {
+  expect(
+    run(
+      'module M;def hello = "m";end;class C;define_method(:hey,M.instance_method(:hello));end;p M.instance_method(:hello).bind(Object.new).call,C.new.hey'
+    )
+  ).toMatchObject({ stdout: '"m"\n"m"\n' });
+  expect(run('class A;def hello = "hi";end;class B;end;B.send(:define_method,:x,A.new.method(:hello))')).toMatchObject({
+    uncaughtException: expect.stringContaining('bind argument must be a subclass of A'),
+  });
+});
+
+test('singleton and alias method descriptions use their actual owners', () => {
+  expect(run('class A;def self.s = 1;end;p A.method(:s),A.method(:s).unbind')).toMatchObject({
+    stdout: '#<Method: A.s() main.rb:1>\n#<UnboundMethod: #<Class:A>#s() main.rb:1>\n',
+  });
+  expect(run('class A;def x = 1;alias y x;end;p A.new.method(:y)')).toMatchObject({
+    stdout: '#<Method: A#y(x)() main.rb:1>\n',
+  });
+});
+
+test('Rational rationalize preserves an exact value without tolerance', () => {
+  expect(run('p Rational(1,3).rationalize')).toMatchObject({ stdout: '(1/3)\n' });
+});
+
 test('Data copies remain frozen and Rational copies preserve identity', () => {
   expect(
     run(

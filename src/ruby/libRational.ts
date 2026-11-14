@@ -97,6 +97,13 @@ for (const op of ['+', '-', '*', '/', 'quo']) {
 def('Rational', '**', 1, function* (self: RObject, [exponent]) {
   const { numerator, denominator } = fractionOf(self);
   if (typeof exponent === 'bigint') {
+    if (exponent === 0n) return makeRational(1n, 1n);
+    if (numerator === 0n) {
+      if (exponent < 0n) throw zeroDivisionError();
+      return makeRational(0n, 1n);
+    }
+    if (denominator === 1n && (numerator === 1n || numerator === -1n))
+      return makeRational(numerator === -1n && exponent % 2n !== 0n ? -1n : 1n, 1n);
     const magnitude = exponent < 0n ? -exponent : exponent;
     const bits = [numerator, denominator]
       .map((value) => (value < 0n ? -value : value))
@@ -143,6 +150,10 @@ def('Rational', 'inspect', 0, (self: RObject) =>
 );
 def('Rational', 'to_f', 0, (self: RObject) => toNumber(fractionOf(self)));
 def('Rational', 'to_r', 0, (self) => self);
+def('Rational', 'rationalize', [0, 1], (self: RObject, args) => {
+  if (args.length > 0) throw new UnsupportedFeatureError('Rational#rationalize（許容誤差）');
+  return self;
+});
 def('Rational', ['to_i', 'truncate'], 0, (self: RObject) => fractionOf(self).numerator / fractionOf(self).denominator);
 def('Rational', 'hash', 0, (self: RObject) => fractionOf(self).numerator ^ fractionOf(self).denominator);
 def(

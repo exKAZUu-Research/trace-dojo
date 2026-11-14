@@ -118,7 +118,9 @@ export function translate(source: string, extended: boolean): string {
       }
       if (/^[imx-]+[:)]/.test(rest)) throw unsupportedSyntax('中のオプションの指定（(?i) など）');
       if (rest.startsWith('#')) {
-        index = source.indexOf(')', index);
+        const end = source.indexOf(')', index);
+        if (end === -1) throw rubyError(rt().c.RegexpError, `invalid pattern: /${source}/`);
+        index = end;
         continue;
       }
     }

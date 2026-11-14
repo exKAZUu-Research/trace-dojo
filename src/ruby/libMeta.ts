@@ -171,7 +171,8 @@ function unboundMethod(method: RMethod, name = method.name): RObject {
 
 function methodDescription(self: RObject): string {
   const { recv, method, name } = self.data as MethodData;
-  const owner = method.owner.isSingleton ? `${className(realClassOf(recv))}.` : `${className(method.owner)}#`;
+  const unbound = self.cls === rt().c.UnboundMethod;
+  const owner = methodOwnerPrefix(method, recv, unbound);
   const definition =
     method.body.kind === 'user'
       ? method.body.def
@@ -195,8 +196,16 @@ function methodDescription(self: RObject): string {
         ? '_'
         : '*';
   const row = definition?.row;
-  const kind = self.cls === rt().c.UnboundMethod ? 'UnboundMethod' : 'Method';
-  return `#<${kind}: ${owner}${name}(${signature})${row === undefined ? '' : ` main.rb:${row + 1}`}>`;
+  const kind = unbound ? 'UnboundMethod' : 'Method';
+  return `#<${kind}: ${owner}${name}${name === method.name ? '' : `(${method.name})`}(${signature})${row === undefined ? '' : ` main.rb:${row + 1}`}>`;
+}
+
+function methodOwnerPrefix(method: RMethod, recv: Value, unbound: boolean): string {
+  if (!method.owner.isSingleton) return `${className(method.owner)}#`;
+  const attached = method.owner.attached as Value;
+  if (unbound)
+    return `#<Class:${attached instanceof RClass ? className(attached) : className(realClassOf(attached))}>#`;
+  return `${attached instanceof RClass ? className(attached) : className(realClassOf(recv))}.`;
 }
 
 /** What `parameters` lists for parameters a program wrote: each one's kind and, when it has one, its name. */
@@ -360,8 +369,7 @@ function* defineMethodFrom(
     method = { name, owner, visibility, body: { kind: 'proc', proc: body } };
   } else if (body instanceof RObject && (body.cls === rt().c.Method || body.cls === rt().c.UnboundMethod)) {
     const source = (body.data as MethodData).method;
-    if (body.cls === rt().c.UnboundMethod && !owner.ancestors().includes(source.owner))
-      throw typeError(`bind argument must be a subclass of ${className(source.owner)}`);
+    assertMethodOwner(source.owner, owner, true);
     method = { ...(body.data as MethodData).method, name, owner, visibility };
   } else {
     throw typeError(`wrong argument type ${realClassOf(body).name} (expected Proc/Method/UnboundMethod)`);
@@ -444,8 +452,20 @@ def(
 
 function validBoundMethod(self: RObject, recv: Value): RMethod {
   const { method } = self.data as MethodData;
-  if (!isA(recv, method.owner)) throw typeError(`bind argument must be an instance of ${className(method.owner)}`);
+  assertMethodOwner(method.owner, recv, false);
   return method;
+}
+
+function assertMethodOwner(owner: RClass, target: Value, defining: boolean): void {
+  if (owner.isModule) return;
+  if (owner.isSingleton) {
+    if (defining ? target !== owner : target !== owner.attached)
+      throw typeError("can't bind singleton method to a different class");
+    return;
+  }
+  const compatible = defining ? target instanceof RClass && target.ancestors().includes(owner) : isA(target, owner);
+  if (!compatible)
+    throw typeError(`bind argument must be ${defining ? 'a subclass' : 'an instance'} of ${className(owner)}`);
 }
 def(
   'BasicObject',
