@@ -1220,3 +1220,17 @@ test('overlapping append snapshots composite values while preserving storage and
     uncaughtException: undefined,
   });
 });
+
+test('JSON IsZero dispatch skips typed nil pointers and calls nil map and slice receivers', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main\nimport("fmt";"encoding/json")\nvar calls int\ntype Zero interface{IsZero()bool}\ntype Z struct{X int}\nfunc(z *Z)IsZero()bool{calls++;return z.X==0}\ntype V int\nfunc(v V)IsZero()bool{calls++;return v==0}\ntype M map[string]int\nfunc(m M)IsZero()bool{calls++;return false}\ntype L []int\nfunc(l L)IsZero()bool{calls++;return false}\ntype S struct{\n A interface{IsZero()bool} `json:",omitzero"`\n B Zero `json:",omitzero"`\n C *Z `json:",omitzero"`\n D any `json:",omitzero"`\n}\nfunc show(s S){b,e:=json.Marshal(s);fmt.Println(string(b),e,calls)}\nfunc main(){\n show(S{})\n var p *Z;show(S{A:p,B:p,C:p,D:p})\n var q *V;show(S{A:q,B:q})\n z:=&Z{};show(S{A:z,B:z,C:z})\n z.X=1;show(S{A:z,B:z,C:z})\n var m M;var l L;show(S{A:m,B:l})\n show(S{A:V(0),B:V(1)})\n}\n'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '{} <nil> 0\n{"D":null} <nil> 0\n{} <nil> 0\n{} <nil> 3\n{"A":{"X":1},"B":{"X":1},"C":{"X":1}} <nil> 6\n{"A":null,"B":null} <nil> 8\n{"B":1} <nil> 10\n',
+    uncaughtException: undefined,
+  });
+});

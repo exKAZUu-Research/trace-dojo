@@ -668,7 +668,10 @@ function zeroJsonValue(ref: Ref, type: Type): boolean {
   const value = ref.get();
   if (value === undefined) return true;
   const method = implementsVia(type, IS_ZERO);
-  if (method === 'value') return callValueMethod(type, value, 'IsZero', []) as boolean;
+  if (method === 'value') {
+    const nilPointer = value instanceof Iface && value.value === undefined && underlying(value.type).kind === 'pointer';
+    return nilPointer || (callValueMethod(type, value, 'IsZero', []) as boolean);
+  }
   if (method === 'pointer') {
     return callPointerMethod(type, ref.pointer, 'IsZero', []) as boolean;
   }
