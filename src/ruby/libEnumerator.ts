@@ -855,23 +855,23 @@ function* lazySize(self: RObject): Gen {
   const { source, steps } = self.data as LazyData;
   if (!respondsTo(source, 'size')) return NIL;
   let size = yield* callMethod(source, 'size', []);
-  for (const step of steps) {
-    if (size === NIL) return NIL;
-    if (step.kind === 'take' || step.kind === 'drop') {
-      if (typeof size === 'bigint')
-        size =
-          step.kind === 'take'
-            ? size < BigInt(step.count)
-              ? size
-              : BigInt(step.count)
-            : size > BigInt(step.count)
-              ? size - BigInt(step.count)
-              : 0n;
-      else if (isRubyFloat(size))
-        size = step.kind === 'take' ? Math.min(Number(size), step.count) : Math.max(0, Number(size) - step.count);
-    } else if (!['map', 'with_index'].includes(step.kind)) return NIL;
-  }
+  for (const step of steps) size = nextLazySize(size, step);
   return size;
+}
+
+function nextLazySize(size: Value, step: LazyStep): Value {
+  if (size === NIL) return NIL;
+  if (step.kind === 'take') {
+    if (typeof size === 'bigint') return size < BigInt(step.count) ? size : BigInt(step.count);
+    if (isRubyFloat(size)) return Number(size) < step.count ? size : BigInt(step.count);
+    return size;
+  }
+  if (step.kind === 'drop') {
+    if (typeof size === 'bigint') return size > BigInt(step.count) ? size - BigInt(step.count) : 0n;
+    if (isRubyFloat(size)) return Math.max(0, Number(size) - step.count);
+    return size;
+  }
+  return step.kind === 'map' || step.kind === 'with_index' ? size : NIL;
 }
 
 function makeLazy(source: Value, steps: LazyStep[]): RObject {

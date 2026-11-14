@@ -3,9 +3,9 @@ import { def } from './define';
 import { argumentError, floatDomainError, typeError, zeroDivisionError } from './errors';
 import { exactDecimal } from './floatFormat';
 import { callMethod, type Gen } from './interp';
-import { isRubyFloat, NIL, RArray, RObject, RString, type Value } from './objects';
+import { isRubyFloat, NIL, RArray, RObject, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
-import { arr, realClassOf, str } from './values';
+import { arr, classOf, realClassOf, str } from './values';
 
 /** A Rational's value in lowest terms, with a positive denominator. */
 interface Fraction {
@@ -68,11 +68,8 @@ function* arithmetic(self: RObject, other: Value, op: string): Gen {
   if (isRubyFloat(other)) return yield* callMethod(toNumber(a), op, [other]);
   const b = asFraction(other);
   if (!b) {
-    if (other === NIL || other instanceof RString)
-      throw typeError(`${other === NIL ? 'nil' : 'String'} can't be coerced into Rational`);
-    const pair = yield* callMethod(other, 'coerce', [self]);
-    if (!(pair instanceof RArray) || pair.items.length !== 2) throw typeError('coerce must return [x, y]');
-    return yield* callMethod(pair.items[0], op, [pair.items[1]]);
+    const [left, right] = yield* coercePair(self, other);
+    return yield* callMethod(left, op, [right]);
   }
   switch (op) {
     case '+': {
@@ -89,6 +86,27 @@ function* arithmetic(self: RObject, other: Value, op: string): Gen {
       return makeRational(a.numerator * b.denominator, a.denominator * b.numerator);
     }
   }
+}
+
+function* coercePair(self: RObject, other: Value): Gen<[Value, Value]> {
+  const cls = classOf(other);
+  const missing = cls.findMethod('method_missing');
+  if (!cls.findMethod('coerce') && (!missing || missing.body.kind === 'native')) {
+    const name =
+      other === NIL
+        ? 'nil'
+        : typeof other === 'boolean'
+          ? String(other)
+          : other instanceof RString
+            ? 'String'
+            : other instanceof RSymbol
+              ? `:${other.name}`
+              : realClassOf(other).name;
+    throw typeError(`${name} can't be coerced into Rational`);
+  }
+  const pair = yield* callMethod(other, 'coerce', [self]);
+  if (!(pair instanceof RArray) || pair.items.length !== 2) throw typeError('coerce must return [x, y]');
+  return [pair.items[0], pair.items[1]];
 }
 
 for (const op of ['+', '-', '*', '/', 'quo']) {
@@ -111,9 +129,8 @@ function* rationalDivision(
   if (isRubyFloat(other)) return yield* callMethod(toNumber(left), op, [other]);
   const right = asFraction(other);
   if (!right) {
-    const pair = yield* callMethod(other, 'coerce', [self]);
-    if (!(pair instanceof RArray) || pair.items.length !== 2) throw typeError('coerce must return [x, y]');
-    return yield* callMethod(pair.items[0], op, [pair.items[1]]);
+    const [left, converted] = yield* coercePair(self, other);
+    return yield* callMethod(left, op, [converted]);
   }
   if (right.numerator === 0n) throw zeroDivisionError();
   const numerator = left.numerator * right.denominator;

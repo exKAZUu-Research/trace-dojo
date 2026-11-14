@@ -5383,6 +5383,25 @@ test('Time strftime uses directive-specific padding and case rules', () => {
   });
 });
 
+test('anonymous rest forwards keyword hashes through implicit super', () => {
+  expect(run('class B;def f(*a,**k)=[a,k];end;class D<B;def f(*)=super;end;p D.new.f(1,a:1)')).toMatchObject({
+    stdout: '[[1, {a: 1}], {}]\n',
+  });
+});
+
+test('Rational division rejects operands without coerce as Ruby TypeError', () => {
+  expect(
+    run('r=Rational(7,2);[nil,"a",Object.new].each{|v|begin;r%v;rescue=>e;p e.class,e.message;end}')
+  ).toMatchObject({
+    stdout:
+      'TypeError\n"nil can\'t be coerced into Rational"\nTypeError\n"String can\'t be coerced into Rational"\nTypeError\n"Object can\'t be coerced into Rational"\n',
+  });
+});
+
+test('Lazy take reports an Integer size for endless sources', () => {
+  expect(run('p (1..).lazy.take(3).size,(1..).lazy.take(5).drop(2).size')).toMatchObject({ stdout: '3\n3\n' });
+});
+
 test('Data copies remain frozen and Rational copies preserve identity', () => {
   expect(
     run(
