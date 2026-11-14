@@ -6797,6 +6797,9 @@ test('MatchData source snapshots preserve binary bytes and freezing', () => {
   }
   expect(run('s="aba";s.sub("a"){s[1]="X";"z"};p $~.string')).toMatchObject({ stdout: '"aba"\n' });
   expect(run('s="abc";s.sub!("a"){s[1]="X";"z"};p $~.string')).toMatchObject({ stdout: '"abc"\n' });
+  expect(run('s="aba";i=0;s.gsub("a"){i+=1;s[1]="X" if i==2;"z"};p $~.string')).toMatchObject({
+    stdout: '"aXa"\n',
+  });
 });
 
 test('Time constructor validates field widths before calendar bounds', () => {
@@ -6827,8 +6830,21 @@ test('respond_to_missing? definitions remain private', () => {
       'class D;def respond_to_missing?(n,p=false);true;end;end;d=D.new;p defined?(d.respond_to_missing?);begin;d.respond_to_missing?(:x);rescue=>e;p e.class;end'
     )
   ).toMatchObject({ stdout: 'nil\nNoMethodError\n' });
+  expect(
+    run(
+      'class C;def self.respond_to_missing?(n,p=false);true;end;end;p C.respond_to_missing?(:x),C.singleton_class.private_method_defined?(:respond_to_missing?)'
+    )
+  ).toMatchObject({ stdout: 'true\nfalse\n' });
+  expect(
+    run(
+      'class D;private;def hidden;end;def respond_to_missing?(n,p=false);true;end;end;p D.new.respond_to?(:hidden),D.new.respond_to?(:respond_to_missing?)'
+    )
+  ).toMatchObject({ stdout: 'true\ntrue\n' });
 });
 
 test('DATA inspect identifies its script file', () => {
   expect(run('p DATA\n__END__\ntext')).toMatchObject({ stdout: '#<File:main.rb>\n' });
+  expect(run('p DATA.to_s\n__END__\ntext')).toMatchObject({
+    stdout: expect.stringMatching(/^"#<File:0x[\da-f]+>"\n$/),
+  });
 });

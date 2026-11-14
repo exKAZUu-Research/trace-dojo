@@ -90,7 +90,7 @@ def(
 /** `respond_to?`: whether a public (or, with `include_all`, any) method answers, or `respond_to_missing?` says so. */
 export function* respondsToName(self: Value, name: string, includeAll: boolean): Gen<boolean> {
   const method = classOf(self).findMethod(name);
-  if (method) return includeAll || method.visibility === 'public';
+  if (method && (includeAll || method.visibility === 'public')) return true;
   const missing = classOf(self).findMethod('respond_to_missing?');
   if (missing && missing.body.kind !== 'native') {
     return truthy(yield* invoke(missing, self, [sym(name), includeAll], undefined, undefined, true));

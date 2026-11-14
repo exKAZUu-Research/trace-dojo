@@ -1506,7 +1506,8 @@ const SINGLETON_METHOD_HOOKS = new Set([
 
 export function addMethod(owner: RClass, method: RMethod): void {
   assertMutableClass(owner);
-  if (method.name === 'respond_to_missing?' && method.body.kind !== 'visibility') method.visibility = 'private';
+  if (method.name === 'respond_to_missing?' && !owner.isSingleton && method.body.kind !== 'visibility')
+    method.visibility = 'private';
   if (
     owner.isSingleton &&
     ((owner.attached instanceof RClass && CLASS_METHOD_HOOKS.has(method.name)) ||

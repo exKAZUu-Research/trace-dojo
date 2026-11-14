@@ -110,7 +110,7 @@ function remaining(self: RObject): string {
 sdef('File', ['new', 'allocate'], [0, -1], () => {
   throw new UnsupportedFeatureError('File オブジェクトの生成');
 });
-def('File', ['inspect', 'to_s'], 0, (self: RObject) => {
+def('File', 'inspect', 0, (self: RObject) => {
   dataState(self);
   return str('#<File:main.rb>');
 });
