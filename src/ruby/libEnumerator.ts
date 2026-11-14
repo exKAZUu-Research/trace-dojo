@@ -5,6 +5,7 @@ import {
   numericCompare,
   spaceship,
   toIndex,
+  toIndexExact,
   toInt,
   toStepFloat,
 } from './conversions';
@@ -75,16 +76,19 @@ function* enumeratorSize(recv: Value, method: string, args: Value[], keywords?: 
   }
   const base = receiverSize(recv);
   if (method === 'each_slice' && args[0] !== undefined && typeof base === 'bigint') {
-    const count = yield* toInt(args[0]);
+    const count = (yield* toIndexExact(args[0])).integer;
+    if (count <= 0n) throw argumentError('invalid slice size');
     return (base + count - 1n) / count;
   }
   if (method === 'each_cons' && args[0] !== undefined && typeof base === 'bigint') {
-    const count = yield* toInt(args[0]);
+    const count = (yield* toIndexExact(args[0])).integer;
+    if (count <= 0n) throw argumentError('invalid size');
     return base >= count ? base - count + 1n : 0n;
   }
   if (method === 'cycle' && typeof base === 'bigint') {
+    if (base === 0n) return 0n;
     const count = args[0] === undefined || args[0] === NIL ? undefined : yield* toInt(args[0]);
-    if (base === 0n || (count !== undefined && count <= 0n)) return 0n;
+    if (count !== undefined && count <= 0n) return 0n;
     return count === undefined ? Number.POSITIVE_INFINITY : base * count;
   }
   if (method === 'loop') return Number.POSITIVE_INFINITY;

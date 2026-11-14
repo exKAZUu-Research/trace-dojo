@@ -54,6 +54,7 @@ import {
   Scope,
   ThrowSignal,
   UnsupportedFeatureError,
+  whileHeld,
 } from './runtime';
 import { CORE_CLASSES, CORE_MODULES, UNSUPPORTED_CONSTANTS } from './unsupportedNames';
 import {
@@ -993,9 +994,11 @@ function* evalFor(e: Extract<Expr, { k: 'for' }>, frame: Frame): Gen {
   const runtime = rt();
   const iterable = yield* ev(e.iter, frame);
   const body = function* (item: Value): Gen {
-    runtime.currentRow = e.row;
-    yield* assign(e.target, item, frame);
-    runtime.steps.stepBinding(e.row, e.target.k === 'mlhs' || storesAnswer(item));
+    yield* whileHeld(item, function* () {
+      runtime.currentRow = e.row;
+      yield* assign(e.target, item, frame);
+      runtime.steps.stepBinding(e.row, e.target.k === 'mlhs' || storesAnswer(item));
+    });
     try {
       yield* evalBody(e.body, frame);
     } catch (error) {
@@ -1119,8 +1122,6 @@ function* evalBegin(e: Extract<Expr, { k: 'begin' }>, frame: Frame): Gen {
 
 const RETRY = Symbol('retry');
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Rescue selects classes, binds the exception, and restores handling state around the chosen body.
-// code-gauge-allow functionNcss 33 -- Rescue selects classes, binds the exception, and restores handling state around the chosen body.
 function* rescueClause(
   e: Extract<Expr, { k: 'begin' }>,
   error: RubyError,
@@ -1134,19 +1135,10 @@ function* rescueClause(
   try {
     for (const rescue of e.rescues) {
       runtime.currentRow = rescue.row;
-      let matched = false;
-      if (rescue.classes.length === 0) {
-        matched = truthy(yield* callMethod(runtime.c.StandardError, '===', [exception]));
-      } else {
-        const classes = yield* evalList(rescue.classes, frame);
-        for (const cls of classes) {
-          if (!(cls instanceof RClass)) throw typeError('class or module required for rescue clause');
-          if (truthy(yield* callMethod(cls, '===', [exception]))) {
-            matched = true;
-            break;
-          }
-        }
-      }
+      const matched =
+        rescue.classes.length === 0
+          ? truthy(yield* callMethod(runtime.c.StandardError, '===', [exception]))
+          : yield* matchesRescueClass(rescue.classes, exception, frame);
       if (!matched) continue;
       try {
         if (rescue.variable) {
@@ -1164,6 +1156,24 @@ function* rescueClause(
     frame.handling.pop();
     runtime.globals.set('$!', savedError);
   }
+}
+
+function* matchesRescueClass(expressions: Expr[], exception: Value, frame: Frame): Gen<boolean> {
+  for (const expression of expressions) {
+    const classes =
+      expression.k === 'splat' ? yield* splatItems(yield* ev(expression.e, frame)) : [yield* ev(expression, frame)];
+    const mark = frame.temporaries.length;
+    for (const cls of classes) frame.temporaries.push(cls);
+    try {
+      for (const cls of classes) {
+        if (!(cls instanceof RClass)) throw typeError('class or module required for rescue clause');
+        if (truthy(yield* callMethod(cls, '===', [exception]))) return true;
+      }
+    } finally {
+      frame.temporaries.length = mark;
+    }
+  }
+  return false;
 }
 
 // Definitions ---------------------------------------------------------------------------------------------------------

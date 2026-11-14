@@ -2486,6 +2486,33 @@ test('Integer Range sum uses Float conversion for String and nil initial values'
   expect(run('begin;p (1..3).sum(nil);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'TypeError\n' });
 });
 
+test('Enumerator grouping sizes validate renewed count conversions', () => {
+  expect(
+    run(
+      'class A;def initialize;@n=1;end;def to_int;x=@n;@n=0;x;end;end;e=[1,2].each_slice(A.new);begin;p e.size;rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({ stdout: 'ArgumentError\n' });
+  expect(
+    run(
+      'class A;def initialize;@n=1;end;def to_int;x=@n;@n=-1;x;end;end;e=[1,2].each_cons(A.new);begin;p e.size;rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({ stdout: 'ArgumentError\n' });
+});
+
+test('empty cycle size skips count conversion', () => {
+  expect(run('class A;def to_int;puts :called;2;end;end;e=[].cycle(A.new);puts :size;p e.size')).toMatchObject({
+    stdout: 'size\n0\n',
+  });
+});
+
+test('rescue class evaluation stops after a match', () => {
+  expect(
+    run('def f;puts :later;StandardError;end;begin;raise "x";rescue StandardError,f;puts :handled;end')
+  ).toMatchObject({
+    stdout: 'handled\n',
+  });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(

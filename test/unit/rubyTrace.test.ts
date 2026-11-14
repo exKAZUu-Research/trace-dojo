@@ -466,6 +466,12 @@ test('Range first keeps collected successors reachable', () => {
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(4);
 });
 
+test('for-loop target evaluation roots the yielded value', () => {
+  const program =
+    'class E;def each;yield Turtle.new;end;end;class A;attr_accessor :x;end;$a=A.new;def recv;q=1;$a;end;for recv.x in E.new;end';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
 test('converted Hash sources keep later Turtle values alive during insertion', () => {
   for (const operation of ['h={**A.new}', 'h={}.merge(A.new)']) {
     const program = `class K; def hash; x=1; 0; end; end; class A; def to_hash; {K.new=>1, 2=>Turtle.new}; end; end; ${operation}`;
