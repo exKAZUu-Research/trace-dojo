@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 921 -- Expression compilation shares lvalue, conversion and pointer metadata state.
+// code-gauge-allow-file fileNcss 925 -- Expression compilation shares lvalue, conversion and pointer metadata state.
 import {
   binaryOperation,
   complement,
@@ -95,13 +95,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected abstract checkFunctionUse(fn: FunctionInfo, row: number): void;
 
   protected typeOfExpression(expression: Expression): CType {
-    const operand = this.withoutVlaEvaluation(() => this.expression(expression));
+    const discovered = this.discover(() => this.expression(expression));
+    const operand = discovered.value;
     if (!isVariablyModified(operand.type)) return unqualified(operand.type);
-    const evaluated = this.expression(expression);
+    discovered.use();
     this.pendingVla.push((frame) => {
-      (evaluated.effect ?? evaluated.value)(frame);
+      discovered.lengths?.(frame);
+      (operand.effect ?? operand.value)(frame);
     });
-    return unqualified(evaluated.type);
+    return unqualified(operand.type);
   }
 
   protected constantOperand(expression: Expression): Operand | undefined {
@@ -222,15 +224,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   private sizeofExpression(expression: Extract<Expression, { kind: 'sizeofExpression' }>): Operand {
     const row = expression.row;
-    const operand = this.withoutVlaEvaluation(() => this.expression(expression.operand));
+    const discovered = this.discover(() => this.expression(expression.operand));
+    const operand = discovered.value;
     if (operand.lvalue?.isBitField) this.error(row, 'ビットフィールドに sizeof は使えません。');
     if (!hasVla(operand.type)) return this.sizeofType(operand.type, row);
-    const evaluated = this.expression(expression.operand);
-    const result = this.sizeofType(evaluated.type, row);
+    discovered.use();
+    const result = this.sizeofType(operand.type, row);
     return {
       type: result.type,
       value: (frame) => {
-        (evaluated.effect ?? evaluated.value)(frame);
+        discovered.lengths?.(frame);
+        (operand.effect ?? operand.value)(frame);
         return result.value(frame);
       },
     };
@@ -345,7 +349,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
       }
       case 'global': {
         const { global } = entity;
-        if (!this.isUnevaluated) global.referencedAt ??= row;
+        this.recordReference(() => {
+          global.referencedAt ??= row;
+        });
         const index = global.index;
         const operand = this.memoryOperand(entity.type, (frame) => frame.runtime.globals[index].base);
         return {

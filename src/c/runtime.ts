@@ -29,8 +29,7 @@ export interface LocalInfo {
   inMemory: boolean;
   /** The size of the variable's block, for one that lives in memory. */
   size: number;
-  /** Whether the variable is a variable-length array, whose block its declaration creates. */
-  isVla?: boolean;
+  deferredAllocation?: boolean;
   /** The global that holds a `static` local. */
   staticGlobal?: GlobalInfo;
   alignment?: number;
@@ -38,6 +37,7 @@ export interface LocalInfo {
 }
 
 export interface GlobalInfo {
+  isUsed?: boolean;
   alignment?: number;
   header?: string;
   referencedAt?: number;
@@ -140,13 +140,23 @@ export class Frame implements TracedFrame {
 
   enterScope(locals: readonly LocalInfo[]): void {
     for (const local of locals) {
-      if (!local.inMemory || local.staticGlobal || local.isVla) continue;
-      const block = this.runtime.allocate(local.size, 'stack', Math.max(alignOf(local.type), local.alignment ?? 0));
-      block.type = local.type;
-      block.name = local.name;
-      this.bases[local.index] = block.base;
-      this.blocks.set(local.index, block);
+      if (!local.inMemory || local.staticGlobal || local.deferredAllocation) continue;
+      this.allocateLocal(local);
     }
+  }
+
+  allocateLocal(local: LocalInfo, type = local.type): Allocation {
+    const previous = this.blocks.get(local.index);
+    if (previous) {
+      this.runtime.memory.release(previous);
+      this.blocks.delete(local.index);
+    }
+    const block = this.runtime.allocate(sizeOf(type), 'stack', Math.max(alignOf(type), local.alignment ?? 0));
+    block.type = type;
+    block.name = local.name;
+    this.bases[local.index] = block.base;
+    this.blocks.set(local.index, block);
+    return block;
   }
 
   exitScope(locals: readonly LocalInfo[]): void {

@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 424 -- Declarator resolution and deferred semantic evaluation share type and scope state.
 import { CompileError } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { convertScalar, type Scalar, type Value } from './arith';
@@ -147,6 +148,7 @@ export interface CompileOptions {
 export abstract class CompilerBase {
   protected scope = new Scope();
   protected isUnevaluated = false;
+  private deferredReferences?: (() => void)[];
   private inParameter = false;
   protected fn?: FunctionContext;
   /** The lengths of variable-length arrays in the declarator being compiled, which its declaration computes. */
@@ -181,6 +183,37 @@ export abstract class CompilerBase {
       return compile();
     } finally {
       this.isUnevaluated = previous;
+    }
+  }
+
+  protected recordReference(reference: () => void): void {
+    if (this.isUnevaluated) return;
+    if (this.deferredReferences) this.deferredReferences.push(reference);
+    else reference();
+  }
+
+  protected discover<T>(compile: () => T): { value: T; lengths?: (frame: Frame) => void; use: () => void } {
+    const previousUnevaluated = this.isUnevaluated;
+    const previousReferences = this.deferredReferences;
+    const previousLengths = this.pendingVla;
+    const references: (() => void)[] = [];
+    this.isUnevaluated = false;
+    this.deferredReferences = references;
+    this.pendingVla = [];
+    try {
+      const value = compile();
+      const lengths = this.takePendingVla();
+      return {
+        value,
+        lengths,
+        use: () => {
+          for (const reference of references) this.recordReference(reference);
+        },
+      };
+    } finally {
+      this.isUnevaluated = previousUnevaluated;
+      this.deferredReferences = previousReferences;
+      this.pendingVla = previousLengths;
     }
   }
 

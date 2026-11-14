@@ -132,18 +132,18 @@ function pad(value: number, width: number, filler = '0'): string {
   return String(value).padStart(width, filler);
 }
 
-function asctimeText(fields: BrokenDown): string {
-  return `${WEEKDAYS[fields.weekday]?.slice(0, 3) ?? '???'} ${MONTHS[fields.month]?.slice(0, 3) ?? '???'} ${pad(fields.day, 2, ' ')} ${pad(fields.hour, 2)}:${pad(fields.minute, 2)}:${pad(fields.second, 2)} ${fields.year + 1900}\n`;
+function calendarText(fields: BrokenDown, missing: '?' | '???'): string {
+  return `${WEEKDAYS[fields.weekday]?.slice(0, 3) ?? missing} ${MONTHS[fields.month]?.slice(0, 3) ?? missing} ${pad(fields.day, 2, ' ')} ${pad(fields.hour, 2)}:${pad(fields.minute, 2)}:${pad(fields.second, 2)} ${fields.year + 1900}`;
 }
 
 /** The ISO 8601 week-based year and week of a date, which `%G`, `%g`, and `%V` show. */
-function isoWeek(fields: BrokenDown): { year: number; week: number } {
-  const year = fields.year + 1900;
-  const weekday = (fields.weekday + 6) % 7;
-  const thursday = fields.yearDay - weekday + 3;
+function isoWeek(yearSince1900: number, dayOfWeek: number, yearDay: number): { year: number; week: number } {
+  const year = yearSince1900 + 1900;
+  const weekday = (dayOfWeek + 6) % 7;
+  const thursday = yearDay - weekday + 3;
   if (thursday < 0) {
     const previousDays = (year - 1) % 4 === 0 && ((year - 1) % 100 !== 0 || (year - 1) % 400 === 0) ? 366 : 365;
-    return isoWeek({ ...fields, year: fields.year - 1, yearDay: fields.yearDay + previousDays });
+    return isoWeek(yearSince1900 - 1, dayOfWeek, yearDay + previousDays);
   }
   const days = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 366 : 365;
   if (thursday >= days) return { year: year + 1, week: 1 };
@@ -157,15 +157,15 @@ const CONVERSIONS: Record<string, (fields: BrokenDown) => string> = {
   b: (fields) => MONTHS[fields.month]?.slice(0, 3) ?? '?',
   h: (fields) => MONTHS[fields.month]?.slice(0, 3) ?? '?',
   B: (fields) => MONTHS[fields.month] ?? '?',
-  c: (fields) => asctimeText(fields).trimEnd(),
+  c: (fields) => calendarText(fields, '?'),
   C: (fields) => pad(Math.floor((fields.year + 1900) / 100), 2),
   d: (fields) => pad(fields.day, 2),
   D: (fields) => monthDayYear(fields),
   x: (fields) => monthDayYear(fields),
   e: (fields) => pad(fields.day, 2, ' '),
   F: (fields) => `${fields.year + 1900}-${pad(fields.month + 1, 2)}-${pad(fields.day, 2)}`,
-  g: (fields) => pad(isoWeek(fields).year % 100, 2),
-  G: (fields) => String(isoWeek(fields).year),
+  g: (fields) => pad(isoWeek(fields.year, fields.weekday, fields.yearDay).year % 100, 2),
+  G: (fields) => String(isoWeek(fields.year, fields.weekday, fields.yearDay).year),
   H: (fields) => pad(fields.hour, 2),
   I: (fields) => pad(hour12(fields), 2),
   j: (fields) => pad(fields.yearDay + 1, 3),
@@ -185,7 +185,7 @@ const CONVERSIONS: Record<string, (fields: BrokenDown) => string> = {
   X: (fields) => hourMinuteSecond(fields),
   u: (fields) => String(fields.weekday === 0 ? 7 : fields.weekday),
   U: (fields) => pad(Math.floor((fields.yearDay + 7 - fields.weekday) / 7), 2),
-  V: (fields) => pad(isoWeek(fields).week, 2),
+  V: (fields) => pad(isoWeek(fields.year, fields.weekday, fields.yearDay).week, 2),
   w: (fields) => String(fields.weekday),
   W: (fields) => pad(Math.floor((fields.yearDay + 7 - ((fields.weekday + 6) % 7)) / 7), 2),
   y: (fields) => pad((fields.year + 1900) % 100, 2),
@@ -258,8 +258,12 @@ export const TIME_FUNCTIONS: Record<string, NativeFunction> = {
   },
   gmtime: (runtime, [pointer]) => brokenDownTime(runtime, pointer, 'gmtime'),
   localtime: (runtime, [pointer]) => brokenDownTime(runtime, pointer, 'localtime'),
-  asctime: (runtime, [pointer]) => returnString(runtime, asctimeText(readTm(runtime, asAddress(pointer)))),
-  ctime: (runtime, [pointer]) => returnString(runtime, asctimeText(breakDown(timeArgument(runtime, pointer)))),
+  asctime: (runtime, [pointer]) =>
+    returnString(runtime, `${calendarText(readTm(runtime, asAddress(pointer)), '???')}\n`),
+  ctime: (runtime, [pointer]) => {
+    const address = brokenDownTime(runtime, pointer, 'localtime');
+    return returnString(runtime, `${calendarText(readTm(runtime, address), '???')}\n`);
+  },
   strftime: (runtime, [buffer, size, format, pointer]) => {
     const text = strftime(
       new TextDecoder().decode(readCString(runtime, asAddress(format))),

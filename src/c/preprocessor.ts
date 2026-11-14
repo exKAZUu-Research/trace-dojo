@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 513 -- Directive handling and macro expansion share preprocessing state.
+// code-gauge-allow-file fileNcss 520 -- Directive handling and macro expansion share preprocessing state.
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { type LogicalLine, type PPToken, spell, tokenize } from './lexer';
@@ -482,25 +482,27 @@ class Preprocessor {
     return { args, closing };
   }
 
-  // code-gauge-allow functionNcss 33 -- Stringification, variadic substitution and token pasting form one ordered pass.
-  // code-gauge-allow functionCognitiveComplexity 28 -- Token pasting, variadic comma removal and argument expansion share replacement state.
+  // code-gauge-allow functionNcss 34 -- Stringification, variadic substitution and token pasting form one ordered pass.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Token pasting, variadic comma removal and argument expansion share replacement state.
   private substitute(macro: Macro, args: PPToken[][], hide: ReadonlySet<string>, call: PPToken): PPToken[] {
     const params = macro.variadic ? [...(macro.params ?? []), '__VA_ARGS__'] : (macro.params ?? []);
-    const argumentOf = (token: PPToken | undefined): PPToken[] | undefined => {
+    const argumentsByPosition = args.map((tokens) => macroArgument(tokens, (input) => this.expand(input)));
+    const argumentOf = (token: PPToken | undefined): ReturnType<typeof macroArgument> | undefined => {
       if (token?.kind !== 'identifier') return undefined;
       const position = params.indexOf(token.text);
-      return position === -1 ? undefined : args[position];
+      return position === -1 ? undefined : argumentsByPosition[position];
     };
     const result: (PPToken | undefined)[] = [];
-    const body = macro.variadic
-      ? withVaOpt(macro.body, this.expand(args.at(-1) ?? []).length > 0, call.row)
-      : macro.body;
+    const body =
+      macro.variadic && macro.body.some((token) => token.text === '__VA_OPT__')
+        ? withVaOpt(macro.body, (argumentsByPosition.at(-1)?.expanded.length ?? 0) > 0, call.row)
+        : macro.body;
     for (let index = 0; index < body.length; index++) {
       const token = body[index];
       this.budget.spend(1 + hide.size);
       if (token.text === '#' && macro.params) {
-        const arg = argumentOf(body[index + 1]) as PPToken[];
-        result.push({ kind: 'string', text: stringify(arg, this.budget), row: call.row, space: token.space });
+        const arg = argumentOf(body[index + 1])!;
+        result.push({ kind: 'string', text: stringify(arg.raw, this.budget), row: call.row, space: token.space });
         index++;
         continue;
       }
@@ -509,7 +511,7 @@ class Preprocessor {
       if (token.text === '##') continue;
       const arg = argumentOf(token);
       const copies = arg
-        ? copyArgument(pastesNext || pastedPrevious ? arg : this.expand(arg), call.row, token.space, this.budget)
+        ? copyArgument(pastesNext || pastedPrevious ? arg.raw : arg.expanded, call.row, token.space, this.budget)
         : [{ ...token, row: call.row }];
       if (pastedPrevious && arg !== undefined && token.text === '__VA_ARGS__' && result.at(-1)?.text === ',') {
         if (copies.length === 0) result.pop();
@@ -529,12 +531,26 @@ class Preprocessor {
   }
 }
 
+function macroArgument(
+  raw: PPToken[],
+  expand: (tokens: PPToken[]) => PPToken[]
+): { raw: PPToken[]; readonly expanded: PPToken[] } {
+  let expanded: PPToken[] | undefined;
+  return {
+    raw,
+    get expanded() {
+      return (expanded ??= expand(raw));
+    },
+  };
+}
+
 const GNU_ATTRIBUTE_KEYWORDS = new Set(['__attribute__', '__attribute']);
 
 function skipIgnored(queue: TokenStream, token: PPToken, expand: (tokens: PPToken[]) => PPToken[]): boolean {
   if (token.text === '[' && queue.peek()?.text === '[') {
     const tokens = takeAnnotation(queue, '[', ']', token.row, token);
-    checkAttributes(spell(tokens), token.row);
+    const expanded = [...tokens.slice(0, 2), ...expand(tokens.slice(2, -2)), ...tokens.slice(-2)];
+    checkAttributes(spell(expanded), token.row);
     return true;
   }
   if (
@@ -583,7 +599,6 @@ const IGNORED_ATTRIBUTES = new Set([
   'sentinel',
   'alloc_size',
   'alloc_align',
-  'always_inline',
   'noinline',
   'pure',
   'const',
