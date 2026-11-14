@@ -5181,6 +5181,18 @@ test('Rational methods accept boxed Float values', () => {
   });
 });
 
+test('Hash equality observes identity comparison for nonempty hashes', () => {
+  expect(run('a={1=>2}.compare_by_identity;b={1=>2};p a==b,b==a,a.eql?(b),{}.compare_by_identity=={}')).toMatchObject({
+    stdout: 'false\nfalse\nfalse\ntrue\n',
+  });
+});
+
+test('Hash.[] rehashes keys when dropping identity comparison', () => {
+  expect(
+    run('h={}.compare_by_identity;a="a";b="a";h[a]=1;h[b]=2;m=Hash[h];p m.compare_by_identity?,m[a],m[b],m.size')
+  ).toMatchObject({ stdout: 'false\n2\n2\n1\n' });
+});
+
 test('Data copies remain frozen and Rational copies preserve identity', () => {
   expect(
     run(

@@ -607,6 +607,7 @@ function* hashEquals(a: RHash, b: Value, pairs: Map<RBasic, Set<RBasic>>): Gen<b
 
 function* compareHashEntries(a: RHash, b: RHash, equals: (left: Value, right: Value) => Gen<boolean>): Gen<boolean> {
   if (a.map.size !== b.map.size) return false;
+  if (a.map.size > 0 && a.byIdentity !== b.byIdentity) return false;
   a.iterating++;
   try {
     for (const entry of a.map.values()) {

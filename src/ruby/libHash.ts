@@ -99,7 +99,10 @@ sdef('Hash', '[]', [0, -1], function* (self, args) {
     const source = args.length === 1 ? yield* hashLiteralSource(args[0]) : undefined;
     if (source) rt().held.push(source);
     if (source instanceof RHash) {
-      for (const [slot, entry] of source.map) copyEntry(hash, slot, entry);
+      for (const [slot, entry] of source.map) {
+        if (source.byIdentity) yield* hashSet(hash, entry.key, entry.value);
+        else copyEntry(hash, slot, entry);
+      }
       return hash;
     }
     if (source instanceof RArray) {
@@ -228,6 +231,7 @@ def('Hash', 'to_a', 0, (self: RHash) => arr([...self.map.values()].map((entry) =
 def('Hash', '==', 1, (self: RHash, [other]) => rEquals(self, other));
 def('Hash', 'eql?', 1, function* (self: RHash, [other]) {
   if (!(other instanceof RHash) || self.map.size !== other.map.size) return false;
+  if (self.map.size > 0 && self.byIdentity !== other.byIdentity) return false;
   self.iterating++;
   try {
     for (const entry of self.map.values()) {
