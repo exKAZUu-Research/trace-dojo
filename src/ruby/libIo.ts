@@ -175,15 +175,15 @@ def(
   'warn',
   [0, -1],
   function* (_self, args, _block, keywords) {
-    yield* validateWarnKeywords(keywords);
+    yield* validateWarnKeywords(keywords, args.length > 0);
     if (args.length > 0) yield* writePuts(rt().globals.get('$stderr') ?? NIL, args);
     return NIL;
   },
   { ...PRIVATE, keywords: true }
 );
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Warn rejects unknown names before validating uplevel and category values.
-function* validateWarnKeywords(keywords: RHash | undefined): Gen<void> {
+// code-gauge-allow functionCognitiveComplexity 20 -- Warn checks every option name before converting values and skips uplevel for empty calls.
+function* validateWarnKeywords(keywords: RHash | undefined, hasMessages: boolean): Gen<void> {
   if (!keywords) return;
   for (const entry of keywords.map.values()) {
     const name = entry.key instanceof RSymbol ? entry.key.name : '';
@@ -192,19 +192,21 @@ function* validateWarnKeywords(keywords: RHash | undefined): Gen<void> {
   for (const entry of keywords.map.values()) {
     const name = entry.key instanceof RSymbol ? entry.key.name : '';
     if (name === 'uplevel') {
-      if (entry.value === NIL) continue;
+      if (!hasMessages || entry.value === NIL) continue;
       const { integer: level } = yield* toIndexExact(entry.value);
       if (level < 0n) throw argumentError(`negative level (${level})`);
-    } else if (name === 'category') {
-      if (entry.value === NIL) continue;
-      let category: string;
-      if (entry.value instanceof RSymbol) category = entry.value.name;
-      else if (entry.value instanceof RString) category = entry.value.s;
-      else throw typeError(`no implicit conversion of ${realClassOf(entry.value).name} into Symbol`);
-      if (!['deprecated', 'experimental', 'performance', 'strict_unused_block'].includes(category))
-        throw argumentError(`unknown category: ${category}`);
-    }
+    } else validateWarnCategory(entry.value);
   }
+}
+
+function validateWarnCategory(value: Value): void {
+  if (value === NIL) return;
+  let category: string;
+  if (value instanceof RSymbol) category = value.name;
+  else if (value instanceof RString) category = value.s;
+  else throw typeError(`no implicit conversion of ${realClassOf(value).name} into Symbol`);
+  if (!['deprecated', 'experimental', 'performance', 'strict_unused_block'].includes(category))
+    throw argumentError(`unknown category: ${category}`);
 }
 
 function* charOf(value: Value): Gen<RString> {
