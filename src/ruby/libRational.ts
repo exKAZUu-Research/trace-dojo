@@ -178,6 +178,7 @@ def('Rational', '-@', 0, (self: RObject) => makeRational(-fractionOf(self).numer
 def('Rational', '<=>', 1, (self: RObject, [other]) => {
   const a = fractionOf(self);
   if (isRubyFloat(other)) {
+    if (Number.isNaN(Number(other))) return NIL;
     const x = toNumber(a);
     return x < Number(other) ? -1n : x > Number(other) ? 1n : 0n;
   }
@@ -210,7 +211,8 @@ def('Rational', 'rationalize', [0, 1], (self: RObject, args) => {
   if (args.length > 0) throw new UnsupportedFeatureError('Rational#rationalize（許容誤差）');
   return self;
 });
-def('Rational', ['to_i', 'truncate'], 0, (self: RObject) => fractionOf(self).numerator / fractionOf(self).denominator);
+def('Rational', 'to_i', 0, (self: RObject) => fractionOf(self).numerator / fractionOf(self).denominator);
+def('Rational', 'truncate', [0, 1], (self: RObject, args) => roundTo(self, args, 'truncate'));
 def('Rational', 'hash', 0, (self: RObject) => fractionOf(self).numerator ^ fractionOf(self).denominator);
 def(
   'Rational',
@@ -247,7 +249,7 @@ function floorDivide(a: bigint, b: bigint): bigint {
   return a % b !== 0n && a < 0n !== b < 0n ? quotient - 1n : quotient;
 }
 
-function* roundTo(self: RObject, args: Value[], mode: 'floor' | 'ceil' | 'round'): Gen {
+function* roundTo(self: RObject, args: Value[], mode: 'floor' | 'ceil' | 'round' | 'truncate'): Gen {
   const { numerator, denominator } = fractionOf(self);
   const digits = args.length > 0 ? yield* toInt(args[0]) : 0n;
   chargePowerOfTen(digits < 0n ? -digits : digits);
@@ -257,6 +259,7 @@ function* roundTo(self: RObject, args: Value[], mode: 'floor' | 'ceil' | 'round'
   let result: bigint;
   if (mode === 'floor') result = floorDivide(n, d);
   else if (mode === 'ceil') result = -floorDivide(-n, d);
+  else if (mode === 'truncate') result = n / d;
   else {
     const twice = 2n * (n < 0n ? -n : n) + d;
     const magnitude = twice / (2n * d);

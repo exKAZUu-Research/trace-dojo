@@ -36,6 +36,9 @@ test('unsupported regexp syntax fails explicitly', () => {
   expect(run(String.raw`p "a".match?(/\X/)`)).toMatchObject({
     uncaughtException: String.raw`正規表現の\X は、この採点環境では使えません。`,
   });
+  expect(run(String.raw`p "g".match?(/[\H]/)`)).toMatchObject({
+    uncaughtException: String.raw`正規表現の文字クラス内の\H は、この採点環境では使えません。`,
+  });
 });
 
 test('regexp splitting and MatchData slicing match Ruby output', () => {
@@ -93,6 +96,34 @@ test('Data rejects mixed positional and keyword construction', () => {
 
 test('large Rational rounding precision stays within the execution budget', () => {
   expect(run('p Rational(1,2).round(10000000000)')).toMatchObject({ kind: 'limitExceeded' });
+});
+
+test('Rational comparison and truncation preserve Ruby numeric results', () => {
+  expect(
+    run('p Rational(1,2) <=> Float::NAN; p Rational(1234,1000).truncate(2); p Rational(-1234,1000).truncate(-1)')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'nil\n(123/100)\n0\n',
+  });
+});
+
+test('resolved conversions work without respond_to? and respect overrides', () => {
+  expect(run('class A<BasicObject; def to_str = "x"; end; p "p" + A.new')).toMatchObject({
+    stdout: '"px"\n',
+  });
+  expect(
+    run(
+      'module Kernel; def respond_to?(*) = false; end; class A; def method_missing(*) = "x"; end; begin; p "p" + A.new; rescue => e; p e.class; end'
+    )
+  ).toMatchObject({
+    stdout: 'TypeError\n',
+  });
+});
+
+test('calendar Time constructors retain exact fractional seconds', () => {
+  expect(run('p Time.utc(1970,1,1,0,0,Rational(1,3)) == Time.at(Rational(1,3))')).toMatchObject({
+    stdout: 'true\n',
+  });
 });
 
 test('imaginary unit remains unsupported', () => {

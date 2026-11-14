@@ -176,17 +176,30 @@ function* buildTime(args: Value[], offset: number, zone: TimeData['zone'], micro
   date.setUTCHours(hour, minute, whole);
   if (Number.isNaN(date.getTime())) throw new UnsupportedFeatureError('JavaScript の日付範囲外の Time');
   const localNanoseconds = BigInt(date.getTime()) * 1_000_000n;
-  const fraction = BigInt(Math.round((seconds - whole) * 1e9));
-  const micros =
+  const secondPart = args[5];
+  const exactSeconds = offsetFraction(
+    secondPart !== undefined &&
+      (typeof secondPart === 'bigint' || typeof secondPart === 'number' || isRational(secondPart))
+      ? secondPart
+      : seconds,
+    0
+  );
+  const fraction = exactSeconds.numerator - BigInt(whole) * exactSeconds.denominator;
+  const microsecondsValue =
     microseconds === undefined
       ? 0n
-      : typeof microseconds === 'bigint'
-        ? microseconds * 1000n
-        : BigInt(Math.floor((yield* toFloat(microseconds)) * 1000));
+      : typeof microseconds === 'bigint' || typeof microseconds === 'number' || isRational(microseconds)
+        ? microseconds
+        : yield* toFloat(microseconds);
+  const micros = offsetFraction(microsecondsValue, 0);
+  const localNumerator =
+    (localNanoseconds * exactSeconds.denominator + fraction * 1_000_000_000n) * micros.denominator +
+    micros.numerator * 1000n * exactSeconds.denominator;
+  const localDenominator = exactSeconds.denominator * micros.denominator;
   const fractionOffset = offsetFraction(exact, offset);
   return makeExactTime(
-    (localNanoseconds + fraction + micros) * fractionOffset.denominator - fractionOffset.numerator * 1_000_000_000n,
-    fractionOffset.denominator,
+    localNumerator * fractionOffset.denominator - fractionOffset.numerator * 1_000_000_000n * localDenominator,
+    localDenominator * fractionOffset.denominator,
     offset,
     zone,
     exact

@@ -345,6 +345,7 @@ function translateEscape(
       return inClass ? '0-9a-fA-F' : '[0-9a-fA-F]';
     }
     case 'H': {
+      if (inClass) throw unsupportedSyntax(String.raw`文字クラス内の\H`);
       return '[^0-9a-fA-F]';
     }
     case 'G': {
