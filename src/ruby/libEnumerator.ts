@@ -1009,7 +1009,7 @@ def('Enumerator::Lazy', 'each_with_index', 0, function* (self: RObject, _args, b
 });
 
 /** Runs a lazy chain: each element of the source passes the steps in turn, and `take` ends the iteration. */
-function* runLazy(self: RObject, visit: (value: Value) => Gen<unknown>): Gen {
+function* runLazy(self: RObject, visit: (value: Value) => Gen<unknown>, args: Value[] = []): Gen {
   const data = self.data as LazyData;
   const states: LazyState[] = data.steps.map((step) => ({
     seen: 0,
@@ -1028,9 +1028,13 @@ function* runLazy(self: RObject, visit: (value: Value) => Gen<unknown>): Gen {
     return outcome;
   };
   try {
-    const result = yield* iterate(data.source, function* (value) {
-      return yield* streamLazyStep(data.steps, states, 0, value, visitWithStop);
-    });
+    const result = yield* iterate(
+      data.source,
+      function* (value) {
+        return yield* streamLazyStep(data.steps, states, 0, value, visitWithStop);
+      },
+      args
+    );
     if (!visitorStopped)
       for (const [position, step] of data.steps.entries()) {
         const buffer = states[position].buffer;
@@ -1196,16 +1200,24 @@ function* streamFlattened(mapped: Value, next: (value: Value) => Gen<unknown>): 
   return yield* next(mapped);
 }
 
-def('Enumerator::Lazy', 'each', 0, function* (self: RObject, _args, block) {
-  if (!block) return self;
-  return yield* runLazy(self, (value) => callProc(block, [value], { used: false }));
+def('Enumerator::Lazy', 'each', [0, -1], function* (self: RObject, args, block) {
+  if (!block) {
+    if (args.length === 0) return self;
+    const data = self.data as LazyData;
+    return makeLazy(makeEnumerator(data.source, 'each', args), data.steps);
+  }
+  return yield* runLazy(self, (value) => callProc(block, [value], { used: false }), args);
 });
-def('Enumerator::Lazy', ['force', 'to_a'], [0, -1], function* (self: RObject) {
+def('Enumerator::Lazy', ['force', 'to_a'], [0, -1], function* (self: RObject, args) {
   const items: Value[] = [];
-  yield* runLazy(self, function* (value) {
-    items.push(value);
-    yield* [];
-  });
+  yield* runLazy(
+    self,
+    function* (value) {
+      items.push(value);
+      yield* [];
+    },
+    args
+  );
   return arr(items);
 });
 def('Enumerator::Lazy', 'first', [0, 1], function* (self: RObject, args) {

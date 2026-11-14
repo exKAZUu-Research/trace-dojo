@@ -11,6 +11,8 @@ export function collectGarbage(runtime: Runtime): void {
   for (const frame of runtime.frames) pushFrameReferences(frame, pending);
   for (const value of runtime.globals.values()) pending.push(value);
   for (const value of runtime.held) pending.push(value);
+  for (const handler of runtime.atExit) pending.push(handler);
+  for (const handler of runtime.completedExitHandlers) pending.push(handler);
   for (const values of runtime.heldArrays) for (const value of values) pending.push(value);
   pending.push(runtime.c.Object);
   while (pending.length > 0) {

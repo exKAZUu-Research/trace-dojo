@@ -2,7 +2,7 @@ import { def } from './define';
 import { rubyError } from './errors';
 import { callProc, type Gen, requireBlock } from './interp';
 import { makeEnumerator } from './libEnumerator';
-import { NIL, RObject, type RString, type Value } from './objects';
+import { NIL, RObject, type RProc, type RString, type Value } from './objects';
 import { ExitSignal, ReturnSignal, rt, RubyError, type Runtime, UnsupportedFeatureError } from './runtime';
 import { arr, str, stringBytes } from './values';
 
@@ -65,8 +65,10 @@ export function* runAtExit(): Gen<(RubyError | ExitSignal | UnsupportedFeatureEr
   const runtime = rt();
   const errors: (RubyError | ExitSignal | UnsupportedFeatureError)[] = [];
   while (runtime.atExit.length > 0) {
+    const handler = runtime.atExit.pop() as RProc;
+    runtime.completedExitHandlers.push(handler);
     try {
-      yield* callProc(runtime.atExit.pop() as never, []);
+      yield* callProc(handler, []);
     } catch (error) {
       if (error instanceof ReturnSignal) {
         const converted = rubyError(runtime.c.LocalJumpError, 'unexpected return');

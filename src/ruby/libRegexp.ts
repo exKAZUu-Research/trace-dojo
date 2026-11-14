@@ -761,7 +761,7 @@ def('Regexp', '=~', 1, function* (self: RObject, [value]) {
 def('Regexp', '===', 1, function* (self: RObject, [value]) {
   const converted =
     value instanceof RString || value instanceof RSymbol ? value : yield* tryImplicitConversion(value, 'to_str');
-  if (converted === undefined) {
+  if (converted === undefined || converted === NIL) {
     setLastMatch(undefined);
     return false;
   }
@@ -883,7 +883,14 @@ function* captureGroup(state: MatchState, key: Value): Gen<number> {
 def('MatchData', ['size', 'length'], 0, (self: RObject) => BigInt(stateOf(self).groups.length));
 def('MatchData', 'values_at', [0, -1], function* (self: RObject, args) {
   const values: Value[] = [];
-  for (const arg of args) values.push(yield* matchIndex(self, arg));
+  for (const arg of args) {
+    if (arg instanceof RRange) {
+      const state = stateOf(self);
+      const all = arr(state.groups.map((_range, group) => groupText(state, group)));
+      const selected = (yield* callMethod(all, 'values_at', [arg])) as RArray;
+      values.push(...selected.items);
+    } else values.push(yield* matchIndex(self, arg));
+  }
   return arr(values);
 });
 def('MatchData', 'string', 0, (self: RObject) => str(stateOf(self).text));
@@ -987,6 +994,7 @@ function* substituteRegexp(
   global: boolean
 ): Gen<{ text: string; matched: boolean }> {
   const text = self.s;
+  const version = self.version;
   const matches = global ? allMatches(regexp, text) : [execAt(regexp, text, 0)].filter((m): m is MatchState => !!m);
   const chunks: string[] = [];
   let length = 0;
@@ -1008,6 +1016,7 @@ function* substituteRegexp(
     } else {
       setLastMatch(state);
       piece = yield* toS(yield* callBlock(block as RProc, [str(text.slice(from, to))]));
+      if (self.version !== version) throw rubyError(rt().c.RuntimeError, 'string modified');
     }
     append(text.slice(position, from));
     append(piece);
@@ -1050,6 +1059,7 @@ for (const [name, global, bang] of [
   });
 }
 wrapFirst('scan', function* (self, args, block) {
+  const version = self.version;
   const matches = allMatches(args[0] as RObject, self.s);
   const values = matches.map((state) =>
     state.groups.length > 1
@@ -1063,7 +1073,9 @@ wrapFirst('scan', function* (self, args, block) {
   for (const [index, value] of values.entries()) {
     setLastMatch(matches[index]);
     yield* callBlock(block, [value], false);
+    if (self.version !== version) throw rubyError(rt().c.RuntimeError, 'string modified');
   }
+  setLastMatch(matches.at(-1));
   return self;
 });
 wrapFirst('split', function* (self, args) {
@@ -1182,8 +1194,18 @@ for (const [name, last] of [
   ['rpartition', true],
 ] as const) {
   wrapFirst(name, function* (self, args) {
-    const matches = allMatches(args[0] as RObject, self.s);
-    const state = last ? matches.at(-1) : matches[0];
+    const regexp = args[0] as RObject;
+    let state = execAt(regexp, self.s, 0);
+    if (last) {
+      for (;;) {
+        if (!state) break;
+        const current = state;
+        const from = (current.groups[0] as readonly [number, number])[0];
+        const next = execAt(regexp, self.s, charIndex(self.s, from) + 1);
+        if (!next) break;
+        state = next;
+      }
+    }
     setLastMatch(state);
     if (!state) return last ? arr([str(''), str(''), str(self.s)]) : arr([str(self.s), str(''), str('')]);
     const [from, to] = state.groups[0] as readonly [number, number];

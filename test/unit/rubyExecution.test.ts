@@ -6310,3 +6310,51 @@ test('negative Time rounding precision raises before exponentiation', () => {
     uncaughtException: 'negative ndigits given (ArgumentError)',
   });
 });
+
+test('Time displays offset seconds outside strftime minute directives', () => {
+  expect(run('p Time.new(2024,1,1,0,0,0,"+05:30:45"), Time.at(0).getlocal(45)')).toMatchObject({
+    stdout: '2024-01-01 00:00:00 +053045\n1970-01-01 00:00:45 +000045\n',
+  });
+});
+
+test('Regexp case comparison treats nil to_str as a miss', () => {
+  expect(run('o=Object.new; def o.to_str; nil; end; p(/a/ === o)')).toMatchObject({ stdout: 'false\n' });
+});
+
+test('scan and literal substitution restore their final match after callbacks', () => {
+  expect(run('"aba".scan(/a/) { /b/ =~ "b" }; p $&; "aba".gsub("a") { /b/ =~ "b"; "x" }; p $&')).toMatchObject({
+    stdout: '"a"\n"a"\n',
+  });
+});
+
+test('MatchData values_at expands range selectors', () => {
+  expect(run('p /(a)(b)(c)/.match("abc").values_at(0,1..2)')).toMatchObject({
+    stdout: '["abc", "a", "b"]\n',
+  });
+});
+
+test('regexp callbacks reject source mutation', () => {
+  expect(run('s="aba"; begin; s.gsub(/a/) { s << "x"; "z" }; rescue => e; p e.class,e.message;end')).toMatchObject({
+    stdout: 'RuntimeError\n"string modified"\n',
+  });
+});
+
+test('regexp partitions find first and rightmost overlapping matches', () => {
+  expect(run('p "ababa".partition(/aba/), "ababa".rpartition(/aba/)')).toMatchObject({
+    stdout: '["", "aba", "ba"]\n["ab", "aba", ""]\n',
+  });
+});
+
+test('DATA starts after the complete CRLF marker line', () => {
+  expect(run('p DATA.read\r\n__END__\r\na\r\n')).toMatchObject({ stdout: '"a\\r\\n"\n' });
+});
+
+test('Lazy forwards iteration arguments to learner enumerables', () => {
+  expect(
+    run(
+      'class C; include Enumerable; def each(n=1); n.times { |x| yield x }; end; end; p C.new.lazy.force(3), C.new.lazy.each(3).force'
+    )
+  ).toMatchObject({
+    stdout: '[0, 1, 2]\n[0, 1, 2]\n',
+  });
+});

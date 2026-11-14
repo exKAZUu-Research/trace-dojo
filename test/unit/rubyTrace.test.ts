@@ -763,3 +763,17 @@ test('chained external iterators retain Turtles in suspended frames', () => {
     'class C\ninclude Enumerable\ndef each\nt=Turtle.new\nyield nil\nt.forward\nyield nil\nend\nend\ne=C.new.chain([])\ne.next\nx=1\ne.next\nx=2';
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
+
+test('Struct trace nodes include instance variables beside members', () => {
+  const program =
+    'class Point < Struct.new(:x)\n def initialize(x); super(x); @label="origin"; end\nend\np=Point.new(1)\nputs p.x';
+  expect(rubyTrace(program).at(-1)?.referenceVars).toMatchObject({
+    p: { kind: 'object', entries: { x: { kind: 'value', value: 1 }, '@label': { kind: 'value', value: 'origin' } } },
+  });
+});
+
+test('exit handlers keep captured turtles reachable through final recording', () => {
+  const program = 'def setup\n t=Turtle.new\n at_exit { t.forward }\nend\nsetup\nx=1\n';
+  const result = traceProgram('ruby', program, program);
+  expect(result.finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
+});

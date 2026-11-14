@@ -84,6 +84,7 @@ export function setText(self: RString, text: string): void {
   rt().checkStringLength(text.length);
   const value = str(text);
   self.s = value.s;
+  self.version++;
   self.rawBytes = value.rawBytes;
   self.usAscii &&= !/[^\u0000-\u007F]/.test(text);
 }
@@ -93,6 +94,7 @@ function setBytes(self: RString, bytes: Uint8Array, binary = self.binary): void 
   rt().checkStringLength(bytes.length);
   const result = stringFromBytes(bytes, binary);
   self.s = result.s;
+  self.version++;
   self.binary = result.binary;
   self.usAscii &&= !binary;
   self.rawBytes = result.rawBytes;
@@ -402,6 +404,7 @@ def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
   const result = stringFromBytes(bytes, binary);
   result.usAscii = usAscii;
   self.s = result.s;
+  self.version++;
   self.binary = result.binary;
   self.usAscii = result.usAscii;
   self.rawBytes = result.rawBytes;
@@ -1203,12 +1206,14 @@ function* substitute(
   let position = 0;
   let positionByte = 0;
   let matched = false;
+  let lastFound = -1;
   for (;;) {
     const found = text.indexOf(target, position);
     if (found === -1) break;
     const mode = stringTextMode(self);
     const foundByte = textByteLength(text.slice(0, found), mode);
     matched = true;
+    lastFound = found;
     setLiteralMatch(text, target, found);
     const piece = yield* substitutionPiece(self, target, replacement, block, text, found, foundByte);
     if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
@@ -1230,7 +1235,7 @@ function* substitute(
     if (!global) break;
     rt().spend();
   }
-  if (!matched) setLiteralMatch(text, target, -1);
+  setLiteralMatch(text, target, lastFound);
   if (positionByte <= sourceLength) append(active.slice(positionByte));
   return { value: stringFromBytes(joinChunks(chunks, length), resultBinary), matched };
 }
@@ -1317,11 +1322,11 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
   let text = self.s;
   const sourceLength = stringBytes(self).length;
   let position = 0;
-  let matched = false;
+  let lastIndex = -1;
   for (;;) {
     const index = text.indexOf(target, position);
     if (index === -1) break;
-    matched = true;
+    lastIndex = index;
     setLiteralMatch(text, target, index);
     const mode = stringTextMode(self);
     const foundByte = textByteLength(text.slice(0, index), mode);
@@ -1337,7 +1342,7 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
     position = modified ? textIndexAtByte(text, nextByte, mode) : index + target.length;
     if (position > text.length) break;
   }
-  if (!matched) setLiteralMatch(text, target, -1);
+  setLiteralMatch(text, target, lastIndex);
   if (!block) return arr(found);
   return self;
 });
@@ -1345,12 +1350,14 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
 function* scanEmpty(self: RString, block: RProc | undefined): Gen<Value> {
   const sourceLength = stringBytes(self).length;
   const found: Value[] = [];
+  let lastIndex = 0;
   for (let offset = 0; offset <= sourceLength;) {
     const bytes = stringBytes(self);
     const first = bytes[offset];
     const width = self.binary || first < 0xc2 || first >= 0xf5 ? 1 : first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
     const match = textResult(self, '');
-    setLiteralMatch(self.s, '', textIndexAtByte(self.s, offset, stringTextMode(self)));
+    lastIndex = textIndexAtByte(self.s, offset, stringTextMode(self));
+    setLiteralMatch(self.s, '', lastIndex);
     if (block) {
       yield* callBlock(block, [match], false);
       if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
@@ -1359,6 +1366,7 @@ function* scanEmpty(self: RString, block: RProc | undefined): Gen<Value> {
     offset += width;
     rt().spend();
   }
+  setLiteralMatch(self.s, '', lastIndex);
   return block ? self : arr(found);
 }
 

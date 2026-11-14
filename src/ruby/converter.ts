@@ -163,7 +163,7 @@ export class Converter {
     return {
       body,
       locals: this.ctx.scope.names,
-      data: data ? data.text.replace(/^\n/, '') : undefined,
+      data: data ? data.text.replace(/^\r?\n/, '') : undefined,
       dataFile: data ? this.source : undefined,
     };
   }

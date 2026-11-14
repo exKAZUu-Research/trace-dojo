@@ -198,6 +198,7 @@ function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: num
         entries[name] = displayNodeOf(member, seen, budget) ?? NULL_NODE;
         if (budget.remaining <= 0) break;
       }
+      if (budget.remaining > 0) addInstanceEntries(entries, value, seen, budget);
       return { kind: 'object', entries };
     } finally {
       seen.delete(value);

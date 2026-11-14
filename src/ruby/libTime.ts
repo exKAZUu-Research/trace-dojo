@@ -328,12 +328,13 @@ function isoWeek(date: Date): { year: number; week: number } {
   return { year, week: Math.floor((thursday.getTime() - first.getTime()) / 604_800_000) + 1 };
 }
 
-function offsetText(offset: number, colon: boolean): string {
+function offsetText(offset: number, colon: boolean, includeSeconds = false): string {
   const sign = offset < 0 ? '-' : '+';
   const magnitude = Math.round(Math.abs(offset));
   const hours = String(Math.floor(magnitude / 3600)).padStart(2, '0');
   const minutes = String(Math.floor((magnitude % 3600) / 60)).padStart(2, '0');
-  return `${sign}${hours}${colon ? ':' : ''}${minutes}`;
+  const seconds = magnitude % 60;
+  return `${sign}${hours}${colon ? ':' : ''}${minutes}${includeSeconds && seconds ? `${colon ? ':' : ''}${String(seconds).padStart(2, '0')}` : ''}`;
 }
 
 function zoneName(data: TimeData): Value {
@@ -602,7 +603,7 @@ function timeText(data: TimeData, withFraction: boolean): string {
           : ` ${reducedNumerator}/${reducedDenominator}`;
     }
   }
-  return `${text} ${data.zone === 'utc' ? 'UTC' : offsetText(data.offset, false)}`;
+  return `${text} ${data.zone === 'utc' ? 'UTC' : offsetText(data.offset, false, true)}`;
 }
 
 export function timeDisplayOf(value: RObject): string | undefined {
