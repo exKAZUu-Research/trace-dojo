@@ -43,6 +43,7 @@ const PROGRAM_NAME = './main';
  *
  * @param onEnd Receives `main`'s frame when it returns, while the frame still holds its variables.
  */
+// code-gauge-allow duplicateLines 16 -- Each language's runner wraps its own runtime and collects the same output contract.
 export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (frame: Frame) => void): ProgramRun {
   let uncaughtException: string | undefined;
   try {

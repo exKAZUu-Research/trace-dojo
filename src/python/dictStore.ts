@@ -99,6 +99,19 @@ export class DictStore {
     for (const entry of entries) if (entry.alive) yield entry;
   }
 
+  /**
+   * The live entry before `entry` in insertion order, or the last one when `entry` is undefined, as CPython's reverse
+   * iterators walk the entries back from where they are, past any added after it.
+   */
+  previous(entry: DictEntry | undefined): DictEntry | undefined {
+    const { entries } = this;
+    let index = entry === undefined ? entries.length : entries.indexOf(entry);
+    // An entry that compacting the entries dropped was deleted; the iterator then sees what is left before it.
+    if (index === -1) index = entries.length;
+    while (--index >= 0) if (entries[index]?.alive) return entries[index];
+    return undefined;
+  }
+
   ordered(): DictEntry[] {
     return this.entries.filter((entry) => entry.alive);
   }
@@ -130,80 +143,4 @@ export class DictStore {
     else this.entries.unshift(entry);
     this.version++;
   }
-}
-
-/**
- * The store of a `__dict__` that is the attribute map of an object, class, or module itself, so that changing the dict
- * changes the attributes, as CPython's `__dict__` is the namespace. Keys that are not strings stay in the dict only.
- */
-export class NamespaceDictStore extends DictStore {
-  constructor(private readonly namespace: Map<string, PyValue>) {
-    super();
-  }
-
-  override set(key: PyValue, value: PyValue, hash?: bigint): void {
-    super.set(key, value, hash);
-    if (typeof key === 'string') this.namespace.set(key, value);
-  }
-
-  override delete(key: PyValue): DictEntry | undefined {
-    const entry = super.delete(key);
-    if (entry && typeof key === 'string') this.namespace.delete(key);
-    return entry;
-  }
-
-  override remove(entry: DictEntry): void {
-    super.remove(entry);
-    if (typeof entry.key === 'string') this.namespace.delete(entry.key);
-  }
-
-  override clear(): void {
-    super.clear();
-    this.namespace.clear();
-  }
-
-  override get size(): number {
-    this.sync();
-    return super.size;
-  }
-
-  override lookup(key: PyValue, hash?: bigint): DictEntry | undefined {
-    this.sync();
-    return super.lookup(key, hash);
-  }
-
-  override ordered(): DictEntry[] {
-    this.sync();
-    return super.ordered();
-  }
-
-  override *liveEntries(): Generator<DictEntry> {
-    this.sync();
-    yield* super.liveEntries();
-  }
-
-  override *reversedLiveEntries(): Generator<DictEntry> {
-    this.sync();
-    yield* super.reversedLiveEntries();
-  }
-
-  /** Brings the dict up to date with the attributes set or deleted since, as every read does first. */
-  private sync(): void {
-    if (this.syncing) return;
-    this.syncing = true;
-    try {
-      for (const entry of super.ordered()) {
-        if (typeof entry.key === 'string' && !this.namespace.has(entry.key)) super.remove(entry);
-      }
-      for (const [key, value] of this.namespace) {
-        const entry = super.lookup(key);
-        if (!entry) super.set(key, value);
-        else if (entry.value !== value) entry.value = value;
-      }
-    } finally {
-      this.syncing = false;
-    }
-  }
-
-  private syncing = false;
 }

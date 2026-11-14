@@ -1,8 +1,26 @@
+// code-gauge-allow-file fileNcss 568 -- The attribute lookup and the protocols every kind of object follows belong together.
+import { moduleAnnotations } from './annotations';
+import { PyAttribute } from './attributeDescriptors';
 import { classAttribute, specialAttribute } from './attributes';
-import { isDataDescriptor, isNonDataDescriptor, readDescriptor } from './descriptors';
+import { PyBytes, PyMemoryView } from './bytesValues';
+import {
+  callGetter,
+  customGetattribute,
+  descriptorGetter,
+  ensureThreadLocalDict,
+  getWithCustomGetattribute,
+  isDataDescriptor,
+  isThreadLocal,
+  ownDict,
+} from './descriptors';
+import { DictItemTuple, dictItemValue } from './dictItemTuple';
 import { getItem as getItemOf } from './items';
+import { clamp, reduction, stateOf, withState } from './iteratorStates';
+import { completeNamespace } from './modules/moduleLayout';
+import { checkNamespaceListing } from './namespaceDifferences';
+import { namespaceDict } from './namespaces';
 import { describeIntegerIndex, toIndex } from './numbers';
-import { currentRuntime } from './runtimeContext';
+import { currentRuntime, releaseCaughtException } from './runtimeContext';
 import { iterStr, strLength } from './strings';
 import { superAttribute } from './typeObject';
 import {
@@ -11,26 +29,34 @@ import {
   classOf,
   exceptionClassNamed,
   frozensetClass,
+  functionClass,
   generatorClass,
+  isIteratorGenerator,
+  isPropertyKind,
   iteratorClass,
   methodClass,
+  methodWrapperClass,
   newList,
+  newTuple,
   None,
   NotImplemented,
-  propertyClass,
   pyError,
+  rangeClass,
   staticmethodClass,
+  stringValue,
   typeError,
   typeName,
+  wrapperDescriptorClass,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
+import { unsupportedClassAttribute } from './unsupportedAttributes';
 import {
   DONE,
   type Kwargs,
-  ownAttributesOf,
   PyBoundMethod,
   PyBuiltinFunction,
   PyClass,
+  PyDeque,
   PyDescriptor,
   PyDict,
   PyDictView,
@@ -41,7 +67,7 @@ import {
   PyIterator,
   PyList,
   PyModule,
-  PyObject,
+  type PyObject,
   PyRange,
   PySet,
   PySuper,
@@ -57,9 +83,17 @@ export function callValue(fn: PyValue, args: PyValue[], kwargs?: Kwargs): PyValu
   if (fn instanceof PyBuiltinFunction) {
     const runtime = currentRuntime();
     runtime.spend();
-    return runtime.runNative(() => fn.run(fn.self === undefined ? args : [fn.self, ...args], kwargs, fn.self));
+    return runtime.runNative(() =>
+      fn.run(
+        fn.self === undefined || fn.binding === 'static' ? args : [fn.self, ...args],
+        fn.prepareKeywords ? fn.prepareKeywords(kwargs) : kwargs,
+        fn.self
+      )
+    );
   }
-  if (fn instanceof PyBoundMethod) return callValue(fn.fn, [fn.self, ...args], kwargs);
+  if (fn instanceof PyBoundMethod) {
+    return fn.fastCall ? callValue(fn.fastCall, args, kwargs) : callValue(fn.fn, [fn.self, ...args], kwargs);
+  }
   if (fn instanceof PyClass) return currentRuntime().instantiate(fn, args, kwargs);
   const call = lookupSpecial(fn, '__call__');
   if (call !== undefined) return callValue(bindValue(call, fn), args, kwargs);
@@ -91,14 +125,18 @@ export function callSpecial(value: PyValue, name: string, args: PyValue[]): PyVa
 }
 
 /** Binds a class attribute to an instance, as a descriptor's `__get__` would. */
-// code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of descriptor binding.
+// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of descriptor binding.
 export function bindValue(attribute: PyValue, instance: PyValue, owner: PyClass = classOf(instance)): PyValue {
   if (attribute instanceof PyFunction) return new PyBoundMethod(methodClass, instance, attribute);
   if (attribute instanceof PyBuiltinFunction && attribute.self === undefined) {
-    if (attribute.binding === 'static') return attribute;
-    const self = attribute.binding === 'class' ? owner : instance;
+    // A builtin function, such as `time.localtime` stored as a class attribute, is not a descriptor in CPython.
+    if (attribute.binding === 'static' || attribute.cls === builtinFunctionClass) return attribute;
+    if (attribute.cls === functionClass) {
+      return new PyBoundMethod(methodClass, attribute.binding === 'class' ? owner : instance, attribute);
+    }
+    const self = attribute.binding === 'class' ? owner : mixinSelf(attribute, instance);
     return new PyBuiltinFunction(
-      builtinFunctionClass,
+      attribute.cls === wrapperDescriptorClass ? methodWrapperClass : builtinFunctionClass,
       attribute.name,
       attribute.run,
       self,
@@ -106,22 +144,30 @@ export function bindValue(attribute: PyValue, instance: PyValue, owner: PyClass 
       attribute.ownerName
     );
   }
-  if (attribute instanceof PyInstance && !attribute.cls.isBuiltin) {
-    // Only classes of library code written in Python define __get__.
-    const get = attribute.cls.lookup('__get__');
-    if (get !== undefined) return callValue(bindValue(get, attribute), [instance, owner]);
-  }
-  if (attribute instanceof PyObject && attribute.cls.nativeGet)
-    return attribute.cls.nativeGet(attribute, instance, owner);
   if (attribute instanceof PyDescriptor) {
     if (attribute.cls === staticmethodClass) return attribute.fn;
     if (attribute.cls === classmethodClass) return bindToClass(attribute.fn, owner);
-    if (attribute.cls === propertyClass) {
+    if (isPropertyKind(attribute.cls)) {
       if (attribute.fn === None) throw pyError('AttributeError', `property object has no getter`);
       return callValue(attribute.fn, [instance]);
     }
   }
-  return attribute;
+  return boundByGetter(attribute, instance, owner);
+}
+
+/** An attribute that a `__get__` of the program's class binds, as special methods such as `unittest.mock`'s are. */
+function boundByGetter(attribute: PyValue, instance: PyValue, owner: PyClass): PyValue {
+  const getter = descriptorGetter(attribute);
+  return getter === undefined ? attribute : callValue(bindValue(getter, attribute), [instance, owner]);
+}
+
+/** The str or int that a method of `str` or `int` runs on for a member of an Enum mixing in that type. */
+function mixinSelf(method: PyBuiltinFunction, instance: PyValue): PyValue {
+  if (!(instance instanceof PyInstance) || instance.enumValue === undefined) return instance;
+  const { enumValue } = instance;
+  if (method.ownerName === 'str' && typeof enumValue === 'string') return enumValue;
+  if (method.ownerName === 'int' && typeof enumValue === 'bigint') return enumValue;
+  return instance;
 }
 
 function bindToClass(fn: PyValue, cls: PyClass): PyValue {
@@ -131,7 +177,7 @@ function bindToClass(fn: PyValue, cls: PyClass): PyValue {
 export function attributeError(value: PyValue, name: string): PyError {
   const message =
     value instanceof PyClass
-      ? `type object '${value.name}' has no attribute '${name}'`
+      ? `type object '${value.typeName ?? value.name}' has no attribute '${name}'`
       : value instanceof PyModule
         ? `module '${value.name}' has no attribute '${name}'`
         : `'${typeName(value)}' object has no attribute '${name}'`;
@@ -145,18 +191,33 @@ export function attributeError(value: PyValue, name: string): PyError {
 }
 
 /** Reads `value.name`, raising AttributeError when it is missing. */
-export function getAttribute(value: PyValue, name: string): PyValue {
-  const getattr = value instanceof PyClass ? undefined : lookupSpecial(value, '__getattr__');
+export function getAttribute(value: PyValue, nameValue: PyValue): PyValue {
+  const name = attributeName(nameValue);
+  const custom = customGetattribute(value);
+  if (custom !== undefined) return getWithCustomGetattribute(value, nameValue, custom);
+  const getattr = value instanceof PyModule ? value.dict.get('__getattr__') : lookupSpecial(value, '__getattr__');
   let found: PyValue | undefined;
   try {
-    found = findAttribute(value, name);
+    found = findAttribute(value, name, nameValue) ?? missingAttribute(value, name);
   } catch (error) {
     // A descriptor that raises AttributeError reports the attribute as missing, so `__getattr__` still applies.
     if (getattr === undefined || !isAttributeError(error)) throw error;
   }
   if (found !== undefined) return found;
-  if (getattr !== undefined) return callValue(bindValue(getattr, value), [name]);
+  if (getattr !== undefined && value instanceof PyModule) return callValue(getattr, [nameValue]);
+  if (getattr !== undefined) return callValue(bindValue(getattr, value), [nameValue]);
+  const feature = unsupportedClassAttribute(value, name);
+  if (feature !== undefined) throw new UnsupportedFeatureError(feature);
   throw attributeError(value, name);
+}
+
+function missingAttribute(value: PyValue, name: string): PyValue | undefined {
+  if (value instanceof PyClass) return undefined;
+  for (const cls of classOf(value).mro) {
+    const found = cls.missingAttribute?.(value, name);
+    if (found !== undefined) return found;
+  }
+  return undefined;
 }
 
 function isAttributeError(error: unknown): boolean {
@@ -164,7 +225,7 @@ function isAttributeError(error: unknown): boolean {
 }
 
 /** Reads `value.name`, or returns undefined when it is missing. */
-export function getAttributeOrUndefined(value: PyValue, name: string): PyValue | undefined {
+export function getAttributeOrUndefined(value: PyValue, name: PyValue): PyValue | undefined {
   try {
     return getAttribute(value, name);
   } catch (error) {
@@ -173,41 +234,106 @@ export function getAttributeOrUndefined(value: PyValue, name: string): PyValue |
   }
 }
 
-// code-gauge-allow functionNcss 35 -- Follows the order CPython looks up an attribute in.
-// code-gauge-allow functionCognitiveComplexity 21 -- Follows the order CPython looks up an attribute in.
-function findAttribute(value: PyValue, name: string): PyValue | undefined {
-  if (value instanceof PyClass) return classAttribute(value, name);
-  if (value instanceof PyModule) {
-    const feature = value.unsupported.get(name);
-    if (feature !== undefined) throw new UnsupportedFeatureError(feature);
-    return value.attribute(name) ?? specialAttribute(value, name);
-  }
-  if (value instanceof PySuper) {
-    const found = superAttribute(value, name);
-    if (found !== undefined) return found;
-    const own = value.cls.lookup(name);
-    return isDataDescriptor(own) ? readDescriptor(own, value) : undefined;
-  }
+/** `object.__getattribute__`: reads an attribute without the program's `__getattribute__` and `__getattr__`. */
+export function genericGetAttribute(value: PyValue, nameValue: PyValue): PyValue {
+  const name = attributeName(nameValue);
+  const found = findAttribute(value, name, nameValue);
+  if (found === undefined) throw attributeError(value, name);
+  return found;
+}
+
+// code-gauge-allow functionNcss 32 -- One step per place an attribute lookup may find a name.
+function findAttribute(value: PyValue, name: string, nameValue: PyValue = name): PyValue | undefined {
+  const key = nameValue as string;
+  if (value instanceof PyClass) return classAttribute(value, name, key);
+  if (value instanceof PyModule) return moduleAttribute(value, name, key);
+  if (value instanceof PySuper) return superAttribute(value, name);
+  if (isThreadLocal(value)) ensureThreadLocalDict(value);
   const cls = classOf(value);
   const special = specialAttribute(value, name);
   if (special !== undefined) return special;
-  const attribute = cls.lookup(name);
-  if (isDataDescriptor(attribute)) return readDescriptor(attribute, value);
-  if (attribute instanceof PyDescriptor && attribute.cls === propertyClass) return bindValue(attribute, value, cls);
-  if (value instanceof PyInstance || value instanceof PyFunction) {
-    const own = value.dict.get(name);
-    if (own !== undefined) return own;
+  const attribute = cls.lookup(key, true);
+  if (attribute === undefined) return ownDict(value)?.get(key) ?? typeDocOf(cls, name);
+  if (attribute instanceof PyAttribute) {
+    // A descriptor standing for what this grader's objects keep natively finds nothing where they keep nothing.
+    if (!attribute.stands) return attribute.get(value);
+    return ownDict(value)?.get(key) ?? attribute.fallback ?? typeDocOf(cls, name);
   }
-  const opaqueOwn = ownAttributesOf(value)?.get(name);
-  if (opaqueOwn !== undefined) return opaqueOwn;
-  if (isNonDataDescriptor(attribute)) return readDescriptor(attribute, value);
-  if (attribute === undefined) return undefined;
+  if (attribute instanceof PyDescriptor && isPropertyKind(attribute.cls)) return bindValue(attribute, value, cls);
+  const getter = descriptorGetter(attribute);
+  if (getter !== undefined && isDataDescriptor(attribute)) return callGetter(getter, attribute, value, cls);
+  const own = ownDict(value)?.get(key);
+  if (own !== undefined) return own;
+  if (getter !== undefined) return callGetter(getter, attribute, value, cls);
   return bindValue(attribute, value, cls);
+}
+
+/** `obj.__doc__` of an instance of a builtin class, which is the class's own doc. */
+function typeDocOf(cls: PyClass, name: string): PyValue | undefined {
+  return name === '__doc__' && cls.isBuiltin ? classAttribute(cls, name) : undefined;
+}
+
+function moduleAttribute(module: PyModule, name: string, key = name): PyValue | undefined {
+  if (name === '__class__') return module.cls;
+  const feature = module.unsupported.get(name);
+  if (feature !== undefined) throw new UnsupportedFeatureError(feature);
+  if (name === '__dict__') {
+    checkNamespaceListing(module, 'モジュールの __dict__・vars()');
+    completeNamespace(module);
+    return namespaceDict(module.dict);
+  }
+  // A module's `__annotate__` is None until its code defines one, which reading it records, as CPython does.
+  if (name === '__annotate__' && !module.dict.has(name)) module.dict.set(name, None);
+  const value =
+    name === '__annotations__' ? moduleAnnotations(module) : (module.dict.get(key) ?? importedModule(module, name));
+  // A special name the module lacks is one its module object lacks, which programs and pydoc look for.
+  if (value === undefined && module.partialFeature !== undefined && !/^__\w+__$/.test(name))
+    throw new UnsupportedFeatureError(module.partialFeature);
+  return value ?? moduleTypeAttribute(module, name);
+}
+
+/** An attribute of the module type, as `__getattribute__` or `__repr__`, bound to the module. */
+function moduleTypeAttribute(module: PyModule, name: string): PyValue | undefined {
+  const attribute = name.startsWith('__') ? module.cls.lookup(name) : undefined;
+  return attribute instanceof PyBuiltinFunction ? bindValue(attribute, module, module.cls) : undefined;
+}
+
+export function importedModule(module: PyModule, name: string): PyValue | undefined {
+  const target = module.imports.get(name);
+  if (target === undefined) return undefined;
+  const runtime = currentRuntime();
+  return runtime.runNative(() => {
+    const value = typeof target === 'string' ? importTarget(target) : target.resolve();
+    runtime.handToNative(value);
+    const aliases =
+      typeof target === 'string'
+        ? [name]
+        : [...module.imports].filter(([, other]) => other === target).map(([alias]) => alias);
+    for (const alias of aliases) {
+      module.dict.set(alias, value);
+      module.imports.delete(alias);
+      runtime.finalizer.recordModuleBinding(module, alias, value);
+    }
+    return value;
+  });
+}
+
+function importTarget(target: string): PyValue {
+  const [moduleName, attribute] = target.split(':');
+  const imported = currentRuntime().importModule(moduleName);
+  return attribute === undefined ? imported : getAttribute(imported, attribute);
 }
 
 export { deleteAttribute, setAttribute } from './attributes';
 
 // Truth, length, and items ------------------------------------------------------------------------------------------
+
+/** A special method that a program's subclass of a builtin type defines over the builtin type's, or undefined. */
+export function overriding(value: PyValue, name: string): PyValue | undefined {
+  if (typeof value !== 'object' || value.cls.isBuiltin) return undefined;
+  const method = value.cls.lookup(name);
+  return method === undefined || method instanceof PyBuiltinFunction ? undefined : method;
+}
 
 export function isTruthy(value: PyValue): boolean {
   switch (typeof value) {
@@ -225,15 +351,10 @@ export function isTruthy(value: PyValue): boolean {
     }
   }
   if (value === None) return false;
-  if (
-    value instanceof PyList ||
-    (value instanceof PyTuple && !overridesBuiltin(value, '__bool__') && !overridesBuiltin(value, '__len__'))
-  ) {
-    return value.items.length > 0;
+  if (overriding(value, '__bool__') === undefined && overriding(value, '__len__') === undefined) {
+    const truth = builtinTruth(value);
+    if (truth !== undefined) return truth;
   }
-  if (value instanceof PyDict) return value.store.size > 0;
-  if (value instanceof PySet) return value.table.size > 0;
-  if (value instanceof PyRange) return value.length > 0n;
   const bool = lookupSpecial(value, '__bool__');
   if (bool !== undefined) {
     const result = callValue(bindValue(bool, value), []);
@@ -243,6 +364,14 @@ export function isTruthy(value: PyValue): boolean {
   const len = lookupSpecial(value, '__len__');
   if (len !== undefined) return exactLength(value) > 0n;
   return true;
+}
+
+function builtinTruth(value: PyValue): boolean | undefined {
+  if (value instanceof PyList || value instanceof PyTuple) return value.items.length > 0;
+  if (value instanceof PyDict) return value.store.size > 0;
+  if (value instanceof PySet) return value.table.size > 0;
+  if (value instanceof PyRange) return value.length > 0n;
+  return undefined;
 }
 
 /** The length of a value as a host number, for code that sizes or indexes a host array by it. */
@@ -255,16 +384,9 @@ const MAX_SSIZE = (1n << 63n) - 1n;
 /** Python's `len()`, exact up to CPython's Py_ssize_t limit. */
 export function exactLength(value: PyValue): bigint {
   if (typeof value === 'string') return BigInt(strLength(value));
-  if (value instanceof PyList || (value instanceof PyTuple && !overridesBuiltin(value, '__len__'))) {
-    return BigInt(value.items.length);
-  }
-  if (value instanceof PyDict) return BigInt(value.store.size);
-  if (value instanceof PySet) return BigInt(value.table.size);
-  if (value instanceof PyDictView) return BigInt(value.dict.store.size);
-  if (value instanceof PyClass && value.enumMembers) return BigInt(value.enumMembers.length);
-  if (value instanceof PyRange) {
-    if (value.length > MAX_SSIZE) throw pyError('OverflowError', 'Python int too large to convert to C ssize_t');
-    return value.length;
+  if (overriding(value, '__len__') === undefined) {
+    const length = builtinExactLength(value);
+    if (length !== undefined) return length;
   }
   const len = lookupSpecial(value, '__len__');
   if (len === undefined) throw typeError(`object of type '${typeName(value)}' has no len()`);
@@ -272,6 +394,19 @@ export function exactLength(value: PyValue): bigint {
   if (length < 0n) throw pyError('ValueError', '__len__() should return >= 0');
   if (length > MAX_SSIZE) throw pyError('OverflowError', "cannot fit 'int' into an index-sized integer");
   return length;
+}
+
+function builtinExactLength(value: PyValue): bigint | undefined {
+  if (value instanceof PyList || value instanceof PyTuple) return BigInt(value.items.length);
+  if (value instanceof PyDict) return BigInt(value.store.size);
+  if (value instanceof PySet) return BigInt(value.table.size);
+  if (value instanceof PyDictView) return BigInt(value.dict.store.size);
+  if (value instanceof PyClass && value.flags.isEnum) return BigInt((value.enumMembers ?? []).length);
+  if (value instanceof PyRange) {
+    if (value.length > MAX_SSIZE) throw pyError('OverflowError', 'Python int too large to convert to C ssize_t');
+    return value.length;
+  }
+  return undefined;
 }
 
 export { deleteItem, getItem, setItem } from './items';
@@ -296,35 +431,76 @@ export function iterateEach(iterables: PyValue[]): { nexts: NextFunction[]; held
  * iterator built on the iteration must report as held: the iterator object that `__iter__` returned, or the value.
  */
 export function iterateHeld(value: PyValue): { next: NextFunction; held: PyValue } {
-  const next = iterateBuiltin(value);
-  if (next) return { next, held: value };
-  const iter = lookupSpecial(value, '__iter__');
-  if (iter === undefined || iter === None) return { next: iterateByProtocol(value), held: value };
-  const iterator = callValue(bindValue(iter, value), []);
+  const iterator = getIterator(value);
   return { next: nextOf(iterator), held: iterator };
 }
 
 function iterateBuiltin(value: PyValue): NextFunction | undefined {
-  if (value instanceof PyList || (value instanceof PyTuple && !overridesBuiltin(value, '__iter__')))
-    return iterateItems(value);
+  if (typeof value === 'string') return iterateString(value);
+  if (overriding(value, '__iter__') !== undefined) return undefined;
+  return builtinIterateRaw(value);
+}
+
+/** Iterates a builtin iterable natively, ignoring any `__iter__` override on a subclass, or returns undefined. */
+function builtinIterateRaw(value: PyValue): NextFunction | undefined {
+  if (value instanceof PyList || value instanceof PyTuple) return iterateItems(value);
   if (typeof value === 'string') return iterateString(value);
   if (value instanceof PyRange) return iterateRange(value);
-  if (value instanceof PyDict && !overridesBuiltin(value, '__iter__')) return iterateDict(value, 'keys');
+  if (value instanceof PyDict) return iterateDict(value, 'keys');
   if (value instanceof PyDictView) return iterateDict(value.dict, value.view);
   if (value instanceof PySet) return iterateSet(value);
-  if (value instanceof PyIterator) {
+  if (value instanceof PyIterator && (value.cls.isBuiltin || isNativeNext(value))) {
     // A native iterator may hand on items that only its own state held, such as groupby's pending item.
     const runtime = currentRuntime();
     return () => runtime.runNative(value.next);
   }
-  if (value instanceof PyGenerator) return iterateGenerator(value);
-  if (value instanceof PyClass && value.enumMembers) return iterate(newList([...value.enumMembers]));
+  if (isIteratorGenerator(value)) return iterateGenerator(value);
+  if (value instanceof PyClass && value.flags.isEnum) return iterate(newList([...(value.enumMembers ?? [])]));
   return undefined;
 }
 
+/** How many items each native iterator has left, which its `__length_hint__` gives. */
+const remainingCounts = new WeakMap<NextFunction, () => number>();
+
+/** Records how many items an iterator's next function has left. */
+export function withRemaining(next: NextFunction, remaining: () => number): NextFunction {
+  remainingCounts.set(next, remaining);
+  return next;
+}
+
+/** How many items a native iterator has left, or undefined for an iterator that does not know. */
+export function remainingOf(next: NextFunction): number | undefined {
+  return remainingCounts.get(next)?.();
+}
+
+// code-gauge-allow functionCognitiveComplexity 18 -- The iterator, its reduction, and its __setstate__ share its position.
 function iterateItems(sequence: PyList | PyTuple): NextFunction {
   let index = 0;
-  return () => (index < sequence.items.length ? sequence.items[index++] : DONE);
+  // As in CPython, an iterator that reached the end stays there, even if the sequence grows.
+  let exhausted = false;
+  let retained = true;
+  const next = withRemaining(
+    () => {
+      if (!exhausted && index < sequence.items.length) return sequence.items[index++];
+      exhausted = true;
+      retained = false;
+      return DONE;
+    },
+    () => (exhausted ? 0 : Math.max(sequence.items.length - index, 0))
+  );
+  const isTuple = sequence instanceof PyTuple;
+  return withState(next, {
+    holds: () => (retained ? [sequence] : []),
+    reduce: () =>
+      exhausted
+        ? reduction('iter', [isTuple ? newTuple([]) : newList([])])
+        : reduction('iter', [sequence], BigInt(index)),
+    setState: (state) => {
+      if (exhausted) return;
+      if (state < 0n && !isTuple) exhausted = true;
+      else index = clamp(state, 0, sequence.items.length);
+    },
+  });
 }
 
 function iterateGenerator(generator: PyGenerator): NextFunction {
@@ -335,32 +511,94 @@ function iterateGenerator(generator: PyGenerator): NextFunction {
 function iterateString(value: string): NextFunction {
   const characters = iterStr(value);
   currentRuntime().scan(characters.length);
+  return iterateByIndex(
+    value,
+    () => characters.length,
+    (index) => characters[index] as string,
+    ''
+  );
+}
+
+/**
+ * Iterates the items of a sequence by their index, as the iterators of str and bytes do: one that reached the end
+ * stays there, and it reduces to `iter(sequence)` and its index, or to `iter(empty)` at the end.
+ */
+export function iterateByIndex(
+  sequence: PyValue,
+  length: () => number,
+  itemAt: (index: number) => PyValue,
+  empty: PyValue
+): NextFunction {
   let index = 0;
-  return () => (index < characters.length ? characters[index++] : DONE);
+  let exhausted = false;
+  const next = withRemaining(
+    () => {
+      if (!exhausted && index < length()) return itemAt(index++);
+      exhausted = true;
+      return DONE;
+    },
+    () => (exhausted ? 0 : Math.max(length() - index, 0))
+  );
+  return withState(next, {
+    holds: () => (exhausted ? [] : [sequence]),
+    reduce: () => (exhausted ? reduction('iter', [empty]) : reduction('iter', [sequence], BigInt(index))),
+    setState: (state) => {
+      if (!exhausted) index = clamp(state, 0, length());
+    },
+  });
 }
 
 function iterateRange(range: PyRange): NextFunction {
   const { step, length } = range;
   let current = range.start;
   let remaining = length;
-  return () => {
+  const next: NextFunction = () => {
     if (remaining <= 0n) return DONE;
     remaining--;
     const result = current;
     current += step;
     return result;
   };
+  return withState(
+    withRemaining(next, () => Number(remaining > 0n ? remaining : 0n)),
+    {
+      reduce: () => reduction('iter', [new PyRange(rangeClass, current, current + remaining * step, step)], None),
+      setState: (state) => {
+        const skipped = state < 0n ? 0n : state > remaining ? remaining : state;
+        current += skipped * step;
+        remaining -= skipped;
+      },
+    }
+  );
 }
 
 function iterateSet(set: PySet): NextFunction {
   const { table } = set;
   const version = table.version;
+  const size = table.size;
   const entries = table.entries();
-  return () => {
+  let consumed = 0;
+  let exhausted = false;
+  const next: NextFunction = () => {
+    if (exhausted) return DONE;
     if (table.version !== version) throw pyError('RuntimeError', 'Set changed size during iteration');
-    const next = entries.next();
-    return next.done ? DONE : next.value.key;
+    const step = entries.next();
+    if (step.done) {
+      consumed = size;
+      exhausted = true;
+      return DONE;
+    }
+    consumed++;
+    return step.value.key;
   };
+  const remainingItems = (): PyValue[] => [...table.entries()].slice(consumed).map((entry) => entry.key as PyValue);
+  return withState(
+    withRemaining(next, () => (table.version === version ? size - consumed : 0)),
+    {
+      holds: () => (exhausted ? [] : [set]),
+      reduce: () => reduction('iter', [newList(consumed >= size ? [] : remainingItems())]),
+    }
+  );
 }
 
 /** Iterates for a caller that words the TypeError of getting the iterator itself, as `str.join` does in CPython. */
@@ -387,6 +625,11 @@ function iterateByProtocol(value: PyValue): NextFunction {
   return nextOf(iterator);
 }
 
+/** Whether a subclass of a builtin iterator keeps its type's __next__, which advances it natively. */
+function isNativeNext(iterator: PyIterator): boolean {
+  return lookupSpecial(iterator, '__next__') instanceof PyBuiltinFunction;
+}
+
 /**
  * Whether the class of a value, a subclass of a builtin type, overrides one of that type's methods, which the native
  * fast paths for the type must then leave to the method.
@@ -395,10 +638,12 @@ export function overridesBuiltin(value: PyObject, name: string): boolean {
   return !value.cls.isBuiltin && value.cls.lookup(name) !== value.cls.mro.find((cls) => cls.isBuiltin)?.lookup(name);
 }
 
-/** The next function of an iterator object, which calls its `__next__` until it raises StopIteration. */
 export function nextOf(iterator: PyValue): NextFunction {
-  if (iterator instanceof PyIterator) return iterator.next;
-  if (iterator instanceof PyGenerator) return () => currentRuntime().resumeGenerator(iterator);
+  if (iterator instanceof PyIterator && (iterator.cls.isBuiltin || isNativeNext(iterator))) {
+    const runtime = currentRuntime();
+    return () => runtime.runNative(iterator.next);
+  }
+  if (isIteratorGenerator(iterator)) return () => currentRuntime().resumeGenerator(iterator);
   const next = lookupSpecial(iterator, '__next__');
   if (next === undefined) throw typeError(`iter() returned non-iterator of type '${typeName(iterator)}'`);
   const bound = bindValue(next, iterator);
@@ -406,23 +651,8 @@ export function nextOf(iterator: PyValue): NextFunction {
     try {
       return callValue(bound, []);
     } catch (error) {
-      if (error instanceof PyError && error.exception.cls.isSubclassOf(exceptionClassNamed('StopIteration')))
-        return DONE;
-      throw error;
-    }
-  };
-}
-
-function iterateSequence(value: PyValue): NextFunction {
-  let index = 0n;
-  let finished = false;
-  return () => {
-    if (finished) return DONE;
-    try {
-      return getItemOf(value, index++);
-    } catch (error) {
-      if (isExceptionOf(error, 'IndexError') || isExceptionOf(error, 'StopIteration')) {
-        finished = true;
+      if (error instanceof PyError && error.exception.cls.isSubclassOf(exceptionClassNamed('StopIteration'))) {
+        releaseCaughtException(error);
         return DONE;
       }
       throw error;
@@ -430,20 +660,64 @@ function iterateSequence(value: PyValue): NextFunction {
   };
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Indexing, terminal exceptions and cursor restoration share sequence iterator state.
+function iterateSequence(value: PyValue): NextFunction {
+  let index = 0n;
+  let finished = false;
+  const next: NextFunction = () => {
+    if (finished) return DONE;
+    try {
+      const result = getItemOf(value, index);
+      index++;
+      return result;
+    } catch (error) {
+      if (error instanceof PyError && (isExceptionOf(error, 'IndexError') || isExceptionOf(error, 'StopIteration'))) {
+        finished = true;
+        releaseCaughtException(error);
+        return DONE;
+      }
+      throw error;
+    }
+  };
+  return withState(next, {
+    holds: () => (finished ? [] : [value]),
+    reduce: () => (finished ? reduction('iter', [newTuple([])]) : reduction('iter', [value], index)),
+    setState: (state) => {
+      if (!finished) index = state < 0n ? 0n : state;
+    },
+  });
+}
+
+// code-gauge-allow functionCognitiveComplexity 19 -- The iterator, its size check, and its reduction share its position.
 function iterateDict(dict: PyDict, view: 'keys' | 'values' | 'items'): NextFunction {
   const { store } = dict;
   const { size, version } = store;
   const entries = store.liveEntries();
-  const runtime = currentRuntime();
-  return () => {
-    checkDictUnchanged(dict, size, version);
-    const next = entries.next();
-    if (next.done) return DONE;
-    const entry = next.value;
-    if (view === 'keys') return entry.key;
-    if (view === 'values') return entry.value;
-    return runtime.tuple([entry.key, entry.value]);
-  };
+  let consumed = 0;
+  let exhausted = false;
+  const cached = view === 'items' ? new DictItemTuple() : undefined;
+  const remainingItems = (): PyValue[] =>
+    [...store.liveEntries()].slice(consumed).map((entry) => dictItemValue(entry, view));
+  const next = withRemaining(
+    () => {
+      if (exhausted) return DONE;
+      checkDictUnchanged(dict, size, version);
+      const step = entries.next();
+      if (step.done) {
+        consumed = size;
+        exhausted = true;
+        return DONE;
+      }
+      consumed++;
+      const entry = step.value;
+      return cached?.item(entry) ?? dictItemValue(entry, view);
+    },
+    () => (store.size === size && (!dict.cls.flags.isOrderedDict || store.version === version) ? size - consumed : 0)
+  );
+  return withState(next, {
+    holds: () => [...(exhausted ? [] : [dict]), ...(cached?.holds() ?? [])],
+    reduce: () => reduction('iter', [newList(consumed >= size ? [] : remainingItems())]),
+  });
 }
 
 /**
@@ -465,13 +739,15 @@ export function isExceptionOf(error: unknown, name: string): boolean {
 
 /** All the items an iterable yields, with `notIterable` as the message for a value that gives no iterator. */
 export function toArray(value: PyValue, notIterable?: string): PyValue[] {
-  if (value instanceof PyList || (value instanceof PyTuple && !overridesBuiltin(value, '__iter__')))
+  if ((value instanceof PyList || value instanceof PyTuple) && overriding(value, '__iter__') === undefined) {
     return [...value.items];
+  }
   const next = notIterable === undefined ? iterate(value) : iterateOr(value, notIterable);
   const items: PyValue[] = [];
   const runtime = currentRuntime();
   // The items taken so far are only here while the iterator runs Python code.
   return runtime.runNative(() => {
+    runtime.handToNative(items);
     for (let item = next(); item !== DONE; item = next()) {
       runtime.spend();
       items.push(item);
@@ -482,39 +758,60 @@ export function toArray(value: PyValue, notIterable?: string): PyValue[] {
 
 /** The iterator object `iter()` returns. */
 export function getIterator(value: PyValue): PyValue {
-  if (value instanceof PyIterator || value instanceof PyGenerator) return value;
-  if (value instanceof PyClass && value.enumMembers) return enumMemberGenerator(value, false);
+  if ((value instanceof PyIterator && value.cls.isBuiltin) || isIteratorGenerator(value)) return value;
   const iter = lookupSpecial(value, '__iter__');
-  // A builtin's own __iter__ is bypassed only where iterateBuiltin reads the value directly, whose __iter__ comes back
-  // here; any other builtin's __iter__ makes its own iterator type, such as a deque's.
-  const builtin = classOf(value).isBuiltin && iter instanceof PyBuiltinFunction ? iterateBuiltin(value) : undefined;
-  if (!builtin && iter !== undefined && iter !== None) {
+  // A program's subclass of a builtin iterator, as of zip, iterates natively unless it defines __iter__.
+  if (value instanceof PyIterator && (iter === undefined || iter instanceof PyBuiltinFunction)) return value;
+  if (iter !== undefined && iter !== None) {
     const iterator = callValue(bindValue(iter, value), []);
     if (lookupSpecial(iterator, '__next__') === undefined) {
       throw typeError(`iter() returned non-iterator of type '${typeName(iterator)}'`);
     }
     return iterator;
   }
-  const base = builtin ?? iterate(value);
-  let consumed = 0;
-  let exhausted = false;
-  const next = (): PyValue | typeof DONE => {
-    const item = base();
-    if (item === DONE) exhausted = true;
-    else consumed++;
-    return item;
-  };
-  const iterator = new PyIterator(iteratorClass(iteratorNameOf(value)), next, () => [value]);
-  iterator.lengthHint = () => (exhausted ? 0 : Math.max(0, lengthOf(value) - consumed));
-  return iterator;
+  const next = iterate(value);
+  return nativeIterator(iteratorClass(iteratorNameOf(value)), next, () => [value]);
 }
 
+/** The iterator the `__iter__` of a builtin iterable returns, which iterates it natively whatever its class. */
+export function builtinIterator(value: PyValue): PyValue {
+  const next = builtinIterateRaw(value) ?? iterate(value);
+  return nativeIterator(iteratorClass(iteratorNameOf(value)), next, () => [value]);
+}
+
+export function nativeIterator(cls: PyClass, next: NextFunction, fallback: () => PyValue[]): PyIterator {
+  const state = stateOf(next);
+  const holds = state?.holds ?? fallback;
+  const advance = withRemaining(
+    () => {
+      const before = holds();
+      const value = next();
+      const retained = new Set(holds());
+      currentRuntime().finalizer.release(
+        before.filter((item) => !retained.has(item)),
+        value === DONE ? [] : [value]
+      );
+      return value;
+    },
+    () => remainingOf(next) ?? 0
+  );
+  if (state) withState(advance, state);
+  return new PyIterator(cls, advance, holds);
+}
+
+// code-gauge-allow functionCognitiveComplexity 22 -- One case per builtin iterable.
 function iteratorNameOf(value: PyValue): string {
   // oxlint-disable-next-line eslint/no-control-regex -- ASCII includes the control characters.
   if (typeof value === 'string') return /^[\u0000-\u007F]*$/.test(value) ? 'str_ascii_iterator' : 'str_iterator';
   if (value instanceof PyList) return 'list_iterator';
+  if (value instanceof PyDeque) return 'collections._deque_iterator';
+  if (value instanceof PyBytes) return value.isMutable ? 'bytearray_iterator' : 'bytes_iterator';
+  if (value instanceof PyMemoryView) return 'memory_iterator';
   if (value instanceof PyTuple) return 'tuple_iterator';
-  if (value instanceof PyRange) return 'range_iterator';
+  if (value instanceof PyRange) {
+    const fits = [value.start, value.stop, value.step].every((each) => each >= -(2n ** 63n) && each < 2n ** 63n);
+    return fits ? 'range_iterator' : 'longrange_iterator';
+  }
   if (value instanceof PySet) return 'set_iterator';
   if (value instanceof PyDict) return dictIteratorName(value, 'keys');
   if (value instanceof PyDictView) return dictIteratorName(value.dict, value.view);
@@ -532,7 +829,10 @@ export function enumMemberGenerator(cls: PyClass, isReversed: boolean): PyGenera
     generatorClass,
     '<genexpr>',
     `EnumType.${isReversed ? '__reversed__' : '__iter__'}.<locals>.<genexpr>`,
-    () => (index < members.length ? { done: false, value: members[index++] } : { done: true, value: None }),
+    (input) => {
+      if (input.error) throw input.error;
+      return index < members.length ? { done: false, value: members[index++] } : { done: true, value: None };
+    },
     () => members
   );
 }
@@ -557,8 +857,9 @@ export { NotImplemented };
 
 /** The name argument of getattr(), setattr(), delattr(), and object's attribute methods, which must be a str. */
 export function attributeName(name: PyValue): string {
-  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
-  return name;
+  const text = stringValue(name);
+  if (text === undefined) throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  return text;
 }
 
 /** `super(type, obj)`, refusing an object that is neither an instance nor a subclass of the type as CPython does. */

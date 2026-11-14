@@ -1,4 +1,5 @@
 import type { Runtime } from './runtime';
+import type { PyError, PyObject } from './values';
 
 /**
  * The runtime of the program running now. Builtin classes are shared by every run, so their methods find the run's
@@ -38,6 +39,23 @@ export function chargeSlots(count: number): void {
   current?.allocate(count);
 }
 
+export function recordNativeAllocation(value: PyObject): void {
+  current?.handToNative(value);
+}
+
+/** Tracks a new object of a class that defines `__del__`, whose freeing the running program's finalizer watches. */
+export function trackFinalizable(object: PyObject): void {
+  current?.finalizer.track(object);
+}
+
+export function releaseCaughtException(error: PyError, inFlight: unknown[] = []): void {
+  current?.finalizer.release([error.exception], inFlight);
+}
+
+export function releaseNamespaceKey(key: unknown, value: unknown): void {
+  current?.finalizer.release([key], [value]);
+}
+
 /**
  * Refuses a string beyond the length limit that a native function returns, so that none can hand one to the program
  * even when it built the string without consulting the limit.
@@ -68,4 +86,9 @@ export function withRuntime<T>(runtime: Runtime, run: () => T): T {
   } finally {
     current = outer;
   }
+}
+
+/** The runtime of the program running now, if any, as none runs while the builtin classes are created. */
+export function runningRuntime(): Runtime | undefined {
+  return current;
 }

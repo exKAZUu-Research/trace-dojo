@@ -1,10 +1,11 @@
-import { formatString, pyFormat, pyStr } from './conversions';
+import { decodeObject } from './codecs';
+import { formatString, pyFormat, strObject } from './conversions';
 import { method } from './define';
 import { pyHash } from './hashing';
 import { sliceIndices } from './items';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
-import { getItem, getIterator, iterate, toArray } from './objects';
+import { builtinIterator, getItem, iterate, toArray } from './objects';
 import { contains } from './operators';
 import { formatPercent } from './percentFormat';
 import { currentRuntime } from './runtimeContext';
@@ -21,8 +22,10 @@ import {
   pyError,
   sliceClass,
   strClass,
+  stringValue,
   typeError,
   typeName,
+  unbox,
   valueError,
 } from './types';
 import {
@@ -30,7 +33,7 @@ import {
   casefold,
   everyCode,
   isLowerText,
-  isTitleText,
+  isTitleText as isTitleStr,
   isUpperText,
   lower,
   swapcase,
@@ -63,15 +66,15 @@ strClass.construct = (_cls, args, kwargs) => {
     kwargs
   );
   const value = argument(args, kwargs, 0, 'object');
-  if (args.length > 1 || kwargs?.has('encoding') || kwargs?.has('errors')) {
-    throw currentRuntime().unsupported('str() に encoding を渡す書き方（bytes の変換）');
-  }
-  return value === undefined ? '' : pyStr(value);
+  const encoding = argument(args, kwargs, 1, 'encoding');
+  const errors = argument(args, kwargs, 2, 'errors');
+  if (encoding !== undefined || errors !== undefined) return decodeObject(value ?? '', encoding, errors);
+  return value === undefined ? '' : strObject(value);
 };
 
 const LINE_BREAKS = '\n\r\v\f\u001C\u001D\u001E\u0085  ';
 
-function isSpace(char: string): boolean {
+export function isSpace(char: string): boolean {
   return isSpaceCode(char.codePointAt(0) as number);
 }
 
@@ -79,12 +82,14 @@ const asStr = (self: PyValue): string => self as string;
 
 /** Checks that an argument is a str, raising the TypeError whose text `message` makes from the argument's type. */
 function expectStr(value: PyValue, message: (type: string) => string): string {
+  value = stringValue(value) ?? value;
   if (typeof value !== 'string') throw typeError(message(typeName(value)));
   return value;
 }
 
 /** Checks a str argument that Argument Clinic converts, raising its TypeError naming the argument as `what`. */
 function expectStrArgument(value: PyValue, what: string): string {
+  value = stringValue(value) ?? value;
   if (typeof value !== 'string') throw typeError(`${what} must be str, not ${argumentTypeName(value)}`);
   return value;
 }
@@ -108,7 +113,7 @@ method(strClass, '__str__', 'none', 0, 0, (self) => self);
 method(strClass, '__hash__', 'none', 0, 0, (self) => pyHash(self));
 method(strClass, '__len__', 'none', 0, 0, (self) => BigInt(strLength(asStr(self))));
 method(strClass, '__getitem__', 'one', 1, 1, (self, [key]) => getItem(self, key));
-method(strClass, '__iter__', 'none', 0, 0, (self) => getIterator(self));
+method(strClass, '__iter__', 'none', 0, 0, (self) => builtinIterator(self));
 method(strClass, '__contains__', 'one', 1, 1, (self, [item]) => contains(self, item));
 method(strClass, '__mod__', 'one', 1, 1, (self, [value]) => formatPercent(asStr(self), value));
 method(strClass, '__format__', 'one', 1, 1, (self, [spec]) =>
@@ -151,7 +156,7 @@ method(strClass, 'isidentifier', 'none', 0, 0, (self) => {
 });
 method(strClass, 'isupper', 'none', 0, 0, (self) => isUpperText(asStr(self)));
 method(strClass, 'islower', 'none', 0, 0, (self) => isLowerText(asStr(self)));
-method(strClass, 'istitle', 'none', 0, 0, (self) => isTitleText(asStr(self)));
+method(strClass, 'istitle', 'none', 0, 0, (self) => isTitleStr(asStr(self)));
 
 // Searching ---------------------------------------------------------------------------------------------------------
 
@@ -221,12 +226,13 @@ for (const [name, atEnd] of [
     const { from, to } = bounds(text, start, end);
     const candidates = prefix instanceof PyTuple ? prefix.items : [prefix];
     const anchor = codePointOffset(text, atEnd ? to : from);
-    return candidates.some((candidate) => {
+    return candidates.some((raw) => {
+      const candidate = unbox(raw);
       if (typeof candidate !== 'string') {
         throw typeError(
           prefix instanceof PyTuple
-            ? `tuple for ${name} must only contain str, not ${typeName(candidate)}`
-            : `${name} first arg must be str or a tuple of str, not ${typeName(candidate)}`
+            ? `tuple for ${name} must only contain str, not ${typeName(raw)}`
+            : `${name} first arg must be str or a tuple of str, not ${typeName(raw)}`
         );
       }
       if (to - strLength(candidate) < from) return false;
@@ -238,7 +244,7 @@ for (const [name, atEnd] of [
 // Splitting and joining ---------------------------------------------------------------------------------------------
 
 /** Splits at the first or, from the end, the last `limit` occurrences of `separator`, or at all for a negative one. */
-function splitAt(text: string, separator: string, limit: number, fromEnd: boolean): string[] {
+export function splitOn(text: string, separator: string, limit: number, fromEnd: boolean): string[] {
   const offsets = occurrences(text, separator, { fromEnd, limit: limit < 0 ? Number.POSITIVE_INFINITY : limit });
   if (fromEnd) offsets.reverse();
   const parts: string[] = [];
@@ -251,20 +257,28 @@ function splitAt(text: string, separator: string, limit: number, fromEnd: boolea
   return parts;
 }
 
-/** Splits at runs of whitespace as CPython does: the part left after `limit` splits keeps its far end's spaces. */
-function splitWhitespace(text: string, limit: number, fromEnd: boolean): string[] {
+/**
+ * Splits at runs of whitespace, as `isSeparator` tells it, as CPython does: the part left after `limit` splits keeps
+ * its far end's spaces.
+ */
+export function splitWhitespace(
+  text: string,
+  limit: number,
+  fromEnd: boolean,
+  isSeparator: (char: string) => boolean = isSpace
+): string[] {
   const points = fromEnd ? iterStr(text).toReversed() : iterStr(text);
   const words: string[] = [];
   let index = 0;
   let remaining = limit < 0 ? Number.POSITIVE_INFINITY : limit;
   while (remaining-- > 0) {
-    while (index < points.length && isSpace(points[index])) index++;
+    while (index < points.length && isSeparator(points[index])) index++;
     if (index >= points.length) break;
     const start = index;
-    while (index < points.length && !isSpace(points[index])) index++;
+    while (index < points.length && !isSeparator(points[index])) index++;
     words.push(points.slice(start, index).join(''));
   }
-  while (index < points.length && isSpace(points[index])) index++;
+  while (index < points.length && isSeparator(points[index])) index++;
   if (index < points.length) words.push(points.slice(index).join(''));
   if (!fromEnd) return words;
   return words.map((word) => iterStr(word).toReversed().join('')).toReversed();
@@ -292,7 +306,7 @@ for (const [name, fromEnd] of [
       if (separator === '') throw valueError('empty separator');
       // No split leaves the text as it is without looking at it.
       if (limit === 0) return newList([text]);
-      return newList(splitAt(text, separator, limit, fromEnd));
+      return newList(splitOn(text, separator, limit, fromEnd));
     },
     { keywords: ['sep', 'maxsplit'], named: 2 }
   );
@@ -306,35 +320,46 @@ method(
   1,
   (self, args, kwargs) => {
     const keepends = currentRuntime().truthy(argument(args, kwargs, 0, 'keepends') ?? false);
-    const points = iterStr(scanned(self));
-    const lines: string[] = [];
-    let start = 0;
-    for (let index = 0; index < points.length; index++) {
-      const char = points[index];
-      if (!LINE_BREAKS.includes(char)) continue;
-      let end = index + 1;
-      if (char === '\r' && points[index + 1] === '\n') end++;
-      lines.push(points.slice(start, keepends ? end : index).join(''));
-      start = end;
-      index = end - 1;
-    }
-    if (start < points.length) lines.push(points.slice(start).join(''));
-    return newList(lines);
+    return newList(splitLinesOf(iterStr(scanned(self)), (char) => LINE_BREAKS.includes(char), keepends));
   },
   { keywords: ['keepends'], named: 1 }
 );
+
+/** The lines of a text, which end at each character `isBreak` accepts, a \r\n ending as one. */
+export function splitLinesOf(
+  points: readonly string[],
+  isBreak: (char: string) => boolean,
+  keepends: boolean
+): string[] {
+  const lines: string[] = [];
+  let start = 0;
+  for (let index = 0; index < points.length; index++) {
+    const char = points[index];
+    if (!isBreak(char)) continue;
+    let end = index + 1;
+    if (char === '\r' && points[index + 1] === '\n') end++;
+    lines.push(points.slice(start, keepends ? end : index).join(''));
+    start = end;
+    index = end - 1;
+  }
+  if (start < points.length) lines.push(points.slice(start).join(''));
+  return lines;
+}
 
 method(strClass, 'join', 'one', 1, 1, (self, [iterable]) => {
   const items = toArray(iterable, 'can only join an iterable');
   const separator = asStr(self);
   let length = 0;
-  for (const [index, item] of items.entries()) {
+  const parts: string[] = [];
+  for (const [index, raw] of items.entries()) {
+    const item = unbox(raw);
     if (typeof item !== 'string')
-      throw typeError(`sequence item ${index}: expected str instance, ${typeName(item)} found`);
+      throw typeError(`sequence item ${index}: expected str instance, ${typeName(raw)} found`);
     length += item.length + (index > 0 ? separator.length : 0);
+    parts.push(item);
   }
   currentRuntime().buildString(length);
-  return (items as string[]).join(separator);
+  return parts.join(separator);
 });
 
 for (const [name, fromEnd] of [
@@ -368,12 +393,23 @@ for (const [name, left, right] of [
             (set: Set<string>) => (char: string) =>
               set.has(char)
           )(new Set(iterStr(expectStr(chars, () => `${name} arg must be None or str`))));
-    let start = 0;
-    let end = points.length;
-    if (left) while (start < end && strip(points[start])) start++;
-    if (right) while (end > start && strip(points[end - 1])) end--;
+    const [start, end] = stripBounds(points, strip, left, right);
     return points.slice(start, end).join('');
   });
+}
+
+/** The bounds of what remains after stripping the items `strip` accepts from the left and the right ends. */
+export function stripBounds<T>(
+  items: ArrayLike<T>,
+  strip: (item: T) => boolean,
+  left: boolean,
+  right: boolean
+): [number, number] {
+  let start = 0;
+  let end = items.length;
+  if (left) while (start < end && strip(items[start])) start++;
+  if (right) while (end > start && strip(items[end - 1])) end--;
+  return [start, end];
 }
 
 for (const [name, place] of [
@@ -389,17 +425,27 @@ for (const [name, place] of [
         ? ' '
         : expectStr(fill, (type) => `The fill character must be a unicode character, not ${type}`);
     if (iterStr(fillChar).length !== 1) throw typeError('The fill character must be exactly one character long');
-    const length = strLength(text);
-    const missing = target - length;
-    if (missing <= 0) return text;
-    const centered = Math.floor(missing / 2) + (missing & target & 1);
-    const leftPad = place === 'left' ? 0 : place === 'right' ? missing : centered;
-    return new StringBuilder()
-      .appendRepeated(fillChar, leftPad)
-      .append(text)
-      .appendRepeated(fillChar, missing - leftPad)
-      .build();
+    return padText(text, strLength(text), target, fillChar, place);
   });
+}
+
+/** Pads a text of `length` characters to `target` with `fillChar`, as str.center, str.ljust, and str.rjust do. */
+export function padText(
+  text: string,
+  length: number,
+  target: number,
+  fillChar: string,
+  place: 'center' | 'left' | 'right'
+): string {
+  const missing = target - length;
+  if (missing <= 0) return text;
+  const centered = Math.floor(missing / 2) + (missing & target & 1);
+  const leftPad = place === 'left' ? 0 : place === 'right' ? missing : centered;
+  return new StringBuilder()
+    .appendRepeated(fillChar, leftPad)
+    .append(text)
+    .appendRepeated(fillChar, missing - leftPad)
+    .build();
 }
 
 method(strClass, 'zfill', 'one', 1, 1, (self, [width]) => {
@@ -419,25 +465,29 @@ method(
   0,
   1,
   (self, args, kwargs) => {
-    const size = Number(toIndex(argument(args, kwargs, 0, 'tabsize') ?? 8n));
-    let column = 0;
-    const result = new StringBuilder();
-    for (const char of iterStr(asStr(self))) {
-      if (char === '\t') {
-        if (size > 0) {
-          const spaces = size - (column % size);
-          result.appendRepeated(' ', spaces);
-          column += spaces;
-        }
-      } else {
-        result.append(char);
-        column = char === '\n' || char === '\r' ? 0 : column + 1;
-      }
-    }
-    return result.build();
+    return expandTabs(iterStr(asStr(self)), Number(toIndex(argument(args, kwargs, 0, 'tabsize') ?? 8n)));
   },
   { keywords: ['tabsize'], named: 1 }
 );
+
+/** Replaces each tab with the spaces up to the next multiple of `size` columns, as str.expandtabs does. */
+export function expandTabs(chars: Iterable<string>, size: number): string {
+  let column = 0;
+  const result = new StringBuilder();
+  for (const char of chars) {
+    if (char === '\t') {
+      if (size > 0) {
+        const spaces = size - (column % size);
+        result.appendRepeated(' ', spaces);
+        column += spaces;
+      }
+    } else {
+      result.append(char);
+      column = char === '\n' || char === '\r' ? 0 : column + 1;
+    }
+  }
+  return result.build();
+}
 
 // Replacing and formatting ------------------------------------------------------------------------------------------
 
@@ -451,32 +501,37 @@ method(
     const text = asStr(self);
     const old = expectStrArgument(args[0], 'replace() argument 1');
     const replacement = expectStrArgument(args[1], 'replace() argument 2');
-    let count = Number(toIndex(argument(args, kwargs, 2, 'count') ?? -1n));
-    if (count < 0) count = Number.POSITIVE_INFINITY;
-    const result = new StringBuilder();
-    if (old === '') {
-      const points = iterStr(text);
-      let replaced = 0;
-      for (const point of points) {
-        if (replaced < count) {
-          result.append(replacement);
-          replaced++;
-        }
-        result.append(point);
-      }
-      if (replaced < count) result.append(replacement);
-    } else {
-      let position = 0;
-      for (const index of occurrences(text, old, { limit: count })) {
-        result.append(text.slice(position, index)).append(replacement);
-        position = index + old.length;
-      }
-      result.append(text.slice(position));
-    }
-    return result.build();
+    const count = Number(toIndex(argument(args, kwargs, 2, 'count') ?? -1n));
+    return replaceText(text, old, replacement, count);
   },
   { keywords: ['count'], named: 1 }
 );
+
+/** Replaces the first `count` occurrences of `old`, or all of them when `count` is negative, as str.replace does. */
+export function replaceText(text: string, old: string, replacement: string, limit: number): string {
+  const count = limit < 0 ? Number.POSITIVE_INFINITY : limit;
+  const result = new StringBuilder();
+  if (old === '') {
+    const points = iterStr(text);
+    let replaced = 0;
+    for (const point of points) {
+      if (replaced < count) {
+        result.append(replacement);
+        replaced++;
+      }
+      result.append(point);
+    }
+    if (replaced < count) result.append(replacement);
+  } else {
+    let position = 0;
+    for (const index of occurrences(text, old, { limit: count })) {
+      result.append(text.slice(position, index)).append(replacement);
+      position = index + old.length;
+    }
+    result.append(text.slice(position));
+  }
+  return result.build();
+}
 
 method(strClass, 'removeprefix', 'one', 1, 1, (self, [prefix]) => {
   const text = asStr(self);
@@ -521,6 +576,7 @@ method(strClass, 'translate', 'one', 1, 1, (self, [table]) => {
 
 /** The text a translation table maps a character to: an integer as its character, None as nothing, or a string. */
 function translation(mapped: PyValue): string {
+  mapped = stringValue(mapped) ?? mapped;
   if (mapped === None) return '';
   if (typeof mapped === 'string') return mapped;
   if (typeof mapped !== 'bigint' && typeof mapped !== 'boolean') {
@@ -554,24 +610,12 @@ function makeTranslation(args: PyValue[]): PyDict {
 
 /** A key of the dict str.maketrans takes, whose characters it turns into code points, with CPython's errors. */
 function translationKey(key: PyValue): PyValue {
+  key = stringValue(key) ?? key;
   if (typeof key === 'bigint' || typeof key === 'boolean') return key;
   if (typeof key !== 'string') throw typeError('keys in translate table mustbe strings or integers');
   if (strLength(key) !== 1) throw valueError('string keys in translatetable must be of length 1');
   return BigInt(key.codePointAt(0) as number);
 }
-
-method(
-  strClass,
-  'encode',
-  'takes',
-  0,
-  2,
-  () => {
-    throw currentRuntime().unsupported('str.encode()（bytes への変換）');
-  },
-  { keywords: ['encoding', 'errors'], named: 2 }
-);
-
 export function iterString(text: string): () => PyValue | typeof DONE {
   return iterate(text);
 }

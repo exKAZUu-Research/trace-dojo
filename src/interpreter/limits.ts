@@ -34,7 +34,7 @@ export class ExecutionBudget {
   }
 
   private nextClockCheck = OPERATIONS_PER_CLOCK_CHECK;
-  private readonly deadline = performance.now() + LIMITS.maxMilliseconds;
+  private deadline = performance.now() + LIMITS.maxMilliseconds;
 
   spend(cost = 1): void {
     // A negative charge (such as a scan over an empty range computed backward) must never refill the budget.
@@ -45,6 +45,19 @@ export class ExecutionBudget {
     if (cost === 1 && this.operations < this.nextClockCheck) return;
     this.nextClockCheck = this.operations + OPERATIONS_PER_CLOCK_CHECK;
     if (performance.now() > this.deadline) throw new ExecutionLimitError('time');
+  }
+
+  /**
+   * Runs `work`, which the grader does for itself rather than for the program (such as parsing a library's source once
+   * per process), so that its time does not count against the program's.
+   */
+  excludingTime<T>(work: () => T): T {
+    const start = performance.now();
+    try {
+      return work();
+    } finally {
+      this.deadline += performance.now() - start;
+    }
   }
 }
 

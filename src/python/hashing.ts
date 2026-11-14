@@ -1,9 +1,10 @@
+import { PyBytes, PyMemoryView } from './bytesValues';
 import { pyStr } from './conversions';
-import { callSpecial, lookupSpecial, overridesBuiltin } from './objects';
+import { callSpecial, lookupSpecial } from './objects';
 import { chargeScan, chargeStep } from './runtimeContext';
 import { rememberedHash } from './strings';
-import { exceptionClassNamed, None, typeError, typeName } from './types';
-import { PyComplex, PyError, type PyObject, PySet, PyTuple, type PyValue } from './values';
+import { exceptionClassNamed, isNativeMethod, None, typeError, typeName, unbox } from './types';
+import { type PyBuiltinFunction, PyComplex, PyError, type PyObject, PySet, PyTuple, type PyValue } from './values';
 
 const MASK64 = (1n << 64n) - 1n;
 const MODULUS = (1n << 61n) - 1n;
@@ -74,11 +75,12 @@ export function frexp(value: number): { mantissa: number; exponent: number } {
 }
 
 function hashTuple(tuple: PyTuple): bigint {
-  tuple.hash ??= computeTupleHash(tuple.items);
+  tuple.hash ??= tupleHash(tuple.items);
   return tuple.hash;
 }
 
-function computeTupleHash(items: readonly PyValue[]): bigint {
+/** The hash of a tuple of `items`, as CPython's `tuplehash` computes it. */
+export function tupleHash(items: readonly PyValue[]): bigint {
   let acc = XXPRIME_5;
   for (const item of items) {
     chargeStep();
@@ -124,6 +126,7 @@ function hashString(value: string): bigint {
 }
 
 function computeStringHash(value: string): bigint {
+  if (value.length === 0) return 0n;
   chargeScan(value.length);
   let high = 0x81_1c_9d_c5;
   let low = 0x01_00_01_93;
@@ -154,8 +157,7 @@ export function keyHash(value: PyValue, role: KeyRole): bigint {
 }
 
 /** Python's `hash()`, raising TypeError for unhashable values. */
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of hashable value.
-// code-gauge-allow functionNcss 32 -- One case per kind of hashable value.
+// code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of hashable value.
 export function pyHash(value: PyValue): bigint {
   switch (typeof value) {
     case 'bigint': {
@@ -172,14 +174,13 @@ export function pyHash(value: PyValue): bigint {
     }
   }
   if (value === None) return NONE_HASH;
-  if (value instanceof PyTuple && !overridesBuiltin(value, '__hash__')) return hashTuple(value);
-  if (value instanceof PyComplex) {
-    const hash = signed(hashFloat(value.real) + 1_000_003n * hashFloat(value.imag));
-    return hash === -1n ? -2n : hash;
-  }
+  if (value instanceof PyTuple && value.cls.isBuiltin) return hashTuple(value);
   const special = lookupSpecial(value, '__hash__');
   if (special === None) throw typeError(`unhashable type: '${typeName(value)}'`);
-  if (special !== undefined && !NATIVE_HASHES.has(special)) {
+  if (value instanceof PyBytes || value instanceof PyMemoryView) {
+    return callSpecial(value, '__hash__', []) as bigint;
+  }
+  if (special !== undefined && !isDefaultHash(special)) {
     const result = callSpecial(value, '__hash__', []);
     if (typeof result === 'boolean') return result ? 1n : 0n;
     if (typeof result !== 'bigint') throw typeError('__hash__ method should return an integer');
@@ -187,15 +188,29 @@ export function pyHash(value: PyValue): bigint {
     if (result < -(1n << 63n) || result >= 1n << 63n) return hashInt(result);
     return result === -1n ? -2n : result;
   }
+  return builtinHash(value);
+}
+
+/** The hash a builtin type's `__hash__` gives an instance of it or of a subclass that does not override it. */
+function builtinHash(value: PyObject): bigint {
   if (value instanceof PySet) return hashFrozenset(value);
+  if (value instanceof PyTuple) return hashTuple(value);
+  if (value instanceof PyComplex) {
+    const hash = signed(hashFloat(value.real) + 1_000_003n * hashFloat(value.imag));
+    return hash === -1n ? -2n : hash;
+  }
+  const unboxed = unbox(value);
+  if (unboxed !== value) return pyHash(unboxed);
   return identityHash(value);
 }
 
-/**
- * The builtin `__hash__` methods that `pyHash` computes itself (by identity, or a frozenset's by value), registered
- * by the modules defining them, so that hashing instances of plain classes needs no call.
- */
-export const NATIVE_HASHES = new Set<PyValue>();
+/** Whether a class's `__hash__` is the builtin one that hashes by identity or by value natively. */
+/** The builtin types whose `__hash__` `builtinHash` computes; any other `__hash__`, native or not, is called. */
+const DIRECT_HASHES = new Set(['object', 'tuple', 'frozenset', 'set', 'str', 'int', 'float', 'complex', 'bool']);
+
+function isDefaultHash(special: PyValue): boolean {
+  return isNativeMethod(special) && DIRECT_HASHES.has((special as PyBuiltinFunction).ownerName ?? '');
+}
 
 export function identityHash(value: PyObject): bigint {
   return BigInt(value.identity) * 16n + 7n;

@@ -40,7 +40,7 @@ function iteratorType(name: string): PyClass {
   if (!cls) {
     cls = builtinClass(name);
     cls.module = 'itertools';
-    cls.tpName = `itertools.${name}`;
+    cls.typeName = `itertools.${name}`;
     cls.dict.set('__module__', 'itertools');
     defineIteratorClass(cls);
     if (name === 'count' || name === 'repeat') {

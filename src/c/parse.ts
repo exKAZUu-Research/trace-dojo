@@ -71,10 +71,12 @@ function parseUnit(text: string, headers: HeaderDeclarations[], typedefNames: re
             );
           }
         },
-        (root, errors) => {
-          if (errors.length === 0) return errors;
-          const scopes = resolveValueTypes(current, root, headers, budget);
-          return cSyntaxDiagnostics(parser, current, root, errors, { headerTypes: typedefNames, typeScopes: scopes });
+        {
+          locateErrors: (root, errors) => {
+            if (errors.length === 0) return errors;
+            const scopes = resolveValueTypes(current, root, headers, budget);
+            return cSyntaxDiagnostics(parser, current, root, errors, { headerTypes: typedefNames, typeScopes: scopes });
+          },
         }
       );
     } catch (error) {

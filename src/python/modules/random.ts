@@ -1,10 +1,11 @@
-import { createHash, randomBytes } from 'node:crypto';
-
+// code-gauge-allow-file fileNcss 476 -- The native random generator and the methods random.py's module functions run.
 import { setAttribute } from '../attributes';
+import { bytesClass, latin1Text, newBytes, PyBytes } from '../bytesValues';
 import { pyStr } from '../conversions';
-import { method, pythonMethod } from '../define';
-import { defineUnsupportedAttributes } from '../descriptors';
+import { builtin, method, pythonMethod } from '../define';
+import { sha512 } from '../hashAlgorithms';
 import { pyHash } from '../hashing';
+import { defineNew } from '../instances';
 import { libraryReceiver, unsupportedReceiver } from '../libraryReceivers';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
 import { type ArgStyle, argument, bindPythonArgs, pythonSignature } from '../nativeArgs';
@@ -20,33 +21,61 @@ import {
   setItem,
   toArray,
 } from '../objects';
-import { binaryOp, lessThan } from '../operators';
+import { binaryOp, equals, lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
-import { builtinClass, newList, newTuple, None, pyError, typeError, typeName, valueError } from '../types';
-import { type Kwargs, PyDict, PyOpaque, PySet, PyTuple, type PyValue } from '../values';
+import { registerSourceModule } from '../sourceModules';
+import {
+  builtinClass,
+  classOf,
+  floatClass,
+  intClass,
+  isInstanceOf,
+  methodClass,
+  nativeFunction,
+  newList,
+  newTuple,
+  None,
+  objectClass,
+  pyError,
+  strClass,
+  stringValue,
+  typeError,
+  typeName,
+  valueError,
+} from '../types';
+import { UnsupportedFeatureError } from '../unsupported';
+import {
+  type Kwargs,
+  PyBoundMethod,
+  PyDict,
+  PyFunction,
+  PyInstance,
+  type PyObject,
+  PyOpaque,
+  PySet,
+  PyTuple,
+  type PyValue,
+} from '../values';
 import { realArgument } from './math';
 import {
   betavariate,
   binomialvariate,
   expovariate,
   gammavariate,
-  LOG4,
   lognormvariate,
   normalvariate,
-  NV_MAGICCONST,
   paretovariate,
-  SG_MAGICCONST,
   triangular,
-  TWOPI,
   vonmisesvariate,
   weibullvariate,
 } from './randomDistributions';
+import { RANDOM_SOURCE } from './randomSource';
 
 const N = 624;
 const M = 397;
 
 /** The Mersenne Twister of CPython's `_random` module, seeded as `random.seed` seeds it. */
-class MersenneTwister {
+export class MersenneTwister {
   private readonly state32 = new Uint32Array(N);
   private index = N + 1;
   gaussNext: number | undefined;
@@ -149,23 +178,55 @@ class MersenneTwister {
   }
 }
 
-/** The key a seed initializes the generator with: its 32-bit words, as CPython's random_seed splits it. */
-function seedKey(value: PyValue | undefined): number[] {
-  if (value === undefined || value === None) return wordsOfHex(randomBytes(32).toString('hex'));
-  if (typeof value === 'bigint' || typeof value === 'boolean') return keyOf(BigInt(value));
-  if (typeof value === 'string') {
-    const bytes = Buffer.from(value, 'utf8');
-    currentRuntime().scan(bytes.length);
-    const digest = createHash('sha512').update(bytes).digest();
-    return wordsOfHex(Buffer.concat([bytes, digest]).toString('hex'));
+// code-gauge-allow functionCognitiveComplexity 19 -- Follows random_seed and Random.seed, one case per seed type and version.
+export function seedOf(value: PyValue | undefined, version: PyValue = 2n): bigint {
+  if (value === undefined || value === None) return bigintOfBytes(crypto.getRandomValues(new Uint8Array(32)));
+  if (isInstanceOf(value, intClass)) return toIndex(value);
+  if (isInstanceOf(value, strClass) || value instanceof PyBytes) {
+    if (equals(version, 1n) && (isInstanceOf(value, strClass) || isInstanceOf(value, bytesClass))) {
+      const text = value instanceof PyBytes ? latin1Text(value.data) : (stringValue(value) as string);
+      return versionOneSeed(text);
+    }
+    if (equals(version, 2n)) return bigintOfBytes(versionTwoBytes(value));
+    return BigInt.asUintN(64, pyHash(value));
   }
-  // CPython seeds from a non-int's hash converted to size_t, so a negative hash wraps instead of losing its sign.
-  if (typeof value === 'number') return keyOf(BigInt.asUintN(64, pyHash(value)));
+  if (isInstanceOf(value, floatClass)) return BigInt.asUintN(64, pyHash(value));
   throw typeError('The only supported seed types are:\nNone, int, float, str, bytes, and bytearray.');
 }
 
-/** The 32-bit words of an int's absolute value, least significant first. */
-function keyOf(seed: bigint): number[] {
+/**
+ * The key a seed initializes the generator with. A str or bytes seed of version 2 makes it from its bytes directly,
+ * as the int CPython makes of them may exceed the size of the ints this grader lets a program make.
+ */
+function seedKey(value: PyValue | undefined, version: PyValue = 2n): number[] {
+  if (value !== undefined && (isInstanceOf(value, strClass) || value instanceof PyBytes) && equals(version, 2n)) {
+    return wordsOfHex(hexOfBytes(versionTwoBytes(value)).replace(/^0+(?=.)/, ''));
+  }
+  return keyOf(seedOf(value, version));
+}
+
+/** The bytes of a str or bytes seed of version 2 followed by their SHA-512, whose int CPython seeds with. */
+function versionTwoBytes(value: PyValue): Uint8Array {
+  const bytes = value instanceof PyBytes ? value.data : new TextEncoder().encode(stringValue(value) as string);
+  currentRuntime().scan(bytes.length);
+  const combined = new Uint8Array(bytes.length + 64);
+  combined.set(bytes);
+  combined.set(sha512(bytes), bytes.length);
+  return combined;
+}
+
+/** The seed version 1 of random.seed makes from a string, which hashes it as Python 2 did. */
+function versionOneSeed(text: string): bigint {
+  currentRuntime().scan(text.length);
+  const codes = Array.from(text, (char) => BigInt(char.codePointAt(0) as number));
+  let x = codes.length > 0 ? codes[0] << 7n : 0n;
+  for (const code of codes) x = ((1_000_003n * x) ^ code) & 0xff_ff_ff_ff_ff_ff_ff_ffn;
+  x ^= BigInt(codes.length);
+  return x === -1n ? -2n : x;
+}
+
+/** The 32-bit words of a seed's absolute value, least significant first, as CPython's random_seed splits it. */
+export function keyOf(seed: bigint): number[] {
   const hex = (seed < 0n ? -seed : seed).toString(16);
   currentRuntime().chargeBits(BigInt(hex.length * 4));
   return wordsOfHex(hex);
@@ -176,6 +237,15 @@ function wordsOfHex(hex: string): number[] {
   const words: number[] = [];
   for (let end = hex.length; end > 0; end -= 8) words.push(Number.parseInt(hex.slice(Math.max(end - 8, 0), end), 16));
   return words;
+}
+
+function hexOfBytes(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/** The big-endian unsigned integer that bytes encode. */
+function bigintOfBytes(bytes: Uint8Array): bigint {
+  return bytes.length === 0 ? 0n : BigInt(`0x${hexOfBytes(bytes)}`);
 }
 
 function randrange(generator: MersenneTwister, args: PyValue[]): bigint {
@@ -213,7 +283,7 @@ function sample(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs): Py
   const population = argument(args, kwargs, 0, 'population') as PyValue;
   const kValue = argument(args, kwargs, 1, 'k') as PyValue;
   const counts = kwargs?.get('counts') ?? None;
-  if (!isSequence(population) && typeof population !== 'string') {
+  if (!isSequence(population) && stringValue(population) === undefined) {
     throw typeError('Population must be a sequence.  For dicts or sets, use sorted(d).');
   }
   const n = exactLength(population);
@@ -395,6 +465,7 @@ const RANDOM_METHODS: [string, { style: ArgStyle; min: number; max: number } | s
   ['seed', 'a=None, version=2', seedMethod],
   ['random', { style: 'none', min: 0, max: 0 }, (generator) => generator.random()],
   ['getrandbits', { style: 'one', min: 1, max: 1 }, (generator, [bits]) => getrandbits(generator, bits)],
+  ['randbytes', 'n', (generator, [n]) => randbytes(generator, n)],
   ['randrange', 'start, stop=None, step=1', (generator, args) => randrange(generator, args)],
   ['randint', 'a, b', (generator, [a, b]) => randint(generator, a, b)],
   ['choice', 'seq', (generator, [sequence]) => choice(generator, sequence)],
@@ -481,7 +552,6 @@ for (const [name, spec, run] of RANDOM_METHODS) {
     method(randomClass, name, spec.style, spec.min, spec.max, runMethod, { ownerName: '_random.Random' });
   }
 }
-defineUnsupportedAttributes(randomClass, { randbytes: 'random.randbytes()（bytes 型）' });
 
 /** Two required real arguments, each passed by position or by name. */
 function realArguments(args: PyValue[], kwargs: Kwargs, first: string, second: string): [number, number] {
@@ -498,23 +568,28 @@ function muSigma(args: PyValue[], kwargs: Kwargs): [number, number] {
 function seedMethod(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs): PyValue {
   const a = argument(args, kwargs, 0, 'a');
   const version = argument(args, kwargs, 1, 'version') ?? 2n;
-  if (version === 1n && typeof a === 'string') {
-    generator.initByArray(keyOf(versionOneSeed(a)));
-  } else {
-    generator.initByArray(seedKey(a));
-  }
+  generator.initByArray(seedKey(a, version));
   generator.gaussNext = undefined;
   return None;
 }
 
-/** The seed version 1 of random.seed makes from a string, which hashes it as Python 2 did. */
-function versionOneSeed(text: string): bigint {
-  currentRuntime().scan(text.length);
-  const codes = Array.from(text, (char) => BigInt(char.codePointAt(0) as number));
-  let x = codes.length > 0 ? codes[0] << 7n : 0n;
-  for (const code of codes) x = ((1_000_003n * x) ^ code) & 0xff_ff_ff_ff_ff_ff_ff_ffn;
-  x ^= BigInt(codes.length);
-  return x === -1n ? -2n : x;
+/**
+ * `Random.randbytes(n)`, as CPython's C code makes it: each 32-bit word of the generator gives four bytes, least
+ * significant first, and a last partial word gives its most significant bytes.
+ */
+function randbytes(generator: MersenneTwister, n: PyValue): PyValue {
+  const count = Number(toIndex(n));
+  if (count < 0) throw valueError('Cannot convert negative int');
+  const runtime = currentRuntime();
+  runtime.ensureStringFits(count);
+  runtime.spend(Math.ceil(count / 64));
+  const data = new Uint8Array(count);
+  for (let offset = 0; offset < count; offset += 4) {
+    const left = count - offset;
+    const word = left < 4 ? generator.nextUint32() >>> (32 - left * 8) : generator.nextUint32();
+    for (let index = 0; index < Math.min(left, 4); index++) data[offset + index] = (word >>> (index * 8)) & 0xff;
+  }
+  return newBytes(data);
 }
 
 function getrandbits(generator: MersenneTwister, bits: PyValue): bigint {
@@ -562,7 +637,13 @@ function setstate(generator: MersenneTwister, state: PyValue): PyValue {
   }
   if (items.length !== 3) throw valueError(`too many values to unpack (expected 3, got ${items.length})`);
   const [, internal, gaussNext] = items;
+  restoreState(generator, internal);
   generator.gaussNext = gaussNext === None ? undefined : realArgument(gaussNext);
+  return None;
+}
+
+/** `_random.Random.setstate(state)`: the 624 words of the Mersenne Twister and its position. */
+function restoreState(generator: MersenneTwister, internal: PyValue): void {
   if (!(internal instanceof PyTuple)) throw typeError('state vector must be a tuple');
   if (internal.items.length !== 625) throw valueError('state vector is the wrong size');
   const words = internal.items.slice(0, 624).map((word) => {
@@ -574,28 +655,135 @@ function setstate(generator: MersenneTwister, state: PyValue): PyValue {
   const index = Number(toIndex(internal.items[624]));
   if (index < 0 || index > 624) throw valueError('invalid state');
   generator.restore(words, index);
+}
+
+registerUnsupportedAttributes('random', { main: 'random.main()（コマンドライン）' });
+
+// _random ------------------------------------------------------------------------------------------------------------
+
+/**
+ * `_random.Random`, the Mersenne Twister under CPython's random.Random, which random.py derives from and programs may
+ * derive from in turn.
+ */
+const coreClass = builtinClass('Random', objectClass, true);
+coreClass.module = '_random';
+coreClass.typeName = '_random.Random';
+const coreGenerators = new WeakMap<PyObject, MersenneTwister>();
+
+function coreOf(self: PyValue): MersenneTwister {
+  let generator = coreGenerators.get(self as PyObject);
+  if (!generator) {
+    generator = new MersenneTwister();
+    generator.initByArray(keyOf(coreSeed(None)));
+    coreGenerators.set(self as PyObject, generator);
+  }
+  return generator;
+}
+
+/** The seed `_random.Random.seed(n)` takes: random bytes for None, an int's absolute value, or another value's hash. */
+function coreSeed(value: PyValue): bigint {
+  if (value === None) return seedOf(undefined);
+  if (isInstanceOf(value, intClass)) return toIndex(value);
+  return BigInt.asUintN(64, pyHash(value));
+}
+
+defineNew(coreClass, (cls, _args, kwargs) => {
+  if (cls === coreClass && kwargs !== undefined && kwargs.size > 0) {
+    throw typeError('Random() takes no keyword arguments');
+  }
+  const instance = new PyInstance(cls);
+  coreOf(instance);
+  return instance;
+});
+method(coreClass, '__init__', 'expected', 0, Number.POSITIVE_INFINITY, (self, args) => {
+  if (args.length > 1) throw typeError('Random() requires 0 or 1 argument');
+  coreOf(self).initByArray(keyOf(coreSeed(args[0] ?? None)));
+  return None;
+});
+method(coreClass, 'random', 'none', 0, 0, (self) => coreOf(self).random());
+method(coreClass, 'seed', 'expected', 0, 1, (self, [n]) => {
+  coreOf(self).initByArray(keyOf(coreSeed(n ?? None)));
+  return None;
+});
+method(coreClass, 'getrandbits', 'one', 1, 1, (self, [k]) => getrandbits(coreOf(self), k));
+method(coreClass, 'getstate', 'none', 0, 0, (self) => {
+  const { words, index } = coreOf(self).state();
+  return newTuple([...words.map(BigInt), BigInt(index)]);
+});
+method(coreClass, 'setstate', 'one', 1, 1, (self, [state]) => {
+  restoreState(coreOf(self), state);
+  return None;
+});
+
+registerModule('_random', () => new Map<string, PyValue>([['Random', coreClass]]));
+
+// random -------------------------------------------------------------------------------------------------------------
+
+/** Whether a method's parameters after `self` take these arguments. */
+function fitsSignature(fn: PyFunction, args: readonly PyValue[], kwargs: Kwargs): boolean {
+  const params = fn.def.params.slice(1);
+  const positional = params.filter((param) => param.kind === 'positionalOnly' || param.kind === 'positional');
+  const varArgs = params.some((param) => param.kind === 'varArgs');
+  const varKeywords = params.some((param) => param.kind === 'varKeywords');
+  if (args.length > positional.length && !varArgs) return false;
+  const named = new Set(kwargs?.keys());
+  for (const name of named) {
+    const param = params.find((each) => each.name === name && each.kind !== 'positionalOnly');
+    if (param === undefined && !varKeywords) return false;
+    // A keyword for a parameter the positional arguments already gave.
+    if (param !== undefined && positional.includes(param) && positional.indexOf(param) < args.length) return false;
+  }
+  return params.every(
+    (param, index) =>
+      param.default !== undefined ||
+      param.kind === 'varArgs' ||
+      param.kind === 'varKeywords' ||
+      (positional.includes(param) && index < args.length) ||
+      named.has(param.name)
+  );
+}
+
+/**
+ * Gives the module the natives of the hidden instance's methods, bound to the generator of random.py's `_inst`, which
+ * give what its Python methods give.
+ */
+function bindNatives(globals: PyValue, instance: PyValue): PyValue {
+  const fast = new PyOpaque(randomClass, 'Random', coreOf(instance));
+  for (const [name] of RANDOM_METHODS) {
+    // The function is random.py's method bound to _inst, as CPython's is, which runs the native in its place.
+    const fn = classOf(instance).lookup(name);
+    if (!(fn instanceof PyFunction)) continue;
+    const bound = new PyBoundMethod(methodClass, instance, fn);
+    const native = bindValue(randomClass.dict.get(name) as PyValue, fast);
+    // Arguments the Python method would refuse reach it, which words the TypeError as CPython does.
+    bound.fastCall = nativeFunction(name, (args, kwargs) =>
+      fitsSignature(fn, args, kwargs) ? callValue(native, args, kwargs) : callValue(fn, [instance, ...args], kwargs)
+    );
+    setItem(globals, name, bound);
+  }
   return None;
 }
 
-registerUnsupportedAttributes('random', {
-  SystemRandom: 'random.SystemRandom（OS の乱数）',
-  randbytes: 'random.randbytes()（bytes 型）',
-  main: 'random.main()（コマンドライン）',
-});
-
-registerModule('random', () => {
-  const instance = callValue(randomClass, []) as PyOpaque;
-  const namespace = new Map<string, PyValue>([
-    ['Random', randomClass],
-    ['BPF', 53n],
-    ['RECIP_BPF', 2 ** -53],
-    ['NV_MAGICCONST', NV_MAGICCONST],
-    ['LOG4', LOG4],
-    ['SG_MAGICCONST', SG_MAGICCONST],
-    ['TWOPI', TWOPI],
-  ]);
-  for (const [name] of RANDOM_METHODS) namespace.set(name, bindValue(randomClass.dict.get(name) as PyValue, instance));
-  return namespace;
-});
+registerSourceModule(
+  'random',
+  RANDOM_SOURCE,
+  () =>
+    new Map<string, PyValue>([
+      [
+        '_bind_natives',
+        builtin('_bind_natives', 'expected', 2, 2, ([globals, instance]) => bindNatives(globals, instance)),
+      ],
+      // os.urandom, which every SystemRandom method that draws numbers reads.
+      [
+        '_urandom',
+        builtin('_urandom', 'one', 1, 1, ([n]) => {
+          const count = toIndex(n);
+          if (count < 0n) throw valueError('negative argument not allowed');
+          if (count === 0n) return newBytes(new Uint8Array(0));
+          throw new UnsupportedFeatureError('random.SystemRandom（OS の乱数）');
+        }),
+      ],
+    ])
+);
 
 export { isTruthy, typeName };

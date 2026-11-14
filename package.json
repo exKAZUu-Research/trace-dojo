@@ -72,7 +72,7 @@
     "@willbooster/tree-sitter-go": "11.0.0",
     "@willbooster/tree-sitter-java": "34.0.0",
     "@willbooster/tree-sitter-javascript": "25.0.0",
-    "@willbooster/tree-sitter-python": "19.0.0",
+    "@willbooster/tree-sitter-python": "20.0.0",
     "@willbooster/tree-sitter-ruby": "17.0.1",
     "@willbooster/wb": "23.3.4",
     "@willbooster/web-tree-sitter": "20.0.0",
