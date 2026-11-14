@@ -9,8 +9,8 @@ import { CRuntimeError } from './errors';
 import { compileC, runProgram } from './execute';
 import { readBits, readScalar } from './expressionCompiler';
 import type { Allocation } from './memory';
-import { type Frame, Runtime } from './runtime';
-import { type CType, isCharType, sizeOf } from './types';
+import { type Frame, type FunctionInfo, Runtime } from './runtime';
+import { type CType, hasVla, isCharType, sizeIn, sizeOf } from './types';
 
 // code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceCProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
@@ -42,16 +42,24 @@ class Snapshotter {
     private readonly program: CompiledProgram
   ) {}
 
+  /** The lengths of the variable-length arrays of the frame whose variables are being read. */
+  private vla: readonly number[] = [];
+
+  private lengthOf(type: Extract<CType, { kind: 'array' }>): number {
+    return type.vla === undefined ? (type.length ?? 0) : (this.vla[type.vla] ?? 0);
+  }
+
   /** The variables a frame shows: its own in scope, then the file-scope variables when `withContext`. */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Lexical locals, receiver fields, and globals must obey one shadowing order.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Lexical locals, receiver fields, and globals must obey one shadowing order.
   variablesOf(frame: Frame, withContext: boolean): TraceVariables {
+    this.vla = frame.vla;
     const variables: TraceVariables = { vars: {}, referenceVars: {} };
     const hidesArgs = frame.fn === this.program.main && frame.fn.params.length === 2;
     const locals =
       frame.visibleLocals ?? frame.finalVisibleLocals ?? frame.fn.locals.filter((local) => frame.live[local.index]);
     for (const local of locals) {
       // main's parameters only receive the launcher's arguments, which these programs never use.
-      if (hidesArgs && local.isParameter) continue;
+      if ((hidesArgs && local.isParameter) || local.name.startsWith('\0')) continue;
       if (!local.inMemory) {
         const value = frame.slots[local.index];
         if (value !== undefined) this.addVariable(variables, local.name, local.type, { value });
@@ -118,8 +126,6 @@ class Snapshotter {
     return readScalar(block.view, offset, type);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 26 -- One case per kind of type.
-  // code-gauge-allow functionNcss 35 -- One display case per C type; helpers isolate strings and pointed-to elements.
   private scalarOf(type: CType, where: Where): Scalarish | typeof NOT_SCALAR | undefined {
     switch (type.kind) {
       case 'int':
@@ -128,22 +134,15 @@ class Snapshotter {
         return value === undefined ? undefined : scalarValue(type, value);
       }
       case 'pointer': {
-        const value = this.read(type, where);
-        if (value === undefined) return undefined;
-        if (value === 0) return NOT_SCALAR;
-        const block = this.runtime.memory.find(value as number);
-        if (!block || type.to.kind === 'function' || type.to.kind === 'void') return `0x${Number(value).toString(16)}`;
-        if (isCharType(type.to)) return this.stringAt(value as number) ?? NOT_SCALAR;
-        if (isArrayLike(this.runtime, type, where)) return this.elementsFrom(type.to, value as number);
-        return NOT_SCALAR;
+        return this.pointerScalar(type, where);
       }
       case 'array': {
         if (!('address' in where)) return NOT_SCALAR;
-        if (isCharType(type.of)) return this.stringAt(where.address, sizeOf(type)) ?? NOT_SCALAR;
+        if (isCharType(type.of)) return this.stringAt(where.address, sizeIn(type, this.vla)) ?? NOT_SCALAR;
         if (!hasScalarElements(type)) return NOT_SCALAR;
-        const elementSize = sizeOf(type.of);
+        const elementSize = sizeIn(type.of, this.vla);
         const items: Scalarish[] = [];
-        for (let index = 0; index < (type.length ?? 0); index++) {
+        for (let index = 0; index < this.lengthOf(type); index++) {
           const item = this.scalarOf(type.of, { address: where.address + index * elementSize });
           // oxlint-disable-next-line unicorn/no-null -- The trace format shows values never written as null.
           items.push(item === NOT_SCALAR || item === undefined ? null : item);
@@ -156,12 +155,38 @@ class Snapshotter {
     }
   }
 
+  /**
+   * Whether a pointer is a `va_list`, a `char *` into a call's extra arguments, whose bytes are no string; Java has no
+   * such variable, so the trace leaves it out.
+   */
+  private isVaList(address: number): boolean {
+    const block =
+      address === 0 ? undefined : (this.runtime.memory.find(address) ?? this.runtime.memory.find(address - 1));
+    return block !== undefined && this.runtime.varargTypes.has(block.base);
+  }
+
+  /** A pointer as a scalar: the string it points to, or the elements it reaches in an array of scalars. */
+  private pointerScalar(
+    type: Extract<CType, { kind: 'pointer' }>,
+    where: Where
+  ): Scalarish | typeof NOT_SCALAR | undefined {
+    const value = this.read(type, where);
+    if (value === undefined || this.isVaList(value as number)) return undefined;
+    if (value === 0) return NOT_SCALAR;
+    const block = this.runtime.memory.find(value as number);
+    if (type.to.kind !== 'function' && (!block || type.to.kind === 'void')) return `0x${Number(value).toString(16)}`;
+    if (isCharType(type.to)) return this.stringAt(value as number) ?? NOT_SCALAR;
+    if (isArrayLike(this.runtime, type, where)) return this.elementsFrom(type.to, value as number);
+    return NOT_SCALAR;
+  }
+
   /** The elements a pointer into a block of scalars reaches, from the pointer to the block's end. */
   private elementsFrom(type: CType, address: number): Scalarish | typeof NOT_SCALAR {
     if (!isScalarElement(type)) return NOT_SCALAR;
     const block = this.runtime.memory.find(address);
     if (!block) return NOT_SCALAR;
-    const size = sizeOf(type);
+    const size = sizeIn(type, this.vla);
+    if (size === 0) return NOT_SCALAR;
     const items: Scalarish[] = [];
     for (let at = address; at + size <= block.end; at += size) {
       const item = this.scalarOf(type, { address: at });
@@ -181,8 +206,6 @@ class Snapshotter {
     return new TextDecoder().decode(block.bytes.subarray(start, end));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of type.
-  // code-gauge-allow functionNcss 39 -- One display case per C type; recursion shares the same cycle-detection set.
   private nodeOf(type: CType, where: Where, seen: Set<number>): DisplayNode | undefined {
     switch (type.kind) {
       case 'int':
@@ -194,7 +217,7 @@ class Snapshotter {
       }
       case 'pointer': {
         const value = this.read(type, where);
-        if (value === undefined) return undefined;
+        if (value === undefined || this.isVaList(value as number)) return undefined;
         if (value === 0) return NULL_NODE;
         return (
           this.pointeeNode(type.to, value as number, seen) ?? {
@@ -204,35 +227,55 @@ class Snapshotter {
         );
       }
       case 'array': {
-        if (!('address' in where)) return undefined;
-        if (isCharType(type.of)) return { kind: 'value', value: this.stringAt(where.address, sizeOf(type)) ?? '' };
-        const size = sizeOf(type.of);
-        const entries: Record<string, DisplayNode> = {};
-        for (let index = 0; index < (type.length ?? 0); index++) {
-          entries[index] = this.nodeOf(type.of, { address: where.address + index * size }, seen) ?? NULL_NODE;
-        }
-        return { kind: 'array', entries };
+        return 'address' in where ? this.arrayNode(type, where.address, seen) : undefined;
       }
       case 'record': {
-        if (!('address' in where)) return undefined;
-        if (seen.has(where.address)) return undefined;
-        seen.add(where.address);
-        const entries: Record<string, DisplayNode> = {};
-        for (const field of type.info.fields ?? []) {
-          if (field.name === undefined) continue;
-          const node =
-            field.bitWidth === undefined
-              ? this.nodeOf(field.type, { address: where.address + field.offset }, seen)
-              : this.bitFieldNode(type, field.name, where.address);
-          entries[field.name] = node ?? NULL_NODE;
-        }
-        seen.delete(where.address);
-        return { kind: 'object', entries };
+        return 'address' in where ? this.recordNode(type, where.address, seen) : undefined;
       }
       default: {
         return undefined;
       }
     }
+  }
+
+  private arrayNode(type: Extract<CType, { kind: 'array' }>, address: number, seen: Set<number>): DisplayNode {
+    const size = sizeIn(type.of, this.vla);
+    const entries: Record<string, DisplayNode> = {};
+    const length =
+      type.length === undefined && type.vla === undefined ? this.flexibleLength(address, size) : this.lengthOf(type);
+    if (isCharType(type.of)) return { kind: 'value', value: this.stringAt(address, length * size) ?? '' };
+    for (let index = 0; index < length; index++) {
+      entries[index] = this.nodeOf(type.of, { address: address + index * size }, seen) ?? NULL_NODE;
+    }
+    return { kind: 'array', entries };
+  }
+
+  /** The elements of a flexible array member, `int a[];`: as many as the rest of the struct's block holds. */
+  private flexibleLength(address: number, size: number): number {
+    const block = this.runtime.memory.find(address);
+    return block && size > 0 ? Math.max(Math.floor((block.end - address) / size), 0) : 0;
+  }
+
+  private recordNode(type: Extract<CType, { kind: 'record' }>, address: number, seen: Set<number>): DisplayNode {
+    const alreadySeen = seen.has(address);
+    seen.add(address);
+    const entries: Record<string, DisplayNode> = {};
+    for (const field of type.info.fields ?? []) {
+      if (field.isAnonymous) {
+        // An unnamed member's members show as the struct's own, as the program names them.
+        const inner = this.nodeOf(field.type, { address: address + field.offset }, seen);
+        if (inner?.kind === 'object') Object.assign(entries, inner.entries);
+        continue;
+      }
+      if (field.name === undefined) continue;
+      const node =
+        field.bitWidth === undefined
+          ? this.nodeOf(field.type, { address: address + field.offset }, seen)
+          : this.bitFieldNode(type, field.name, address);
+      entries[field.name] = node ?? NULL_NODE;
+    }
+    if (!alreadySeen) seen.delete(address);
+    return { kind: 'object', entries };
   }
 
   private bitFieldNode(type: Extract<CType, { kind: 'record' }>, name: string, address: number): DisplayNode {
@@ -254,6 +297,15 @@ class Snapshotter {
 
   /** What a pointer points to: a turtle, a struct, the elements from it to its block's end, or a single value. */
   private pointeeNode(type: CType, address: number, seen: Set<number>): DisplayNode | undefined {
+    // A struct that points back to one being shown, as in a cyclic list, shows as nothing there.
+    if (seen.has(address)) return undefined;
+    seen.add(address);
+    const node = this.pointeeNodeAt(type, address, seen);
+    seen.delete(address);
+    return node;
+  }
+
+  private pointeeNodeAt(type: CType, address: number, seen: Set<number>): DisplayNode | undefined {
     const block = this.runtime.memory.find(address);
     if (!block) return { kind: 'value', value: `0x${address.toString(16)}` };
     if (block.turtle) {
@@ -263,10 +315,13 @@ class Snapshotter {
         entries: { x: { kind: 'value', value: block.turtle.x }, y: { kind: 'value', value: block.turtle.y } },
       };
     }
-    if (type.kind === 'function' || type.kind === 'void') return undefined;
+    // A function pointer shows the name of the function, as the program wrote it where it stored the pointer.
+    if (type.kind === 'function')
+      return block.target ? { kind: 'value', value: (block.target as FunctionInfo).name } : undefined;
+    if (type.kind === 'void') return undefined;
     if (isCharType(type)) return { kind: 'value', value: this.stringAt(address) ?? '' };
-    if (blockIsArray(block, type) && type.kind !== 'record') {
-      const size = sizeOf(type);
+    const size = sizeIn(type, this.vla);
+    if (size > 0 && blockIsArray(block, type) && type.kind !== 'record') {
       const entries: Record<string, DisplayNode> = {};
       let index = 0;
       for (let at = address; at + size <= block.end; at += size)
@@ -315,7 +370,9 @@ function hasScalarElements(type: CType): boolean {
 function blockIsArray(block: Allocation, type: CType): boolean {
   if (block.isHeap) return true;
   const declared = block.type;
-  return declared?.kind === 'array' && sizeOf(type) <= sizeOf(declared.of) * 1;
+  if (declared?.kind !== 'array') return false;
+  // A variable-length array's element size is known only in its frame, and a pointer into it reaches its elements.
+  return hasVla(declared.of) || hasVla(type) || sizeOf(type) <= sizeOf(declared.of);
 }
 
 /** Whether a pointer variable points into an array of scalars, which learners see as the elements it reaches. */

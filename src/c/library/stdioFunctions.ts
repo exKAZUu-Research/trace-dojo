@@ -1,7 +1,21 @@
 import type { Value } from '../arith';
 import { CRuntimeError } from '../errors';
-import { type NativeFunction, type Runtime, storerOf } from '../runtime';
-import { CHAR, type CType, DOUBLE, FLOAT, INT, INT_PROPERTIES, LONG, SHORT, typeName, ULONG } from '../types';
+import { loaderOf, loadRecord, type NativeFunction, type Runtime, storerOf } from '../runtime';
+import {
+  CHAR,
+  CHAR_POINTER,
+  type CType,
+  DOUBLE,
+  FLOAT,
+  INT,
+  INT_PROPERTIES,
+  LONG,
+  SHORT,
+  SIZE_T,
+  sizeOf,
+  typeName,
+  ULONG,
+} from '../types';
 import { unsupportedMessage } from '../unsupported';
 import { isSpaceByte, parseFloatPrefix, parseIntegerPrefix } from './numberParsing';
 import { formatPrintf } from './printf';
@@ -341,3 +355,50 @@ class Scanner {
     return this.assigned > 0 ? this.assigned : -1;
   }
 }
+
+/** The extra arguments from where a `va_list` points to the last one, as the `v` functions read them. */
+function varargsFrom(runtime: Runtime, value: Value | undefined): { values: Value[]; types: CType[] } {
+  const address = asAddress(value);
+  const block = runtime.memory.find(address) ?? runtime.memory.find(address - 1);
+  const slots = block ? runtime.varargTypes.get(block.base) : undefined;
+  if (!block || !slots) throw new CRuntimeError('custom', 'va_list が va_start で始めた可変長引数を指していません。');
+  const values: Value[] = [];
+  const types: CType[] = [];
+  for (let slot = (address - block.base) / 8; slot < slots.length;) {
+    const type = slots[slot];
+    const at = block.base + slot * 8;
+    values.push(type.kind === 'record' ? loadRecord(runtime, at, sizeOf(type)) : loaderOf(type)(runtime, at));
+    types.push(type);
+    slot += Math.ceil(sizeOf(type) / 8);
+  }
+  return { values, types };
+}
+
+/** The `v` functions of stdio.h, which take the extra arguments of a variadic function as a `va_list`. */
+export const VARARG_FUNCTIONS: Record<string, NativeFunction> = {
+  vprintf: (runtime, [format, list]) => {
+    const { values, types } = varargsFrom(runtime, list);
+    return STDIO_FUNCTIONS.printf(runtime, [format, ...values], [CHAR_POINTER, ...types], 0);
+  },
+  vfprintf: (runtime, [stream, format, list]) => {
+    const { values, types } = varargsFrom(runtime, list);
+    return STDIO_FUNCTIONS.fprintf(runtime, [stream, format, ...values], [CHAR_POINTER, CHAR_POINTER, ...types], 0);
+  },
+  vsprintf: (runtime, [buffer, format, list]) => {
+    const { values, types } = varargsFrom(runtime, list);
+    return STDIO_FUNCTIONS.sprintf(runtime, [buffer, format, ...values], [CHAR_POINTER, CHAR_POINTER, ...types], 0);
+  },
+  vsnprintf: (runtime, [buffer, size, format, list]) => {
+    const { values, types } = varargsFrom(runtime, list);
+    return STDIO_FUNCTIONS.snprintf(
+      runtime,
+      [buffer, size, format, ...values],
+      [CHAR_POINTER, SIZE_T, CHAR_POINTER, ...types],
+      0
+    );
+  },
+  vsscanf: (runtime, [text, format, list]) => {
+    const { values, types } = varargsFrom(runtime, list);
+    return STDIO_FUNCTIONS.sscanf(runtime, [text, format, ...values], [CHAR_POINTER, CHAR_POINTER, ...types], 0);
+  },
+};

@@ -25,7 +25,11 @@ export type CType =
   | ({ kind: 'float'; name: FloatName } & Qualified)
   | ({ kind: 'pointer'; to: CType } & Qualified)
   /** An array, whose length is undefined while it is incomplete (`int a[]` before its initializer). */
-  | ({ kind: 'array'; of: CType; length?: number } & Qualified)
+  /**
+   * An array, whose length is undefined while it is incomplete (`int a[]` before its initializer); a variable-length
+   * array has instead the index of the frame's slot holding its length (`vla`), or -1 in a prototype (`int a[*]`).
+   */
+  | ({ kind: 'array'; of: CType; length?: number; vla?: number } & Qualified)
   /** A function type, whose parameters are undefined when declared with `()`. */
   | { kind: 'function'; ret: CType; params?: CType[]; variadic: boolean }
   | ({ kind: 'record'; info: RecordInfo } & Qualified);
@@ -44,6 +48,8 @@ export interface Field {
   offset: number;
   bitOffset?: number;
   bitWidth?: number;
+  /** Whether the member is an unnamed struct or union, whose own members are members of this one (C11). */
+  isAnonymous?: boolean;
 }
 
 let nextRecordId = 0;
@@ -66,8 +72,24 @@ export class RecordInfo {
     return this.fields !== undefined;
   }
 
+  /** A member by name, including the members of unnamed struct and union members, at its offset in this one. */
   field(name: string): Field | undefined {
-    return this.fields?.find((member) => member.name === name);
+    for (const member of this.fields ?? []) {
+      if (member.name === name) return member;
+      if (member.isAnonymous && member.type.kind === 'record') {
+        const inner = member.type.info.field(name);
+        if (inner) return { ...inner, offset: member.offset + inner.offset };
+      }
+    }
+    return undefined;
+  }
+
+  /** The names of the members, including those of unnamed members, to check that no name is declared twice. */
+  memberNames(): string[] {
+    return (this.fields ?? []).flatMap((member) => {
+      if (member.isAnonymous && member.type.kind === 'record') return member.type.info.memberNames();
+      return member.name === undefined ? [] : [member.name];
+    });
   }
 }
 
@@ -164,7 +186,7 @@ export function isComplete(type: CType): boolean {
       return false;
     }
     case 'array': {
-      return type.length !== undefined && isComplete(type.of);
+      return (type.length !== undefined || type.vla !== undefined) && isComplete(type.of);
     }
     case 'record': {
       return type.info.isComplete;
@@ -469,9 +491,16 @@ function hasOnly(counts: ReadonlyMap<string, number>, ...allowed: string[]): boo
 }
 
 /** Lays out the members of a struct or union as clang does on arm64. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Field alignment, bit allocation, and record extent share one target-ABI layout cursor.
-// code-gauge-allow functionNcss 47 -- Field alignment, bit allocation, and record extent share one target-ABI layout cursor.
-export function layoutRecord(info: RecordInfo, members: { name?: string; type: CType; bitWidth?: number }[]): void {
+export interface RecordMember {
+  name?: string;
+  type: CType;
+  bitWidth?: number;
+  align?: number;
+  isAnonymous?: boolean;
+}
+// code-gauge-allow functionCognitiveComplexity 24 -- Alignment, bit allocation and extent share a target ABI cursor.
+// code-gauge-allow functionNcss 48 -- Field layout shares one target ABI cursor.
+export function layoutRecord(info: RecordInfo, members: RecordMember[]): void {
   const fields: Field[] = [];
   let offset = 0;
   let bitPosition = 0;
@@ -479,7 +508,7 @@ export function layoutRecord(info: RecordInfo, members: { name?: string; type: C
   let size = 0;
   for (const member of members) {
     const memberSize = sizeOf(member.type);
-    const memberAlign = alignOf(member.type);
+    const memberAlign = Math.max(alignOf(member.type), member.align ?? 0);
     if (member.bitWidth !== undefined) {
       if (member.bitWidth === 0) {
         // A zero-width bit-field ends the current storage unit.
@@ -518,13 +547,14 @@ export function layoutRecord(info: RecordInfo, members: { name?: string; type: C
       size = Math.max(size, offset);
       continue;
     }
+    const anonymous = member.isAnonymous ? { isAnonymous: true } : {};
     if (info.kind === 'union') {
-      fields.push({ name: member.name, type: member.type, offset: 0 });
+      fields.push({ name: member.name, type: member.type, offset: 0, ...anonymous });
       size = Math.max(size, memberSize);
     } else {
       offset = Math.max(offset, Math.ceil(bitPosition / 8));
       offset = Math.ceil(offset / memberAlign) * memberAlign;
-      fields.push({ name: member.name, type: member.type, offset });
+      fields.push({ name: member.name, type: member.type, offset, ...anonymous });
       offset += memberSize;
       bitPosition = offset * 8;
       size = offset;
@@ -534,6 +564,31 @@ export function layoutRecord(info: RecordInfo, members: { name?: string; type: C
   info.fields = fields;
   info.align = align;
   info.size = Math.ceil(size / align) * align;
+}
+
+/** Whether a type has a variable-length array in it, whose size the program computes when it runs. */
+export function hasVla(type: CType): boolean {
+  if (type.kind === 'array') return type.vla !== undefined || hasVla(type.of);
+  return false;
+}
+
+export function evaluatedArrayType(type: CType, lengths: readonly number[]): CType {
+  if (type.kind !== 'array') return type;
+  const { vla, ...array } = type;
+  return { ...array, length: vla === undefined ? type.length : lengths[vla], of: evaluatedArrayType(type.of, lengths) };
+}
+
+export function isVariablyModified(type: CType): boolean {
+  if (type.kind === 'pointer') return isVariablyModified(type.to);
+  if (type.kind === 'array') return type.vla !== undefined || isVariablyModified(type.of);
+  return false;
+}
+
+/** The size of a type, reading the lengths of its variable-length arrays from the frame that declared them. */
+export function sizeIn(type: CType, vla: readonly number[]): number {
+  if (type.kind !== 'array') return sizeOf(type);
+  const length = type.vla === undefined ? (type.length ?? 0) : (vla[type.vla] ?? 0);
+  return length * sizeIn(type.of, vla);
 }
 
 /** Whether a type is an array of a character type, which a string literal may initialize. */

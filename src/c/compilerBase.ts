@@ -1,17 +1,33 @@
+// code-gauge-allow-file fileNcss 424 -- Declarator resolution and deferred semantic evaluation share type and scope state.
 import { CompileError } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { convertScalar, type Scalar, type Value } from './arith';
-import type { Declaration, Declarator, Expression, FieldDeclaration, Specifiers, TypeName, TypeSpecifier } from './ast';
+import type {
+  Declaration,
+  Declarator,
+  Expression,
+  FieldDeclaration,
+  Specifiers,
+  StaticAssert,
+  TypeName,
+  TypeSpecifier,
+} from './ast';
+import { CRuntimeError } from './errors';
+import { decodeStringLiteral } from './literals';
 import type { Address, MetadataReader, PointerBytes, PointerRange } from './pointerBounds';
 import type { Frame, FunctionInfo, GlobalInfo, LocalInfo } from './runtime';
 import {
+  alignOf,
   builtinType,
   type CType,
   type EnumInfo,
   INT,
   isComplete,
+  isVariablyModified,
   layoutRecord,
+  LONG,
   RecordInfo,
+  type RecordMember,
   sizeOf,
   typeName,
   UINT,
@@ -92,11 +108,21 @@ export interface LValue {
   isStatic?: boolean;
 }
 
+export interface LabelInfo {
+  id: number;
+  row: number;
+  defined: boolean;
+  declarations?: Set<Entity>;
+  jumps: { row: number; declarations: Set<Entity> }[];
+}
+
 /** The state of the function being compiled. */
 export interface FunctionContext {
+  /** The number of the function's variable-length arrays, each of which has a slot for its length. */
+  vlaCount: number;
   info: FunctionInfo;
   returnType: CType;
-  labels: Map<string, { id: number; row: number; defined: boolean }>;
+  labels: Map<string, LabelInfo>;
   nextLabel: number;
   loopDepth: number;
   /** The switch statements around the statement being compiled, innermost last. */
@@ -107,8 +133,10 @@ export interface FunctionContext {
 }
 
 export interface SwitchContext {
+  declarations: Set<Entity>;
   type: CType;
   cases: Map<string, number>;
+  ranges: { low: Scalar; high: Scalar; label: number; row: number }[];
   defaultLabel?: number;
   defaultRow?: number;
 }
@@ -120,8 +148,18 @@ export interface CompileOptions {
 export abstract class CompilerBase {
   protected scope = new Scope();
   protected isUnevaluated = false;
+  private deferredReferences?: (() => void)[];
   private inParameter = false;
   protected fn?: FunctionContext;
+  /** The lengths of variable-length arrays in the declarator being compiled, which its declaration computes. */
+  protected pendingVla: ((frame: Frame) => void)[] = [];
+  /** How deep in a prototype's parameter list the compiler is, where a variable length is only `[*]`. */
+  private prototypeDepth = 0;
+
+  /** The function being compiled, for the checks of calls that depend on it, such as `va_start`. */
+  get currentFunction(): FunctionInfo | undefined {
+    return this.fn?.info;
+  }
   protected readonly globals: GlobalInfo[] = [];
   protected readonly functions: FunctionInfo[] = [];
   /** The distinct string literals, whose blocks the run creates when it starts. */
@@ -146,6 +184,52 @@ export abstract class CompilerBase {
     } finally {
       this.isUnevaluated = previous;
     }
+  }
+
+  protected recordReference(reference: () => void): void {
+    if (this.isUnevaluated) return;
+    if (this.deferredReferences) this.deferredReferences.push(reference);
+    else reference();
+  }
+
+  protected discover<T>(compile: () => T): { value: T; lengths?: (frame: Frame) => void; use: () => void } {
+    const previousUnevaluated = this.isUnevaluated;
+    const previousReferences = this.deferredReferences;
+    const previousLengths = this.pendingVla;
+    const references: (() => void)[] = [];
+    this.isUnevaluated = false;
+    this.deferredReferences = references;
+    this.pendingVla = [];
+    try {
+      const value = compile();
+      const lengths = this.takePendingVla();
+      return {
+        value,
+        lengths,
+        use: () => {
+          for (const reference of references) this.recordReference(reference);
+        },
+      };
+    } finally {
+      this.isUnevaluated = previousUnevaluated;
+      this.deferredReferences = previousReferences;
+      this.pendingVla = previousLengths;
+    }
+  }
+
+  protected withoutVlaEvaluation<T>(compile: () => T): T {
+    const previous = this.pendingVla;
+    this.pendingVla = [];
+    try {
+      return this.unevaluated(compile);
+    } finally {
+      this.pendingVla = previous;
+    }
+  }
+
+  protected validateInline(specifiers: Specifiers, type: CType, name?: string): void {
+    if (specifiers.isInline && (type.kind !== 'function' || specifiers.storage === 'typedef' || name === 'main'))
+      this.error(specifiers.row, 'inline は main 以外の関数にだけ指定できます。');
   }
 
   protected withScope<T>(compile: () => T): T {
@@ -199,7 +283,43 @@ export abstract class CompilerBase {
       case 'enum': {
         return this.enumType(specifier);
       }
+      case 'typeof': {
+        // __typeof__ names the type of its operand without evaluating it.
+        return specifier.typeName
+          ? this.typeOfName(specifier.typeName)
+          : this.typeOfExpression(specifier.operand as Expression);
+      }
     }
+  }
+
+  protected abstract typeOfExpression(expression: Expression): CType;
+
+  /** `_Static_assert`, which stops compiling when its constant condition is 0. */
+  protected staticAssert(item: StaticAssert): void {
+    const condition = this.constantOperand(item.condition);
+    if (condition?.constant === undefined || condition.type.kind !== 'int') {
+      this.error(item.row, '_Static_assert の条件には、整数の定数を書いてください。');
+    }
+    if (condition.constant === 0 || condition.constant === 0n) {
+      const message = item.message
+        ? `（${new TextDecoder().decode(decodeStringLiteral(item.message, item.row).slice(0, -1))}）`
+        : '';
+      this.error(item.row, `_Static_assert の条件が成り立ちません${message}。`);
+    }
+  }
+
+  /** The alignment that `_Alignas` asks for, which must be a power of two. */
+  protected requestedAlignment(requests: NonNullable<Specifiers['alignas']>): number {
+    return Math.max(...requests.map((request) => this.alignmentRequest(request)));
+  }
+
+  private alignmentRequest(alignas: NonNullable<Specifiers['alignas']>[number]): number {
+    const typeName = alignas.typeName;
+    if (typeName) return alignOf(this.withoutVlaEvaluation(() => this.typeOfName(typeName)));
+    const value = this.integerConstant(alignas.expression as Expression, '_Alignas の大きさ');
+    if (value !== 0 && (value < 0 || (value & (value - 1)) !== 0))
+      this.error(alignas.row, '_Alignas の大きさは、2 のべき乗にしてください。');
+    return value;
   }
 
   protected declareStandaloneTag(declaration: Declaration): void {
@@ -242,38 +362,72 @@ export abstract class CompilerBase {
 
   // code-gauge-allow functionCognitiveComplexity 22 -- Field validation, duplicate names, and layout are one declaration pass; helpers already isolate type and width checks.
   private defineRecord(info: RecordInfo, fields: FieldDeclaration[], row: number): void {
-    const members: { name?: string; type: CType; bitWidth?: number }[] = [];
+    const members: RecordMember[] = [];
     const names = new Set<string>();
+    const last = fields.flatMap((field) => field.declarators).at(-1);
     for (const field of fields) {
+      if (field.specifiers.isInline) this.error(field.row, '構造体・共用体のメンバに inline は指定できません。');
       const base = this.baseType(field.specifiers);
       if (field.specifiers.storage) this.error(field.row, '構造体のメンバに記憶域の指定（static など）は書けません。');
+      const align = field.specifiers.alignas ? this.requestedAlignment(field.specifiers.alignas) : undefined;
+      if (field.declarators.length === 0 && base.kind === 'record' && field.specifiers.type.kind !== 'typedefName') {
+        // An unnamed struct or union member (C11), whose members belong to this struct; a tagged one declares nothing.
+        const specifier = field.specifiers.type as { tag?: string };
+        if (specifier.tag !== undefined) continue;
+        for (const name of base.info.memberNames()) this.claimMemberName(names, name, field.row);
+        members.push({ type: base, isAnonymous: true, ...(align === undefined ? {} : { align }) });
+        continue;
+      }
       for (const declarator of field.declarators) {
-        const { type, name } = this.declaredType(base, declarator.declarator);
-        const memberRow = declarator.row;
-        if (name !== undefined) {
-          if (names.has(name)) this.error(memberRow, `メンバ「${name}」が2回宣言されています。`);
-          names.add(name);
-        }
-        this.checkMemberType(info, type, name, memberRow);
-        const bitWidth =
-          declarator.bitWidth === undefined
-            ? undefined
-            : this.bitFieldWidth(declarator.bitWidth, type, name, memberRow);
-        members.push({
-          ...(name === undefined ? {} : { name }),
-          type,
-          ...(bitWidth === undefined ? {} : { bitWidth }),
-        });
+        members.push(this.recordMember(info, base, declarator, declarator === last, names, align));
       }
     }
     if (members.length === 0) this.error(row, '構造体・共用体には、メンバを1つ以上書いてください。');
     layoutRecord(info, members);
   }
 
+  private recordMember(
+    info: RecordInfo,
+    base: CType,
+    declarator: FieldDeclaration['declarators'][number],
+    isLast: boolean,
+    names: Set<string>,
+    align: number | undefined
+  ): RecordMember {
+    const { type, name } = this.declaredType(base, declarator.declarator);
+    const memberRow = declarator.row;
+    if (isVariablyModified(type))
+      this.error(memberRow, '構造体・共用体のメンバの配列には、定数の大きさを書いてください。');
+    if (name !== undefined) this.claimMemberName(names, name, memberRow);
+    if (align !== undefined && align !== 0 && align < alignOf(type))
+      this.error(memberRow, '_Alignas の大きさは、型のアラインメントより小さくできません。');
+    const isFlexible = type.kind === 'array' && type.length === undefined;
+    if (isFlexible) this.checkFlexibleMember(info, isLast, name, memberRow);
+    else this.checkMemberType(info, type, name, memberRow);
+    const bitWidth =
+      declarator.bitWidth === undefined ? undefined : this.bitFieldWidth(declarator.bitWidth, type, name, memberRow);
+    return {
+      ...(name === undefined ? {} : { name }),
+      type,
+      ...(bitWidth === undefined ? {} : { bitWidth }),
+      ...(align === undefined ? {} : { align }),
+    };
+  }
+
+  private claimMemberName(names: Set<string>, name: string, row: number): void {
+    if (names.has(name)) this.error(row, `メンバ「${name}」が2回宣言されています。`);
+    names.add(name);
+  }
+
+  /** A flexible array member, `int a[];`, which only the last member of a struct with other members may be. */
+  private checkFlexibleMember(info: RecordInfo, isLast: boolean, name: string | undefined, row: number): void {
+    if (info.kind === 'union')
+      this.error(row, `共用体のメンバ「${name ?? ''}」には、大きさを書かない配列を使えません。`);
+    if (!isLast) this.error(row, `大きさを書かない配列のメンバ「${name ?? ''}」は、構造体の最後にしか書けません。`);
+  }
+
   private checkMemberType(info: RecordInfo, type: CType, name: string | undefined, row: number): void {
     if (type.kind === 'function') this.error(row, '構造体のメンバを関数にはできません（関数ポインタにしてください）。');
-    if (type.kind === 'array' && type.length === undefined)
-      unsupported(row, '大きさを書かない配列のメンバ（柔軟な配列メンバ）');
     if (!isComplete(type)) {
       if (type.kind === 'record' && type.info === info)
         this.error(row, '構造体の中に、同じ構造体そのものは入れられません（ポインタにしてください）。');
@@ -349,9 +503,8 @@ export abstract class CompilerBase {
             this.error(current.row, '関数の配列は作れません（関数ポインタの配列にしてください）。');
           if (!isComplete(type))
             this.error(current.row, `要素の型（${typeName(type)}）が決まっていない配列は作れません。`);
-          let length: number | undefined;
-          if (current.size !== undefined) length = this.arrayLength(current.size);
-          type = { kind: 'array', of: type, ...(length === undefined ? {} : { length }) };
+          const length = current.size === undefined ? {} : this.arrayLength(current.size);
+          type = { kind: 'array', of: type, ...length };
           break;
         }
         case 'function': {
@@ -365,17 +518,42 @@ export abstract class CompilerBase {
     }
   }
 
-  private arrayLength(size: Expression): number {
-    const operand = this.constantOperand(size);
-    if (operand?.constant === undefined || operand.type.kind !== 'int') {
-      if (this.fn || this.inParameter) unsupported(size.row, '大きさが定数でない配列（可変長配列）');
-      this.error(size.row, '配列の大きさには、整数の定数を書いてください。');
+  /** An array's length, or the slot of a variable-length array, whose length the declaration computes. */
+  private arrayLength(size: Expression): { length?: number; vla?: number } {
+    const operand = this.rvalueOf(size);
+    if (operand.type.kind !== 'int')
+      this.error(size.row, `配列の大きさには整数を書いてください（${typeName(operand.type)}）。`);
+    if (operand.constant !== undefined) {
+      const length = Number(operand.constant);
+      if (length < 0) this.error(size.row, '配列の大きさに負の数は使えません。');
+      return { length };
     }
-    const length = Number(operand.constant);
-    if (length < 0) this.error(size.row, '配列の大きさに負の数は使えません。');
-    if (length === 0) unsupported(size.row, '大きさが 0 の配列');
-    return length;
+    if (this.prototypeDepth > 0) return { vla: -1 };
+    if (!this.fn) this.error(size.row, '関数の外の配列の大きさには、整数の定数を書いてください。');
+    const slot = this.fn.vlaCount++;
+    const value = operand.value;
+    const sourceType = operand.type;
+    this.pendingVla.push((frame) => {
+      const length = Number(convertScalar(value(frame) as Scalar, sourceType, LONG));
+      // A variable-length array of no or negative length is undefined behavior.
+      if (length <= 0)
+        throw new CRuntimeError('custom', `可変長配列の大きさが ${length} です（1 以上にしてください）。`);
+      frame.vla[slot] = length;
+    });
+    return { vla: slot };
   }
+
+  /** Runs the length computations of the variable-length arrays declared since the last call. */
+  protected takePendingVla(): ((frame: Frame) => void) | undefined {
+    const pending = this.pendingVla;
+    if (pending.length === 0) return undefined;
+    this.pendingVla = [];
+    return (frame) => {
+      for (const compute of pending) compute(frame);
+    };
+  }
+
+  protected abstract rvalueOf(expression: Expression): Operand;
 
   private functionType(ret: CType, declarator: Extract<Declarator, { kind: 'function' }>): CType {
     if (!declarator.params) {
@@ -392,27 +570,31 @@ export abstract class CompilerBase {
     ) {
       return { kind: 'function', ret, params: [], variadic: declarator.variadic };
     }
-    const types = this.withScope(() =>
-      params.map((param) => {
-        const { type, name } = this.parameterType(param);
-        if (name)
-          this.scope.ordinary.set(name, {
-            kind: 'local',
-            type,
-            local: {
+    // In a prototype, earlier parameters are in scope for later ones' array lengths, which are only `[*]` there.
+    this.prototypeDepth++;
+    try {
+      const types = this.withScope(() =>
+        params.map((param) => {
+          const { type, name } = this.parameterType(param);
+          if (name !== undefined) {
+            const local: LocalInfo = {
               name,
               type,
-              index: 0,
+              index: -1,
               row: param.row,
               inMemory: false,
               size: 0,
               isParameter: true,
-            },
-          });
-        return type;
-      })
-    );
-    return { kind: 'function', ret, params: types, variadic: declarator.variadic };
+            };
+            this.scope.ordinary.set(name, { kind: 'local', local, type });
+          }
+          return type;
+        })
+      );
+      return { kind: 'function', ret, params: types, variadic: declarator.variadic };
+    } finally {
+      this.prototypeDepth--;
+    }
   }
 
   /** A parameter's type, adjusted as C adjusts it: arrays become pointers and functions pointers to functions. */
@@ -423,6 +605,7 @@ export abstract class CompilerBase {
     if (param.specifiers.storage && param.specifiers.storage !== 'register') {
       this.error(param.row, '引数に記憶域の指定（static など）は書けません。');
     }
+    if (param.specifiers.isInline) this.error(param.row, '引数に inline は指定できません。');
     const previous = this.inParameter;
     this.inParameter = true;
     let declared: ReturnType<CompilerBase['declaredType']>;
