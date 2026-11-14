@@ -631,13 +631,30 @@ function* hashEquals(a: RHash, b: Value, pairs: Map<RBasic, Set<RBasic>>): Gen<b
   return b instanceof RHash && (yield* compareHashEntries(a, b, (left, right) => rEquals(left, right, pairs)));
 }
 
-function* compareHashEntries(a: RHash, b: RHash, equals: (left: Value, right: Value) => Gen<boolean>): Gen<boolean> {
+export function* compareHashEntries(
+  a: RHash,
+  b: RHash,
+  equals: (left: Value, right: Value) => Gen<boolean>
+): Gen<boolean> {
   if (a.map.size !== b.map.size) return false;
   if (a.map.size > 0 && a.byIdentity !== b.byIdentity) return false;
+  const distinctIdentityKeys =
+    a.byIdentity && ((yield* hasEquivalentIdentityKeys(a)) || (yield* hasEquivalentIdentityKeys(b)));
+  const paired = new Set<object>();
   a.iterating++;
   try {
     for (const entry of a.map.values()) {
-      const other = yield* hashGet(b, entry.key);
+      let other: typeof entry | undefined;
+      if (a.byIdentity && !distinctIdentityKeys) {
+        for (const candidate of b.map.values()) {
+          if (paired.has(candidate)) continue;
+          if (entry.key === candidate.key || (yield* rEql(entry.key, candidate.key))) {
+            other = candidate;
+            paired.add(candidate);
+            break;
+          }
+        }
+      } else other = yield* hashGet(b, entry.key);
       if (!other || (entry.value !== other.value && !((yield equals(entry.value, other.value)) as boolean)))
         return false;
     }
@@ -645,6 +662,14 @@ function* compareHashEntries(a: RHash, b: RHash, equals: (left: Value, right: Va
   } finally {
     a.iterating--;
   }
+}
+
+function* hasEquivalentIdentityKeys(hash: RHash): Gen<boolean> {
+  const keys = [...hash.map.values()].map((entry) => entry.key);
+  for (let first = 0; first < keys.length; first++)
+    for (let second = first + 1; second < keys.length; second++)
+      if (yield* rEql(keys[first], keys[second])) return true;
+  return false;
 }
 
 export function numericEquals(a: bigint | number, b: bigint | number): boolean {

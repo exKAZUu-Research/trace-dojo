@@ -1,4 +1,12 @@
-import { inspect, inspectHash, rEql, rEquals, toIndexExact, tryImplicitConversion } from './conversions';
+import {
+  compareHashEntries,
+  inspect,
+  inspectHash,
+  rEql,
+  rEquals,
+  toIndexExact,
+  tryImplicitConversion,
+} from './conversions';
 import { def, sdef } from './define';
 import {
   argumentError,
@@ -233,18 +241,7 @@ def('Hash', 'deconstruct_keys', 1, (self) => self);
 def('Hash', 'to_a', 0, (self: RHash) => arr([...self.map.values()].map((entry) => arr([entry.key, entry.value]))));
 def('Hash', '==', 1, (self: RHash, [other]) => rEquals(self, other));
 def('Hash', 'eql?', 1, function* (self: RHash, [other]) {
-  if (!(other instanceof RHash) || self.map.size !== other.map.size) return false;
-  if (self.map.size > 0 && self.byIdentity !== other.byIdentity) return false;
-  self.iterating++;
-  try {
-    for (const entry of self.map.values()) {
-      const match = yield* hashGet(other, entry.key);
-      if (!match || (entry.value !== match.value && !(yield* rEql(entry.value, match.value)))) return false;
-    }
-    return true;
-  } finally {
-    self.iterating--;
-  }
+  return other instanceof RHash && (yield* compareHashEntries(self, other, (left, right) => rEql(left, right)));
 });
 def('Hash', 'default', [0, 1], function* (self: RHash, args) {
   if (args.length > 0 && self.defaultProc) return yield* hashDefault(self, args[0]);

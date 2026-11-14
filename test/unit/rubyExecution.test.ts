@@ -5329,6 +5329,17 @@ test('Hash equality observes identity comparison for nonempty hashes', () => {
   expect(run('a={1=>2}.compare_by_identity;b={1=>2};p a==b,b==a,a.eql?(b),{}.compare_by_identity=={}')).toMatchObject({
     stdout: 'false\nfalse\nfalse\ntrue\n',
   });
+  expect(
+    run('s="a";t="a";h={s=>1}.compare_by_identity;g={t=>1}.compare_by_identity;p h==g,h.eql?(g),g[s],h[t]')
+  ).toMatchObject({ stdout: 'true\ntrue\nnil\nnil\n' });
+  expect(
+    run('a="a";b="a";h={}.compare_by_identity;h[a]=1;h[b]=2;g={}.compare_by_identity;g[a]=1;g[b]=2;p h==g,h.eql?(g)')
+  ).toMatchObject({ stdout: 'true\ntrue\n' });
+  expect(
+    run(
+      'h={}.compare_by_identity;a="a";b="a";h[a]=1;h[b]=2;g={}.compare_by_identity;c="a";d="a";g[c]=1;g[d]=2;p h==g,h.eql?(g)'
+    )
+  ).toMatchObject({ stdout: 'false\nfalse\n' });
 });
 
 test('Hash.[] rehashes keys when dropping identity comparison', () => {
