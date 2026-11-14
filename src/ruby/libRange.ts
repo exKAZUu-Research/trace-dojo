@@ -23,7 +23,7 @@ import { kernelFloat } from './libNumeric';
 import { isRubyFloat, isRubyNumber, NIL, type RProc, RRange, RString, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { successorBytes } from './stringTransforms';
-import { arr, isA, realClassOf, str, stringBytes, stringFromBytes } from './values';
+import { arr, asciiString, isA, realClassOf, str, stringBytes, stringFromBytes } from './values';
 
 type Visit = (value: Value) => Gen<unknown>;
 
@@ -295,9 +295,9 @@ def('Range', 'inspect', 0, function* (self: RRange) {
 });
 def('Range', 'to_s', 0, function* (self: RRange) {
   const parts = [
-    self.begin === NIL ? str('') : yield* toSValue(self.begin),
-    str(self.exclusive ? '...' : '..'),
-    self.end === NIL ? str('') : yield* toSValue(self.end),
+    self.begin === NIL ? asciiString('') : yield* toSValue(self.begin),
+    asciiString(self.exclusive ? '...' : '..'),
+    self.end === NIL ? asciiString('') : yield* toSValue(self.end),
   ];
   let binary = parts[0].binary;
   let usAscii = parts[0].usAscii;

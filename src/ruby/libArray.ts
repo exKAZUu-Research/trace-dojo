@@ -301,7 +301,8 @@ def('Array', '<=>', 1, function* (self: RArray, [other]) {
   const pairs = rt().arrayComparisonPairs;
   const active = pairs.get(self) ?? new Set<RArray>();
   if (active.has(compared)) return 0n;
-  if (pairs.size >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
+  if (rt().arrayComparisonDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
+  rt().arrayComparisonDepth++;
   active.add(compared);
   pairs.set(self, active);
   try {
@@ -312,6 +313,7 @@ def('Array', '<=>', 1, function* (self: RArray, [other]) {
     }
     return BigInt(Math.sign(self.items.length - compared.items.length));
   } finally {
+    rt().arrayComparisonDepth--;
     active.delete(compared);
     if (active.size === 0) pairs.delete(self);
   }

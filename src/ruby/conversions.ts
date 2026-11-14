@@ -19,7 +19,17 @@ import {
   type Value,
 } from './objects';
 import { rt } from './runtime';
-import { asciiString, classOf, frozenCoreString, isA, realClassOf, str, stringBytes, truthy } from './values';
+import {
+  asciiString,
+  classOf,
+  frozenCoreString,
+  isA,
+  realClassOf,
+  str,
+  stringBytes,
+  stringFromBytes,
+  truthy,
+} from './values';
 
 // Numbers -------------------------------------------------------------------------------------------------------------
 
@@ -259,16 +269,14 @@ export function* inspectArray(array: RArray): Gen<RString> {
   if (inspecting.has(array)) return asciiString('[...]');
   inspecting.add(array);
   try {
-    const parts: string[] = [];
+    const parts: RString[] = [];
     let length = 2;
-    let usAscii = true;
     for (let index = 0; index < array.items.length; index++) {
       const item = (yield inspectValue(array.items[index])) as RString;
-      usAscii &&= item.usAscii;
-      length = pushInspected(parts, item.s, length, 2);
+      if (index > 0) length = pushInspectionPart(parts, asciiString(', '), length);
+      length = pushInspectionPart(parts, escapedInspectionPart(item), length);
     }
-    const text = `[${parts.join(', ')}]`;
-    return usAscii ? asciiString(text) : str(text);
+    return finishInspection(parts, '[', ']', length);
   } finally {
     inspecting.delete(array);
   }
@@ -280,30 +288,80 @@ export function* inspectHash(hash: RHash): Gen<RString> {
   inspecting.add(hash);
   hash.iterating++;
   try {
-    const parts: string[] = [];
+    const parts: RString[] = [];
     let length = 2;
-    let usAscii = true;
     for (const { key, value } of hash.map.values()) {
+      if (parts.length > 0) length = pushInspectionPart(parts, asciiString(', '), length);
       if (key instanceof RSymbol) {
-        const name = isSimpleSymbol(key.name) ? key.name : ((yield inspectValue(str(key.name))) as RString).s;
+        const name = isSimpleSymbol(key.name)
+          ? /^[\u0000-\u007F]*$/.test(key.name)
+            ? asciiString(key.name)
+            : str(key.name)
+          : ((yield inspectValue(str(key.name))) as RString);
         const shownValue = (yield inspectValue(value)) as RString;
-        usAscii &&= /^[\u0000-\u007F]*$/.test(name);
-        usAscii &&= shownValue.usAscii;
-        length = pushInspected(parts, `${name}: ${shownValue.s}`, length, 2);
+        length = pushInspectionPart(parts, name, length);
+        length = pushInspectionPart(parts, asciiString(': '), length);
+        length = pushInspectionPart(parts, escapedInspectionPart(shownValue), length);
       } else {
         const shownKey = (yield inspectValue(key)) as RString;
         const shownValue = (yield inspectValue(value)) as RString;
-        usAscii &&= shownKey.usAscii;
-        usAscii &&= shownValue.usAscii;
-        length = pushInspected(parts, `${shownKey.s} => ${shownValue.s}`, length, 2);
+        length = pushInspectionPart(parts, escapedInspectionPart(shownKey), length);
+        length = pushInspectionPart(parts, asciiString(' => '), length);
+        length = pushInspectionPart(parts, escapedInspectionPart(shownValue), length);
       }
     }
-    const text = `{${parts.join(', ')}}`;
-    return usAscii ? asciiString(text) : str(text);
+    return finishInspection(parts, '{', '}', length);
   } finally {
     hash.iterating--;
     inspecting.delete(hash);
   }
+}
+
+function escapedInspectionPart(value: RString): RString {
+  if (!value.binary) return value;
+  const bytes = stringBytes(value);
+  if (bytes.every((byte) => byte < 0x80)) return value;
+  const highBytes = bytes.reduce((count, byte) => count + Number(byte >= 0x80), 0);
+  rt().checkStringLength(bytes.length + highBytes * 3);
+  const escaped = Array.from(bytes, (byte) =>
+    byte < 0x80 ? String.fromCodePoint(byte) : `\\x${byte.toString(16).toUpperCase().padStart(2, '0')}`
+  );
+  return asciiString(escaped.join(''));
+}
+
+function pushInspectionPart(parts: RString[], part: RString, length: number): number {
+  const added = stringBytes(part).length;
+  if (length + added > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+  rt().spend(Math.ceil(added / 256));
+  parts.push(part);
+  return length + added;
+}
+
+function finishInspection(parts: RString[], open: string, close: string, length: number): RString {
+  if (parts.length === 0) return asciiString(`${open}${close}`);
+  const first = parts[0];
+  let binary = first.binary;
+  let usAscii = first.usAscii;
+  let ascii = stringBytes(first).every((byte) => byte < 0x80);
+  const result = new Uint8Array(length);
+  result[0] = open.codePointAt(0) as number;
+  let offset = 1;
+  for (const [index, part] of parts.entries()) {
+    const bytes = stringBytes(part);
+    if (index > 0) {
+      if (usAscii) {
+        if (bytes.some((byte) => byte >= 0x80)) {
+          binary = part.binary;
+          usAscii = part.usAscii;
+        }
+      } else if (!part.usAscii) binary = combinedStringEncoding(binary, ascii, part);
+    }
+    result.set(bytes, offset);
+    offset += bytes.length;
+    ascii &&= bytes.every((byte) => byte < 0x80);
+  }
+  result[offset] = close.codePointAt(0) as number;
+  return stringFromBytes(result, binary, usAscii);
 }
 
 /** Whether a symbol key shows as `key: value` without quotes in a Hash's inspect. */

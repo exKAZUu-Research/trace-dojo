@@ -1750,9 +1750,16 @@ def('String', 'between?', 2, function* (self: RString, [min, max]) {
 
 // Symbol --------------------------------------------------------------------------------------------------------------
 
-def('Symbol', ['to_s', 'id2name', 'name'], 0, (self: RSymbol) =>
+def('Symbol', ['to_s', 'id2name'], 0, (self: RSymbol) =>
   /^[\u0000-\u007F]*$/.test(self.name) ? asciiString(self.name) : str(self.name)
 );
+def('Symbol', 'name', 0, (self: RSymbol) => {
+  if (!self.nameString) {
+    self.nameString = /^[\u0000-\u007F]*$/.test(self.name) ? asciiString(self.name) : str(self.name);
+    self.nameString.frozen = true;
+  }
+  return self.nameString;
+});
 def('Symbol', 'to_sym', 0, (self) => self);
 def('Symbol', 'intern', 0, (self) => self);
 def('Symbol', 'casecmp', 1, (self: RSymbol, [other]) =>

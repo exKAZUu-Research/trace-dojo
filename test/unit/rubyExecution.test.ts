@@ -4810,3 +4810,41 @@ test('Array rotation keeps signed-long counts exact through modulus', () => {
     stdout: '[1, 2, 3]\n[2, 3, 1]\n[1, 2, 3]\n',
   });
 });
+
+test('container inspection preserves custom inspect bytes and initial encoding', () => {
+  const source = `class High; def inspect; 255.chr; end; end
+class Binary; def inspect; 255.chr.clear << 120; end; end
+p [High.new].inspect.bytes, {a: High.new}.inspect.bytes
+[[Binary.new], [1, Binary.new], {Binary.new => 1}, {a: Binary.new}].each do |value|
+  text = value.inspect
+  begin
+    text << 256
+    p :utf8
+  rescue RangeError
+    p :ascii
+  end
+end`;
+  expect(run(source)).toMatchObject({
+    stdout: '[91, 92, 120, 70, 70, 93]\n[123, 97, 58, 32, 92, 120, 70, 70, 125]\n:ascii\n:ascii\n:ascii\n:ascii\n',
+  });
+});
+
+test('beginless Range strings keep ASCII encoding', () => {
+  expect(run('s=(..2).to_s;s<<128;p s.bytes;s=(...2).to_s;s<<128;p s.bytes')).toMatchObject({
+    stdout: '[46, 46, 50, 128]\n[46, 46, 46, 50, 128]\n',
+  });
+});
+
+test('Symbol name is stable and frozen while conversions are mutable', () => {
+  expect(
+    run('p :hello.name.frozen?,:hello.name.equal?(:hello.name),:hello.to_s.frozen?,:hello.id2name.frozen?')
+  ).toMatchObject({
+    stdout: 'true\ntrue\nfalse\nfalse\n',
+  });
+  expect(run(':hello.name << "x"')).toMatchObject({ uncaughtException: expect.stringContaining('frozen') });
+});
+
+test('Array comparison limits nested comparisons through a cyclic left receiver', () => {
+  const source = 'b=1;600.times{b=[b]};a=[];a<<a;p(a<=>b)';
+  expect(run(source)).toMatchObject({ kind: 'limitExceeded', limit: 'output' });
+});
