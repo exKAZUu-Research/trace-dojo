@@ -22,7 +22,7 @@ import { lookupPackage } from './packages/index';
 import {
   type Eval,
   evaluateAll,
-  type Frame,
+  type Exec,
   type FunctionInfo,
   type LocalInfo,
   type StackBuffers,
@@ -30,7 +30,7 @@ import {
 } from './runtime';
 import { Scope } from './scope';
 import { STANDARD_PACKAGES } from './standardPackages';
-import { declareValue, StatementCompiler } from './statementCompiler';
+import { declareValue, execOf, StatementCompiler } from './statementCompiler';
 import {
   BASIC,
   describeType,
@@ -76,7 +76,7 @@ export class ProgramCompiler extends StatementCompiler {
   private readonly initializers: {
     spec: VarSpec;
     variables: VarEntity[];
-    run: (frame: never) => void;
+    run: Exec;
     references: Set<unknown>;
     done: boolean;
   }[] = [];
@@ -1000,12 +1000,15 @@ export class ProgramCompiler extends StatementCompiler {
       const compiled = units.map((unit) => {
         const unitTypes: Type[] = [];
         const unitOperands: Operand[] = [];
-        const { result: values, run: ordered } = this.hoistingCalls(() =>
-          this.rightSide(spec, unit.values, unit.variables.length, () => declaredType, unitTypes, unitOperands)
+        const { value: orderedUnit, hoists } = this.part(() =>
+          this.hoistingCalls(() =>
+            this.rightSide(spec, unit.values, unit.variables.length, () => declaredType, unitTypes, unitOperands)
+          )
         );
+        const { result: values, run: ordered } = orderedUnit;
         types.push(...unitTypes);
         operands.push(...unitOperands);
-        return { values, ordered, variables: unit.variables };
+        return { values, ordered, hoists, variables: unit.variables };
       });
       for (const [index, variable] of variables.entries()) {
         if (!declaredType) variable.type = types[index] ?? BASIC.invalid;
@@ -1018,22 +1021,29 @@ export class ProgramCompiler extends StatementCompiler {
         operands.length === spec.values.length && operands.every((operand) => operand.mode === 'constant');
       const row = this.trace && !isConstant ? spec.row : undefined;
       const createsObjects = spec.values.every((value) => this.createsObject(value));
-      const run = (frame: Frame): void => {
-        const evaluate = (): void => {
-          for (const unit of compiled) {
-            unit.ordered(frame, () => {
-              const evaluated = evaluateAll(frame, unit.values as Eval[]);
-              for (const [index, variable] of unit.variables.entries()) {
-                const cell = frame.runtime.globals[variable.slot];
-                cell.v = writeInPlace(cell.v, evaluated[index]);
-              }
-            });
-          }
-        };
-        if (row === undefined) evaluate();
-        else frame.runtime.steps.runStatement(row, createsObjects, evaluate);
+      const actions = compiled.map((unit) =>
+        execOf(
+          {
+            run: (frame) => {
+              unit.ordered(frame, () => {
+                const evaluated = evaluateAll(frame, unit.values as Eval[]);
+                for (const [index, variable] of unit.variables.entries()) {
+                  const cell = frame.runtime.globals[variable.slot];
+                  cell.v = writeInPlace(cell.v, evaluated[index]);
+                }
+              });
+            },
+            onlyCalls: createsObjects,
+          },
+          unit.hoists
+        )
+      );
+      const run: Exec = function* (frame) {
+        const mark = frame.runtime.steps.statementMark();
+        for (const action of actions) yield* action(frame);
+        if (row !== undefined) frame.runtime.steps.completeStatement(row, createsObjects, mark);
       };
-      this.initializers.push({ spec, variables, run: run as never, references, done: false });
+      this.initializers.push({ spec, variables, run, references, done: false });
     } finally {
       this.scope = outerScope;
       this.fn = outerFn;
@@ -1046,7 +1056,7 @@ export class ProgramCompiler extends StatementCompiler {
     const order = this.initializationOrder();
     const info = this.initContext.info;
     info.body = function* (frame) {
-      for (const initializer of order) initializer.run(frame as never);
+      for (const initializer of order) yield* initializer.run(frame);
       return;
     };
     return info;

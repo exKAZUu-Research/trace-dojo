@@ -51,6 +51,7 @@ export class Scheduler {
   run(main: Goroutine): void {
     const { runtime } = this;
     for (;;) {
+      runtime.spend();
       const goroutine = this.runQueue.shift();
       if (!goroutine) {
         if (this.fireTimers()) continue;
@@ -105,7 +106,10 @@ export class Scheduler {
     const due = this.timers.filter((timer) => timer.when === when).toSorted((a, b) => a.seq - b.seq);
     for (const timer of due) this.timers.splice(this.timers.indexOf(timer), 1);
     this.now = when;
-    for (const timer of due) timer.fire();
+    for (const timer of due) {
+      this.runtime.spend();
+      timer.fire();
+    }
     return true;
   }
 

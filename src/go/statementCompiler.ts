@@ -14,7 +14,7 @@ import {
   type TypeDeclaration,
   type VarDeclaration,
 } from './ast';
-import { CallCompiler } from './callCompiler';
+import { CallCompiler, VALUE_BUILTINS } from './callCompiler';
 import type { Hoist, Part } from './compilerBase';
 import {
   always,
@@ -1698,13 +1698,18 @@ export abstract class StatementCompiler extends CallCompiler {
     const signature = coreType(value.type);
     if (signature?.kind !== 'func' || value.func?.generic) {
       if (value.func?.generic) {
-        if (keyword === 'go') {
-          this.unsupported(statement, 'go 文での型引数を持つ関数の呼び出し');
-          return () => {};
-        }
-        const operand = this.withoutHoists(() => this.expression(call));
-        const read = operand.eval;
-        return (frame) => launch(frame, () => void read(frame), undefined, []);
+        const prepared = this.prepareGenericCall(call, value.func, value.typeArgs);
+        if (!prepared?.instance) return () => {};
+        const { instance, args } = prepared;
+        return (frame) => {
+          const argValues = args(frame);
+          launch(
+            frame,
+            () => void instance.call(argValues, row, keyword === 'defer' ? frame : undefined),
+            instance.resume && (() => (instance.resume as NonNullable<GoFunc['resume']>)(argValues, row)),
+            [instance, ...argValues]
+          );
+        };
       }
       this.error(statement, `${describeType(value.type)} 型の値は関数ではないので、${keyword} で呼び出せません。`);
       return () => {};
@@ -1848,8 +1853,52 @@ export abstract class StatementCompiler extends CallCompiler {
       // A recover that the deferred mechanism calls directly is not called by a deferred function, so it stops nothing.
       return (frame) => launch(frame, () => {}, undefined, []);
     }
-    this.unsupported(statement, `${statement.kind} での ${name} の呼び出し`);
-    return () => {};
+    return this.launchedBuiltinStatement(call, name, launch, statement.kind);
+  }
+
+  private launchedBuiltinStatement(
+    call: Extract<Expression, { kind: 'call' }>,
+    name: string,
+    launch: Launch,
+    keyword: 'defer' | 'go'
+  ): Run {
+    const evaluates: Eval[] = [];
+    let current: Value[] = [];
+    this.deferredArguments = {
+      args: new Set(call.args),
+      capture: (operand) => {
+        const index = evaluates.length;
+        const read = operand.eval;
+        // The defer statement saves the arguments' values, so an array or a struct is copied there.
+        evaluates.push(isValueKind(operand.type) ? (frame) => copyValue(read(frame)) : read);
+        return { ...operand, eval: () => current[index] };
+      },
+    };
+    let operand: Operand;
+    try {
+      operand = this.builtin(call, name);
+    } finally {
+      this.deferredArguments = undefined;
+    }
+    if (this.isInvalid(operand)) return () => {};
+    if (VALUE_BUILTINS.has(name)) {
+      this.error(call, `${keyword} では ${name} の結果を使えません。`);
+      return () => {};
+    }
+    const run = operand.eval;
+    return (frame) => {
+      const values = evaluateAll(frame, evaluates);
+      launch(
+        frame,
+        () => {
+          current = values;
+          run(frame);
+        },
+        undefined,
+        values
+      );
+      return;
+    };
   }
 
   // Channels --------------------------------------------------------------------------------------------------------

@@ -38,7 +38,6 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
     let uncaughtException: string | undefined;
     try {
       runtime.globals = program.globalZeros.map((zero) => new Cell(zero()));
-      runtime.call(program.initializer, [], [], undefined);
       // The turtles that main's variables still reach when it ends are the final ones, as in Java.
       const onMainEnd = (frame: Frame): void => {
         onEnd?.(frame);
@@ -47,11 +46,13 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
       if (program.concurrent) {
         const scheduler = new Scheduler(runtime);
         const main = scheduler.spawn(function* () {
+          yield* runtime.resume(program.initializer, [], [], undefined);
           for (const init of program.inits) yield* runtime.resume(init, [], [], undefined);
           return yield* runtime.resume(program.main, [], [], undefined, undefined, onMainEnd);
         });
         scheduler.run(main);
       } else {
+        runtime.call(program.initializer, [], [], undefined);
         for (const init of program.inits) runtime.call(init, [], [], undefined);
         runtime.call(program.main, [], [], undefined, undefined, onMainEnd);
       }
