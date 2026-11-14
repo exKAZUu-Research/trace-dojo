@@ -65,7 +65,7 @@ sdef('Hash', '[]', [0, -1], function* (self, args) {
     const source = args.length === 1 ? yield* hashLiteralSource(args[0]) : undefined;
     if (source) rt().held.push(source);
     if (source instanceof RHash) {
-      for (const entry of source.map.values()) yield* hashSet(hash, entry.key, entry.value);
+      for (const [slot, entry] of source.map) copyEntry(hash, slot, entry);
       return hash;
     }
     if (source instanceof RArray) {

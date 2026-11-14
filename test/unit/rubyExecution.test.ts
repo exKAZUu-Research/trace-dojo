@@ -1705,6 +1705,26 @@ begin; [a]*17&[b]; rescue=>e; p e.message; end`;
   expect(run(source)).toMatchObject({ stdout: '0\n1\n1\n2\n0\n1\n"hash called"\n' });
 });
 
+test('Array intersect predicate compares small operands without hashing', () => {
+  expect(
+    run('class K;def hash;raise "hashed";end;def eql?(v);false;end;end;p [K.new].intersect?([K.new])')
+  ).toMatchObject({
+    stdout: 'false\n',
+  });
+});
+
+test('Hash constructor copies stored key hashes without callbacks', () => {
+  const source = `class K
+  attr_accessor :bad
+  def hash; raise 'bad' if @bad; 0; end
+end
+k=K.new;h={k=>1};k.bad=true
+p Hash[h].size
+class H;def initialize(h);@h=h;end;private;def to_hash;@h;end;end
+p Hash[H.new(h)].size`;
+  expect(run(source)).toMatchObject({ stdout: '1\n1\n' });
+});
+
 test('Array conversions observe current operands and row widths', () => {
   expect(run('class X;def to_ary;$a.replace([[9],[8]]);[1];end;end;$a=[X.new,[2]];p $a.transpose')).toMatchObject({
     stdout: '[[1, 8]]\n',

@@ -749,10 +749,26 @@ function* arrayUnion(self: RArray, others: Value[]): Gen {
 def('Array', '|', 1, arrayUnion);
 def('Array', 'union', [0, -1], arrayUnion);
 def('Array', 'intersect?', 1, function* (self: RArray, [other]) {
+  const array = yield* toAry(other);
+  if (self.items.length === 0 || array.items.length === 0) return false;
+  if (self.items.length <= 16 && array.items.length <= 16) {
+    for (let index = 0; index < self.items.length; index++)
+      if (yield* includesByEql(array.items, self.items[index])) return true;
+    return false;
+  }
+  const shorter = self.items.length > array.items.length ? array : self;
+  const longer = shorter === self ? array : self;
   const keys = newHash();
-  for (const item of (yield* toAry(other)).items) yield* hashSet(keys, item, true);
-  for (const item of self.items) if (yield* hashGet(keys, item)) return true;
-  return false;
+  const held = rt().held.length;
+  rt().held.push(array, keys);
+  try {
+    for (const item of shorter.items) yield* hashSet(keys, item, true);
+    for (let index = 0; index < longer.items.length; index++)
+      if (yield* hashGet(keys, longer.items[index])) return true;
+    return false;
+  } finally {
+    rt().held.length = held;
+  }
 });
 
 /** `join`: elements' bytes with a separator, nested arrays joined recursively. */
