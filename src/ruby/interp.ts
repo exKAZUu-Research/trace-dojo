@@ -371,6 +371,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
       if (!method) {
         throw nameError(`undefined method '${e.oldName}' for class '${owner.name}'`, owner, e.oldName);
       }
+      assertMutableClass(owner);
       owner.methods.set(e.newName, { ...method });
       invalidateMethodCaches();
       return NIL;

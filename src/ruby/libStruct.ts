@@ -3,7 +3,16 @@ import { addressOf, inspect, rEql, rEquals, toIndex } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, indexError, nameError, typeError } from './errors';
 import { digest, hashKeyOf, hashSet } from './hashes';
-import { addMethod, callBlock, callMethod, callProc, type Gen, invoke, methodMissing } from './interp';
+import {
+  addMethod,
+  assertMutableClass,
+  callBlock,
+  callMethod,
+  callProc,
+  type Gen,
+  invoke,
+  methodMissing,
+} from './interp';
 import { tryAry } from './libArray';
 import { makeEnumerator } from './libEnumerator';
 import { nameOf } from './libMeta';
@@ -158,11 +167,14 @@ sdef(
     let names = args;
     if (args[0] instanceof RString) names = args.slice(1);
     if (names.length === 0 && !keywordInit) throw argumentError('wrong number of arguments (given 0, expected 1+)');
-    const cls = yield* newStructClass(rt().c.Struct, yield* membersFrom(names), { keywordInit, kind: 'struct' });
-    if (args[0] instanceof RString) {
-      const name = args[0].s;
+    const name = args[0] instanceof RString ? args[0].s : undefined;
+    if (name !== undefined) {
       if (!/^[\p{Lu}\p{Lt}][\p{L}\p{M}\p{N}_]*$/u.test(name))
         throw nameError(`identifier ${name} needs to be constant`);
+      assertMutableClass(rt().c.Struct);
+    }
+    const cls = yield* newStructClass(rt().c.Struct, yield* membersFrom(names), { keywordInit, kind: 'struct' });
+    if (name !== undefined) {
       cls.baseName = name;
       cls.lexicalParent = rt().c.Struct;
       rt().c.Struct.constants.set(name, cls);

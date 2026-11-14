@@ -296,7 +296,7 @@ export class RClass extends RBasic {
       rt().spend();
       for (const prepended of module.prepends) addModule(prepended, 'prepend');
       list.push(module);
-      for (const included of module.includes) addModule(included);
+      for (const included of module.includes) addModule(included, placement);
       active.delete(module);
     };
     addModule(this);

@@ -123,15 +123,15 @@ function* findForMethodObject(self: Value, name: string, publicOnly = false): Ge
       owner: missing.owner,
       visibility: 'public',
       body: {
-        kind: 'proc',
-        proc: nativeProc(-1, (args, block) => invoke(missing, self, [sym(name), ...args], undefined, block, true)),
+        kind: 'native',
+        fn: (recv, args, block, keywords) => invoke(missing, recv, [sym(name), ...args], keywords, block, true),
+        min: 0,
+        max: -1,
+        takesKeywords: true,
       },
     };
   }
-  const description =
-    self === rt().mainObject
-      ? 'an instance of Object'
-      : `${realClassOf(self).name === undefined ? '' : 'an instance of '}${realClassOf(self).name ?? ''}`;
+  const description = self === rt().mainObject ? 'an instance of Object' : `class '${realClassOf(self).name}'`;
   throw nameError(`undefined method '${name}' for ${description}`, self, name);
 }
 
@@ -204,7 +204,9 @@ function* methodOwnerPrefix(method: RMethod, recv: Value, unbound: boolean): Gen
   if (!method.owner.isSingleton) return `${className(method.owner)}#`;
   const attached = method.owner.attached as Value;
   const name = attached instanceof RClass ? className(attached) : yield* inspect(attached);
-  return unbound ? `#<Class:${name}>#` : `${attached instanceof RClass ? name : yield* inspect(recv)}.`;
+  if (unbound) return `#<Class:${name}>#`;
+  const receiver = recv instanceof RClass ? className(recv) : yield* inspect(recv);
+  return recv === attached ? `${receiver}.` : `${receiver}(${name}).`;
 }
 
 /** What `parameters` lists for parameters a program wrote: each one's kind and, when it has one, its name. */
@@ -482,9 +484,9 @@ def('Module', 'prepend', [1, -1], function* (self: RClass, modules) {
       throw typeError(`wrong argument type ${realClassOf(module).name} (expected Module)`);
     }
   }
+  assertMutableClass(self);
   for (const module of modules.toReversed() as RClass[]) {
     if (self.prepends.includes(module)) continue;
-    assertMutableClass(self);
     self.prepends.unshift(module);
     invalidateMethodCaches();
     const hook = classOf(module).findMethod('prepended');
@@ -504,8 +506,9 @@ function* constantName(value: Value): Gen<string> {
 def('Module', 'const_get', [1, 2], function* (self: RClass, args) {
   const inherit = args.length < 2 || truthy(args[1]);
   let module: Value = self;
-  for (const part of (yield* nameOf(args[0])).split('::')) {
-    if (!(module instanceof RClass)) throw typeError(`${yield* inspect(module)} is not a class/module`);
+  const requested = yield* nameOf(args[0]);
+  for (const part of requested.split('::')) {
+    if (!(module instanceof RClass)) throw typeError(`${requested} does not refer to class/module`);
     const constant = yield* constantName(str(part));
     const value: Value | undefined = inherit ? constInModule(module, constant) : module.constants.get(constant);
     if (value === undefined)

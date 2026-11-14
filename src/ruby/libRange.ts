@@ -205,6 +205,15 @@ def('Range', 'max', [0, 1], function* (self: RRange, args, block) {
   }
   return self.end;
 });
+def('Range', 'minmax', 0, function* (self: RRange, _args, block) {
+  if (block || (!linearEndpoint(self.begin) && !linearEndpoint(self.end)))
+    return yield* callEnumerable(self, 'minmax', [], block);
+  return arr([yield* callMethod(self, 'min', []), yield* callMethod(self, 'max', [])]);
+});
+
+function linearEndpoint(value: Value): boolean {
+  return value !== NIL && (isA(value, rt().c.Numeric) || isA(value, rt().c.Time));
+}
 
 function* callEnumerable(self: RRange, name: string, args: Value[], block: RProc | undefined): Gen {
   const method = rt().c.Enumerable.methods.get(name);
@@ -260,7 +269,8 @@ def('Range', 'count', [0, 1], function* (self: RRange, args, block) {
 def('Range', 'exclude_end?', 0, (self: RRange) => self.exclusive);
 def('Range', ['include?', 'member?'], 1, function* (self: RRange, [value]) {
   if (value instanceof RRange) return false;
-  if (isRubyNumber(self.begin) || self.begin === NIL) return yield* rangeCovers(self, value);
+  if (linearEndpoint(self.begin) || linearEndpoint(self.end) || self.begin === NIL)
+    return yield* rangeCovers(self, value);
   let found = false;
   yield* iterateRange(self, function* (item) {
     if (yield* rEquals(item, value)) {

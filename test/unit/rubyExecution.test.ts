@@ -5370,6 +5370,60 @@ test('return from an exit handler reports LocalJumpError', () => {
   });
 });
 
+test('Rational and Time ranges use comparison for membership', () => {
+  expect(run('r=Rational(1,2)..2;p r.include?(1),r.minmax')).toMatchObject({
+    stdout: 'true\n[(1/2), 2]\n',
+  });
+  expect(run('a=Time.utc(2000,1,1);b=Time.utc(2000,1,3);p((a..b).include?(Time.utc(2000,1,2)))')).toMatchObject({
+    stdout: 'true\n',
+  });
+});
+
+test('prepended modules retain their included ancestors', () => {
+  expect(
+    run(
+      'module N;def x;"N"+super;end;end;module M;include N;def x;"M"+super;end;end;class A;include M;def x;"A";end;end;class B<A;prepend M;end;p B.ancestors.take(7),B.new.x'
+    )
+  ).toMatchObject({
+    stdout: '[M, N, B, A, M, N, Object]\n"MNA"\n',
+  });
+});
+
+test('frozen classes reject no-op prepend and named Struct registration', () => {
+  expect(run('module M;end;class A;prepend M;end;A.freeze;A.prepend(M)')).toMatchObject({
+    uncaughtException: expect.stringContaining('FrozenError'),
+  });
+  expect(run('Struct.freeze;Struct.new("Point",:x)')).toMatchObject({
+    uncaughtException: expect.stringContaining('FrozenError'),
+  });
+});
+
+test('reflection errors identify the requested constant path and method class', () => {
+  expect(
+    run(
+      'module K;A=1;end;begin;K.const_get("A::B");rescue=>e;p e.message;end;begin;1.method(:zzz);rescue=>e;p e.message;end'
+    )
+  ).toMatchObject({
+    stdout: '"A::B does not refer to class/module"\n"undefined method \'zzz\' for class \'Integer\'"\n',
+  });
+});
+
+test('inherited singleton Method inspect names receiver and original owner', () => {
+  expect(run('class A;def self.s = 1;end;class B<A;end;p B.method(:s)')).toMatchObject({
+    stdout: '#<Method: B(A).s() main.rb:1>\n',
+  });
+});
+
+test('rebound dynamic Methods call method_missing on the new receiver', () => {
+  expect(
+    run(
+      'class A;def initialize(x);@x=x;end;def respond_to_missing?(n,*)=true;def method_missing(n,*)=@x;end;a=A.new(1);b=A.new(2);p a.method(:foo).unbind.bind(b).call'
+    )
+  ).toMatchObject({
+    stdout: '2\n',
+  });
+});
+
 test('inherited Struct brackets construct the receiver class', () => {
   expect(run('Base=Struct.new(:a,:b);class Sub<Base;end;p Sub[1,2].class==Sub')).toMatchObject({
     stdout: 'true\n',
