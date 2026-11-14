@@ -5127,6 +5127,27 @@ test('Rational rationalize preserves an exact value without tolerance', () => {
   expect(run('p Rational(1,3).rationalize')).toMatchObject({ stdout: '(1/3)\n' });
 });
 
+test('String match treats string patterns as regexp source', () => {
+  expect(run('p "abc".match("a.c")[0],"abc".match?("a.c")')).toMatchObject({
+    stdout: '"abc"\ntrue\n',
+  });
+});
+
+test('regexp matching normalizes negative character offsets', () => {
+  expect(run('p /b/.match?("ab",-1),/a/.match?("ab",-1),"ab".match?(/b/,-1)')).toMatchObject({
+    stdout: 'true\nfalse\ntrue\n',
+  });
+});
+
+test('regexp String helpers honor argument position, capture and freeze', () => {
+  expect(run('s="abc";p s.start_with?("x",/a/),s.slice!(/(b)/,1),s')).toMatchObject({
+    stdout: 'true\n"b"\n"ac"\n',
+  });
+  expect(run('"abc".freeze.slice!(/b/)')).toMatchObject({
+    uncaughtException: expect.stringContaining('FrozenError'),
+  });
+});
+
 test('Data copies remain frozen and Rational copies preserve identity', () => {
   expect(
     run(

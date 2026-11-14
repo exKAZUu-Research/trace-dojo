@@ -255,6 +255,7 @@ function unitIndex(text: string, char: number): number {
 
 /** Runs a regexp from a character position, returning the match's state or undefined. */
 export function execAt(regexp: RObject, text: string, start: number): MatchState | undefined {
+  if (start < 0 || start > charIndex(text, text.length)) return undefined;
   const { js } = dataOf(regexp);
   rt().spend(Math.ceil(text.length / 64));
   js.lastIndex = unitIndex(text, start);
@@ -439,7 +440,8 @@ def('Regexp', 'match', [1, 2], function* (self: RObject, args, block) {
 def('Regexp', 'match?', [1, 2], function* (self: RObject, args) {
   const text = yield* subjectText(args[0]);
   if (text === undefined) return false;
-  return execAt(self, text, args.length > 1 ? yield* toIndex(args[1]) : 0) !== undefined;
+  const start = args.length > 1 ? yield* toIndex(args[1]) : 0;
+  return execAt(self, text, start < 0 ? start + charIndex(text, text.length) : start) !== undefined;
 });
 def('Regexp', '=~', 1, function* (self: RObject, [value]) {
   const text = yield* subjectText(value);
@@ -649,10 +651,12 @@ function* substituteRegexp(
 
 function wrapFirst(
   name: string,
-  handle: (self: RString, args: Value[], block: RProc | undefined, previous: NativeFn) => Gen | Value
+  handle: (self: RString, args: Value[], block: RProc | undefined, previous: NativeFn) => Gen | Value,
+  anyRegexp = false
 ): void {
   extend('String', [name], (previous) => (self: RString, args, block, keywords) => {
-    if (args.length > 0 && isRegexp(args[0])) return handle(self, args, block, previous);
+    if (args.length > 0 && (anyRegexp ? args.some(isRegexp) : isRegexp(args[0])))
+      return handle(self, args, block, previous);
     return previous(self, args, block, keywords);
   });
 }
@@ -760,29 +764,33 @@ for (const name of ['[]', 'slice'] as const) {
   });
 }
 wrapFirst('slice!', function* (self, args) {
+  if (self.frozen) throw frozenError(self, strInspect(self.s));
   const state = execAt(args[0] as RObject, self.s, 0);
-  setLastMatch(state);
+  const match = setLastMatch(state);
   if (!state) return NIL;
   const [from, to] = state.groups[0] as readonly [number, number];
-  const removed = self.s.slice(from, to);
-  self.s = self.s.slice(0, from) + self.s.slice(to);
-  yield* [];
-  return str(removed);
+  const removed = args.length > 1 ? yield* matchIndex(match as RObject, args[1]) : groupText(state, 0);
+  setText(self, self.s.slice(0, from) + self.s.slice(to));
+  return removed;
 });
-wrapFirst('start_with?', function* (self, args, block, previous) {
-  for (const arg of args) {
-    if (isRegexp(arg)) {
-      const state = execAt(arg, self.s, 0);
-      if (state && (state.groups[0] as readonly [number, number])[0] === 0) {
-        setLastMatch(state);
+wrapFirst(
+  'start_with?',
+  function* (self, args, block, previous) {
+    for (const arg of args) {
+      if (isRegexp(arg)) {
+        const state = execAt(arg, self.s, 0);
+        if (state && (state.groups[0] as readonly [number, number])[0] === 0) {
+          setLastMatch(state);
+          return true;
+        }
+      } else if (truthy((yield* asGen(previous(self, [arg], block, undefined))) as Value)) {
         return true;
       }
-    } else if (truthy((yield* asGen(previous(self, [arg], block, undefined))) as Value)) {
-      return true;
     }
-  }
-  return false;
-});
+    return false;
+  },
+  true
+);
 for (const [name, last] of [
   ['partition', false],
   ['rpartition', true],
@@ -816,20 +824,20 @@ def('String', '=~', 1, function* (self: RString, [pattern]) {
 
 function* asRegexp(pattern: Value): Gen<RObject> {
   if (isRegexp(pattern)) return pattern;
-  const source = (yield* toStr(pattern)).replaceAll(/[.*?+^$|()[\]{}\\/-]/g, String.raw`\$&`);
-  return makeRegexp(source, {});
+  return makeRegexp(yield* toStr(pattern), {});
 }
 
 def('String', 'match', [1, 2], function* (self: RString, args, block) {
   const regexp = yield* asRegexp(args[0]);
   const start = args.length > 1 ? yield* toIndex(args[1]) : 0;
-  const match = setLastMatch(execAt(regexp, self.s, start));
+  const match = setLastMatch(execAt(regexp, self.s, start < 0 ? start + charIndex(self.s, self.s.length) : start));
   if (block && match !== NIL) return yield* callBlock(block, [match]);
   return match;
 });
 def('String', 'match?', [1, 2], function* (self: RString, args) {
   const regexp = yield* asRegexp(args[0]);
-  return execAt(regexp, self.s, args.length > 1 ? yield* toIndex(args[1]) : 0) !== undefined;
+  const start = args.length > 1 ? yield* toIndex(args[1]) : 0;
+  return execAt(regexp, self.s, start < 0 ? start + charIndex(self.s, self.s.length) : start) !== undefined;
 });
 for (const name of ['=~', 'match', 'match?']) {
   def('Symbol', name, [1, 2], (self: RSymbol, args, block) => callMethod(str(self.name), name, args, undefined, block));
