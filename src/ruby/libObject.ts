@@ -333,13 +333,18 @@ def(
   'lambda',
   0,
   (_self, _args, block) => {
-    const proc = requireBlock(block);
+    const proc = requireProcBlock(block);
     if (proc.body.kind === 'block' && proc.callSiteActive !== undefined) proc.isLambda = true;
     return proc;
   },
   PRIVATE
 );
-def('Kernel', 'proc', 0, (_self, _args, block) => requireBlock(block), PRIVATE);
+def('Kernel', 'proc', 0, (_self, _args, block) => requireProcBlock(block), PRIVATE);
+
+function requireProcBlock(block: RProc | undefined): RProc {
+  if (!block) throw argumentError('tried to create Proc object without a block');
+  return block;
+}
 def(
   'Kernel',
   ['raise', 'fail'],
@@ -756,6 +761,7 @@ function* symbolNames(args: Value[], expandArrays = false): Gen<string[]> {
 function* symbolName(value: Value): Gen<string> {
   if (value instanceof RSymbol) return value.name;
   if (value instanceof RString) return value.s;
+  if (respondsTo(value, 'to_str', true)) return (yield* toStrValue(value)).s;
   throw typeError(`${yield* inspect(value)} is not a symbol nor a string`);
 }
 
@@ -803,6 +809,8 @@ function* setVisibility(self: RClass, args: Value[], visibility: Visibility): Ge
     if ((frame.kind === 'class' && frame.self === self) || frame.extra.definitionTarget === self) {
       frame.defaultVisibility = visibility;
       frame.moduleFunction = false;
+    } else if (frame.kind === 'main' && self === rt().c.Object) {
+      frame.defaultVisibility = visibility;
     }
     return NIL;
   }
@@ -1112,7 +1120,7 @@ function lambdaCurryBounds(proc: RProc): [number, number] {
   const required = params.required.length + params.post.length;
   return [required, params.rest === undefined ? required + params.optional.length : -1];
 }
-sdef('Proc', 'new', 0, (_self, _args, block) => requireBlock(block));
+sdef('Proc', 'new', 0, (_self, _args, block) => requireProcBlock(block));
 
 export function procArity(proc: RProc): number {
   if (proc.body.kind === 'native') return proc.body.arity;
@@ -1153,6 +1161,7 @@ export function defineMainObject(main: RObject): void {
   delegate('include', 'public');
   delegate('public', 'public');
   delegate('private', 'private');
+  delegate('protected', 'protected');
   for (const name of ['to_s', 'inspect']) {
     singleton.methods.set(name, {
       name,

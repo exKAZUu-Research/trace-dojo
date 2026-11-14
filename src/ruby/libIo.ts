@@ -1,5 +1,5 @@
 import type { OutputChannel } from '../interpreter/programIo';
-import { inspect, inspectValue, toInt, toSValue } from './conversions';
+import { inspectValue, toInt, toSValue } from './conversions';
 import { def } from './define';
 import { argumentError, typeError } from './errors';
 import { exportBinaryInspect, formatString } from './format';
@@ -213,13 +213,6 @@ def('IO', '<<', 1, function* (self: RObject, [value]) {
 def('IO', 'printf', [1, -1], function* (self: RObject, args) {
   yield* write(self, yield* formatString(args[0], args.slice(1)));
   return NIL;
-});
-def('IO', 'p', [0, -1], function* (self: RObject, args) {
-  for (const arg of args) {
-    yield* write(self, yield* inspect(arg));
-    yield* write(self, '\n');
-  }
-  return args.length === 0 ? NIL : args.length === 1 ? args[0] : arr(args);
 });
 def('IO', 'putc', 1, function* (self: RObject, [value]) {
   yield* write(self, yield* charOf(value));

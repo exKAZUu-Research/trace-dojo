@@ -2661,6 +2661,34 @@ test('lambda curry validates explicit positional arity', () => {
   });
 });
 
+test('Proc creators without blocks raise ArgumentError', () => {
+  expect(
+    run(
+      'begin;Proc.new;rescue=>e;p e.class,e.message;end;begin;proc;rescue=>e;p e.class,e.message;end;begin;lambda;rescue=>e;p e.class,e.message;end'
+    )
+  ).toMatchObject({
+    stdout: 'ArgumentError\n"tried to create Proc object without a block"\n'.repeat(3),
+  });
+});
+
+test('module declarations convert string-like method names', () => {
+  expect(
+    run('class A;private;def to_str;"x";end;end;class C;attr_accessor A.new;end;c=C.new;c.x=2;p c.x')
+  ).toMatchObject({ stdout: '2\n' });
+});
+
+test('top-level visibility applies to later Object methods', () => {
+  expect(
+    run('public;def f;1;end;p Object.new.f;private;def g;2;end;begin;Object.new.g;rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: '1\nNoMethodError\n',
+  });
+});
+
+test('IO receivers keep Kernel p private', () => {
+  expect(run('begin;STDOUT.p 1;rescue=>e;p e.class;end')).toMatchObject({ stdout: 'NoMethodError\n' });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(

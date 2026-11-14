@@ -1194,7 +1194,7 @@ function* defineMethod(def: MethodDef, singleton: Expr | undefined, frame: Frame
     visibility = frame.defaultVisibility;
   } else if (frame.home.kind === 'main') {
     owner = runtime.c.Object;
-    visibility = frame.kind === 'main' ? 'private' : 'public';
+    visibility = frame.kind === 'main' ? frame.defaultVisibility : 'public';
     if (frame.kind === 'block') visibility = 'private';
   } else {
     owner = frame.cref[0];

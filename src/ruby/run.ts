@@ -52,6 +52,7 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: F
   return withRuntime(runtime, () => {
     bootstrap(runtime);
     const frame = new Frame('main', runtime.mainObject, new Scope(), [runtime.c.Object], undefined, false, false, {});
+    frame.defaultVisibility = 'private';
     runtime.pushFrame(frame);
     try {
       let uncaughtException: string | undefined;
