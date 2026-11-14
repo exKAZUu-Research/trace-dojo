@@ -2235,6 +2235,13 @@ test('String codepoint iteration yields a valid prefix before invalid bytes', ()
     stdout: '97\nArgumentError\n',
   });
   expect(run(String.raw`p "ab\xFF".each_codepoint.first`)).toMatchObject({ stdout: '97\n' });
+  expect(run('s="abc";s.each_codepoint{|x|p x;s.clear}')).toMatchObject({ stdout: '97\n' });
+  expect(run('s="abc";s.each_codepoint{|x|p x;s<<"d" if x==97}')).toMatchObject({
+    stdout: '97\n98\n99\n100\n',
+  });
+  expect(run('s="x"*100000;10.times{p s.each_codepoint.first}')).toMatchObject({
+    stdout: '120\n'.repeat(10),
+  });
 });
 
 test('String translation checks source and replacement pattern encodings', () => {

@@ -563,9 +563,12 @@ def('String', 'each_char', 0, function* (self: RString, _args, block) {
 });
 def('String', 'each_codepoint', 0, function* (self: RString, _args, block) {
   if (!block) return makeEnumerator(self, 'each_codepoint', []);
-  for (const char of stringCharacters(self)) {
-    if (char.rawBytes && !char.binary) throw argumentError('invalid byte sequence in UTF-8');
-    yield* callBlock(block, [BigInt(char.s.codePointAt(0) as number)], false);
+  for (let index = 0; index < self.s.length;) {
+    const point = self.s.codePointAt(index) as number;
+    if (self.rawBytes && !self.binary && point >= 0xdc_80 && point <= 0xdc_ff)
+      throw argumentError('invalid byte sequence in UTF-8');
+    index += point > 0xff_ff ? 2 : 1;
+    yield* callBlock(block, [BigInt(point)], false);
   }
   return self;
 });
