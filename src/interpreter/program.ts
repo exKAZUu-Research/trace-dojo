@@ -14,6 +14,9 @@ import type { TraceItem, TraceItemVariable, TurtleTrace } from '../problems/trac
 import { findPythonTraceAnnotations } from '../python/parse';
 import { executePythonProgram } from '../python/run';
 import { tracePythonProgram } from '../python/trace';
+import { findRubyTraceAnnotations } from '../ruby/parse';
+import { executeRubyProgram } from '../ruby/run';
+import { traceRubyProgram } from '../ruby/trace';
 import type { SourceDiagnostic } from './diagnostics';
 import type { ExecutionLimitError } from './limits';
 import type { ProgramInput, ProgramOutput } from './programIo';
@@ -42,7 +45,7 @@ export interface ProgramRecording extends ProgramRun {
 }
 
 export interface ProgramTrace extends ProgramRecording {
-  /** The program without its atomic annotations (`// atomic`, or `# atomic` in Python), whose rows match the lines that trace items refer to. */
+  /** The program without its atomic annotations (`// atomic`, or `# atomic` in Python and Ruby), whose rows match the lines that trace items refer to. */
   displayProgram: string;
 }
 
@@ -68,11 +71,16 @@ const interpreters = {
     record: tracePythonProgram,
     execute: executePythonProgram,
   },
+  ruby: {
+    findTraceAnnotations: findRubyTraceAnnotations,
+    record: traceRubyProgram,
+    execute: executeRubyProgram,
+  },
   c: { findTraceAnnotations: findCTraceAnnotations, record: traceCProgram, execute: executeCProgram },
 } satisfies Record<string, Interpreter>;
 
 /**
- * Runs a model program and records its steps outside the methods marked `// atomic` (`# atomic` in Python).
+ * Runs a model program and records its steps outside the methods marked `// atomic` (`# atomic` in Python and Ruby).
  *
  * @param program The program to run, with every blank filled in.
  * @param displayProgram The program shown to learners, whose blanks may be placeholders on the same rows.

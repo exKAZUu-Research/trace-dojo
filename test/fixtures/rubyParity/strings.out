@@ -1,0 +1,113 @@
+12
+"HELLO, WORLD"
+"hello, world"
+"hELLO, wORLD"
+"dlroW ,olleH"
+"H"
+"d"
+"Hello"
+"Hello"
+"World"
+nil
+""
+4
+8
+8
+true
+true
+true
+"Hell0, World"
+"Hell0, W0rld"
+"HeLLo, WorLd"
+"He001, W1r0d"
+"Heo, Word"
+"Helo, World"
+5
+["Hello", "World"]
+["a", "b", "c"]
+["a", "b", "", "c"]
+["a", "b", "c"]
+["a", "b-c"]
+["H", "e", "l"]
+[72, 101]
+"****Hello, World****"
+"Hello, World..."
+"   Hello, World"
+"x"
+"x "
+" x"
+"abc"
+"ab"
+"ab"
+97
+"a"
+"00042"
+"a-b"
+"ababab"
+"ab"
+"Hello world"
+true
+-1
+true
+true
+false
+3.7
+42
+26
+255
+:abc
+13
+1000
+12
+-350.0
+"ba"
+"aaa"
+"b0"
+"AAa"
+"2.0"
+""
+"aZZc"
+">a-ZZc!?"
+">a-ZZc!?"
+">a-ZZc!?"
+"Hello"
+false
+"Hello"
+nil
+["a", ",", "b"]
+["a,b", ",", "c"]
+["line1\n", "line2\n"]
+["a", "b", "c"]
+true
+"ab   |"
+"+3 -3"
+"2.000"
+"1.234568e+04"
+"0.0001 1.23457e+08"
+3
+"ういあ"
+"い"
+["日", "本", "語"]
+3
+"bcd"
+"a"
+"AB"
+"ff 10 101 FF"
+"0003.142"
+["R", "U", "B", "Y"]
+"b"
+["abc", "abd", "abe"]
+"a".."e"
+["a", "b", "c", "d", "e"]
+tab	new\n 2 é
+"single \#{x} \\n"
+" 99.6%"
+""
+"nil"
+"name      |   42"
+"ell"
+"llo"
+"hel"
+294
+"camelcaseString"
+"Hello World"

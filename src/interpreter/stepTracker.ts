@@ -39,10 +39,18 @@ export class StepTracker {
    * an argument whose evaluation recorded steps, a variable a `return` expression updates), needs this step.
    */
   runStatement<T>(row: number | undefined, onlyCalls: boolean | (() => boolean), run: () => T): T {
-    const { recordedSteps } = this;
+    const mark = this.statementMark();
     const result = run();
-    this.finishStatement(row, typeof onlyCalls === 'function' ? onlyCalls() : onlyCalls, recordedSteps);
+    this.completeStatement(row, onlyCalls, mark);
     return result;
+  }
+
+  statementMark(): number {
+    return this.recordedSteps;
+  }
+
+  completeStatement(row: number | undefined, onlyCalls: boolean | (() => boolean), mark: number): void {
+    this.finishStatement(row, typeof onlyCalls === 'function' ? onlyCalls() : onlyCalls, mark);
   }
 
   /** How many steps have been recorded, which a statement that cannot run as a callback reads before it runs. */
