@@ -128,8 +128,14 @@ export function translate(source: string, extended: boolean): string {
       out += '(?:';
       continue;
     }
-    if (inClass === 0 && char === '+' && /[*+?}]/.test(source[index - 1] ?? '') && source[index - 2] !== '\\') {
+    if (inClass === 0 && char === '+' && /[*+?]/.test(source[index - 1] ?? '') && source[index - 2] !== '\\') {
       throw unsupportedSyntax('強欲な量指定子（*+ など）');
+    }
+    if (inClass === 0 && char === '+' && /\{\d+(?:,\d*)?\}$/.test(source.slice(0, index))) {
+      const atom = /(\\.|\[[^\]]+\]|\([^()]*\)|.)\{\d+(?:,\d*)?\}$/u.exec(out);
+      if (!atom) throw unsupportedSyntax('量指定子の連続');
+      out = `${out.slice(0, -atom[0].length)}(?:${atom[0]})+`;
+      continue;
     }
     out += char;
   }
@@ -367,23 +373,42 @@ sdef('Regexp', ['new', 'compile'], [1, 2], function* (_self, [source, options]) 
 });
 sdef('Regexp', ['escape', 'quote'], 1, function* (_self, [value]) {
   const text = value instanceof RSymbol ? value.name : yield* toStr(value);
-  return str(
-    text
-      .replaceAll(/[.*?+^$|()[\]{}\\/-]/g, String.raw`\$&`)
-      .replaceAll('\n', String.raw`\n`)
-      .replaceAll('\t', String.raw`\t`)
-      .replaceAll(' ', String.raw`\ `)
-  );
+  return str(escapeRegexpSource(text));
 });
 sdef('Regexp', 'union', [0, -1], function* (_self, args) {
   const items = args.length === 1 && args[0] instanceof RArray ? args[0].items : args;
   const parts: string[] = [];
   for (const item of items) {
     if (isRegexp(item)) parts.push(regexpToS(item));
-    else parts.push((yield* toStr(item)).replaceAll(/[.*?+^$|()[\]{}\\/-]/g, String.raw`\$&`));
+    else parts.push(escapeRegexpSource(yield* toStr(item)));
   }
   return makeRegexp(parts.length === 0 ? '(?!)' : parts.join('|'), {});
 });
+
+function escapeRegexpSource(value: string): string {
+  return Array.from(value, (char) => {
+    switch (char) {
+      case '\n': {
+        return String.raw`\n`;
+      }
+      case '\t': {
+        return String.raw`\t`;
+      }
+      case '\r': {
+        return String.raw`\r`;
+      }
+      case '\f': {
+        return String.raw`\f`;
+      }
+      case '\v': {
+        return String.raw`\v`;
+      }
+      default: {
+        return String.raw`.*?+^$|()[]{}\-# `.includes(char) ? `\\${char}` : char;
+      }
+    }
+  }).join('');
+}
 sdef('Regexp', 'last_match', [0, 1], function* (_self, args) {
   if (args.length === 0) return lastMatch();
   const match = lastMatch();

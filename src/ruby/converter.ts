@@ -32,6 +32,8 @@ class LocalScope {
   readonly names: string[] = [];
   private readonly set = new Set<string>();
   readonly implicitNames = new Set<string>();
+  numberedUsed = false;
+  innerNumberedUsed = false;
 
   constructor(
     readonly kind: 'top' | 'method' | 'class' | 'block',
@@ -525,10 +527,12 @@ export class Converter {
     const name = node.text;
     const depth = this.ctx.scope.depthOf(name);
     if (/^_[1-9]$/.test(name) && this.ctx.inBlock) {
-      if (depth > 0 && this.ctx.scope.implicitDeclaration(name))
-        this.fail(node, '外側のブロックで番号付き引数が既に使われています。');
+      if (this.ctx.scope.innerNumberedUsed) this.fail(node, '内側のブロックで番号付き引数が既に使われています。');
+      for (let parent = this.ctx.scope.parent; parent?.kind === 'block'; parent = parent.parent)
+        if (parent.numberedUsed) this.fail(node, '外側のブロックで番号付き引数が既に使われています。');
       if (this.ctx.implicit === undefined && depth < 0)
         this.fail(node, '明示的な引数と番号付き引数は一緒に使えません。');
+      this.ctx.scope.numberedUsed = true;
     }
     if (name === 'it' && depth > 0 && this.ctx.implicit && this.ctx.scope.implicitDeclaration(name)) {
       this.ctx.implicit.add(name);
@@ -828,7 +832,7 @@ export class Converter {
     switch (node.type) {
       case 'identifier': {
         const name = node.text;
-        if (/^_[1-9]$/.test(name)) this.fail(node, `${name} は番号付き引数のため予約されています。`);
+        this.checkReservedBinding(node, name);
         return { k: 'lvar', name, depth: this.ctx.scope.declare(name) };
       }
       case 'instance_variable': {
@@ -995,11 +999,10 @@ export class Converter {
       left.k === 'regex' &&
       left.parts.every((part) => typeof part === 'string')
     ) {
-      const names = regexpCaptureNames(left.parts.join('')).map((name) => ({
-        k: 'lvar' as const,
-        name,
-        depth: this.ctx.scope.declare(name),
-      }));
+      const names = regexpCaptureNames(left.parts.join('')).map((name) => {
+        this.checkReservedBinding(leftNode, name);
+        return { k: 'lvar' as const, name, depth: this.ctx.scope.declare(name) };
+      });
       if (names.length > 0) return { k: 'matchWrite', match: this.operatorCall(node, left, operator, [right]), names };
     }
     switch (operator) {
@@ -1165,7 +1168,7 @@ export class Converter {
   private methodDef(node: Node): MethodDef {
     const nameNode = required(node.childForFieldName('name'));
     const name = nameNode.text;
-    if (/^_[1-9]$/.test(name)) this.fail(nameNode, `${name} は番号付き引数のため予約されています。`);
+    this.checkReservedBinding(nameNode, name);
     const row = node.startPosition.row;
     const outer = this.ctx;
     const scope = new LocalScope('method');
@@ -1199,6 +1202,7 @@ export class Converter {
     if (!node) return params;
     const seen = new Set<string>();
     const declare = (child: Node, name: string): string => {
+      this.checkReservedBinding(child, name);
       if (seen.has(name) && name !== '_' && !name.startsWith('_')) {
         this.fail(child, `引数の名前「${name}」が重複しています。`);
       }
@@ -1335,6 +1339,9 @@ export class Converter {
       if (implicit && implicit.size > 0) params = implicitParams(implicit);
       return { params, locals: scope.names, body, row: node.startPosition.row, isLambdaLiteral };
     } finally {
+      if (scope.numberedUsed || scope.innerNumberedUsed)
+        for (let parent: LocalScope | undefined = outer.scope; parent?.kind === 'block'; parent = parent.parent)
+          parent.innerNumberedUsed = true;
       this.ctx = outer;
     }
   }
@@ -1432,6 +1439,7 @@ export class Converter {
 
   private bindTarget(node: Node): LocalRef | undefined {
     const name = node.text;
+    this.checkReservedBinding(node, name);
     if (name === '_') {
       this.ctx.scope.declare(name);
       return undefined;
@@ -1440,6 +1448,10 @@ export class Converter {
       this.fail(node, `パターンの変数「${name}」が重複しています。`);
     this.patternBindings.add(name);
     return { k: 'lvar', name, depth: this.ctx.scope.declare(name) };
+  }
+
+  private checkReservedBinding(node: Node, name: string): void {
+    if (/^_[1-9]$/.test(name)) this.fail(node, `${name} は番号付き引数のため予約されています。`);
   }
 
   private readonly patternBindings = new Set<string>();

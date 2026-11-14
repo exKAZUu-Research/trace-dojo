@@ -5446,8 +5446,31 @@ test('pattern validation rejects duplicate captures, alternative binds and unkno
 });
 
 test('numbered block parameters reject nested, explicit and assigned misuse', () => {
-  for (const source of ['p [[1,2]].map{_1.map{_1*2}}', 'p [1].map{|x|_1}', '_1=5;p _1', 'def _1;end'])
+  for (const source of [
+    'p [[1,2]].map{_1.map{_1*2}}',
+    'p [1].map{|x|_1}',
+    '_1=5;p _1',
+    'def _1;end',
+    'p [1].map { [2].map { _1 }; _1 }',
+    'p [1].map { -> { _1 }.call + _1 }',
+    'def m(_1);end',
+    'p ->(_1){}',
+    'p [1].map { |*_1| }',
+    'p [1].map { |a; _1| }',
+    'p [1].map { case 1; in _1; end }',
+    '/(?<_1>a)/ =~ "a"',
+  ])
     expect(run(source)).toMatchObject({ kind: 'compileError' });
+});
+
+test('Regexp handles quantified properties and Ruby escaping', () => {
+  expect(
+    run(
+      String.raw`p "日本語abc".scan(/\p{Han}+/);p "aaa" =~ /a{2}+/;p Regexp.escape("a/b#c d-e\r\f\v");p Regexp.union("a/b","c#").source`
+    )
+  ).toMatchObject({
+    stdout: '["日本語"]\n0\n"a/b\\\\#c\\\\ d\\\\-e\\\\r\\\\f\\\\v"\n"a/b|c\\\\#"\n',
+  });
 });
 
 test('anonymous forwarding resolves only method parameters', () => {
