@@ -1672,6 +1672,8 @@ export class Converter {
   private heredoc(node: Node): Expr {
     const body = this.heredocBodies[this.heredocIndex++];
     if (!body) this.fail(node, 'ヒアドキュメントの終わりがありません。');
+    if (!namedChildren(body).some((child) => child.type === 'heredoc_end' && child.text.length > 0))
+      this.fail(node, 'ヒアドキュメントの終わりがありません。');
     const opening = node.text;
     const raw = /^<<[-~]?(['`])/.exec(opening)?.[1];
     if (raw === '`') this.unsupported(node, '外部コマンドの実行（`...`）');

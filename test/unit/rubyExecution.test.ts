@@ -19,6 +19,37 @@ test('shared module ancestry stays bounded', () => {
   expect(run(`${program}p A26.ancestors.size`)).toMatchObject({ kind: 'executed', stdout: '53\n' });
 });
 
+test('shared prepended ancestry stays bounded', () => {
+  let program = 'module A0;end\nmodule B0;end\n';
+  for (let index = 1; index <= 26; index++)
+    program += `module A${index};prepend A${index - 1},B${index - 1};end\nmodule B${index};prepend A${index - 1},B${index - 1};end\n`;
+  const result = run(`${program}p A26.ancestors.size`);
+  if (result.kind !== 'executed') throw new Error(`prepend ancestry did not run: ${JSON.stringify(result)}`);
+  expect(result.stdout).toMatch(/^\d+\n$/);
+});
+
+test('unterminated heredoc rejects the program before execution', () => {
+  expect(run('puts "start"\nx = <<~EOS\n  text\n')).toMatchObject({ kind: 'compileError' });
+});
+
+test('unsupported regexp syntax fails explicitly', () => {
+  expect(run(String.raw`p "a".match?(/\X/)`)).toMatchObject({
+    uncaughtException: String.raw`正規表現の\X は、この採点環境では使えません。`,
+  });
+});
+
+test('regexp splitting and MatchData slicing match Ruby output', () => {
+  const result = run(String.raw`p "a b c".split(/( )/, 2)
+m = /(a)(b)(c)/.match("abc")
+p m[1..], m[1..2], m[7, 2], m == /(a)(b)(c)/.match("abc")
+p /a\/b/.source, /a\/b/ == Regexp.new("a/b")
+`);
+  expect(result).toMatchObject({
+    kind: 'executed',
+    stdout: '["a", " ", "b c"]\n["a", "b", "c"]\n["a", "b"]\nnil\ntrue\n"a/b"\ntrue\n',
+  });
+});
+
 test('imaginary unit remains unsupported', () => {
   expect(run('p 1.i')).toMatchObject({
     uncaughtException: 'Numeric#i（複素数）は、この採点環境では使えません。',

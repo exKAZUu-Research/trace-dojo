@@ -442,6 +442,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
         }
       }
       const regexp = makeRegexp(source, {
+        literal: true,
         ignoreCase: e.flags.includes('i'),
         multiline: e.flags.includes('m'),
         extended: e.flags.includes('x'),
@@ -1477,6 +1478,11 @@ const PRIVATE_METHOD_NAMES = new Set(['initialize', 'initialize_copy', 'initiali
 
 export function addMethod(owner: RClass, method: RMethod): void {
   assertMutableClass(owner);
+  if (
+    (method.name === 'method_added' || method.name === 'singleton_method_added') &&
+    (method.body.kind === 'user' || method.body.kind === 'proc')
+  )
+    throw new UnsupportedFeatureError(`メソッド追加フック（${method.name}）`);
   owner.methods.set(method.name, method);
   invalidateMethodCaches();
 }
@@ -1715,7 +1721,7 @@ function* callMethodMissing(
       keywords,
       block,
       options.used ?? true,
-      options.vcall
+      visibility ?? (options.vcall ? 'vcall' : undefined)
     );
   }
   if (visibility)
@@ -1723,7 +1729,14 @@ function* callMethodMissing(
   methodMissing(recv, name, options);
 }
 
-export function methodMissing(recv: Value, name: string, options: CallOptions): never {
+export function methodMissing(
+  recv: Value,
+  name: string,
+  options: CallOptions,
+  visibility?: 'private' | 'protected'
+): never {
+  if (visibility)
+    throw noMethodError(`${visibility} method '${name}' called for ${receiverDescription(recv)}`, recv, name);
   if (options.vcall) {
     throw nameError(`undefined local variable or method '${name}' for ${receiverDescription(recv)}`, recv, name);
   }
@@ -1740,7 +1753,7 @@ export function* invoke(
   keywords: RHash | undefined,
   block: RProc | undefined,
   used: boolean,
-  missingCallVcall?: boolean
+  missingReason?: 'vcall' | 'private' | 'protected'
 ): Gen {
   const runtime = rt();
   const { body } = method;
@@ -1785,7 +1798,7 @@ export function* invoke(
       return value as Value;
     }
     case 'user': {
-      return yield* invokeUser(method, body.def, body.cref, recv, args, keywords, block, used, missingCallVcall);
+      return yield* invokeUser(method, body.def, body.cref, recv, args, keywords, block, used, missingReason);
     }
     case 'proc': {
       return yield* callProc(body.proc, args, { keywords, block, self: recv, used, method, lambdaArgs: true });
@@ -1809,13 +1822,13 @@ function* invokeUser(
   keywords: RHash | undefined,
   block: RProc | undefined,
   used: boolean,
-  missingCallVcall?: boolean
+  missingReason?: 'vcall' | 'private' | 'protected'
 ): Gen {
   const runtime = rt();
   runtime.userCallVersion++;
   const frame = new Frame('method', recv, new Scope(), cref, runtime.currentRow, def.isAtomic, used, {
     method,
-    missingCallVcall,
+    missingReason,
     def,
     block,
     args,
@@ -1892,12 +1905,12 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
     }
     const used = e.used === 1 || (e.used === 2 && frame.resultUsed);
     rt().currentRow = e.row;
-    const missingVcall = method.name === 'method_missing' ? home.extra.missingCallVcall : undefined;
-    if (!e.block) return yield* invoke(superMethod, home.self, args, keywords, block, used, missingVcall);
+    const missingReason = method.name === 'method_missing' ? home.extra.missingReason : undefined;
+    if (!e.block) return yield* invoke(superMethod, home.self, args, keywords, block, used, missingReason);
     const proc = block as RProc;
     if (proc.callSiteState) proc.callSiteState.active = true;
     try {
-      return yield* invoke(superMethod, home.self, args, keywords, proc, used, missingVcall);
+      return yield* invoke(superMethod, home.self, args, keywords, proc, used, missingReason);
     } catch (error) {
       if (error instanceof BreakSignal && error.tag === proc.breakTag) return error.value;
       throw error;

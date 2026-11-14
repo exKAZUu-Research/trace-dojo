@@ -9,7 +9,18 @@ import { hashGet, hashSet } from './hashes';
 import { callBlock, callMethod, type Gen } from './interp';
 import { makeEnumerator } from './libEnumerator';
 import { setText } from './libString';
-import { type NativeFn, NIL, RArray, RHash, RObject, type RProc, RString, RSymbol, type Value } from './objects';
+import {
+  type NativeFn,
+  NIL,
+  RArray,
+  RHash,
+  RObject,
+  type RProc,
+  RRange,
+  RString,
+  RSymbol,
+  type Value,
+} from './objects';
 import {
   regexpCaptureNames,
   regexpCommentEnd,
@@ -171,7 +182,7 @@ export function translate(source: string, extended: boolean, multiline = false):
           ...negatedClassBodies.map((body) => `(?:(?![${body}])[\\s\\S])`),
         ];
         const union = alternatives.length === 1 ? alternatives[0] : `(?:${alternatives.join('|')})`;
-        out = out.slice(0, classStart) + (outerNegated ? `(?!(?:${union}))[\\s\\S]` : union);
+        out = out.slice(0, classStart) + (outerNegated ? `(?:(?!(?:${union}))[\\s\\S])` : union);
       } else out += char;
       continue;
     }
@@ -179,6 +190,7 @@ export function translate(source: string, extended: boolean, multiline = false):
     if (inClass === 0 && char === '(' && source[index + 1] === '?') {
       const rest = source.slice(index + 2);
       if (rest.startsWith('>')) throw unsupportedSyntax('アトミックグループ（(?>)）');
+      if (rest.startsWith('~')) throw unsupportedSyntax('不在演算子（(?~...)）');
       const scoped = /^([imx]*)(?:-([imx]*))?:/.exec(rest);
       if (scoped) {
         const enabled = scoped[1];
@@ -360,10 +372,12 @@ function translateEscape(
       return `\\${negated ? 'P' : 'p'}{${name}}`;
     }
     case 'k': {
+      if (/^<\d+>/.test(source.slice(index + 1))) throw unsupportedSyntax('番号付き後方参照');
       return String.raw`\k`;
     }
     default: {
       if (/[dDwWsSbBnrtfv0-9xuc]/.test(next)) return `\\${next}`;
+      if (/[A-Za-z0-9]/.test(next)) throw unsupportedSyntax(`\\${next}`);
       return SYNTAX.includes(next) && (next !== '-' || inClass) ? `\\${next}` : next;
     }
   }
@@ -375,8 +389,9 @@ function unsupportedSyntax(feature: string): unknown {
 
 export function makeRegexp(
   source: string,
-  options: { ignoreCase?: boolean; multiline?: boolean; extended?: boolean }
+  options: { ignoreCase?: boolean; multiline?: boolean; extended?: boolean; literal?: boolean }
 ): RObject {
+  if (options.literal) source = source.replaceAll(/(?<!\\)\\\//g, '/');
   if (regexpCaptureNames(source, options.extended).length > 0 && regexpHasNumberedBackref(source, options.extended))
     throw rubyError(rt().c.RegexpError, `numbered backref/call is not allowed. (use name): /${source}/`);
   const regexp = new RObject(rt().c.Regexp);
@@ -736,11 +751,9 @@ function* matchIndex(match: RObject, key: Value): Gen {
 }
 
 def('MatchData', '[]', [1, 2], function* (self: RObject, args) {
-  if (args.length === 2) {
-    const all = stateOf(self).groups.map((_range, group) => groupText(stateOf(self), group));
-    let start = yield* toIndex(args[0]);
-    if (start < 0) start += all.length;
-    return arr(all.slice(start, start + (yield* toIndex(args[1]))));
+  if (args.length === 2 || args[0] instanceof RRange) {
+    const state = stateOf(self);
+    return yield* callMethod(arr(state.groups.map((_range, group) => groupText(state, group))), '[]', args);
   }
   return yield* matchIndex(self, args[0]);
 });
@@ -754,6 +767,26 @@ def('MatchData', 'captures', 0, (self: RObject) =>
 def('MatchData', 'to_a', 0, (self: RObject) =>
   arr(stateOf(self).groups.map((_range, group) => groupText(stateOf(self), group)))
 );
+def('MatchData', ['==', 'eql?'], 1, (self: RObject, [other]) => {
+  if (!(other instanceof RObject) || realClassOf(other) !== rt().c.MatchData) return false;
+  const left = stateOf(self);
+  const right = stateOf(other);
+  const leftRegexp = dataOf(left.regexp);
+  const rightRegexp = dataOf(right.regexp);
+  return (
+    left.text === right.text &&
+    leftRegexp.source === rightRegexp.source &&
+    leftRegexp.ignoreCase === rightRegexp.ignoreCase &&
+    leftRegexp.multiline === rightRegexp.multiline &&
+    leftRegexp.extended === rightRegexp.extended &&
+    left.groups.length === right.groups.length &&
+    left.groups.every((range, index) =>
+      range === undefined
+        ? right.groups[index] === undefined
+        : range[0] === right.groups[index]?.[0] && range[1] === right.groups[index]?.[1]
+    )
+  );
+});
 def('MatchData', 'named_captures', 0, function* (self: RObject) {
   const hash = newHash();
   const state = stateOf(self);
@@ -988,11 +1021,12 @@ wrapFirst('split', function* (self, args) {
   const text = self.s;
   const limit = args.length > 1 ? yield* toIndex(args[1]) : 0;
   const parts: string[] = [];
+  let fields = 0;
   let position = 0;
   let searchFrom = 0;
   const length = charIndex(text, text.length);
   while (searchFrom <= length) {
-    if (limit > 0 && parts.length === limit - 1) break;
+    if (limit > 0 && fields === limit - 1) break;
     const state = execAt(args[0] as RObject, text, searchFrom);
     if (!state) break;
     const [from, to] = state.groups[0] as readonly [number, number];
@@ -1005,6 +1039,7 @@ wrapFirst('split', function* (self, args) {
     }
     if (!(from === to && from === position)) {
       parts.push(text.slice(position, from));
+      fields++;
       for (let group = 1; group < state.groups.length; group++) {
         const value = groupText(state, group);
         if (value !== NIL) parts.push((value as RString).s);

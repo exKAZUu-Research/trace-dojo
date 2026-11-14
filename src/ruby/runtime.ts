@@ -81,7 +81,7 @@ export interface FrameExtra {
   definitionTarget?: RClass;
   /** The running method. */
   method?: RMethod;
-  missingCallVcall?: boolean;
+  missingReason?: 'vcall' | 'private' | 'protected';
   def?: MethodDef;
   /** The block the method received, which `yield` calls. */
   block?: RProc;

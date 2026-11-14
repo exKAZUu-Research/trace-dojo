@@ -288,8 +288,11 @@ export class RClass extends RBasic {
     const active = new Set<RClass>();
     const superAncestors = this.superclass ? this.superclass.ancestors() : [];
     const inSuper = new Set(superAncestors);
+    const chainMemo = new Map<RClass, RClass[]>();
     const mergedPrepends = (modules: RClass[], inherited = new Set<RClass>()): RClass[] => {
-      const chains = modules.map((module) => prependChain(module, new Set(inherited)));
+      const chains = modules.map((module) =>
+        fullPrependChain(module, new Set(inherited)).filter((item) => !inherited.has(item))
+      );
       const prerequisites = new Map<RClass, Set<RClass>>();
       const ranks = new Map<RClass, number>();
       const addEdge = (before: RClass, after: RClass): void => {
@@ -311,6 +314,7 @@ export class RClass extends RBasic {
       const result: RClass[] = [];
       const emitted = new Set<RClass>();
       while (emitted.size < prerequisites.size) {
+        rt().spend(prerequisites.size);
         const ready = [...prerequisites].filter(
           ([item, before]) => !emitted.has(item) && [...before].every((prior) => emitted.has(prior))
         );
@@ -335,12 +339,22 @@ export class RClass extends RBasic {
       }
       return result;
     };
-    const prependChain = (module: RClass, visited: Set<RClass>): RClass[] => {
-      if (visited.has(module)) return [];
-      visited.add(module);
-      const prepended = mergedPrepends(module.prepends, visited);
-      for (const item of prepended) visited.add(item);
-      return [...prepended, module, ...module.includes.flatMap((item) => prependChain(item, visited))];
+    const fullPrependChain = (module: RClass, active: Set<RClass>): RClass[] => {
+      if (active.has(module)) return [];
+      const cached = chainMemo.get(module);
+      if (cached) return cached;
+      rt().spend();
+      active.add(module);
+      const members = [
+        ...mergedPrepends(module.prepends, active),
+        module,
+        ...module.includes.flatMap((item) => fullPrependChain(item, active)),
+      ];
+      active.delete(module);
+      const seenInChain = new Set<RClass>();
+      const chain = members.filter((item) => !seenInChain.has(item) && !!seenInChain.add(item));
+      chainMemo.set(module, chain);
+      return chain;
     };
     const addModule = (module: RClass, placement: 'prepend' | 'body' = 'body'): void => {
       const visited = placement === 'prepend' ? seenPrepended : seen;

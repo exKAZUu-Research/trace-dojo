@@ -33,7 +33,10 @@ class TimeData {
     const offset = offsetFraction(this.exactOffset, this.offset);
     const numerator =
       this.exactNumerator() * offset.denominator + offset.numerator * this.remainderDenominator * 1_000_000_000n;
-    return new Date(Number(floorDivide(numerator, this.remainderDenominator * offset.denominator * 1_000_000n)));
+    const milliseconds = floorDivide(numerator, this.remainderDenominator * offset.denominator * 1_000_000n);
+    if (milliseconds < -8_640_000_000_000_000n || milliseconds > 8_640_000_000_000_000n)
+      throw new UnsupportedFeatureError('JavaScript の日付範囲外の Time');
+    return new Date(Number(milliseconds));
   }
 
   exactNumerator(): bigint {
@@ -171,6 +174,7 @@ function* buildTime(args: Value[], offset: number, zone: TimeData['zone'], micro
   const date = new Date(0);
   date.setUTCFullYear(year, month - 1, day);
   date.setUTCHours(hour, minute, whole);
+  if (Number.isNaN(date.getTime())) throw new UnsupportedFeatureError('JavaScript の日付範囲外の Time');
   const localNanoseconds = BigInt(date.getTime()) * 1_000_000n;
   const fraction = BigInt(Math.round((seconds - whole) * 1e9));
   const micros =

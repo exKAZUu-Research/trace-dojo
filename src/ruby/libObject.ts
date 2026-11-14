@@ -1258,7 +1258,7 @@ sdef('Proc', 'new', 0, (_self, _args, block) => requireProcBlock(block));
 export function procArity(proc: RProc): number {
   if (proc.body.kind === 'native') return proc.body.arity;
   const { params } = proc.body.def;
-  if (!params) return proc.isLambda ? 0 : -1;
+  if (!params) return 0;
   const positional = params.required.length + params.post.length;
   const requiredKeywords = params.keywords.some((keyword) => !keyword.value);
   const required = positional + Number(requiredKeywords);

@@ -475,7 +475,8 @@ def(
   'method_missing',
   [1, -1],
   (self, [name]) => {
-    methodMissing(self, (name as RSymbol).name, { vcall: rt().frame.home.extra.missingCallVcall });
+    const reason = rt().frame.home.extra.missingReason;
+    methodMissing(self, (name as RSymbol).name, { vcall: reason === 'vcall' }, reason === 'vcall' ? undefined : reason);
   },
   { visibility: 'private' }
 );
