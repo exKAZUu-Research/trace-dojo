@@ -7,8 +7,6 @@ import {
   RClass,
   RFloat,
   RHash,
-  RObject,
-  RProc,
   RRange,
   RString,
   RSymbol,
@@ -239,38 +237,6 @@ export function singletonClassOf(value: Value): RClass {
 
 export function isA(value: Value, cls: RClass): boolean {
   return classOf(value).isSubclassOf(cls);
-}
-
-export function isString(value: Value): value is RString {
-  return value instanceof RString;
-}
-
-export function isArray(value: Value): value is RArray {
-  return value instanceof RArray;
-}
-
-export function isHash(value: Value): value is RHash {
-  return value instanceof RHash;
-}
-
-export function isProc(value: Value): value is RProc {
-  return value instanceof RProc;
-}
-
-export function isException(value: Value): value is RObject {
-  return value instanceof RObject && value.exception !== undefined;
-}
-
-export function isInteger(value: Value): value is bigint {
-  return typeof value === 'bigint';
-}
-
-export function isFloat(value: Value): value is number {
-  return typeof value === 'number';
-}
-
-export function isNumeric(value: Value): value is bigint | number {
-  return typeof value === 'bigint' || typeof value === 'number';
 }
 
 /** A copy of what an iteration visits, for loops whose bodies may change the collection. */

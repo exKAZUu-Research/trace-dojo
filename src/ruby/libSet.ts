@@ -161,7 +161,8 @@ def('Set', 'count', [0, 1], function* (self: RObject, args, block) {
 def('Set', 'empty?', 0, (self: RObject) => membersOf(self).map.size === 0);
 def('Set', 'to_a', 0, (self: RObject) => arr([...membersOf(self).map.values()].map((entry) => entry.key)));
 def('Set', 'to_set', [0, -1], function* (self: RObject, args, block) {
-  if (args.length === 0 && !block && self.cls === rt().c.Set) return self;
+  if (args.length <= 1 && (args.length === 0 || args[0] === rt().c.Set) && !block && self.cls === rt().c.Set)
+    return self;
   return yield* callMethod(args[0] ?? rt().c.Set, 'new', [self, ...args.slice(1)], undefined, block);
 });
 def('Set', ['inspect', 'to_s'], 0, function* (self: RObject) {

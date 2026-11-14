@@ -2350,6 +2350,10 @@ test('to_set forwards mapping blocks and target Set classes', () => {
   });
 });
 
+test('Set to_set preserves identity with an explicit default class', () => {
+  expect(run('s=Set[1];p s.to_set(Set).equal?(s)')).toMatchObject({ stdout: 'true\n' });
+});
+
 test('Enumerable reductions convert string-like method names', () => {
   expect(run('class A;private;def to_str;"+";end;end;p [1,2].inject(A.new),[1,2].reduce(10,A.new)')).toMatchObject({
     stdout: '3\n13\n',
