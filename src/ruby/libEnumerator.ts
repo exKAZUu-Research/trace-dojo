@@ -298,7 +298,7 @@ export function customEnumerator(recv: Value, method: string, held: Value[], ite
   const enumerator = makeEnumerator(recv, method, []);
   const source = enumerator.data as EnumeratorSource;
   source.iterate = iterate;
-  source.held = () => [recv, ...held];
+  source.held = () => [recv, ...held, ...cursorRoots(source.cursor)];
   source.generatorAddress = addressOf(enumerator);
   return enumerator;
 }
@@ -694,6 +694,7 @@ function nextValues(self: RObject): Value[] {
   runtime.held.push(...cursor.held);
   runtime.catchTags.push(...cursor.catchTags);
   let step: IteratorResult<unknown, Value>;
+  let failed = false;
   try {
     const feed = cursor.started && cursor.feedSet ? cursor.feed : NIL;
     if (cursor.started) {
@@ -702,12 +703,16 @@ function nextValues(self: RObject): Value[] {
     }
     step = cursor.runner.next(feed);
     cursor.started = true;
+  } catch (error) {
+    failed = true;
+    throw error;
   } finally {
     cursor.frames = runtime.frames.splice(frameBase);
     cursor.held = runtime.held.splice(heldBase);
     cursor.catchTags = runtime.catchTags.splice(0);
     runtime.catchTags.push(...callerTags);
     runtime.currentRow = row;
+    if (failed) source.cursor = undefined;
   }
   if (step.done) {
     cursor.result = step.value;

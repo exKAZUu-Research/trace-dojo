@@ -743,3 +743,9 @@ test('suspended external iterators and installed method blocks retain reachable 
   const installed = 't=Turtle.new;Object.define_method(:keep){t};x=1';
   expect(traceProgram('ruby', installed, installed).finalTurtles).toHaveLength(1);
 });
+
+test('chained external iterators retain Turtles in suspended frames', () => {
+  const program =
+    'class C\ninclude Enumerable\ndef each\nt=Turtle.new\nyield nil\nt.forward\nyield nil\nend\nend\ne=C.new.chain([])\ne.next\nx=1\ne.next\nx=2';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});

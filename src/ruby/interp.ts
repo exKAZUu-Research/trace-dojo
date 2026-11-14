@@ -1896,7 +1896,7 @@ function* implicitSuperArgs(frame: Frame): Gen<{ args: Value[]; keywords: RHash 
         Math.max(0, original.length - params.required.length - params.post.length)
       );
       const anonymous = original.slice(params.required.length + passedOptional, original.length - params.post.length);
-      const rest = params.rest === '' ? arr(anonymous) : scope.lookup(params.rest, 0);
+      const rest = params.rest === '*' ? arr(anonymous) : scope.lookup(params.rest, 0);
       for (const item of yield* splatItems(rest)) args.push(item);
     }
     for (const [index, param] of params.post.entries())
@@ -1911,11 +1911,11 @@ function* implicitSuperArgs(frame: Frame): Gen<{ args: Value[]; keywords: RHash 
           yield* hashSet(keywordHash, RSymbol.of(keyword.name), scope.lookup(keyword.name, 0));
         }
         if (params.keywordRest !== undefined) {
-          const rest = params.keywordRest === '' ? frame.extra.keywords : scope.lookup(params.keywordRest, 0);
+          const rest = params.keywordRest === '**' ? frame.extra.keywords : scope.lookup(params.keywordRest, 0);
           if (rest !== undefined && rest !== NIL) {
             const converted = yield* superKeywordRest(rest);
             const named =
-              params.keywordRest === '' ? new Set(params.keywords.map((keyword) => keyword.name)) : undefined;
+              params.keywordRest === '**' ? new Set(params.keywords.map((keyword) => keyword.name)) : undefined;
             yield* whileHeld(converted, () => addSuperKeywordRest(keywordHash, converted, named));
           }
         }

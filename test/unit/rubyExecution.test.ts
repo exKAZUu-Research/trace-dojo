@@ -5259,6 +5259,22 @@ test('Lazy flat_map streams nested values and stops at take', () => {
   expect(run('p [1].lazy.flat_map{|x|[x,x+1].lazy}.force')).toMatchObject({ stdout: '[1, 2]\n' });
 });
 
+test('failed external enumerators restart on the next call', () => {
+  expect(run('e=Enumerator.new{|y|y<<1;raise "oops"};4.times{begin;p e.next;rescue=>ex;p ex.class;end}')).toMatchObject(
+    {
+      stdout: '1\nRuntimeError\n1\nRuntimeError\n',
+    }
+  );
+});
+
+test('anonymous forwarding parameters reach implicit super', () => {
+  expect(
+    run('class A;def f(*a,**k,&b);p a,k,b.call;end;end;class B<A;def f(*,**,&);super;end;end;B.new.f(1,x:2){3}')
+  ).toMatchObject({
+    stdout: '[1]\n{x: 2}\n3\n',
+  });
+});
+
 test('Data copies remain frozen and Rational copies preserve identity', () => {
   expect(
     run(
