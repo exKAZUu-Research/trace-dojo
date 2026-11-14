@@ -2023,6 +2023,15 @@ test('Set intersection processes Enumerable members as yielded', () => {
   expect(run(source)).toMatchObject({ stdout: 'before\nhash\nafter\n' });
 });
 
+test('Set operations process Enumerable members before later yields', () => {
+  const header =
+    'class K;def hash;puts :hash;0;end;end;class E;include Enumerable;def each;puts :before;yield K.new;puts :after;end;end;';
+  expect(run(`${header}Set[].merge(E.new)`)).toMatchObject({ stdout: 'before\nhash\nafter\n' });
+  expect(run(`${header}Set[].subtract(E.new)`)).toMatchObject({ stdout: 'before\nhash\nafter\n' });
+  expect(run(`${header}p Set[].disjoint?(E.new)`)).toMatchObject({ stdout: 'before\nhash\nafter\ntrue\n' });
+  expect(run(`${header}p Set[].intersect?(E.new)`)).toMatchObject({ stdout: 'before\nhash\nafter\nfalse\n' });
+});
+
 test('Set symmetric difference invokes subclass initialization with its operand', () => {
   expect(
     run('class S<Set;def initialize(x,y);super(x);end;end;s=S.new([1],2);begin;s ^ Set[2];rescue=>e;p e.message;end')

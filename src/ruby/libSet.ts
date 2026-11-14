@@ -3,7 +3,7 @@ import { def, sdef } from './define';
 import { argumentError, frozenError, runtimeError, typeError } from './errors';
 import { eachEntry, hashDelete, hashDeleteEntry, hashGet, hashKeyOf, hashSet, rehash } from './hashes';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
-import { iterate, toArray } from './libEnumerable';
+import { iterate, STOP, toArray } from './libEnumerable';
 import { makeEnumerator } from './libEnumerator';
 import { NIL, type RHash, RObject, type Value } from './objects';
 import { rt, whileHeld } from './runtime';
@@ -259,13 +259,32 @@ def('Set', ['proper_superset?', '>'], 1, function* (self: RObject, [value]) {
   return membersOf(small).map.size < membersOf(self).map.size && (yield* subset(small, self));
 });
 def('Set', 'disjoint?', 1, function* (self: RObject, [value]) {
-  for (const item of yield* other(value)) if (yield* hashGet(membersOf(self), item)) return false;
-  return true;
+  return !(yield* someOther(value, (item) => callMethod(self, 'include?', [item])));
 });
 def('Set', 'intersect?', 1, function* (self: RObject, [value]) {
-  for (const item of yield* other(value)) if (yield* hashGet(membersOf(self), item)) return true;
-  return false;
+  return yield* someOther(value, (item) => callMethod(self, 'include?', [item]));
 });
+function* someOther(value: Value, predicate: (item: Value) => Gen): Gen<boolean> {
+  if (value instanceof RObject && value.data instanceof SetData) {
+    const members = membersOf(value);
+    members.iterating++;
+    try {
+      for (const entry of members.map.values()) if (truthy(yield* predicate(entry.key))) return true;
+      return false;
+    } finally {
+      members.iterating--;
+    }
+  }
+  if (!respondsTo(value, 'each')) throw typeError('value must be enumerable');
+  let found = false;
+  yield* iterate(value, function* (item) {
+    if (truthy(yield* predicate(item))) {
+      found = true;
+      return STOP;
+    }
+  });
+  return found;
+}
 def('Set', ['==', 'eql?'], 1, function* (self: RObject, [value]) {
   if (!(value instanceof RObject && value.data instanceof SetData)) return false;
   return membersOf(self).map.size === membersOf(value).map.size && (yield* subset(self, value));
@@ -291,12 +310,17 @@ def('Set', 'clear', 0, function* (self: RObject) {
 });
 def('Set', ['merge'], [0, -1], function* (self: RObject, values) {
   yield* modify(self);
-  for (const value of values) for (const item of yield* other(value)) yield* hashSet(membersOf(self), item, true);
+  for (const value of values)
+    yield* eachOther(value, function* (item) {
+      yield* self.cls === rt().c.Set ? hashSet(membersOf(self), item, true) : callMethod(self, 'add', [item]);
+    });
   return self;
 });
 def('Set', 'subtract', 1, function* (self: RObject, [value]) {
   yield* modify(self);
-  for (const item of yield* other(value)) yield* hashDelete(membersOf(self), item);
+  yield* eachOther(value, function* (item) {
+    yield* self.cls === rt().c.Set ? hashDelete(membersOf(self), item) : callMethod(self, 'delete', [item]);
+  });
   return self;
 });
 def('Set', 'replace', 1, function* (self: RObject, [value]) {
