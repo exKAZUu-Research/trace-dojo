@@ -10,6 +10,7 @@ import {
   toIndexExact,
   toInt,
   toStepFloat,
+  tryImplicitConversion,
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentCountError, argumentError, floatDomainError, rangeError, rubyError, typeError } from './errors';
@@ -1080,139 +1081,151 @@ function* streamLazyStep(
   visit: (value: Value, yielded?: Value[]) => Gen<unknown>,
   yielded: Value[] = [item]
 ): Gen<unknown> {
-  const step = steps[position];
-  if (!step) return yield* visit(item, yielded);
-  const state = states[position];
-  const next = (value: Value, args: Value[] = [value]): Gen<unknown> =>
-    streamLazyStep(steps, states, position + 1, value, visit, args);
-  switch (step.kind) {
-    case 'map': {
-      return yield* next(yield* callProc(step.block, yielded));
-    }
-    case 'select':
-    case 'reject': {
-      return truthy(yield* callProc(step.block, yielded)) === (step.kind === 'select')
-        ? yield* next(item, yielded)
-        : undefined;
-    }
-    case 'filter_map': {
-      const mapped = yield* callProc(step.block, yielded);
-      return truthy(mapped) ? yield* next(mapped) : undefined;
-    }
-    case 'flat_map': {
-      return yield* streamFlattened(yield* callProc(step.block, yielded), next);
-    }
-    case 'take_while': {
-      return truthy(yield* callProc(step.block, yielded)) ? yield* next(item, yielded) : STOP;
-    }
-    case 'drop_while': {
-      if (state.dropping && truthy(yield* callProc(step.block, yielded))) return undefined;
-      state.dropping = false;
-      return yield* next(item, yielded);
-    }
-    case 'take': {
-      if (state.seen >= step.count) return STOP;
-      state.seen++;
-      const result = yield* next(item, yielded);
-      return result === STOP || state.seen >= step.count ? STOP : undefined;
-    }
-    case 'drop': {
-      return state.seen++ >= step.count ? yield* next(item, yielded) : undefined;
-    }
-    case 'compact': {
-      return item === NIL ? undefined : yield* next(item, yielded);
-    }
-    case 'with_index': {
-      const index = state.index++;
-      if (step.block) yield* callProc(step.block, [item, index]);
-      return step.block ? yield* next(item) : yield* next(arr([item, index]), [item, index]);
-    }
-    case 'grep':
-    case 'grep_v': {
-      if (truthy(yield* caseEquals(step.pattern, item)) !== (step.kind === 'grep')) return;
-      return step.block ? yield* next(yield* callProc(step.block, [item])) : yield* next(item, yielded);
-    }
-    case 'uniq': {
-      const key = step.block ? yield* callProc(step.block, [item]) : item;
-      if (!state.keys) {
-        state.keys = newHash();
-        rt().held.push(state.keys);
+  const held = rt().held;
+  const rootIndex = held.push(item) - 1;
+  try {
+    const step = steps[position];
+    if (!step) return yield* visit(item, yielded);
+    const state = states[position];
+    const next = (value: Value, args: Value[] = [value]): Gen<unknown> =>
+      streamLazyStep(steps, states, position + 1, value, visit, args);
+    switch (step.kind) {
+      case 'map': {
+        return yield* next(yield* callProc(step.block, yielded));
       }
-      if (yield* hashGet(state.keys, key)) return;
-      yield* hashSet(state.keys, key, true);
-      return yield* next(item, yielded);
-    }
-    case 'zip': {
-      state.iterators ??= step.others.map((other) =>
-        other instanceof RArray
-          ? undefined
-          : flattenGenerator(
-              (function* (): Gen<void> {
-                yield* iterate(other, function* (value) {
-                  yield value;
-                });
-              })()
-            )
-      );
-      const tuple: Value[] = [item];
-      const index = state.seen++;
-      for (const [position, other] of step.others.entries()) {
-        const result = state.iterators[position]?.next();
-        tuple.push(
-          other instanceof RArray ? (other.items[index] ?? NIL) : result?.done ? NIL : (result?.value as Value)
+      case 'select':
+      case 'reject': {
+        return truthy(yield* callProc(step.block, yielded)) === (step.kind === 'select')
+          ? yield* next(item, yielded)
+          : undefined;
+      }
+      case 'filter_map': {
+        const mapped = yield* callProc(step.block, yielded);
+        return truthy(mapped) ? yield* next(mapped) : undefined;
+      }
+      case 'flat_map': {
+        return yield* streamFlattened(yield* callProc(step.block, yielded), next);
+      }
+      case 'take_while': {
+        return truthy(yield* callProc(step.block, yielded)) ? yield* next(item, yielded) : STOP;
+      }
+      case 'drop_while': {
+        if (state.dropping && truthy(yield* callProc(step.block, yielded))) return undefined;
+        state.dropping = false;
+        return yield* next(item, yielded);
+      }
+      case 'take': {
+        if (state.seen >= step.count) return STOP;
+        state.seen++;
+        const result = yield* next(item, yielded);
+        return result === STOP || state.seen >= step.count ? STOP : undefined;
+      }
+      case 'drop': {
+        return state.seen++ >= step.count ? yield* next(item, yielded) : undefined;
+      }
+      case 'compact': {
+        return item === NIL ? undefined : yield* next(item, yielded);
+      }
+      case 'with_index': {
+        const index = state.index++;
+        if (step.block) yield* callProc(step.block, [item, index]);
+        return step.block ? yield* next(item) : yield* next(arr([item, index]), [item, index]);
+      }
+      case 'grep':
+      case 'grep_v': {
+        if (truthy(yield* caseEquals(step.pattern, item)) !== (step.kind === 'grep')) return;
+        return step.block ? yield* next(yield* callProc(step.block, [item])) : yield* next(item, yielded);
+      }
+      case 'uniq': {
+        const key = step.block ? yield* callProc(step.block, [item]) : item;
+        if (!state.keys) {
+          state.keys = newHash();
+          rt().held.push(state.keys);
+        }
+        if (yield* hashGet(state.keys, key)) return;
+        yield* hashSet(state.keys, key, true);
+        return yield* next(item, yielded);
+      }
+      case 'zip': {
+        state.iterators ??= step.others.map((other) =>
+          other instanceof RArray
+            ? undefined
+            : flattenGenerator(
+                (function* (): Gen<void> {
+                  yield* iterate(other, function* (value) {
+                    yield value;
+                  });
+                })()
+              )
         );
+        const tuple: Value[] = [item];
+        const index = state.seen++;
+        for (const [position, other] of step.others.entries()) {
+          const result = state.iterators[position]?.next();
+          tuple.push(
+            other instanceof RArray ? (other.items[index] ?? NIL) : result?.done ? NIL : (result?.value as Value)
+          );
+        }
+        const arrays = rt().heldArrays;
+        arrays.push(tuple);
+        try {
+          return yield* next(arr(tuple));
+        } finally {
+          arrays.pop();
+        }
       }
-      const arrays = rt().heldArrays;
-      arrays.push(tuple);
-      try {
-        return yield* next(arr(tuple));
-      } finally {
-        arrays.pop();
+      case 'each_slice':
+      case 'each_cons': {
+        if (!state.buffer) {
+          state.buffer = [];
+          rt().heldArrays.push(state.buffer);
+        }
+        state.buffer.push(item);
+        if (state.buffer.length < step.count) return;
+        const values = arr([...state.buffer]);
+        if (step.kind === 'each_slice') state.buffer.length = 0;
+        else state.buffer.shift();
+        return yield* next(values);
+      }
+      case 'each_entry': {
+        return yield* next(item);
+      }
+      case 'each_with_object': {
+        return yield* next(arr([item, step.memo]), [item, step.memo]);
       }
     }
-    case 'each_slice':
-    case 'each_cons': {
-      if (!state.buffer) {
-        state.buffer = [];
-        rt().heldArrays.push(state.buffer);
-      }
-      state.buffer.push(item);
-      if (state.buffer.length < step.count) return;
-      const values = arr([...state.buffer]);
-      if (step.kind === 'each_slice') state.buffer.length = 0;
-      else state.buffer.shift();
-      return yield* next(values);
-    }
-    case 'each_entry': {
-      return yield* next(item);
-    }
-    case 'each_with_object': {
-      return yield* next(arr([item, step.memo]), [item, step.memo]);
-    }
+  } finally {
+    held.splice(rootIndex, 1);
   }
 }
 
 function* streamFlattened(mapped: Value, next: (value: Value) => Gen<unknown>): Gen<unknown> {
-  if (mapped instanceof RArray) {
-    for (const item of mapped.items) if ((yield* next(item)) === STOP) return STOP;
-    return;
+  const held = rt().held;
+  const rootIndex = held.push(mapped) - 1;
+  try {
+    if (mapped instanceof RArray) {
+      for (const item of mapped.items) if ((yield* next(item)) === STOP) return STOP;
+      return;
+    }
+    if (mapped instanceof RObject && respondsTo(mapped, 'force') && respondsTo(mapped, 'each')) {
+      let stopped = false;
+      yield* iterate(mapped, function* (item) {
+        if ((yield* next(item)) === STOP) {
+          stopped = true;
+          return STOP;
+        }
+      });
+      return stopped ? STOP : undefined;
+    }
+    const array = yield* tryImplicitConversion(mapped, 'to_ary');
+    if (array !== undefined) {
+      if (array instanceof RArray) return yield* streamFlattened(array, next);
+      if (array !== NIL) throw typeError(`can't convert ${realClassOf(mapped).name} to Array`);
+    }
+    return yield* next(mapped);
+  } finally {
+    held.splice(rootIndex, 1);
   }
-  if (mapped instanceof RObject && respondsTo(mapped, 'force') && respondsTo(mapped, 'each')) {
-    let stopped = false;
-    yield* iterate(mapped, function* (item) {
-      if ((yield* next(item)) === STOP) {
-        stopped = true;
-        return STOP;
-      }
-    });
-    return stopped ? STOP : undefined;
-  }
-  if (respondsTo(mapped, 'to_ary', true)) {
-    const array = yield* callMethod(mapped, 'to_ary', [], undefined, undefined, { fcall: true });
-    if (array instanceof RArray) return yield* streamFlattened(array, next);
-    if (array !== NIL) throw typeError(`can't convert ${realClassOf(mapped).name} to Array`);
-  }
-  return yield* next(mapped);
 }
 
 def('Enumerator::Lazy', 'each', [0, -1], function* (self: RObject, args, block) {

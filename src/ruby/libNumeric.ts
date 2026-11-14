@@ -256,6 +256,15 @@ for (const owner of ['Integer', 'Float']) {
   def(owner, 'quo', 1, (self: Num, [other]) => {
     if (!isNum(other)) return coerceBinary(self, other, 'quo', typeof self === 'bigint' ? 'Rational' : 'Float');
     if (typeof self === 'bigint' && typeof other === 'bigint') return makeRational(self, other);
+    if (typeof self === 'bigint' && typeof other === 'number' && Number.isFinite(other) && other !== 0) {
+      const fraction = floatFraction(other);
+      if (typeof fraction.numerator === 'bigint') {
+        const leftBits = integerBits(self);
+        const rightBits = integerBits(fraction.denominator);
+        chargeIntegerResult(leftBits + rightBits, (leftBits * rightBits) / 1024);
+        return bigintRatio(self * fraction.denominator, fraction.numerator);
+      }
+    }
     return Number(self) / Number(other);
   });
   def(owner, 'remainder', 1, function* (self: Num, [other]) {

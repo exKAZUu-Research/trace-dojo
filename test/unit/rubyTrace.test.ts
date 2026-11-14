@@ -820,3 +820,13 @@ test('nested pattern callbacks retain pending deconstructed turtles', () => {
     'class A;def deconstruct_keys(ks);{a:Turtle.new};end;def inspect;@n=1;"A";end;end;begin;A.new=>{b:};rescue NoMatchingPatternKeyError=>e;t=e.matchee[:a];t.forward;end';
   expect(traceProgram('ruby', failedMatch, failedMatch).finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
 });
+
+test('Lazy callbacks retain pending flattened and deduplicated turtles', () => {
+  const flattened = 'a=[1].lazy.flat_map{|x|[Turtle.new(1,0),Turtle.new(2,0)]}.map{|t|t.forward;t}.force';
+  expect(traceProgram('ruby', flattened, flattened).finalTurtles).toMatchObject([
+    { x: 1, y: 1 },
+    { x: 2, y: 1 },
+  ]);
+  const deduplicated = 'class K;def hash;q=1;0;end;end\na=[1].lazy.map{Turtle.new}.uniq{|t|K.new}.force';
+  expect(traceProgram('ruby', deduplicated, deduplicated).finalTurtles).toMatchObject([{ x: 0, y: 0 }]);
+});

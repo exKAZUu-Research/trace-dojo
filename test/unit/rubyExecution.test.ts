@@ -6539,6 +6539,11 @@ test('Lazy preserves source yield argument lists', () => {
   expect(run('e=Enumerator.new{|y|y.yield 1,2};p e.lazy.with_index{|v,i|nil}.map{|*a|a}.force')).toMatchObject({
     stdout: '[[[1, 2]]]\n',
   });
+  expect(
+    run(
+      'class A;def respond_to_missing?(n,*)=n==:to_ary;def method_missing(n,*)=[1,2];end;p [0].lazy.flat_map{A.new}.map{|x|x.class}.force'
+    )
+  ).toMatchObject({ stdout: '[Integer, Integer]\n' });
 });
 
 test('regexp replacement expands the last participating capture', () => {
@@ -6754,6 +6759,12 @@ test('non-leading unparenthesized command arguments fail before execution', () =
   for (const source of ['x=[1,2]; p x, x.join ","', 'def f1;1;end;def f2(a);a;end;p f1, f2 2'])
     expect(run(source)).toMatchObject({ kind: 'compileError' });
   expect(run('x=[1,2]; p x, x.join(",")')).toMatchObject({ stdout: '[1, 2]\n"1,2"\n' });
+});
+
+test('large Integer quo retains finite Float results', () => {
+  expect(run('p (10**400).quo(1e300),(10**400).quo(1e308)')).toMatchObject({
+    stdout: '1.0e+100\n1.0e+92\n',
+  });
 });
 
 test('strftime distinguishes unknown from truncated directives', () => {

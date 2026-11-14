@@ -310,10 +310,6 @@ def('Integer', 'to_r', 0, (self: bigint) => makeRational(self, 1n));
 def('Integer', 'rationalize', [0, 1], (self: bigint) => makeRational(self, 1n));
 def('Integer', 'numerator', 0, (self) => self);
 def('Integer', 'denominator', 0, () => 1n);
-def('Integer', 'quo', 1, function* (self: bigint, [other]) {
-  if (isRubyFloat(other)) return Number(self) / Number(other);
-  return yield* arithmetic(makeRational(self, 1n), other, '/');
-});
 def('Float', 'to_r', 0, (self: number) => floatToRational(self));
 def('Float', 'rationalize', [0, 1], () => {
   throw new UnsupportedFeatureError('Float#rationalize（有理数）');
