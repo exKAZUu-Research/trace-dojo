@@ -145,6 +145,17 @@ export function receiverSize(recv: Value): Value {
 function arraySelectionSize(length: number, method: string, requested: bigint | undefined): Value {
   if (length === 0 && requested !== undefined && requested > 0n) return 0n;
   if (requested !== undefined && requested >= 0n && length === 1 && method.startsWith('repeated_')) return 1n;
+  if (method === 'repeated_combination' && requested !== undefined) {
+    if (requested < 0n) return 0n;
+    const factors = BigInt(length - 1);
+    const total = BigInt(length) + requested - 1n;
+    let result = 1n;
+    for (let index = 1n; index <= factors; index++) {
+      rt().spend();
+      result = (result * (total - factors + index)) / index;
+    }
+    return result;
+  }
   const size = requested === undefined ? length : Number(requested);
   if (!Number.isSafeInteger(size)) return 0n;
   if (size < 0 || ((method === 'combination' || method === 'permutation') && size > length)) return 0n;
@@ -289,7 +300,11 @@ export function* iterateEnumerator(self: RObject, visit: (value: Value) => Gen):
 }
 
 function* runSource(source: EnumeratorSource, block: RProc, args: Value[] = []): Gen {
-  if (source.iterate) return yield* source.iterate(block);
+  if (source.iterate) {
+    const count = source.args.length + args.length;
+    if (source.method === 'chain' && count > 0) throw argumentCountError(count, 0, 0);
+    return yield* source.iterate(block);
+  }
   return yield* callMethod(source.recv, source.method, [...source.args, ...args], source.keywords, block);
 }
 

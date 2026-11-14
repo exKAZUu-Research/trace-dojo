@@ -2394,6 +2394,25 @@ test('SystemExit initializes status and message independently', () => {
   ).toMatchObject({ stdout: '2\n1\n1\n"x"\n' });
 });
 
+test('NameError and NoMethodError retain constructed metadata', () => {
+  expect(
+    run(
+      'e=NameError.new("oops",:foo,receiver:nil);p e.name,e.message,e.receiver;e=NoMethodError.new("bad",:bar,[1],true,receiver:nil);p e.name,e.args,e.private_call?,e.receiver'
+    )
+  ).toMatchObject({ stdout: ':foo\n"oops"\nnil\n:bar\n[1]\ntrue\nnil\n' });
+});
+
+test('exception metadata distinguishes missing fields from explicit nil', () => {
+  expect(
+    run(
+      'begin;NameError.new.receiver;rescue=>e;p e.class,e.message;end;begin;FrozenError.new.receiver;rescue=>e;p e.class,e.message;end;begin;KeyError.new.key;rescue=>e;p e.class,e.message;end;p KeyError.new(key:nil).key,FrozenError.new(receiver:nil).receiver'
+    )
+  ).toMatchObject({
+    stdout:
+      'ArgumentError\n"no receiver is available"\nArgumentError\n"no receiver is available"\nArgumentError\n"no key is available"\nnil\nnil\n',
+  });
+});
+
 test('process and option globals report unsupported runtime state', () => {
   for (const name of ['$$', '$-p', '$-l', '$-a']) {
     expect(run(`p ${name}`)).toMatchObject({
@@ -2723,6 +2742,25 @@ test('Enumerator each_with_index rejects offsets while with_index accepts them',
     )
   ).toMatchObject({
     stdout: 'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\nArgumentError\n[[1, 0]]\n[[1, 5]]\n',
+  });
+});
+
+test('large repeated combination sizes use a short exact calculation', () => {
+  expect(
+    run('p [1,2].repeated_combination(9007199254740992).size,[1,2,3].repeated_combination(9007199254740992).size')
+  ).toMatchObject({
+    stdout: '9007199254740993\n40564819207303354358693384683521\n',
+  });
+  expect(run('p [1,2].repeated_combination(1000001).size')).toMatchObject({ stdout: '1000002\n' });
+});
+
+test('Enumerator Chain each rejects extra arguments when iteration starts', () => {
+  expect(
+    run(
+      'begin;[1,2].chain([3]).each(3).to_a;rescue=>e;p e.class,e.message;end;begin;[1].chain([2]).each(3){|x|p x};rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({
+    stdout: 'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\nArgumentError\n',
   });
 });
 

@@ -992,12 +992,15 @@ def(
   'initialize',
   [0, 1],
   function* (self: RObject, [message = NIL]) {
-    if (self.frozen) throw frozenError(self, yield* inspectException(self));
-    (self.exception as NonNullable<RObject['exception']>).message = message;
+    yield* setExceptionMessage(self, message);
     return NIL;
   },
   PRIVATE
 );
+function* setExceptionMessage(self: RObject, message: Value): Gen<void> {
+  if (self.frozen) throw frozenError(self, yield* inspectException(self));
+  (self.exception as NonNullable<RObject['exception']>).message = message;
+}
 sdef('Exception', 'exception', [0, -1], function* (self: RClass, args, block, keywords) {
   return yield* callMethod(self, 'new', args, keywords, block);
 });
@@ -1040,11 +1043,93 @@ def('Exception', '==', 1, function* (self: RObject, [other]) {
   if (!(other instanceof RObject) || !other.exception || realClassOf(self) !== realClassOf(other)) return false;
   return yield* rEquals(yield* callMethod(self, 'message', []), yield* callMethod(other, 'message', []));
 });
+def(
+  'NameError',
+  'initialize',
+  [0, -1],
+  function* (self: RObject, args, _block, keywords) {
+    yield* initializeNameError(self, args, keywords);
+    return NIL;
+  },
+  { ...PRIVATE, keywords: true }
+);
+def(
+  'NoMethodError',
+  'initialize',
+  [0, -1],
+  function* (self: RObject, args, _block, keywords) {
+    const remaining = [...args];
+    const privateCall = remaining.length > 3 ? truthy(remaining.pop() ?? NIL) : false;
+    const methodArgs = remaining.length > 2 ? (remaining.pop() ?? NIL) : NIL;
+    yield* initializeNameError(self, remaining, keywords);
+    self.ivars?.set('@__args', methodArgs);
+    self.ivars?.set('@__private_call', privateCall);
+    return NIL;
+  },
+  { ...PRIVATE, keywords: true }
+);
+def(
+  'FrozenError',
+  'initialize',
+  [0, 1],
+  function* (self: RObject, args, _block, keywords) {
+    const options = exceptionKeywords(keywords, ['receiver']);
+    yield* setExceptionMessage(self, args[0] ?? NIL);
+    if (options.has('receiver')) {
+      self.ivars ??= new Map();
+      self.ivars.set('@__receiver', options.get('receiver') ?? NIL);
+    }
+    return NIL;
+  },
+  { ...PRIVATE, keywords: true }
+);
+def(
+  'KeyError',
+  'initialize',
+  [0, 1],
+  function* (self: RObject, args, _block, keywords) {
+    const options = exceptionKeywords(keywords, ['receiver', 'key']);
+    yield* setExceptionMessage(self, args[0] ?? NIL);
+    self.ivars ??= new Map();
+    for (const [name, value] of options) self.ivars.set(`@__${name}`, value);
+    return NIL;
+  },
+  { ...PRIVATE, keywords: true }
+);
+
+function* initializeNameError(self: RObject, args: Value[], keywords: RHash | undefined): Gen<void> {
+  const options = exceptionKeywords(keywords, ['receiver']);
+  const name = args.length > 1 ? (args.at(-1) ?? NIL) : NIL;
+  const messageCount = args.length > 1 ? args.length - 1 : args.length;
+  if (messageCount > 1) throw argumentCountError(messageCount, 0, 1);
+  yield* setExceptionMessage(self, args[0] ?? NIL);
+  self.ivars ??= new Map();
+  self.ivars.set('@__name', name);
+  if (options.has('receiver')) self.ivars.set('@__receiver', options.get('receiver') ?? NIL);
+}
+
+function exceptionKeywords(keywords: RHash | undefined, allowed: string[]): Map<string, Value> {
+  const options = new Map<string, Value>();
+  for (const entry of keywords?.map.values() ?? []) {
+    const name = entry.key instanceof RSymbol ? entry.key.name : '';
+    if (!allowed.includes(name)) throw argumentError(`unknown keyword: :${name}`);
+    options.set(name, entry.value);
+  }
+  return options;
+}
+
+function exceptionMetadata(self: RObject, name: string, label: string): Value {
+  if (!self.ivars?.has(name)) throw argumentError(`no ${label} is available`);
+  return self.ivars.get(name) ?? NIL;
+}
+
 def('NameError', 'name', 0, (self: RObject) => self.ivars?.get('@__name') ?? NIL);
-def('NameError', 'receiver', 0, (self: RObject) => self.ivars?.get('@__receiver') ?? NIL);
-def('FrozenError', 'receiver', 0, (self: RObject) => self.ivars?.get('@__receiver') ?? NIL);
-def('KeyError', 'key', 0, (self: RObject) => self.ivars?.get('@__key') ?? NIL);
-def('KeyError', 'receiver', 0, (self: RObject) => self.ivars?.get('@__receiver') ?? NIL);
+def('NameError', 'receiver', 0, (self: RObject) => exceptionMetadata(self, '@__receiver', 'receiver'));
+def('NoMethodError', 'args', 0, (self: RObject) => self.ivars?.get('@__args') ?? NIL);
+def('NoMethodError', 'private_call?', 0, (self: RObject) => self.ivars?.get('@__private_call') ?? false);
+def('FrozenError', 'receiver', 0, (self: RObject) => exceptionMetadata(self, '@__receiver', 'receiver'));
+def('KeyError', 'key', 0, (self: RObject) => exceptionMetadata(self, '@__key', 'key'));
+def('KeyError', 'receiver', 0, (self: RObject) => exceptionMetadata(self, '@__receiver', 'receiver'));
 def('StopIteration', 'result', 0, (self: RObject) => self.ivars?.get('@result') ?? NIL);
 def(
   'SystemExit',
