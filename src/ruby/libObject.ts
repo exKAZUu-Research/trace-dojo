@@ -1115,6 +1115,8 @@ def('NoMethodError', 'private_call?', 0, (self: RObject) => self.ivars?.get('@__
 def('FrozenError', 'receiver', 0, (self: RObject) => exceptionMetadata(self, '@__receiver', 'receiver'));
 def('KeyError', 'key', 0, (self: RObject) => exceptionMetadata(self, '@__key', 'key'));
 def('KeyError', 'receiver', 0, (self: RObject) => exceptionMetadata(self, '@__receiver', 'receiver'));
+def('NoMatchingPatternKeyError', 'key', 0, (self: RObject) => exceptionMetadata(self, '@__key', 'key'));
+def('NoMatchingPatternKeyError', 'matchee', 0, (self: RObject) => exceptionMetadata(self, '@__matchee', 'matchee'));
 def('StopIteration', 'result', 0, (self: RObject) => self.ivars?.get('@result') ?? NIL);
 def(
   'SystemExit',

@@ -392,9 +392,10 @@ export function* ev(e: Expr, frame: Frame): Gen {
     }
     case 'caseIn': {
       const subject = yield* ev(e.subject, frame);
+      const cache = new Map<Value, Value[]>();
       for (const clause of e.clauses) {
         rt().currentRow = clause.row;
-        if (!(yield* matchPattern(clause.pattern, subject, frame))) continue;
+        if (!(yield* matchPattern(clause.pattern, subject, frame, cache))) continue;
         if (clause.guard && truthy(yield* ev(clause.guard.cond, frame)) === clause.guard.unless) {
           guardFailed();
           continue;

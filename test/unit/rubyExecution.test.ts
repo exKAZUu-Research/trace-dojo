@@ -5329,6 +5329,33 @@ test('MatchData offset accessors reject out-of-range captures', () => {
   });
 });
 
+test('pattern matching honors deconstruction overrides and dynamic hooks', () => {
+  expect(run('class A<Array;def deconstruct = [2];end;a=A.new;a<<1;p((a in [2]))')).toMatchObject({ stdout: 'true\n' });
+  expect(run('class H<Hash;def deconstruct_keys(keys) = {a:2};end;h=H.new;h[:a]=1;p((h in {a:2}))')).toMatchObject({
+    stdout: 'true\n',
+  });
+  expect(
+    run('class P;def respond_to_missing?(n, *) = n==:deconstruct;def method_missing(n, *) = [1];end;p((P.new in [1]))')
+  ).toMatchObject({ stdout: 'true\n' });
+  expect(run('class C;def method_missing(n, *) = "x";end;p "p" + C.new')).toMatchObject({ stdout: '"px"\n' });
+});
+
+test('case in reuses a subject deconstruction across clauses', () => {
+  expect(
+    run(
+      'class A;def initialize = @n=0;def deconstruct;@n+=1;p @n;[@n];end;end;case A.new;in [0] then p :zero;in [2] then p :two;else p :no;end'
+    )
+  ).toMatchObject({
+    stdout: '1\n:no\n',
+  });
+});
+
+test('missing-key pattern exceptions retain key and matchee', () => {
+  expect(run('begin;{a:1}=>{b:};rescue NoMatchingPatternKeyError=>e;p e.key,e.matchee;end')).toMatchObject({
+    stdout: ':b\n{a: 1}\n',
+  });
+});
+
 test('Data copies remain frozen and Rational copies preserve identity', () => {
   expect(
     run(
