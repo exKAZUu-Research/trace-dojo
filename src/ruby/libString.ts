@@ -113,6 +113,17 @@ function* patternText(value: Value, kind: 'characters' | 'regexp'): Gen<string> 
   return pattern.s;
 }
 
+function* characterSetPattern(self: RString, value: Value): Gen<RString> {
+  const pattern = yield* stringArgValue(value);
+  if (pattern.rawBytes && !pattern.binary) throw argumentError('invalid byte sequence in UTF-8');
+  combinedStringEncoding(
+    self.binary,
+    stringBytes(self).every((byte) => byte < 0x80),
+    pattern
+  );
+  return pattern;
+}
+
 function regexpUnsupported(value: Value): void {
   if (value instanceof RString || value instanceof RSymbol) return;
   if (typeof value === 'object' && value !== NIL && (value as { cls?: { name?: string } }).cls?.name === 'Regexp') {
@@ -328,22 +339,7 @@ def('String', '-@', 0, (self: RString) => {
 def('String', '+@', 0, (self: RString) => (self.frozen ? stringFromBytes(stringBytes(self), self.binary) : self));
 def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
   modify(self);
-  const converted: (RString | bigint)[] = [];
-  let validationBinary = self.binary;
-  let validationAscii = stringBytes(self).every((byte) => byte < 0x80);
-  for (const arg of args) {
-    if (typeof arg === 'bigint') {
-      validateConcatCodepoint(arg, validationBinary);
-      if (arg > 0x7fn) validationAscii = false;
-      converted.push(arg);
-    } else {
-      const string = yield* stringArgValue(arg);
-      const stringAscii = stringBytes(string).every((byte) => byte < 0x80);
-      if (validationAscii && !stringAscii) validationBinary = string.binary;
-      validationAscii &&= stringAscii;
-      converted.push(string);
-    }
-  }
+  const converted = yield* convertedConcatArgs(self, args);
   const chunks: Uint8Array[] = [stringBytes(self)];
   let length = chunks[0].length;
   let binary = self.binary;
@@ -377,6 +373,25 @@ def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
   self.rawBytes = result.rawBytes;
   return self;
 });
+function* convertedConcatArgs(self: RString, args: Value[]): Gen<(RString | bigint)[]> {
+  const converted: (RString | bigint)[] = [];
+  let validationBinary = self.binary;
+  let validationAscii = stringBytes(self).every((byte) => byte < 0x80);
+  for (const arg of args) {
+    if (typeof arg === 'bigint') {
+      validateConcatCodepoint(arg, validationBinary);
+      if (arg > 0x7fn) validationAscii = false;
+      converted.push(arg);
+    } else {
+      const string = yield* stringArgValue(arg);
+      const stringAscii = stringBytes(string).every((byte) => byte < 0x80);
+      if (validationAscii && !stringAscii) validationBinary = string.binary;
+      validationAscii &&= stringAscii;
+      converted.push(string);
+    }
+  }
+  return converted;
+}
 function validateConcatCodepoint(value: bigint, binary: boolean): void {
   if (value < 0n) throw rangeError(`${value} out of char range`);
   if (value > 0x7f_ff_ff_ff_ff_ff_ff_ffn) throw rangeError('bignum out of char range');
@@ -767,7 +782,7 @@ def('String', 'rindex', [1, 2], function* (self: RString, args) {
 def('String', 'count', [1, -1], function* (self: RString, args) {
   if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   const sets: string[] = [];
-  for (const arg of args) sets.push(yield* patternText(arg, 'characters'));
+  for (const arg of args) sets.push((yield* characterSetPattern(self, arg)).s);
   const matches = characterSetMatcher(sets);
   return BigInt(charsOf(self.s).filter((char) => matches(char)).length);
 });
@@ -775,7 +790,7 @@ def('String', 'delete', [1, -1], function* (self: RString, args) {
   if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   if (self.s.length === 0) return stringFromBytes(stringBytes(self), self.binary);
   const sets: string[] = [];
-  for (const arg of args) sets.push(yield* patternText(arg, 'characters'));
+  for (const arg of args) sets.push((yield* characterSetPattern(self, arg)).s);
   const matches = characterSetMatcher(sets);
   return textResult(
     self,
@@ -789,7 +804,7 @@ def('String', 'delete!', [1, -1], function* (self: RString, args) {
   if (self.s.length === 0) return NIL;
   modify(self);
   const sets: string[] = [];
-  for (const arg of args) sets.push(yield* patternText(arg, 'characters'));
+  for (const arg of args) sets.push((yield* characterSetPattern(self, arg)).s);
   const matches = characterSetMatcher(sets);
   const result = charsOf(self.s)
     .filter((char) => !matches(char))
@@ -814,14 +829,14 @@ function squeeze(text: string, sets: string[]): string {
 def('String', 'squeeze', [0, -1], function* (self: RString, args) {
   if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   const sets: string[] = [];
-  for (const arg of args) sets.push(yield* patternText(arg, 'characters'));
+  for (const arg of args) sets.push((yield* characterSetPattern(self, arg)).s);
   return textResult(self, squeeze(self.s, sets));
 });
 def('String', 'squeeze!', [0, -1], function* (self: RString, args) {
   if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   modify(self);
   const sets: string[] = [];
-  for (const arg of args) sets.push(yield* patternText(arg, 'characters'));
+  for (const arg of args) sets.push((yield* characterSetPattern(self, arg)).s);
   const result = squeeze(self.s, sets);
   if (result === self.s) return NIL;
   setText(self, result);
@@ -867,7 +882,6 @@ function characterSetMatcher(sets: string[]): (char: string) => boolean {
   return (char) => tests.every((test) => test(char));
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Translation expands character sets and optionally squeezes adjacent replacements.
 function translate(
   text: string,
   fromSpec: string,
@@ -876,17 +890,19 @@ function translate(
 ): { text: string; matched: boolean } {
   const from = expandSet(fromSpec);
   const to = expandSet(toSpec).chars;
+  const positions = new Map<string, number>();
+  rt().chargeSlots(from.chars.length);
+  for (const [index, char] of from.chars.entries()) {
+    if (index % 256 === 0) rt().spend();
+    positions.set(char, index);
+  }
   let result = '';
   let previous: string | undefined;
   let matched = false;
-  for (const char of charsOf(text)) {
-    let replacement: string | undefined;
-    if (from.negated) {
-      if (!from.chars.includes(char)) replacement = to.at(-1) ?? '';
-    } else {
-      const position = from.chars.lastIndexOf(char);
-      if (position !== -1) replacement = to.length === 0 ? '' : (to[position] ?? to.at(-1));
-    }
+  let count = 0;
+  for (const char of text) {
+    if (count++ % 256 === 0) rt().spend();
+    const replacement = translationReplacement(char, from.negated, positions, to);
     if (replacement === undefined) {
       result += char;
       previous = undefined;
@@ -900,37 +916,65 @@ function translate(
   return { text: result, matched };
 }
 
+function translationReplacement(
+  char: string,
+  negated: boolean,
+  positions: Map<string, number>,
+  to: string[]
+): string | undefined {
+  if (negated) return positions.has(char) ? undefined : (to.at(-1) ?? '');
+  const position = positions.get(char);
+  return position === undefined ? undefined : to.length === 0 ? '' : (to[position] ?? to.at(-1));
+}
+
 for (const [name, squeezeRuns] of [
   ['tr', false],
   ['tr_s', true],
 ] as const) {
   def('String', name, 2, function* (self: RString, [from, to]) {
-    if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
-    if (self.s.length === 0) {
-      if (!(from instanceof RString)) yield* stringArgValue(from);
-      if (!(to instanceof RString)) yield* stringArgValue(to);
-      return stringFromBytes(stringBytes(self), self.binary);
-    }
-    return textResult(
-      self,
-      translate(self.s, yield* patternText(from, 'characters'), yield* patternText(to, 'characters'), squeezeRuns).text
-    );
+    const patterns = yield* translationPatterns(self, from, to);
+    if (!patterns) return stringFromBytes(stringBytes(self), self.binary);
+    const { source, replacement } = patterns;
+    const translated = translate(self.s, source.s, replacement.s, squeezeRuns);
+    const result = textResult(self, translated.text);
+    if (translated.matched)
+      result.binary = combinedStringEncoding(
+        self.binary,
+        stringBytes(self).every((byte) => byte < 0x80),
+        replacement
+      );
+    return result;
   });
   def('String', `${name}!`, 2, function* (self: RString, [from, to]) {
-    if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
-    if (self.s.length === 0) {
-      if (!(from instanceof RString)) yield* stringArgValue(from);
-      if (!(to instanceof RString)) yield* stringArgValue(to);
-      return NIL;
-    }
-    const source = yield* patternText(from, 'characters');
-    const replacement = yield* patternText(to, 'characters');
+    const patterns = yield* translationPatterns(self, from, to);
+    if (!patterns) return NIL;
+    const { source, replacement } = patterns;
     modify(self);
-    const result = translate(self.s, source, replacement, squeezeRuns);
+    const result = translate(self.s, source.s, replacement.s, squeezeRuns);
     if (!result.matched) return NIL;
+    const binary = combinedStringEncoding(
+      self.binary,
+      stringBytes(self).every((byte) => byte < 0x80),
+      replacement
+    );
     setText(self, result.text);
+    self.binary = binary;
     return self;
   });
+}
+
+function* translationPatterns(
+  self: RString,
+  from: Value,
+  to: Value
+): Gen<{ source: RString; replacement: RString } | undefined> {
+  if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
+  if (self.s.length === 0) {
+    if (!(from instanceof RString)) yield* stringArgValue(from);
+    if (!(to instanceof RString)) yield* stringArgValue(to);
+    return undefined;
+  }
+  return { source: yield* characterSetPattern(self, from), replacement: yield* characterSetPattern(self, to) };
 }
 
 // Substitution --------------------------------------------------------------------------------------------------------

@@ -161,6 +161,12 @@ test('custom Range reverse_each roots generated elements during callbacks', () =
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
+test('Array delete roots its last match during later comparisons', () => {
+  const program =
+    'class T<Turtle;def ==(x);true;end;end;class K;def ==(x);$a.clear;q=1;false;end;end;$a=[T.new,K.new];x=$a.delete(:x)';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
 test('Array concat roots early conversion results', () => {
   const program =
     'class A;def to_ary;[Turtle.new];end;end;class B;def to_ary;q=1;[];end;end;a=[];a.concat(A.new,B.new)';

@@ -2174,6 +2174,20 @@ test('String substitutions preserve mixed UTF-8 and invalid bytes', () => {
   });
 });
 
+test('String character-set operations check argument encodings', () => {
+  const source =
+    's=255.chr;begin;s.count("é");rescue=>e;p e.class;end;begin;s.delete("é");rescue=>e;p e.class;end;begin;s.squeeze("é");rescue=>e;p e.class;end;begin;("a"+s).tr("a","é");rescue=>e;p e.class;end';
+  expect(run(source)).toMatchObject({
+    stdout: 'Encoding::CompatibilityError\n'.repeat(4),
+  });
+  expect(run('s=255.chr;s.clear;s<<"a";p s.tr("a","é").bytes')).toMatchObject({ stdout: '[195, 169]\n' });
+});
+
+test('String translation stays bounded for broad character ranges', () => {
+  expect(run(String.raw`s="a"*100000;p s.tr("a-\u{ffff}","x").size`)).toMatchObject({ stdout: '100000\n' });
+  expect(run(String.raw`s="a"*40000;p s.tr_s("a-\u{ffff}","x").size`)).toMatchObject({ stdout: '1\n' });
+});
+
 test('Set reinitialization preserves existing members and frozen contents', () => {
   expect(
     run(

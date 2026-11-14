@@ -383,21 +383,28 @@ def('Array', 'delete', 1, function* (self: RArray, [target], block) {
   let found: Value | undefined;
   let read = 0;
   const kept: number[] = [];
-  for (; read < self.items.length; read++) {
-    const item = self.items[read];
-    const matched = yield* rEquals(item, target);
-    if (matched) {
-      yield* modify(self);
-      found = item;
-    } else kept.push(read);
+  const mark = rt().held.length;
+  rt().held.push(NIL);
+  try {
+    for (; read < self.items.length; read++) {
+      const item = self.items[read];
+      const matched = yield* rEquals(item, target);
+      if (matched) {
+        yield* modify(self);
+        found = item;
+        rt().held[mark] = item;
+      } else kept.push(read);
+    }
+    if (found === undefined) return block ? yield* call(block, target) : NIL;
+    yield* modify(self);
+    self.items = [
+      ...kept.flatMap((index) => (index < self.items.length ? [self.items[index]] : [])),
+      ...self.items.slice(read),
+    ];
+    return found;
+  } finally {
+    rt().held.length = mark;
   }
-  if (found === undefined) return block ? yield* call(block, target) : NIL;
-  yield* modify(self);
-  self.items = [
-    ...kept.flatMap((index) => (index < self.items.length ? [self.items[index]] : [])),
-    ...self.items.slice(read),
-  ];
-  return found;
 });
 def('Array', 'delete_at', 1, function* (self: RArray, [indexValue]) {
   let index = yield* toIndex(indexValue);
