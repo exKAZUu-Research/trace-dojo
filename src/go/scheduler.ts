@@ -1,7 +1,7 @@
 import { currentRuntime } from './native';
 import { type Blocked, type Frame, GoFatal, pushFrameRoots, type Runtime, type Suspending } from './runtime';
 import { plainPanic } from './runtimeErrors';
-import { Channel, type Value } from './values';
+import { Channel, GoFunc, type Value } from './values';
 
 /**
  * Runs goroutines one at a time with fixed rules, since Go's own scheduler runs them in parallel in an order that
@@ -25,7 +25,7 @@ export class Scheduler {
   private nextTimerSeq = 0;
   current: Goroutine | undefined;
   /** The virtual time in nanoseconds since the program started. */
-  now = 0;
+  now = 0n;
 
   constructor(private readonly runtime: Runtime) {
     runtime.scheduler = this;
@@ -87,8 +87,8 @@ export class Scheduler {
   // Timers ----------------------------------------------------------------------------------------------------------
 
   /** Calls `fire` when the virtual time reaches `delay` nanoseconds from now. */
-  addTimer(delay: number, fire: () => void, channel?: Channel, roots: unknown[] = []): Timer {
-    const timer: Timer = { when: this.now + Math.max(delay, 0), seq: this.nextTimerSeq++, fire, channel, roots };
+  addTimer(delay: bigint, fire: () => void, channel?: Channel, roots: unknown[] = []): Timer {
+    const timer: Timer = { when: this.now + (delay > 0n ? delay : 0n), seq: this.nextTimerSeq++, fire, channel, roots };
     this.timers.push(timer);
     return timer;
   }
@@ -104,7 +104,8 @@ export class Scheduler {
   /** Advances the virtual time to the earliest timers and fires them, telling whether there were any. */
   private fireTimers(): boolean {
     if (this.timers.length === 0) return false;
-    const when = Math.min(...this.timers.map((timer) => timer.when));
+    let when = this.timers[0].when;
+    for (const timer of this.timers) if (timer.when < when) when = timer.when;
     const due = this.timers.filter((timer) => timer.when === when).toSorted((a, b) => a.seq - b.seq);
     for (const timer of due) this.timers.splice(this.timers.indexOf(timer), 1);
     this.now = when;
@@ -129,8 +130,8 @@ export class Scheduler {
   }
 
   /** `time.Sleep`: blocks the running goroutine until the virtual time advances by `duration` nanoseconds. */
-  *sleep(duration: number): Suspending<void> {
-    if (duration <= 0) return;
+  *sleep(duration: bigint): Suspending<void> {
+    if (duration <= 0n) return;
     const goroutine = this.current as Goroutine;
     this.addTimer(duration, () => this.ready(goroutine));
     yield* this.park('sleep');
@@ -156,7 +157,7 @@ export class Goroutine {
 }
 
 interface Timer {
-  when: number;
+  when: bigint;
   seq: number;
   fire: () => void;
   /** The channel that the timer sends to, which garbage collection must follow while the timer is pending. */
@@ -194,6 +195,11 @@ interface Completed {
 }
 
 let nextChannelId = 0;
+
+export function goroutineFunction(value: Value): GoFunc {
+  if (!(value instanceof GoFunc)) throw new GoFatal('fatal error: go of nil func value');
+  return value;
+}
 
 export function makeChannel(capacity: number, zero: () => Value, timer = false): Channel {
   return new Channel(capacity, zero, nextChannelId++, timer);

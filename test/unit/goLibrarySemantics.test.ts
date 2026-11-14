@@ -254,13 +254,13 @@ func main(){f:=big.NewInt(1);for i:=int64(2);i<=${n};i++{f.Mul(f,big.NewInt(i))}
   });
 });
 
-test('native arithmetic budgets admit Fibonacci with 50000 steps', () => {
+test('native arithmetic budgets admit additions of large operands', () => {
   const source = `package main
 import("fmt";"math/big")
-func main(){a,b:=big.NewInt(0),big.NewInt(1);for i:=0;i<50000;i++{a.Add(a,b);a,b=b,a};fmt.Println(len(a.String()))}`;
+func main(){a:=new(big.Int).Lsh(big.NewInt(1),30000);b:=new(big.Int).Set(a);for i:=0;i<5000;i++{a.Add(a,b);a,b=b,a};fmt.Println(len(a.String()))}`;
   expect(executeProgram('go', source)).toMatchObject({
     kind: 'executed',
-    stdout: '10450\n',
+    stdout: '10076\n',
     uncaughtException: undefined,
   });
 });

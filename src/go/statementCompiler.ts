@@ -48,7 +48,6 @@ import {
   type Execution,
   FALLTHROUGH,
   type Frame,
-  GoFatal,
   GoPanic,
   readLocal,
   RETURN,
@@ -60,7 +59,7 @@ import {
 } from './runtime';
 import { nilPointerPanic, panicNilValue, runtimeErrorPanic } from './runtimeErrors';
 import { runtimePrint } from './runtimePrint';
-import { closeChannel, receive, scheduler, select, type SelectOp, send } from './scheduler';
+import { closeChannel, goroutineFunction, receive, scheduler, select, type SelectOp, send } from './scheduler';
 import { sizeOf } from './sliceOps';
 import type { SliceTracking } from './slicePass';
 import { clobberMemory, define, joining, storeLocalMemory } from './ssaValues';
@@ -1744,7 +1743,7 @@ export abstract class StatementCompiler extends CallCompiler {
       const fn = readFunction(frame);
       const argValues = withTemporary(frame, fn, () => args(frame));
       if (!(fn instanceof GoFunc)) {
-        if (keyword === 'go') throw new GoFatal('fatal error: go of nil func value');
+        if (keyword === 'go') goroutineFunction(fn);
         launch(frame, () => nilPointerPanic(), undefined, []);
         return;
       }

@@ -4,8 +4,8 @@ import { addBlockingMethod, addMethod, definePackage, fn, namedType, typeEntity 
 import { GoFatal, GoPanic, type Suspending } from '../runtime';
 import { nilPointerPanic } from '../runtimeErrors';
 import { type Goroutine, scheduler } from '../scheduler';
-import { ANY, BASIC, type FuncType } from '../types';
-import { GoFunc, type GoStruct, Iface, type NativeState, type Pointer, type Value } from '../values';
+import { ANY, BASIC, type FuncType, pointerTo } from '../types';
+import { Cell, GoFunc, GoStruct, Iface, type NativeState, Pointer, type Value } from '../values';
 import { BOOL, INT } from './support';
 
 /**
@@ -282,6 +282,39 @@ for (const [name, writer] of [
   );
 }
 
+const LOCKER = namedType('sync', 'Locker', {
+  kind: 'interface',
+  methods: [
+    { name: 'Lock', type: NO_ARGS },
+    { name: 'Unlock', type: NO_ARGS },
+  ],
+});
+const RLOCKER = namedType('sync', 'rlocker', { kind: 'struct', fields: [] });
+const readLockerOf = (receiver: Value): RWMutexState =>
+  rwMutexOf(((receiver as Pointer).load() as GoStruct).native?.receiver as Value);
+addMethod(
+  RW_MUTEX,
+  'RLocker',
+  fn([], [LOCKER]),
+  (receiver) =>
+    new Iface(pointerTo(RLOCKER), new Pointer(new Cell(new GoStruct([], { receiver, roots: () => [receiver] })), 'v')),
+  true
+);
+addBlockingMethod(RLOCKER, 'Lock', NO_ARGS, function* (receiver) {
+  yield* readLockerOf(receiver).acquire(false);
+  return;
+});
+addMethod(
+  RLOCKER,
+  'Unlock',
+  NO_ARGS,
+  (receiver) => {
+    readLockerOf(receiver).release(false);
+    return;
+  },
+  true
+);
+
 // Once ----------------------------------------------------------------------------------------------------------------
 
 class OnceState {
@@ -436,6 +469,7 @@ const members: Record<string, Entity> = {
   WaitGroup: typeEntity(WAIT_GROUP),
   Mutex: typeEntity(MUTEX),
   RWMutex: typeEntity(RW_MUTEX),
+  Locker: typeEntity(LOCKER),
   Once: typeEntity(ONCE),
   Map: typeEntity(SYNC_MAP),
 };
@@ -444,7 +478,6 @@ export const SYNC_PACKAGE = definePackage('sync', members, [
   'Cond',
   'NewCond',
   'Pool',
-  'Locker',
   'OnceFunc',
   'OnceValue',
   'OnceValues',

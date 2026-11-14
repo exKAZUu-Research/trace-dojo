@@ -290,7 +290,7 @@ export class ProgramCompiler extends StatementCompiler {
       entity.type = BASIC.invalid;
       const outerFn = this.fn;
       try {
-        entity.type = this.withScopeOf(this.scopeOfType(entity), () => this.resolveType(state.spec.type));
+        entity.type = this.withScopeOf(this.scopeOfType(entity), () => this.resolveType(state.spec.type, false, true));
       } finally {
         this.fn = outerFn;
       }

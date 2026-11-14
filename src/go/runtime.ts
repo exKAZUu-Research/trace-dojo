@@ -222,7 +222,7 @@ export class Runtime implements TracedRuntime<Frame> {
   /** The frames of the running goroutine. */
   frames: Frame[] = [];
   /** Runs the goroutines when the program uses them. */
-  scheduler: { roots(): unknown[]; now: number } | undefined;
+  scheduler: { roots(): unknown[]; now: bigint } | undefined;
   /** The package-level variables, which pointers may refer to. */
   globals: Cell[] = [];
   private allocated = 0;

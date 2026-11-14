@@ -295,7 +295,7 @@ export abstract class CompilerBase {
   resolveType(syntax: TypeExpression, direct = false, constraint = false): Type {
     const type = this.resolveTypeSyntax(syntax, direct);
     const under = underlying(type);
-    if (!constraint && !this.inConstraint && under.kind === 'interface' && under.typeSet) {
+    if (!constraint && under.kind === 'interface' && under.typeSet) {
       return this.error(
         syntax,
         `${describeType(type)} 型は、型の制約にしか使えません（型の集合を持つインターフェースです）。`
@@ -482,7 +482,7 @@ export abstract class CompilerBase {
     const outer = this.inConstraint;
     this.inConstraint = true;
     try {
-      return this.resolveType(syntax);
+      return this.resolveType(syntax, false, true);
     } finally {
       this.inConstraint = outer;
     }

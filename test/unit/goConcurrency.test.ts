@@ -269,3 +269,47 @@ func main(){p:=NewTurtle(0,0);gate:=make(chan bool);go func(){gate<-true}();for 
     });
   }
 );
+
+test('read lockers share RWMutex state and satisfy Locker', () => {
+  const source = `package main
+import("fmt";"sync")
+func main(){var rw sync.RWMutex;rw.Lock();var reader sync.Locker=rw.RLocker();entered:=make(chan bool);done:=make(chan bool);go func(){entered<-true;reader.Lock();fmt.Println("reader");reader.Unlock();done<-true}();<-entered;fmt.Println("waiting");rw.Unlock();<-done;fmt.Println(rw.TryLock());rw.Unlock();var lock sync.Locker=&sync.Mutex{};lock.Lock();lock.Unlock()}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'waiting\nreader\ntrue\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['nil', 'task'])('AfterFunc launches a nil callback fatally: %s', (callback) => {
+  const source = `package main
+import "time"
+func main(){var task func();_=task;time.AfterFunc(1,${callback});time.Sleep(time.Millisecond)}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: 'fatal error: go of nil func value',
+  });
+});
+
+test('a stopped nil AfterFunc can be reset without becoming a channel timer', () => {
+  const source = `package main
+import("fmt";"time")
+func main(){t:=time.AfterFunc(time.Hour,nil);fmt.Println(t.C==nil,t.Stop(),t.Reset(time.Hour));time.Sleep(2*time.Hour)}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true true false\n',
+    uncaughtException: 'fatal error: go of nil func value',
+  });
+});
+
+test('virtual nanoseconds and timer order remain exact after long sleeps', () => {
+  const source = `package main
+import("fmt";"time")
+func main(){time.Sleep(105*24*time.Hour);start:=time.Now();time.Sleep(time.Nanosecond);fmt.Println(time.Since(start));later:=time.NewTimer(time.Nanosecond);earlier:=time.NewTimer(0);select{case <-later.C:fmt.Println("later");case <-earlier.C:fmt.Println("earlier")}}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1ns\nearlier\n',
+    uncaughtException: undefined,
+  });
+});

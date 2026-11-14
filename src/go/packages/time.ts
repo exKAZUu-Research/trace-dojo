@@ -15,9 +15,9 @@ import {
 } from '../native';
 import type { Runtime } from '../runtime';
 import { nilPointerPanic, plainPanic } from '../runtimeErrors';
-import { type Goroutine, makeChannel, scheduler } from '../scheduler';
+import { type Goroutine, goroutineFunction, makeChannel, scheduler } from '../scheduler';
 import { BASIC, pointerTo, type Type } from '../types';
-import { Cell, type Channel, type GoFunc, GoStruct, Iface, Pointer, type Value } from '../values';
+import { Cell, type Channel, GoStruct, Iface, Pointer, type Value } from '../values';
 import * as goTime from './goTime';
 import * as timeFormat from './goTimeFormat';
 import {
@@ -371,7 +371,7 @@ function clockOf(runtime: Runtime): Clock {
 
 /** The monotonic clock, counted from 1 when the program first reads it, as Go counts from its start. */
 function monotonic(): bigint {
-  return BigInt(currentRuntime().scheduler?.now ?? 0) + 1n;
+  return (currentRuntime().scheduler?.now ?? 0n) + 1n;
 }
 
 export function now(): goTime.Time {
@@ -395,9 +395,7 @@ const TICKER = namedType('time', 'Ticker', {
 
 interface TimerState {
   pending?: ReturnType<ReturnType<typeof scheduler>['addTimer']>;
-  channel?: Channel;
-  period?: bigint;
-  task?: Value;
+  action: { kind: 'channel'; channel: Channel; period?: bigint } | { kind: 'callback'; task: Value };
 }
 
 /** Sends the time to a timer's channel unless a value waits there already, as a ticker drops ticks no one takes. */
@@ -421,12 +419,13 @@ function deliver(channel: Channel): void {
 
 function arm(state: TimerState, delay: bigint): void {
   const running = scheduler();
+  const { action } = state;
   state.pending = running.addTimer(
-    Number(delay),
+    delay,
     () => {
       state.pending = undefined;
-      if (state.task !== undefined) {
-        const task = state.task as GoFunc;
+      if (action.kind === 'callback') {
+        const task = goroutineFunction(action.task);
         running.spawn(
           function* () {
             return task.resume ? yield* task.resume([]) : task.call([]);
@@ -435,20 +434,34 @@ function arm(state: TimerState, delay: bigint): void {
         );
         return;
       }
-      deliver(state.channel as Channel);
-      if (state.period !== undefined) arm(state, state.period);
+      deliver(action.channel);
+      if (action.period !== undefined) arm(state, action.period);
     },
-    state.channel,
-    [state.task]
+    action.kind === 'channel' ? action.channel : undefined,
+    action.kind === 'callback' ? [action.task] : []
   );
 }
 
-function newTimer(delay: bigint, period?: bigint, task?: Value): Pointer {
-  const channel =
-    task === undefined ? makeChannel(0, () => timeValue({ wall: 0n, ext: 0n, loc: undefined }), true) : undefined;
-  const state: TimerState = { channel, period, task };
+function newTimer(delay: bigint, period?: bigint, callback?: { task: Value }): Pointer {
+  const action: TimerState['action'] = callback
+    ? { kind: 'callback', task: callback.task }
+    : {
+        kind: 'channel',
+        channel: makeChannel(0, () => timeValue({ wall: 0n, ext: 0n, loc: undefined }), true),
+        period,
+      };
+  const state: TimerState = { action };
   arm(state, delay);
-  return new Pointer({ v: new GoStruct([channel], { timer: state }) } as never, 'v');
+  const channel = action.kind === 'channel' ? action.channel : undefined;
+  return new Pointer(
+    new Cell(
+      new GoStruct([channel], {
+        timer: state,
+        roots: () => (action.kind === 'callback' ? [action.task] : [action.channel]),
+      })
+    ),
+    'v'
+  );
 }
 
 const timerStateOf = (receiver: Value): TimerState =>
@@ -457,9 +470,10 @@ const timerStateOf = (receiver: Value): TimerState =>
 /** Stops a timer, discarding a time it sent that no one took, as Go 1.23 does; tells whether it was pending. */
 function stopTimer(state: TimerState): boolean {
   const pending = state.pending !== undefined && scheduler().removeTimer(state.pending);
-  const wasPending = pending || (state.task === undefined && (state.channel?.buffer.length ?? 0) > 0);
+  const channel = state.action.kind === 'channel' ? state.action.channel : undefined;
+  const wasPending = pending || (channel?.buffer.length ?? 0) > 0;
   state.pending = undefined;
-  if (state.channel) state.channel.buffer.length = 0;
+  if (channel) channel.buffer.length = 0;
   return wasPending;
 }
 
@@ -494,8 +508,9 @@ addMethod(
   (receiver, [period]) => {
     const state = timerStateOf(receiver);
     stopTimer(state);
-    state.period = positivePeriod(period as bigint, 'Ticker.Reset');
-    arm(state, state.period);
+    const action = state.action as Extract<TimerState['action'], { kind: 'channel' }>;
+    action.period = positivePeriod(period as bigint, 'Ticker.Reset');
+    arm(state, action.period);
     return;
   },
   true
@@ -577,7 +592,7 @@ const members: Record<string, Entity> = {
     return goTime.sub(t, now());
   }),
   Sleep: blockingFunction('Sleep', fn([DURATION], []), function* ([duration]) {
-    yield* scheduler().sleep(Number(duration as bigint));
+    yield* scheduler().sleep(duration as bigint);
     return;
   }),
   After: nativeFunction(
@@ -587,7 +602,7 @@ const members: Record<string, Entity> = {
   ),
   NewTimer: nativeFunction('NewTimer', fn([DURATION], [pointerTo(TIMER)]), ([delay]) => newTimer(delay as bigint)),
   AfterFunc: nativeFunction('AfterFunc', fn([DURATION, fn([], [])], [pointerTo(TIMER)]), ([delay, task]) =>
-    newTimer(delay as bigint, undefined, task)
+    newTimer(delay as bigint, undefined, { task })
   ),
   NewTicker: nativeFunction('NewTicker', fn([DURATION], [pointerTo(TICKER)]), ([period]) =>
     newTimer(positivePeriod(period as bigint, 'NewTicker'), period as bigint)

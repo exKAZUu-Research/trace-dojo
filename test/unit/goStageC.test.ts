@@ -96,3 +96,28 @@ test.each([
       expect.objectContaining({ row: 1, message: expect.stringContaining('型の制約にしか使えません') }),
     ]);
 });
+
+test.each(['type Number = interface{~int|~float64}', 'type Ordered interface{~int|~float64};type Number = Ordered'])(
+  'constraint aliases remain valid declarations: %s',
+  (alias) => {
+    const source = `package main
+import "fmt"
+${alias}
+func Sum[T Number](xs []T)T{var sum T;for _,x:=range xs{sum+=x};return sum}
+func main(){fmt.Println(Sum([]int{1,2}),Sum([]float64{1.5,2.5}))}`;
+    expect(executeProgram('go', source)).toMatchObject({
+      kind: 'executed',
+      stdout: '3 4\n',
+      uncaughtException: undefined,
+    });
+    expect(executeProgram('go', `package main\n${alias}\nfunc main(){var value Number;_=value}`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+);
+
+test('constraint contexts do not allow type sets inside ordinary nested types', () => {
+  expect(executeProgram('go', 'package main;func f[T ~[]interface{~int}](){};func main(){}')).toMatchObject({
+    kind: 'compileError',
+  });
+});
