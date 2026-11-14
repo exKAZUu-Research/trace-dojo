@@ -1,6 +1,5 @@
 // code-gauge-allow-file fileNcss 679 -- The libNumeric module keeps one concern's cases together.
 import {
-  compareValues,
   comparisonFailed,
   floatToInt,
   formatFloat,
@@ -388,8 +387,7 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
     let value: Num = self;
     const ascending = Number(step) > 0;
     for (;;) {
-      const order = yield* compareValues(value, limit);
-      if (ascending ? order > 0 : order < 0) break;
+      if (yield* pastStepLimit(value, limit, ascending)) break;
       yield* callBlock(block, [value], false);
       value = arithmetic('+', value, step) as Num;
     }
@@ -426,14 +424,15 @@ function* stepCustomNumeric(self: Num, limit: Value, step: Value, block: RProc):
   const ascending = truthy(yield* callMethod(step, '>', [0n]));
   let value: Value = self;
   for (;;) {
-    if (limit !== NIL) {
-      const order = yield* compareValues(value, limit);
-      if (ascending ? order > 0 : order < 0) break;
-    }
+    if (limit !== NIL && (yield* pastStepLimit(value, limit, ascending))) break;
     yield* callBlock(block, [value], false);
     value = yield* callMethod(value, '+', [step]);
   }
   return self;
+}
+
+function* pastStepLimit(value: Value, limit: Value, ascending: boolean): Gen<boolean> {
+  return truthy(yield* callMethod(value, ascending ? '>' : '<', [limit]));
 }
 
 // Integer -------------------------------------------------------------------------------------------------------------

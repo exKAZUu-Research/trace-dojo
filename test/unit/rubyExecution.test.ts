@@ -2019,6 +2019,16 @@ test('Integer iteration uses relational coercion', () => {
   });
 });
 
+test('Numeric step uses relational coercion for custom limits', () => {
+  expect(
+    run(
+      'class T;def >(x);puts :gt;false;end;def <=>(x);puts :cmp;1;end;end;class A;def coerce(x);[T.new,0];end;end;1.step(A.new){|x|p x;break}'
+    )
+  ).toMatchObject({
+    stdout: 'gt\n1\n',
+  });
+});
+
 test('ArithmeticSequence last computes ratios before infinite-step results', () => {
   for (const source of [
     'Float::INFINITY.step(1.0, Float::INFINITY).last',
