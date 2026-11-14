@@ -434,18 +434,35 @@ def('Array', 'compact!', 0, function* (self: RArray) {
 
 function* flatten(items: Value[], depth: number, seen: Set<RArray>): Gen<Value[]> {
   const result: Value[] = [];
-  for (const item of items) {
-    const nested = depth !== 0 ? yield* tryAry(item) : undefined;
-    if (nested) {
+  const stack: { items: Value[]; index: number; depth: number; owner?: RArray }[] = [{ items, index: 0, depth }];
+  try {
+    while (stack.length > 0) {
+      rt().spend();
+      const frame = stack.at(-1) as (typeof stack)[number];
+      if (frame.index >= frame.items.length) {
+        stack.pop();
+        if (frame.owner) {
+          seen.delete(frame.owner);
+          rt().held.pop();
+        }
+        continue;
+      }
+      const item = frame.items[frame.index++];
+      const nested = frame.depth !== 0 ? yield* tryAry(item) : undefined;
+      if (!nested) {
+        result.push(item);
+        grow(result.length);
+        continue;
+      }
       if (seen.has(nested)) throw argumentError('tried to flatten recursive array');
       seen.add(nested);
-      for (const value of yield* flatten(nested.items, depth - 1, seen)) result.push(value);
-      seen.delete(nested);
-    } else {
-      result.push(item);
+      rt().held.push(nested);
+      stack.push({ items: nested.items, index: 0, depth: frame.depth - 1, owner: nested });
     }
+  } finally {
+    for (const frame of stack) if (frame.owner) seen.delete(frame.owner);
+    for (let index = 0; index < stack.length - 1; index++) rt().held.pop();
   }
-  grow(result.length);
   return result;
 }
 

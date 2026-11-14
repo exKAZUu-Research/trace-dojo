@@ -2254,6 +2254,43 @@ test('pp streams repeated inspect values within the execution budget', () => {
   if (result.kind === 'executed') expect(result.stdout).toHaveLength(8000);
 });
 
+test('pp bounds deferred inspect text before retaining more callbacks', () => {
+  expect(run('class A;def inspect;"x"*60000;end;end;pp Array.new(100,A.new)')).toEqual({
+    kind: 'limitExceeded',
+    limit: 'output',
+  });
+});
+
+test('String concat validates Integer characters before later conversions', () => {
+  expect(
+    run('class A;def to_str;puts :side;"a";end;end;begin;"".concat(-1,A.new);rescue=>e;p e.class;end')
+  ).toMatchObject({ stdout: 'RangeError\n' });
+});
+
+test('Set symmetric difference hashes each yielded member before the next yield', () => {
+  expect(
+    run(
+      'class K;def hash;puts :hash;0;end;end;class E;include Enumerable;def each;yield K.new;raise "later";end;end;s=Set.new;puts :start;begin;s^E.new;rescue;puts :rescued;end'
+    )
+  ).toMatchObject({ stdout: 'start\nhash\nrescued\n' });
+});
+
+test('Array flatten handles deep conversion without a host stack overflow', () => {
+  expect(run('class A;def to_ary;[self];end;end;p [A.new].flatten(10000).size')).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+  });
+});
+
+test('ArithmeticSequence size converts custom Float limits', () => {
+  expect(run('class A;private;def to_f;puts :convert;2.0;end;end;p 1.0.step(A.new,0.5).size')).toMatchObject({
+    stdout: 'convert\n3\n',
+  });
+  expect(run('class A;end;begin;p 1.0.step(A.new,0.5).size;rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'TypeError\n',
+  });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(

@@ -331,7 +331,10 @@ def('String', '+@', 0, (self: RString) => (self.frozen ? stringFromBytes(stringB
 def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
   modify(self);
   const converted: (RString | bigint)[] = [];
-  for (const arg of args) converted.push(typeof arg === 'bigint' ? arg : yield* stringArgValue(arg));
+  for (const arg of args) {
+    if (typeof arg === 'bigint') validateConcatCodepoint(arg, self.binary);
+    converted.push(typeof arg === 'bigint' ? arg : yield* stringArgValue(arg));
+  }
   const chunks: Uint8Array[] = [stringBytes(self)];
   let length = chunks[0].length;
   let binary = self.binary;
@@ -339,12 +342,7 @@ def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
   for (const arg of converted) {
     let chunk: Uint8Array;
     if (typeof arg === 'bigint') {
-      if (arg < 0n) throw rangeError(`${arg} out of char range`);
-      if (arg > 0x7f_ff_ff_ff_ff_ff_ff_ffn) throw rangeError('bignum out of char range');
-      if (arg > 0x10_ff_ffn) throw rangeError(`${arg} out of char range`);
-      if (binary && arg > 255n) throw rangeError(`${arg} out of char range`);
-      if (arg >= 0xd8_00n && arg <= 0xdf_ffn)
-        throw rangeError(`invalid codepoint 0x${arg.toString(16).toUpperCase()} in UTF-8`);
+      validateConcatCodepoint(arg, binary);
       chunk =
         binary && arg <= 255n
           ? Uint8Array.of(Number(arg))
@@ -370,6 +368,13 @@ def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
   self.rawBytes = result.rawBytes;
   return self;
 });
+function validateConcatCodepoint(value: bigint, binary: boolean): void {
+  if (value < 0n) throw rangeError(`${value} out of char range`);
+  if (value > 0x7f_ff_ff_ff_ff_ff_ff_ffn) throw rangeError('bignum out of char range');
+  if (value > 0x10_ff_ffn || (binary && value > 255n)) throw rangeError(`${value} out of char range`);
+  if (value >= 0xd8_00n && value <= 0xdf_ffn)
+    throw rangeError(`invalid codepoint 0x${value.toString(16).toUpperCase()} in UTF-8`);
+}
 def('String', 'replace', 1, function* (self: RString, [other]) {
   modify(self);
   const source = yield* stringArgValue(other);

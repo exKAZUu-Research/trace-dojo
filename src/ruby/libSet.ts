@@ -141,12 +141,21 @@ def('Set', ['-', 'difference'], 1, function* (self: RObject, [value]) {
 def('Set', '^', 1, function* (self: RObject, [value]) {
   const result = new RObject(self.cls);
   result.data = (self.data as SetData).copy();
-  const right = value instanceof RObject && value.data instanceof SetData ? value : yield* newSet(yield* other(value));
+  const right = value instanceof RObject && value.data instanceof SetData ? value : yield* setFromEnumerable(value);
   for (const entry of membersOf(right).map.values()) {
     if (yield* hashSet(membersOf(result), entry.key, true)) yield* hashDelete(membersOf(result), entry.key);
   }
   return result;
 });
+
+function* setFromEnumerable(value: Value): Gen<RObject> {
+  if (value === NIL || typeof value !== 'object') throw typeError('value must be enumerable');
+  const result = yield* newSet([]);
+  yield* iterate(value, function* (item) {
+    yield* hashSet(membersOf(result), item, true);
+  });
+  return result;
+}
 
 function* subset(small: RObject, large: RObject): Gen<boolean> {
   for (const entry of membersOf(small).map.values()) if (!(yield* hashGet(membersOf(large), entry.key))) return false;

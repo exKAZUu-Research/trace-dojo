@@ -43,6 +43,7 @@ export function* writePretty(value: Value, write: (part: string) => Gen<void>): 
   const doc = yield* build(value, new Set(), { nodes: 0, textLength: 0 }, true);
   const hashes = new Set<RHash>();
   holdHashes(doc, hashes);
+  let textLength = documentTextLength(doc);
   let emitted = '';
   const flushPrefix = function* (): Gen<void> {
     const prefix = staticPrefix(doc);
@@ -53,8 +54,12 @@ export function* writePretty(value: Value, write: (part: string) => Gen<void>): 
     yield* flushPrefix();
     for (let node = firstDeferred(doc); node; node = firstDeferred(doc)) {
       node.text = yield* inspect(node.deferred as Value);
+      textLength += node.text.length;
+      if (textLength > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
       node.deferred = undefined;
       yield* reconcileContainers(doc, node);
+      textLength = documentTextLength(doc);
+      if (textLength > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
       holdHashes(doc, hashes);
       yield* flushPrefix();
     }
@@ -62,6 +67,12 @@ export function* writePretty(value: Value, write: (part: string) => Gen<void>): 
   } finally {
     for (const hash of hashes) hash.iterating--;
   }
+}
+
+function documentTextLength(doc: Doc): number {
+  if (doc.kind === 'text') return doc.text.length;
+  if (doc.kind === 'break') return doc.text.length;
+  return doc.parts.reduce((length, part) => length + documentTextLength(part), 0);
 }
 
 function holdHashes(doc: Doc, held: Set<RHash>): void {

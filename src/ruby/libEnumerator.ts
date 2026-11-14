@@ -11,7 +11,7 @@ import {
 import { def, sdef } from './define';
 import { argumentCountError, argumentError, floatDomainError, rangeError } from './errors';
 import { floatStepCount } from './floatMath';
-import { callMethod, callProc, type Gen, nativeProc } from './interp';
+import { callMethod, callProc, type Gen, isGenerator, nativeProc, runToEnd } from './interp';
 import { rangeSize } from './libRange';
 import { setSize } from './libSet';
 import { NIL, RArray, RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
@@ -24,7 +24,7 @@ export interface EnumeratorSource {
   method: string;
   args: Value[];
   keywords?: RHash;
-  size?: () => Value;
+  size?: () => Value | Gen<Value>;
   arithmetic?: boolean;
   generatorAddress?: string;
   iterate?: (block: RProc) => Gen;
@@ -53,8 +53,8 @@ export function makeEnumerator(recv: Value, method: string, args: Value[], keywo
   return enumerator;
 }
 
-function enumeratorSize(recv: Value, method: string, args: Value[], keywords?: RHash): Value {
-  if (method === 'step' || method === '%') return stepSize(recv, args, keywords);
+function* enumeratorSize(recv: Value, method: string, args: Value[], keywords?: RHash): Gen<Value> {
+  if (method === 'step' || method === '%') return yield* stepSize(recv, args, keywords);
   if (recv instanceof RString && method === 'each_byte') return BigInt(stringBytes(recv).length);
   if (recv instanceof RArray && ARRAY_SELECTION_METHODS.has(method))
     return arraySelectionSize(recv.items.length, method, args[0]);
@@ -92,7 +92,10 @@ export function receiverSize(recv: Value): Value {
   if (recv instanceof RString) return BigInt(stringCharacters(recv).length);
   if (recv instanceof RRange) return rangeSize(recv);
   if (recv instanceof RObject && recv.cls.isSubclassOf(rt().c.Set)) return setSize(recv);
-  if (recv instanceof RObject && recv.cls.isSubclassOf(rt().c.Enumerator)) return sourceOf(recv).size?.() ?? NIL;
+  if (recv instanceof RObject && recv.cls.isSubclassOf(rt().c.Enumerator)) {
+    const size = sourceOf(recv).size?.() ?? NIL;
+    return isGenerator(size) ? runToEnd(size) : size;
+  }
   return NIL;
 }
 
@@ -129,8 +132,15 @@ function arraySelectionSize(length: number, method: string, requested: Value | u
   return result;
 }
 
-function stepSize(recv: Value, args: Value[], keywords?: RHash): Value {
-  const { start, end, step, exclusive } = arithmeticSpec(recv, args, keywords);
+function* stepSize(recv: Value, args: Value[], keywords?: RHash): Gen<Value> {
+  const { start, end: originalEnd, step, exclusive } = arithmeticSpec(recv, args, keywords);
+  const end =
+    originalEnd !== NIL &&
+    typeof originalEnd !== 'bigint' &&
+    typeof originalEnd !== 'number' &&
+    typeof step === 'number'
+      ? yield* toStepFloat(originalEnd)
+      : originalEnd;
   if (
     (typeof start !== 'bigint' && typeof start !== 'number') ||
     (typeof end !== 'bigint' && typeof end !== 'number' && end !== NIL) ||
@@ -283,9 +293,11 @@ def('Enumerator', ['with_object', 'each_with_object'], 1, function* (self: RObje
   yield* runSource(source, proc);
   return memo;
 });
-def('Enumerator', 'size', 0, (self: RObject) => {
+def('Enumerator', 'size', 0, function* (self: RObject) {
   const source = sourceOf(self);
-  return source.size === undefined ? NIL : source.size();
+  if (source.size === undefined) return NIL;
+  const result = source.size();
+  return isGenerator(result) ? yield* result : result;
 });
 for (const name of ['begin', 'end', 'step'] as const)
   def('Enumerator::ArithmeticSequence', name, 0, (self: RObject) => {
