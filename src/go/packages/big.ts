@@ -461,8 +461,10 @@ interface Fraction {
   den: bigint;
 }
 
-const ratOf = (pointer: Value): Fraction =>
-  (structOf(pointer).native?.rat as Fraction | undefined) ?? { num: 0n, den: 1n };
+function ratOf(pointer: Value): Fraction {
+  const value = structOf(pointer).native?.rat as Fraction | undefined;
+  return !value || value.den === 0n ? { num: value?.num ?? 0n, den: 1n } : value;
+}
 
 function normalize(num: bigint, den: bigint): Fraction {
   if (den === 0n) throw new GoPanic(new Iface(BASIC.string, 'division by zero'));
@@ -512,7 +514,7 @@ function ratFloat64(value: Fraction): [number, boolean] {
 function normalizeExact(result: number, value: Fraction): boolean {
   if (!Number.isFinite(result)) return false;
   const back = fractionOf(result);
-  return back.num === value.num && back.den === value.den;
+  return back.num * value.den === value.num * back.den;
 }
 
 /** The exact fraction of a float64. */
@@ -639,17 +641,18 @@ export const BIG_PACKAGE = definePackage('math/big', members, [
 
 function component(receiver: Value, part: 'num' | 'den'): Pointer {
   const struct = structOf(receiver);
+  if (part === 'den' && ((struct.native?.rat as Fraction | undefined)?.den ?? 0n) === 0n) return newInt(1n);
   struct.native ??= {};
   const key = `${part}Pointer`;
   let pointer = struct.native[key] as Pointer | undefined;
   if (!pointer) {
     const state = {
       get int(): bigint {
-        return ratOf(receiver)[part];
+        return ((struct.native?.rat as Fraction | undefined) ?? { num: 0n, den: 0n })[part];
       },
       set int(value: bigint) {
         struct.native ??= {};
-        const fraction = (struct.native.rat ??= { num: 0n, den: 1n }) as Fraction;
+        const fraction = (struct.native.rat ??= { num: 0n, den: 0n }) as Fraction;
         fraction[part] = value;
       },
     };

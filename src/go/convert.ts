@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 544 -- Mirrors the grammar node cases while preserving each source span for diagnostics.
+// code-gauge-allow-file fileNcss 549 -- Mirrors the grammar node cases while preserving each source span for diagnostics.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -748,6 +748,26 @@ export class Converter {
       case 'blank_identifier': {
         return { kind: 'name', ...span, name: node.text };
       }
+      case 'qualified_type': {
+        const receiver = required(node.childForFieldName('package'));
+        return {
+          kind: 'selector',
+          ...span,
+          operand: this.convertExpression(receiver),
+          field: required(node.childForFieldName('name')).text,
+          fieldSpan: spanOf(required(node.childForFieldName('name'))),
+        };
+      }
+      case 'generic_type': {
+        const base = required(node.childForFieldName('type'));
+        const args = this.convertTypeArguments(required(node.childForFieldName('type_arguments')));
+        return {
+          kind: 'index',
+          ...span,
+          operand: this.convertExpression(base),
+          indices: args.map((type) => ({ kind: 'type', ...span, type })),
+        };
+      }
       case 'true':
       case 'false':
       case 'nil': {
@@ -878,8 +898,6 @@ export class Converter {
       case 'function_type':
       case 'struct_type':
       case 'interface_type':
-      case 'generic_type':
-      case 'qualified_type':
       case 'channel_type':
       case 'implicit_length_array_type':
       case 'parenthesized_type': {

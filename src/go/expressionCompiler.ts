@@ -989,6 +989,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const entity = base.func as FuncEntity;
     const generic = entity.generic as NonNullable<FuncEntity['generic']>;
     if (!this.checkTypeArguments(generic.typeParams, args, span)) return this.invalid(span);
+    if (!this.recordGenericInstantiation(generic.typeParams, args)) return this.invalid(span);
     const mapping = new Map<number, Type>(generic.typeParams.map((param, index) => [param.id, args[index]]));
     const type = substitute(generic.type, mapping, (named: NamedType, typeArgs: Type[]) =>
       this.instantiateNamed(named, typeArgs)

@@ -228,3 +228,14 @@ test('type parameters cannot be constraints or union terms even through aliases'
   ])
     expect(executeProgram('go', 'package main;' + body)).toMatchObject({ kind: 'compileError' });
 });
+
+test('generic function and method expression values reject expanding instantiation cycles', () => {
+  for (const body of [
+    'func F[T any](){_=F[[]T]};func main(){}',
+    'type A int;func(A)F[T any](){_=A.F[[]T]};func main(){}',
+  ]) {
+    const result = executeProgram('go', 'package main;' + body);
+    expect(result).toMatchObject({ kind: 'compileError' });
+    if (result.kind === 'compileError') expect(JSON.stringify(result.diagnostics)).toContain('インスタンス化');
+  }
+});

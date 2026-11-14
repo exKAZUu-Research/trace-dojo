@@ -3,6 +3,15 @@ import { type Blocked, type Frame, GoFatal, pushFrameRoots, type Runtime, type S
 import { plainPanic } from './runtimeErrors';
 import { Channel, GoFunc, type Value } from './values';
 
+/** What a blocked channel operation receives when it wakes. */
+interface Completed {
+  index: number;
+  value?: Value;
+  ok: boolean;
+  /** A sender woken because the channel closed, which panics. */
+  closed?: boolean;
+}
+
 /**
  * Runs goroutines one at a time with fixed rules, since Go's own scheduler runs them in parallel in an order that
  * varies from run to run:
@@ -46,7 +55,7 @@ export class Scheduler {
   }
 
   /** Makes a blocked goroutine able to run, handing it `value` as the result of what it waited for. */
-  ready(goroutine: Goroutine, value?: unknown): void {
+  ready(goroutine: Goroutine, value?: Completed): void {
     goroutine.resumeWith = value;
     goroutine.blocked = undefined;
     this.runQueue.push(goroutine);
@@ -82,7 +91,7 @@ export class Scheduler {
     const stack: unknown[] = [];
     for (const goroutine of this.live) {
       pushFrameRoots(goroutine.frames, stack);
-      stack.push(...goroutine.holding, ...goroutine.callRoots);
+      stack.push(...goroutine.holding, ...goroutine.callRoots, goroutine.resumeWith?.value);
     }
     for (const timer of this.timers) stack.push(timer.channel, ...timer.roots);
     return stack;
@@ -158,7 +167,7 @@ export class Scheduler {
 export class Goroutine {
   readonly frames: Frame[] = [];
   body: Suspending<unknown> | undefined;
-  resumeWith: unknown;
+  resumeWith: Completed | undefined;
   blocked: Blocked | undefined;
   /** Values that only the blocked goroutine holds, such as a value waiting to be sent. */
   holding: unknown[] = [];
@@ -194,15 +203,6 @@ interface Waiter {
   value?: Value;
   select?: { done: boolean };
   index: number;
-}
-
-/** What a blocked channel operation receives when it wakes. */
-interface Completed {
-  index: number;
-  value?: Value;
-  ok: boolean;
-  /** A sender woken because the channel closed, which panics. */
-  closed?: boolean;
 }
 
 let nextChannelId = 0;

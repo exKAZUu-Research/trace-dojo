@@ -365,3 +365,33 @@ func main(){c:=make(chan *Turtle,${buffered ? 1 : 0});${buffered ? 'c<-NewTurtle
     });
   }
 });
+
+test('delivered channel payloads stay live until ordinary or select receivers resume', () => {
+  for (const selected of [false, true]) {
+    const source = `package main
+import "fmt"
+func main(){c:=make(chan *Turtle);go func(){c<-NewTurtle(0,1);p:=NewTurtle(0,0);fmt.Println(p.CanMoveForward())}();var t *Turtle;${selected ? 'select{case t=<-c:}' : 't=<-c'};t.Forward()}`;
+    expect(executeProgram('go', source)).toMatchObject({
+      kind: 'executed',
+      stdout: 'false\n',
+      uncaughtException: undefined,
+    });
+  }
+});
+
+test('switch tags retain received turtles during case callbacks', () => {
+  for (const composite of [false, true]) {
+    const type = composite ? 'struct{P *Turtle}' : '*Turtle';
+    const returned = composite ? 'struct{P *Turtle}{NewTurtle(2,2)}' : 'NewTurtle(2,2)';
+    const tag = composite ? 'struct{P *Turtle}{<-c}' : '<-c';
+    const source = `package main
+import "fmt"
+func other() ${type}{p:=NewTurtle(0,0);fmt.Println(p.CanMoveForward());return ${returned}}
+func main(){c:=make(chan *Turtle,1);c<-NewTurtle(0,1);switch ${tag}{case other():fmt.Println("same");default:fmt.Println("different",NewTurtle(0,0).CanMoveForward())}}`;
+    expect(executeProgram('go', source)).toMatchObject({
+      kind: 'executed',
+      stdout: 'false\ndifferent true\n',
+      uncaughtException: undefined,
+    });
+  }
+});

@@ -1,3 +1,7 @@
+import type { FunctionContext, ProductSource, VarEntity } from './entities';
+import { gateFacts, type Operand, type SsaConstant, type SsaFields, type StaticValue } from './operand';
+import { isFloat } from './types';
+
 /**
  * The value of each variable that reaches a use as Go's SSA form sees it, which decides where its compiler folds
  * constants and fuses products: the single definition reaching the use through straight-line code, forgotten where
@@ -5,8 +9,6 @@
  * compiler forwards to a load past at most three other stores to distinct variables, but not past a call or a store
  * through a pointer.
  */
-import type { FunctionContext, ProductSource, VarEntity } from './entities';
-import { gateFacts, type Operand, type SsaConstant, type SsaFields, type StaticValue } from './operand';
 
 export interface SsaValues {
   definitions: Map<VarEntity, Definition>;
@@ -15,9 +17,15 @@ export interface SsaValues {
   /** The stores to memory so far. */
   stores: number;
   versions: number;
+  labelJoins: Map<string, LabelJoin>;
+}
+
+interface LabelJoin {
+  incoming: Map<VarEntity, Definition>[];
 }
 
 export interface Definition extends Negations {
+  sources?: () => readonly (Definition | undefined)[];
   constant?: SsaConstant;
   fields?: SsaFields;
   /** The hidden slots holding the factors of the multiplication the value is, which an addition using it fuses. */
@@ -59,7 +67,104 @@ const MEMORY = Symbol('memory');
 const FORWARDED_STORES = 3;
 
 export function newSsaValues(): SsaValues {
-  return { definitions: new Map(), regions: [], stores: 0, versions: 0 };
+  return { definitions: new Map(), regions: [], stores: 0, versions: 0, labelJoins: new Map() };
+}
+
+export function recordGoto(fn: FunctionContext | undefined, label: string): void {
+  if (!fn) return;
+  labelJoin(fn.ssa, label).incoming.push(new Map(fn.ssa.definitions));
+}
+
+export function enterLabel(fn: FunctionContext | undefined, label: string, fallsThrough: boolean): boolean {
+  if (!fn) return fallsThrough;
+  const ssa = fn.ssa;
+  const join = labelJoin(ssa, label);
+  if (fallsThrough) join.incoming.push(new Map(ssa.definitions));
+  const chosen = join.incoming[0] ?? ssa.definitions;
+  ssa.definitions = new Map(
+    [...chosen].map(([variable, definition]) => [variable, labelDefinition(ssa, join, variable, definition)])
+  );
+  return join.incoming.length > 0;
+}
+
+function labelJoin(ssa: SsaValues, label: string): LabelJoin {
+  let join = ssa.labelJoins.get(label);
+  if (!join) {
+    join = { incoming: [] };
+    ssa.labelJoins.set(label, join);
+  }
+  return join;
+}
+
+function labelDefinition(ssa: SsaValues, join: LabelJoin, variable: VarEntity, fallback: Definition): Definition {
+  const sources = (): (Definition | undefined)[] => join.incoming.map((source) => source.get(variable));
+  const resolve = (): Definition | undefined => uniqueDefinition(sources());
+  const unresolvedVersion = ++ssa.versions;
+  let checking = false;
+  const check = (run: (definition: Definition) => boolean): boolean => {
+    if (checking) return false;
+    checking = true;
+    try {
+      const definition = resolve();
+      return definition ? run(definition) : false;
+    } finally {
+      checking = false;
+    }
+  };
+  const factors: ProductFactors | undefined = isFloat(variable.type)
+    ? {
+        get left() {
+          return resolve()?.factors?.left ?? -1;
+        },
+        get right() {
+          return resolve()?.factors?.right ?? -1;
+        },
+        source: {
+          get order() {
+            return resolve()?.factors?.source.order ?? 0;
+          },
+          get count() {
+            return resolve()?.factors?.source.count ?? 0;
+          },
+        },
+        enabled: () =>
+          check((definition) => definition.factors !== undefined && (definition.factors.enabled?.() ?? true)),
+      }
+    : undefined;
+  return {
+    ...fallback,
+    sources,
+    depth: ssa.regions.length,
+    get version() {
+      return resolve()?.version ?? unresolvedVersion;
+    },
+    constant: (params) => check((definition) => definition.constant?.(params) ?? false),
+    factors,
+    fields:
+      fallback.fields &&
+      gateFacts({ ssaFields: fallback.fields }, () => resolve()?.version === fallback.version).ssaFields,
+    negation: () => check((definition) => definition.negation?.() ?? false),
+    partNegations: fallback.partNegations?.map(
+      (_, index) => () => check((definition) => definition.partNegations?.[index]?.() ?? false)
+    ) as Negations['partNegations'],
+  };
+}
+
+function uniqueDefinition(sources: readonly (Definition | undefined)[]): Definition | undefined {
+  const stack = [...sources];
+  const seen = new Set<Definition>();
+  let result: Definition | undefined;
+  while (stack.length > 0) {
+    const definition = stack.pop();
+    if (!definition) return undefined;
+    if (seen.has(definition)) continue;
+    seen.add(definition);
+    if (definition.sources) {
+      for (const source of definition.sources()) stack.push(source);
+    } else if (result && result.version !== definition.version) return undefined;
+    else result = definition;
+  }
+  return result;
 }
 
 /**
@@ -112,6 +217,7 @@ export function storeLocalMemory(fn: FunctionContext | undefined, variable: VarE
   for (const region of fn.ssa.regions) region.written.add(variable);
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps reaching definitions, joins and lazy fact gates in one compiler analysis.
 export function reachingValue(fn: FunctionContext | undefined, variable: VarEntity): ReachingValue {
   const definition = fn?.ssa.definitions.get(variable);
   if (!fn || !definition) return {};
@@ -124,7 +230,18 @@ export function reachingValue(fn: FunctionContext | undefined, variable: VarEnti
     loops.every(({ written }) => !written.has(variable) && (local || !written.has(MEMORY)));
   return {
     constant: constant && ((frame) => reaches() && constant(frame)),
-    factors: factors && { ...factors, enabled: () => reaches() && (factors.enabled?.() ?? true) },
+    factors: factors && {
+      get left() {
+        return factors.left;
+      },
+      get right() {
+        return factors.right;
+      },
+      get source() {
+        return factors.source;
+      },
+      enabled: () => reaches() && (factors.enabled?.() ?? true),
+    },
     fields: fields && gateFacts({ ssaFields: fields }, reaches).ssaFields,
     negation: negation && ((): boolean => reaches() && negation()),
     partNegations: partNegations?.map(

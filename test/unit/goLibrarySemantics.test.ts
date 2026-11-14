@@ -824,3 +824,74 @@ test('JSON field tag parsing shares name dominance lookup and scalar options', (
     uncaughtException: undefined,
   });
 });
+
+test('promoted interface method expressions share ordinary dynamic dispatch', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";type I interface{M()int};type A int;func(a A)M()int{return int(a)};type S struct{I};type Outer struct{*S};func main(){s:=S{A(7)};fmt.Println(S.M(s),(*S).M(&s));f:=S.M;fmt.Println(f(s));o:=Outer{&s};fmt.Println(Outer.M(o),(*Outer).M(&o));func(){defer func(){fmt.Println(recover()!=nil)}();S.M(S{})}()}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '7 7\n7\n7 7\ntrue\n', uncaughtException: undefined });
+});
+
+test('generic method expressions use function instantiation and inference', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";type A int;func(a A)M[T any](v T)T{return v};func(a A)Pick[T,U any](x T,y U)U{return y};type S struct{A};type Box[T any]struct{V T};func(b Box[T])Pair[U any](u U)(T,U){return b.V,u};func(A)Send[T any](c chan T,v T){c<-v};func main(){f:=A.M[int];var g func(A,int)int=A.M;fmt.Println(A.M(A(0),1),f(A(0),2),g(A(0),3),A.Pick[int](A(0),4,"x"),S.M[string](S{},"s"));a:=A(0);fmt.Println((*A).M[int](&a,5));fmt.Println(Box[int].Pair[string](Box[int]{7},"b"));fmt.Println(A.M[[]int](A(0),[]int{9}));c:=make(chan int);go A.Send[int](A(0),c,8);fmt.Println(<-c)}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '1 2 3 x s\n5\n7 b\n[9]\n8\n', uncaughtException: undefined });
+});
+
+test('goto joins preserve reaching definitions across skipped writes and back edges', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";func f(skip bool,x,y float64)float64{defer func(){}();p:=0.0;if skip{goto L};p=x*y;L:return p+1};func g(n int,x,y float64)float64{defer func(){}();p:=0.0;L:if n==0{return p+1};p=x*y;n--;goto L};func h(x,y float64)float64{defer func(){}();p:=x*y;goto L;p=0;L:return p+1};func k(x,y float64)float64{defer func(){}();p:=0.0;goto B;A:return p+1;B:p=x*y;goto A};func main(){fmt.Println(f(true,1.1,2.2),f(false,1.1,2.2),g(0,1.1,2.2),g(1,1.1,2.2),h(1.1,2.2),k(1.1,2.2))}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '1 3.4200000000000004 1 3.4200000000000004 3.4200000000000004 3.4200000000000004\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('function and channel ranges join product facts even on zero iterations', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";func f(n int,x,y float64)float64{defer func(){}();p:=0.0;seq:=func(yield func()bool){for i:=0;i<n;i++{if !yield(){return}}};for range seq{p=x*y};return p+1};func g(n int,x,y float64)float64{defer func(){}();p:=0.0;c:=make(chan int,n);for range n{c<-1};close(c);for range c{p=x*y};return p+1};func main(){fmt.Println(f(0,1.1,2.2),f(1,1.1,2.2),g(0,1.1,2.2),g(1,1.1,2.2))}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '1 3.4200000000000004 1 3.4200000000000004\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('rational component references preserve float exactness and zero denominator initialization', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import("fmt";"math/big");func main(){r:=big.NewRat(1,4);r.Num().SetInt64(2);fmt.Println(r.Float64());r.Denom().SetInt64(2);fmt.Println(r.Float64());var z big.Rat;d:=z.Denom();d.SetInt64(7);fmt.Println(d,&z,z.Denom());z.Num().SetInt64(3);z.Denom().SetInt64(8);fmt.Println(&z);z.Set(&z);live:=z.Denom();live.SetInt64(4);fmt.Println(&z,z.FloatString(2));live.SetInt64(0);fmt.Println(live,&z,z.Denom());r.Neg(r);fmt.Println(r.Float64())}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '0.5 true\n1 true\n7 0/1 1\n3/1\n3/4 0.75\n0 3/1 1\n-1 true\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('goto joins retain a unique product discovered after its target was compiled', () => {
+  const source = `package main
+import "fmt"
+func h(x,y,c float64)float64{defer func(){}();p:=x*y;goto L;p=0;L:return p+c}
+func k(x,y,c float64)float64{defer func(){}();p:=0.0;goto B;A:return p+c;B:p=x*y;goto A}
+func copy(skip bool,x,y float64)float64{defer func(){}();p:=0.0;if skip{goto L};p=x*y;L:q:=p;return q+1}
+func main(){fmt.Println(h(1.0000000000000002,1.0000000000000002,-1.0000000000000004),k(1.0000000000000002,1.0000000000000002,-1.0000000000000004));fmt.Println(copy(true,1.1,2.2),copy(false,1.1,2.2))}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '4.930380657631324e-32 4.930380657631324e-32\n1 3.4200000000000004\n',
+    uncaughtException: undefined,
+  });
+});

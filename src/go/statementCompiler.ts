@@ -63,7 +63,7 @@ import { runtimePrint } from './runtimePrint';
 import { closeChannel, goroutineFunction, receive, scheduler, select, type SelectOp, send } from './scheduler';
 import { sizeOf } from './sliceOps';
 import type { SliceTracking } from './slicePass';
-import { clobberMemory, define, joining, storeLocalMemory } from './ssaValues';
+import { clobberMemory, define, enterLabel, joining, recordGoto, storeLocalMemory } from './ssaValues';
 import {
   ANY,
   BASIC,
@@ -139,7 +139,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 23 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
-  // code-gauge-allow functionNcss 40 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss 44 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   protected statements(statements: Statement[]): Exec {
     const labels = this.labelState();
     const list = labels.nextList++;
@@ -150,14 +150,18 @@ export abstract class StatementCompiler extends CallCompiler {
     labels.declarations.set(list, declarations);
     let compiled: Exec[];
     try {
+      let fallsThrough = true;
       compiled = statements.map((statement, index) => {
         labels.positions[labels.positions.length - 1] = index;
         if (statement.kind === 'labeled') {
           this.declareLabel(statement, labels, index);
           targets.set(statement.label, index);
+          fallsThrough = enterLabel(this.fn, statement.label, fallsThrough);
         }
         if (declaresVariables(statement)) declarations.push(index);
-        return this.statement(statement);
+        const compiled = this.statement(statement);
+        fallsThrough &&= !isTerminating(statement, this.builtinPanicCalls);
+        return compiled;
       });
     } finally {
       labels.path.pop();
@@ -260,6 +264,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private gotoStatement(statement: Extract<Statement, { kind: 'goto' }>): Exec {
+    recordGoto(this.fn, statement.label);
     const labels = this.labelState();
     labels.gotos.push({
       label: statement.label,
@@ -866,7 +871,9 @@ export abstract class StatementCompiler extends CallCompiler {
     const left = this.hiddenSlot();
     const right = this.hiddenSlot();
     const multiply = arithmetic('*', operand.type);
+    const read = values[index];
     values[index] = (frame) => {
+      if (product.enabled && !product.enabled()) return read(frame);
       const x = product.left(frame);
       const y = product.right(frame);
       frame.locals[left] = x;
@@ -1126,9 +1133,16 @@ export abstract class StatementCompiler extends CallCompiler {
       );
     }
     const [keyType = BASIC.invalid, valueType = BASIC.invalid] = yieldType.params;
-    const bind = this.rangeTargets(statement, keyType, valueType);
     const row = this.stepRow(statement);
-    const body = this.breakable(label, 'for', () => this.loopBody(statement.body));
+    const [bind, body] = joining(
+      this.fn,
+      true,
+      () =>
+        [
+          this.rangeTargets(statement, keyType, valueType),
+          this.breakable(label, 'for', () => this.loopBody(statement.body)),
+        ] as const
+    );
     return function* (frame) {
       const fn = iterator.hoists ? yield* evaluatePart(frame, iterator) : iterator.value(frame);
       if (!(fn instanceof GoFunc)) nilPointerPanic();
@@ -1328,7 +1342,6 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss 60 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private switchStatement(statement: Extract<Statement, { kind: 'switch' }>): Exec {
     const label = this.takeLabel();
     const init = statement.init ? this.simpleStatement(statement.init) : undefined;
@@ -1377,19 +1390,24 @@ export abstract class StatementCompiler extends CallCompiler {
       if (init) yield* init(frame);
       const value = readTag.hoists ? yield* evaluatePart(frame, readTag) : readTag.value(frame);
       let start = -1;
-      for (const [index, switchCase] of cases.entries()) {
-        for (const test of switchCase.tests) {
-          if (test.hoists) yield* runHoists(frame, test.hoists);
-          try {
-            if (test.value(frame, value)) start = index;
-          } finally {
-            if (test.hoists) clearHoists(frame, test.hoists);
+      frame.temporaries.push(value);
+      try {
+        for (const [index, switchCase] of cases.entries()) {
+          for (const test of switchCase.tests) {
+            if (test.hoists) yield* runHoists(frame, test.hoists);
+            try {
+              if (test.value(frame, value)) start = index;
+            } finally {
+              if (test.hoists) clearHoists(frame, test.hoists);
+            }
+            if (start >= 0) break;
           }
           if (start >= 0) break;
         }
-        if (start >= 0) break;
+        if (start < 0) start = cases.findIndex((switchCase) => switchCase.isDefault);
+      } finally {
+        frame.temporaries.pop();
       }
-      if (start < 0) start = cases.findIndex((switchCase) => switchCase.isDefault);
       if (start < 0) return;
       for (let index = start; index < cases.length; index++) {
         const completion = yield* cases[index].body(frame);
@@ -2180,9 +2198,16 @@ export abstract class StatementCompiler extends CallCompiler {
     label: string | undefined
   ): Exec {
     if (statement.value) this.error(statement.value, 'チャネルの range で受け取れる値は1つだけです。');
-    const bind = this.rangeTargets({ ...statement, value: undefined }, element, BASIC.invalid);
     const row = this.stepRow(statement);
-    const body = this.breakable(label, 'for', () => this.loopBody(statement.body));
+    const [bind, body] = joining(
+      this.fn,
+      true,
+      () =>
+        [
+          this.rangeTargets({ ...statement, value: undefined }, element, BASIC.invalid),
+          this.breakable(label, 'for', () => this.loopBody(statement.body)),
+        ] as const
+    );
     return function* (frame) {
       const value = channel.hoists ? yield* evaluatePart(frame, channel) : channel.value(frame);
       frame.temporaries.push(value);

@@ -78,6 +78,7 @@ import {
   isString,
   isUntyped,
   lookupFieldOrMethod,
+  type Method,
   NO_VALUE,
   type Type,
   type TypeParamType,
@@ -743,46 +744,64 @@ export abstract class CallCompiler extends CompositeCompiler {
       results: methodType.results,
       variadic: methodType.variadic,
     };
-    const call =
-      selection.kind === 'method'
-        ? (args: Value[], row?: number, deferredFor?: unknown, stackBuffers?: StackBuffers): Value | Value[] =>
-            invokeMethod(
-              selection.method,
-              receiverFor(args[0], selection.path, selection.method, underlying(type).kind === 'pointer'),
-              args.slice(1),
-              row,
-              deferredFor,
-              stackBuffers
-            )
-        : (args: Value[], row?: number, deferredFor?: unknown, stackBuffers?: StackBuffers): Value | Value[] => {
-            const iface = args[0] as Iface | undefined;
-            if (!iface) nilPointerPanic();
-            return (dynamicMethod(iface.type, name) as BoundCall)(
-              iface.value,
-              args.slice(1),
-              row,
-              deferredFor,
-              stackBuffers
-            );
-          };
-    const resume =
-      selection.kind === 'method'
-        ? (args: Value[], row?: number, deferredFor?: unknown, stackBuffers?: StackBuffers) =>
-            resumeMethod(
-              selection.method,
-              receiverFor(args[0], selection.path, selection.method, underlying(type).kind === 'pointer'),
-              args.slice(1),
-              row,
-              deferredFor,
-              stackBuffers
-            )
-        : (args: Value[], row?: number, deferredFor?: unknown, stackBuffers?: StackBuffers) => {
-            const iface = args[0] as Iface | undefined;
-            if (!iface) nilPointerPanic();
-            return resumeDynamicMethod(iface.type, name, iface.value, args.slice(1), row, deferredFor, stackBuffers);
-          };
-    const value = new GoFunc(call, [], resume);
+    if (selection.kind === 'method' && selection.method.typeParams) {
+      const method = selection.method;
+      const typeParams = selection.method.typeParams;
+      const entity: FuncEntity = {
+        kind: 'func',
+        name,
+        type: signature,
+        value: () => new GoFunc(() => {}),
+        generic: {
+          typeParams,
+          type: signature,
+          instantiate: (args) =>
+            this.methodExpressionFunction(
+              type,
+              name,
+              {
+                ...method,
+                code: method.instantiate?.(args) ?? method.code,
+              },
+              selection.path
+            ),
+        },
+      };
+      return { mode: 'value', type: signature, span, func: entity, eval: () => entity.value() };
+    }
+    const value = this.methodExpressionFunction(type, name);
     return { mode: 'value', type: signature, span, eval: () => value };
+  }
+
+  private methodExpressionFunction(type: Type, name: string, method?: Method, path: readonly number[] = []): GoFunc {
+    const call: BoundCall = method
+      ? (receiver, args, row, deferredFor, stackBuffers) =>
+          invokeMethod(
+            method,
+            receiverFor(receiver, path, method, underlying(type).kind === 'pointer'),
+            args,
+            row,
+            deferredFor,
+            stackBuffers
+          )
+      : (dynamicMethod(type, name) as BoundCall);
+    const resume = method
+      ? (receiver: Value, args: Value[], row?: number, deferredFor?: unknown, stackBuffers?: StackBuffers) =>
+          resumeMethod(
+            method,
+            receiverFor(receiver, path, method, underlying(type).kind === 'pointer'),
+            args,
+            row,
+            deferredFor,
+            stackBuffers
+          )
+      : (receiver: Value, args: Value[], row?: number, deferredFor?: unknown, stackBuffers?: StackBuffers) =>
+          resumeDynamicMethod(type, name, receiver, args, row, deferredFor, stackBuffers);
+    return new GoFunc(
+      (args, row, deferredFor, stackBuffers) => call(args[0], args.slice(1), row, deferredFor, stackBuffers),
+      [],
+      (args, row, deferredFor, stackBuffers) => resume(args[0], args.slice(1), row, deferredFor, stackBuffers)
+    );
   }
 
   /** A call of a method with its own type parameters, inferred from the arguments as a generic function's are. */
@@ -993,7 +1012,6 @@ export abstract class CallCompiler extends CompositeCompiler {
     throw new Error(`Unknown builtin ${name}`);
   }
 
-  /** `print` and `println`, which write to standard error in the runtime's own format, apart from fmt's. */
   protected validBuiltinSpread(expression: Extract<Expression, { kind: 'call' }>, name: string): boolean {
     if (!expression.spread || name === 'append') return true;
     for (const argument of expression.args) this.expression(argument);
@@ -1001,6 +1019,7 @@ export abstract class CallCompiler extends CompositeCompiler {
     return false;
   }
 
+  /** `print` and `println`, which write to standard error in the runtime's own format, apart from fmt's. */
   private printBuiltin(expression: Extract<Expression, { kind: 'call' }>, name: 'print' | 'println'): Operand {
     const operands = expression.args.map((arg) => this.defaulted(this.value(arg)));
     for (const operand of operands) {
