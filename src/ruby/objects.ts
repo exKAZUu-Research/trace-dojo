@@ -220,6 +220,7 @@ export type MethodBody =
   | { kind: 'native'; fn: NativeFn; min: number; max: number; takesKeywords: boolean }
   | { kind: 'reader'; ivar: string }
   | { kind: 'writer'; ivar: string }
+  | { kind: 'visibility' }
   | { kind: 'undefined' };
 
 export interface RMethod {
@@ -292,6 +293,7 @@ export class RClass extends RBasic {
     return list;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Method lookup resolves visibility markers against the current ancestor body.
   findMethod(name: string): RMethod | undefined {
     if (this.methodCache?.version !== hierarchyVersion.value) {
       this.methodCache = { version: hierarchyVersion.value, map: new Map() };
@@ -299,11 +301,15 @@ export class RClass extends RBasic {
     const cache = this.methodCache.map;
     if (cache.has(name)) return cache.get(name);
     let found: RMethod | undefined;
+    let visibility: Visibility | undefined;
     for (const module of this.ancestors()) {
       const method = module.methods.get(name);
       if (method) {
-        found = method.body.kind === 'undefined' ? undefined : method;
-        break;
+        if (method.body.kind === 'visibility') visibility ??= method.visibility;
+        else {
+          found = method.body.kind === 'undefined' ? undefined : visibility ? { ...method, visibility } : method;
+          break;
+        }
       }
     }
     cache.set(name, found);
@@ -316,7 +322,7 @@ export class RClass extends RBasic {
     const index = ancestors.indexOf(owner);
     for (const module of ancestors.slice(index + 1)) {
       const method = module.methods.get(name);
-      if (method) return method.body.kind === 'undefined' ? undefined : method;
+      if (method && method.body.kind !== 'visibility') return method.body.kind === 'undefined' ? undefined : method;
     }
     return undefined;
   }

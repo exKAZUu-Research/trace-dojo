@@ -376,10 +376,14 @@ def('Array', 'delete', 1, function* (self: RArray, [target], block) {
   const kept: Value[] = [];
   for (; read < self.items.length; read++) {
     const item = self.items[read];
-    if (yield* rEquals(item, target)) {
+    const version = self.version;
+    const matched = yield* rEquals(item, target);
+    const changed = self.version !== version;
+    if (changed) kept.length = 0;
+    if (matched) {
       yield* modify(self);
       found = item;
-    } else kept.push(item);
+    } else if (!changed) kept.push(item);
   }
   if (found === undefined) return block ? yield* call(block, target) : NIL;
   yield* modify(self);

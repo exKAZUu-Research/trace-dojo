@@ -1494,6 +1494,9 @@ export function* invoke(
     case 'undefined': {
       throw noMethodError(`undefined method '${method.name}' for ${receiverDescription(recv)}`, recv, method.name);
     }
+    case 'visibility': {
+      throw new Error(`Unresolved visibility marker: ${method.name}`);
+    }
   }
 }
 

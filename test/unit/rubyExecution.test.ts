@@ -1879,6 +1879,12 @@ test('inherited visibility preserves method ownership for super', () => {
   });
 });
 
+test('inherited visibility follows later ancestor redefinitions', () => {
+  expect(run('class A;def f;1;end;end;class B<A;public :f;end;class A;def f;2;end;end;p B.new.f')).toMatchObject({
+    stdout: '2\n',
+  });
+});
+
 test('Comparable equality interprets comparison result signs', () => {
   expect(run('class A;include Comparable;def <=>(x);-0.0;end;end;p A.new==A.new')).toMatchObject({
     stdout: 'true\n',
@@ -1968,6 +1974,12 @@ test('Array delete retains contents when an equality callback raises', () => {
     )
   ).toMatchObject({
     stdout: '3\n',
+  });
+});
+
+test('Array delete does not restore elements removed by callbacks', () => {
+  expect(run('class X;def ==(v);$a.clear;true;end;end;$a=[8,X.new];$a.delete(0);p $a')).toMatchObject({
+    stdout: '[]\n',
   });
 });
 
