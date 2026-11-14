@@ -9,7 +9,7 @@ import { arr, newHash, sym, truthy } from './values';
 
 /** Why the last pattern failed to match, which a `case`/`in` with one clause, or a `=>`, reports. */
 interface Failure {
-  message: string;
+  description: string | (() => Gen<string>);
   missingKey?: Value;
   matchee?: Value;
 }
@@ -23,7 +23,8 @@ interface DeconstructionCache {
 let lastFailure: Failure | undefined;
 
 function* fail(describe: () => Gen<string>, missingKey?: Value, matchee?: Value): Gen<boolean> {
-  lastFailure = { message: yield* describe(), missingKey, matchee };
+  lastFailure = { description: describe, missingKey, matchee };
+  yield* [];
   return false;
 }
 
@@ -39,7 +40,7 @@ function* checked(pattern: Value, value: Value): Gen<boolean> {
 
 /** Records that a guard clause rejected the value. */
 export function guardFailed(): void {
-  lastFailure = { message: 'guard clause does not return true' };
+  lastFailure = { description: 'guard clause does not return true' };
 }
 
 /** Whether a value matches a pattern, binding the pattern's variables in the frame as it goes, as Ruby does. */
@@ -167,7 +168,8 @@ function* matchHash(pattern: Extract<Pattern, { k: 'hash' }>, value: Value, fram
       return `${yield* inspect(value)} does not respond to #deconstruct_keys`;
     });
   }
-  const keys = pattern.rest === undefined ? arr(pattern.pairs.map((pair) => sym(pair.key))) : NIL;
+  const keys =
+    pattern.rest === undefined && pattern.pairs.length > 0 ? arr(pattern.pairs.map((pair) => sym(pair.key))) : NIL;
   const hash = yield* callMethod(value, 'deconstruct_keys', [keys]);
   if (!(hash instanceof RHash)) throw typeError('deconstruct_keys must return Hash');
   for (const pair of pattern.pairs) {
@@ -224,7 +226,7 @@ export function* noMatchingPattern(value: Value, single: boolean): Gen<unknown> 
   if (!single || !failure) return rubyError(rt().c.NoMatchingPatternError, subject);
   const error = rubyError(
     failure.missingKey === undefined ? rt().c.NoMatchingPatternError : rt().c.NoMatchingPatternKeyError,
-    `${subject}: ${failure.message}`
+    `${subject}: ${typeof failure.description === 'string' ? failure.description : yield* failure.description()}`
   );
   if (failure.missingKey !== undefined)
     error.exception.ivars = new Map([

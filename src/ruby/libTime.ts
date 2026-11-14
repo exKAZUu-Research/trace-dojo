@@ -1,7 +1,7 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { compareValues, toFloat, toInt, toStr } from './conversions';
 import { def, sdef } from './define';
-import { argumentError, frozenError, typeError } from './errors';
+import { argumentError, frozenError, rangeError, typeError } from './errors';
 import { bigintRatio } from './floatMath';
 import type { Gen } from './interp';
 import { floatToRational, isRational } from './libRational';
@@ -419,17 +419,20 @@ function padOffset(value: string, width: number | undefined, flag: string): stri
   return `${value[0]}${value.slice(1).padStart(target - 1, '0')}`;
 }
 
+function formatYear(year: number): string {
+  return year < 0 ? `-${String(-year).padStart(4, '0')}` : String(year).padStart(4, '0');
+}
+
 function calendarDirective(data: TimeData, date: Date, directive: string, flag: string): string | undefined {
   switch (directive) {
     case 'Y': {
-      const year = date.getUTCFullYear();
-      return year < 0 ? `-${String(-year).padStart(4, '0')}` : String(year).padStart(4, '0');
+      return formatYear(date.getUTCFullYear());
     }
     case 'C': {
       return pad(Math.floor(date.getUTCFullYear() / 100), 2, flag);
     }
     case 'y': {
-      return pad(date.getUTCFullYear() % 100, 2, flag);
+      return pad(((date.getUTCFullYear() % 100) + 100) % 100, 2, flag);
     }
     case 'm': {
       return pad(date.getUTCMonth() + 1, 2, flag);
@@ -473,10 +476,10 @@ function calendarDirective(data: TimeData, date: Date, directive: string, flag: 
       return pad(isoWeek(date).week, 2, flag);
     }
     case 'G': {
-      return String(isoWeek(date).year);
+      return formatYear(isoWeek(date).year);
     }
     case 'g': {
-      return pad(isoWeek(date).year % 100, 2, flag);
+      return pad(((isoWeek(date).year % 100) + 100) % 100, 2, flag);
     }
     case 'F': {
       return strftime(data, '%Y-%m-%d');
@@ -788,10 +791,16 @@ def(
   'sleep',
   [0, 1],
   function* (_self, args) {
+    if (args.length === 0 || args[0] === NIL) throw new ExecutionLimitError('time');
     const runtime = rt() as unknown as { slept?: number };
-    const seconds = args.length > 0 ? yield* toFloat(args[0]) : 0;
+    const seconds = yield* toFloat(args[0]);
     if (seconds < 0) throw argumentError('time interval must not be negative');
-    runtime.slept = (runtime.slept ?? 0) + seconds;
+    if (!Number.isFinite(seconds)) throw rangeError(`${Number.isNaN(seconds) ? 'NaN' : 'Inf'} out of Time range`);
+    const slept = (runtime.slept ?? 0) + seconds;
+    const clock = Date.now() + slept * 1000;
+    if (!Number.isSafeInteger(clock) || Math.abs(clock) > 8_640_000_000_000_000)
+      throw new UnsupportedFeatureError('JavaScript の日付範囲外の sleep');
+    runtime.slept = slept;
     return BigInt(Math.round(seconds));
   },
   { visibility: 'private' }

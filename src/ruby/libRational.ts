@@ -187,12 +187,12 @@ def('Rational', '<=>', 1, (self: RObject, [other]) => {
   const difference = a.numerator * b.denominator - b.numerator * a.denominator;
   return difference < 0n ? -1n : difference > 0n ? 1n : 0n;
 });
-def('Rational', '==', 1, (self: RObject, [other]) => {
+def('Rational', '==', 1, function* (self: RObject, [other]) {
   if (isRubyFloat(other)) return toNumber(fractionOf(self)) === Number(other);
   const b = asFraction(other);
-  return (
-    b !== undefined && b.numerator === fractionOf(self).numerator && b.denominator === fractionOf(self).denominator
-  );
+  if (b !== undefined)
+    return b.numerator === fractionOf(self).numerator && b.denominator === fractionOf(self).denominator;
+  return yield* callMethod(other, '==', [self]);
 });
 def('Rational', 'coerce', 1, (self: RObject, [other]) => {
   if (typeof other === 'bigint') return arr([makeRational(other, 1n), self]);

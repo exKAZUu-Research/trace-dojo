@@ -6358,3 +6358,106 @@ test('Lazy forwards iteration arguments to learner enumerables', () => {
     stdout: '[0, 1, 2]\n[0, 1, 2]\n',
   });
 });
+
+test('reflection names accept to_str and qualified paths limit Object fallback', () => {
+  expect(
+    run(
+      'o=Object.new; def o.to_str; "upcase";end; p "abc".send(o), "abc".respond_to?(o); class A;end; p Object.const_defined?("A::String")'
+    )
+  ).toMatchObject({
+    stdout: '"ABC"\ntrue\nfalse\n',
+  });
+});
+
+test('active inherited definition hooks fail explicitly', () => {
+  expect(run('module Hook; def method_added(n); p n;end;end;class A;extend Hook;def x;end;end')).toMatchObject({
+    uncaughtException: 'メソッド・定数フック（method_added）は、この採点環境では使えません。',
+  });
+});
+
+test('pattern failures avoid inspect until an error needs it', () => {
+  expect(
+    run('class A; def inspect; puts "inspected"; "A";end;end; case A.new; in Integer; p :int; else; p :other; end')
+  ).toMatchObject({
+    stdout: ':other\n',
+  });
+});
+
+test('empty hash patterns request every deconstructed key', () => {
+  expect(run('class A; def deconstruct_keys(k); k ? {x:1}.slice(*k) : {x:1};end;end; p((A.new in {}))')).toMatchObject({
+    stdout: 'false\n',
+  });
+});
+
+test('interpolated regexp text retains its own escapes', () => {
+  expect(run(String.raw`s="a\\/b"; p /#{s}/.source, /#{s}/ == Regexp.new(s)`)).toMatchObject({
+    stdout: '"a\\\\/b"\ntrue\n',
+  });
+});
+
+test('sleep validates NaN before updating virtual time', () => {
+  expect(run('begin; sleep(Float::NAN); rescue => e; p e.class,e.message;end')).toMatchObject({
+    stdout: 'RangeError\n"NaN out of Time range"\n',
+  });
+});
+
+test('duplicate regexp capture names fail with an unavailable-feature message', () => {
+  expect(run('p /(?<a>x)(?<a>y)/.match("xy")[:a]')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: '重複する名前付きキャプチャは、この採点環境では使えません。' }],
+  });
+});
+
+test('defined? checks protected method visibility', () => {
+  expect(
+    run('class A; protected def x;end; public def f(o); p defined?(o.x);end;end; p defined?(A.new.x); A.new.f(A.new)')
+  ).toMatchObject({
+    stdout: 'nil\n"method"\n',
+  });
+});
+
+test('prepend invokes overridable feature and notification hooks', () => {
+  expect(
+    run(
+      'module M; def self.prepend_features(base); puts :features; super;end; def self.prepended(base); puts :prepended;end;end; class A; prepend M; prepend M;end'
+    )
+  ).toMatchObject({
+    stdout: 'features\nprepended\nfeatures\nprepended\n',
+  });
+});
+
+test('indefinite sleep stops before later statements', () => {
+  expect(run('p sleep; p :after')).toMatchObject({ kind: 'limitExceeded', limit: 'time' });
+  expect(run('p sleep(nil); p :after')).toMatchObject({ kind: 'limitExceeded', limit: 'time' });
+});
+
+test('non-lambda Proc arity ignores optional parameters', () => {
+  expect(run('p proc { |a,b=1| }.arity, proc { |a=0| }.arity, lambda { |a,b=1| }.arity')).toMatchObject({
+    stdout: '1\n0\n-2\n',
+  });
+});
+
+test('regexp callbacks permit same-length source edits and continue from current text', () => {
+  expect(run('s="abc"; p s.gsub(/a/) { s[1]="X"; "z" }; s="aba"; p s.gsub(/a/) { s[2]="b"; "x" }')).toMatchObject({
+    stdout: '"zXc"\n"xbb"\n',
+  });
+});
+
+test('rpartition searches from the right on long strings', () => {
+  expect(run('p ("a" * 50000).rpartition(/a/).map(&:length)')).toMatchObject({
+    kind: 'executed',
+    stdout: '[49999, 1, 0]\n',
+  });
+});
+
+test('strftime formats negative calendar and ISO years', () => {
+  expect(run('p Time.utc(-1).strftime("%Y %y %C %G %g")')).toMatchObject({
+    stdout: '"-0001 99 -1 -0002 98"\n',
+  });
+});
+
+test('Rational equality delegates to custom objects', () => {
+  expect(run('class N; def ==(x); p x; true; end;end; p Rational(1,2)==N.new')).toMatchObject({
+    stdout: '(1/2)\ntrue\n',
+  });
+});

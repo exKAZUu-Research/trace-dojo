@@ -1263,7 +1263,7 @@ export function procArity(proc: RProc): number {
   const positional = params.required.length + params.post.length;
   const requiredKeywords = params.keywords.some((keyword) => !keyword.value);
   const required = positional + Number(requiredKeywords);
-  if (params.rest !== undefined || params.optional.length > 0) return -required - 1;
+  if (params.rest !== undefined || (proc.isLambda && params.optional.length > 0)) return -required - 1;
   if (proc.isLambda && !requiredKeywords && (params.keywords.length > 0 || params.keywordRest !== undefined))
     return -positional - 1;
   return required;

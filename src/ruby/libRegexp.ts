@@ -28,7 +28,7 @@ import {
   regexpLineCommentEnd,
 } from './regexpCaptureNames';
 import { type Frame, rt, UnsupportedFeatureError } from './runtime';
-import { arr, newHash, realClassOf, str, sym, truthy } from './values';
+import { arr, newHash, realClassOf, str, stringBytes, sym, truthy } from './values';
 
 export interface RegexpData {
   source: string;
@@ -404,12 +404,8 @@ function unsupportedSyntax(feature: string): unknown {
 
 export function makeRegexp(
   source: string,
-  options: { ignoreCase?: boolean; multiline?: boolean; extended?: boolean; literal?: boolean }
+  options: { ignoreCase?: boolean; multiline?: boolean; extended?: boolean }
 ): RObject {
-  if (options.literal)
-    source = source.replaceAll(/(\\+)\//g, (_match, slashes: string) =>
-      slashes.length % 2 === 1 ? `${slashes.slice(0, -1)}/` : `${slashes}/`
-    );
   if (regexpCaptureNames(source, options.extended).length > 0 && regexpHasNumberedBackref(source, options.extended))
     throw rubyError(rt().c.RegexpError, `numbered backref/call is not allowed. (use name): /${source}/`);
   const regexp = new RObject(rt().c.Regexp);
@@ -418,6 +414,8 @@ export function makeRegexp(
   try {
     js = new RegExp(translated, `dgmu${options.ignoreCase ? 'i' : ''}${options.multiline ? 's' : ''}`);
   } catch {
+    const names = regexpCaptureNames(source, options.extended);
+    if (new Set(names).size !== names.length) throw new UnsupportedFeatureError('重複する名前付きキャプチャ');
     throw rubyError(rt().c.RegexpError, `invalid pattern: /${source}/`);
   }
   const data: RegexpData = {
@@ -430,6 +428,12 @@ export function makeRegexp(
   };
   regexp.data = data;
   return regexp;
+}
+
+export function normalizeSlashLiteralSource(source: string): string {
+  return source.replaceAll(/(\\+)\//g, (_match, slashes: string) =>
+    slashes.length % 2 === 1 ? `${slashes.slice(0, -1)}/` : `${slashes}/`
+  );
 }
 
 function triviallyLinearRegexp(source: string): boolean {
@@ -993,9 +997,8 @@ function* substituteRegexp(
   block: RProc | undefined,
   global: boolean
 ): Gen<{ text: string; matched: boolean }> {
-  const text = self.s;
-  const version = self.version;
-  const matches = global ? allMatches(regexp, text) : [execAt(regexp, text, 0)].filter((m): m is MatchState => !!m);
+  let text = self.s;
+  const sourceLength = stringBytes(self).length;
   const chunks: string[] = [];
   let length = 0;
   const append = (part: string): void => {
@@ -1005,7 +1008,9 @@ function* substituteRegexp(
     chunks.push(part);
   };
   let position = 0;
-  for (const state of matches) {
+  let state = execAt(regexp, text, 0);
+  let last: MatchState | undefined;
+  while (state) {
     const [from, to] = state.groups[0] as readonly [number, number];
     let piece: string;
     if (replacement instanceof RHash) {
@@ -1016,15 +1021,18 @@ function* substituteRegexp(
     } else {
       setLastMatch(state);
       piece = yield* toS(yield* callBlock(block as RProc, [str(text.slice(from, to))]));
-      if (self.version !== version) throw rubyError(rt().c.RuntimeError, 'string modified');
     }
+    if (stringBytes(self).length !== sourceLength) throw rubyError(rt().c.RuntimeError, 'string modified');
+    text = self.s;
     append(text.slice(position, from));
     append(piece);
     position = to;
+    last = state;
+    state = global ? execAt(regexp, text, charIndex(text, to) + (from === to ? 1 : 0)) : undefined;
   }
-  setLastMatch(matches.at(-1));
+  setLastMatch(last);
   append(text.slice(position));
-  return { text: chunks.join(''), matched: matches.length > 0 };
+  return { text: chunks.join(''), matched: last !== undefined };
 }
 
 function wrapFirst(
@@ -1059,23 +1067,30 @@ for (const [name, global, bang] of [
   });
 }
 wrapFirst('scan', function* (self, args, block) {
-  const version = self.version;
-  const matches = allMatches(args[0] as RObject, self.s);
-  const values = matches.map((state) =>
+  const regexp = args[0] as RObject;
+  const scanValue = (state: MatchState): Value =>
     state.groups.length > 1
       ? arr(state.groups.slice(1).map((_range, group) => groupText(state, group + 1)))
-      : groupText(state, 0)
-  );
+      : groupText(state, 0);
   if (!block) {
+    const matches = allMatches(regexp, self.s);
     setLastMatch(matches.at(-1));
-    return arr(values);
+    return arr(matches.map(scanValue));
   }
-  for (const [index, value] of values.entries()) {
-    setLastMatch(matches[index]);
-    yield* callBlock(block, [value], false);
-    if (self.version !== version) throw rubyError(rt().c.RuntimeError, 'string modified');
+  const sourceLength = stringBytes(self).length;
+  let text = self.s;
+  let state = execAt(regexp, text, 0);
+  let last: MatchState | undefined;
+  while (state) {
+    const [from, to] = state.groups[0] as readonly [number, number];
+    setLastMatch(state);
+    yield* callBlock(block, [scanValue(state)], false);
+    if (stringBytes(self).length !== sourceLength) throw rubyError(rt().c.RuntimeError, 'string modified');
+    text = self.s;
+    last = state;
+    state = execAt(regexp, text, charIndex(text, to) + (from === to ? 1 : 0));
   }
-  setLastMatch(matches.at(-1));
+  setLastMatch(last);
   return self;
 });
 wrapFirst('split', function* (self, args) {
@@ -1196,14 +1211,14 @@ for (const [name, last] of [
   wrapFirst(name, function* (self, args) {
     const regexp = args[0] as RObject;
     let state = execAt(regexp, self.s, 0);
-    if (last) {
-      for (;;) {
-        if (!state) break;
-        const current = state;
-        const from = (current.groups[0] as readonly [number, number])[0];
-        const next = execAt(regexp, self.s, charIndex(self.s, from) + 1);
-        if (!next) break;
-        state = next;
+    if (last && state) {
+      const length = charIndex(self.s, self.s.length);
+      for (let position = length; position >= 0; position--) {
+        const candidate = execAt(regexp, self.s, position);
+        if (candidate && charIndex(self.s, (candidate.groups[0] as readonly [number, number])[0]) === position) {
+          state = candidate;
+          break;
+        }
       }
     }
     setLastMatch(state);

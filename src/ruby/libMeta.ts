@@ -1,5 +1,5 @@
 import type { Params } from './ast';
-import { className, inspect, toStr } from './conversions';
+import { className, inspect, toStr, tryImplicitConversion } from './conversions';
 import { def } from './define';
 import { argumentError, frozenError, nameError, typeError } from './errors';
 import { hashGet } from './hashes';
@@ -38,6 +38,12 @@ import { arr, classOf, isA, realClassOf, singletonClassOf, str, sym, truthy } fr
 export function* nameOf(value: Value): Gen<string> {
   if (value instanceof RSymbol) return value.name;
   if (value instanceof RString) return value.s;
+  const converted = yield* tryImplicitConversion(value, 'to_str');
+  if (converted instanceof RString) return converted.s;
+  if (converted !== undefined) {
+    const name = realClassOf(value).name;
+    throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
+  }
   throw typeError(`${yield* inspect(value)} is not a symbol nor a string`);
 }
 
@@ -495,6 +501,39 @@ def(
   },
   { visibility: 'private' }
 );
+def(
+  'Module',
+  'prepend_features',
+  1,
+  (self: RClass, [target]) => {
+    if (!(target instanceof RClass)) throw typeError('wrong argument type');
+    assertMutableClass(target);
+    if (moduleDependsOn(self, target)) throw argumentError('cyclic prepend detected');
+    if (!target.prepends.includes(self)) {
+      target.prepends.unshift(self);
+      invalidateMethodCaches();
+    }
+    return self;
+  },
+  { visibility: 'private' }
+);
+def('Module', 'prepended', 1, () => NIL, { visibility: 'private' });
+
+function moduleDependsOn(module: RClass, target: RClass): boolean {
+  const pending = [module];
+  const seen = new Set<RClass>();
+  while (pending.length > 0) {
+    const current = pending.pop() as RClass;
+    if (current === target) return true;
+    if (seen.has(current)) continue;
+    seen.add(current);
+    rt().spend();
+    pending.push(...current.includes, ...current.prepends);
+    if (current.superclass) pending.push(current.superclass);
+  }
+  return false;
+}
+
 def('Module', 'prepend', [1, -1], function* (self: RClass, modules) {
   for (const module of modules) {
     if (!(module instanceof RClass) || !module.isModule) {
@@ -503,11 +542,8 @@ def('Module', 'prepend', [1, -1], function* (self: RClass, modules) {
   }
   assertMutableClass(self);
   for (const module of modules.toReversed() as RClass[]) {
-    if (self.prepends.includes(module)) continue;
-    self.prepends.unshift(module);
-    invalidateMethodCaches();
-    const hook = classOf(module).findMethod('prepended');
-    if (hook && hook.body.kind === 'user') yield* invoke(hook, module, [self], undefined, undefined, false);
+    yield* callMethod(module, 'prepend_features', [self], undefined, undefined, { fcall: true });
+    yield* callMethod(module, 'prepended', [self], undefined, undefined, { fcall: true });
   }
   return self;
 });
@@ -558,14 +594,16 @@ def('Module', 'const_defined?', [1, 2], function* (self: RClass, args) {
   const parts = (absolute ? requested.slice(2) : requested).split('::');
   if (parts.some((part) => part.length === 0)) throw nameError(`wrong constant name ${requested}`, NIL, requested);
   let module: Value | undefined = absolute ? rt().c.Object : self;
-  for (const part of parts) {
+  for (const [index, part] of parts.entries()) {
     if (!(module instanceof RClass)) throw typeError(`${requested} does not refer to class/module`);
     const constant = yield* constantName(str(part));
-    const holders: RClass[] = inherit ? module.ancestors() : [module];
+    const ancestors = inherit ? module.ancestors() : [module];
+    const objectIndex = index > 0 && module !== rt().c.Object ? ancestors.indexOf(rt().c.Object) : -1;
+    const holders: RClass[] = objectIndex < 0 ? ancestors : ancestors.slice(0, objectIndex);
     const value: Value | undefined = holders
       .map((holder: RClass) => holder.constants.get(constant))
       .find((candidate: Value | undefined) => candidate !== undefined);
-    module = value ?? (inherit ? rt().c.Object.constants.get(constant) : undefined);
+    module = value ?? (inherit && index === 0 ? rt().c.Object.constants.get(constant) : undefined);
     if (module === undefined) return false;
   }
   return true;

@@ -84,7 +84,6 @@ export function setText(self: RString, text: string): void {
   rt().checkStringLength(text.length);
   const value = str(text);
   self.s = value.s;
-  self.version++;
   self.rawBytes = value.rawBytes;
   self.usAscii &&= !/[^\u0000-\u007F]/.test(text);
 }
@@ -94,7 +93,6 @@ function setBytes(self: RString, bytes: Uint8Array, binary = self.binary): void 
   rt().checkStringLength(bytes.length);
   const result = stringFromBytes(bytes, binary);
   self.s = result.s;
-  self.version++;
   self.binary = result.binary;
   self.usAscii &&= !binary;
   self.rawBytes = result.rawBytes;
@@ -404,7 +402,6 @@ def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
   const result = stringFromBytes(bytes, binary);
   result.usAscii = usAscii;
   self.s = result.s;
-  self.version++;
   self.binary = result.binary;
   self.usAscii = result.usAscii;
   self.rawBytes = result.rawBytes;

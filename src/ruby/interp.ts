@@ -35,7 +35,7 @@ import {
 } from './errors';
 import { hashGet, hashSet, hashSetStored } from './hashes';
 import { makeRational } from './libRational';
-import { lastMatch, makeRegexp, matchGlobal } from './libRegexp';
+import { lastMatch, makeRegexp, matchGlobal, normalizeSlashLiteralSource } from './libRegexp';
 import {
   boxFloat,
   invalidateMethodCaches,
@@ -437,15 +437,14 @@ export function* ev(e: Expr, frame: Frame): Gen {
       if (cached) return cached;
       let source = '';
       for (const part of e.parts) {
-        if (typeof part === 'string') source += part;
-        else if ('text' in part) source += part.text;
+        if (typeof part === 'string') source += e.slashDelimited ? normalizeSlashLiteralSource(part) : part;
+        else if ('text' in part) source += e.slashDelimited ? normalizeSlashLiteralSource(part.text) : part.text;
         else {
           const value = yield* ev(part, frame);
           source += yield* toS(value);
         }
       }
       const regexp = makeRegexp(source, {
-        literal: e.slashDelimited,
         ignoreCase: e.flags.includes('i'),
         multiline: e.flags.includes('m'),
         extended: e.flags.includes('x'),
@@ -1202,6 +1201,7 @@ function* definedText(e: Expr, frame: Frame): Gen {
           : NIL;
       }
       if (method.visibility === 'private' && !e.fcall) return NIL;
+      if (method.visibility === 'protected' && !e.fcall && !isA(frame.self, method.owner)) return NIL;
       return text('method');
     }
     case 'yield': {
@@ -1499,6 +1499,10 @@ export function addMethod(owner: RClass, method: RMethod): void {
     (method.body.kind === 'user' || method.body.kind === 'proc')
   )
     throw new UnsupportedFeatureError(`メソッド・定数フック（${method.name}）`);
+  const target = owner.isSingleton ? owner.attached : owner;
+  const hookName = owner.isSingleton ? 'singleton_method_added' : 'method_added';
+  const activeHook = target === undefined ? undefined : classOf(target).findMethod(hookName);
+  if (activeHook) throw new UnsupportedFeatureError(`メソッド・定数フック（${hookName}）`);
   owner.methods.set(method.name, method);
   invalidateMethodCaches();
 }
