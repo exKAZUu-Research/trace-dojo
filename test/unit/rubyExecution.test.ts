@@ -5303,6 +5303,32 @@ test('Time strftime applies widths, flags and week directives', () => {
   });
 });
 
+test('DATA rewind reads from the script and each_line advances per yield', () => {
+  const rewound = 'p DATA.gets\nDATA.rewind\np DATA.gets\n__END__\na\nb\n';
+  expect(run(rewound)).toMatchObject({ stdout: '"a\\n"\n"p DATA.gets\\n"\n' });
+  const partial = 'DATA.each_line{|line|p line;break};p DATA.read\n__END__\na\nb\n';
+  expect(run(partial)).toMatchObject({ stdout: '"a\\n"\n"b\\n"\n' });
+});
+
+test('DATA each_line returns an enumerator without consuming the cursor', () => {
+  expect(run('p DATA.each_line.to_a\n__END__\na\nb\n')).toMatchObject({ stdout: '["a\\n", "b\\n"]\n' });
+});
+
+test('Integer chr preserves ASCII encoding metadata', () => {
+  expect(run('p 65.chr.encoding,0.chr.encoding,255.chr.encoding')).toMatchObject({
+    stdout: '#<Encoding:US-ASCII>\n#<Encoding:US-ASCII>\n#<Encoding:ASCII-8BIT (BINARY)>\n',
+  });
+});
+
+test('MatchData offset accessors reject out-of-range captures', () => {
+  expect(
+    run('m=/a(b)/.match("ab");[:begin,:end,:offset].each{|name|begin;m.send(name,2);rescue=>e;p e.class,e.message;end}')
+  ).toMatchObject({
+    stdout:
+      'IndexError\n"index 2 out of matches"\nIndexError\n"index 2 out of matches"\nIndexError\n"index 2 out of matches"\n',
+  });
+});
+
 test('Data copies remain frozen and Rational copies preserve identity', () => {
   expect(
     run(

@@ -195,4 +195,5 @@ export interface Program {
   locals: string[];
   /** The text after `__END__`, which `DATA` reads. */
   data?: string;
+  dataFile?: string;
 }

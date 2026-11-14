@@ -552,6 +552,7 @@ def('Integer', 'chr', [0, 1], (self: bigint, args) => {
   if (self < 0n || self > 255n) throw rangeError(`${self} out of char range`);
   const char = str(String.fromCodePoint(Number(self)));
   char.binary = self > 127n;
+  char.usAscii = self <= 127n;
   return char;
 });
 def('Integer', 'ord', 0, (self) => self);

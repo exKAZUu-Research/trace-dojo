@@ -515,21 +515,29 @@ for (const [name, side] of [
 ] as const) {
   def('MatchData', name, 1, function* (self: RObject, [key]) {
     const state = stateOf(self);
-    const group =
-      key instanceof RString || key instanceof RSymbol
-        ? state.namedGroups[key instanceof RString ? key.s : key.name]
-        : yield* toIndex(key);
-    const range = group === undefined ? undefined : state.groups[group];
+    const range = state.groups[yield* captureGroup(state, key)];
     return range ? BigInt(charIndex(state.text, range[side])) : NIL;
   });
 }
 def('MatchData', 'offset', 1, function* (self: RObject, [key]) {
   const state = stateOf(self);
-  const range = state.groups[yield* toIndex(key)];
+  const range = state.groups[yield* captureGroup(state, key)];
   return range
     ? arr([BigInt(charIndex(state.text, range[0])), BigInt(charIndex(state.text, range[1]))])
     : arr([NIL, NIL]);
 });
+
+function* captureGroup(state: MatchState, key: Value): Gen<number> {
+  if (key instanceof RString || key instanceof RSymbol) {
+    const name = key instanceof RString ? key.s : key.name;
+    const group = state.namedGroups[name];
+    if (group === undefined) throw indexError(`undefined group name reference: ${name}`);
+    return group;
+  }
+  const group = yield* toIndex(key);
+  if (group < 0 || group >= state.groups.length) throw indexError(`index ${group} out of matches`);
+  return group;
+}
 def('MatchData', ['size', 'length'], 0, (self: RObject) => BigInt(stateOf(self).groups.length));
 def('MatchData', 'values_at', [0, -1], function* (self: RObject, args) {
   const values: Value[] = [];

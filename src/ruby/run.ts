@@ -57,7 +57,8 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: F
     runtime.pushFrame(frame);
     try {
       let mainError: unknown;
-      if (program.data !== undefined) runtime.c.Object.constants.set('DATA', makeData(program.data));
+      if (program.data !== undefined)
+        runtime.c.Object.constants.set('DATA', makeData(program.data, program.dataFile ?? program.data));
       try {
         runToEnd(evalBody(program.body, frame));
       } catch (error) {

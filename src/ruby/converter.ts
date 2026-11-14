@@ -129,7 +129,12 @@ export class Converter {
     const beginBlocks = children.filter((child) => child.type === 'begin_block');
     const rest = children.filter((child) => child.type !== 'uninterpreted' && child.type !== 'begin_block');
     const body = [...beginBlocks.flatMap((block) => this.body(namedChildren(block), 0)), ...this.body(rest, 0)];
-    return { body, locals: this.ctx.scope.names, data: data ? data.text.replace(/^\n/, '') : undefined };
+    return {
+      body,
+      locals: this.ctx.scope.names,
+      data: data ? data.text.replace(/^\n/, '') : undefined,
+      dataFile: data ? this.source : undefined,
+    };
   }
 
   /** The bodies of the heredocs, in the order their openings appear, which the tree places after their lines. */

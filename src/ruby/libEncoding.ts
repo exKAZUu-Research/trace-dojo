@@ -1,7 +1,8 @@
 import { def } from './define';
 import { callProc, type Gen, requireBlock } from './interp';
+import { makeEnumerator } from './libEnumerator';
 import { NIL, RObject, type RString, type Value } from './objects';
-import { ExitSignal, rt, RubyError, type Runtime } from './runtime';
+import { ExitSignal, rt, RubyError, type Runtime, UnsupportedFeatureError } from './runtime';
 import { arr, str, stringBytes } from './values';
 
 /** Creates the encodings a program can name: strings here are UTF-8, or ASCII-8BIT when they hold bytes. */
@@ -74,10 +75,9 @@ export function* runAtExit(): Gen<(RubyError | ExitSignal)[]> {
   return errors;
 }
 
-/** The text after `__END__`, which `DATA` reads as a file opened at its start. */
-export function makeData(text: string): RObject {
+export function makeData(text: string, file: string): RObject {
   const data = new RObject(rt().c.File);
-  data.data = { text, position: 0 };
+  data.data = { text: file, position: file.length - text.length };
   return data;
 }
 
@@ -96,14 +96,16 @@ def('File', 'read', 0, (self: RObject) => {
   (self.data as DataState).position = (self.data as DataState).text.length;
   return str(text);
 });
-def('File', 'gets', 0, (self: RObject) => {
+def('File', 'gets', 0, (self: RObject) => readLine(self));
+
+function readLine(self: RObject): Value {
   const state = self.data as DataState;
   if (state.position >= state.text.length) return NIL;
   const end = state.text.indexOf('\n', state.position);
   const line = state.text.slice(state.position, end === -1 ? undefined : end + 1);
   state.position += line.length;
   return str(line);
-});
+}
 def('File', 'readlines', 0, (self: RObject) => {
   const lines = remaining(self)
     .split(/(?<=\n)/)
@@ -112,11 +114,9 @@ def('File', 'readlines', 0, (self: RObject) => {
   return arr(lines.map((line) => str(line)));
 });
 def('File', 'each_line', 0, function* (self: RObject, _args, block) {
-  const lines = remaining(self)
-    .split(/(?<=\n)/)
-    .filter((line) => line.length > 0);
-  (self.data as DataState).position = (self.data as DataState).text.length;
-  for (const line of lines) yield* callProc(requireBlock(block), [str(line)], { used: false });
+  if (!block) return makeEnumerator(self, 'each_line', []);
+  let line: Value;
+  while ((line = readLine(self)) !== NIL) yield* callProc(block, [line], { used: false });
   return self;
 });
 def('File', 'rewind', 0, (self: RObject) => {
@@ -124,3 +124,8 @@ def('File', 'rewind', 0, (self: RObject) => {
   return 0n;
 });
 def('File', 'eof?', 0, (self: RObject) => remaining(self).length === 0);
+for (const name of ['lineno', 'each', 'getc', 'readline', 'close', 'pos']) {
+  def('File', name, [0, -1], () => {
+    throw new UnsupportedFeatureError(`DATA.${name}`);
+  });
+}
