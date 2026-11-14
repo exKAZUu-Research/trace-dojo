@@ -43,6 +43,7 @@ import {
   joinStringCharacters,
   str,
   stringBytes,
+  stringCharacterCount,
   stringCharacters,
   stringFromBytes,
   sym,
@@ -250,7 +251,7 @@ def('String', 'to_r', 0, () => {
 });
 def('String', 'hex', 0, (self: RString) => parseIntegerLenient(self.s, 16));
 def('String', 'oct', 0, (self: RString) => parseIntegerLenient(self.s, 8));
-def('String', ['length', 'size'], 0, (self: RString) => BigInt(stringCharacters(self).length));
+def('String', ['length', 'size'], 0, (self: RString) => BigInt(stringCharacterCount(self)));
 def('String', 'bytesize', 0, (self: RString) => BigInt(stringBytes(self).length));
 def('String', 'empty?', 0, (self: RString) => self.s.length === 0);
 def('String', 'hash', 0, (self: RString) => stringKeyHash(self));

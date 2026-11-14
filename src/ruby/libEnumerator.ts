@@ -16,7 +16,7 @@ import { rangeSize } from './libRange';
 import { setSize } from './libSet';
 import { NIL, RArray, RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
-import { arr, str, stringBytes, stringCharacters } from './values';
+import { arr, str, stringBytes, stringCharacterCount } from './values';
 
 /** What an enumerator iterates: a method of a receiver, called with the block it is given. */
 export interface EnumeratorSource {
@@ -32,8 +32,10 @@ export interface EnumeratorSource {
 }
 
 export function makeEnumerator(recv: Value, method: string, args: Value[], keywords?: RHash): RObject {
+  const end = method === 'step' || method === '%' ? arithmeticSpec(recv, args, keywords).end : NIL;
   const arithmetic =
     (method === 'step' || method === '%') &&
+    (end === NIL || typeof end === 'bigint' || typeof end === 'number') &&
     (typeof recv === 'bigint' ||
       typeof recv === 'number' ||
       (recv instanceof RRange && (typeof recv.begin === 'bigint' || typeof recv.begin === 'number')));
@@ -57,7 +59,7 @@ function* enumeratorSize(recv: Value, method: string, args: Value[], keywords?: 
   if (method === 'step' || method === '%') return yield* stepSize(recv, args, keywords);
   if (recv instanceof RString && method === 'each_byte') return BigInt(stringBytes(recv).length);
   if (recv instanceof RArray && ARRAY_SELECTION_METHODS.has(method))
-    return arraySelectionSize(recv.items.length, method, args[0]);
+    return arraySelectionSize(recv.items.length, method, args[0] === undefined ? undefined : yield* toInt(args[0]));
   if (typeof recv === 'bigint') {
     const limit = args[0];
     if (method === 'times') return recv > 0n ? recv : 0n;
@@ -72,13 +74,18 @@ function* enumeratorSize(recv: Value, method: string, args: Value[], keywords?: 
     }
   }
   const base = receiverSize(recv);
-  if (method === 'each_slice' && typeof args[0] === 'bigint' && typeof base === 'bigint')
-    return (base + args[0] - 1n) / args[0];
-  if (method === 'each_cons' && typeof args[0] === 'bigint' && typeof base === 'bigint')
-    return base >= args[0] ? base - args[0] + 1n : 0n;
+  if (method === 'each_slice' && args[0] !== undefined && typeof base === 'bigint') {
+    const count = yield* toInt(args[0]);
+    return (base + count - 1n) / count;
+  }
+  if (method === 'each_cons' && args[0] !== undefined && typeof base === 'bigint') {
+    const count = yield* toInt(args[0]);
+    return base >= count ? base - count + 1n : 0n;
+  }
   if (method === 'cycle' && typeof base === 'bigint') {
-    if (base === 0n || (typeof args[0] === 'bigint' && args[0] <= 0n)) return 0n;
-    return typeof args[0] === 'bigint' ? base * args[0] : Number.POSITIVE_INFINITY;
+    const count = args[0] === undefined || args[0] === NIL ? undefined : yield* toInt(args[0]);
+    if (base === 0n || (count !== undefined && count <= 0n)) return 0n;
+    return count === undefined ? Number.POSITIVE_INFINITY : base * count;
   }
   if (method === 'loop') return Number.POSITIVE_INFINITY;
   if (NIL_SIZE_METHODS.has(method)) return NIL;
@@ -89,7 +96,7 @@ function* enumeratorSize(recv: Value, method: string, args: Value[], keywords?: 
 export function receiverSize(recv: Value): Value {
   if (recv instanceof RArray) return BigInt(recv.items.length);
   if (recv instanceof RHash) return BigInt(recv.map.size);
-  if (recv instanceof RString) return BigInt(stringCharacters(recv).length);
+  if (recv instanceof RString) return BigInt(stringCharacterCount(recv));
   if (recv instanceof RRange) return rangeSize(recv);
   if (recv instanceof RObject && recv.cls.isSubclassOf(rt().c.Set)) return setSize(recv);
   if (recv instanceof RObject && recv.cls.isSubclassOf(rt().c.Enumerator)) {
@@ -99,8 +106,8 @@ export function receiverSize(recv: Value): Value {
   return NIL;
 }
 
-function arraySelectionSize(length: number, method: string, requested: Value | undefined): Value {
-  if (requested !== undefined && typeof requested !== 'bigint') return NIL;
+function arraySelectionSize(length: number, method: string, requested: bigint | undefined): Value {
+  if (length === 0 && requested !== undefined && requested > 0n) return 0n;
   if (requested !== undefined && requested >= 0n && length === 1 && method.startsWith('repeated_')) return 1n;
   const size = requested === undefined ? length : Number(requested);
   if (!Number.isSafeInteger(size)) return 0n;

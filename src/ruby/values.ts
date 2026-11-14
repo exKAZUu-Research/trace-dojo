@@ -131,6 +131,16 @@ export function stringCharacters(value: RString): RString[] {
   return characters;
 }
 
+export function stringCharacterCount(value: RString): number {
+  if (value.binary) return stringBytes(value).length;
+  let count = 0;
+  for (let index = 0; index < value.s.length; index++) {
+    if ((value.s.codePointAt(index) as number) > 0xff_ff) index++;
+    if (count++ % 256 === 0) rt().spend();
+  }
+  return count;
+}
+
 export function joinStringCharacters(characters: RString[], binary = false): RString {
   const chunks = characters.map(stringBytes);
   const length = chunks.reduce((total, chunk) => total + chunk.length, 0);

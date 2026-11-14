@@ -2435,6 +2435,38 @@ test('Range step with NaN yields no values', () => {
   expect(run('p (1..3).step(Float::NAN).to_a')).toMatchObject({ stdout: '[]\n' });
 });
 
+test('repeated String sizes count characters without allocating them', () => {
+  expect(run('s="x"*100000;10.times{p s.size}')).toMatchObject({
+    kind: 'executed',
+    stdout: '100000\n'.repeat(10),
+  });
+  expect(run('s="x"*100000;10.times{p s.each_char.size}')).toMatchObject({
+    kind: 'executed',
+    stdout: '100000\n'.repeat(10),
+  });
+});
+
+test('empty Array repeated selection sizes short-circuit', () => {
+  expect(run('p [].repeated_combination(1000001).size,[].repeated_permutation(1000001).size')).toMatchObject({
+    stdout: '0\n0\n',
+  });
+});
+
+test('Enumerator sizes convert count arguments when queried', () => {
+  expect(
+    run('class A;def to_int;puts :called;2;end;end;e=[1,2,3].each_slice(A.new);puts :size;p e.size')
+  ).toMatchObject({ stdout: 'called\nsize\ncalled\n2\n' });
+  expect(run('p [1,2,3].permutation(2.5).size,[1,2].cycle(2.5).size')).toMatchObject({
+    stdout: '6\n4\n',
+  });
+});
+
+test('custom Numeric step limits use a generic Enumerator', () => {
+  expect(
+    run('class A;def to_f;3.0;end;end;e=1.0.step(A.new,0.5);p e.class;begin;p e.last;rescue=>x;p x.class;end')
+  ).toMatchObject({ stdout: 'Enumerator\nNoMethodError\n' });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(
