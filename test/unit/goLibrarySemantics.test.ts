@@ -1206,3 +1206,17 @@ test('spread append shares backing writes and allocation 4', () => {
     )
   ).toMatchObject({ kind: 'executed', stdout: '[0 1 2] 4\n[1 2 3] 3\n', uncaughtException: undefined });
 });
+
+test('overlapping append snapshots composite values while preserving storage and references', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main\nimport "fmt"\ntype S struct{N int}\ntype Nested struct{A [1]int; P *int; V []int}\nfunc main(){\n a:=[]S{{1},{2},{3},{4}};p:=&a[2].N;a=append(a[:1],a[:3]...);fmt.Println(a,*p);*p=9;fmt.Println(a)\n b:=[][1]int{{1},{2},{3},{4}};b=append(b[:1],b[:3]...);fmt.Println(b)\n x:=7;v:=[]int{8};c:=[]Nested{{[1]int{1},&x,v},{[1]int{2},&x,v},{[1]int{3},&x,v},{[1]int{4},&x,v}};c=append(c[:1],c[:3]...);fmt.Println(c[0].A,c[1].A,c[2].A,c[3].A);*c[3].P=10;c[2].V[0]=11;fmt.Println(x,v,c[0].V)\n d:=[]S{{1},{2},{3},{4},{5}};d=append(d[1:2],d[1:4]...);fmt.Println(d)\n e:=[]S{{1},{2},{3},{4}};e=append(e[:0],e[1:4]...);fmt.Println(e)\n f:=[]S{{1},{2},{3}};f=append(f[:1:1],f...);fmt.Println(f)\n}\n'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[{1} {1} {2} {3}] 2\n[{1} {1} {9} {3}]\n[[1] [1] [2] [3]]\n[1] [1] [2] [3]\n10 [11] [11]\n[{2} {2} {3} {4}]\n[{2} {3} {4}]\n[{1} {1} {2} {3}]\n',
+    uncaughtException: undefined,
+  });
+});
