@@ -6801,6 +6801,9 @@ test('MatchData source snapshots preserve binary bytes and freezing', () => {
     stdout: '"aXa"\n',
   });
   expect(run('s="aba";i=0;s.gsub("a"){i+=1;s[2]="X" if i==2;"z"};p $~')).toMatchObject({ stdout: 'nil\n' });
+  expect(run('s="aba";i=0;s.gsub("a"){i+=1;if i==2;s[2]="X";s[1]="a";end;"z"};p $~&.begin(0)')).toMatchObject({
+    stdout: '1\n',
+  });
 });
 
 test('Time constructor validates field widths before calendar bounds', () => {
