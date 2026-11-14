@@ -82,13 +82,13 @@ int fsetpos(FILE *stream, const fpos_t *pos);
 int rename(const char *from, const char *to);
 FILE *tmpfile(void);
 char *tmpnam(char *s);
-int vprintf();
-int vfprintf();
-int vsprintf();
-int vsnprintf();
-int vscanf();
-int vsscanf();
-int vfscanf();
+int vprintf(const char *format, char *ap);
+int vfprintf(FILE *stream, const char *format, char *ap);
+int vsprintf(char *str, const char *format, char *ap);
+int vsnprintf(char *str, size_t size, const char *format, char *ap);
+int vsscanf(const char *str, const char *format, char *ap);
+int vscanf(const char *format, char *ap);
+int vfscanf(FILE *stream, const char *format, char *ap);
 `;
 
 const STDLIB = `
@@ -336,11 +336,64 @@ ${type} nexttoward${suffix}(${type} x, long double y);`;
 
 `;
 
+/** On arm64 macOS, a va_list is a char * to the extra arguments, which lie in 8-byte slots. */
+const STDARG = `
+typedef char *va_list;
+typedef char *__gnuc_va_list;
+#define va_start(ap, last) __builtin_va_start(ap, last)
+#define va_end(ap) ((void)(ap))
+#define va_copy(destination, source) ((destination) = (source))
+#define __va_copy(destination, source) ((destination) = (source))
+void __builtin_va_start();
+void __va_arg_is_declared(void);
+`;
+
+const TIME = `
+${SIZE_T}
+${NULL}
+typedef long time_t;
+typedef unsigned long clock_t;
+#define CLOCKS_PER_SEC 1000000
+struct tm {
+  int tm_sec;
+  int tm_min;
+  int tm_hour;
+  int tm_mday;
+  int tm_mon;
+  int tm_year;
+  int tm_wday;
+  int tm_yday;
+  int tm_isdst;
+  long tm_gmtoff;
+  char *tm_zone;
+};
+time_t time(time_t *t);
+clock_t clock(void);
+double difftime(time_t end, time_t start);
+time_t mktime(struct tm *tm);
+struct tm *gmtime(const time_t *t);
+struct tm *localtime(const time_t *t);
+char *asctime(const struct tm *tm);
+char *ctime(const time_t *t);
+size_t strftime(char *buffer, size_t size, const char *format, const struct tm *tm);
+`;
+
 const STDBOOL = `
 #define bool _Bool
 #define true 1
 #define false 0
 #define __bool_true_false_are_defined 1
+`;
+
+const STDALIGN = `
+#define alignas _Alignas
+#define alignof _Alignof
+#define __alignas_is_defined 1
+#define __alignof_is_defined 1
+`;
+
+const STDNORETURN = `
+#define noreturn _Noreturn
 `;
 
 const STDDEF = `
@@ -548,6 +601,7 @@ const ASSERT = `
 #define assert(e) ((e) ? (void)0 : __assert_rtn(#e, __LINE__))
 #endif
 void __assert_rtn(const char *expression, int line);
+#define static_assert _Static_assert
 `;
 
 const ERRNO = ERRNO_HEADER;
@@ -568,11 +622,15 @@ const ISO646 = `
 
 const HEADERS: Record<string, string> = {
   'stdio.h': STDIO,
+  'stdarg.h': STDARG,
+  'time.h': TIME,
   'stdlib.h': STDLIB,
   'string.h': STRING,
   'ctype.h': CTYPE,
   'math.h': MATH,
   'stdbool.h': STDBOOL,
+  'stdalign.h': STDALIGN,
+  'stdnoreturn.h': STDNORETURN,
   'stddef.h': STDDEF,
   'limits.h': LIMITS,
   'float.h': FLOAT,
@@ -585,8 +643,6 @@ const HEADERS: Record<string, string> = {
 
 /** The standard headers the interpreter leaves out, with what learners call what they provide. */
 const UNSUPPORTED_HEADERS: Record<string, string> = {
-  'stdarg.h': '可変長引数（stdarg.h）',
-  'time.h': '時刻（time.h）',
   'threads.h': 'スレッド（threads.h）',
   'pthread.h': 'スレッド（pthread.h）',
   'stdatomic.h': '原子的な操作（stdatomic.h）',
@@ -599,8 +655,6 @@ const UNSUPPORTED_HEADERS: Record<string, string> = {
   'complex.h': '複素数（complex.h）',
   'tgmath.h': '型総称の数学関数（tgmath.h）',
   'fenv.h': '浮動小数点数の環境（fenv.h）',
-  'stdalign.h': 'stdalign.h',
-  'stdnoreturn.h': 'stdnoreturn.h',
   'stdbit.h': 'stdbit.h',
   'stdckdint.h': 'stdckdint.h',
 };

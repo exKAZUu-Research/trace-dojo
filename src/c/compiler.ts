@@ -1,21 +1,25 @@
-// code-gauge-allow-file fileNcss 585 -- Declaration and initializer compilation share symbol and type state; splitting the phase would only distribute that state across modules.
+// code-gauge-allow-file fileNcss 825 -- Declaration and initializer compilation share symbol and type state.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type { Value } from './arith';
 import type {
   Compound,
   Declaration,
   Declarator,
+  Designator,
   Expression,
   ExternalDeclaration,
   FunctionDefinition,
   InitDeclarator,
   Initializer,
+  Parameter,
+  Specifiers,
   StorageClass,
   TranslationUnit,
 } from './ast';
-import type { CompileOptions, Entity, FunctionContext, Operand } from './compilerBase';
+import type { CompileOptions, Entity, FunctionContext, LValue, Operand } from './compilerBase';
 import { declaredName, findFunctionDeclarator } from './convert';
-import { isNullConstant, type SpecialCall, writeBits } from './expressionCompiler';
+import { isNullConstant, readBits, type SpecialCall, writeBits } from './expressionCompiler';
+import { memberCoverage, replaceWrites, type Write, type Writer, zeroedWriter } from './initializerWrites';
 import { decodeStringLiteral } from './literals';
 import { TURTLE_HEADER_NAME } from './parse';
 import { evaluate, type Evaluator, replacePointerBytes } from './pointerBounds';
@@ -25,16 +29,22 @@ import {
   Frame,
   type FunctionInfo,
   type GlobalInfo,
+  loadRecord,
   type LocalInfo,
   type Runtime,
+  storeRecord,
   storeValue,
 } from './runtime';
 import { type Compiled, StatementCompiler } from './statementCompiler';
 import {
+  alignOf,
   compatible,
   composite,
   type CType,
+  evaluatedArrayType,
+  type Field,
   type FunctionType,
+  hasVla,
   INT,
   isCharArray,
   isComplete,
@@ -59,8 +69,47 @@ export interface CompiledProgram {
   main: FunctionInfo;
 }
 
-/** Writes an initializer's values into an object at an address. */
-type Writer = (frame: Frame, address: number) => void;
+/** The subobject of an aggregate that an initializer list fills next. */
+interface Cursor {
+  type: CType;
+  index: number;
+  offset: number;
+}
+
+interface Member {
+  type: CType;
+  offset: number;
+  field?: Field;
+}
+
+/** The named members of a struct or union, which an initializer list fills. */
+function namedFields(type: Extract<CType, { kind: 'record' }>): Field[] {
+  return (type.info.fields ?? []).filter((field) => field.name !== undefined || field.isAnonymous);
+}
+
+/** The subobject a cursor is at, or undefined past the end of its aggregate. */
+function memberAt(cursor: Cursor): Member | undefined {
+  const { type, index } = cursor;
+  if (type.kind === 'array') {
+    if (type.length !== undefined && index >= type.length) return undefined;
+    return { type: type.of, offset: cursor.offset + index * sizeOf(type.of) };
+  }
+  if (type.kind !== 'record') return undefined;
+  const field = namedFields(type)[index];
+  return field ? { type: field.type, offset: cursor.offset + field.offset, field } : undefined;
+}
+
+/** Moves past the subobject just filled: to the next element or member, or past a union's one member. */
+function advance(cursor: Cursor): void {
+  cursor.index =
+    cursor.type.kind === 'record' && cursor.type.info.kind === 'union' ? Number.POSITIVE_INFINITY : cursor.index + 1;
+}
+
+/** The number of elements of the outermost aggregate that the items so far reached, for an array of unknown length. */
+function filledLength(stack: Cursor[]): number {
+  // While a nested subobject is open, the outer element holding it counts; otherwise the cursor is already past it.
+  return stack.length > 1 ? stack[0].index + 1 : stack[0].index;
+}
 
 interface LocalPart {
   run: (frame: Frame) => void;
@@ -68,6 +117,10 @@ interface LocalPart {
 }
 
 export class Compiler extends StatementCompiler {
+  private readonly compoundObjects = new WeakMap<
+    object,
+    WeakMap<Extract<Expression, { kind: 'compoundLiteral' }>, { operand: Operand; use: () => void }>
+  >();
   private readonly linkage = new Map<string, Entity>();
   private readonly usedAtomicRows = new Set<number>();
   constructor(
@@ -101,7 +154,12 @@ export class Compiler extends StatementCompiler {
   }
 
   private checkFunctionDefinition(fn: FunctionInfo): void {
-    if (fn.referencedAt === undefined || fn.isDefined || fn.native) return;
+    if (
+      fn.referencedAt === undefined ||
+      (fn.isDefined && !(fn.isInlineDefinition && !fn.hasExternalDeclaration)) ||
+      fn.native
+    )
+      return;
     const entry = fn.header === undefined ? undefined : this.library(fn.name);
     if (entry?.kind === 'unsupported') unsupported(fn.referencedAt, entry.feature);
     this.error(fn.referencedAt, `関数「${fn.name}」は宣言されていますが、定義されていません。`);
@@ -113,7 +171,9 @@ export class Compiler extends StatementCompiler {
   }
 
   protected checkFunctionUse(fn: FunctionInfo, row: number): void {
-    if (!this.isUnevaluated) fn.referencedAt ??= row;
+    this.recordReference(() => {
+      fn.referencedAt ??= row;
+    });
     if (fn.header === undefined) return;
     const entry = this.library(fn.name);
     if (entry?.kind === 'unsupported' && !entry.canDefine) unsupported(row, entry.feature);
@@ -124,11 +184,16 @@ export class Compiler extends StatementCompiler {
       this.functionDefinition(item);
       return;
     }
+    if (item.kind === 'staticAssert') {
+      this.staticAssert(item);
+      return;
+    }
     this.fileScopeDeclaration(item);
   }
 
   // File scope --------------------------------------------------------------------------------------------------------
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- File declarations share type, linkage and initializer checks.
   private fileScopeDeclaration(declaration: Declaration): void {
     const { specifiers } = declaration;
     if (specifiers.storage === 'auto' || specifiers.storage === 'register') {
@@ -138,17 +203,31 @@ export class Compiler extends StatementCompiler {
     for (const declarator of declaration.declarators) {
       const { type, name, row } = this.declaredType(base, declarator.declarator);
       if (name === undefined) this.error(row, '宣言する名前を書いてください。');
+      this.validateInline(specifiers, type, name);
+      const alignment = this.objectAlignment(specifiers, type);
       if (specifiers.storage === 'typedef') {
         this.declareTypedef(name, type, row);
         continue;
       }
       if (type.kind === 'function') {
         if (declarator.init) this.error(row, `関数「${name}」には初期値を書けません。`);
-        this.declareFunction(name, type, row, specifiers.storage === 'static', declaration.fromHeader);
+        const fn = this.declareFunction(name, type, row, specifiers.storage === 'static', declaration.fromHeader);
+        if (!specifiers.isInline || specifiers.storage === 'extern') fn.hasExternalDeclaration = true;
         continue;
       }
-      this.declareGlobal(name, type, row, specifiers.storage, declarator.init, declaration.fromHeader);
+      const global = this.declareGlobal(name, type, row, specifiers.storage, declarator.init, declaration.fromHeader);
+      global.alignment = Math.max(global.alignment ?? 0, alignment ?? 0);
     }
+  }
+
+  private objectAlignment(specifiers: Specifiers, type: CType): number | undefined {
+    if (!specifiers.alignas) return undefined;
+    if (specifiers.storage === 'typedef' || specifiers.storage === 'register' || type.kind === 'function')
+      this.error(specifiers.row, '_Alignas は、typedef・register・関数には指定できません。');
+    const alignment = this.requestedAlignment(specifiers.alignas);
+    if (alignment !== 0 && alignment < alignOf(type))
+      this.error(specifiers.row, '_Alignas の大きさは、型のアラインメントより小さくできません。');
+    return alignment;
   }
 
   private declareTypedef(name: string, type: CType, row: number): void {
@@ -218,7 +297,7 @@ export class Compiler extends StatementCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- C's rules for tentative definitions and redeclarations.
-  // code-gauge-allow functionNcss 37 -- Tentative definitions, composite types, and initializers update one symbol; separating branches would split that invariant.
+  // code-gauge-allow functionNcss 40 -- Tentative definitions, composite types, and initializers update one symbol; separating branches would split that invariant.
   private declareGlobal(
     name: string,
     declaredType: CType,
@@ -229,8 +308,6 @@ export class Compiler extends StatementCompiler {
   ): GlobalInfo {
     let type = declaredType;
     if (init && storage === 'extern' && this.fn) this.error(row, '関数の中の extern の変数には、初期値を書けません。');
-    if (init && type.kind === 'array' && type.length === undefined)
-      type = { ...type, length: this.initializerLength(type, init) };
     const existing =
       (this.scope === this.fileScope ? this.scope.ordinary.get(name) : undefined) ?? this.linkage.get(name);
     if (existing) {
@@ -242,6 +319,8 @@ export class Compiler extends StatementCompiler {
       global.type = composite(global.type, type);
       existing.type = global.type;
       if (init) {
+        global.type = this.completeArrayType(global.type, init);
+        existing.type = global.type;
         if (global.initialize) this.error(row, `変数「${name}」が2回定義されています。`);
         global.initialize = this.staticInitializer(global.type, init, row);
       }
@@ -265,12 +344,21 @@ export class Compiler extends StatementCompiler {
     if (this.scope === this.fileScope) this.fileScope.ordinary.set(name, entity);
     this.scope.ordinary.set(name, entity);
     if (init) {
+      type = this.completeArrayType(type, init);
+      global.type = type;
+      entity.type = type;
       entity.constantBytes = this.constantString(type, init);
       global.initialize = this.staticInitializer(type, init, row);
       const constant = this.foldedConstant(type, init);
       if (constant !== undefined) entity.constant = constant;
     }
     return global;
+  }
+
+  private completeArrayType(type: CType, init: Initializer): CType {
+    return type.kind === 'array' && type.length === undefined
+      ? { ...type, length: this.initializerLength(type, init) }
+      : type;
   }
 
   /** An initializer of an object with static storage, whose values must be known before the program runs. */
@@ -285,7 +373,7 @@ export class Compiler extends StatementCompiler {
   // Functions ---------------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionCognitiveComplexity 30 -- Declaring a function's parameters, checking main's form.
-  // code-gauge-allow functionNcss 42 -- Parameter scope, labels, and body compilation form one function lifecycle; splitting it would distribute the context restoration.
+  // code-gauge-allow functionNcss 50 -- Function setup shares linkage, parameter lengths, trace annotations and body state.
   private functionDefinition(definition: FunctionDefinition): void {
     const { specifiers, row } = definition;
     if (specifiers.storage === 'typedef' || specifiers.storage === 'auto' || specifiers.storage === 'register') {
@@ -298,8 +386,11 @@ export class Compiler extends StatementCompiler {
     const ret = unqualified(type.ret);
     if (ret.kind !== 'void' && !isComplete(ret))
       this.error(row, `戻り値の型（${typeName(ret)}）の中身が定義されていません。`);
+    this.validateInline(specifiers, type, name);
     if (name === 'main') this.checkMain(type, row);
     const info = this.declareFunction(name, type, row, specifiers.storage === 'static', undefined);
+    if (specifiers.isInline && !info.isStatic && specifiers.storage === undefined) info.isInlineDefinition = true;
+    else info.hasExternalDeclaration = true;
     if (info.isDefined) this.error(row, `関数「${name}」が2回定義されています。`);
     if (info.header !== undefined && !this.library(name)?.canDefine)
       this.error(row, `関数「${name}」は標準ライブラリにあるので、同じ名前の関数は定義できません。`);
@@ -323,37 +414,39 @@ export class Compiler extends StatementCompiler {
       switches: [],
       addressTaken: addressTakenNames(definition.body),
       registerLocals: new Set(),
+      vlaCount: 0,
     };
     const outer = this.fn;
     this.fn = context;
     try {
       this.withScope(() => {
-        this.defineParameters(declarator, context);
+        // `(void)` declares no parameters.
+        const params = (type.params ?? []).length === 0 ? [] : (declarator.params ?? []);
+        for (const param of params) this.declareParameter(param, context);
+        // Parameters of variably modified types, such as `int a[rows][cols]`, get their lengths on entry.
+        const parameterLengths = this.takePendingVla();
         const body = this.compound(definition.body, true);
         for (const [labelName, label] of context.labels) {
           if (!label.defined) this.error(label.row, `ラベル「${labelName}」がありません。`);
         }
-        info.body = functionBody(body.exec, name === 'main');
+        info.body = functionBody(body.exec, name === 'main', parameterLengths);
       });
     } finally {
       this.fn = outer;
     }
   }
 
-  private defineParameters(declarator: Extract<Declarator, { kind: 'function' }>, context: FunctionContext): void {
-    const info = context.info;
-    const params = (info.type.params ?? []).length === 0 ? [] : (declarator.params ?? []);
-    for (const param of params) {
-      const { type: paramType, name: declaredParam } = this.parameterType(param);
-      // clang accepts an unnamed parameter in a definition, as C23 does; the function cannot read it.
-      const paramName = declaredParam ?? `\0${param.row}:${info.params.length}`;
-      if (!isComplete(paramType))
-        this.error(param.row, `引数「${paramName}」の型（${typeName(paramType)}）の中身が定義されていません。`);
-      if (this.scope.ordinary.has(paramName)) this.error(param.row, `引数「${paramName}」が2つあります。`);
-      const local = this.addLocal(paramName, paramType, param.row, true);
-      if (param.specifiers.storage === 'register') context.registerLocals.add(local);
-      info.params.push(local);
-    }
+  private declareParameter(param: Parameter, context: FunctionContext): void {
+    const { info } = context;
+    const { type: paramType, name: declaredParam } = this.parameterType(param);
+    // clang accepts an unnamed parameter in a definition, as C23 does; the function cannot read it.
+    const paramName = declaredParam ?? `\0${param.row}:${info.params.length}`;
+    if (!isComplete(paramType))
+      this.error(param.row, `引数「${paramName}」の型（${typeName(paramType)}）の中身が定義されていません。`);
+    if (this.scope.ordinary.has(paramName)) this.error(param.row, `引数「${paramName}」が2つあります。`);
+    const local = this.addLocal(paramName, paramType, param.row, true);
+    if (param.specifiers.storage === 'register') context.registerLocals.add(local);
+    info.params.push(local);
   }
 
   private checkMain(type: FunctionType, row: number): void {
@@ -401,6 +494,7 @@ export class Compiler extends StatementCompiler {
     const parts: LocalPart[] = [];
     for (const declarator of declaration.declarators) {
       const part = this.localDeclarator(specifiers.storage, base, declarator, declaration.fromHeader);
+      this.alignLocal(specifiers, declarator);
       if (part) parts.push(part);
     }
     const step = parts.some((part) => part.initializes) ? this.stepRow(row) : undefined;
@@ -420,7 +514,22 @@ export class Compiler extends StatementCompiler {
     return this.withVisibility({ exec, labels: new Set() });
   }
 
-  // code-gauge-allow functionNcss 33 -- Storage-class and declarator rules must be checked before allocating a local; keep those alternatives together.
+  private alignLocal(specifiers: Specifiers, declarator: InitDeclarator): void {
+    const name = declaredName(declarator.declarator);
+    const entity = name === undefined ? undefined : this.scope.ordinary.get(name);
+    if (entity) {
+      this.validateInline(specifiers, entity.type, name);
+      const alignment = this.objectAlignment(specifiers, entity.type);
+      if (entity.kind === 'local') {
+        entity.local.alignment = alignment;
+        if (entity.local.staticGlobal) entity.local.staticGlobal.alignment = alignment;
+      } else if (entity.kind === 'global')
+        entity.global.alignment = Math.max(entity.global.alignment ?? 0, alignment ?? 0);
+    }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 23 -- Storage class and variably modified types determine one local declaration.
+  // code-gauge-allow functionNcss 43 -- Local declaration alternatives share storage and initializer state.
   private localDeclarator(
     storage: StorageClass | undefined,
     base: CType,
@@ -428,12 +537,16 @@ export class Compiler extends StatementCompiler {
     header?: string
   ): LocalPart | undefined {
     const declared = this.declaredType(base, declarator.declarator);
+    const lengths = this.takePendingVla();
     const { name } = declared;
     let { type } = declared;
     if (name === undefined) this.error(declared.row, '宣言する名前を書いてください。');
     if (storage === 'typedef') {
       this.declareTypedef(name, type, declared.row);
-      return undefined;
+      return lengths ? { run: lengths, initializes: false } : undefined;
+    }
+    if (lengths && (storage === 'static' || storage === 'extern')) {
+      this.error(declared.row, `${storage} の変数「${name}」の型には、可変長配列は使えません。`);
     }
     if (type.kind === 'function') {
       if (storage === 'static') this.error(declared.row, '関数の中では、static の関数は宣言できません。');
@@ -447,13 +560,24 @@ export class Compiler extends StatementCompiler {
       return undefined;
     }
     if (this.scope.ordinary.has(name)) this.error(declared.row, `「${name}」が2回宣言されています。`);
-    if (init && type.kind === 'array' && type.length === undefined)
-      type = { ...type, length: this.initializerLength(type, init) };
     if (type.kind === 'void') this.error(declared.row, `変数「${name}」の型に void は使えません。`);
-    if (!isComplete(type))
+    if (!isComplete(type) && !(init && type.kind === 'array' && type.length === undefined && !hasVla(type)))
       this.error(declared.row, `変数「${name}」の型（${typeName(type)}）の中身が決まっていません。`);
     if (storage === 'static') return { run: this.staticLocal(name, type, declared.row, init), initializes: false };
-    return this.automaticLocal(name, type, declared.row, init, storage === 'register');
+    if (hasVla(type)) {
+      if (init) this.error(declared.row, `可変長配列「${name}」には初期値を書けません。`);
+      return this.variableLengthLocal(name, type, declared.row, lengths);
+    }
+    const part = this.automaticLocal(name, type, declared.row, init, storage === 'register');
+    if (!lengths) return part;
+    // A pointer to a variable-length array (`int (*p)[n]`) computes its lengths before its initializer.
+    return {
+      run: (frame) => {
+        lengths(frame);
+        part.run(frame);
+      },
+      initializes: part.initializes,
+    };
   }
 
   private externLocal(name: string, type: CType, row: number, header?: string): void {
@@ -463,7 +587,13 @@ export class Compiler extends StatementCompiler {
     this.scope.ordinary.set(name, { kind: 'global', global, type: global.type });
   }
 
-  private staticLocal(name: string, type: CType, row: number, init: Initializer | undefined): (frame: Frame) => void {
+  private staticLocal(
+    name: string,
+    declaredType: CType,
+    row: number,
+    init: Initializer | undefined
+  ): (frame: Frame) => void {
+    let type = declaredType;
     const global: GlobalInfo = {
       index: this.globals.length,
       name,
@@ -477,6 +607,8 @@ export class Compiler extends StatementCompiler {
     const local = this.addLocal(name, type, row, false);
     local.staticGlobal = global;
     local.inMemory = true;
+    type = this.completeLocalType(local, type, init);
+    global.type = type;
     if (init) global.initialize = this.staticInitializer(type, init, row);
     this.foldInto(name, type, init);
     const index = local.index;
@@ -485,15 +617,38 @@ export class Compiler extends StatementCompiler {
     };
   }
 
-  private automaticLocal(
+  /** A variable-length array, whose block its declaration creates once its lengths are known. */
+  private variableLengthLocal(
     name: string,
     type: CType,
+    row: number,
+    lengths: ((frame: Frame) => void) | undefined
+  ): LocalPart {
+    const local = this.addLocal(name, type, row, false);
+    local.inMemory = true;
+    local.deferredAllocation = true;
+    const index = local.index;
+    return {
+      run: (frame) => {
+        lengths?.(frame);
+        frame.allocateLocal(local, evaluatedArrayType(type, frame.vla));
+        frame.live[index] = true;
+      },
+      initializes: false,
+    };
+  }
+
+  private automaticLocal(
+    name: string,
+    declaredType: CType,
     row: number,
     init: Initializer | undefined,
     isRegister: boolean
   ): LocalPart {
+    let type = declaredType;
     const local = this.addLocal(name, type, row, false);
     if (isRegister) this.context.registerLocals.add(local);
+    type = this.completeLocalType(local, type, init);
     this.foldInto(name, type, init);
     const index = local.index;
     if (!init) {
@@ -533,6 +688,16 @@ export class Compiler extends StatementCompiler {
     };
   }
 
+  private completeLocalType(local: LocalInfo, type: CType, init: Initializer | undefined): CType {
+    if (!init || type.kind !== 'array' || type.length !== undefined) return type;
+    const completed = { ...type, length: this.initializerLength(type, init) };
+    local.type = completed;
+    local.size = sizeOf(completed);
+    const entity = this.scope.ordinary.get(local.name);
+    if (entity?.kind === 'local') entity.type = completed;
+    return completed;
+  }
+
   private foldInto(name: string, type: CType, init: Initializer | undefined): void {
     const constant = this.foldedConstant(type, init);
     const entity = this.scope.ordinary.get(name);
@@ -548,6 +713,73 @@ export class Compiler extends StatementCompiler {
     return literal ? decodeStringLiteral(literal.parts, literal.row).slice(0, type.length) : undefined;
   }
 
+  protected compoundLiteral(expression: Extract<Expression, { kind: 'compoundLiteral' }>): Operand {
+    const owner = this.fn?.info ?? this.fileScope;
+    let objects = this.compoundObjects.get(owner);
+    if (!objects) {
+      objects = new WeakMap();
+      this.compoundObjects.set(owner, objects);
+    }
+    let object = objects.get(expression);
+    if (!object) {
+      const compiled = this.discover(() => this.compileCompoundLiteral(expression));
+      object = {
+        operand: compiled.value.operand,
+        use: () => {
+          compiled.use();
+          compiled.value.use();
+        },
+      };
+      objects.set(expression, object);
+    }
+    this.recordReference(object.use);
+    return object.operand;
+  }
+
+  // code-gauge-allow functionNcss 31 -- Static and automatic literal storage share type resolution and initializer identity.
+  private compileCompoundLiteral(expression: Extract<Expression, { kind: 'compoundLiteral' }>): {
+    operand: Operand;
+    use: () => void;
+  } {
+    const { row, init } = expression;
+    let type = this.typeOfName(expression.typeName);
+    const lengths = this.takePendingVla();
+    if (hasVla(type)) this.error(row, '複合リテラルの型には、可変長配列は指定できません。');
+    if (type.kind === 'array' && type.length === undefined)
+      type = { ...type, length: this.initializerLength(type, init) };
+    if (type.kind === 'function' || type.kind === 'void' || !isComplete(type)) {
+      this.error(row, `複合リテラルの型（${typeName(type)}）の中身が決まっていません。`);
+    }
+    const name = `\0literal${row}:${this.fn ? this.fn.info.locals.length : this.globals.length}`;
+    if (!this.fn) {
+      // At file scope, the object is static, so its address is a constant.
+      const global = this.declareGlobal(name, type, row, 'static', init, undefined);
+      global.isShown = false;
+      global.isUsed = false;
+      const index = global.index;
+      const operand = this.memoryOperand(type, (frame) => frame.runtime.globals[index].base);
+      return {
+        operand: { ...operand, isAddressConstant: true, lvalue: { ...(operand.lvalue as LValue), isStatic: true } },
+        use: () => {
+          global.isUsed = true;
+        },
+      };
+    }
+    const local = this.addLocal(name, type, row, false);
+    local.inMemory = true;
+    local.deferredAllocation = true;
+    local.size = sizeOf(type);
+    const writer = this.initializer(type, init, false);
+    const index = local.index;
+    const operand = this.memoryOperand(type, (frame) => {
+      lengths?.(frame);
+      const block = frame.blocks.get(index) ?? frame.allocateLocal(local);
+      writer(frame, block.base);
+      return block.base;
+    });
+    return { operand, use: () => {} };
+  }
+
   // Initializers ------------------------------------------------------------------------------------------------------
 
   private scalarInitializer(type: CType, init: Initializer): Evaluator {
@@ -558,15 +790,20 @@ export class Compiler extends StatementCompiler {
   /** The expression initializing a scalar, which braces may enclose once. */
   private singleExpression(type: CType, init: Initializer): Expression {
     if (init.kind === 'expression') return init.expression;
-    if (init.items.length === 0) unsupported(init.row, '空の { } による初期化');
+    if (init.kind === 'designated')
+      return this.error(init.row, `${typeName(type)} の初期化に、要素の指定は書けません。`);
+    // An empty initializer (C23, which clang accepts in C17) initializes a scalar to 0.
+    if (init.items.length === 0) return { kind: 'number', text: '0', row: init.row };
     const [first, ...excess] = init.items;
     for (const item of excess) this.validateInitializer(item);
-    if (first.kind === 'list') this.error(first.row, `${typeName(type)} の初期化に、{ } を重ねて書けません。`);
+    if (first.kind !== 'expression')
+      return this.error(first.row, `${typeName(type)} の初期化に、{ } や要素の指定は書けません。`);
     return first.expression;
   }
 
   private validateInitializer(init: Initializer): void {
     if (init.kind === 'expression') this.unevaluated(() => this.rvalue(init.expression));
+    else if (init.kind === 'designated') this.validateInitializer(init.value);
     else for (const item of init.items) this.validateInitializer(item);
   }
 
@@ -576,25 +813,14 @@ export class Compiler extends StatementCompiler {
       const literal = stringLiteralOf(init);
       if (literal) return decodeStringLiteral(literal.parts, literal.row).length;
     }
-    if (init.kind !== 'list') {
-      this.validateInitializer(init);
-      this.error(init.row, '配列の初期化には { } か文字列リテラルを書いてください。');
-    }
-    const cursor = { items: init.items, index: 0 };
-    let count = 0;
-    while (cursor.index < cursor.items.length) {
-      const before = cursor.index;
-      this.element(type.of, cursor, 0, [], false);
-      if (cursor.index === before) this.error(init.row, '配列の要素を初期化できません。');
-      count++;
-    }
-    if (count === 0) unsupported(init.row, '空の { } による初期化');
-    return count;
+    if (init.kind !== 'list') this.error(init.row, '配列の初期化には { } か文字列リテラルを書いてください。');
+    return this.braced(type, init.items, 0, [], false);
   }
 
   /** Compiles an initializer into a writer that zeroes the object and stores the given values in it. */
   protected initializer(type: CType, init: Initializer, isStatic: boolean): Writer {
-    const writes: { offset: number; write: Writer }[] = [];
+    const writes: Write[] = [];
+    if (init.kind === 'designated') this.error(init.row, '初期化の指定（.x = や [n] =）は、{ } の中にしか書けません。');
     if (isScalar(type) || init.kind === 'expression') {
       if (!isScalar(type) && init.kind === 'expression') {
         const writer = this.aggregateFromExpression(type, init.expression, isStatic);
@@ -609,39 +835,18 @@ export class Compiler extends StatementCompiler {
         storeValue(frame.runtime, address, unqualified(type), result.value, result.range, result.bytes);
       };
     }
-    if (init.items.length === 0) unsupported(init.row, '空の { } による初期化');
-    const cursor = { items: init.items, index: 0 };
-    this.aggregate(type, cursor, 0, writes, isStatic, true);
-    if (cursor.index < cursor.items.length) {
-      // clang warns about excess initializers and ignores them, but still checks their types.
-      for (const item of cursor.items.slice(cursor.index)) this.validateInitializer(item);
-    }
-    const size = sizeOf(type);
-    return (frame, address) => {
-      const block = frame.runtime.memory.locate(address, size);
-      const offset = address - block.base;
-      replacePointerBytes(block.pointerBytes, offset, size);
-      block.bytes.fill(0, offset, offset + size);
-      block.initialized.fill(255, offset, offset + size);
-      for (const { offset: at, write } of writes) write(frame, address + at);
-    };
+    this.braced(type, init.items, 0, writes, isStatic);
+    return zeroedWriter(sizeOf(type), writes);
   }
 
   /** `struct P q = p;` or `char s[] = "abc";`: an aggregate initialized from one expression. */
   private aggregateFromExpression(type: CType, expression: Expression, isStatic: boolean): Writer | undefined {
     if (type.kind === 'array') {
-      if (isCharArray(type) && stringOf(expression)) {
-        const writes: { offset: number; write: Writer }[] = [];
-        this.stringInto(type, stringOf(expression) as Extract<Expression, { kind: 'string' }>, 0, writes);
-        const size = sizeOf(type);
-        return (frame, address) => {
-          const block = frame.runtime.memory.locate(address, size);
-          const offset = address - block.base;
-          replacePointerBytes(block.pointerBytes, offset, size);
-          block.bytes.fill(0, offset, offset + size);
-          block.initialized.fill(255, offset, offset + size);
-          for (const { offset: at, write } of writes) write(frame, address + at);
-        };
+      const literal = stringOf(expression);
+      if (isCharArray(type) && literal) {
+        const writes: Write[] = [];
+        this.stringInto(type, literal, 0, writes);
+        return zeroedWriter(sizeOf(type), writes);
       }
       this.unevaluated(() => this.rvalue(expression));
       this.error(expression.row, '配列の初期化には { } か文字列リテラルを書いてください。');
@@ -655,116 +860,288 @@ export class Compiler extends StatementCompiler {
     return undefined;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- C's rules for braces and brace elision.
-  // code-gauge-allow functionNcss 31 -- The shared initializer cursor implements brace elision across arrays and records; keep its consumption rules together.
-  private aggregate(
-    type: CType,
-    cursor: { items: Initializer[]; index: number },
-    offset: number,
-    writes: { offset: number; write: Writer }[],
-    isStatic: boolean,
-    braced: boolean
-  ): void {
-    if (type.kind === 'array') {
-      const length = type.length ?? 0;
-      const elementSize = sizeOf(type.of);
-      if (isCharArray(type) && cursor.index < cursor.items.length) {
-        const literal = stringLiteralOf(cursor.items[cursor.index]);
-        if (literal) {
-          cursor.index++;
-          this.stringInto(type, literal, offset, writes);
-          return;
-        }
-      }
-      for (let index = 0; index < length && cursor.index < cursor.items.length; index++) {
-        this.element(type.of, cursor, offset + index * elementSize, writes, isStatic);
-      }
-      return;
+  /**
+   * Compiles a braced list for an aggregate, as C17 6.7.9 walks it: items fill the current subobject in order, braces
+   * may be left out for nested aggregates, and a designator moves to the subobject it names.
+   *
+   * @returns The number of elements the list gives an array of unknown length.
+   */
+  private braced(type: CType, items: Initializer[], offset: number, writes: Write[], isStatic: boolean): number {
+    // `char s[] = {"abc"}`: a string literal may initialize a character array in braces of its own.
+    const literal = items.length === 1 && items[0].kind === 'expression' ? stringOf(items[0].expression) : undefined;
+    if (isCharArray(type) && literal) {
+      this.stringInto(type, literal, offset, writes);
+      return decodeStringLiteral(literal.parts, literal.row).length;
     }
-    if (type.kind === 'record') {
-      const fields = type.info.fields ?? [];
-      const members =
-        type.info.kind === 'union' ? fields.slice(0, 1) : fields.filter((field) => field.name !== undefined);
-      for (const field of members) {
-        if (cursor.index >= cursor.items.length) break;
-        if (field.bitWidth !== undefined) {
-          const item = cursor.items[cursor.index++];
-          const expression = this.singleExpression(field.type, item);
-          const operand = this.rvalue(expression);
-          this.checkStatic(operand, expression, isStatic);
-          const value = this.convertForAssignment(operand, field.type, 'initialization', expression.row);
-          const store = this.bitFieldStore(field);
-          writes.push({
-            offset: offset + field.offset,
-            write: (frame, address) => store(frame, address, value(frame)),
-          });
-          continue;
-        }
-        this.element(field.type, cursor, offset + field.offset, writes, isStatic);
-      }
-      return;
+    let stack: Cursor[] = [{ type, index: 0, offset }];
+    let length = 0;
+    const cursor = { items, index: 0 };
+    while (cursor.index < items.length) {
+      const item = items[cursor.index++];
+      if (item.kind === 'designated') {
+        const targets = this.designate(stack[0], item);
+        if (targets.length === 1) this.place(targets[0], item.value, writes, isStatic);
+        else this.placeRange(targets, item.value, writes, isStatic, cursor);
+        stack = targets.at(-1) as Cursor[];
+      } else this.place(stack, item, writes, isStatic);
+      length = Math.max(length, filledLength(stack));
     }
-    void braced;
+    return length;
   }
 
-  /** One element or member: a braced list for it, an expression of its type, or the start of its elided braces. */
-  private element(
-    type: CType,
+  private designate(root: Cursor, item: Extract<Initializer, { kind: 'designated' }>): Cursor[][] {
+    let targets: Cursor[][] = [[{ ...root, index: 0 }]];
+    for (const [position, designator] of item.designators.entries()) {
+      targets = targets.flatMap((stack) =>
+        this.designateStep(stack, designator, position < item.designators.length - 1)
+      );
+    }
+    return targets;
+  }
+
+  private designateStep(stack: Cursor[], designator: Designator, descend: boolean): Cursor[][] {
+    let cursor = stack.at(-1) as Cursor;
+    for (const index of this.anonymousPath(cursor.type, designator)) {
+      cursor.index = index;
+      const member = memberAt(cursor) as Member;
+      stack.push({ type: member.type, index: 0, offset: member.offset });
+      cursor = stack.at(-1) as Cursor;
+    }
+    const { index, end = index } = this.designatorIndex(cursor.type, designator);
+    const targets: Cursor[][] = [];
+    for (let at = index; at <= end; at++) {
+      const target = stack.map((entry) => ({ ...entry }));
+      (target.at(-1) as Cursor).index = at;
+      if (descend) {
+        const member = memberAt(target.at(-1) as Cursor);
+        if (!member || (member.type.kind !== 'array' && member.type.kind !== 'record'))
+          this.error(designator.row, '初期化の指定で、配列でも構造体でもないものの中を指定しています。');
+        target.push({ type: member.type, index: 0, offset: member.offset });
+      }
+      targets.push(target);
+    }
+    return targets;
+  }
+
+  // code-gauge-allow functionNcss 35 -- One range template, cursor continuation and byte or bitfield copies share the selected targets.
+  private placeRange(
+    targets: Cursor[][],
+    item: Initializer,
+    writes: Write[],
+    isStatic: boolean,
+    cursor: { items: Initializer[]; index: number }
+  ): void {
+    const members = targets.map((target) => memberAt(target.at(-1) as Cursor) as Member);
+    const first = members[0];
+    const size = sizeOf(first.type);
+    const initial: Write[] = [];
+    const depth = targets[0].length;
+    this.place(targets[0], item, initial, isStatic);
+    this.finishRangeAggregate(targets[0], depth, cursor, initial, isStatic);
+    for (const member of members) replaceWrites(writes, member.offset, size, memberCoverage(member));
+    const final = targets.at(-1) as Cursor[];
+    const open = targets[0].slice(depth);
+    if (open.length === 0) advance(final.at(-1) as Cursor);
+    else for (const part of open) final.push({ ...part, offset: part.offset + members.at(-1)!.offset - first.offset });
+    writes.push({
+      offset: first.offset,
+      size: members.at(-1)!.offset - first.offset + size,
+      coverage: members.flatMap((member) => memberCoverage(member)),
+      write: (frame, address) => {
+        const runtime = frame.runtime;
+        const temporary = runtime.allocate(size, 'stack', alignOf(first.type));
+        try {
+          temporary.initialized.fill(255);
+          for (const part of initial) part.write(frame, temporary.base + part.offset - first.offset);
+          const value = loadRecord(runtime, temporary.base, size);
+          for (const member of members) {
+            const destination = address + member.offset - first.offset;
+            if (member.field?.bitWidth !== undefined) {
+              const field = member.field;
+              const bits = readBits(
+                temporary,
+                0,
+                field.bitOffset ?? 0,
+                field.bitWidth as number,
+                field.type as Extract<CType, { kind: 'int' }>
+              );
+              const block = runtime.memory.locate(destination, size);
+              writeBits(block, destination - block.base, field.bitOffset ?? 0, field.bitWidth as number, bits);
+            } else storeRecord(runtime, destination, value);
+          }
+        } finally {
+          runtime.memory.release(temporary);
+        }
+      },
+    });
+  }
+
+  private finishRangeAggregate(
+    stack: Cursor[],
+    depth: number,
     cursor: { items: Initializer[]; index: number },
-    offset: number,
-    writes: { offset: number; write: Writer }[],
+    writes: Write[],
     isStatic: boolean
   ): void {
-    const item = cursor.items[cursor.index];
+    for (;;) {
+      while (stack.length > depth && !memberAt(stack.at(-1) as Cursor)) {
+        stack.pop();
+        advance(stack.at(-1) as Cursor);
+      }
+      if (
+        stack.length === depth ||
+        cursor.index === cursor.items.length ||
+        cursor.items[cursor.index].kind === 'designated'
+      )
+        return;
+      this.place(stack, cursor.items[cursor.index++], writes, isStatic);
+    }
+  }
+
+  /** The indexes of the unnamed members leading to a member that a `.name` designator names, outermost first. */
+  private anonymousPath(type: CType, designator: Designator): number[] {
+    if (designator.kind !== 'field' || type.kind !== 'record') return [];
+    const fields = namedFields(type);
+    if (fields.some((field) => field.name === designator.name)) return [];
+    for (const [index, field] of fields.entries()) {
+      if (field.isAnonymous && field.type.kind === 'record' && field.type.info.field(designator.name)) {
+        return [index, ...this.anonymousPath(field.type, designator)];
+      }
+    }
+    return [];
+  }
+
+  private designatorIndex(type: CType, designator: Designator): { index: number; end?: number } {
+    if (designator.kind === 'field') {
+      if (type.kind !== 'record')
+        this.error(
+          designator.row,
+          `構造体・共用体ではないもの（${typeName(type)}）に .${designator.name} は指定できません。`
+        );
+      const index = namedFields(type).findIndex((field) => field.name === designator.name);
+      if (index === -1)
+        this.error(designator.row, `「${typeName(type)}」にはメンバ「${designator.name}」がありません。`);
+      return { index };
+    }
+    if (type.kind !== 'array')
+      this.error(designator.row, `配列ではないもの（${typeName(type)}）に [ ] は指定できません。`);
+    const index = this.integerConstant(designator.index, '配列の初期化の添字');
+    const end = designator.end === undefined ? undefined : this.integerConstant(designator.end, '配列の初期化の添字');
+    const last = end ?? index;
+    if (index < 0 || (type.length !== undefined && last >= type.length)) {
+      this.error(designator.row, `配列の初期化の添字「${last}」が、配列の大きさを超えています。`);
+    }
+    if (end !== undefined && end < index) this.error(designator.row, '初期化の範囲（[a ... b]）が空です。');
+    return { index, ...(end === undefined ? {} : { end }) };
+  }
+
+  /** Initializes the current subobject with one item, entering nested aggregates whose braces the list leaves out. */
+  // code-gauge-allow functionCognitiveComplexity 25 -- The cases of C's brace elision.
+  private place(stack: Cursor[], item: Initializer, writes: Write[], isStatic: boolean): void {
+    for (;;) {
+      const cursor = stack.at(-1) as Cursor;
+      const member = memberAt(cursor);
+      if (!member) {
+        if (stack.length === 1) {
+          // clang warns about excess initializers and ignores them, but still checks their types.
+          this.validateInitializer(item);
+          return;
+        }
+        stack.pop();
+        advance(stack.at(-1) as Cursor);
+        continue;
+      }
+      if (item.kind === 'list') {
+        if (isScalar(member.type)) this.scalarInto(member, this.singleExpression(member.type, item), writes, isStatic);
+        else {
+          const size = sizeOf(member.type);
+          replaceWrites(writes, member.offset, size);
+          writes.push({ offset: member.offset, size, write: zeroedWriter(size, []) });
+          this.braced(member.type, item.items, member.offset, writes, isStatic);
+        }
+        advance(cursor);
+        return;
+      }
+      if (item.kind === 'designated') this.error(item.row, '初期化の指定の書き方に誤りがあります。');
+      if (this.placeWhole(member, item.expression, writes, isStatic)) {
+        advance(cursor);
+        return;
+      }
+      stack.push({ type: member.type, index: 0, offset: member.offset });
+    }
+  }
+
+  /** Initializes a member from one expression when it can take one: a scalar, a struct of its type, or a string. */
+  private placeWhole(member: Member, expression: Expression, writes: Write[], isStatic: boolean): boolean {
+    const { type } = member;
     if (isScalar(type)) {
-      cursor.index++;
-      const expression = this.singleExpression(type, item);
-      const operand = this.rvalue(expression);
-      this.checkStatic(operand, expression, isStatic);
-      const value = this.convertForAssignment(operand, unqualified(type), 'initialization', expression.row);
-      const target = unqualified(type);
+      this.scalarInto(member, expression, writes, isStatic);
+      return true;
+    }
+    const literal = stringOf(expression);
+    if (isCharArray(type) && literal) {
+      this.stringInto(type, literal, member.offset, writes);
+      return true;
+    }
+    if (type.kind !== 'record') return false;
+    const operand = this.rvalue(expression);
+    if (operand.type.kind !== 'record' || operand.type.info !== type.info) return false;
+    this.checkStatic(operand, expression, isStatic);
+    const value = operand.value;
+    replaceWrites(writes, member.offset, sizeOf(type));
+    writes.push({
+      offset: member.offset,
+      size: sizeOf(type),
+      write: (frame, address) => storeValue(frame.runtime, address, type, value(frame)),
+    });
+    return true;
+  }
+
+  private scalarInto(member: Member, expression: Expression, writes: Write[], isStatic: boolean): void {
+    const operand = this.rvalue(expression);
+    this.checkStatic(operand, expression, isStatic);
+    const target = unqualified(member.type);
+    const value = this.convertForAssignment(operand, target, 'initialization', expression.row);
+    if (member.field?.bitWidth !== undefined) {
+      const coverage = memberCoverage(member);
+      replaceWrites(writes, member.offset, sizeOf(target), coverage);
+      const store = this.bitFieldStore(member.field);
       writes.push({
-        offset,
-        write: (frame, address) => {
-          const result = evaluate(value, frame);
-          storeValue(frame.runtime, address, target, result.value, result.range, result.bytes);
-        },
+        offset: member.offset,
+        size: sizeOf(target),
+        coverage,
+        write: (frame, address) => store(frame, address, value(frame)),
       });
       return;
     }
-    if (item.kind === 'list') {
-      cursor.index++;
-      const inner = { items: item.items, index: 0 };
-      this.aggregate(type, inner, offset, writes, isStatic, true);
-      for (const excess of inner.items.slice(inner.index)) this.validateInitializer(excess);
-      return;
-    }
-    if (type.kind === 'record') {
-      // A struct may also be initialized from an expression of its own type, without braces.
-      const operand = this.rvalue(item.expression);
-      if (operand.type.kind === 'record' && operand.type.info === type.info) {
-        cursor.index++;
-        this.checkStatic(operand, item.expression, isStatic);
-        const value = operand.value;
-        writes.push({ offset, write: (frame, address) => storeValue(frame.runtime, address, type, value(frame)) });
-        return;
-      }
-    }
-    this.aggregate(type, cursor, offset, writes, isStatic, false);
+    replaceWrites(writes, member.offset, sizeOf(target));
+    writes.push({
+      offset: member.offset,
+      size: sizeOf(target),
+      write: (frame, address) => {
+        const result = evaluate(value, frame);
+        storeValue(frame.runtime, address, target, result.value, result.range, result.bytes);
+      },
+    });
   }
 
   private stringInto(
     type: Extract<CType, { kind: 'array' }>,
     literal: Extract<Expression, { kind: 'string' }>,
     offset: number,
-    writes: { offset: number; write: Writer }[]
+    writes: Write[]
   ): void {
     const bytes = decodeStringLiteral(literal.parts, literal.row);
     // clang warns when the literal is longer than the array and copies only what fits.
     const copied = bytes.slice(0, type.length ?? bytes.length);
+    const size = type.length ?? bytes.length;
+    replaceWrites(writes, offset, size);
+    const clear = zeroedWriter(size, []);
     writes.push({
       offset,
+      size,
       write: (frame, address) => {
+        clear(frame, address);
         const block = frame.runtime.memory.locate(address, copied.length);
         replacePointerBytes(block.pointerBytes, address - block.base, copied.length);
         block.bytes.set(copied, address - block.base);
@@ -808,12 +1185,15 @@ function stringOf(expression: Expression): Extract<Expression, { kind: 'string' 
 /** The string literal of an initializer, which braces may enclose once. */
 function stringLiteralOf(init: Initializer): Extract<Expression, { kind: 'string' }> | undefined {
   if (init.kind === 'expression') return stringOf(init.expression);
-  if (init.items.length === 1 && init.items[0].kind === 'expression') return stringOf(init.items[0].expression);
+  if (init.kind === 'list' && init.items.length === 1 && init.items[0].kind === 'expression') {
+    return stringOf(init.items[0].expression);
+  }
   return undefined;
 }
 
-function functionBody(exec: Exec, isMain: boolean): Exec {
+function functionBody(exec: Exec, isMain: boolean, prepare: ((frame: Frame) => void) | undefined): Exec {
   return (frame) => {
+    prepare?.(frame);
     exec(frame);
     // Reaching the end of main returns 0.
     if (isMain && frame.returnValue === undefined) frame.returnValue = 0;

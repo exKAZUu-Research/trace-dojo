@@ -256,15 +256,21 @@ test('CRLF line-comment continuations hide the continued line', () => {
   ).toMatchObject({ kind: 'executed', stdout: 'ok\n', uncaughtException: undefined });
 });
 
-test.each(['void f(int n, int a[n]); int main(void) {}', 'void f(int n, int a[n]) { a[0] = n; } int main(void) {}'])(
-  'parameter-dependent array bounds report unsupported VLAs: %s',
-  (program) => {
-    const result = executeProgram('c', program);
-    expect(result.kind === 'compileError' && result.diagnostics[0].message).toContain(
-      '可変長配列）は、この採点環境では使えません。'
-    );
-  }
-);
+test('parameter-dependent array bounds are accepted in prototypes and definitions', () => {
+  expect(
+    executeProgram(
+      'c',
+      `#include <stdio.h>
+void f(int n, int a[n]);
+void f(int n, int a[n]) { a[n-1] = n; }
+int main(void) { int a[3] = {0}; f(3, a); printf("%d", a[2]); }`
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '3',
+    uncaughtException: undefined,
+  });
+});
 
 test('trace variables retain shadowing locals and pointers without live targets', () => {
   const program = `#include <stdlib.h>
@@ -496,7 +502,7 @@ test.each(['int a={1,f(),x};return a-1;', 'int a[1]={1,f(),x};return a[0]-1;'])(
   }
 );
 
-test('function and void pointers remain visible as pointer values', () => {
+test('function pointers show their names and void pointers remain visible', () => {
   const source = `int dbl(int x){return 2*x;}
 int main(void){
  int (*op)(int)=dbl;
@@ -506,9 +512,9 @@ int main(void){
 }`;
   const trace = traceProgram('c', source, source);
   const step = trace.traceItems.find((item) => item.line === 6);
-  expect(step?.vars.op).toMatch(/^0x[\da-f]+$/);
-  expect(step?.vars.p).toEqual(step?.vars.op);
-  expect(step?.referenceVars.ops).toEqual({ kind: 'array', entries: { 0: { kind: 'value', value: step?.vars.op } } });
+  expect(step?.referenceVars.op).toEqual({ kind: 'value', value: 'dbl' });
+  expect(step?.vars.p).toEqual(expect.stringMatching(/^0x[\da-f]+$/));
+  expect(step?.referenceVars.ops).toEqual({ kind: 'array', entries: { 0: { kind: 'value', value: 'dbl' } } });
 });
 
 test('math decomposition preserves exponents, exact remainders, NaN and signed zero', () => {
@@ -1667,4 +1673,35 @@ test.each([
       uncaughtException: end ? expect.any(String) : undefined,
     });
   }
+});
+
+test('object alignment is honored across storage durations and array bounds', () => {
+  expect(
+    executeProgram(
+      'c',
+      `#include <stdio.h>
+#include <stdint.h>
+int a; _Alignas(64) int x;
+struct record { _Alignas(64) int value; } global;
+int main(void) {
+  _Alignas(128) int local = 3;
+  _Alignas(256) static int persistent;
+  struct record automatic;
+  int n = 3; _Alignas(64) int vla[n];
+  printf("%d %d %d %d %d %d %d\\n", (int)((uintptr_t)&x % 64), (int)((uintptr_t)&global % 64), (int)((uintptr_t)&local % 128), (int)((uintptr_t)&persistent % 256), (int)((uintptr_t)&automatic % 64), (int)((uintptr_t)vla % 64), local);
+}
+`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '0 0 0 0 0 0 3\n', uncaughtException: undefined });
+});
+
+test.each([
+  '_Alignas(1) int x;',
+  'void f(void) { _Alignas(1) int x; }',
+  'struct S { _Alignas(1) int x; };',
+  '_Alignas(64) typedef int T;',
+  'void f(void) { _Alignas(64) register int x; }',
+  '_Alignas(64) int f(void);',
+])('invalid alignment declarations are compile errors: %s', (source) => {
+  expect(executeProgram('c', `${source}\nint main(void) {}`)).toMatchObject({ kind: 'compileError' });
 });

@@ -17,7 +17,7 @@ import {
   slicePointerBytes,
   storedPointerBytes,
 } from './pointerBounds';
-import { type CType, type FunctionType, sizeOf } from './types';
+import { alignOf, type CType, type FunctionType, sizeOf } from './types';
 
 /** A block-scope variable of a function, in the order the function declares it. */
 export interface LocalInfo {
@@ -29,12 +29,16 @@ export interface LocalInfo {
   inMemory: boolean;
   /** The size of the variable's block, for one that lives in memory. */
   size: number;
+  deferredAllocation?: boolean;
   /** The global that holds a `static` local. */
   staticGlobal?: GlobalInfo;
+  alignment?: number;
   isParameter: boolean;
 }
 
 export interface GlobalInfo {
+  isUsed?: boolean;
+  alignment?: number;
   header?: string;
   referencedAt?: number;
   index: number;
@@ -82,6 +86,10 @@ export interface FunctionInfo {
   header?: string;
   /** The row where the program first refers to the function, which must then be defined. */
   referencedAt?: number;
+  /** Whether the definition says `inline` without `static` or `extern`, which alone defines no external function. */
+  isInlineDefinition?: boolean;
+  /** Whether a declaration without `inline` (or with `extern`) makes the definition an external one. */
+  hasExternalDeclaration?: boolean;
 }
 
 export class Frame implements TracedFrame {
@@ -100,6 +108,10 @@ export class Frame implements TracedFrame {
   returnValue: Value | undefined;
   /** The label a `goto` jumps to, while its completion travels to the statement holding the label. */
   gotoLabel = -1;
+  /** The address of the block holding a variadic function's extra arguments, which `va_start` points to. */
+  varargs = 0;
+  /** The lengths of the function's variable-length arrays, by slot, computed when their declarations run. */
+  readonly vla: number[] = [];
 
   constructor(
     readonly runtime: Runtime,
@@ -128,13 +140,23 @@ export class Frame implements TracedFrame {
 
   enterScope(locals: readonly LocalInfo[]): void {
     for (const local of locals) {
-      if (!local.inMemory || local.staticGlobal) continue;
-      const block = this.runtime.allocate(local.size, 'stack');
-      block.type = local.type;
-      block.name = local.name;
-      this.bases[local.index] = block.base;
-      this.blocks.set(local.index, block);
+      if (!local.inMemory || local.staticGlobal || local.deferredAllocation) continue;
+      this.allocateLocal(local);
     }
+  }
+
+  allocateLocal(local: LocalInfo, type = local.type): Allocation {
+    const previous = this.blocks.get(local.index);
+    if (previous) {
+      this.runtime.memory.release(previous);
+      this.blocks.delete(local.index);
+    }
+    const block = this.runtime.allocate(sizeOf(type), 'stack', Math.max(alignOf(type), local.alignment ?? 0));
+    block.type = type;
+    block.name = local.name;
+    this.bases[local.index] = block.base;
+    this.blocks.set(local.index, block);
+    return block;
   }
 
   exitScope(locals: readonly LocalInfo[]): void {
@@ -176,6 +198,8 @@ export class Runtime implements TracedRuntime<Frame> {
   /** Where `strtok` continues when called with NULL. */
   tokenizerPosition = 0;
   readonly exitHandlers: number[] = [];
+  /** The static struct tm and string of time.h's functions, created when first used. */
+  readonly timeBuffers: { gmtime?: Allocation; localtime?: Allocation; text?: Allocation } = {};
   private fallbackErrno = 0;
 
   get errno(): number {
@@ -222,9 +246,9 @@ export class Runtime implements TracedRuntime<Frame> {
     return true;
   }
 
-  allocate(size: number, region: 'data' | 'heap' | 'stack' | 'text'): Allocation {
+  allocate(size: number, region: 'data' | 'heap' | 'stack' | 'text', alignment?: number): Allocation {
     if (!this.reserve(size)) throw new CRuntimeError('custom', 'メモリを確保しすぎました。');
-    return this.memory.allocate(size, region);
+    return this.memory.allocate(size, region, alignment);
   }
 
   fullExpression<T>(run: () => T): T {
@@ -268,6 +292,7 @@ export class Runtime implements TracedRuntime<Frame> {
    *
    * @param onReturn Receives the callee's frame when it returns, while the frame still holds its variables.
    */
+  // code-gauge-allow functionNcss 31 -- Call setup and cleanup share the frame and argument metadata.
   call(
     fn: FunctionInfo,
     args: Value[],
@@ -293,6 +318,13 @@ export class Runtime implements TracedRuntime<Frame> {
     for (const [index, param] of fn.params.entries()) {
       bindParameter(frame, param, args[index], argMetadata[index]);
     }
+    if (fn.type.variadic)
+      frame.varargs = this.storeVarargs(
+        frame,
+        args.slice(fn.params.length),
+        argTypes.slice(fn.params.length),
+        argMetadata.slice(fn.params.length)
+      );
     this.frames.push(frame);
     try {
       (fn.body as Exec)(frame);
@@ -300,12 +332,42 @@ export class Runtime implements TracedRuntime<Frame> {
     } finally {
       this.frames.pop();
       for (const block of frame.blocks.values()) this.memory.release(block);
+      if (frame.varargs !== 0) this.varargTypes.delete(frame.varargs);
     }
     if (fn.isAtomic) this.steps.completeAtomicCall();
     this.returnRange = frame.returnRange;
     this.returnBytes = frame.returnBytes;
     return frame.returnValue;
   }
+
+  /**
+   * Stores a variadic call's extra arguments in 8-byte slots, as arm64 macOS passes them on the stack, so that `va_arg`
+   * reads them through a `va_list` that is a `char *`.
+   */
+  private storeVarargs(
+    frame: Frame,
+    values: Value[],
+    types: CType[],
+    metadata: Pick<Evaluated, 'range' | 'bytes'>[]
+  ): number {
+    const slots: CType[] = [];
+    for (const type of types) {
+      slots.push(type);
+      for (let extra = 8; extra < sizeOf(type); extra += 8) slots.push(type);
+    }
+    const block = this.allocate(Math.max(slots.length * 8, 8), 'stack');
+    frame.blocks.set(-1, block);
+    let offset = 0;
+    for (const [index, type] of types.entries()) {
+      storeValue(this, block.base + offset, type, values[index], metadata[index]?.range, metadata[index]?.bytes);
+      offset += Math.ceil(sizeOf(type) / 8) * 8;
+    }
+    this.varargTypes.set(block.base, slots);
+    return block.base;
+  }
+
+  /** The types of the arguments in a block of extra arguments, by 8-byte slot. */
+  readonly varargTypes = new Map<number, CType[]>();
 
   /** Removes the turtles that no variable, nor any block a variable reaches, points to any longer. */
   // code-gauge-allow functionCognitiveComplexity 22 -- Root discovery and the reachability worklist share allocation identities; retain the single traversal.

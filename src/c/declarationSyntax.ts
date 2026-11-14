@@ -16,7 +16,13 @@ const DECLARATOR_FIELDS: Record<string, readonly string[]> = {
 
 export function validateDeclarationChildren(node: Node, types: Node[], checkFeature: (node: Node) => void): void {
   const consumed = consumedChildren(node, ['type', 'declarator', 'body'], types);
-  const allowed = new Set(['comment', 'storage_class_specifier', 'type_qualifier']);
+  const allowed = new Set([
+    'comment',
+    'storage_class_specifier',
+    'type_qualifier',
+    'attribute_declaration',
+    'attribute_specifier',
+  ]);
   if (node.type === 'field_declaration') allowed.add('bitfield_clause');
   validateChildren(node, consumed, allowed, checkFeature);
 }

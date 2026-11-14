@@ -74,7 +74,8 @@ export class Memory {
       this.stackBytes += size;
       if (this.stackBytes > MAX_STACK_BYTES) throw new CRuntimeError('stackOverflow');
       // The stack grows downward, so that later frames have lower addresses, as on arm64.
-      this.next.stack -= Math.ceil((size + GUARD) / 16) * 16;
+      const unit = Math.max(16, alignment);
+      this.next.stack = Math.floor((this.next.stack - size - GUARD) / unit) * unit;
       base = this.next.stack;
     } else {
       base = this.alignedBase(region, alignment);

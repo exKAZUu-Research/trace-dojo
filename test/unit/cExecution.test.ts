@@ -37,28 +37,82 @@ int main(void) {
   });
 });
 
-test('zero-sized allocations can be freed and resized', () => {
+// clang prints this output: designations move the initializer's cursor, which later items continue from.
+test('designated initializers, variable-length arrays, and va_arg give the output of clang', () => {
   const program = `#include <stdio.h>
-#include <stdlib.h>
+#include <stdarg.h>
+struct point { int x, y, z; };
+static int sum(int count, ...) {
+  va_list ap;
+  va_start(ap, count);
+  int total = 0;
+  for (int i = 0; i < count; i++) total += va_arg(ap, int);
+  va_end(ap);
+  return total;
+}
+static void fill(int rows, int cols, int m[rows][cols]) {
+  for (int i = 0; i < rows; i++)
+    for (int j = 0; j < cols; j++) m[i][j] = i * cols + j;
+}
 int main(void) {
-  void *empty = malloc(0);
-  void *other = calloc(0, sizeof(int));
-  printf("%d %d %d\\n", empty != NULL, other != NULL, empty != other);
-  free(empty);
-  int *values = realloc(other, 2 * sizeof(int));
-  values[0] = 17;
-  values[1] = 25;
-  printf("%d\\n", values[0] + values[1]);
-  empty = realloc(values, 0);
-  free(empty);
-  free(realloc(NULL, 0));
-  puts("done");
+  struct point ps[] = { [1].y = 5, 1, 2, [0] = { .z = 9 }, 7 };
+  printf("%zu %d %d %d %d %d\\n", sizeof ps / sizeof ps[0], ps[0].z, ps[1].y, ps[1].z, ps[2].x, ps[0].x);
+  int rows = 2, cols = 3;
+  int m[rows][cols];
+  fill(rows, cols, m);
+  printf("%zu %d %d\\n", sizeof m, m[1][2], sum(4, m[0][1], m[1][0], 10, (int)'a'));
   return 0;
 }`;
   expect(executeProgram('c', program)).toMatchObject({
     kind: 'executed',
     uncaughtException: undefined,
-    stdout: '1 1 1\n42\ndone\n',
+    stdout: '3 9 5 1 2 0\n24 5 111\n',
+  });
+});
+
+// clang prints this output: the attributes only change warnings, and __extension__ only silences them.
+test('attributes, __extension__, stdalign.h, and stdnoreturn.h give the output of clang', () => {
+  const program = `#include <stdio.h>
+#include <stdlib.h>
+#include <stdalign.h>
+#include <stdnoreturn.h>
+__extension__ long long big = 1LL << 33;
+static int helper(void) __attribute__((unused));
+noreturn void finish(void) {
+  exit(0);
+}
+struct rec {
+  char tag;
+  alignas(8) int value;
+};
+int main(void) {
+  int x __attribute__((unused)) = 1;
+  __extension__ long long local = big + x;
+  printf("%lld %zu %zu %d\\n", local, alignof(struct rec), sizeof(struct rec), __alignas_is_defined);
+  finish();
+}`;
+  expect(executeProgram('c', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '8589934593 8 16 1\n',
+  });
+});
+
+test("va_arg of a type other than the argument's stops the program", () => {
+  const program = `#include <stdarg.h>
+double first(int n, ...) {
+  va_list ap;
+  va_start(ap, n);
+  double d = va_arg(ap, double);
+  va_end(ap);
+  return d;
+}
+int main(void) {
+  first(1, 2);
+}`;
+  expect(executeProgram('c', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'va_arg で読んだ型（double）が、渡された引数の型（int）と合いません。',
   });
 });
 
@@ -142,10 +196,47 @@ test.each([
     '自分で作ったヘッダや別のファイル（#include "mine.h"）は、この採点環境では使えません。',
   ],
   [
-    'struct P { int x; };\nint main(void) {\n  struct P p = { .x = 1 };\n}',
-    '要素を指定した初期化（.x = 1 や [2] = 5）は、この採点環境では使えません。',
+    'int main(void) {\n  int x = 1;\n  return _Generic(x, int: 1, default: 0);\n}',
+    '_Genericは、この採点環境では使えません。',
+  ],
+  [
+    '#include <stdio.h>\nstruct __attribute__((packed)) rec { char tag; int value; };\nint main(void) {\n  printf("%zu\\n", sizeof(struct rec));\n}',
+    '配置や型を変える属性（packed）は、この採点環境では使えません。',
+  ],
+  [
+    'struct rec { char tag; } __attribute__((aligned(16)));\nint main(void) { return sizeof(struct rec); }',
+    '配置や型を変える属性（aligned）は、この採点環境では使えません。',
+  ],
+  [
+    'int main(void) {\n  int x __attribute__((aligned(16))) = 1;\n  return x;\n}',
+    '配置や型を変える属性（aligned）は、この採点環境では使えません。',
   ],
 ])('features left out of the interpreter are rejected before running: %s', (program, message) => {
   const execution = executeProgram('c', program);
   expect(execution.kind === 'compileError' && execution.diagnostics[0].message).toBe(message);
+});
+
+test('zero-sized allocations can be freed and resized', () => {
+  const program = `#include <stdio.h>
+#include <stdlib.h>
+int main(void) {
+  void *empty = malloc(0);
+  void *other = calloc(0, sizeof(int));
+  printf("%d %d %d\\n", empty != NULL, other != NULL, empty != other);
+  free(empty);
+  int *values = realloc(other, 2 * sizeof(int));
+  values[0] = 17;
+  values[1] = 25;
+  printf("%d\\n", values[0] + values[1]);
+  empty = realloc(values, 0);
+  free(empty);
+  free(realloc(NULL, 0));
+  puts("done");
+  return 0;
+}`;
+  expect(executeProgram('c', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '1 1 1\n42\ndone\n',
+  });
 });

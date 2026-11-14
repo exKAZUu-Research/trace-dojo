@@ -10,7 +10,7 @@ import { libraryEntry } from './library';
 import { cString } from './library/support';
 import { parseC } from './parse';
 import { type Frame, Runtime, storeValue } from './runtime';
-import { CHAR_POINTER, INT, pointerTo, sizeOf } from './types';
+import { alignOf, CHAR_POINTER, INT, pointerTo, sizeOf } from './types';
 
 // code-gauge-allow duplicateLines 15 -- Each language's runner wraps its own parser and runtime.
 export function executeCProgram(source: string, input?: ProgramInput): ProgramExecution {
@@ -76,8 +76,12 @@ function setUp(runtime: Runtime, program: CompiledProgram): void {
   }
   runtime.literals = program.strings.map((bytes) => runtime.stringLiteral(bytes));
   runtime.globals = program.globals.map((global) => {
-    const hasStorage = global.isDefined || global.header !== undefined;
-    const block = runtime.allocate(hasStorage ? Math.max(sizeOf(global.type), 1) : 0, 'data');
+    const hasStorage = global.isUsed !== false && (global.isDefined || global.header !== undefined);
+    const block = runtime.allocate(
+      hasStorage ? Math.max(sizeOf(global.type), 1) : 0,
+      'data',
+      Math.max(alignOf(global.type), global.alignment ?? 0)
+    );
     block.initialized.fill(255);
     block.type = global.type;
     block.name = global.name;
@@ -95,7 +99,12 @@ function setUp(runtime: Runtime, program: CompiledProgram): void {
     }
     if (global.name === 'errno' && !global.isDefined) runtime.errnoAddress = block.base;
   }
-  for (const [index, global] of program.globals.entries()) global.initialize?.(runtime, runtime.globals[index]);
+  initializeGlobals(runtime, program);
+}
+
+function initializeGlobals(runtime: Runtime, program: CompiledProgram): void {
+  for (const [index, global] of program.globals.entries())
+    if (global.isUsed !== false) global.initialize?.(runtime, runtime.globals[index]);
 }
 
 function callMain(runtime: Runtime, program: CompiledProgram, onEnd: ((frame: Frame) => void) | undefined): void {
