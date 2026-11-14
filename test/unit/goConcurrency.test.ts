@@ -86,3 +86,113 @@ func main() {
     stdout: 'map[2:20] [3 4] [0 0]\n',
   });
 });
+
+test('deferred sends, waits, sleeps, and panic recovery can suspend and resume', () => {
+  const source = `package main
+import ("fmt"; "sync"; "time")
+func worker(id int, done chan int) {
+  defer func() { done <- id }()
+  fmt.Println("worker", id)
+}
+func report[T any](done chan T, value T) { if recover() != nil { done <- value } }
+func main() {
+  done := make(chan int)
+  for i := 1; i <= 3; i++ { go worker(i, done) }
+  for i := 0; i < 3; i++ { <-done }
+  var wg sync.WaitGroup
+  defer wg.Wait()
+  wg.Add(1)
+  go func() { defer wg.Done(); time.Sleep(time.Millisecond); fmt.Println("finished") }()
+  errors := make(chan string)
+  go func() { defer report(errors, "recovered"); panic("boom") }()
+  fmt.Println(<-errors)
+  defer time.Sleep(time.Millisecond)
+  fmt.Println("end")
+}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: 'worker 1\nworker 2\nworker 3\nrecovered\nend\nfinished\n',
+  });
+});
+
+test('generic methods capture receivers and arguments for go and defer', () => {
+  const source = `package main
+import "fmt"
+type Box struct{ value int }
+func (b Box) Show[T any](x T) { fmt.Println(b.value, x) }
+func (b Box) Send[T any](ch chan T, x T) { ch <- x }
+func main() {
+  b := Box{1}
+  defer b.Show(5)
+  defer b.Show[string]("s")
+  ch := make(chan int)
+  go b.Send(ch, 7)
+  b.value = 2
+  fmt.Println(<-ch)
+}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '7\n1 s\n1 5\n',
+  });
+});
+
+test('select prepares both receive destinations before either store', () => {
+  const source = `package main
+import "fmt"
+func main() {
+  i := 0
+  flags := []bool{false, false}
+  ch := make(chan int, 1)
+  ch <- 1
+  select { case i, flags[i] = <-ch: }
+  fmt.Println(i, flags)
+}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '1 [true false]\n',
+  });
+});
+
+test('channel identity survives interface, array, and struct map keys', () => {
+  const source = `package main
+import "fmt"
+func main() {
+  c, d := make(chan int), make(chan int)
+  interfaces := map[any]int{c: 1, d: 2}
+  arrays := map[[1]chan int]int{{c}: 3, {d}: 4}
+  type Key struct { C chan int }
+  structs := map[Key]int{{c}: 5, {d}: 6}
+  var zero chan int
+  interfaces[zero] = 7
+  fmt.Println(len(interfaces), interfaces[c], interfaces[d], interfaces[zero], len(arrays), arrays[[1]chan int{c}], arrays[[1]chan int{d}], len(structs), structs[Key{c}], structs[Key{d}])
+}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '3 1 2 7 2 3 4 2 5 6\n',
+  });
+});
+
+test('sync.Map validates unhashable keys on empty maps for reads and writes', () => {
+  const source = `package main
+import ("fmt"; "sync")
+func check(action func(*sync.Map)) {
+  defer func() { fmt.Println(recover() != nil) }()
+  var m sync.Map
+  action(&m)
+}
+func main() {
+  check(func(m *sync.Map) { m.Store([]int{1}, 2) })
+  check(func(m *sync.Map) { m.Load([]int{1}) })
+  check(func(m *sync.Map) { m.Delete([]int{1}) })
+  check(func(m *sync.Map) { m.LoadOrStore([]int{1}, 2) })
+}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: 'true\ntrue\ntrue\ntrue\n',
+  });
+});

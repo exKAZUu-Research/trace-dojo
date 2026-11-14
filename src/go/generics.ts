@@ -151,6 +151,7 @@ export function unify(param: Type, arg: Type, mapping: Substitution, params: rea
       if (arg.kind === 'named' && param.origin && arg.origin === param.origin) {
         return (param.typeArgs ?? []).every((type, index) => unify(type, (arg.typeArgs ?? [])[index], mapping, params));
       }
+      if (arg.kind !== 'named') return unify(underlying(param), arg, mapping, params);
       return true;
     }
     default: {

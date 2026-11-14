@@ -174,11 +174,11 @@ export function convertible(from: Type, to: Type): boolean {
     return typeParamConvertible(from, to);
   }
   // A conversion ignores the tags of struct fields.
-  if (identical(withoutTags(fromUnder), withoutTags(toUnder))) return true;
+  if (identical(fromUnder, toUnder, true)) return true;
   if (
     fromUnder.kind === 'pointer' &&
     toUnder.kind === 'pointer' &&
-    identical(underlying(fromUnder.element), underlying(toUnder.element))
+    identical(underlying(fromUnder.element), underlying(toUnder.element), true)
   ) {
     return true;
   }
@@ -213,9 +213,4 @@ function typeParamConvertible(from: Type, to: Type): boolean {
 export function isByteOrRuneSlice(type: Type): boolean {
   const under = underlying(type);
   return under.kind === 'slice' && (isBasic(under.element, 'uint8') || isBasic(under.element, 'int32'));
-}
-
-function withoutTags(type: Type): Type {
-  if (type.kind !== 'struct') return type;
-  return { kind: 'struct', fields: type.fields.map((field) => ({ ...field, tag: undefined })) };
 }

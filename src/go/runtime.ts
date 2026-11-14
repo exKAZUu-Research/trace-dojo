@@ -118,6 +118,7 @@ export const UNASSIGNED: unique symbol = Symbol('unassigned');
 
 interface DeferredCall {
   run: () => void;
+  resume?: () => Suspending<unknown>;
   /** The function and arguments, which garbage collection must follow until the call runs. */
   values: unknown[];
 }
@@ -328,7 +329,8 @@ export class Runtime implements TracedRuntime<Frame> {
     while (frame.defers.length > 0) {
       const deferred = frame.defers.pop() as DeferredCall;
       try {
-        deferred.run();
+        if (deferred.resume) yield* deferred.resume();
+        else deferred.run();
       } catch (error) {
         if (!(error instanceof GoPanic)) throw error;
         // A panic in a deferred call replaces the one in progress, which Go reports as recovered or not.
@@ -349,8 +351,8 @@ export class Runtime implements TracedRuntime<Frame> {
     return panic.value;
   }
 
-  defer(frame: Frame, run: () => void, values: unknown[]): void {
-    (frame.defers ??= []).push({ run, values });
+  defer(frame: Frame, run: () => void, values: unknown[], resume?: () => Suspending<unknown>): void {
+    (frame.defers ??= []).push({ run, values, resume });
   }
 
   /** Removes the turtles that no variable, temporary value, or pending deferred call reaches. */
@@ -389,7 +391,7 @@ export function runToEnd<T>(computation: Suspending<T>): T {
   if (next.done) return next.value;
   computation.return(undefined as T);
   throw new GoFatal(
-    'ライブラリの関数から呼ばれた関数の中や defer で呼ぶ関数の中で、チャネルやロックを待つことは、この採点環境では使えません。'
+    'ライブラリの関数から呼ばれた関数の中で、チャネルやロックを待つことは、この採点環境では使えません。'
   );
 }
 
@@ -400,7 +402,8 @@ function rawBytes(bytes: string): Uint8Array {
 }
 
 function pushChildren(item: object, stack: unknown[], turtles: Set<unknown>): void {
-  if (item instanceof Cell) stack.push(item.v);
+  if (item instanceof Frame) pushFrameRoots([item], stack);
+  else if (item instanceof Cell) stack.push(item.v);
   else if (item instanceof Pointer) stack.push(item.base);
   else if (Array.isArray(item)) {
     for (const entry of item as unknown[]) stack.push(entry);

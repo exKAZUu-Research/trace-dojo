@@ -2,7 +2,7 @@ import type { Entity } from '../entities';
 import { newError } from '../errorValues';
 import { formatFloat } from '../floatFormat';
 import { type BoundCall, dynamicMethod } from '../methods';
-import { addMethod, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
+import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
 import { GoPanic } from '../runtime';
 import { BASIC, pointerTo, RUNE, type Type } from '../types';
 import { Cell, GoStruct, Iface, Pointer, type Value } from '../values';
@@ -64,6 +64,7 @@ function parseInt(source: string, base: number): bigint | undefined {
     if (prefix && rest.length > 1) {
       radix = prefix[1] ? { b: 2, o: 8, x: 16 }[prefix[1].toLowerCase() as 'b' | 'o' | 'x'] : 8;
       rest = rest.slice(prefix[0].length);
+      if (rest.startsWith('_')) rest = rest.slice(1);
     }
     if (/^_|_$|__/.test(rest)) return undefined;
     rest = rest.replaceAll('_', '');
@@ -71,6 +72,7 @@ function parseInt(source: string, base: number): bigint | undefined {
   if (rest === '') return undefined;
   let value = 0n;
   for (const char of rest) {
+    currentRuntime().spend();
     const digit = radix <= 36 ? DIGITS.indexOf(char.toLowerCase()) : DIGITS.indexOf(char);
     if (digit < 0 || digit >= radix) return undefined;
     value = value * BigInt(radix) + BigInt(digit);
@@ -103,6 +105,7 @@ function power(base: bigint, exponent: bigint, modulus: bigint | undefined): big
   };
   b = reduce(b);
   while (e > 0n) {
+    currentRuntime().spend();
     if (e & 1n) result = reduce(result * b);
     b = reduce(b * b);
     e >>= 1n;
@@ -119,25 +122,30 @@ function gcd(a: bigint, b: bigint): bigint {
 
 /** The extended Euclidean algorithm: g, and x and y with a*x + b*y = g, as Go's GCD returns them. */
 function extendedGcd(a: bigint, b: bigint): [bigint, bigint, bigint] {
-  let [oldR, r] = [a, b];
+  if (a === 0n && b === 0n) return [0n, 0n, 0n];
+  let [oldR, r] = [a < 0n ? -a : a, b < 0n ? -b : b];
   let [oldS, s] = [1n, 0n];
   let [oldT, t] = [0n, 1n];
   while (r !== 0n) {
+    currentRuntime().spend();
     const q = oldR / r;
     [oldR, r] = [r, oldR - q * r];
     [oldS, s] = [s, oldS - q * s];
     [oldT, t] = [t, oldT - q * t];
   }
-  return [oldR, oldS, oldT];
+  return [oldR, a < 0n ? -oldS : oldS, b < 0n ? -oldT : oldT];
 }
 
 function sqrt(value: bigint): bigint {
   if (value < 0n) throw new GoPanic(new Iface(BASIC.string, 'square root of negative number'));
   if (value < 2n) return value;
-  let x = BigInt(Math.floor(Math.sqrt(Number(value))));
-  while (x * x > value) x--;
-  while ((x + 1n) * (x + 1n) <= value) x++;
-  return x;
+  let estimate = 1n << BigInt(Math.ceil(bitLength(value) / 2));
+  for (;;) {
+    currentRuntime().spend();
+    const next = (estimate + value / estimate) >> 1n;
+    if (next >= estimate) return estimate;
+    estimate = next;
+  }
 }
 
 /** A deterministic Miller–Rabin test with the first prime bases, which is exact for the sizes programs use. */
@@ -239,7 +247,19 @@ const methods: [string, Type[], Type[], (z: Value, args: Value[]) => Value | Val
     'Exp',
     [INT_POINTER, INT_POINTER, INT_POINTER],
     [INT_POINTER],
-    (z, [x, y, m]) => setInt(z, power(intOf(x), intOf(y), m === undefined ? undefined : intOf(m))),
+    (z, [x, y, m]) => {
+      let base = intOf(x);
+      let exponent = intOf(y);
+      const modulus = m === undefined ? undefined : intOf(m);
+      if (exponent < 0n && modulus !== undefined && modulus !== 0n) {
+        const positive = modulus < 0n ? -modulus : modulus;
+        const [divisor, inverse] = extendedGcd(base, positive);
+        if (divisor !== 1n) return;
+        base = inverse;
+        exponent = -exponent;
+      }
+      return setInt(z, power(base, exponent, modulus));
+    },
   ],
   [
     'MulRange',
@@ -279,14 +299,6 @@ const methods: [string, Type[], Type[], (z: Value, args: Value[]) => Value | Val
     (z, [x, y, a, b]) => {
       const left = intOf(a);
       const right = intOf(b);
-      if (left <= 0n || right <= 0n) {
-        // Go's GCD of non-positive arguments: the absolute values, with x and y set to match.
-        const g =
-          left === 0n ? (right < 0n ? -right : right) : right === 0n ? (left < 0n ? -left : left) : gcd(left, right);
-        if (x !== undefined) setInt(x, left === 0n ? 0n : left < 0n ? -1n : 1n);
-        if (y !== undefined) setInt(y, right === 0n ? 0n : right < 0n ? -1n : 1n);
-        return setInt(z, left !== 0n && right !== 0n ? 0n : g);
-      }
       const [g, s, t] = extendedGcd(left, right);
       if (x !== undefined) setInt(x, s);
       if (y !== undefined) setInt(y, t);

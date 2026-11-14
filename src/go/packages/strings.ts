@@ -16,9 +16,9 @@ import {
 } from '../native';
 import { grownCapacity } from '../sliceOps';
 import { BASIC, ERROR_TYPE, funcType, pointerTo, RUNE, sliceOf, type StructType } from '../types';
-import { Cell, GoFunc, GoStruct, type NativeState, Pointer, Slice, type Value } from '../values';
+import { Cell, type GoFunc, GoStruct, type NativeState, Pointer, Slice, type Value } from '../values';
 import { EOF, ERR_SHORT_WRITE, IO_WRITER, writeString } from './io';
-import { seqOf } from './iter';
+import { iteratorOf, seqOf } from './iter';
 import {
   BOOL,
   bytesOf,
@@ -36,10 +36,25 @@ import { isSpace, mapRunes, simpleFold, toLower, toTitle, toUpper } from './unic
 
 const STRINGS = sliceOf(STRING);
 function sequence(pieces: string[]): GoFunc {
-  return new GoFunc(([yieldFunction]) => {
-    for (const piece of pieces) if (callFunction(yieldFunction, [piece]) === false) break;
-    return;
+  return iteratorOf(function* () {
+    for (const piece of pieces) yield [piece];
   });
+}
+
+function fieldSequence(s: string, isSeparator: (rune: number) => boolean, captured: Value[] = []): GoFunc {
+  return iteratorOf(function* () {
+    let start = -1;
+    for (let at = 0; at < s.length;) {
+      spendFor(1);
+      const { rune, size } = decodeRune(s, at);
+      if (isSeparator(rune)) {
+        if (start >= 0) yield [s.slice(start, at)];
+        start = -1;
+      } else if (start < 0) start = at;
+      at += size;
+    }
+    if (start >= 0) yield [s.slice(start)];
+  }, captured);
 }
 
 /** `strings.Lines`: the lines of a text, each with its newline, the last one without when the text lacks one. */
@@ -822,11 +837,9 @@ const members: Record<string, Entity> = {
   SplitAfterSeq: nativeFunction('SplitAfterSeq', fn([STRING, STRING], [seqOf(STRING)]), ([s, sep]) =>
     sequence(split(s as string, sep as string, true, -1))
   ),
-  FieldsSeq: nativeFunction('FieldsSeq', fn([STRING], [seqOf(STRING)]), ([s]) =>
-    sequence(fields(s as string, isSpace))
-  ),
+  FieldsSeq: nativeFunction('FieldsSeq', fn([STRING], [seqOf(STRING)]), ([s]) => fieldSequence(s as string, isSpace)),
   FieldsFuncSeq: nativeFunction('FieldsFuncSeq', fn([STRING, RUNE_PREDICATE], [seqOf(STRING)]), ([s, predicate]) =>
-    sequence(fields(s as string, (rune) => callFunction(predicate, [BigInt(rune)]) === true))
+    fieldSequence(s as string, (rune) => callFunction(predicate, [BigInt(rune)]) === true, [predicate])
   ),
   Lines: nativeFunction('Lines', fn([STRING], [seqOf(STRING)]), ([s]) => sequence(lines(s as string))),
   Split: nativeFunction(

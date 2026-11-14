@@ -389,7 +389,7 @@ export function integerBits(kind: BasicKind): { bits: number; signed: boolean } 
 // Identity --------------------------------------------------------------------------------------------------------------
 
 // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of type, as the specification defines identity.
-export function identical(a: Type, b: Type): boolean {
+export function identical(a: Type, b: Type, ignoreTags = false): boolean {
   if (a === b) return true;
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
@@ -403,19 +403,19 @@ export function identical(a: Type, b: Type): boolean {
     }
     case 'pointer':
     case 'slice': {
-      return identical(a.element, (b as PointerType | SliceType).element);
+      return identical(a.element, (b as PointerType | SliceType).element, ignoreTags);
     }
     case 'array': {
       const other = b as ArrayType;
-      return a.length === other.length && identical(a.element, other.element);
+      return a.length === other.length && identical(a.element, other.element, ignoreTags);
     }
     case 'map': {
       const other = b as MapType;
-      return identical(a.key, other.key) && identical(a.value, other.value);
+      return identical(a.key, other.key, ignoreTags) && identical(a.value, other.value, ignoreTags);
     }
     case 'chan': {
       const other = b as ChanType;
-      return a.dir === other.dir && identical(a.element, other.element);
+      return a.dir === other.dir && identical(a.element, other.element, ignoreTags);
     }
     case 'struct': {
       const other = b as StructType;
@@ -426,8 +426,8 @@ export function identical(a: Type, b: Type): boolean {
           return (
             field.name === otherField.name &&
             field.embedded === otherField.embedded &&
-            (field.tag ?? '') === (otherField.tag ?? '') &&
-            identical(field.type, otherField.type)
+            (ignoreTags || (field.tag ?? '') === (otherField.tag ?? '')) &&
+            identical(field.type, otherField.type, ignoreTags)
           );
         })
       );
@@ -436,8 +436,8 @@ export function identical(a: Type, b: Type): boolean {
       const other = b as FuncType;
       return (
         a.variadic === other.variadic &&
-        identicalLists(a.params, other.params) &&
-        identicalLists(a.results, other.results)
+        identicalLists(a.params, other.params, ignoreTags) &&
+        identicalLists(a.results, other.results, ignoreTags)
       );
     }
     case 'interface': {
@@ -446,14 +446,14 @@ export function identical(a: Type, b: Type): boolean {
         a.methods.length === other.methods.length &&
         a.methods.every(
           (method, index) =>
-            method.name === other.methods[index].name && identical(method.type, other.methods[index].type)
+            method.name === other.methods[index].name && identical(method.type, other.methods[index].type, ignoreTags)
         ) &&
         Boolean(a.typeSet?.comparable) === Boolean(other.typeSet?.comparable) &&
         identicalTerms(a.typeSet?.terms, other.typeSet?.terms)
       );
     }
     case 'tuple': {
-      return identicalLists(a.types, (b as TupleType).types);
+      return identicalLists(a.types, (b as TupleType).types, ignoreTags);
     }
     case 'typeParam': {
       return a.id === (b as TypeParamType).id;
@@ -461,8 +461,8 @@ export function identical(a: Type, b: Type): boolean {
   }
 }
 
-function identicalLists(a: Type[], b: Type[]): boolean {
-  return a.length === b.length && a.every((type, index) => identical(type, b[index]));
+function identicalLists(a: Type[], b: Type[], ignoreTags = false): boolean {
+  return a.length === b.length && a.every((type, index) => identical(type, b[index], ignoreTags));
 }
 
 function identicalTerms(a: TypeSet['terms'], b: TypeSet['terms']): boolean {
@@ -511,7 +511,8 @@ export function typeIdentityKey(type: Type, seen = new Set<Type>()): string {
     case 'struct': {
       const fields = type.fields
         .map(
-          (field) => `${field.embedded ? '^' : ''}${JSON.stringify(field.name)}:${typeIdentityKey(field.type, seen)}`
+          (field) =>
+            `${field.embedded ? '^' : ''}${JSON.stringify(field.name)}:${JSON.stringify(field.tag ?? '')}:${typeIdentityKey(field.type, seen)}`
         )
         .join(';');
       return `struct{${fields}}`;

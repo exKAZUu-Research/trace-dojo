@@ -893,6 +893,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
    * `v, ok := <-ch` takes them.
    */
   protected receive(expression: Extract<Expression, { kind: 'unary' }>, commaOk: boolean): Operand {
+    this.runtimeCallCount++;
     const channel = this.receivableChannel(expression.operand);
     if (!channel) return this.invalid(expression);
     const type = (coreType(this.withoutHoists(() => this.value(expression.operand)).type) as { element: Type }).element;

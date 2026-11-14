@@ -1,5 +1,5 @@
 import type { Entity } from '../entities';
-import { equalityOf } from '../equality';
+import { equalityOf, mapKeyOf } from '../equality';
 import { addBlockingMethod, addMethod, definePackage, fn, namedType, typeEntity } from '../native';
 import { GoFatal, GoPanic, type Suspending } from '../runtime';
 import { nilPointerPanic } from '../runtimeErrors';
@@ -330,6 +330,7 @@ class MapState {
   }
 
   find(key: Value): { key: Value; value: Value } | undefined {
+    mapKeyOf(ANY)(key);
     const equal = equalityOf(ANY);
     return this.entries.find((entry) => equal(entry.key, key));
   }

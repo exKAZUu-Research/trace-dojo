@@ -60,7 +60,8 @@ export function* resumeDynamicMethod(
   name: string,
   receiver: Value,
   args: Value[],
-  callRow?: number
+  callRow?: number,
+  deferredFor?: unknown
 ): Generator<{ reason: string }, Value | Value[], unknown> {
   const selection = lookupFieldOrMethod(type, name);
   if (selection.kind === 'method') {
@@ -69,13 +70,14 @@ export function* resumeDynamicMethod(
       method,
       receiverFor(receiver, path, method, underlying(type).kind === 'pointer'),
       args,
-      callRow
+      callRow,
+      deferredFor
     );
   }
   if (selection.kind !== 'interfaceMethod') throw new Error(`Missing method ${name}`);
   const inner = walk(receiver, selection.path) as Iface | undefined;
   if (!inner) nilPointerPanic();
-  return yield* resumeDynamicMethod(inner.type, name, inner.value, args, callRow);
+  return yield* resumeDynamicMethod(inner.type, name, inner.value, args, callRow, deferredFor);
 }
 
 const dispatchCache = new WeakMap<Type, Map<string, BoundCall | undefined>>();

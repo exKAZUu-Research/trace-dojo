@@ -122,6 +122,9 @@ function buildKey(type: Type): KeyOf {
       }
       return (value) => value;
     }
+    case 'chan': {
+      return (value) => (value === undefined ? 'nil' : `chan:${identityOf(value as object)}`);
+    }
     case 'pointer': {
       return (value) =>
         value === undefined ? 'nil' : `${identityOf((value as Pointer).base)}:${String((value as Pointer).key)}`;

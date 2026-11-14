@@ -217,7 +217,6 @@ export abstract class CompilerBase {
     return (this.fn as FunctionContext).info.slotCount++;
   }
 
-  /** Looks up a name, marking variables of enclosing functions as captured by the function being compiled. */
   /** The packages imported with `.`, whose members the file's scope holds. */
   protected readonly dotImports: PackageEntity[] = [];
   protected readonly dotMembers = new Map<Entity, PackageEntity>();
@@ -532,7 +531,6 @@ export abstract class CompilerBase {
     return { kind: 'struct', fields };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Methods, embedded interfaces, and unions of type terms.
   /** Go embeds a type or a pointer to one, but neither a pointer type nor a pointer to an interface. */
   private checkEmbeddedType(field: Span, type: Type): void {
     const isPointer = type.kind === 'pointer';

@@ -421,7 +421,11 @@ export abstract class CallCompiler extends CompositeCompiler {
     written: Type[] = []
   ): { instance: GoFunc | undefined; args: ListEval; results: Type[] } | undefined {
     const generic = entity.generic as GenericFunc;
-    const operands = expression.args.map((arg) => this.expression(arg));
+    let operands = expression.args.map((arg) => this.expression(arg));
+    let expand: ((args: ListEval) => ListEval) | undefined;
+    if (!expression.spread && operands.length === 1 && operands[0].type.kind === 'tuple') {
+      ({ parts: operands, spread: expand } = this.spreadResults(operands[0]));
+    }
     const mapping = this.inferTypeArguments(expression, generic, operands, written, expression.spread === true);
     if (!mapping) return undefined;
     const typeArgs = generic.typeParams.map((param) => mapping.get(param.id) as Type);
@@ -430,10 +434,11 @@ export abstract class CallCompiler extends CompositeCompiler {
     const signature = substitute(generic.type, mapping, (named, args) =>
       this.instantiateNamed(named, args)
     ) as FuncType;
-    const args = expression.spread
+    const listed = expression.spread
       ? this.spreadValues(operands, signature)
       : this.listArguments(expression, operands, signature, entity.name);
-    if (!args) return undefined;
+    if (!listed) return undefined;
+    const args = expand ? expand(listed) : listed;
     if (typeArgs.some((arg) => containsTypeParam(arg))) {
       return { instance: undefined, args, results: signature.results };
     }
@@ -684,7 +689,12 @@ export abstract class CallCompiler extends CompositeCompiler {
       this.error(span, `${describeType(type)} 型には ${name} というメソッドがありません。`);
       return this.invalid(span);
     }
-    if (selection.kind === 'method' && selection.method.pointerReceiver && underlying(type).kind !== 'pointer') {
+    if (
+      selection.kind === 'method' &&
+      selection.method.pointerReceiver &&
+      !selection.indirect &&
+      underlying(type).kind !== 'pointer'
+    ) {
       this.error(
         span,
         `メソッド ${name} はポインタのレシーバを持つので、(*${describeType(type)}).${name} と書いてください。`
@@ -733,51 +743,67 @@ export abstract class CallCompiler extends CompositeCompiler {
 
   /** A call of a method with its own type parameters, inferred from the arguments as a generic function's are. */
   private genericMethodCall(expression: Extract<Expression, { kind: 'call' }>, callee: Operand): Operand {
-    const { receiver, selection } = callee.method as NonNullable<Operand['method']>;
-    const { method, path } = selection as Extract<typeof selection, { kind: 'method' }>;
-    const typeParams = method.typeParams as TypeParamType[];
-    const generic: GenericFunc = { typeParams, type: method.type, instantiate: () => new GoFunc(() => {}) };
-    const operands = expression.args.map((arg) => this.expression(arg));
-    const mapping = this.inferTypeArguments(
-      expression,
-      generic,
-      operands,
-      callee.typeArgs ?? [],
-      expression.spread === true
-    );
-    if (!mapping) return this.invalid(expression);
-    const typeArgs = typeParams.map((param) => mapping.get(param.id) as Type);
-    if (!this.checkTypeArguments(typeParams, typeArgs, expression)) return this.invalid(expression);
-    const signature = substitute(method.type, mapping, (named, args) => this.instantiateNamed(named, args)) as FuncType;
-    const args = expression.spread
-      ? this.spreadValues(operands, signature)
-      : this.listArguments(expression, operands, signature, method.name);
-    if (!args) return this.invalid(expression);
-    let readReceiver: Eval | undefined;
-    if (method.pointerReceiver) readReceiver = this.pointerReceiver(expression, receiver, path);
-    else {
-      const read = receiver.eval;
-      readReceiver = (frame) => receiverFor(read(frame), path, method, underlying(receiver.type).kind === 'pointer');
-    }
-    if (!readReceiver || !method.instantiate || typeArgs.some((arg) => containsTypeParam(arg))) {
-      return this.resultOperand(expression, signature.results, () => {});
-    }
-    const code = method.instantiate(typeArgs);
-    const bound = readReceiver;
+    const prepared = this.prepareGenericMethodCall(expression, callee);
+    if (!prepared) return this.invalid(expression);
+    const { instance, receiver, args, results } = prepared;
+    if (!instance) return this.resultOperand(expression, results, () => {});
+    const evaluate = (frame: Frame): Value[] => {
+      const value = receiver(frame);
+      return [value, ...withTemporary(frame, value, () => args(frame))];
+    };
     const row = expression.row;
     return this.resultOperand(
       expression,
-      signature.results,
-      (frame) => {
-        const value = bound(frame);
-        return code.call?.(value, args(frame), row) as Value | Value[];
-      },
+      results,
+      (frame) => instance.call(evaluate(frame), row),
       function* (frame) {
-        const value = bound(frame);
-        const argValues = args(frame);
-        return (yield* (code.resume as NonNullable<typeof code.resume>)(value, argValues, row)) as Value | Value[];
+        const values = evaluate(frame);
+        return instance.resume ? yield* instance.resume(values, row) : instance.call(values, row);
       }
     );
+  }
+
+  protected prepareGenericMethodCall(
+    expression: Extract<Expression, { kind: 'call' }>,
+    callee: Operand
+  ): { instance: GoFunc | undefined; receiver: Eval; args: ListEval; results: Type[] } | undefined {
+    const { receiver, selection } = callee.method as NonNullable<Operand['method']>;
+    if (selection.kind !== 'method') return undefined;
+    const { method, path } = selection;
+    const prepared = this.prepareGenericCall(
+      expression,
+      {
+        kind: 'func',
+        name: method.name,
+        type: method.type,
+        value: () => new GoFunc(() => {}),
+        generic: {
+          typeParams: method.typeParams as TypeParamType[],
+          type: method.type,
+          instantiate: (types) => {
+            const code = method.instantiate?.(types);
+            return new GoFunc(
+              ([value, ...args], row, deferredFor) => code?.call?.(value, args, row, deferredFor) as Value | Value[],
+              [],
+              function* ([value, ...args], row, deferredFor) {
+                return (
+                  code?.resume
+                    ? yield* code.resume(value, args, row, deferredFor)
+                    : code?.call?.(value, args, row, deferredFor)
+                ) as Value | Value[];
+              }
+            );
+          },
+        },
+      },
+      callee.typeArgs
+    );
+    if (!prepared) return undefined;
+    const read = receiver.eval;
+    const bound = method.pointerReceiver
+      ? this.pointerReceiver(expression, receiver, path, selection.indirect)
+      : (frame: Frame) => receiverFor(read(frame), path, method, underlying(receiver.type).kind === 'pointer');
+    return bound ? { ...prepared, receiver: bound } : undefined;
   }
 
   /**

@@ -278,3 +278,44 @@ func main() {
   const { finalVars } = traceProgram('go', program, program);
   expect(finalVars.x).toBe(9_007_199_254_740_993n);
 });
+
+test('Pull keeps suspended iterator frames reachable between calls', () => {
+  const program = `package main
+import "iter"
+func sequence(yield func(int) bool) {
+  turtle := NewTurtle()
+  yield(1)
+  turtle.Forward()
+}
+func main() {
+  next, stop := iter.Pull(sequence)
+  next()
+  marker := 1
+  _ = marker
+  next()
+  stop()
+}`;
+  const trace = traceProgram('go', program, program);
+  expect(trace.uncaughtException).toBeUndefined();
+  expect(trace.traceItems.filter(({ vars }) => vars.marker === 1).map(({ turtles }) => turtles.length)).toContain(1);
+  expect(trace.traceItems.some(({ turtles }) => turtles.some(({ x, y }) => x === 0 && y === 1))).toBe(true);
+});
+
+test('lazy string predicates keep their captured turtles reachable', () => {
+  const program = `package main
+import ("iter"; "strings")
+func words() iter.Seq[string] {
+  turtle := NewTurtle()
+  return strings.FieldsFuncSeq("a b", func(r rune) bool { turtle.Forward(); return r == ' ' })
+}
+func main() {
+  sequence := words()
+  marker := 1
+  _ = marker
+  for range sequence {}
+}`;
+  const trace = traceProgram('go', program, program);
+  expect(trace.uncaughtException).toBeUndefined();
+  expect(trace.traceItems.filter(({ vars }) => vars.marker === 1).map(({ turtles }) => turtles.length)).toContain(1);
+  expect(trace.traceItems.some(({ turtles }) => turtles.some(({ x, y }) => x === 0 && y === 3))).toBe(true);
+});

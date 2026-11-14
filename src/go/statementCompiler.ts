@@ -101,6 +101,7 @@ import {
 const CONSTRUCTOR_NAME = /^(?:New|new)(?:$|[^\p{Ll}])/u;
 
 export abstract class StatementCompiler extends CallCompiler {
+  private readonly allowedFallthrough = new WeakSet<Statement>();
   // Steps -------------------------------------------------------------------------------------------------------------
 
   /** The row whose step a statement records, when the program is traced. */
@@ -358,7 +359,8 @@ export abstract class StatementCompiler extends CallCompiler {
         return this.gotoStatement(statement);
       }
       case 'fallthrough': {
-        this.error(statement, 'fallthrough は switch 文の case の最後にしか書けません。');
+        if (!this.allowedFallthrough.has(statement))
+          this.error(statement, 'fallthrough は switch 文の case の最後にしか書けません。');
         return completing(FALLTHROUGH);
       }
       case 'defer':
@@ -1036,9 +1038,10 @@ export abstract class StatementCompiler extends CallCompiler {
 
   private rangeStatement(statement: Extract<Statement, { kind: 'range' }>): Exec {
     const label = this.takeLabel();
-    const { value: range, hoists } = this.part(() =>
-      this.sliceTransition(statement.range, this.orderedValue(statement.range))
+    const { value: tracked, hoists } = this.part(() =>
+      this.withRuntimeCallTracking(() => this.sliceTransition(statement.range, this.orderedValue(statement.range)))
     );
+    const { result: range, hasRuntimeCall } = tracked;
     const rangeType = this.isInvalid(range) ? undefined : coreType(range.type);
     if (rangeType?.kind === 'chan') {
       if (rangeType.dir === 'send') {
@@ -1051,7 +1054,7 @@ export abstract class StatementCompiler extends CallCompiler {
       const yieldType = iteratorYield(rangeType);
       if (yieldType) return this.rangeFunction(statement, { value: range.eval, hoists }, yieldType, label);
     }
-    const source = this.isInvalid(range) ? undefined : this.rangeSource(statement, range);
+    const source = this.isInvalid(range) ? undefined : this.rangeSource(statement, range, hasRuntimeCall);
     if (!source) {
       this.declareRangeTargets(statement, BASIC.invalid, BASIC.invalid);
       this.breakable(label, 'for', () => this.loopBody(statement.body));
@@ -1162,7 +1165,7 @@ export abstract class StatementCompiler extends CallCompiler {
   private rangeSource(
     statement: Extract<Statement, { kind: 'range' }>,
     range: Operand,
-    hasRuntimeCall = true
+    hasRuntimeCall: boolean
   ): { read: Eval; keyType: Type; valueType: Type; iterate: RangeIterator } | undefined {
     const type = coreType(range.type) ?? range.type;
     const read = range.eval;
@@ -1306,17 +1309,16 @@ export abstract class StatementCompiler extends CallCompiler {
       const tests = (switchCase.values ?? []).map((value) =>
         this.part(() => this.caseTest(value, tag, tagType, seenConstants))
       );
-      const last = switchCase.body.at(-1);
+      const last = unlabel(switchCase.body.at(-1));
       const fallsThrough = last?.kind === 'fallthrough';
       if (fallsThrough && index === statement.cases.length - 1) {
         this.error(last, '最後の case では fallthrough を使えません。');
       }
+      if (fallsThrough && last) this.allowedFallthrough.add(last);
       fn.breakDepth++;
       let body: Exec;
       try {
-        body = this.breakable(label, 'switch', () =>
-          this.scoped(() => this.statements(fallsThrough ? switchCase.body.slice(0, -1) : switchCase.body))
-        );
+        body = this.breakable(label, 'switch', () => this.scoped(() => this.statements(switchCase.body)));
       } finally {
         fn.breakDepth--;
       }
@@ -1352,7 +1354,7 @@ export abstract class StatementCompiler extends CallCompiler {
       for (let index = start; index < cases.length; index++) {
         const completion = yield* cases[index].body(frame);
         if (breaks(completion, label)) return;
-        if (completion) return completion;
+        if (completion && completion.kind !== 'fallthrough') return completion;
         if (!cases[index].fallsThrough) return;
       }
       return;
@@ -1664,10 +1666,6 @@ export abstract class StatementCompiler extends CallCompiler {
     return execOf({ run, onlyCalls: false }, hoists);
   }
 
-  /**
-   * Evaluates the function and arguments of a deferred call or a goroutine's call now, as Go does, and defers the call,
-   * which runs where it cannot block, or starts a goroutine that runs it.
-   */
   // code-gauge-allow functionCognitiveComplexity 25 -- Calls of functions, function values, generic functions, and methods.
   private launchedCall(statement: Extract<Statement, { kind: 'defer' | 'go' }>): Run {
     (this.fn as FunctionContext).notInlinable = true;
@@ -1706,7 +1704,13 @@ export abstract class StatementCompiler extends CallCompiler {
           launch(
             frame,
             () => void instance.call(argValues, row, keyword === 'defer' ? frame : undefined),
-            instance.resume && (() => (instance.resume as NonNullable<GoFunc['resume']>)(argValues, row)),
+            instance.resume &&
+              (() =>
+                (instance.resume as NonNullable<GoFunc['resume']>)(
+                  argValues,
+                  row,
+                  keyword === 'defer' ? frame : undefined
+                )),
             [instance, ...argValues]
           );
         };
@@ -1728,7 +1732,8 @@ export abstract class StatementCompiler extends CallCompiler {
       launch(
         frame,
         () => void fn.call(argValues, row, frame),
-        fn.resume && (() => (fn.resume as NonNullable<GoFunc['resume']>)(argValues, row)),
+        fn.resume &&
+          (() => (fn.resume as NonNullable<GoFunc['resume']>)(argValues, row, keyword === 'defer' ? frame : undefined)),
         [fn, ...argValues]
       );
     };
@@ -1740,6 +1745,22 @@ export abstract class StatementCompiler extends CallCompiler {
     row: number,
     launch: Launch
   ): Run {
+    if (callee.method?.selection.kind === 'method' && callee.method.selection.method.typeParams) {
+      const prepared = this.prepareGenericMethodCall(call, callee);
+      if (!prepared?.instance) return () => {};
+      const { instance, receiver, args } = prepared;
+      return (frame) => {
+        const value = receiver(frame);
+        const argValues = withTemporary(frame, value, () => args(frame));
+        const all = [value, ...argValues];
+        launch(
+          frame,
+          () => void instance.call(all, row, frame),
+          instance.resume && (() => (instance.resume as NonNullable<GoFunc['resume']>)(all, row, frame)),
+          all
+        );
+      };
+    }
     const { receiver, selection } = callee.method as NonNullable<Operand['method']>;
     const args = this.callArguments(call, selection.method.type);
     if (!args) return () => {};
@@ -1758,7 +1779,7 @@ export abstract class StatementCompiler extends CallCompiler {
           },
           () => {
             if (!iface) nilPointerPanic();
-            return resumeDynamicMethod(iface.type, name, iface.value, argValues, row);
+            return resumeDynamicMethod(iface.type, name, iface.value, argValues, row, frame);
           },
           [iface, ...argValues]
         );
@@ -1777,7 +1798,7 @@ export abstract class StatementCompiler extends CallCompiler {
       launch(
         frame,
         () => void invokeMethod(method, value, argValues, row, frame),
-        () => resumeMethod(method, value, argValues, row),
+        () => resumeMethod(method, value, argValues, row, frame),
         [value, ...argValues]
       );
     };
@@ -2036,7 +2057,7 @@ export abstract class StatementCompiler extends CallCompiler {
           if (variables[1]) declareValue(frame, variables[1], ok);
         };
       } else {
-        const stores = comm.left.slice(0, 2).map((target, index) => {
+        const prepares = comm.left.slice(0, 2).map((target, index) => {
           const operand = this.assignmentTarget(target);
           if (!operand || this.isInvalid(operand)) return;
           if (isAnswerType(types[index])) answered = true;
@@ -2045,19 +2066,23 @@ export abstract class StatementCompiler extends CallCompiler {
             operand.type,
             '変数'
           );
-          const store = operand.store as NonNullable<Operand['store']>;
-          return (frame: Frame, value: Value): void => {
-            frame.temporaries.push(value);
-            try {
-              store(frame, convert(frame));
-            } finally {
-              frame.temporaries.pop();
-            }
+          const prepare = operand.prepareStore ?? ((frame: Frame) => (value: Value) => operand.store?.(frame, value));
+          return (frame: Frame): ((value: Value) => void) => {
+            const write = prepare(frame);
+            return (value: Value): void => {
+              frame.temporaries.push(value);
+              try {
+                write(convert(frame));
+              } finally {
+                frame.temporaries.pop();
+              }
+            };
           };
         });
         bind = (frame, value, ok) => {
-          stores[0]?.(frame, value);
-          stores[1]?.(frame, ok);
+          const writers = prepares.map((prepare) => prepare?.(frame));
+          writers[0]?.(value);
+          writers[1]?.(ok);
         };
       }
     }
@@ -2427,10 +2452,17 @@ export function isTerminatingList(statements: Statement[], panics: WeakSet<Expre
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- The terminating statements of the specification.
-function isTerminating(statement: Statement, panics: WeakSet<Expression>): boolean {
+function isTerminating(statement: Statement, panics: WeakSet<Expression>, label?: string): boolean {
   switch (statement.kind) {
+    case 'goto':
     case 'return': {
       return true;
+    }
+    case 'labeled': {
+      return isTerminating(statement.statement, panics, statement.label);
+    }
+    case 'select': {
+      return statement.cases.every((clause) => !hasBreak(clause.body, label) && isTerminatingList(clause.body, panics));
     }
     case 'expression': {
       return panics.has(stripParens(statement.expression));
@@ -2447,7 +2479,7 @@ function isTerminating(statement: Statement, panics: WeakSet<Expression>): boole
       return isTerminatingList(statement.consequence.statements, panics) && otherwise;
     }
     case 'for': {
-      return statement.condition === undefined && !hasBreak(statement.body.statements);
+      return statement.condition === undefined && !hasBreak(statement.body.statements, label);
     }
     case 'switch':
     case 'typeSwitch': {
@@ -2457,8 +2489,8 @@ function isTerminating(statement: Statement, panics: WeakSet<Expression>): boole
         hasDefault &&
         cases.every((switchCase) => {
           const body = switchCase.body;
-          const last = body.at(-1);
-          return !hasBreak(body) && (last?.kind === 'fallthrough' || isTerminatingList(body, panics));
+          const last = unlabel(body.at(-1));
+          return !hasBreak(body, label) && (last?.kind === 'fallthrough' || isTerminatingList(body, panics));
         })
       );
     }
@@ -2469,22 +2501,34 @@ function isTerminating(statement: Statement, panics: WeakSet<Expression>): boole
 }
 
 /** Whether a break in the statements targets the enclosing statement, skipping nested loops and switches. */
-function hasBreak(statements: Statement[]): boolean {
+function hasBreak(statements: Statement[], label?: string, unlabeled = true): boolean {
   return statements.some((statement) => {
     switch (statement.kind) {
       case 'break': {
-        return true;
+        return statement.label === undefined ? unlabeled : statement.label === label;
+      }
+      case 'labeled': {
+        return hasBreak([statement.statement], label, unlabeled);
       }
       case 'block': {
-        return hasBreak(statement.block.statements);
+        return hasBreak(statement.block.statements, label, unlabeled);
       }
       case 'if': {
         const alternative = statement.alternative;
         return (
-          hasBreak(statement.consequence.statements) ||
+          hasBreak(statement.consequence.statements, label, unlabeled) ||
           (alternative !== undefined &&
-            ('statements' in alternative ? hasBreak(alternative.statements) : hasBreak([alternative])))
+            hasBreak('statements' in alternative ? alternative.statements : [alternative], label, unlabeled))
         );
+      }
+      case 'for':
+      case 'range': {
+        return label !== undefined && hasBreak(statement.body.statements, label, false);
+      }
+      case 'switch':
+      case 'typeSwitch':
+      case 'select': {
+        return label !== undefined && statement.cases.some((clause) => hasBreak(clause.body, label, false));
       }
       default: {
         return false;
@@ -2504,7 +2548,7 @@ type Launch = (
   values: unknown[]
 ) => void;
 
-const deferLaunch: Launch = (frame, run, _resume, values) => frame.runtime.defer(frame, run, values);
+const deferLaunch: Launch = (frame, run, resume, values) => frame.runtime.defer(frame, run, values, resume);
 
 const goLaunch: Launch = (_frame, run, resume, values) => {
   void values;
@@ -2633,4 +2677,8 @@ function fitsRegisters(type: Type): boolean {
   if (under.kind === 'struct')
     return under.fields.length <= 4 && under.fields.every((field) => fitsRegisters(field.type));
   return true;
+}
+
+function unlabel(statement: Statement | undefined): Statement | undefined {
+  return statement?.kind === 'labeled' ? unlabel(statement.statement) : statement;
 }

@@ -122,7 +122,7 @@ export interface FieldSyntax extends Span {
   /** Undefined for an embedded field, which takes its type's name. */
   name?: string;
   type: TypeExpression;
-  /** The field's tag, which only reflection reads, but which is part of the struct type. */
+  /** The field's tag, which encoding/json reads and which is part of the struct type. */
   tag?: string;
 }
 

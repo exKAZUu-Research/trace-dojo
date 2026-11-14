@@ -32,7 +32,7 @@ import {
   underlying,
 } from '../types';
 import { Cell, copyValue, GoFunc, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
-import { seq2Of, seqOf } from './iter';
+import { iteratorOf, seq2Of, seqOf } from './iter';
 import { zeroValue } from './reflection';
 import { pdqsort, type SortData, stableSort } from './sorting';
 import {
@@ -770,11 +770,8 @@ function collectPairs(seq: Value): [Value, Value][] {
 }
 
 /** An iterator over pairs, which stops when the yield function returns false, as range-over-func requires. */
-function pairIterator(pairs: () => [Value, Value][]): GoFunc {
-  return new GoFunc(([yieldFn]) => {
-    for (const [key, value] of pairs()) if (callFunction(yieldFn, [key, value]) !== true) break;
-    return;
-  });
+function pairIterator(pairs: () => Iterable<[Value, Value]>, captured: Value[] = []): GoFunc {
+  return iteratorOf(pairs, captured);
 }
 
 Object.assign(slicesMembers, {
@@ -921,10 +918,14 @@ Object.assign(slicesMembers, {
     (s, e) => ({ params: [s], results: [SEQ(e)] }),
     () =>
       ([slice]) =>
-        new GoFunc(([yieldFn]) => {
-          for (const value of sliceValues(slice)) if (callFunction(yieldFn, [value]) !== true) break;
-          return;
-        })
+        iteratorOf(
+          function* () {
+            const source = slice as Slice | undefined;
+            const length = source?.length ?? 0;
+            for (let index = 0; index < length; index++) yield [(source as Slice).get(index)];
+          },
+          [slice]
+        )
   ),
   All: sliceGeneric(
     'All',
@@ -932,7 +933,14 @@ Object.assign(slicesMembers, {
     (s, e) => ({ params: [s], results: [SEQ2(INT, e)] }),
     () =>
       ([slice]) =>
-        pairIterator(() => sliceValues(slice).map((value, index): [Value, Value] => [BigInt(index), value]))
+        pairIterator(
+          function* () {
+            const source = slice as Slice | undefined;
+            const length = source?.length ?? 0;
+            for (let index = 0; index < length; index++) yield [BigInt(index), (source as Slice).get(index)];
+          },
+          [slice]
+        )
   ),
   Backward: sliceGeneric(
     'Backward',
@@ -940,10 +948,13 @@ Object.assign(slicesMembers, {
     (s, e) => ({ params: [s], results: [SEQ2(INT, e)] }),
     () =>
       ([slice]) =>
-        pairIterator(() =>
-          sliceValues(slice)
-            .map((value, index): [Value, Value] => [BigInt(index), value])
-            .toReversed()
+        pairIterator(
+          function* () {
+            const source = slice as Slice | undefined;
+            for (let index = (source?.length ?? 0) - 1; index >= 0; index--)
+              yield [BigInt(index), (source as Slice).get(index)];
+          },
+          [slice]
         )
   ),
   Chunk: sliceGeneric(
@@ -954,21 +965,23 @@ Object.assign(slicesMembers, {
       ([slice, size]) => {
         const n = Number(size as bigint);
         if (n < 1) throw new GoPanic(newError('cannot be less than 1'));
-        return new GoFunc(([yieldFn]) => {
-          const current = slice as Slice | undefined;
-          for (let start = 0; start < (current?.length ?? 0); start += n) {
-            const end = Math.min(start + n, (current as Slice).length);
-            // Each chunk is a slice of the original array whose capacity ends with the chunk.
-            const chunk = new Slice(
-              (current as Slice).array,
-              (current as Slice).offset + start,
-              end - start,
-              end - start
-            );
-            if (callFunction(yieldFn, [chunk]) !== true) break;
-          }
-          return;
-        });
+        return iteratorOf(
+          function* () {
+            const current = slice as Slice | undefined;
+            for (let start = 0; start < (current?.length ?? 0); start += n) {
+              const end = Math.min(start + n, (current as Slice).length);
+              // Each chunk is a slice of the original array whose capacity ends with the chunk.
+              const chunk = new Slice(
+                (current as Slice).array,
+                (current as Slice).offset + start,
+                end - start,
+                end - start
+              );
+              yield [chunk];
+            }
+          },
+          [slice]
+        );
       }
   ),
   SortedFunc: (() => {
@@ -1032,10 +1045,12 @@ const mapsMembers: Record<string, Entity> = {
       funcType([m], [SEQ(k)]),
       () =>
         ([map]) =>
-          new GoFunc(([yieldFn]) => {
-            for (const entry of mapEntries(map)) if (callFunction(yieldFn, [entry.key]) !== true) break;
-            return;
-          })
+          iteratorOf(
+            function* () {
+              for (const entry of (map as GoMap | undefined)?.entries.values() ?? []) yield [entry.key];
+            },
+            [map]
+          )
     );
   })(),
   Values: (() => {
@@ -1046,10 +1061,12 @@ const mapsMembers: Record<string, Entity> = {
       funcType([m], [SEQ(v)]),
       () =>
         ([map]) =>
-          new GoFunc(([yieldFn]) => {
-            for (const entry of mapEntries(map)) if (callFunction(yieldFn, [entry.value]) !== true) break;
-            return;
-          })
+          iteratorOf(
+            function* () {
+              for (const entry of (map as GoMap | undefined)?.entries.values() ?? []) yield [entry.value];
+            },
+            [map]
+          )
     );
   })(),
   All: (() => {
@@ -1060,7 +1077,12 @@ const mapsMembers: Record<string, Entity> = {
       funcType([m], [SEQ2(k, v)]),
       () =>
         ([map]) =>
-          pairIterator(() => mapEntries(map).map((entry): [Value, Value] => [entry.key, entry.value]))
+          pairIterator(
+            function* () {
+              for (const entry of (map as GoMap | undefined)?.entries.values() ?? []) yield [entry.key, entry.value];
+            },
+            [map]
+          )
     );
   })(),
   Collect: (() => {
@@ -1233,8 +1255,4 @@ export const CMP_PACKAGE = definePackage('cmp', cmpMembers);
 function newSlice(values: Value[]): Slice {
   currentRuntime().allocate(values.length);
   return new Slice(values, 0, values.length, values.length);
-}
-
-function mapEntries(value: Value): { key: Value; value: Value }[] {
-  return [...((value as GoMap | undefined)?.entries.values() ?? [])];
 }

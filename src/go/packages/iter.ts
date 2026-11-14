@@ -38,7 +38,6 @@ function pull(sequence: Value, zeros: (() => Value)[]): Value[] {
   const runtime = currentRuntime();
   const frames: Frame[] = [];
   let coroutine: Suspending<unknown> | undefined;
-  let buffered: Value[][] | undefined;
   let done = false;
   const finished = (): Value[] => [...zeros.map((zero) => zero()), false];
   const yieldFunction = new GoFunc(
@@ -65,22 +64,12 @@ function pull(sequence: Value, zeros: (() => Value)[]): Value[] {
   };
   const resumeNext = function* (): Suspending<Value[]> {
     if (done) return finished();
-    if (!sequence.resume) {
-      // A library iterator runs to its end at once, since it has no effects to interleave.
-      if (!buffered) {
-        const values: Value[][] = [];
-        sequence.call([new GoFunc((args) => (values.push(args), true))]);
-        buffered = values;
-      }
-      const next = buffered.shift();
-      if (!next) {
-        done = true;
-        return finished();
-      }
-      return [...next, true];
-    }
     let send: unknown = coroutine ? true : undefined;
-    coroutine ??= sequence.resume([yieldFunction]);
+    coroutine ??= sequence.resume
+      ? sequence.resume([yieldFunction])
+      : (function* () {
+          return sequence.call([yieldFunction]);
+        })();
     for (;;) {
       const result = step(send);
       if (result.done) {
@@ -111,12 +100,12 @@ function pull(sequence: Value, zeros: (() => Value)[]): Value[] {
   return [
     new GoFunc(
       () => runToEnd(resumeNext()),
-      [],
+      [sequence, frames],
       () => resumeNext()
     ),
     new GoFunc(
       () => runToEnd(stop()),
-      [],
+      [sequence, frames],
       () => stop()
     ),
   ];
@@ -148,3 +137,16 @@ const members: Record<string, Entity> = {
 };
 
 export const ITER_PACKAGE = definePackage('iter', members);
+
+export function iteratorOf(iterate: () => Iterable<Value[]>, captured: Value[] = []): GoFunc {
+  const resume = function* ([callback]: Value[]): Suspending<Value> {
+    if (!(callback instanceof GoFunc)) nilPointerPanic();
+    for (const values of iterate()) {
+      currentRuntime().spend();
+      const next = callback.resume ? yield* callback.resume(values) : callback.call(values);
+      if (next !== true) break;
+    }
+    return undefined;
+  };
+  return new GoFunc((args) => runToEnd(resume(args)), captured, resume);
+}
