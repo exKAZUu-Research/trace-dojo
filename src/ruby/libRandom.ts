@@ -1,8 +1,8 @@
-import { inspectRange, toFloat, toInt, toStepFloat } from './conversions';
+import { inspect, inspectRange, toFloat, toInt, toStepFloat } from './conversions';
 import { def, sdef } from './define';
-import { argumentError, rangeError, rubyError } from './errors';
+import { argumentError, frozenError, rangeError, rubyError } from './errors';
 import { callMethod, type Gen, invoke, respondsTo } from './interp';
-import { isRubyNumber, NIL, RFloat, RObject, RRange, type Value } from './objects';
+import { isRubyFloat, isRubyNumber, NIL, RFloat, RObject, RRange, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { classOf } from './values';
 
@@ -213,7 +213,7 @@ function* randomRange(generator: MersenneTwister, range: RRange): Gen<Value | un
 // code-gauge-allow functionCognitiveComplexity 16 -- Ruby's custom range path selects Integer or Float offsets after conversion.
 function* randomArithmeticRange(generator: MersenneTwister, begin: Value, end: Value, exclusive: boolean): Gen<Value> {
   let distance = yield* callMethod(end, '-', [begin]);
-  if (typeof distance !== 'bigint' && typeof distance !== 'number') {
+  if (typeof distance !== 'bigint' && !isRubyFloat(distance)) {
     if (respondsTo(distance, 'to_int', true)) distance = yield* toInt(distance);
     else if (respondsTo(distance, 'to_f', true)) distance = yield* toStepFloat(distance);
     else return NIL;
@@ -222,9 +222,10 @@ function* randomArithmeticRange(generator: MersenneTwister, begin: Value, end: V
     const max = distance - (exclusive ? 1n : 0n);
     return max < 0n ? NIL : yield* callMethod(begin, '+', [generator.limited(max)]);
   }
-  if (!Number.isFinite(distance)) domainError();
-  if (distance < 0 || (distance === 0 && exclusive)) return NIL;
-  const offset = distance === 0 ? 0 : generator.real(exclusive) * distance;
+  const floatDistance = Number(distance);
+  if (!Number.isFinite(floatDistance)) domainError();
+  if (floatDistance < 0 || (floatDistance === 0 && exclusive)) return NIL;
+  const offset = floatDistance === 0 ? 0 : generator.real(exclusive) * floatDistance;
   return yield* callMethod(begin, '+', [offset]);
 }
 
@@ -287,6 +288,7 @@ def(
   'initialize',
   [0, 1],
   function* (self: RObject, args) {
+    if (self.frozen) throw frozenError(self, yield* inspect(self));
     self.data = new MersenneTwister(
       args.length > 0 ? yield* toInt(args[0]) : BigInt(Math.floor(Math.random() * 2 ** 52))
     );

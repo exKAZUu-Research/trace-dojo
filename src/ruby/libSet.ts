@@ -366,7 +366,7 @@ def('Set', ['map!', 'collect!'], 0, function* (self: RObject, _args, block) {
 def('Set', 'flatten', 0, function* (self: RObject) {
   const result = (yield* callMethod(self.cls, 'new', [])) as RObject;
   return yield* whileHeld(result, function* () {
-    for (const item of yield* flattenMembers(self, new Set())) yield* hashSet(membersOf(result), item, true);
+    for (const item of yield* flattenMembers(self, new Set())) yield* callMethod(result, 'add', [item]);
     return result;
   });
 });

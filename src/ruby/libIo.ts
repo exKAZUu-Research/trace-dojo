@@ -1,7 +1,7 @@
 import type { OutputChannel } from '../interpreter/programIo';
 import { inspectValue, toIndexExact, toInt, toSValue } from './conversions';
 import { def } from './define';
-import { argumentError, typeError } from './errors';
+import { argumentError, frozenError, typeError } from './errors';
 import { exportBinaryInspect, formatString } from './format';
 import { callMethod, type Gen, respondsTo } from './interp';
 import { NIL, RArray, type RHash, RObject, RString, RSymbol, type Value, type Visibility } from './objects';
@@ -66,10 +66,17 @@ function* writePrint(target: Value, args: Value[]): Gen<void> {
 function* write(target: Value, value: string | Value): Gen<void> {
   const text = typeof value === 'string' ? str(value) : value;
   if (target instanceof RObject && (target.data === 'stdout' || target.data === 'stderr')) {
-    channel(target.data).write((text instanceof RString ? text : yield* toSValue(text)).s);
+    checkWritable(target);
+    const rendered = text instanceof RString ? text : yield* toSValue(text);
+    checkWritable(target);
+    channel(target.data).write(rendered.s);
     return;
   }
   yield* callMethod(target, 'write', [text]);
+}
+
+function checkWritable(self: RObject): void {
+  if (self.frozen) throw frozenError(self, `#<IO:<${self.data === 'stdout' ? 'STDOUT' : 'STDERR'}>>`);
 }
 
 function channel(stream: 'stdout' | 'stderr'): OutputChannel {
@@ -228,9 +235,11 @@ def('IO', 'print', [0, -1], function* (self: RObject, args) {
   return NIL;
 });
 def('IO', 'write', [0, -1], function* (self: RObject, args) {
+  checkWritable(self);
   let bytes = 0n;
   for (const arg of args) {
     const value = yield* toSValue(arg);
+    checkWritable(self);
     channel(self.data as 'stdout' | 'stderr').write(value.s);
     bytes += BigInt(stringBytes(value).length);
   }
@@ -248,9 +257,13 @@ def('IO', 'putc', 1, function* (self: RObject, [value]) {
   yield* write(self, yield* charOf(value));
   return value;
 });
-def('IO', ['flush', 'fsync'], 0, (self) => self);
+def('IO', ['flush', 'fsync'], 0, (self: RObject) => {
+  checkWritable(self);
+  return self;
+});
 def('IO', 'sync', 0, (self: RObject) => self.ivars?.get('@__sync') ?? true);
 def('IO', 'sync=', 1, (self: RObject, [value]) => {
+  checkWritable(self);
   self.ivars ??= new Map();
   self.ivars.set('@__sync', truthy(value));
   return value;

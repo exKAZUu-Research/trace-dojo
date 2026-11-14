@@ -15,7 +15,7 @@ import { callMethod, type Gen, respondsTo } from './interp';
 import { kernelFloat, kernelInteger } from './libNumeric';
 import { NIL, RFloat, RHash, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
-import { joinStringCharacters, realClassOf, stringBytes, stringCharacters, stringFromBytes } from './values';
+import { realClassOf, stringBytes, stringFromBytes } from './values';
 
 interface Spec {
   minus: boolean;
@@ -271,9 +271,9 @@ function* characterDirective(value: Value, spec: Spec): Gen<string | RString> {
     }
   }
   if (string)
-    return padStringValue(stringCharacters(string)[0] ?? stringFromBytes(new Uint8Array()), {
+    return padStringValue(string, {
       ...spec,
-      precision: undefined,
+      precision: 1,
     });
   const point = yield* toInt(value);
   if (point < -0x80_00_00_00_00_00_00_00n || point > 0x7f_ff_ff_ff_ff_ff_ff_ffn)
@@ -285,15 +285,63 @@ function* characterDirective(value: Value, spec: Spec): Gen<string | RString> {
 }
 
 function padStringValue(value: RString, spec: Spec): RString {
-  const chars = stringCharacters(value);
-  const selected = spec.precision === undefined ? chars : chars.slice(0, spec.precision);
-  const content = stringBytes(joinStringCharacters(selected, value.binary));
-  const padding = Math.max(0, (spec.width ?? 0) - selected.length);
+  if (spec.precision === undefined && (spec.width ?? 0) === 0) return value;
+  const bytes = stringBytes(value);
+  const { end, count } = stringByteBoundary(value, bytes, spec.precision);
+  const content = bytes.subarray(0, end);
+  const padding = Math.max(0, (spec.width ?? 0) - count);
+  if (padding === 0 && end === bytes.length) return value;
   rt().checkStringLength(content.length + padding);
-  const bytes = new Uint8Array(content.length + padding);
-  bytes.fill(0x20);
-  bytes.set(content, spec.minus ? 0 : padding);
-  return stringFromBytes(bytes, value.binary);
+  const padded = new Uint8Array(content.length + padding);
+  padded.fill(0x20);
+  padded.set(content, spec.minus ? 0 : padding);
+  return stringFromBytes(padded, value.binary);
+}
+
+function stringByteBoundary(
+  value: RString,
+  bytes: Uint8Array,
+  precision: number | undefined
+): { end: number; count: number } {
+  if (value.binary)
+    return {
+      end: Math.min(bytes.length, precision ?? bytes.length),
+      count: Math.min(bytes.length, precision ?? bytes.length),
+    };
+  return value.rawBytes ? rawStringBoundary(bytes, precision) : validStringBoundary(value.s, precision);
+}
+
+function validStringBoundary(text: string, precision: number | undefined): { end: number; count: number } {
+  let end = 0;
+  let count = 0;
+  for (let index = 0; index < text.length && count < (precision ?? Number.POSITIVE_INFINITY); count++) {
+    if (count % 256 === 0) rt().spend();
+    const point = text.codePointAt(index) as number;
+    index += point > 0xff_ff ? 2 : 1;
+    end += point < 0x80 ? 1 : point < 0x8_00 ? 2 : point < 0x1_00_00 ? 3 : 4;
+  }
+  return { end, count };
+}
+
+// code-gauge-allow functionCognitiveComplexity 17 -- Raw UTF-8 bytes need distinct valid and invalid character lengths.
+function rawStringBoundary(bytes: Uint8Array, precision: number | undefined): { end: number; count: number } {
+  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+  let end = 0;
+  let count = 0;
+  while (end < bytes.length && count < (precision ?? Number.POSITIVE_INFINITY)) {
+    if (count % 256 === 0) rt().spend();
+    const first = bytes[end];
+    const width = first < 0x80 ? 1 : first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
+    const segment = bytes.subarray(end, Math.min(bytes.length, end + width));
+    try {
+      decoder.decode(segment);
+      end += segment.length === width ? width : 1;
+    } catch {
+      end++;
+    }
+    count++;
+  }
+  return { end, count };
 }
 
 export function exportBinaryInspect(value: RString): RString {

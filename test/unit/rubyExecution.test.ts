@@ -2024,6 +2024,48 @@ test('Set subclasses use overridden insertion and deletion methods', () => {
   });
 });
 
+test('Set flatten dispatches subclass insertion methods', () => {
+  expect(
+    run('class S<Set;def add(x);puts :add;super(x*2);end;end;s=S[1];puts :flatten;p s.flatten.to_a')
+  ).toMatchObject({
+    stdout: 'add\nflatten\nadd\n[4]\n',
+  });
+});
+
+test('String formatting handles repeated long inputs within the operation limit', () => {
+  expect(run('s="x"*100000;10.times{p format("%s",s).size}')).toMatchObject({
+    stdout: '100000\n'.repeat(10),
+  });
+  expect(run('s="x"*100000;p format("%c",s).size,format("%p",s).size')).toMatchObject({
+    stdout: '1\n100002\n',
+  });
+});
+
+test('Random custom ranges retain Float distances and frozen initialization state', () => {
+  expect(
+    run(
+      'class A;def <=>(x);0;end;def -(x);Float::MAX;end;def +(x);p x.class;x;end;end;Random.new(1).rand(A.new..A.new)'
+    )
+  ).toMatchObject({
+    stdout: 'Float\n',
+  });
+  expect(
+    run(
+      'class R<Random;def reset;initialize(3);end;end;r=R.new(1).freeze;begin;r.reset;rescue=>e;p e.class;end;p r.seed'
+    )
+  ).toMatchObject({
+    stdout: 'FrozenError\n1\n',
+  });
+});
+
+test('frozen standard streams reject writes and sync changes', () => {
+  expect(
+    run('STDERR.freeze;begin;STDERR.write("x");rescue=>e;p e.class;end;begin;STDERR.sync=false;rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'FrozenError\nFrozenError\n',
+  });
+});
+
 test('Set reinitialization preserves existing members and frozen contents', () => {
   expect(
     run(
