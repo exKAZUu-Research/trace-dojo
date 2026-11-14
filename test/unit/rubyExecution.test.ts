@@ -1725,6 +1725,12 @@ p Hash[H.new(h)].size`;
   expect(run(source)).toMatchObject({ stdout: '1\n1\n' });
 });
 
+test('Enumerable chunk rejects reserved classifier symbols when consumed', () => {
+  expect(run('begin;[1].chunk{|x|:_bad}.to_a;rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'RuntimeError\n"symbols beginning with an underscore are reserved"\n',
+  });
+});
+
 test('Array conversions observe current operands and row widths', () => {
   expect(run('class X;def to_ary;$a.replace([[9],[8]]);[1];end;end;$a=[X.new,[2]];p $a.transpose')).toMatchObject({
     stdout: '[[1, 8]]\n',

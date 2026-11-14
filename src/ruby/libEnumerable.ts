@@ -10,7 +10,7 @@ import {
   toInt,
 } from './conversions';
 import { def } from './define';
-import { argumentCountError, argumentError, typeError } from './errors';
+import { argumentCountError, argumentError, runtimeError, typeError } from './errors';
 import { eachEntry, hashGet, hashSet } from './hashes';
 import { callBlock, callMethod, callProc, flattenGenerator, type Gen, nativeProc, respondsTo } from './interp';
 import { tryAry } from './libArray';
@@ -998,6 +998,8 @@ function* chunkByKey(self: Value, classifier: RProc, consumer: RProc): Gen {
           rt().held[keyMark] = NIL;
           return;
         }
+        if (key instanceof RSymbol && key.name.startsWith('_'))
+          throw runtimeError('symbols beginning with an underscore are reserved');
         if (currentKey !== undefined && !(yield* rEquals(currentKey, key))) {
           yield* callBlock(consumer, [arr([currentKey, arr(current)])], false);
           current = [];
