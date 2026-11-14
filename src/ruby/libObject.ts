@@ -12,12 +12,12 @@ import {
   rEquals,
   toInt,
   toRubyInt,
-  toS,
   toStr,
   toStrValue,
+  toSValue,
 } from './conversions';
 import { def, sdef } from './define';
-import { argumentError, frozenError, nameError, rubyError, typeError } from './errors';
+import { argumentCountError, argumentError, frozenError, nameError, rubyError, typeError } from './errors';
 import { hashSet } from './hashes';
 import {
   addMethod,
@@ -666,8 +666,8 @@ def(
   1,
   (self: RClass, [target]) => {
     if (!(target instanceof RClass)) throw typeError('wrong argument type');
-    if (self.ancestors().includes(target)) throw argumentError('cyclic include detected');
     if (target.frozen) throw frozenError(target, target.name ?? '');
+    if (self.ancestors().includes(target)) throw argumentError('cyclic include detected');
     if (!target.ancestors().includes(self)) {
       target.includes.unshift(self);
       invalidateMethodCaches();
@@ -981,13 +981,13 @@ def('Exception', 'to_s', 0, function* (self: RObject) {
   const message = self.exception?.message ?? NIL;
   if (message === NIL) return str(className(realClassOf(self)));
   if (message instanceof RString) return message;
-  return str(yield* toS(message));
+  return yield* toSValue(message);
 });
 def('Exception', 'message', 0, function* (self: RObject) {
-  return str(yield* toS(yield* callMethod(self, 'to_s', [])));
+  return yield* toSValue(yield* callMethod(self, 'to_s', []));
 });
-def('Exception', 'detailed_message', [0, -1], function* (self: RObject) {
-  return str(yield* toS(yield* callMethod(self, 'message', [])));
+def('Exception', 'detailed_message', [0, -1], () => {
+  throw new UnsupportedFeatureError('Exception#detailed_message');
 });
 def('Exception', 'inspect', 0, function* (self: RObject) {
   return str(yield* inspectException(self));
@@ -1095,8 +1095,23 @@ def('Proc', 'parameters', 0, () => {
 def('Proc', ['inspect', 'to_s'], 0, (self: RProc) => str(inspectProc(self)));
 def('Proc', 'curry', [0, 1], function* (self: RProc, args) {
   const arity = args.length > 0 ? Number(yield* toInt(args[0])) : procArity(self);
+  if (args.length > 0 && self.isLambda) {
+    const [minimum, maximum] = lambdaCurryBounds(self);
+    if (arity < minimum || (maximum >= 0 && arity > maximum)) throw argumentCountError(arity, minimum, maximum);
+  }
   return curry(self, arity < 0 ? -arity - 1 : arity, []);
 });
+
+function lambdaCurryBounds(proc: RProc): [number, number] {
+  if (proc.body.kind === 'native') {
+    const arity = proc.body.arity;
+    return arity < 0 ? [-arity - 1, -1] : [arity, arity];
+  }
+  const params = proc.body.def.params;
+  if (!params) return [0, 0];
+  const required = params.required.length + params.post.length;
+  return [required, params.rest === undefined ? required + params.optional.length : -1];
+}
 sdef('Proc', 'new', 0, (_self, _args, block) => requireBlock(block));
 
 export function procArity(proc: RProc): number {

@@ -1407,6 +1407,8 @@ export function* callMethod(
   rt().spend();
   const method = classOf(recv).findMethod(name);
   if (!method) methodMissing(recv, name, options);
+  if (recv instanceof RClass && !recv.isModule && name === 'module_function' && method.owner === rt().c.Module)
+    methodMissing(recv, name, options);
   if (method.visibility !== 'public' && !options.fcall) {
     if (method.visibility === 'private') {
       throw noMethodError(`private method '${name}' called for ${receiverDescription(recv)}`, recv, name);

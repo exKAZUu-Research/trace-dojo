@@ -2631,6 +2631,36 @@ test('Module attr accepts an optional writer flag', () => {
   });
 });
 
+test('classes do not inherit module_function', () => {
+  expect(run('class C;def x;end;begin;module_function :x;rescue=>e;p e.class;end;end')).toMatchObject({
+    stdout: 'NoMethodError\n',
+  });
+});
+
+test('frozen module inclusion checks freezing before cycles', () => {
+  expect(run('module M;end;M.freeze;begin;M.include(M);rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'FrozenError\n"can\'t modify frozen Module: M"\n',
+  });
+});
+
+test('Exception message preserves binary String bytes', () => {
+  expect(run('p Exception.new(255.chr).message.bytes')).toMatchObject({ stdout: '[255]\n' });
+});
+
+test('detailed exception messages report unsupported behavior', () => {
+  expect(run('p RuntimeError.new("oops").detailed_message')).toMatchObject({
+    uncaughtException: 'Exception#detailed_message は、この採点環境では使えません。',
+  });
+});
+
+test('lambda curry validates explicit positional arity', () => {
+  expect(
+    run('f=->(x,y){x+y};begin;f.curry(1);rescue=>e;p e.class;end;begin;f.curry(3);rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'ArgumentError\nArgumentError\n',
+  });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(
