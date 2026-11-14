@@ -2238,6 +2238,11 @@ test('pp guards Hash entries during callback inspection', () => {
 
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
+  expect(
+    run('class A;def inspect;$a.clear;"x";end;end;class B;def inspect;puts :two;"y";end;end;$a=[A.new,B.new];pp $a')
+  ).toMatchObject({
+    stdout: '[x]\n',
+  });
 });
 
 test('pp emits container prefixes before user inspect callbacks', () => {
@@ -2270,6 +2275,17 @@ test('pp breaks all separators in a streamed group that cannot fit', () => {
   });
   expect(run('class A;def inspect;"x";end;end;a=["z"*40];pp [a,a,A.new]')).toMatchObject({
     stdout: `[["${'z'.repeat(40)}"],\n ["${'z'.repeat(40)}"],\n x]\n`,
+  });
+  expect(run('class A;def inspect;"x"*70;end;end;pp [1,A.new,A.new]')).toMatchObject({
+    stdout: `[1,\n ${'x'.repeat(70)},\n ${'x'.repeat(70)}]\n`,
+  });
+  expect(run('class A;def inspect;"x"*70;end;end;pp({a:1,b:A.new,c:A.new})')).toMatchObject({
+    stdout: `{a: 1,\n b: ${'x'.repeat(70)},\n c: ${'x'.repeat(70)}}\n`,
+  });
+  expect(
+    run('class A;def inspect;puts :one;"x";end;end;class B;def inspect;puts :two;"y";end;end;pp [A.new,B.new,"a"*80,1]')
+  ).toMatchObject({
+    stdout: `[one\nx,two\n\n y,\n "${'a'.repeat(80)}",\n 1]\n`,
   });
 });
 

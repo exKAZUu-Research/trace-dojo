@@ -7,9 +7,9 @@ import { classOf, realClassOf, stringBytes, stringFromBytes } from './values';
 
 /** A document for Ruby's PrettyPrint: text, a breakable space, or a group whose breakables break together. */
 type Doc =
-  | { kind: 'text'; text: string; deferred?: boolean }
+  | { kind: 'text'; text: string; deferred?: Value }
   | { kind: 'break'; text: string }
-  | { kind: 'group'; indent: number; parts: Doc[] };
+  | { kind: 'group'; indent: number; parts: Doc[]; source?: RArray };
 
 /** `pp` prints to a stream that is not a terminal, where Ruby's width is 80 columns less one. */
 const WIDTH = 79;
@@ -33,16 +33,51 @@ export function* writePretty(value: Value, write: (part: string) => Gen<void>): 
     yield* write(rendered.slice(prefix.length));
     return;
   }
-  const budget: BuildBudget = { nodes: 0, textLength: 0 };
-  const state = { column: 0 };
-  const emit = function* (part: string): Gen<void> {
-    text(part, budget);
-    yield* write(part);
-    const newline = part.lastIndexOf('\n');
-    state.column = newline === -1 ? state.column + part.length : part.length - newline - 1;
+  const doc = yield* build(value, new Set(), { nodes: 0, textLength: 0 }, true);
+  let emitted = '';
+  const flushPrefix = function* (): Gen<void> {
+    const prefix = staticPrefix(doc);
+    yield* write(prefix.slice(emitted.length));
+    emitted = prefix;
   };
-  yield* streamPretty(value, { emit, seen: new Set(), budget, state }, 0);
-  yield* emit('\n');
+  yield* flushPrefix();
+  for (let node = firstDeferred(doc); node; node = firstDeferred(doc)) {
+    node.text = yield* inspect(node.deferred as Value);
+    node.deferred = undefined;
+    yield* reconcileArrays(doc, node);
+    yield* flushPrefix();
+  }
+  yield* write(`${layout(doc)}\n`.slice(emitted.length));
+}
+
+function firstDeferred(doc: Doc): Extract<Doc, { kind: 'text' }> | undefined {
+  if (doc.kind === 'text') return doc.deferred === undefined ? undefined : doc;
+  if (doc.kind === 'group')
+    for (const part of doc.parts) {
+      const found = firstDeferred(part);
+      if (found) return found;
+    }
+  return undefined;
+}
+
+function* reconcileArrays(doc: Doc, resolved: Doc): Gen<boolean> {
+  if (doc === resolved) return true;
+  if (doc.kind !== 'group') return false;
+  for (const [position, part] of doc.parts.entries()) {
+    if (!(yield* reconcileArrays(part, resolved))) continue;
+    if (doc.source) {
+      const index = Math.floor((position - 1) / 3);
+      const end = doc.parts.at(-1) as Doc;
+      const remainder: Doc[] = [];
+      for (let next = index + 1; next < doc.source.items.length; next++) {
+        remainder.push({ kind: 'text', text: ',' }, breakable());
+        remainder.push(yield* build(doc.source.items[next], new Set([doc.source]), { nodes: 0, textLength: 0 }, true));
+      }
+      doc.parts = [...doc.parts.slice(0, position + 1), ...remainder, end];
+    }
+    return true;
+  }
+  return false;
 }
 
 function staticPrefix(doc: Doc): string {
@@ -71,13 +106,6 @@ interface BuildBudget {
   textLength: number;
 }
 
-interface StreamContext {
-  emit: (part: string) => Gen<void>;
-  seen: Set<object>;
-  budget: BuildBudget;
-  state: { column: number };
-}
-
 function text(value: string, budget: BuildBudget): Doc {
   budget.textLength += value.length;
   if (budget.textLength > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
@@ -88,8 +116,8 @@ function breakable(separator = ' '): Doc {
   return { kind: 'break', text: separator };
 }
 
-function group(indent: number, open: string, parts: Doc[], close: string, budget: BuildBudget): Doc {
-  return { kind: 'group', indent, parts: [text(open, budget), ...parts, text(close, budget)] };
+function group(indent: number, open: string, parts: Doc[], close: string, budget: BuildBudget, source?: RArray): Doc {
+  return { kind: 'group', indent, parts: [text(open, budget), ...parts, text(close, budget)], source };
 }
 
 /** Whether the program redefined how a value is shown, which then decides its text as a whole. */
@@ -101,7 +129,7 @@ function showsItself(value: Value): boolean {
 function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = false): Gen<Doc> {
   rt().spend();
   if (++budget.nodes > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
-  if (defer && showsItself(value)) return { kind: 'text', text: '', deferred: true };
+  if (defer && showsItself(value)) return { kind: 'text', text: '', deferred: value };
   if (value instanceof RArray && !showsItself(value)) {
     if (seen.has(value)) return text('[...]', budget);
     seen.add(value);
@@ -111,7 +139,7 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = fa
         if (index > 0) parts.push(text(',', budget), breakable());
         parts.push(yield* build(value.items[index], seen, budget, defer));
       }
-      return group(1, '[', parts, ']', budget);
+      return group(1, '[', parts, ']', budget, value);
     } finally {
       seen.delete(value);
     }
@@ -199,144 +227,6 @@ function inspectionCallbackCount(value: Value, seen: Set<object>, budget: BuildB
     }
   }
   return count;
-}
-
-function* streamPretty(value: Value, context: StreamContext, indent: number): Gen<void> {
-  rt().spend();
-  if (++context.budget.nodes > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
-  if (value instanceof RArray && !showsItself(value)) return yield* streamArray(value, context, indent);
-  if (value instanceof RHash && !showsItself(value)) return yield* streamHash(value, context, indent);
-  if (
-    value instanceof RObject &&
-    !value.exception &&
-    value.data === undefined &&
-    !showsItself(value) &&
-    classOf(value).findMethod('to_s')?.body.kind === 'native' &&
-    value.ivars &&
-    value.ivars.size > 0
-  )
-    return yield* streamObject(value, context, indent);
-  yield* context.emit(
-    value instanceof RString && !showsItself(value)
-      ? layout(yield* build(value, new Set(), { nodes: 0, textLength: 0 }))
-      : yield* inspect(value)
-  );
-}
-
-function* streamArray(value: RArray, context: StreamContext, indent: number): Gen<void> {
-  const { emit, seen } = context;
-  if (seen.has(value)) return yield* emit('[...]');
-  const broken = context.state.column + (yield* minimumWidth(value, new Set())) > WIDTH;
-  seen.add(value);
-  try {
-    yield* emit('[');
-    for (let index = 0; index < value.items.length; index++) {
-      if (index > 0) yield* emit(',');
-      yield* streamPrettyPart(value.items[index], index > 0, context, indent + 1, broken);
-    }
-    yield* emit(']');
-  } finally {
-    seen.delete(value);
-  }
-}
-
-function* streamHash(value: RHash, context: StreamContext, indent: number): Gen<void> {
-  const { emit, seen } = context;
-  if (seen.has(value)) return yield* emit('{...}');
-  const broken = context.state.column + (yield* minimumWidth(value, new Set())) > WIDTH;
-  seen.add(value);
-  value.iterating++;
-  try {
-    yield* emit('{');
-    let index = 0;
-    for (const { key, value: item } of value.map.values()) {
-      if (index++ > 0) yield* emit(broken ? `,\n${' '.repeat(indent + 1)}` : ', ');
-      if (key instanceof RSymbol) yield* emit(`${isSimplePrettySymbol(key) ? key.name : strInspect(key.name)}:`);
-      else {
-        yield* streamPrettyPart(key, false, context, indent + 1);
-        yield* emit(' =>');
-      }
-      yield* streamPrettyPart(item, true, context, indent + 1);
-    }
-    yield* emit('}');
-  } finally {
-    value.iterating--;
-    seen.delete(value);
-  }
-}
-
-function* streamObject(value: RObject, context: StreamContext, indent: number): Gen<void> {
-  const { emit, seen } = context;
-  if (seen.has(value)) return yield* emit(yield* inspect(value));
-  seen.add(value);
-  const cls = realClassOf(value);
-  try {
-    yield* emit(`#<${cls.name ?? anonymousClassName(cls)}:${addressOf(value)}`);
-    for (const [name, item] of value.ivars ?? []) {
-      if (name.startsWith('@__')) continue;
-      yield* emit(` ${name}=`);
-      yield* streamPretty(item, context, indent + 1);
-    }
-    yield* emit('>');
-  } finally {
-    seen.delete(value);
-  }
-}
-
-function* streamPrettyPart(
-  value: Value,
-  separated: boolean,
-  context: StreamContext,
-  indent: number,
-  broken = false
-): Gen<void> {
-  const { emit, state } = context;
-  if (showsItself(value)) {
-    const breakBefore = separated && (broken || state.column + 2 > WIDTH);
-    if (breakBefore) yield* emit(`\n${' '.repeat(indent)}`);
-    const shown = yield* inspect(value);
-    if (separated && !breakBefore) yield* emit(' ');
-    yield* emit(shown);
-    return;
-  }
-  if (separated) yield* emit(broken || state.column + 2 > WIDTH ? `\n${' '.repeat(indent)}` : ' ');
-  yield* streamPretty(value, context, indent);
-}
-
-function* minimumWidth(value: Value, seen: Set<object>): Gen<number> {
-  rt().spend();
-  if (showsItself(value)) return 1;
-  if (value instanceof RArray) {
-    if (seen.has(value)) return 5;
-    seen.add(value);
-    try {
-      let width = 2;
-      for (const item of value.items) {
-        width += (yield* minimumWidth(item, seen)) + 2;
-        if (width > WIDTH + 2) break;
-      }
-      return value.items.length > 0 ? width - 2 : width;
-    } finally {
-      seen.delete(value);
-    }
-  }
-  if (value instanceof RHash) {
-    if (seen.has(value)) return 5;
-    seen.add(value);
-    try {
-      let width = 2;
-      for (const entry of value.map.values()) {
-        width += entry.key instanceof RSymbol ? entry.key.name.length + 2 : (yield* minimumWidth(entry.key, seen)) + 4;
-        width += (yield* minimumWidth(entry.value, seen)) + 2;
-        if (width > WIDTH + 2) break;
-      }
-      return value.map.size > 0 ? width - 2 : width;
-    } finally {
-      seen.delete(value);
-    }
-  }
-  if (value instanceof RObject) return 1;
-  return (yield* inspect(value)).length;
 }
 
 function isSimplePrettySymbol(key: RSymbol): boolean {
