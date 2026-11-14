@@ -83,6 +83,7 @@ function setText(self: RString, text: string): void {
   const value = str(text);
   self.s = value.s;
   self.rawBytes = value.rawBytes;
+  self.usAscii &&= !/[^\u0000-\u007F]/.test(text);
 }
 
 function setBytes(self: RString, bytes: Uint8Array, binary = self.binary): void {
@@ -91,6 +92,7 @@ function setBytes(self: RString, bytes: Uint8Array, binary = self.binary): void 
   const result = stringFromBytes(bytes, binary);
   self.s = result.s;
   self.binary = result.binary;
+  self.usAscii &&= !binary;
   self.rawBytes = result.rawBytes;
 }
 
@@ -214,9 +216,12 @@ sdef(
   },
   { keywords: true }
 );
-def('String', ['to_s', 'to_str'], 0, (self: RString) =>
-  self.cls === rt().c.String ? self : stringFromBytes(stringBytes(self), self.binary)
-);
+def('String', ['to_s', 'to_str'], 0, (self: RString) => (self.cls === rt().c.String ? self : copyStringEncoding(self)));
+function copyStringEncoding(self: RString): RString {
+  const copy = stringFromBytes(stringBytes(self), self.binary);
+  copy.usAscii = self.usAscii;
+  return copy;
+}
 def('String', 'inspect', 0, (self: RString) =>
   str(self.rawBytes ? inspectRawBytes(self.rawBytes) : self.binary ? binaryInspect(self.s) : strInspect(self.s))
 );
@@ -327,7 +332,9 @@ def('String', '+', 1, function* (self: RString, [other]) {
   const joined = new Uint8Array(left.length + right.length);
   joined.set(left);
   joined.set(right, left.length);
-  return stringFromBytes(joined, binary);
+  const result = stringFromBytes(joined, binary);
+  result.usAscii = self.usAscii && !binary && right.every((byte) => byte < 0x80);
+  return result;
 });
 def('String', '*', 1, function* (self: RString, [count]) {
   const times = yield* toIndex(count);
@@ -356,16 +363,18 @@ def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
   const chunks: Uint8Array[] = [stringBytes(self)];
   let length = chunks[0].length;
   let binary = self.binary;
+  let usAscii = self.usAscii;
   let ascii = chunks[0].every((byte) => byte < 0x80);
   for (const arg of converted) {
     let chunk: Uint8Array;
     if (typeof arg === 'bigint') {
-      validateConcatCodepoint(arg, binary);
+      validateConcatCodepoint(arg, binary || usAscii);
       chunk =
-        binary && arg <= 255n
+        (binary || usAscii) && arg <= 255n
           ? Uint8Array.of(Number(arg))
           : new TextEncoder().encode(String.fromCodePoint(Number(arg)));
     } else {
+      if (usAscii && stringBytes(arg).some((byte) => byte >= 0x80)) usAscii = false;
       binary = combinedStringEncoding(binary, ascii, arg);
       chunk = stringBytes(arg);
     }
@@ -381,8 +390,10 @@ def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
     offset += chunk.length;
   }
   const result = stringFromBytes(bytes, binary);
+  result.usAscii = usAscii;
   self.s = result.s;
   self.binary = result.binary;
+  self.usAscii = result.usAscii;
   self.rawBytes = result.rawBytes;
   return self;
 });
@@ -407,6 +418,7 @@ def('String', 'replace', 1, function* (self: RString, [other]) {
   modify(self);
   const source = yield* stringArgValue(other);
   setBytes(self, stringBytes(source), source.binary);
+  self.usAscii = source.usAscii;
   return self;
 });
 def('String', 'clear', 0, (self: RString) => {

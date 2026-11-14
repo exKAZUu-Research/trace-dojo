@@ -1,4 +1,4 @@
-import { ExecutionLimitError } from '../interpreter/limits';
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 // code-gauge-allow-file fileNcss 931 -- The interp module keeps one concern's cases together.
 import type {
   BlockDef,
@@ -373,17 +373,21 @@ function* interpolateString(parts: StrPart[], frame: Frame): Gen<RString> {
   let length = 0;
   let binary = false;
   let ascii = true;
-  for (const part of parts) {
+  for (const [index, part] of parts.entries()) {
     const segment =
       typeof part === 'string'
         ? stringFromBytes(new TextEncoder().encode(part))
         : 'text' in part
           ? stringFromBytes(Uint8Array.from(part.bytes))
           : yield* toSValue(yield* ev(part, frame));
-    binary = combinedStringEncoding(binary, ascii, segment);
     const bytes = stringBytes(segment);
+    binary =
+      index === 0
+        ? segment.binary && (bytes.length > 0 || parts.length > 1)
+        : combinedStringEncoding(binary, ascii, segment);
     length += bytes.length;
-    rt().checkStringLength(length);
+    if (length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+    rt().spend(Math.ceil(bytes.length / 256));
     chunks.push(bytes);
     ascii &&= bytes.every((byte) => byte < 0x80);
   }

@@ -2540,6 +2540,28 @@ test('Array join retains an empty binary first element', () => {
   });
 });
 
+test('Array join retains empty child US-ASCII encoding', () => {
+  expect(
+    run(
+      's=[[],"a"].join(":");s<<128;p s.bytes;s=[[[]],"a"].join(":");s<<128;p s.bytes;s=[[],[]].join(":");begin;s<<256;rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({ stdout: '[58, 97, 128]\n[58, 97, 128]\nRangeError\n' });
+  expect(run('s=[[],"é"].join(":");s<<256;p s.bytes')).toMatchObject({
+    stdout: '[58, 195, 169, 196, 128]\n',
+  });
+  expect(run('s=[[],"a"].join(":");[s.dup,s+"b",s.clear].each{|v|v<<128;p v.bytes}')).toMatchObject({
+    stdout: '[58, 97, 128]\n[58, 97, 98, 128]\n[128]\n',
+  });
+});
+
+test('interpolation retains the first empty binary segment when another follows', () => {
+  expect(
+    run(
+      'b=255.chr.clear;["#{b}a","#{b}#{"a"}","#{b}#{b}"].each{|s|begin;s<<256;rescue=>e;p e.class;end};s="#{b}";s<<256;p s.bytes'
+    )
+  ).toMatchObject({ stdout: 'RangeError\nRangeError\nRangeError\n[196, 128]\n' });
+});
+
 test('Array values_at keeps one large result within the slot budget', () => {
   expect(run('p [].values_at(0...600000).size')).toMatchObject({ stdout: '600000\n' });
   expect(run('p [].values_at(0...300000,0...300000).size')).toMatchObject({ stdout: '600000\n' });

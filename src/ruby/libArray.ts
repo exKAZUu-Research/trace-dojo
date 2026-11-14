@@ -854,7 +854,7 @@ function* join(self: RArray, separator: RString): Gen<RString> {
     if (stack.length >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
     seen.add(source);
     rt().held.push(source);
-    stack.push({ source, index: 0, length: 0, binary: false, ascii: true, started: false });
+    stack.push({ source, index: 0, length: 0, binary: false, ascii: true, usAscii: true, started: false });
     yield* preflightJoinFirst(source);
   }
 }
@@ -865,6 +865,7 @@ interface JoinFrame {
   length: number;
   binary: boolean;
   ascii: boolean;
+  usAscii: boolean;
   started: boolean;
 }
 
@@ -874,22 +875,37 @@ interface JoinOutput {
 }
 
 function appendJoinPart(frame: JoinFrame, part: RString, output: JoinOutput): void {
-  frame.binary = frame.started ? combinedStringEncoding(frame.binary, frame.ascii, part) : part.binary;
-  frame.started = true;
   const bytes = stringBytes(part);
+  const rightAscii = bytes.every((byte) => byte < 0x80);
+  if (!frame.started) {
+    frame.binary = part.binary;
+    frame.usAscii = part.usAscii;
+  } else if (frame.usAscii) {
+    if (!rightAscii) {
+      frame.binary = part.binary;
+      frame.usAscii = part.usAscii;
+    }
+  } else if (!part.usAscii) frame.binary = combinedStringEncoding(frame.binary, frame.ascii, part);
+  frame.started = true;
   frame.length += bytes.length;
   if (frame.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
   output.length += bytes.length;
   if (output.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
   output.chunks.push(bytes);
-  if (frame.ascii) frame.ascii = bytes.every((byte) => byte < 0x80);
+  if (frame.ascii) frame.ascii = rightAscii;
 }
 
 function mergeJoinFrame(parent: JoinFrame, child: JoinFrame): void {
   if (!parent.started) {
     parent.binary = child.binary;
+    parent.usAscii = child.usAscii;
     parent.started = true;
-  } else {
+  } else if (parent.usAscii) {
+    if (!child.ascii) {
+      parent.binary = child.binary;
+      parent.usAscii = child.usAscii;
+    }
+  } else if (!child.usAscii) {
     if (parent.binary !== child.binary && !parent.ascii && !child.ascii) {
       const left = rubyEncodingName(parent.binary);
       const right = rubyEncodingName(child.binary);
@@ -909,7 +925,9 @@ function finishJoinFrame(frame: JoinFrame, chunks: Uint8Array[]): RString {
     bytes.set(chunk, offset);
     offset += chunk.length;
   }
-  return stringFromBytes(bytes, frame.binary);
+  const result = stringFromBytes(bytes, frame.binary);
+  result.usAscii = frame.usAscii;
+  return result;
 }
 
 function* preflightJoinFirst(self: RArray): Gen<void> {

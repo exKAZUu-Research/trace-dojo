@@ -192,6 +192,7 @@ function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
   else if (self instanceof RString) {
     const string = new RString(self.cls, self.s);
     string.binary = self.binary;
+    string.usAscii = self.usAscii;
     string.rawBytes = self.rawBytes ? Uint8Array.from(self.rawBytes) : undefined;
     copy = string;
   } else if (self instanceof RArray) copy = new RArray(self.cls, [...self.items]);
