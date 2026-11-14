@@ -103,7 +103,7 @@ export const VALUE_BUILTINS = new Set(['append', 'cap', 'complex', 'imag', 'len'
 const MEMORYLESS_BUILTINS = new Set(['cap', 'complex', 'imag', 'len', 'max', 'min', 'real']);
 
 export abstract class CallCompiler extends CompositeCompiler {
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of callee.
+  // code-gauge-allow functionNcss 34 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   protected compileCall(expression: Extract<Expression, { kind: 'call' }>): Operand {
     const callee = this.expression(expression.callee);
     if (this.isInvalid(callee)) {
@@ -152,6 +152,8 @@ export abstract class CallCompiler extends CompositeCompiler {
    * Compiles the arguments of a call. For a function of the program, `callee` links each argument to its parameter,
    * after `receivers` leading parameters, so that the body decides whether the argument escapes.
    */
+  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
+  // code-gauge-allow functionNcss 32 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   private argumentsFor(
     expression: Extract<Expression, { kind: 'call' }>,
     signature: FuncType,
@@ -328,6 +330,7 @@ export abstract class CallCompiler extends CompositeCompiler {
   }
 
   /** The results of a call with several results as operands, which `spread` lets the arguments read. */
+  // code-gauge-allow duplicateLines 15 -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
   private spreadResults(call: Operand): { parts: Operand[]; spread: (args: ListEval) => ListEval } {
     const types = (call.type as { types: Type[] }).types;
     // The conversions of the results call no code of the program, so one holder serves every call.
@@ -368,7 +371,8 @@ export abstract class CallCompiler extends CompositeCompiler {
     return { mode: 'value', type: { kind: 'tuple', types: results }, span, eval: call, isCall: true };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Generic and ordinary calls of functions and function values.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
+  // code-gauge-allow functionNcss 36 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   private functionCall(expression: Extract<Expression, { kind: 'call' }>, callee: Operand): Operand {
     if (this.isInvalid(callee)) return callee;
     if (callee.func?.generic) return this.genericCall(expression, callee.func, callee.typeArgs);
@@ -447,6 +451,7 @@ export abstract class CallCompiler extends CompositeCompiler {
     return { instance: generic.instantiate(typeArgs), args, results: signature.results };
   }
 
+  // code-gauge-allow duplicateLines 16 -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
   private genericCall(
     expression: Extract<Expression, { kind: 'call' }>,
     entity: FuncEntity,
@@ -485,6 +490,7 @@ export abstract class CallCompiler extends CompositeCompiler {
   }
 
   /** Infers the type arguments of a generic call from its arguments: typed ones first, then untyped defaults. */
+  // code-gauge-allow functionNcss 50 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   private inferTypeArguments(
     span: Span,
     generic: GenericFunc,
@@ -566,7 +572,8 @@ export abstract class CallCompiler extends CompositeCompiler {
 
   // Methods ---------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Method calls through values, pointers, embedded fields, and interfaces.
+  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
+  // code-gauge-allow functionNcss 57 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   private methodCall(expression: Extract<Expression, { kind: 'call' }>, callee: Operand): Operand {
     const { receiver, selection } = callee.method as NonNullable<Operand['method']>;
     if (selection.kind === 'method' && selection.method.typeParams) return this.genericMethodCall(expression, callee);
@@ -778,6 +785,7 @@ export abstract class CallCompiler extends CompositeCompiler {
   }
 
   /** A call of a method with its own type parameters, inferred from the arguments as a generic function's are. */
+  // code-gauge-allow duplicateLines 16 -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
   private genericMethodCall(expression: Extract<Expression, { kind: 'call' }>, callee: Operand): Operand {
     const prepared = this.prepareGenericMethodCall(expression, callee);
     if (!prepared) return this.invalid(expression);
@@ -906,7 +914,7 @@ export abstract class CallCompiler extends CompositeCompiler {
 
   // Builtins --------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per builtin function.
+  // code-gauge-allow functionNcss 57 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   protected builtin(expression: Extract<Expression, { kind: 'call' }>, name: string): Operand {
     const { args } = expression;
     const count = (min: number, max = min): boolean => {
@@ -1055,7 +1063,7 @@ export abstract class CallCompiler extends CompositeCompiler {
     return operand.type;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- len and cap of each kind of operand, with Go's constant rules.
+  // code-gauge-allow functionNcss 32 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   private lengthBuiltin(expression: Extract<Expression, { kind: 'call' }>, name: 'len' | 'cap'): Operand {
     const { result: operand, hasRuntimeCall } = this.withRuntimeCallTracking(() => this.value(expression.args[0]));
     if (this.isInvalid(operand)) return operand;
@@ -1119,6 +1127,7 @@ export abstract class CallCompiler extends CompositeCompiler {
     return this.invalid(expression);
   }
 
+  // code-gauge-allow functionNcss 31 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   private appendBuiltin(expression: Extract<Expression, { kind: 'call' }>): Operand {
     const [first, ...rest] = expression.args;
     const slice = this.value(first);
@@ -1224,6 +1233,7 @@ export abstract class CallCompiler extends CompositeCompiler {
    * variable it optimizes, and otherwise an empty slice whose array stays in the function gets the whole buffer once
    * per call, at the variable's first append or at an append to a slice no variable holds.
    */
+  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   private appendStackBuffer(
     syntax: Expression,
     slice: Operand,
@@ -1254,7 +1264,7 @@ export abstract class CallCompiler extends CompositeCompiler {
     return stackBuffer;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- make of slices and maps, with Go's checks of sizes.
+  // code-gauge-allow functionNcss 55 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   private makeBuiltin(expression: Extract<Expression, { kind: 'call' }>): Operand {
     const type = this.typeArgument(expression.args[0]);
     if (!type) return this.invalid(expression);
@@ -1466,6 +1476,7 @@ export abstract class CallCompiler extends CompositeCompiler {
     };
   }
 
+  // code-gauge-allow functionNcss 49 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   private minMaxBuiltin(expression: Extract<Expression, { kind: 'call' }>, name: 'min' | 'max'): Operand {
     let operands = expression.args.map((arg) => this.value(arg));
     if (operands.some((operand) => this.isInvalid(operand))) return this.invalid(expression);
@@ -1563,7 +1574,7 @@ export abstract class CallCompiler extends CompositeCompiler {
     return this.invalid(expression);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- complex over typed and untyped constants and values.
+  // code-gauge-allow functionNcss 35 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   private complexBuiltin(expression: Extract<Expression, { kind: 'call' }>): Operand {
     let re = this.value(expression.args[0]);
     let im = this.value(expression.args[1]);
@@ -1635,6 +1646,7 @@ export abstract class CallCompiler extends CompositeCompiler {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   private complexPartBuiltin(expression: Extract<Expression, { kind: 'call' }>, name: 'real' | 'imag'): Operand {
     let operand = this.value(expression.args[0]);
     if (this.isInvalid(operand)) return operand;

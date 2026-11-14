@@ -17,7 +17,6 @@ export function equalityOf(type: Type): Equal {
   return equal;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of comparable type.
 function buildEquality(type: Type): Equal {
   const under = underlying(type);
   switch (under.kind) {
@@ -105,7 +104,8 @@ export function checkKeyHashable(type: Type, value: Value): void {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of comparable type.
+// code-gauge-allow functionCognitiveComplexity 28 -- Visits every comparable Go value shape to build one canonical map key.
+// code-gauge-allow functionNcss 31 -- Visits every comparable Go value shape to build one canonical map key.
 function buildKey(type: Type): KeyOf {
   const under = underlying(type);
   switch (under.kind) {

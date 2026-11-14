@@ -238,3 +238,24 @@ func main(){s:=[]int{};s=grow(s);fmt.Println(cap(s));runtime.Gosched();fmt.Print
     uncaughtException: undefined,
   });
 });
+
+test('native arithmetic budgets admit factorial and Fibonacci exercises', () => {
+  const source =
+    'package main\nimport("fmt";"math/big")\nfunc main(){for _,n:=range []int64{4000,5000,20000}{f:=big.NewInt(1);for i:=int64(2);i<=n;i++{f.Mul(f,big.NewInt(i))};fmt.Println(len(f.String()))};a,b:=big.NewInt(0),big.NewInt(1);for i:=0;i<50000;i++{a.Add(a,b);a,b=b,a};fmt.Println(len(a.String()))}\n';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '12674\n16326\n77338\n10450\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('JSON string tag errors preserve typed field paths and inner parse errors', () => {
+  const source =
+    'package main\nimport("fmt";"encoding/json")\ntype S struct{I int `json:"i,string"`;S string `json:"s,string"`}\nfunc main(){for _,input:=range []string{`{"i":1}`,`{"i":"x"}`,`{"s":"q"}`,`{"i":"true"}`,`{"i":"9999999999999999999999"}`}{var s S;fmt.Println(json.Unmarshal([]byte(input),&s))}}\n';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "json: cannot unmarshal number into Go struct field S.i of type int\njson: cannot unmarshal number x into Go struct field S.i of type int\njson: cannot unmarshal string into Go struct field S.s of type string: invalid character 'q' looking for beginning of object key string\njson: cannot unmarshal number true into Go struct field S.i of type int\njson: cannot unmarshal number 9999999999999999999999 into Go struct field S.i of type int\n",
+    uncaughtException: undefined,
+  });
+});

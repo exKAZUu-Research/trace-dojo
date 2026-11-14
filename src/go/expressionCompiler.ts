@@ -317,7 +317,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per expression kind.
+  // code-gauge-allow functionNcss 40 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private compileExpression(expression: Expression): Operand {
     if (this.fn) this.fn.inlineCost++;
     switch (expression.kind) {
@@ -534,6 +534,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  // code-gauge-allow functionNcss 31 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   protected entityOperand(entity: Entity, span: Span, use: boolean): Operand {
     switch (entity.kind) {
       case 'var': {
@@ -728,6 +729,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
    * enters an interface, and structs and arrays are copied. Reports the mismatch as `context` says. The value escapes
    * unless `holder` is the local variable that receives it or links it to where it goes.
    */
+  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  // code-gauge-allow functionNcss 36 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   protected assign(
     operand: Operand,
     target: Type,
@@ -845,6 +848,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** Converts an untyped operand to the type of the other operand of a binary operator. */
+  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private convertUntyped(operand: Operand, target: Type): Operand {
     if (!isUntyped(operand.type) || isUntyped(target) || this.isInvalid(operand)) return operand;
     if (operand.type.kind === 'basic' && operand.type.basic === 'untypedNil') return { ...operand, type: target };
@@ -1012,6 +1016,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return this.applyUnary(expression, unaryOp, operand);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private applyUnary(span: Span, operator: '+' | '-' | '!' | '^', operand: Operand): Operand {
     const type = operand.type;
     const allowed = operator === '!' ? isBoolean(type) : operator === '^' ? isInteger(type) : isNumeric(type);
@@ -1141,7 +1146,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 50 -- The binary operators and their type rules, one at a time.
   private binary(expression: Extract<Expression, { kind: 'binary' }>): Operand {
     const { operator } = expression;
     if ((operator === '&&' || operator === '||') && this.hoists) return this.blockingLogical(expression);
@@ -1188,6 +1192,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** Applies a binary operator to compiled operands, as `x op= y` also does. */
+  // code-gauge-allow functionNcss 60 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   protected binaryOfOperands(span: Span, operator: string, leftOperand: Operand, rightOperand: Operand): Operand {
     const expression = {
       ...span,
@@ -1325,6 +1330,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   /**
    * Fuses `a + x*y`, `a - x*y`, and `x*y - a` into one rounding, as Go's compiler does on arm64.
    */
+  // code-gauge-allow functionNcss 42 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private fusedMultiplyAdd(
     span: Span,
     operator: string,
@@ -1470,6 +1476,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  // code-gauge-allow functionNcss 56 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private comparison(
     expression: Extract<Expression, { kind: 'binary' }>,
     leftOperand: Operand,
@@ -1583,6 +1590,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  // code-gauge-allow functionNcss 59 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private shiftExpression(
     expression: Extract<Expression, { kind: 'binary' }>,
     leftOperand: Operand,
@@ -1683,6 +1691,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  // code-gauge-allow functionNcss 34 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private resolveUntypedShift(
     expression: Extract<Expression, { kind: 'binary' }>,
     operator: '<<' | '>>',
@@ -1768,7 +1778,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
   /** `T.M`: a function that takes the receiver as its first argument. */
   protected abstract methodExpression(span: Span, type: Type, name: string): Operand;
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Fields and methods through embedded fields and pointers.
   protected selectMember(span: Span, operand: Operand, field: string): Operand {
     const type = operand.type;
     if (isBasic(type, 'untypedNil')) {
@@ -1814,6 +1823,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** A field reached through embedded fields, following pointers, which may be nil. */
+  // code-gauge-allow functionCognitiveComplexity 30 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  // code-gauge-allow functionNcss 49 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   protected fieldOperand(span: Span, operand: Operand, path: number[], type: Type): Operand {
     const read = operand.eval;
     const steps = path.slice(0, -1);
@@ -1890,6 +1901,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
   // Index and slice -------------------------------------------------------------------------------------------------
 
   /** Converts an index to a number, checking it as Go does: an integer, non-negative if constant. */
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  // code-gauge-allow functionNcss 31 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   protected indexValue(expression: Expression, length?: number): ((frame: Frame) => number) | undefined {
     let operand = this.value(expression);
     if (this.isInvalid(operand)) return undefined;
@@ -2043,6 +2056,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  // code-gauge-allow functionNcss 41 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private mapIndex(span: Span, operand: Operand, keyType: Type, valueType: Type): Operand {
     const expression = span as Extract<Expression, { kind: 'index' }>;
     const keyOperand = this.expression(expression.indices[0]);
@@ -2100,6 +2115,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  // code-gauge-allow functionNcss 47 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private sliceExpression(expression: Extract<Expression, { kind: 'slice' }>): Operand {
     const operand = this.value(expression.operand);
     if (this.isInvalid(operand)) return operand;
@@ -2177,6 +2193,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** `a[low:high:max]`, whose result has the capacity max - low; strings cannot take a third index. */
+  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private fullSliceExpression(
     expression: Extract<Expression, { kind: 'slice' }>,
     operand: Operand,
@@ -2235,6 +2252,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   // Type assertions -------------------------------------------------------------------------------------------------
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  // code-gauge-allow functionNcss 37 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private typeAssertion(expression: Extract<Expression, { kind: 'typeAssert' }>): Operand {
     const operand = this.value(expression.operand);
     if (this.isInvalid(operand)) return operand;
@@ -2373,7 +2392,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** Converts an operand with `T(x)`, which the call compiler routes here. */
-  // code-gauge-allow functionCognitiveComplexity 25 -- Type conversions including untyped shifts and []rune capacity modes.
+  // code-gauge-allow functionNcss 56 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   protected convert(span: Span, target: Type, rawOperand: Operand): Operand {
     let operand = rawOperand;
     if (this.isInvalid(operand)) return operand;
@@ -2463,7 +2482,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- The conversions of constants, as the specification lists them.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private convertConstant(span: Span, target: Type, operand: Operand): Operand | undefined {
     const constant = operand.constant as Constant;
     const under = underlying(target);

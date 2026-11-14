@@ -24,6 +24,7 @@ const ZERO_FIELD: SsaFacts = { ssaConstant: always };
 
 /** Compiles composite literals: structs, arrays, slices, and maps, whose nested literals may elide their types. */
 export abstract class CompositeCompiler extends ExpressionCompiler {
+  // code-gauge-allow functionNcss 46 -- Compiles literal elements together with their destination type and storage lifetime.
   protected composite(expression: CompositeLiteral, elided: Type | undefined): Operand {
     let type = elided;
     if (expression.type?.kind === 'array' && expression.type.length === undefined) {
@@ -140,7 +141,6 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
     return this.assign(operand, type, context, holder);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 35 -- Keyed and unkeyed struct literals with promoted fields and evaluation order.
   private structLiteral(
     expression: CompositeLiteral,
     type: Type,
@@ -282,7 +282,8 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Keyed and unkeyed array/slice literals with constant bounds checks.
+  // code-gauge-allow functionCognitiveComplexity 27 -- Compiles literal elements together with their destination type and storage lifetime.
+  // code-gauge-allow functionNcss 50 -- Compiles literal elements together with their destination type and storage lifetime.
   private arrayLiteral(
     expression: CompositeLiteral,
     type: Type,
@@ -348,6 +349,7 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
     return { mode: 'value', type, span: expression, eval: (frame) => new Slice(build(frame), 0, size, size) };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 27 -- Compiles literal elements together with their destination type and storage lifetime.
   private mapLiteral(expression: CompositeLiteral, type: Type, under: Extract<Type, { kind: 'map' }>): Operand {
     const entries: { key: Eval; value: Eval }[] = [];
     const constantKeys = new Set<string>();

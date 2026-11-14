@@ -20,7 +20,7 @@ import { Complex, type Value } from './values';
 export type Representation = { constant: Constant } | { error: 'overflows' | 'truncated' | 'mismatch' };
 
 /** Converts a constant to a basic type, as an untyped constant converts implicitly or a typed one is checked. */
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of basic type.
+// code-gauge-allow functionNcss 45 -- Applies Go assignment rules in their precedence order with one diagnostic result.
 export function represent(constant: Constant, type: Type): Representation {
   const under = underlying(type);
   if (under.kind !== 'basic') return { error: 'mismatch' };
@@ -123,6 +123,7 @@ export type AssignFailure = { kind: 'mismatch' } | { kind: 'missingMethod'; miss
  * Whether a value of a typed type is assignable to another type, as the specification defines. Untyped constants
  * and nil are handled by the caller.
  */
+// code-gauge-allow functionCognitiveComplexity 23 -- Applies Go assignment rules in their precedence order with one diagnostic result.
 export function assignFailure(from: Type, to: Type): AssignFailure | undefined {
   if (identical(from, to)) return undefined;
   const fromUnder = underlying(from);

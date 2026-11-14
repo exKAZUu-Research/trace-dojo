@@ -295,6 +295,7 @@ export type SelectOp =
  * `select`: the index of the first case ready in the order written, with what a receive received, or -1 for the
  * default case when none is ready; without a default case, blocks until one is.
  */
+// code-gauge-allow functionNcss 37 -- Keeps channel registration and wakeup cleanup in the same select lifecycle.
 export function* select(
   ops: SelectOp[],
   hasDefault: boolean

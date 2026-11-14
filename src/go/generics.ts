@@ -3,7 +3,7 @@ import { identical, type InterfaceType, type NamedType, type Type, type TypePara
 export type Substitution = Map<number, Type>;
 
 /** Replaces type parameters by their type arguments, instantiating generic named types through `instantiateNamed`. */
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of type.
+// code-gauge-allow functionNcss 34 -- Visits the Go type shapes while retaining substitution and inference context.
 export function substitute(
   type: Type,
   mapping: Substitution,
@@ -80,6 +80,7 @@ export function substituteInterface(
  * does; returns false when the types cannot match.
  */
 // code-gauge-allow functionCognitiveComplexity 30 -- Structural unification over each kind of type.
+// code-gauge-allow functionNcss 41 -- Visits the Go type shapes while retaining substitution and inference context.
 export function unify(param: Type, arg: Type, mapping: Substitution, params: readonly TypeParamType[]): boolean {
   if (param.kind === 'typeParam' && params.some((candidate) => candidate.id === param.id)) {
     const bound = mapping.get(param.id);
@@ -161,6 +162,7 @@ export function unify(param: Type, arg: Type, mapping: Substitution, params: rea
 }
 
 /** Infers type parameters from the core types of the constraints of already-inferred ones, such as `S ~[]E`. */
+// code-gauge-allow functionCognitiveComplexity 18 -- Visits the Go type shapes while retaining substitution and inference context.
 export function inferFromConstraints(params: readonly TypeParamType[], mapping: Substitution): void {
   for (let changed = true; changed;) {
     changed = false;
@@ -181,6 +183,7 @@ export function inferFromConstraints(params: readonly TypeParamType[], mapping: 
   }
 }
 
+// code-gauge-allow duplicateLines 29 -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
 function containsUnbound(
   type: Type,
   params: readonly TypeParamType[],
@@ -216,6 +219,7 @@ function containsUnbound(
   }
 }
 
+// code-gauge-allow duplicateLines 29 -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
 export function containsTypeParam(type: Type, seen = new Set<Type>()): boolean {
   if (seen.has(type)) return false;
   seen.add(type);

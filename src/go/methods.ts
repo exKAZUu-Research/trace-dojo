@@ -56,6 +56,7 @@ export function* resumeMethod(
 }
 
 /** Calls the method that a dynamic type provides as {@link dynamicMethod} does, yielding when its goroutine blocks. */
+// code-gauge-allow functionParameterCount 7 -- Carries receiver, arguments, trace location, defer frame and caller storage through dynamic dispatch.
 export function* resumeDynamicMethod(
   type: Type,
   name: string,

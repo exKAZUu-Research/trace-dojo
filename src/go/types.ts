@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 450 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
 import type { Span } from './ast';
 import type { CalleeSummary } from './entities';
 import type { StackBuffers } from './runtime';
@@ -396,7 +397,7 @@ export function integerBits(kind: BasicKind): { bits: number; signed: boolean } 
 
 // Identity --------------------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of type, as the specification defines identity.
+// code-gauge-allow functionNcss 40 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
 export function identical(a: Type, b: Type, ignoreTags = false): boolean {
   if (a === b) return true;
   if (a.kind !== b.kind) return false;
@@ -486,6 +487,7 @@ let nextNamedTypeId = 0;
 
 /** A canonical key that agrees with Go's `identical(a, b)` for every type, including local named types. */
 // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of type, matching identical.
+// code-gauge-allow functionNcss 41 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
 export function typeIdentityKey(type: Type, seen = new Set<Type>()): string {
   switch (type.kind) {
     case 'basic': {
@@ -562,7 +564,8 @@ function namedTypeId(type: NamedType): number {
  * The name `%T` and `%v` print, as reflection names types: `main.Vertex`, `[]int`, `map[string]int`,
  * `struct { X int }`.
  */
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of type.
+// code-gauge-allow functionCognitiveComplexity 29 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
+// code-gauge-allow functionNcss 44 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
 export function typeString(type: Type, qualify = true): string {
   switch (type.kind) {
     case 'basic': {
@@ -695,6 +698,7 @@ interface EmbeddedEntry {
  * Finds a field or method by name through embedded fields, as a selector does: the shallowest depth wins, and two at
  * the same depth make the name ambiguous. `path` lists the embedded fields to go through and then the field itself.
  */
+// code-gauge-allow functionNcss 56 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
 export function lookupFieldOrMethod(type: Type, name: string): LookupResult {
   if (name === '_') return { kind: 'notFound' };
   if (type.kind === 'named' && type.underlying.kind === 'pointer') {

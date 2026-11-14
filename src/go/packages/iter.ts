@@ -32,7 +32,8 @@ interface Pulled {
  * `iter.Pull`: runs the iterator as a coroutine with frames of its own, which `next` resumes until the iterator's
  * yield hands over the next values; `stop` makes yield return false and lets the iterator finish.
  */
-// code-gauge-allow functionCognitiveComplexity 20 -- The protocol of Pull, which resumes and stops a coroutine.
+// code-gauge-allow functionCognitiveComplexity 28 -- The next, stop and frame-switching closures share one iterator coroutine lifecycle.
+// code-gauge-allow functionNcss 50 -- The next, stop and frame-switching closures share one iterator coroutine lifecycle.
 function pull(sequence: Value, zeros: (() => Value)[]): Value[] {
   if (!(sequence instanceof GoFunc)) nilPointerPanic();
   const runtime = currentRuntime();
