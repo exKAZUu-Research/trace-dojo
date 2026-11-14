@@ -54,7 +54,7 @@ function* inspectSet(self: RObject): Gen<string> {
   const data = self.data as SetData;
   if (data.inspecting) return 'Set[...]';
   const runtime = rt();
-  if (runtime.setInspectDepth >= LIMITS.maxCallDepth / 4) throw new ExecutionLimitError('output');
+  if (runtime.setInspectDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
   data.inspecting = true;
   runtime.setInspectDepth++;
   const parts: string[] = [];
@@ -299,6 +299,7 @@ function* someOther(value: Value, predicate: (item: Value) => Gen): Gen<boolean>
   return found;
 }
 def('Set', ['==', 'eql?'], 1, function* (self: RObject, [value]) {
+  if (value === self) return true;
   if (!(value instanceof RObject && value.data instanceof SetData)) return false;
   return membersOf(self).map.size === membersOf(value).map.size && (yield* subset(self, value));
 });

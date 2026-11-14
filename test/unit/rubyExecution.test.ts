@@ -2413,6 +2413,39 @@ test('Range cover excludes empty Range arguments', () => {
   });
 });
 
+test('Range sum uses native addition for built-in numeric initial values', () => {
+  expect(
+    run(
+      'class Integer;def +(x);puts :plus;99;end;end;class Float;def +(x);puts :float_plus;99;end;end;p (1..3).sum;p (1..3).sum(0.5)'
+    )
+  ).toMatchObject({ stdout: '6\n6.5\n' });
+});
+
+test('tally can insert after its key freezes the accumulator', () => {
+  expect(run('class K;def hash;$h.freeze;0;end;end;$h={};[K.new].tally($h);p $h.size')).toMatchObject({
+    stdout: '1\n',
+  });
+});
+
+test.each([129, 500])('acyclic Sets inspect at depth %i within the configured limit', (depth) => {
+  const result = run(`a=1;${depth}.times{a=Set[a]};p a`);
+  expect(result.kind).toBe('executed');
+  if (result.kind !== 'executed') throw new Error('Expected Ruby execution');
+  expect(result.stdout).toBe(`${'Set['.repeat(depth)}1${']'.repeat(depth)}\n`);
+});
+
+test('infinite Range steps yield equal exclusive endpoints', () => {
+  expect(run('p (1...1).step(Float::INFINITY).to_a,(1...1).step(-Float::INFINITY).to_a')).toMatchObject({
+    stdout: '[1.0]\n[1.0]\n',
+  });
+});
+
+test('Set identity equality skips member hash callbacks', () => {
+  expect(run('class K;def hash;puts :hash;0;end;end;s=Set[K.new];puts :start;p s==s,s.eql?(s)')).toMatchObject({
+    stdout: 'hash\nstart\ntrue\ntrue\n',
+  });
+});
+
 test('recursive Sets inspect with a cycle marker', () => {
   expect(run('s=Set[];s.add(s);p s')).toMatchObject({ stdout: 'Set[Set[...]]\n' });
   expect(run('a=Set[];b=Set[a];a.add(b);p a')).toMatchObject({ stdout: 'Set[Set[Set[...]]]\n' });

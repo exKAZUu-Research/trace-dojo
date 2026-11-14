@@ -161,7 +161,12 @@ export function* hashGet(hash: RHash, key: Value): Gen<HashEntry | undefined> {
   return (yield* findEntry(hash, key)).entry;
 }
 
-export function* hashGetOrInsert(hash: RHash, key: Value, create: () => Value | Gen): Gen<HashEntry> {
+export function* hashGetOrInsert(
+  hash: RHash,
+  key: Value,
+  create: () => Value | Gen,
+  recheckFrozen = true
+): Gen<HashEntry> {
   const held = rt().held.length;
   rt().held.push(hash, key);
   try {
@@ -171,7 +176,7 @@ export function* hashGetOrInsert(hash: RHash, key: Value, create: () => Value | 
     const created = create();
     const value = isGenerator(created) ? yield* created : created;
     rt().held.push(value);
-    if (hash.frozen) throw frozenError(hash, yield* inspect(hash));
+    if (recheckFrozen && hash.frozen) throw frozenError(hash, yield* inspect(hash));
     const stored = key instanceof RString && key.cls === rt().c.String && !key.frozen ? frozenCopy(key) : key;
     return insertHashEntry(hash, base, slot, stored, value);
   } finally {

@@ -217,9 +217,10 @@ def('Range', 'sum', [0, 1], function* (self: RRange, args, block) {
     const initial = args.length > 0 ? args[0] : 0n;
     if (last < self.begin) return initial;
     const total = ((self.begin + last) * (last - self.begin + 1n)) / 2n;
-    if (typeof initial !== 'bigint' && typeof initial !== 'number')
-      return Number(yield* kernelFloat(initial, undefined)) + Number(total);
-    return yield* callMethod(initial, '+', [total]);
+    if (typeof initial === 'bigint') return initial + total;
+    if (isRubyFloat(initial)) return Number(initial) + Number(total);
+    if (typeof initial !== 'number') return Number(yield* kernelFloat(initial, undefined)) + Number(total);
+    return initial + Number(total);
   }
   return yield* sum(self, args, block);
 });
@@ -504,7 +505,8 @@ function* stepNumericRange(self: RRange, start: number, by: number, block: RProc
     let value = index === 0 ? start : fusedMultiplyAdd(index, by, start);
     if (end !== NIL) {
       const boundary = Number(end);
-      if (exclusive && (by > 0 ? value >= boundary : value <= boundary)) break;
+      if (exclusive && !(index === 0 && !Number.isFinite(by)) && (by > 0 ? value >= boundary : value <= boundary))
+        break;
       if (by > 0 ? value > boundary : value < boundary) value = boundary;
     }
     yield* callBlock(block, [value], false);
