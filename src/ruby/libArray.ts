@@ -266,7 +266,6 @@ def('Array', 'values_at', [0, -1], function* (self: RArray, args) {
         if (!arg.exclusive && arg.end !== NIL) end++;
         const added = Math.max(0, end - start);
         if (values.length + added > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
-        rt().chargeSlots(added);
         rt().spend(Math.ceil(added / 64));
         for (let index = start; index < end; index++) values.push(self.items[index] ?? NIL);
       } else {

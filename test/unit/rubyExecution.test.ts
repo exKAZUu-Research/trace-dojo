@@ -2445,6 +2445,14 @@ test('warn preserves binary bytes and skips disabled warning level conversion', 
   ).toMatchObject({ stdout: '[[255, 10]]\n' });
 });
 
+test('warn retains empty binary message encoding', () => {
+  expect(
+    run(
+      'class W;def write(s);$v<<s;end;end;$v=[];$stderr=W.new;warn 255.chr.clear;warn 255.chr.clear,"a";$stderr=STDERR;$v.each{|s|begin;s<<256;rescue=>e;p e.class;end}'
+    )
+  ).toMatchObject({ stdout: 'RangeError\nRangeError\n' });
+});
+
 test('warn assembles many short messages within operation limits', () => {
   expect(run('warn(*Array.new(20000,"x"));puts :ok')).toMatchObject({ stdout: 'ok\n' });
 });
@@ -2530,6 +2538,11 @@ test('Array join retains an empty binary first element', () => {
   expect(run('a=255.chr.clear;s=[a,"é"].join;s<<256;p s.bytes')).toMatchObject({
     stdout: '[195, 169, 196, 128]\n',
   });
+});
+
+test('Array values_at keeps one large result within the slot budget', () => {
+  expect(run('p [].values_at(0...600000).size')).toMatchObject({ stdout: '600000\n' });
+  expect(run('p [].values_at(0...300000,0...300000).size')).toMatchObject({ stdout: '600000\n' });
 });
 
 test('Array join enforces String storage as an execution limit', () => {

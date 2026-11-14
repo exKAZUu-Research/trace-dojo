@@ -18,7 +18,7 @@ function* writePuts(target: Value, args: Value[]): Gen<void> {
   yield* emitPuts(args, (part) => write(target, part));
 }
 
-function* emitPuts(args: Value[], emit: (part: string | RString) => Gen<void>): Gen<void> {
+function* emitPuts(args: Value[], emit: (part: string | RString) => Gen<void>, includeEmpty = false): Gen<void> {
   if (args.length === 0) {
     yield* emit('\n');
     return;
@@ -52,7 +52,7 @@ function* emitPuts(args: Value[], emit: (part: string | RString) => Gen<void>): 
     }
     const line = value instanceof RString ? value : yield* toSValue(value);
     const needsNewline = !line.s.endsWith('\n');
-    if (line.s.length > 0) yield* emit(line);
+    if (line.s.length > 0 || includeEmpty) yield* emit(line);
     if (needsNewline) yield* emit('\n');
   };
   for (const arg of args) yield* visit(arg, new Set());
@@ -190,10 +190,14 @@ def(
   function* (_self, args, _block, keywords) {
     yield* validateWarnKeywords(keywords, args.length > 0);
     if (args.length > 0 && warnCategoryEnabled(keywords)) {
-      const parts: WarningParts = { chunks: [], binary: false, ascii: true, length: 0 };
-      yield* emitPuts(args, function* (part) {
-        appendWarningPart(parts, part instanceof RString ? part : str(part));
-      });
+      const parts: WarningParts = { chunks: [], binary: false, ascii: true, length: 0, started: false };
+      yield* emitPuts(
+        args,
+        function* (part) {
+          appendWarningPart(parts, part instanceof RString ? part : str(part));
+        },
+        true
+      );
       yield* write(rt().globals.get('$stderr') ?? NIL, combineWarningParts(parts));
     }
     return NIL;
@@ -206,10 +210,12 @@ interface WarningParts {
   binary: boolean;
   ascii: boolean;
   length: number;
+  started: boolean;
 }
 
 function appendWarningPart(parts: WarningParts, part: RString): void {
-  parts.binary = combinedStringEncoding(parts.binary, parts.ascii, part);
+  parts.binary = parts.started ? combinedStringEncoding(parts.binary, parts.ascii, part) : part.binary;
+  parts.started = true;
   const bytes = stringBytes(part);
   parts.length += bytes.length;
   if (parts.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
