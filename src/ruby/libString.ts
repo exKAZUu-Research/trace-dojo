@@ -78,7 +78,7 @@ function modify(self: RString): void {
   if (self.frozen) throw frozenError(self, strInspect(self.s));
 }
 
-function setText(self: RString, text: string): void {
+export function setText(self: RString, text: string): void {
   modify(self);
   rt().checkStringLength(text.length);
   const value = str(text);
@@ -286,9 +286,6 @@ def('String', 'to_i', [0, 1], function* (self: RString, args) {
 def('String', 'to_f', 0, (self: RString) => parseFloatLenient(self.s));
 def('String', 'to_c', 0, () => {
   throw new UnsupportedFeatureError('String#to_c（複素数）');
-});
-def('String', 'to_r', 0, () => {
-  throw new UnsupportedFeatureError('String#to_r（有理数）');
 });
 def('String', 'hex', 0, (self: RString) => parseIntegerLenient(self.s, 16));
 def('String', 'oct', 0, (self: RString) => parseIntegerLenient(self.s, 8));

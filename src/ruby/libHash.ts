@@ -253,6 +253,7 @@ def('Hash', 'default_proc', 0, (self: RHash) => self.defaultProc ?? NIL);
 
 function copy(self: RHash, preserveClass = false): RHash {
   const hash = newHash();
+  hash.byIdentity = self.byIdentity;
   if (preserveClass) {
     hash.cls = self.cls;
     hash.ivars = self.ivars ? new Map(self.ivars) : undefined;
@@ -290,6 +291,7 @@ def('Hash', 'each_value', 0, function* (self: RHash, _args, block) {
 
 function* filtered(self: RHash, block: RProc, keep: boolean): Gen<RHash> {
   const hash = newHash();
+  hash.byIdentity = self.byIdentity;
   yield* whileHeld(hash, () =>
     eachEntry(self, function* (entry, slot) {
       if (truthy(yield* pair(block, entry.key, entry.value)) === keep) copyEntry(hash, slot, entry);
@@ -441,6 +443,7 @@ def('Hash', ['merge!', 'update'], [0, -1], function* (self: RHash, others, block
 def('Hash', 'transform_values', 0, function* (self: RHash, _args, block) {
   if (!block) return makeEnumerator(self, 'transform_values', []);
   const hash = newHash();
+  hash.byIdentity = self.byIdentity;
   yield* whileHeld(hash, () =>
     eachEntry(self, function* (entry) {
       yield* hashSet(hash, entry.key, yield* callBlock(block, [entry.value]));
@@ -461,9 +464,10 @@ def('Hash', 'transform_values!', 0, function* (self: RHash, _args, block) {
   return self;
 });
 
-function* transformKeys(self: RHash, args: Value[], block: RProc | undefined): Gen<RHash> {
+function* transformKeys(self: RHash, args: Value[], block: RProc | undefined, preserveMode = false): Gen<RHash> {
   const mapping = args.length > 0 ? yield* toHash(args[0]) : undefined;
   const hash = newHash();
+  hash.byIdentity = preserveMode && self.byIdentity;
   yield* whileHeld(mapping ?? NIL, () =>
     whileHeld(hash, () =>
       eachEntry(self, function* (entry) {
@@ -483,7 +487,7 @@ def('Hash', 'transform_keys', [0, 1], function* (self: RHash, args, block) {
 def('Hash', 'transform_keys!', [0, 1], function* (self: RHash, args, block) {
   if (!block && args.length === 0) return makeEnumerator(self, 'transform_keys!', []);
   yield* modify(self);
-  const result = yield* transformKeys(self, args, block);
+  const result = yield* transformKeys(self, args, block, true);
   yield* modify(self);
   self.map = result.map;
   self.bucketVersion = -1;
@@ -500,6 +504,7 @@ def('Hash', 'invert', 0, function* (self: RHash) {
 });
 def('Hash', 'slice', [0, -1], function* (self: RHash, keys) {
   const hash = newHash();
+  hash.byIdentity = self.byIdentity;
   return yield* whileHeld(hash, function* () {
     for (const key of keys) {
       const entry = yield* hashGet(self, key);

@@ -202,6 +202,10 @@ function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
     if (clone && freezeOption === false) throw argumentError(`can't unfreeze ${realClassOf(self).name}`);
     return self;
   }
+  if (self instanceof RObject && self.cls === rt().c.Rational) {
+    if (clone && freezeOption === false) throw argumentError("can't unfreeze Rational");
+    return self;
+  }
   let copy: RBasic;
   if (self instanceof RClass) copy = copyClass(self);
   else if (self instanceof RString) {
@@ -241,6 +245,7 @@ function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
   if ((clone || self instanceof RClass) && self.singleton) copySingleton(self.singleton, copy);
   yield* initializeCopy(copy, self, clone, freezeOption);
   if (clone) copy.frozen = freezeOption === true || (freezeOption !== false && self.frozen);
+  if (self instanceof RObject && self.cls.isSubclassOf(rt().c.Data)) copy.frozen = true;
   return copy;
 }
 
@@ -729,7 +734,15 @@ def('Module', 'include', [1, -1], function* (self: RClass, modules) {
   return self;
 });
 
-for (const name of ['instance_methods', 'public_instance_methods', 'private_instance_methods', 'refine', 'using']) {
+for (const name of [
+  'instance_methods',
+  'public_instance_methods',
+  'private_instance_methods',
+  'public_instance_method',
+  'remove_const',
+  'refine',
+  'using',
+]) {
   def('Module', name, [0, -1], () => {
     throw new UnsupportedFeatureError(name);
   });

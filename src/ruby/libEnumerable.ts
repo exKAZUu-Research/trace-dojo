@@ -81,7 +81,10 @@ export function* iterate(collection: Value, visit: Visit, args: Value[] = []): G
     return NIL;
   });
   try {
-    yield* args.length === 0 && collection instanceof RObject && collection.cls.isSubclassOf(runtime.c.Enumerator)
+    yield* args.length === 0 &&
+    collection instanceof RObject &&
+    collection.cls.isSubclassOf(runtime.c.Enumerator) &&
+    collection.cls !== runtime.c['Enumerator::Lazy']
       ? iterateEnumerator(collection, function* (value) {
           runtime.spend();
           if ((yield* visit(value)) === STOP) throw signal;

@@ -1522,6 +1522,7 @@ function* runModuleBody(module: RClass, body: Body, frame: Frame): Gen {
 export interface CallOptions {
   /** Whether the call has no explicit receiver, which may call private methods. */
   fcall?: boolean;
+  explicitSelf?: boolean;
   /** Whether the call is a bare name, which reports a missing method as a missing variable too. */
   vcall?: boolean;
   /** Whether the caller uses the result, which decides whether the method's last statement is a step. */
@@ -1552,11 +1553,21 @@ function* evalCall(e: Call, frame: Frame): Gen {
     rt().currentRow = e.row;
     try {
       if (!e.block)
-        return yield* callMethod(recv, e.name, args, keywords, block, { fcall: e.fcall, vcall: e.vcall, used });
+        return yield* callMethod(recv, e.name, args, keywords, block, {
+          fcall: e.fcall,
+          explicitSelf: e.recv?.k === 'self',
+          vcall: e.vcall,
+          used,
+        });
       const proc = block as RProc;
       if (proc.callSiteState) proc.callSiteState.active = true;
       try {
-        return yield* callMethod(recv, e.name, args, keywords, proc, { fcall: e.fcall, vcall: e.vcall, used });
+        return yield* callMethod(recv, e.name, args, keywords, proc, {
+          fcall: e.fcall,
+          explicitSelf: e.recv?.k === 'self',
+          vcall: e.vcall,
+          used,
+        });
       } catch (error) {
         if (error instanceof BreakSignal && error.tag === proc.breakTag) return error.value;
         throw error;
@@ -1620,12 +1631,12 @@ export function* callMethod(
   if (!method) return yield* callMethodMissing(recv, name, args, keywords, block, options);
   if (recv instanceof RClass && !recv.isModule && name === 'module_function' && method.owner === rt().c.Module)
     methodMissing(recv, name, options);
-  if (method.visibility !== 'public' && !options.fcall) {
+  if (method.visibility !== 'public' && !options.fcall && !options.explicitSelf) {
     if (method.visibility === 'private') {
-      throw noMethodError(`private method '${name}' called for ${receiverDescription(recv)}`, recv, name);
+      return yield* callMethodMissing(recv, name, args, keywords, block, options, 'private');
     }
     if (method.visibility === 'protected' && !isA(rt().frame.self, method.owner)) {
-      throw noMethodError(`protected method '${name}' called for ${receiverDescription(recv)}`, recv, name);
+      return yield* callMethodMissing(recv, name, args, keywords, block, options, 'protected');
     }
   }
   return yield* invoke(method, recv, args, keywords, block, options.used ?? true);
@@ -1638,12 +1649,15 @@ function* callMethodMissing(
   args: Value[],
   keywords: RHash | undefined,
   block: RProc | undefined,
-  options: CallOptions
+  options: CallOptions,
+  visibility?: 'private' | 'protected'
 ): Gen {
   const handler = classOf(recv).findMethod('method_missing');
   if (handler && handler.body.kind !== 'native') {
     return yield* invoke(handler, recv, [RSymbol.of(name), ...args], keywords, block, options.used ?? true);
   }
+  if (visibility)
+    throw noMethodError(`${visibility} method '${name}' called for ${receiverDescription(recv)}`, recv, name);
   methodMissing(recv, name, options);
 }
 

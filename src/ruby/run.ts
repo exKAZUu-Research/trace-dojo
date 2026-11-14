@@ -67,7 +67,7 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: F
       try {
         runToEnd(runAtExit());
       } catch (error) {
-        uncaughtException ??= describeUncaught(runtime, error, frame);
+        uncaughtException = describeUncaught(runtime, error, frame);
       }
       onEnd?.(frame);
       runtime.collectGarbage();

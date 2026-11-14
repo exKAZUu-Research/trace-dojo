@@ -104,6 +104,9 @@ function intPow(base: bigint, exponent: bigint): Value {
     if (base === 1n) return 1n;
     if (base === -1n) return exponent % 2n === 0n ? 1n : -1n;
     if (base === 0n) throw zeroDivisionError();
+    const bits = integerBits(base);
+    const outputBits = BigInt(bits) * -exponent + 1n;
+    chargeIntegerResult(Number(outputBits), Number(outputBits));
     return makeRational(1n, base ** -exponent);
   }
   if (exponent === 0n) return 1n;

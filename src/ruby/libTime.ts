@@ -53,8 +53,17 @@ function nowNanoseconds(): bigint {
 function* fieldArgs(args: Value[]): Gen<{ fields: number[]; seconds: number }> {
   const fields: number[] = [];
   for (const [index, arg] of args.slice(0, 5).entries()) {
-    const value =
-      arg === NIL ? (index < 3 ? 1 : 0) : Number(yield* toInt(arg instanceof RString ? BigInt(arg.s) : arg));
+    let selected: Value = arg;
+    if (arg instanceof RString) {
+      if (!/^[+-]?\d+$/.test(arg.s))
+        throw argumentError(
+          index === 0
+            ? `can't parse: ${JSON.stringify(arg.s)}`
+            : `invalid value for Integer(): ${JSON.stringify(arg.s)}`
+        );
+      selected = BigInt(arg.s);
+    }
+    const value = arg === NIL ? (index < 3 ? 1 : 0) : Number(yield* toInt(selected));
     fields.push(value);
   }
   while (fields.length < 5) fields.push(fields.length < 3 ? 1 : 0);
@@ -79,7 +88,10 @@ function* buildTime(args: Value[], offset: number, zone: TimeData['zone']): Gen 
   const { fields, seconds } = yield* fieldArgs(args);
   const [year, month, day, hour, minute] = fields;
   const whole = Math.floor(seconds);
-  const utcMs = Date.UTC(year, month - 1, day, hour, minute, whole) - offset * 1000;
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(hour, minute, whole);
+  const utcMs = date.getTime() - offset * 1000;
   const fraction = BigInt(Math.round((seconds - whole) * 1e9));
   return makeTime(BigInt(utcMs) * 1_000_000n + fraction, offset, zone);
 }
@@ -97,7 +109,7 @@ sdef('Time', 'at', [1, 2], function* (_self, args) {
   const [seconds, microseconds] = args;
   if (seconds instanceof RObject && seconds.data instanceof TimeData) {
     if (microseconds !== undefined) throw typeError("can't convert Time into an exact number");
-    return makeTime(seconds.data.nanoseconds);
+    return makeTime(seconds.data.nanoseconds, seconds.data.offset, seconds.data.zone);
   }
   const nanoseconds =
     typeof seconds === 'bigint' ? seconds * 1_000_000_000n : BigInt(Math.round((yield* toFloat(seconds)) * 1e9));

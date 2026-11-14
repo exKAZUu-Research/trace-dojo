@@ -11,8 +11,9 @@ import {
   toStepFloat,
 } from './conversions';
 import { def, sdef } from './define';
-import { argumentCountError, argumentError, floatDomainError, rangeError, rubyError } from './errors';
+import { argumentCountError, argumentError, floatDomainError, rangeError, rubyError, typeError } from './errors';
 import { floatStepCount } from './floatMath';
+import { pushFrameReferences } from './garbageCollection';
 import {
   callMethod,
   callProc,
@@ -21,6 +22,7 @@ import {
   isGenerator,
   nativeProc,
   requireBlock,
+  respondsTo,
   runToEnd,
 } from './interp';
 import { iterate, STOP } from './libEnumerable';
@@ -92,6 +94,7 @@ export function makeEnumerator(
         ...this.args,
         ...(this.keywords ? [this.keywords] : []),
         ...(this.sizeBlock ? [this.sizeBlock] : []),
+        ...cursorRoots(this.cursor),
       ];
     },
   };
@@ -301,6 +304,18 @@ export function customEnumerator(recv: Value, method: string, held: Value[], ite
 }
 
 function sourceOf(self: RObject): EnumeratorSource {
+  if (self.cls === rt().c['Enumerator::Lazy']) {
+    const data = self.data as LazyData;
+    data.enumerator ??= {
+      recv: self,
+      method: 'each',
+      args: [],
+      size: () => NIL,
+      iterate: (block) => callMethod(self, 'each', [], undefined, block),
+      held: () => [self, ...data.held()],
+    };
+    return data.enumerator;
+  }
   return self.data as EnumeratorSource;
 }
 
@@ -636,8 +651,20 @@ interface Cursor {
   /** The frames, held values, and catch tags of the suspended calls, put back while the iteration resumes. */
   frames: Frame[];
   held: Value[];
+  catchTags: Value[];
   peeked: Value[][];
+  feed?: Value;
+  feedSet: boolean;
+  started: boolean;
   result?: Value;
+}
+
+function cursorRoots(cursor: Cursor | undefined): Value[] {
+  if (!cursor) return [];
+  const values = [...cursor.held, ...cursor.catchTags, ...cursor.peeked.flat()];
+  if (cursor.feedSet) values.push(cursor.feed as Value);
+  for (const frame of cursor.frames) pushFrameReferences(frame, values);
+  return values;
 }
 
 function startCursor(self: RObject): Cursor {
@@ -648,7 +675,7 @@ function startCursor(self: RObject): Cursor {
       });
     })()
   );
-  return { runner, frames: [], held: [], peeked: [] };
+  return { runner, frames: [], held: [], catchTags: [], peeked: [], feedSet: false, started: false };
 }
 
 /** Resumes the iteration until it yields its next value, or raises StopIteration when it has ended. */
@@ -662,14 +689,24 @@ function nextValues(self: RObject): Value[] {
   const frameBase = runtime.frames.length;
   const heldBase = runtime.held.length;
   const row = runtime.currentRow;
+  const callerTags = runtime.catchTags.splice(0);
   runtime.frames.push(...cursor.frames);
   runtime.held.push(...cursor.held);
+  runtime.catchTags.push(...cursor.catchTags);
   let step: IteratorResult<unknown, Value>;
   try {
-    step = cursor.runner.next(NIL);
+    const feed = cursor.started && cursor.feedSet ? cursor.feed : NIL;
+    if (cursor.started) {
+      cursor.feedSet = false;
+      cursor.feed = undefined;
+    }
+    step = cursor.runner.next(feed);
+    cursor.started = true;
   } finally {
     cursor.frames = runtime.frames.splice(frameBase);
     cursor.held = runtime.held.splice(heldBase);
+    cursor.catchTags = runtime.catchTags.splice(0);
+    runtime.catchTags.push(...callerTags);
     runtime.currentRow = row;
   }
   if (step.done) {
@@ -697,7 +734,9 @@ def('Enumerator', 'peek', 0, (self: RObject) => {
   (sourceOf(self).cursor as Cursor).peeked.unshift(args);
   return args.length === 0 ? NIL : args.length === 1 ? args[0] : arr(args);
 });
-def('Enumerator', 'rewind', 0, (self: RObject) => {
+def('Enumerator', 'rewind', 0, function* (self: RObject) {
+  const receiver = sourceOf(self).recv;
+  if (receiver !== self && respondsTo(receiver, 'rewind')) yield* callMethod(receiver, 'rewind', []);
   sourceOf(self).cursor = undefined;
   return self;
 });
@@ -708,6 +747,14 @@ def('Enumerator', 'peek_values', 0, (self: RObject) => {
   const args = nextValues(self);
   (sourceOf(self).cursor as Cursor).peeked.unshift(args);
   return arr(args);
+});
+def('Enumerator', 'feed', 1, (self: RObject, [value]) => {
+  const source = sourceOf(self);
+  source.cursor ??= startCursor(self);
+  if (source.cursor.feedSet) throw typeError('feed value already set');
+  source.cursor.feed = value;
+  source.cursor.feedSet = true;
+  return NIL;
 });
 
 // Enumerator.new and its yielder --------------------------------------------------------------------------------------
@@ -795,6 +842,7 @@ type LazyStep =
 interface LazyData {
   source: Value;
   steps: LazyStep[];
+  enumerator?: EnumeratorSource;
   held(): Value[];
 }
 
@@ -804,7 +852,11 @@ function makeLazy(source: Value, steps: LazyStep[]): RObject {
     source,
     steps,
     held() {
-      return [this.source, ...this.steps.flatMap((step) => ('block' in step && step.block ? [step.block] : []))];
+      return [
+        this.source,
+        ...this.steps.flatMap((step) => ('block' in step && step.block ? [step.block] : [])),
+        ...cursorRoots(this.enumerator?.cursor),
+      ];
     },
   };
   lazy.data = data;
@@ -894,8 +946,10 @@ function* runLazy(self: RObject, visit: (value: Value) => Gen<unknown>): Gen<voi
             break;
           }
           case 'take': {
-            next.push(item);
-            state.seen++;
+            if (state.seen < step.count) {
+              next.push(item);
+              state.seen++;
+            }
             break;
           }
           case 'drop': {
@@ -915,7 +969,10 @@ function* runLazy(self: RObject, visit: (value: Value) => Gen<unknown>): Gen<voi
         }
       }
       values = next;
-      if (values.length === 0) return;
+      if (values.length === 0)
+        return data.steps.some((step, position) => step.kind === 'take' && states[position].seen >= step.count)
+          ? STOP
+          : undefined;
     }
     for (const item of values) if ((yield* visit(item)) === STOP) return STOP;
     const finished = data.steps.some((step, index) => step.kind === 'take' && states[index].seen >= step.count);

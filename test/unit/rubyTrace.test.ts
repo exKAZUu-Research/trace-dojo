@@ -735,3 +735,11 @@ test('trace variables keep special local names as own properties', () => {
     expect(Object.hasOwn(trace.traceItems.at(-1)?.referenceVars ?? {}, '__proto__')).toBe(value.startsWith('['));
   }
 });
+
+test('suspended external iterators and installed method blocks retain reachable Turtles', () => {
+  const suspended =
+    'e=Enumerator.new do |y|\n t=Turtle.new\n y<<nil\n t.forward\n y<<nil\nend\ne.next\nx=1\ne.next\nx=2';
+  expect(traceProgram('ruby', suspended, suspended).finalTurtles).toHaveLength(1);
+  const installed = 't=Turtle.new;Object.define_method(:keep){t};x=1';
+  expect(traceProgram('ruby', installed, installed).finalTurtles).toHaveLength(1);
+});

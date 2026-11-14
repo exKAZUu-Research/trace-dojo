@@ -4965,3 +4965,135 @@ test('literal Regexp named captures assign locals on match and clear them on mis
   const source = String.raw`year="none";if /(?<year>\d+)-/ =~ "2024-01";p year;end;p((/(?<month>\d+)/ =~ "none"),month)`;
   expect(run(source)).toMatchObject({ stdout: '"2024"\nnil\nnil\n' });
 });
+
+test('exit handler exceptions supersede the main exception', () => {
+  expect(run('at_exit { raise "handler" }; raise "main"')).toMatchObject({
+    uncaughtException: 'handler (RuntimeError)',
+  });
+});
+
+test('method_missing receives inaccessible explicit calls', () => {
+  const source =
+    'class P;def method_missing(n,*a);"mm #{n}";end;private;def secret;1;end;protected;def guarded;2;end;end;p P.new.secret,P.new.guarded';
+  expect(run(source)).toMatchObject({ stdout: '"mm secret"\n"mm guarded"\n' });
+});
+
+test('defined? distinguishes implicit and explicit self calls', () => {
+  expect(run('def foo;1;end;p defined?(foo),defined?(self.foo),self.foo')).toMatchObject({
+    stdout: '"method"\nnil\n1\n',
+  });
+});
+
+test('String encoding metadata and UTF-8 validity follow its bytes', () => {
+  expect(
+    run(
+      String.raw`p :hello.name.encoding.name,"\xFF".valid_encoding?,"\xC3\xA9".valid_encoding?,255.chr.valid_encoding?`
+    )
+  ).toMatchObject({
+    stdout: '"US-ASCII"\nfalse\ntrue\ntrue\n',
+  });
+});
+
+test('Time rejects invalid text fields and keeps historical years and copied zones', () => {
+  expect(
+    run(
+      'begin;Time.new("abc");rescue ArgumentError=>e;p e.message;end;p Time.utc(1).year,Time.utc(99).year,Time.at(Time.utc(2024)).utc?'
+    )
+  ).toMatchObject({
+    stdout: '"can\'t parse: \\"abc\\""\n1\n99\ntrue\n',
+  });
+});
+
+test('Rational String conversion remains available and unsupported reflection remains explicit', () => {
+  expect(run('p "1/2".to_r')).toMatchObject({ stdout: '(1/2)\n' });
+  expect(run('1.0.rationalize')).toMatchObject({ uncaughtException: expect.stringContaining('使えません。') });
+  expect(run('Object.remove_const(:X)')).toMatchObject({ uncaughtException: expect.stringContaining('使えません。') });
+  expect(run('Object.public_instance_method(:to_s)')).toMatchObject({
+    uncaughtException: expect.stringContaining('使えません。'),
+  });
+});
+
+test('Lazy Enumerable methods and external next share its source correctly', () => {
+  expect(run('p [1,2,3].lazy.map{|x|x*2}.sum,[1,2,3].lazy.map{|x|x*2}.next')).toMatchObject({
+    stdout: '12\n2\n',
+  });
+});
+
+test('Lazy take stops after its limit even when later filters discard values', () => {
+  expect(run('p [1,2,3,4].lazy.take(2).select{|x|x.odd?}.force')).toMatchObject({ stdout: '[1]\n' });
+  expect(run('p [1,2,3].lazy.flat_map{|x|[x,x]}.take(2).force')).toMatchObject({ stdout: '[1, 1]\n' });
+});
+
+test('external Enumerator catch tags stay isolated from the caller', () => {
+  const source =
+    'e=Enumerator.new{|y|catch(:x){y<<1;y<<2}};p e.next;begin;throw :x,3;rescue UncaughtThrowError=>error;p error.class;end';
+  expect(run(source)).toMatchObject({ stdout: '1\nUncaughtThrowError\n' });
+});
+
+test('external Enumerator feed and rewind preserve Ruby control flow', () => {
+  const source =
+    'e=Enumerator.new{|y|p y.yield(1)};e.feed(7);p e.peek_values,e.next_values;begin;e.next;rescue StopIteration;end;class C;include Enumerable;def each;yield 1;end;def rewind;$rewound=true;end;end;v=C.new.to_enum;v.next;v.rewind;p $rewound';
+  expect(run(source)).toMatchObject({ stdout: '[1]\n[1]\n7\ntrue\n' });
+});
+
+test('Regexp option constants construct patterns with matching option bits', () => {
+  expect(
+    run(
+      'p Regexp::IGNORECASE,Regexp::EXTENDED,Regexp::MULTILINE,Regexp.new("a+",Regexp::IGNORECASE).options,Regexp.new("a+",Regexp::IGNORECASE)=~"AA"'
+    )
+  ).toMatchObject({
+    stdout: '1\n2\n4\n1\n0\n',
+  });
+});
+
+test('named Structs register constants and iterate live member values', () => {
+  const source =
+    'S=Struct.new("Example",:a,:b);s=S.new(1,2);seen=[];s.each{|v|seen<<v;s.b=3 if v==1};p S.name,Struct::Example.equal?(S),seen';
+  expect(run(source)).toMatchObject({ stdout: '"Struct::Example"\ntrue\n[1, 3]\n' });
+});
+
+test('Struct and Data to_h validate and apply transformed pairs', () => {
+  expect(
+    run('S=Struct.new(:a);p S.new(1).to_h{|k,v|[v,k]};D=Data.define(:a);p D.new(2).to_h{|k,v|[v,k]}')
+  ).toMatchObject({
+    stdout: '{1 => :a}\n{2 => :a}\n',
+  });
+  expect(run('Struct.new(:a).new(1).to_h{|k,v|[k]}')).toMatchObject({
+    uncaughtException: expect.stringContaining('element has wrong array length'),
+  });
+});
+
+test('cyclic Struct comparisons and hashes remain bounded', () => {
+  expect(run('C=Struct.new(:a);s=C.new;s.a=s;t=C.new;t.a=t;p s==t;s.hash')).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\n',
+  });
+  expect(run('C=Struct.new(:a);a=0;b=0;600.times{a=C.new(a);b=C.new(b)};p a==b')).toMatchObject({
+    kind: 'limitExceeded',
+    limit: 'output',
+  });
+});
+
+test('Data copies remain frozen and Rational copies preserve identity', () => {
+  expect(
+    run(
+      'D=Data.define(:a);d=D.new(1);r=Rational(1,2);p d.dup.frozen?,d.clone(freeze:false).frozen?,r.dup.equal?(r),r.clone.equal?(r)'
+    )
+  ).toMatchObject({
+    stdout: 'true\ntrue\ntrue\ntrue\n',
+  });
+});
+
+test('Regexp bang substitutions check frozen state and match success', () => {
+  expect(run('s="x";p s.sub!(/x/,"x"),s.gsub!(/z/,"y")')).toMatchObject({ stdout: '"x"\nnil\n' });
+  expect(run('s="a".freeze;s.gsub!(/x/,"y")')).toMatchObject({
+    uncaughtException: expect.stringContaining('FrozenError'),
+  });
+  expect(run('s="a";s.gsub!(/a/){s.freeze;"x"}')).toMatchObject({
+    uncaughtException: expect.stringContaining('FrozenError'),
+  });
+});
+
+test('Regexp substitution enforces cumulative output storage', () => {
+  expect(run('("a"*1000).gsub(/a/,"x"*1100)')).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+});

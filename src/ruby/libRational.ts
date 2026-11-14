@@ -4,7 +4,7 @@ import { argumentError, floatDomainError, typeError, zeroDivisionError } from '.
 import { exactDecimal } from './floatFormat';
 import { callMethod, type Gen } from './interp';
 import { NIL, RArray, RObject, RString, type Value } from './objects';
-import { rt } from './runtime';
+import { rt, UnsupportedFeatureError } from './runtime';
 import { arr, realClassOf, str } from './values';
 
 /** A Rational's value in lowest terms, with a positive denominator. */
@@ -192,6 +192,9 @@ def('Integer', 'quo', 1, function* (self: bigint, [other]) {
   return yield* arithmetic(makeRational(self, 1n), other, '/');
 });
 def('Float', 'to_r', 0, (self: number) => floatToRational(self));
+def('Float', 'rationalize', [0, 1], () => {
+  throw new UnsupportedFeatureError('Float#rationalize（有理数）');
+});
 
 /** `Rational(...)`, which reads Integers, Rationals, Floats, and strings such as `"1/3"`. */
 function* rationalOf(value: Value): Gen<RObject> {

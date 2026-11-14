@@ -1,13 +1,15 @@
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { addressOf, inspect, rEql, rEquals, toIndex } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, indexError, nameError, typeError } from './errors';
 import { hashKeyOf, hashSet } from './hashes';
 import { addMethod, callBlock, callMethod, callProc, type Gen, invoke, methodMissing } from './interp';
+import { tryAry } from './libArray';
 import { makeEnumerator } from './libEnumerator';
 import { nameOf } from './libMeta';
-import { NIL, RClass, type RHash, RObject, RString, RSymbol, type Value } from './objects';
+import { NIL, RArray, RClass, type RHash, RObject, type RProc, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
-import { arr, newHash, realClassOf, snapshot, str, sym, truthy } from './values';
+import { arr, newHash, realClassOf, str, sym, truthy } from './values';
 
 /** The members of a Struct or Data class, and whether its `new` takes keywords only. */
 interface Layout {
@@ -142,6 +144,13 @@ sdef(
     if (args[0] instanceof RString) names = args.slice(1);
     if (names.length === 0 && !keywordInit) throw argumentError('wrong number of arguments (given 0, expected 1+)');
     const cls = yield* newStructClass(rt().c.Struct, yield* membersFrom(names), { keywordInit, kind: 'struct' });
+    if (args[0] instanceof RString) {
+      const name = args[0].s;
+      if (!/^[A-Z][A-Za-z_0-9]*$/.test(name)) throw nameError(`identifier ${name} needs to be constant`);
+      cls.baseName = name;
+      cls.lexicalParent = rt().c.Struct;
+      rt().c.Struct.constants.set(name, cls);
+    }
     if (block) yield* callProc(block, [cls], { self: cls, definee: cls });
     return cls;
   },
@@ -179,20 +188,7 @@ sdef('Struct', 'members', 0, (self: RClass) => arr(layoutOf(self).members.map((n
 sdef('Struct', 'keyword_init?', 0, (self: RClass) => layoutOf(self).keywordInit ?? NIL);
 def('Struct', 'members', 0, (self: RObject) => arr(layoutOf(self.cls).members.map((name) => sym(name))));
 def('Struct', ['to_a', 'deconstruct', 'values'], 0, (self: RObject) => arr([...valuesOf(self)]));
-def('Struct', 'to_h', 0, function* (self: RObject, _args, block) {
-  const hash = newHash();
-  const { members } = layoutOf(self.cls);
-  for (const [index, name] of members.entries()) {
-    if (block) {
-      const pair = yield* callBlock(block, [sym(name), valuesOf(self)[index]]);
-      const items = (pair as { items?: Value[] }).items ?? [];
-      yield* hashSet(hash, items[0] ?? NIL, items[1] ?? NIL);
-    } else {
-      yield* hashSet(hash, sym(name), valuesOf(self)[index]);
-    }
-  }
-  return hash;
-});
+def('Struct', 'to_h', 0, (self: RObject, _args, block) => structToHash(self, block));
 def('Struct', 'deconstruct_keys', 1, function* (self: RObject) {
   const hash = newHash();
   for (const [index, name] of layoutOf(self.cls).members.entries())
@@ -209,8 +205,7 @@ def('Struct', '[]=', 2, function* (self: RObject, [key, value]) {
 });
 def('Struct', ['each'], 0, function* (self: RObject, _args, block) {
   if (!block) return makeEnumerator(self, 'each', []);
-  // The block may change the members, so it walks the values as they were.
-  for (const value of snapshot(valuesOf(self))) yield* callBlock(block, [value], false);
+  for (let index = 0; index < valuesOf(self).length; index++) yield* callBlock(block, [valuesOf(self)[index]], false);
   return self;
 });
 def('Struct', 'each_pair', 0, function* (self: RObject, _args, block) {
@@ -228,20 +223,45 @@ def('Struct', 'dig', [1, -1], function* (self: RObject, args) {
 });
 def('Struct', '==', 1, (self: RObject, [other]) => sameValues(self, other, rEquals));
 def('Struct', 'eql?', 1, (self: RObject, [other]) => sameValues(self, other, rEql));
-def('Struct', 'hash', 0, function* (self: RObject) {
-  let key = className(self.cls);
-  for (const value of valuesOf(self)) key += yield* hashKeyOf(value);
-  return BigInt(key.length);
-});
+def('Struct', 'hash', 0, (self: RObject) => structuralHash(self));
 def('Struct', ['inspect', 'to_s'], 0, (self: RObject) => inspectMembers(self, 'struct'));
 
 function* sameValues(self: RObject, other: Value, equal: (a: Value, b: Value) => Gen<boolean>): Gen<boolean> {
   if (self === other) return true;
   if (!(other instanceof RObject) || realClassOf(other) !== realClassOf(self)) return false;
-  const left = valuesOf(self);
-  const right = valuesOf(other);
-  for (let index = 0; index < left.length; index++) if (!(yield* equal(left[index], right[index]))) return false;
-  return true;
+  const runtime = rt();
+  const active = runtime.structComparisonPairs.get(self) ?? new Set<RObject>();
+  if (active.has(other)) return true;
+  if (runtime.structComparisonDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
+  runtime.structComparisonDepth++;
+  active.add(other);
+  runtime.structComparisonPairs.set(self, active);
+  try {
+    const left = valuesOf(self);
+    const right = valuesOf(other);
+    for (let index = 0; index < left.length; index++) if (!(yield* equal(left[index], right[index]))) return false;
+    return true;
+  } finally {
+    runtime.structComparisonDepth--;
+    active.delete(other);
+    if (active.size === 0) runtime.structComparisonPairs.delete(self);
+  }
+}
+
+function* structuralHash(self: RObject): Gen<bigint> {
+  const runtime = rt();
+  if (runtime.structHashing.has(self)) return 0n;
+  if (runtime.structHashDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
+  runtime.structHashDepth++;
+  runtime.structHashing.add(self);
+  try {
+    let key = className(self.cls);
+    for (const value of valuesOf(self)) key += yield* hashKeyOf(value);
+    return BigInt(key.length);
+  } finally {
+    runtime.structHashDepth--;
+    runtime.structHashing.delete(self);
+  }
 }
 
 function className(cls: RClass): string {
@@ -327,12 +347,25 @@ def(
 );
 sdef('Data', 'members', 0, (self: RClass) => arr(layoutOf(self).members.map((name) => sym(name))));
 def('Data', 'members', 0, (self: RObject) => arr(layoutOf(self.cls).members.map((name) => sym(name))));
-def('Data', 'to_h', 0, function* (self: RObject) {
+def('Data', 'to_h', 0, (self: RObject, _args, block) => structToHash(self, block));
+
+function* structToHash(self: RObject, block: RProc | undefined): Gen<RHash> {
   const hash = newHash();
-  for (const [index, name] of layoutOf(self.cls).members.entries())
-    yield* hashSet(hash, sym(name), valuesOf(self)[index]);
+  for (const [index, name] of layoutOf(self.cls).members.entries()) {
+    const value = valuesOf(self)[index];
+    if (!block) {
+      yield* hashSet(hash, sym(name), value);
+      continue;
+    }
+    const converted = yield* callBlock(block, [sym(name), value]);
+    const pair = converted instanceof RArray ? converted : yield* tryAry(converted);
+    if (!pair) throw typeError(`wrong element type ${realClassOf(converted).name} (expected array)`);
+    if (pair.items.length !== 2)
+      throw argumentError(`element has wrong array length (expected 2, was ${pair.items.length})`);
+    yield* hashSet(hash, pair.items[0], pair.items[1]);
+  }
   return hash;
-});
+}
 def(
   'Data',
   'with',
@@ -349,11 +382,7 @@ def(
 );
 def('Data', '==', 1, (self: RObject, [other]) => sameValues(self, other, rEquals));
 def('Data', 'eql?', 1, (self: RObject, [other]) => sameValues(self, other, rEql));
-def('Data', 'hash', 0, function* (self: RObject) {
-  let key = className(self.cls);
-  for (const value of valuesOf(self)) key += yield* hashKeyOf(value);
-  return BigInt(key.length);
-});
+def('Data', 'hash', 0, (self: RObject) => structuralHash(self));
 def('Data', ['inspect', 'to_s'], 0, (self: RObject) => inspectMembers(self, 'data'));
 def('Data', 'deconstruct_keys', 1, function* (self: RObject) {
   const hash = newHash();

@@ -1,10 +1,12 @@
 // code-gauge-allow-file fileNcss 558 -- The libRegexp module keeps one concern's cases together.
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { inspect, rEquals, strInspect, toIndex, toS, toStr } from './conversions';
 import { def, extend, sdef } from './define';
-import { argumentError, indexError, rubyError, typeError } from './errors';
+import { argumentError, frozenError, indexError, rubyError, typeError } from './errors';
 import { hashGet, hashSet } from './hashes';
 import { callBlock, callMethod, type Gen } from './interp';
 import { makeEnumerator } from './libEnumerator';
+import { setText } from './libString';
 import { type NativeFn, NIL, RArray, RHash, RObject, type RProc, RString, RSymbol, type Value } from './objects';
 import { regexpCaptureNames } from './regexpCaptureNames';
 import { type Frame, rt, UnsupportedFeatureError } from './runtime';
@@ -589,10 +591,17 @@ function* substituteRegexp(
   replacement: Value | undefined,
   block: RProc | undefined,
   global: boolean
-): Gen<string> {
+): Gen<{ text: string; matched: boolean }> {
   const text = self.s;
   const matches = global ? allMatches(regexp, text) : [execAt(regexp, text, 0)].filter((m): m is MatchState => !!m);
-  let result = '';
+  const chunks: string[] = [];
+  let length = 0;
+  const append = (part: string): void => {
+    length += part.length;
+    if (length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+    rt().spend(Math.ceil(part.length / 256));
+    chunks.push(part);
+  };
   let position = 0;
   for (const state of matches) {
     const [from, to] = state.groups[0] as readonly [number, number];
@@ -606,11 +615,13 @@ function* substituteRegexp(
       setLastMatch(state);
       piece = yield* toS(yield* callBlock(block as RProc, [str(text.slice(from, to))]));
     }
-    result += text.slice(position, from) + piece;
+    append(text.slice(position, from));
+    append(piece);
     position = to;
   }
   setLastMatch(matches.at(-1));
-  return result + text.slice(position);
+  append(text.slice(position));
+  return { text: chunks.join(''), matched: matches.length > 0 };
 }
 
 function wrapFirst(
@@ -630,14 +641,15 @@ for (const [name, global, bang] of [
   ['gsub!', true, true],
 ] as const) {
   wrapFirst(name, function* (self, args, block) {
+    if (bang && self.frozen) throw frozenError(self, strInspect(self.s));
     if (args.length === 1 && !block) {
       if (global && !bang) return makeEnumerator(self, name, args);
       throw argumentError('wrong number of arguments (given 1, expected 2)');
     }
     const result = yield* substituteRegexp(self, args[0] as RObject, args[1], block, global);
-    if (!bang) return str(result);
-    if (result === self.s) return NIL;
-    self.s = result;
+    if (!bang) return str(result.text);
+    if (!result.matched) return NIL;
+    setText(self, result.text);
     return self;
   });
 }

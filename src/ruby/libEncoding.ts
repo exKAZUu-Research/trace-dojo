@@ -2,7 +2,7 @@ import { def } from './define';
 import { callProc, type Gen, requireBlock } from './interp';
 import { NIL, RObject, type RString, type Value } from './objects';
 import { ExitSignal, rt, RubyError, type Runtime } from './runtime';
-import { arr, str } from './values';
+import { arr, str, stringBytes } from './values';
 
 /** Creates the encodings a program can name: strings here are UTF-8, or ASCII-8BIT when they hold bytes. */
 export function installEncodings(runtime: Runtime): void {
@@ -33,9 +33,18 @@ def(
   'String',
   'encoding',
   0,
-  (self: RString) => rt().c.Encoding.constants.get(self.binary ? 'ASCII_8BIT' : 'UTF_8') as Value
+  (self: RString) =>
+    rt().c.Encoding.constants.get(self.binary ? 'ASCII_8BIT' : self.usAscii ? 'US_ASCII' : 'UTF_8') as Value
 );
-def('String', 'valid_encoding?', 0, () => true);
+def('String', 'valid_encoding?', 0, (self: RString) => {
+  if (self.binary || !self.rawBytes) return true;
+  try {
+    new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(stringBytes(self));
+    return true;
+  } catch {
+    return false;
+  }
+});
 
 def(
   'Kernel',
