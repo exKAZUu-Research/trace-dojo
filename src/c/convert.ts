@@ -774,7 +774,7 @@ export class Converter {
         kind: 'case',
         ...(value ? { value } : {}),
         ...(endValue ? { endValue } : {}),
-        body: (first as Statement | Declaration | undefined) ?? { kind: 'expression', row },
+        body: first ?? { kind: 'expression', row },
         row,
       };
       return [labeled, ...rest];
@@ -939,7 +939,7 @@ export class Converter {
         return {
           kind: 'labeled',
           label,
-          body: (converted[0] as Statement | Declaration | undefined) ?? { kind: 'expression', row },
+          body: converted[0] ?? { kind: 'expression', row },
           row,
         };
       }

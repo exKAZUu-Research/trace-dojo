@@ -41,14 +41,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   // code-gauge-allow functionCognitiveComplexity 25 -- Running a block from a label, and leaving its scope.
   // code-gauge-allow functionNcss 40 -- Label dispatch, lexical lifetime and completion share the child list.
   private blockItems(items: (Statement | Declaration | StaticAssert)[], endsScope: boolean): Compiled {
-    const children = items.map((item): Compiled => {
-      if (item.kind === 'declaration') return this.localDeclaration(item);
-      if (item.kind === 'staticAssert') {
-        this.staticAssert(item);
-        return NOOP;
-      }
-      return this.statement(item);
-    });
+    const children = items.map((item) => this.statementOrDeclaration(item));
     const locals = this.scopeLocals().filter((local) => !local.isParameter);
     const labels = new Set<number>();
     const childOfLabel = new Map<number, number>();
@@ -191,7 +184,11 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
   }
 
-  private statementOrDeclaration(item: Statement | Declaration): Compiled {
+  private statementOrDeclaration(item: Statement | Declaration | StaticAssert): Compiled {
+    if (item.kind === 'staticAssert') {
+      this.staticAssert(item);
+      return NOOP;
+    }
     return item.kind === 'declaration' ? this.localDeclaration(item) : this.statement(item);
   }
 
@@ -208,7 +205,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   private variablyModifiedDeclarations(): Set<Entity> {
     const declarations = new Set<Entity>();
     for (let scope: typeof this.scope | undefined = this.scope; scope; scope = scope.parent)
-      for (const entity of scope.ordinary.values()) if (isVariablyModified(entity.type)) declarations.add(entity);
+      for (const [name, entity] of scope.ordinary)
+        if (!name.startsWith('\0') && isVariablyModified(entity.type)) declarations.add(entity);
     return declarations;
   }
 

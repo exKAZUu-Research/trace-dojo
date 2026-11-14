@@ -126,9 +126,10 @@ test('jumps within a VLA scope and jumps out of it remain valid', () => {
       `#include <stdio.h>
 int main(void) { int n=2; { int a[n]; a[0]=0;
 L: a[0]++; if (a[0]<3) goto L;
-printf("%d",a[0]); goto OUT; } OUT: puts(" ok"); }`
+printf("%d",a[0]); goto OUT; } OUT: puts(" ok");
+int fixed[3]; goto LITERAL; (int(*)[n]){&fixed}; LITERAL: puts("literal"); }`
     )
-  ).toMatchObject({ kind: 'executed', stdout: '3 ok\n', uncaughtException: undefined });
+  ).toMatchObject({ kind: 'executed', stdout: '3 ok\nliteral\n', uncaughtException: undefined });
 });
 
 test('caller-built time fields outside name tables use Apple libc placeholders', () => {
@@ -172,4 +173,40 @@ int main(void) {
       },
     },
   });
+});
+
+test('static assertions after case, default and ordinary labels compile as declarations', () => {
+  const source = `#include <stdio.h>
+int main(void) {
+ switch(1) { case 1: _Static_assert(1,"x"); puts("case"); break; }
+ switch(0) { default: _Static_assert(sizeof(int)==4,"x"); puts("default"); }
+ again: _Static_assert(1,"x"); puts("label");
+}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'case\ndefault\nlabel\n',
+    uncaughtException: undefined,
+  });
+  for (const label of ['case 1:', 'default:', 'again:']) {
+    const body =
+      label === 'again:'
+        ? `${label} _Static_assert(0,"failure");`
+        : `switch(1) { ${label} _Static_assert(0,"failure"); }`;
+    expect(executeProgram('c', `int main(void) { ${body} }`)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('compound literals reject VLA objects while evaluating bounds of pointer types', () => {
+  for (const type of ['int[n]', 'int[2][n]']) {
+    expect(executeProgram('c', `int main(void) { int n=3; void*p=(${type}){1,2}; }`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+  expect(
+    executeProgram(
+      'c',
+      `#include <stdio.h>
+int main(void) { int n=3; int a[2][3]; int (*p)[n]=(int(*)[n++]){a}; printf("%zu %d",sizeof *p,n); }`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '12 4', uncaughtException: undefined });
 });

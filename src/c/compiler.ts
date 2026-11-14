@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 784 -- Declaration and initializer compilation share symbol and type state.
+// code-gauge-allow-file fileNcss 788 -- Declaration and initializer compilation share symbol and type state.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type { Value } from './arith';
 import type {
@@ -718,6 +718,8 @@ export class Compiler extends StatementCompiler {
   protected compoundLiteral(expression: Extract<Expression, { kind: 'compoundLiteral' }>): Operand {
     const { row, init } = expression;
     let type = this.typeOfName(expression.typeName);
+    const lengths = this.takePendingVla();
+    if (hasVla(type)) this.error(row, '複合リテラルの型には、可変長配列は指定できません。');
     if (type.kind === 'array' && type.length === undefined)
       type = { ...type, length: this.initializerLength(type, init) };
     if (type.kind === 'function' || type.kind === 'void' || !isComplete(type)) {
@@ -738,6 +740,7 @@ export class Compiler extends StatementCompiler {
     const writer = this.initializer(type, init, false);
     const index = local.index;
     return this.memoryOperand(type, (frame) => {
+      lengths?.(frame);
       const address = frame.bases[index];
       writer(frame, address);
       return address;

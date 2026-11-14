@@ -131,12 +131,12 @@ export type Statement =
     } & Span)
   | ({ kind: 'switch'; condition: Expression; body: Statement } & Span)
   /** `case value:` or `default:` (no value), labeling the statement after it. */
-  | ({ kind: 'case'; value?: Expression; endValue?: Expression; body: Statement | Declaration } & Span)
+  | ({ kind: 'case'; value?: Expression; endValue?: Expression; body: Statement | Declaration | StaticAssert } & Span)
   | ({ kind: 'break' } & Span)
   | ({ kind: 'continue' } & Span)
   | ({ kind: 'return'; value?: Expression } & Span)
   | ({ kind: 'goto'; label: string } & Span)
-  | ({ kind: 'labeled'; label: string; body: Statement | Declaration } & Span);
+  | ({ kind: 'labeled'; label: string; body: Statement | Declaration | StaticAssert } & Span);
 
 // Expressions -------------------------------------------------------------------------------------------------------
 

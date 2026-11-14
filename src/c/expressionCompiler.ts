@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 919 -- Expression compilation shares lvalue, conversion and pointer metadata state.
+// code-gauge-allow-file fileNcss 921 -- Expression compilation shares lvalue, conversion and pointer metadata state.
 import {
   binaryOperation,
   complement,
@@ -287,11 +287,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (!this.scope.lookup(STDARG_MARKER)) this.undeclaredFunction('va_arg', row);
     const list = this.vaList(expression.operand, row, 'va_arg');
     const type = unqualified(this.typeOfName(expression.typeName));
+    const lengths = this.takePendingVla();
     if (type.kind === 'void' || type.kind === 'array' || type.kind === 'function' || !isComplete(type)) {
       this.error(row, `va_arg では ${typeName(type)} の値は読めません。`);
     }
     const size = sizeOf(type);
     const operand = this.memoryOperand(type, (frame) => {
+      lengths?.(frame);
       const location = list.resolve(frame);
       const address = location.load() as number;
       checkVararg(frame, address, type);
