@@ -1647,6 +1647,98 @@ test('Array conversion callbacks cannot mutate frozen receivers', () => {
   });
 });
 
+test('Array slice assignment resolves negative starts after replacement conversion', () => {
+  expect(
+    run('class X;def to_ary;$a.clear;[9];end;end;$a=[1,2,3];begin;$a[-1,1]=X.new;rescue=>e;p e.class;end;p $a')
+  ).toMatchObject({
+    stdout: 'IndexError\n[]\n',
+  });
+});
+
+test('Array shift and slice reject freezing during selector conversion', () => {
+  expect(
+    run('class I;def to_int;$a.freeze;1;end;end;$a=[1,2,3];begin;$a.shift(I.new);rescue=>e;p e.class;end;p $a')
+  ).toMatchObject({
+    stdout: 'FrozenError\n[1, 2, 3]\n',
+  });
+  expect(
+    run('class I;def to_int;$a.freeze;0;end;end;$a=[1,2,3];begin;$a.slice!(I.new);rescue=>e;p e.class;end;p $a')
+  ).toMatchObject({
+    stdout: 'FrozenError\n[1, 2, 3]\n',
+  });
+});
+
+test('Array insert preserves exact long index errors', () => {
+  expect(run('begin;[1].insert(-9007199254740993,9);rescue=>e;p e.message;end')).toMatchObject({
+    stdout: '"index -9007199254740993 too small for array; minimum: -2"\n',
+  });
+  expect(run('begin;[1].insert(9223372036854775807,9);rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'IndexError\n',
+  });
+});
+
+test('Array fill checks freezing before expansion and permits block freezing', () => {
+  expect(
+    run('class I;def to_int;$a.freeze;3;end;end;$a=[1];begin;$a.fill(9,I.new,1);rescue=>e;p e.class;end;p $a')
+  ).toMatchObject({
+    stdout: 'FrozenError\n[1]\n',
+  });
+  expect(run('$a=[1,2];$a.fill{|i|$a.freeze;9};p $a')).toMatchObject({ stdout: '[9, 9]\n' });
+});
+
+test('Array set operators require one operand', () => {
+  expect(run('begin;[1].-;rescue=>e;p e.class;end;begin;[1].|([2],[3]);rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'ArgumentError\nArgumentError\n',
+  });
+});
+
+test('Array set operations use eql without hashing small operands', () => {
+  const source = `class K
+  def hash; raise 'hash called'; end
+  def eql?(other); true; end
+end
+a=K.new;b=K.new
+p ([a]-[b]).size,([a]&[b]).size,([a]|[b]).size
+p [a,a].intersection.size
+p ([a]*16-[b]).size,([a]*16&[b]).size
+begin; [a]*17&[b]; rescue=>e; p e.message; end`;
+  expect(run(source)).toMatchObject({ stdout: '0\n1\n1\n2\n0\n1\n"hash called"\n' });
+});
+
+test('Array conversions observe current operands and row widths', () => {
+  expect(run('class X;def to_ary;$a.replace([[9],[8]]);[1];end;end;$a=[X.new,[2]];p $a.transpose')).toMatchObject({
+    stdout: '[[1, 8]]\n',
+  });
+  expect(
+    run('class A;def to_ary;puts :called;[3];end;end;begin;[[1],[2,3],A.new].transpose;rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'IndexError\n',
+  });
+  expect(run('class X;def to_ary;$b[1]=9;[3];end;end;$b=[1,2];p [0].product($b,X.new)')).toMatchObject({
+    stdout: '[[0, 1, 3], [0, 9, 3]]\n',
+  });
+  expect(run('class A;private;def to_ary;[1,2];end;end;p [A.new].assoc(1),[A.new].rassoc(2)')).toMatchObject({
+    stdout: '[1, 2]\n[1, 2]\n',
+  });
+});
+
+test('Array mutation and selection follow callback boundaries', () => {
+  expect(run('$a=[3,2,1];p $a.sort_by!{|x|$a.clear if x==3;x},$a')).toMatchObject({ stdout: '[3]\n[3]\n' });
+  expect(run('class A;def to_ary;$a.clear;[];end;end;$a=[A.new];p $a.flatten!.equal?($a)')).toMatchObject({
+    stdout: 'true\n',
+  });
+  expect(run('begin;[1].repeated_combination(4294967296){break};rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'ArgumentError\n',
+  });
+  expect(run('begin;[1].repeated_permutation(4294967296){break};rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'ArgumentError\n',
+  });
+  expect(run('begin;[1,2].sample(random:Random.new(1),foo:2);rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'ArgumentError\n',
+  });
+  expect(run('begin;[1,2].shuffle(3);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'ArgumentError\n' });
+});
+
 test('Array reads current contents after conversion callbacks', () => {
   expect(run('class X;def to_ary;$a.clear;[9];end;end;$a=[1,2];b=$a+X.new;p b,$a')).toMatchObject({
     stdout: '[9]\n[]\n',

@@ -23,7 +23,7 @@ import {
   runtimeError,
   typeError,
 } from './errors';
-import { hashGet, hashSet, structuralHashValue } from './hashes';
+import { hashDelete, hashGet, hashSet, structuralHashValue } from './hashes';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import {
   blockCompare,
@@ -178,10 +178,12 @@ def('Array', '[]=', [2, 3], function* (self: RArray, args) {
   }
   let start: number;
   let count: number;
+  let startIndex: bigint | undefined;
   if (args.length === 3) {
     const { integer } = yield* toIndexExact(args[0]);
+    startIndex = integer;
     count = yield* toIndex(args[1]);
-    start = assignmentIndexExact(self, integer);
+    start = 0;
     if (count < 0) throw indexError(`negative length (${count})`);
   } else {
     const range = args[0] as RRange;
@@ -199,6 +201,7 @@ def('Array', '[]=', [2, 3], function* (self: RArray, args) {
   }
   const converted = yield* tryAry(value);
   const replacement = converted ? [...converted.items] : [value];
+  if (startIndex !== undefined) start = assignmentIndexExact(self, startIndex);
   const filled = Math.max(self.items.length, start);
   const removed = Math.min(count, Math.max(0, filled - start));
   grow(filled - removed + replacement.length, self);
@@ -323,6 +326,7 @@ def('Array', 'shift', [0, 1], function* (self: RArray, args) {
   if (args.length === 0) return self.items.shift() ?? NIL;
   const count = yield* toIndex(args[0]);
   if (count < 0) throw argumentError('negative array size');
+  if (count > 0 && self.items.length > 0) yield* modify(self);
   return arr(self.items.splice(0, count));
 });
 def('Array', ['unshift', 'prepend'], [0, -1], function* (self: RArray, args) {
@@ -333,15 +337,15 @@ def('Array', ['unshift', 'prepend'], [0, -1], function* (self: RArray, args) {
 });
 def('Array', 'insert', [1, -1], function* (self: RArray, args) {
   yield* modify(self);
-  let index = yield* toIndex(args[0]);
+  const { integer } = yield* toIndexExact(args[0]);
   if (args.length === 1) return self;
-  if (index < 0) {
-    index += self.items.length + 1;
-    if (index < 0)
-      throw indexError(
-        `index ${index - self.items.length - 1} too small for array; minimum: -${self.items.length + 1}`
-      );
+  let position = integer;
+  if (position < 0n) {
+    position += BigInt(self.items.length + 1);
+    if (position < 0n) throw indexError(`index ${integer} too small for array; minimum: -${self.items.length + 1}`);
   }
+  if (position > BigInt(Number.MAX_SAFE_INTEGER)) throw indexError(`index ${integer} too big`);
+  const index = Number(position);
   grow(Math.max(index, self.items.length) + args.length - 1, self);
   yield* modify(self);
   while (self.items.length < index) self.items.push(NIL);
@@ -351,11 +355,16 @@ def('Array', 'insert', [1, -1], function* (self: RArray, args) {
 def('Array', 'concat', [0, -1], function* (self: RArray, args) {
   yield* modify(self);
   const additions: Value[] = [];
-  for (const arg of args) for (const item of (yield* toAry(arg)).items) additions.push(item);
-  grow(self.items.length + additions.length, self);
-  yield* modify(self);
-  for (const item of additions) self.items.push(item);
-  return self;
+  rt().heldArrays.push(additions);
+  try {
+    for (const arg of args) for (const item of (yield* toAry(arg)).items) additions.push(item);
+    grow(self.items.length + additions.length, self);
+    yield* modify(self);
+    for (const item of additions) self.items.push(item);
+    return self;
+  } finally {
+    rt().heldArrays.pop();
+  }
 });
 def('Array', 'replace', 1, function* (self: RArray, [other]) {
   yield* modify(self);
@@ -400,7 +409,10 @@ def('Array', 'delete_at', 1, function* (self: RArray, [indexValue]) {
 def('Array', 'slice!', [1, 2], function* (self: RArray, args) {
   yield* modify(self);
   const { value, start, count } = yield* resolvedSlice(self, args);
-  if (start !== undefined) self.items.splice(start, count ?? 0);
+  if (start !== undefined && count !== undefined && count > 0) {
+    yield* modify(self);
+    self.items.splice(start, count);
+  }
   return value;
 });
 
@@ -469,7 +481,7 @@ def('Array', 'compact!', 0, function* (self: RArray) {
   return self;
 });
 
-function* flatten(source: RArray, depth: number, seen: Set<RArray>): Gen<Value[]> {
+function* flatten(source: RArray, depth: number, seen: Set<RArray>, expanded?: { value: boolean }): Gen<Value[]> {
   const result: Value[] = [];
   rt().heldArrays.push(result);
   const stack: { source: RArray; index: number; depth: number; owner?: RArray }[] = [{ source, index: 0, depth }];
@@ -492,6 +504,7 @@ function* flatten(source: RArray, depth: number, seen: Set<RArray>): Gen<Value[]
         grow(result.length);
         continue;
       }
+      if (expanded) expanded.value = true;
       if (seen.has(nested)) throw argumentError('tried to flatten recursive array');
       seen.add(nested);
       rt().held.push(nested);
@@ -512,12 +525,12 @@ def('Array', 'flatten', [0, 1], function* (self: RArray, args) {
 def('Array', 'flatten!', [0, 1], function* (self: RArray, args) {
   yield* modify(self);
   const depth = args.length > 0 && args[0] !== NIL ? yield* toIndex(args[0]) : -1;
-  const flattened = yield* flatten(self, depth, new Set([self]));
-  const changed = flattened.length !== self.items.length || flattened.some((item, index) => item !== self.items[index]);
+  const expanded = { value: false };
+  const flattened = yield* flatten(self, depth, new Set([self]), expanded);
   grow(flattened.length, self);
   yield* modify(self);
   self.items = flattened;
-  return changed ? self : NIL;
+  return expanded.value ? self : NIL;
 });
 def('Array', 'uniq', 0, function* (self: RArray, _args, block) {
   if (self.items.length < 2) return arr([...self.items]);
@@ -570,7 +583,7 @@ def('Array', 'sort!', 0, function* (self: RArray, _args, block) {
 def('Array', 'sort_by!', 0, function* (self: RArray, _args, block) {
   if (!block) return sizedEnumerator(self, 'sort_by!', [], () => BigInt(self.items.length));
   yield* modify(self);
-  const sorted = yield* sortBy(self.items, block);
+  const sorted = yield* sortBy(self, block);
   yield* modify(self);
   self.items = sorted;
   return self;
@@ -600,12 +613,12 @@ def('Array', 'fill', [0, 3], function* (self: RArray, args, block) {
     if (values.length > 1 && values[1] !== NIL) end = start + (yield* toIndex(values[1]));
     else if (values.length > 0) end = self.items.length;
   }
+  yield* modify(self);
   grow(end, self);
   while (self.items.length < end) self.items.push(NIL);
   for (let index = start; index < end && index < self.items.length; index++) {
     const next = block ? yield* call(block, BigInt(index)) : (value as Value);
     if (index >= self.items.length) break;
-    yield* modify(self);
     self.items[index] = next;
   }
   return self;
@@ -619,13 +632,46 @@ def('Array', '+', 1, function* (self: RArray, [other]) {
   grow(items.length);
   return arr(items);
 });
-def('Array', ['-', 'difference'], [0, -1], function* (self: RArray, others) {
-  const excluded = newHash();
-  for (const other of others) for (const item of (yield* toAry(other)).items) yield* hashSet(excluded, item, true);
-  const result: Value[] = [];
-  for (const item of self.items) if (!(yield* hashGet(excluded, item))) result.push(item);
-  return arr(result);
-});
+function* arrayDifference(self: RArray, others: Value[]): Gen {
+  const held = rt().held.length;
+  const heldArrays = rt().heldArrays.length;
+  try {
+    const exclusions: (RArray | RHash)[] = [];
+    for (const other of others) {
+      const array = yield* toAry(other);
+      rt().held.push(array);
+      if (self.items.length > 16 && array.items.length > 16) {
+        const hash = newHash();
+        rt().held.push(hash);
+        for (const item of array.items) yield* hashSet(hash, item, true);
+        exclusions.push(hash);
+      } else exclusions.push(array);
+    }
+    const result: Value[] = [];
+    rt().heldArrays.push(result);
+    for (let index = 0; index < self.items.length; index++) {
+      const item = self.items[index];
+      let excluded = false;
+      for (const other of exclusions) {
+        if (other instanceof RArray ? yield* includesByEql(other.items, item) : !!(yield* hashGet(other, item))) {
+          excluded = true;
+          break;
+        }
+      }
+      if (!excluded) result.push(item);
+    }
+    return arr(result);
+  } finally {
+    rt().heldArrays.length = heldArrays;
+    rt().held.length = held;
+  }
+}
+function* includesByEql(items: Value[], candidate: Value): Gen<boolean> {
+  for (const item of items) if (candidate === item || (yield* rEql(candidate, item))) return true;
+  return false;
+}
+def('Array', '-', 1, arrayDifference);
+def('Array', 'difference', [0, -1], arrayDifference);
 def('Array', '*', 1, function* (self: RArray, [count]) {
   if (count instanceof RString) return yield* join(self, count);
   if (respondsTo(count, 'to_str', true)) {
@@ -644,7 +690,7 @@ def('Array', '*', 1, function* (self: RArray, [count]) {
   for (let index = 0; index < times; index++) for (const item of self.items) items.push(item);
   return arr(items);
 });
-def('Array', ['&', 'intersection'], [0, -1], function* (self: RArray, others) {
+function* arrayIntersection(self: RArray, others: Value[]): Gen {
   const held = rt().held.length;
   const heldArrays = rt().heldArrays.length;
   try {
@@ -654,15 +700,20 @@ def('Array', ['&', 'intersection'], [0, -1], function* (self: RArray, others) {
       arrays.push(array);
       rt().held.push(array);
     }
-    let result = yield* uniqValues(self, undefined);
+    let result = [...self.items];
     rt().heldArrays.push(result);
     for (const array of arrays) {
-      const keys = newHash();
-      rt().held.push(keys);
-      for (const item of array.items) yield* hashSet(keys, item, true);
       const kept: Value[] = [];
       rt().heldArrays.push(kept);
-      for (const item of result) if (yield* hashGet(keys, item)) kept.push(item);
+      if (result.length <= 16 && array.items.length <= 16) {
+        for (const item of result)
+          if ((yield* includesByEql(array.items, item)) && !(yield* includesByEql(kept, item))) kept.push(item);
+      } else {
+        const keys = newHash();
+        rt().held.push(keys);
+        for (const item of array.items) yield* hashSet(keys, item, true);
+        for (const item of result) if (yield* hashDelete(keys, item)) kept.push(item);
+      }
       result = kept;
     }
     return arr(result);
@@ -670,9 +721,12 @@ def('Array', ['&', 'intersection'], [0, -1], function* (self: RArray, others) {
     rt().heldArrays.length = heldArrays;
     rt().held.length = held;
   }
-});
-def('Array', ['|', 'union'], [0, -1], function* (self: RArray, others) {
+}
+def('Array', '&', 1, arrayIntersection);
+def('Array', 'intersection', [0, -1], arrayIntersection);
+function* arrayUnion(self: RArray, others: Value[]): Gen {
   const held = rt().held.length;
+  const heldArrays = rt().heldArrays.length;
   try {
     const arrays: RArray[] = [];
     for (const other of others) {
@@ -682,11 +736,18 @@ def('Array', ['|', 'union'], [0, -1], function* (self: RArray, others) {
     }
     const all = [...self.items];
     for (const array of arrays) for (const item of array.items) all.push(item);
-    return arr(yield* uniqValues(all, undefined));
+    if (all.length > 16) return arr(yield* uniqValues(all, undefined));
+    const result: Value[] = [];
+    rt().heldArrays.push(result);
+    for (const item of all) if (!(yield* includesByEql(result, item))) result.push(item);
+    return arr(result);
   } finally {
+    rt().heldArrays.length = heldArrays;
     rt().held.length = held;
   }
-});
+}
+def('Array', '|', 1, arrayUnion);
+def('Array', 'union', [0, -1], arrayUnion);
 def('Array', 'intersect?', 1, function* (self: RArray, [other]) {
   const keys = newHash();
   for (const item of (yield* toAry(other)).items) yield* hashSet(keys, item, true);
@@ -767,15 +828,15 @@ function joinStringConversionError(value: Value, converted: Value): unknown {
 }
 def('Array', 'assoc', 1, function* (self: RArray, [key]) {
   for (let index = 0; index < self.items.length; index++) {
-    const item = self.items[index];
-    if (item instanceof RArray && item.items.length > 0 && (yield* rEquals(item.items[0], key))) return item;
+    const item = yield* tryAry(self.items[index]);
+    if (item && item.items.length > 0 && (yield* whileHeld(item, () => rEquals(item.items[0], key)))) return item;
   }
   return NIL;
 });
 def('Array', 'rassoc', 1, function* (self: RArray, [value]) {
   for (let index = 0; index < self.items.length; index++) {
-    const item = self.items[index];
-    if (item instanceof RArray && item.items.length > 1 && (yield* rEquals(item.items[1], value))) return item;
+    const item = yield* tryAry(self.items[index]);
+    if (item && item.items.length > 1 && (yield* whileHeld(item, () => rEquals(item.items[1], value)))) return item;
   }
   return NIL;
 });
@@ -803,18 +864,18 @@ def('Array', 'transpose', 0, function* (self: RArray) {
   const rows: Value[][] = [];
   const held = rt().heldArrays.length;
   try {
-    for (const item of self.items) {
-      const row = [...(yield* toAry(item)).items];
+    const length = self.items.length;
+    let width: number | undefined;
+    for (let index = 0; index < length; index++) {
+      const row = [...(yield* toAry(self.items[index] ?? NIL)).items];
+      width ??= row.length;
+      if (row.length !== width) throw indexError(`element size differs (${row.length} should be ${width})`);
       rows.push(row);
       rt().heldArrays.push(row);
     }
     if (rows.length === 0) return arr([]);
-    const width = rows[0].length;
-    for (const row of rows) {
-      if (row.length !== width) throw indexError(`element size differs (${row.length} should be ${width})`);
-    }
     const result: Value[] = [];
-    for (let column = 0; column < width; column++) result.push(arr(rows.map((row) => row[column])));
+    for (let column = 0; column < (width as number); column++) result.push(arr(rows.map((row) => row[column])));
     return arr(result);
   } finally {
     rt().heldArrays.length = held;
@@ -824,11 +885,18 @@ def('Array', 'zip', [0, -1], function* (self: RArray, others, block) {
   return yield* zipCollections(self, others, block);
 });
 def('Array', 'product', [0, -1], function* (self: RArray, others, block) {
+  const heldValues = rt().held.length;
   const held = rt().heldArrays.length;
   try {
     const arrays: Value[][] = [];
+    const converted: RArray[] = [];
     for (const other of others) {
-      const items = [...(yield* toAry(other)).items];
+      const array = yield* toAry(other);
+      converted.push(array);
+      rt().held.push(array);
+    }
+    for (const array of converted) {
+      const items = [...array.items];
       arrays.push(items);
       rt().heldArrays.push(items);
     }
@@ -861,6 +929,7 @@ def('Array', 'product', [0, -1], function* (self: RArray, others, block) {
     }
     return arr(tuples.map((tuple) => arr(tuple)));
   } finally {
+    rt().held.length = heldValues;
     rt().heldArrays.length = held;
   }
 });
@@ -954,6 +1023,8 @@ def('Array', 'repeated_combination', 1, function* (self: RArray, [sizeValue], bl
   if (!block) return makeEnumerator(self, 'repeated_combination', [sizeValue]);
   const items = [...self.items];
   if (size < 0 || (items.length === 0 && size > 0)) return self;
+  grow(size);
+  rt().chargeSlots(size * 2);
   const indices = Array.from({ length: size }, () => 0);
   rt().heldArrays.push(items);
   try {
@@ -976,6 +1047,8 @@ def('Array', 'repeated_permutation', 1, function* (self: RArray, [sizeValue], bl
   if (!block) return makeEnumerator(self, 'repeated_permutation', [sizeValue]);
   const items = [...self.items];
   if (size < 0 || (items.length === 0 && size > 0)) return self;
+  grow(size);
+  rt().chargeSlots(size * 2);
   const indices = Array.from({ length: size }, () => 0);
   rt().heldArrays.push(items);
   try {
@@ -1176,7 +1249,7 @@ def('Array', 'to_h', 0, function* (self: RArray, _args, block) {
 def(
   'Array',
   'shuffle',
-  [0, 1],
+  0,
   function* (self: RArray, _args, _block, keywords) {
     const items = [...self.items];
     rt().heldArrays.push(items);
@@ -1192,7 +1265,7 @@ def(
 def(
   'Array',
   'shuffle!',
-  [0, 1],
+  0,
   function* (self: RArray, _args, _block, keywords) {
     yield* modify(self);
     yield* shuffle(self.items, yield* randomOption(keywords), self);
@@ -1203,11 +1276,12 @@ def(
 
 function* randomOption(keywords: RHash | undefined): Gen<Value | undefined> {
   if (!keywords) return undefined;
+  let randomizer: Value | undefined;
   for (const entry of keywords.map.values()) {
-    if (entry.key instanceof RSymbol && entry.key.name === 'random') return entry.value;
-    throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
+    if (entry.key instanceof RSymbol && entry.key.name === 'random') randomizer = entry.value;
+    else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
   }
-  return undefined;
+  return randomizer;
 }
 
 function* shuffle(items: Value[], randomizer: Value | undefined, owner?: RArray): Gen<void> {

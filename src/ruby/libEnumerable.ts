@@ -523,12 +523,14 @@ export function* sortValues(items: Value[], block: RProc | undefined): Gen<Value
 }
 
 /** Sorts values by keys a block computes, as `sort_by` does. */
-export function* sortBy(items: Value[], block: RProc): Gen<Value[]> {
+export function* sortBy(source: RArray, block: RProc): Gen<Value[]> {
   const pairs: { key: Value; value: Value }[] = [];
-  const roots = [...items];
+  const roots: Value[] = [];
   rt().heldArrays.push(roots);
   try {
-    for (const value of items) {
+    for (let index = 0; index < source.items.length; index++) {
+      const value = source.items[index];
+      roots.push(value);
       const key = yield* call(block, value);
       roots.push(key);
       pairs.push({ key, value });

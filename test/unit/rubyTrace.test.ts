@@ -93,7 +93,19 @@ test('uniq roots the selected value while its key is hashed', () => {
 });
 
 test('Array intersection roots pending values during key hashing', () => {
-  const program = 'class K;def hash;$a.clear;$b.clear;q=1;0;end;end;$a=[Turtle.new,1];$b=[K.new,$a[0]];c=$a & $b';
+  const program =
+    'class K;def hash;$a.clear;$b.clear;q=1;0;end;end;$a=[Turtle.new,1]+Array.new(20,1);$b=[K.new,$a[0]]+Array.new(20,9);c=$a & $b';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
+test('Array difference roots pending values during key hashing', () => {
+  const program = 'class K;def hash;$a.clear;q=1;0;end;end;$a=[Turtle.new,K.new]+Array.new(20,1);b=$a-Array.new(20,9)';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
+test('Array concat roots early conversion results', () => {
+  const program =
+    'class A;def to_ary;[Turtle.new];end;end;class B;def to_ary;q=1;[];end;end;a=[];a.concat(A.new,B.new)';
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
