@@ -616,7 +616,7 @@ def('Hash', 'group_by', 0, function* (self: RHash, _args, block) {
       const item = arr([entry.key, entry.value]);
       yield* whileHeld(item, function* () {
         const key = yield* callBlock(block, [item]);
-        const group = yield* hashGetOrInsert(groups, key, () => arr([]));
+        const { entry: group } = yield* hashGetOrInsert(groups, key, () => arr([]));
         rt().chargeSlots(1);
         (group.value as RArray).items.push(item);
       });

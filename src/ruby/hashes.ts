@@ -166,19 +166,19 @@ export function* hashGetOrInsert(
   key: Value,
   create: () => Value | Gen,
   recheckFrozen = true
-): Gen<HashEntry> {
+): Gen<{ entry: HashEntry; inserted: boolean }> {
   const held = rt().held.length;
   rt().held.push(hash, key);
   try {
     if (hash.frozen) throw frozenError(hash, yield* inspect(hash));
     const { base, slot, entry } = yield* findEntry(hash, key);
-    if (entry) return entry;
+    if (entry) return { entry, inserted: false };
     const created = create();
     const value = isGenerator(created) ? yield* created : created;
     rt().held.push(value);
     if (recheckFrozen && hash.frozen) throw frozenError(hash, yield* inspect(hash));
     const stored = key instanceof RString && key.cls === rt().c.String && !key.frozen ? frozenCopy(key) : key;
-    return insertHashEntry(hash, base, slot, stored, value);
+    return { entry: insertHashEntry(hash, base, slot, stored, value), inserted: true };
   } finally {
     rt().held.length = held;
   }

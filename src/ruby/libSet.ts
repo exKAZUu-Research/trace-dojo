@@ -138,9 +138,8 @@ def('Set', ['add', '<<'], 1, function* (self: RObject, [value]) {
 });
 def('Set', 'add?', 1, function* (self: RObject, [value]) {
   yield* modify(self);
-  if (yield* hashGet(membersOf(self), value)) return NIL;
-  yield* hashSet(membersOf(self), value, true);
-  return self;
+  const { inserted } = yield* hashGetOrInsert(membersOf(self), value, () => true);
+  return inserted ? self : NIL;
 });
 def('Set', 'delete', 1, function* (self: RObject, [value]) {
   yield* modify(self);
@@ -422,7 +421,7 @@ def('Set', 'classify', 0, function* (self: RObject, _args, block) {
     yield* eachEntry(membersOf(self), function* (entry) {
       yield* whileHeld(entry.key, function* () {
         const key = yield* callBlock(block, [entry.key]);
-        const group = yield* hashGetOrInsert(groups, key, () => callMethod(self.cls, 'new', []));
+        const { entry: group } = yield* hashGetOrInsert(groups, key, () => callMethod(self.cls, 'new', []));
         yield* callMethod(group.value, 'add', [entry.key]);
       });
     });

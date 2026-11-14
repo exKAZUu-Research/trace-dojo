@@ -854,7 +854,7 @@ def('Enumerable', 'group_by', 0, function* (self, _args, block) {
     yield* iterate(self, function* (value) {
       yield* whileHeld(value, function* () {
         const key = yield* call(block, value);
-        const entry = yield* hashGetOrInsert(groups, key, () => arr([]));
+        const { entry } = yield* hashGetOrInsert(groups, key, () => arr([]));
         rt().chargeSlots(1);
         (entry.value as RArray).items.push(value);
       });
@@ -1061,7 +1061,7 @@ def('Enumerable', 'tally', [0, 1], function* (self, args) {
   } else throw typeError(`no implicit conversion of ${realClassOf(args[0]).name} into Hash`);
   return yield* whileHeld(counts, function* () {
     yield* iterate(self, function* (value) {
-      const entry = yield* hashGetOrInsert(counts, value, () => 0n, false);
+      const { entry } = yield* hashGetOrInsert(counts, value, () => 0n, false);
       const previous = entry.value;
       if (typeof previous !== 'bigint' || previous < 0n)
         throw typeError(`wrong argument type ${realClassOf(previous).name} (expected Integer)`);

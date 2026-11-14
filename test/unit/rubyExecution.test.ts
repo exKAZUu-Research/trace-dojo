@@ -2334,6 +2334,13 @@ test('Set size and length reject arguments and ignore blocks', () => {
   });
 });
 
+test('Set add? hashes a new member once and returns nil for existing members', () => {
+  expect(
+    run('class K;def hash;@n=(@n||0)+1;raise "bad" if @n==2;0;end;end;s=Set[];k=K.new;p s.add?(k).size')
+  ).toMatchObject({ stdout: '1\n' });
+  expect(run('s=Set[1];p s.add?(1),s.size')).toMatchObject({ stdout: 'nil\n1\n' });
+});
+
 test('Enumerable grouping and tally hash each new key once', () => {
   expect(run('class K;def hash;puts :hash;0;end;end;[1].group_by{K.new};[K.new].tally')).toMatchObject({
     stdout: 'hash\nhash\n',
