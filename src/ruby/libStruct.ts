@@ -1,5 +1,5 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { addressOf, inspect, rEql, rEquals, toIndex } from './conversions';
+import { addressOf, inspect, rEql, rEquals, toIndex, toInt } from './conversions';
 import { def, sdef, sundef } from './define';
 import { argumentError, frozenError, indexError, nameError, typeError } from './errors';
 import { digest, hashKeyOf, hashSet } from './hashes';
@@ -7,7 +7,7 @@ import { addMethod, assertMutableClass, callBlock, callMethod, callProc, type Ge
 import { tryAry } from './libArray';
 import { makeEnumerator } from './libEnumerator';
 import { nameOf } from './libMeta';
-import { NIL, RArray, RClass, type RHash, RObject, type RProc, RString, RSymbol, type Value } from './objects';
+import { NIL, RArray, RClass, type RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
 import { arr, newHash, realClassOf, singletonClassOf, str, sym, truthy } from './values';
 
@@ -150,7 +150,7 @@ sdef(
   'new',
   [0, -1],
   // code-gauge-allow functionCognitiveComplexity 19 -- Ruby's method takes these argument forms, which the branches mirror.
-  function* (_self: RClass, args, block, keywords) {
+  function* (self: RClass, args, block, keywords) {
     const first = args[0];
     if (first !== undefined && first !== NIL && !(first instanceof RString) && !(first instanceof RSymbol))
       throw typeError(`no implicit conversion of ${realClassOf(first).name} into String`);
@@ -167,15 +167,15 @@ sdef(
     if (name !== undefined) {
       if (!/^[\p{Lu}\p{Lt}][\p{L}\p{M}\p{N}_]*$/u.test(name))
         throw nameError(`identifier ${name} needs to be constant`);
-      assertMutableClass(rt().c.Struct);
+      assertMutableClass(self);
     }
     if (names.length === 0 && !keywordInit && first !== NIL && name === undefined)
       throw argumentError('wrong number of arguments (given 0, expected 1+)');
-    const cls = yield* newStructClass(rt().c.Struct, yield* membersFrom(names), { keywordInit, kind: 'struct' });
+    const cls = yield* newStructClass(self, yield* membersFrom(names), { keywordInit, kind: 'struct' });
     if (name !== undefined) {
       cls.baseName = name;
-      cls.lexicalParent = rt().c.Struct;
-      rt().c.Struct.constants.set(name, cls);
+      cls.lexicalParent = self;
+      self.constants.set(name, cls);
     }
     if (block) yield* callProc(block, [cls], { self: cls, definee: cls });
     return cls;
@@ -214,6 +214,16 @@ sdef('Struct', 'members', 0, (self: RClass) => arr(layoutOf(self).members.map((n
 sdef('Struct', 'keyword_init?', 0, (self: RClass) => layoutOf(self).keywordInit ?? NIL);
 def('Struct', 'members', 0, (self: RObject) => arr(layoutOf(self.cls).members.map((name) => sym(name))));
 def('Struct', ['to_a', 'deconstruct', 'values'], 0, (self: RObject) => arr([...valuesOf(self)]));
+def('Struct', 'values_at', [0, -1], function* (self: RObject, args) {
+  const values = valuesOf(self);
+  for (const argument of args) {
+    if (argument instanceof RRange) continue;
+    const index = yield* toInt(argument);
+    if (index < -BigInt(values.length)) throw indexError(`offset ${index} too small for struct(size:${values.length})`);
+    if (index >= BigInt(values.length)) throw indexError(`offset ${index} too large for struct(size:${values.length})`);
+  }
+  return yield* callMethod(arr([...values]), 'values_at', args);
+});
 def('Struct', 'to_h', 0, (self: RObject, _args, block) => structToHash(self, block));
 def('Struct', 'deconstruct_keys', 1, (self: RObject, [keys]) => deconstructKeys(self, keys));
 def('Struct', '[]', 1, function* (self: RObject, [key]) {

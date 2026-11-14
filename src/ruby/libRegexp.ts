@@ -17,7 +17,7 @@ import {
   regexpLineCommentEnd,
 } from './regexpCaptureNames';
 import { type Frame, rt, UnsupportedFeatureError } from './runtime';
-import { arr, newHash, str, sym, truthy } from './values';
+import { arr, newHash, realClassOf, str, sym, truthy } from './values';
 
 export interface RegexpData {
   source: string;
@@ -401,6 +401,7 @@ export function makeRegexp(
 
 function triviallyLinearRegexp(source: string): boolean {
   let inClass = false;
+  let quantifier = -1;
   for (let index = 0; index < source.length; index++) {
     const char = source[index];
     if (char === '\\') {
@@ -410,9 +411,20 @@ function triviallyLinearRegexp(source: string): boolean {
     }
     if (char === '[') inClass = true;
     else if (char === ']') inClass = false;
-    else if (!inClass && /[()*+?{|]/.test(char)) return false;
+    else if (!inClass) {
+      if (char === '|' || char === '{' || (char === '(' && source[index + 1] === '?')) return false;
+      if ('*+?'.includes(char)) {
+        if (quantifier >= 0) return false;
+        quantifier = index;
+      }
+    }
   }
-  return true;
+  if (quantifier < 0) return true;
+  const tail = source.slice(quantifier + 1).replaceAll(')', '');
+  return (
+    tail === '' ||
+    ((tail === '$' || tail === String.raw`\z`) && (source.startsWith('^') || source.startsWith(String.raw`\A`)))
+  );
 }
 
 export function isRegexp(value: Value): value is RObject {
@@ -817,6 +829,19 @@ def('MatchData', 'deconstruct', 0, (self: RObject) =>
       .map((_range, group) => groupText(stateOf(self), group + 1))
   )
 );
+def('MatchData', 'deconstruct_keys', 1, function* (self: RObject, [keys]) {
+  if (keys !== NIL && !(keys instanceof RArray))
+    throw typeError(`wrong argument type ${realClassOf(keys).name} (expected Array)`);
+  const state = stateOf(self);
+  const hash = newHash();
+  const requested = keys instanceof RArray ? keys.items : state.names.map((name) => sym(name));
+  for (const key of requested) {
+    if (!(key instanceof RSymbol)) throw typeError(`wrong argument type ${realClassOf(key).name} (expected Symbol)`);
+    const group = state.namedGroups[key.name];
+    if (group !== undefined) yield* hashSet(hash, key, groupText(state, group));
+  }
+  return hash;
+});
 
 // String's regular-expression forms ------------------------------------------------------------------------------------
 

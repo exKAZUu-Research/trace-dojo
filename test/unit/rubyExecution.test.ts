@@ -6076,3 +6076,36 @@ test('POSIX word classes compose with outer negation and join controls', () => {
     stdout: 'false\ntrue\n',
   });
 });
+
+test('remaining Lazy methods stream or reject explicitly', () => {
+  expect(
+    run(
+      'p (1..Float::INFINITY).lazy.each_slice(2).first(2),(1..Float::INFINITY).lazy.each_cons(2).first(2),(1..Float::INFINITY).lazy.each_with_object([]).first(2)'
+    )
+  ).toMatchObject({
+    stdout: '[[1, 2], [3, 4]]\n[[1, 2], [2, 3]]\n[[1, []], [2, []]]\n',
+  });
+  expect(run('p (1..3).lazy.take(3).each_slice(2).force')).toMatchObject({ stdout: '[[1, 2], [3]]\n' });
+  expect(run('p (1..Float::INFINITY).lazy.slice_when{true}.first(2)')).toMatchObject({
+    uncaughtException: expect.stringContaining('は、この採点環境では使えません。'),
+  });
+});
+
+test('new Ruby class methods run or fail with the unavailable contract', () => {
+  expect(
+    run(
+      String.raw`p Struct.new(:a,:b).new(1,2).values_at(0..3);m=/(?<year>\d+)/.match("2024");p m.deconstruct_keys([:year])`
+    )
+  ).toMatchObject({
+    stdout: '[1, 2, nil, nil]\n{year: "2024"}\n',
+  });
+  for (const source of ['Time.utc(2024).iso8601', '/a/.named_captures', '1.method(:+).curry', 'Time.now(in: "UTC")'])
+    expect(run(source)).toMatchObject({
+      uncaughtException: expect.stringContaining('は、この採点環境では使えません。'),
+    });
+});
+
+test('source CRLF normalizes regexp comment continuation', () => {
+  const source = `p(/(a)# ignored ${String.fromCodePoint(92)}\r\n(?<real>b)/x.match("ab").to_a)`;
+  expect(run(source)).toMatchObject({ stdout: '["a", "a"]\n' });
+});

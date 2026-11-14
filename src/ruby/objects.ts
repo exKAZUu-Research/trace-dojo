@@ -304,7 +304,10 @@ export class RClass extends RBasic {
           if (index > 0) addEdge(chain[index - 1], item);
         }
       }
-      for (let index = 1; index < modules.length; index++) addEdge(modules[index - 1], modules[index]);
+      const directRoots = modules.filter((module, position) =>
+        chains.every((chain, index) => index === position || chain.indexOf(module) <= chain.indexOf(modules[index]))
+      );
+      for (let index = 1; index < directRoots.length; index++) addEdge(directRoots[index - 1], directRoots[index]);
       const result: RClass[] = [];
       const emitted = new Set<RClass>();
       while (emitted.size < prerequisites.size) {

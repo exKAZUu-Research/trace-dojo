@@ -674,13 +674,13 @@ export class Converter {
     for (const child of namedChildren(node)) {
       if (child.type === 'string_content' || child.type === 'escape_sequence') literal += child.text;
       else if (child.type === 'interpolation') {
-        if (literal) parts.push(literal);
+        if (literal) parts.push(literal.replaceAll('\r\n', '\n'));
         literal = '';
         const statements = this.body(namedChildren(child), 1);
         parts.push(statements.length === 1 ? statements[0].e : { k: 'seq', body: statements });
       }
     }
-    if (literal) parts.push(literal);
+    if (literal) parts.push(literal.replaceAll('\r\n', '\n'));
     if (parts.every((part) => typeof part === 'string')) {
       const source = parts.join('');
       if (

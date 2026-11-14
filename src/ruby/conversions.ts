@@ -82,17 +82,19 @@ export function* toInt(value: Value): Gen<bigint> {
 }
 
 function* respondsToConversion(value: Value, name: string): Gen<boolean> {
+  const responder = classOf(value).findMethod('respond_to?');
+  const advertised = responder
+    ? truthy(yield* callMethod(value, 'respond_to?', [RSymbol.of(name), true], undefined, undefined, { fcall: true }))
+    : false;
+  if (responder && responder.owner !== rt().c.Kernel) return advertised;
+  if (advertised) return true;
   const missing = classOf(value).findMethod('method_missing');
-  if (missing && missing.body.kind !== 'native') return true;
-  if (!classOf(value).findMethod('respond_to?')) return false;
-  return truthy(
-    yield* callMethod(value, 'respond_to?', [RSymbol.of(name), true], undefined, undefined, { fcall: true })
-  );
+  return missing !== undefined && missing.body.kind !== 'native';
 }
 
 export function* tryImplicitConversion(value: Value, name: string): Gen<Value | undefined> {
   const resolved = classOf(value).findMethod(name);
-  if (!resolved && !(yield* respondsToConversion(value, name))) return undefined;
+  if (!(yield* respondsToConversion(value, name))) return undefined;
   try {
     return yield* callMethod(value, name, [], undefined, undefined, { fcall: true });
   } catch (error) {

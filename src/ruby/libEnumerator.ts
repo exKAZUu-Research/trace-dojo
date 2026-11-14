@@ -43,7 +43,7 @@ import {
   RSymbol,
   type Value,
 } from './objects';
-import { type Frame, rt, RubyError } from './runtime';
+import { type Frame, rt, RubyError, UnsupportedFeatureError } from './runtime';
 import { arr, newHash, realClassOf, str, stringBytes, stringCharacterCount, truthy } from './values';
 
 /** What an enumerator iterates: a method of a receiver, called with the block it is given. */
@@ -848,6 +848,9 @@ type LazyStep = (
   | { kind: 'grep' | 'grep_v'; pattern: Value; block?: RProc }
   | { kind: 'uniq'; block?: RProc }
   | { kind: 'zip'; others: Value[] }
+  | { kind: 'each_slice' | 'each_cons'; count: number }
+  | { kind: 'each_entry' }
+  | { kind: 'each_with_object'; memo: Value }
 ) & { label?: string; args?: Value[] };
 
 interface LazyData {
@@ -877,7 +880,11 @@ function nextLazySize(size: Value, step: LazyStep): Value {
     if (isRubyFloat(size)) return Math.max(0, Number(size) - step.count);
     return size;
   }
-  return step.kind === 'map' || step.kind === 'with_index' || step.kind === 'zip' ? size : NIL;
+  if (step.kind === 'each_slice' && typeof size === 'bigint')
+    return (size + BigInt(step.count - 1)) / BigInt(step.count);
+  if (step.kind === 'each_cons' && typeof size === 'bigint')
+    return size >= BigInt(step.count) ? size - BigInt(step.count) + 1n : 0n;
+  return ['map', 'with_index', 'zip', 'each_entry', 'each_with_object'].includes(step.kind) ? size : NIL;
 }
 
 function makeLazy(source: Value, steps: LazyStep[]): RObject {
@@ -938,6 +945,38 @@ def('Enumerator::Lazy', 'uniq', 0, (self: RObject, _args, block) => {
   const data = self.data as LazyData;
   return makeLazy(data.source, [...data.steps, { kind: 'uniq', block }]);
 });
+for (const kind of ['each_slice', 'each_cons'] as const) {
+  def('Enumerator::Lazy', kind, 1, function* (self: RObject, [count], block) {
+    const size = Number(yield* toInt(count));
+    if (size <= 0) throw argumentError('invalid slice size');
+    const data = self.data as LazyData;
+    const lazy = makeLazy(data.source, [...data.steps, { kind, count: size, args: [count] }]);
+    if (!block) return lazy;
+    yield* runLazy(lazy, (value) => callProc(block, [value], { used: false }));
+    return self;
+  });
+}
+def('Enumerator::Lazy', 'each_entry', 0, function* (self: RObject, _args, block) {
+  const data = self.data as LazyData;
+  const lazy = makeLazy(data.source, [...data.steps, { kind: 'each_entry' }]);
+  if (!block) return lazy;
+  yield* runLazy(lazy, (value) => callProc(block, [value], { used: false }));
+  return self;
+});
+for (const name of ['each_with_object', 'with_object']) {
+  def('Enumerator::Lazy', name, 1, function* (self: RObject, [memo], block) {
+    if (block) {
+      yield* runLazy(self, (value) => callProc(block, [value, memo], { used: false }));
+      return memo;
+    }
+    const data = self.data as LazyData;
+    return makeLazy(data.source, [...data.steps, { kind: 'each_with_object', memo, label: name, args: [memo] }]);
+  });
+}
+for (const name of ['slice_when', 'slice_before', 'slice_after', 'chunk', 'chunk_while'])
+  def('Enumerator::Lazy', name, [0, -1], () => {
+    throw new UnsupportedFeatureError(`Enumerator::Lazy#${name}`);
+  });
 def('Enumerator::Lazy', 'zip', [0, -1], function* (self: RObject, others, block) {
   if (block) return yield* zipCollections(self, others, block);
   for (const other of others)
@@ -980,12 +1019,32 @@ function* runLazy(self: RObject, visit: (value: Value) => Gen<unknown>): Gen {
   const takeZero = data.steps.some((step) => step.kind === 'take' && step.count === 0);
   if (takeZero) return NIL;
   const held = rt().held.length;
+  const arrays = rt().heldArrays;
+  const arrayMark = arrays.length;
+  let visitorStopped = false;
+  const visitWithStop = function* (value: Value): Gen<unknown> {
+    const outcome = yield* visit(value);
+    if (outcome === STOP) visitorStopped = true;
+    return outcome;
+  };
   try {
-    const result = yield* iterate(data.source, (value) => streamLazyStep(data.steps, states, 0, value, visit));
+    const result = yield* iterate(data.source, function* (value) {
+      return yield* streamLazyStep(data.steps, states, 0, value, visitWithStop);
+    });
+    if (!visitorStopped)
+      for (const [position, step] of data.steps.entries()) {
+        const buffer = states[position].buffer;
+        if (step.kind === 'each_slice' && buffer && buffer.length > 0) {
+          states[position].buffer = [];
+          const outcome = yield* streamLazyStep(data.steps, states, position + 1, arr(buffer), visitWithStop);
+          if (outcome === STOP) break;
+        }
+      }
     return data.steps.length === 0 ? result : NIL;
   } finally {
     for (const state of states) for (const iterator of state.iterators ?? []) iterator?.return();
     rt().held.length = held;
+    arrays.length = arrayMark;
   }
 }
 
@@ -995,6 +1054,7 @@ interface LazyState {
   index: bigint;
   keys?: RHash;
   iterators?: (Generator<unknown, void, unknown> | undefined)[];
+  buffer?: Value[];
 }
 
 function* streamLazyStep(
@@ -1090,6 +1150,25 @@ function* streamLazyStep(
       } finally {
         arrays.pop();
       }
+    }
+    case 'each_slice':
+    case 'each_cons': {
+      if (!state.buffer) {
+        state.buffer = [];
+        rt().heldArrays.push(state.buffer);
+      }
+      state.buffer.push(item);
+      if (state.buffer.length < step.count) return;
+      const values = arr([...state.buffer]);
+      if (step.kind === 'each_slice') state.buffer.length = 0;
+      else state.buffer.shift();
+      return yield* next(values);
+    }
+    case 'each_entry': {
+      return yield* next(item);
+    }
+    case 'each_with_object': {
+      return yield* next(arr([item, step.memo]));
     }
   }
 }

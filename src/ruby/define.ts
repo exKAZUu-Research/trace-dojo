@@ -11,6 +11,7 @@ interface NativeSpec {
   visibility: Visibility;
   takesKeywords: boolean;
   undefined?: boolean;
+  ifMissing?: boolean;
   /** Builds the method from the one defined before it, for a method that handles one more kind of argument. */
   wrap?: (previous: NativeFn) => NativeFn;
 }
@@ -21,6 +22,7 @@ export interface DefineOptions {
   visibility?: Visibility;
   /** Whether the method receives keyword arguments apart, instead of as a trailing Hash. */
   keywords?: boolean;
+  ifMissing?: boolean;
 }
 
 /**
@@ -80,6 +82,7 @@ function register(
     singleton,
     visibility: options.visibility ?? 'public',
     takesKeywords: options.keywords ?? false,
+    ifMissing: options.ifMissing,
   });
 }
 
@@ -114,6 +117,7 @@ export function installNatives(runtime: Runtime): void {
     if (!owner) throw new Error(`Unknown library class: ${spec.owner}`);
     const target = spec.singleton ? (singletonOf as (cls: RClass) => RClass)(owner) : owner;
     for (const name of spec.names) {
+      if (spec.ifMissing && target.ancestors().some((ancestor) => ancestor.methods.has(name))) continue;
       if (spec.wrap) {
         const previous = target.methods.get(name);
         if (previous?.body.kind !== 'native') throw new Error(`No native ${spec.owner}#${name} to extend`);

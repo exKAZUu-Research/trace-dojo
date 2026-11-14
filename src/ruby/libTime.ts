@@ -189,50 +189,73 @@ function* buildTime(args: Value[], offset: number, zone: TimeData['zone'], micro
   );
 }
 
-sdef('Time', 'now', 0, () => makeTime(nowNanoseconds()));
-sdef('Time', 'new', [0, 7], function* (_self, args) {
-  if (args.length === 0) return makeTime(nowNanoseconds());
-  if (args.length === 1 && args[0] instanceof RString && /^\d{4}-\d{2}-\d{2}(?:[ T].*)?$/.test(args[0].s))
-    throw new UnsupportedFeatureError('Time.new の文字列形式');
-  if (args.length === 7 && args[6] !== NIL)
-    return yield* buildTime(args.slice(0, 6), yield* parseOffset(args[6]), 'fixed', undefined, exactOffset(args[6]));
-  return yield* buildTime(args, LOCAL_OFFSET, 'local');
-});
+sdef(
+  'Time',
+  'now',
+  0,
+  (_self, _args, _block, keywords) => {
+    if (keywords) throw new UnsupportedFeatureError('Time.now の in: 指定');
+    return makeTime(nowNanoseconds());
+  },
+  { keywords: true }
+);
+sdef(
+  'Time',
+  'new',
+  [0, 7],
+  function* (_self, args, _block, keywords) {
+    if (keywords) throw new UnsupportedFeatureError('Time.new の in: 指定');
+    if (args.length === 0) return makeTime(nowNanoseconds());
+    if (args.length === 1 && args[0] instanceof RString && /^\d{4}-\d{2}-\d{2}(?:[ T].*)?$/.test(args[0].s))
+      throw new UnsupportedFeatureError('Time.new の文字列形式');
+    if (args.length === 7 && args[6] !== NIL)
+      return yield* buildTime(args.slice(0, 6), yield* parseOffset(args[6]), 'fixed', undefined, exactOffset(args[6]));
+    return yield* buildTime(args, LOCAL_OFFSET, 'local');
+  },
+  { keywords: true }
+);
 sdef('Time', ['local', 'mktime'], [1, 7], (_self, args) => buildTime(args.slice(0, 6), LOCAL_OFFSET, 'local', args[6]));
 sdef('Time', ['utc', 'gm'], [1, 7], (_self, args) => buildTime(args.slice(0, 6), 0, 'utc', args[6]));
-sdef('Time', 'at', [1, 2], function* (_self, args) {
-  const [seconds, microseconds] = args;
-  if (seconds instanceof RObject && seconds.data instanceof TimeData) {
-    if (microseconds !== undefined) throw typeError("can't convert Time into an exact number");
-    return makeTime(
-      seconds.data.nanoseconds,
-      seconds.data.offset,
-      seconds.data.zone,
-      seconds.data.exactOffset,
-      seconds.data.remainderNumerator,
-      seconds.data.remainderDenominator
+sdef(
+  'Time',
+  'at',
+  [1, 3],
+  function* (_self, args, _block, keywords) {
+    if (keywords || args.length > 2) throw new UnsupportedFeatureError('Time.at の unit/in: 指定');
+    const [seconds, microseconds] = args;
+    if (seconds instanceof RObject && seconds.data instanceof TimeData) {
+      if (microseconds !== undefined) throw typeError("can't convert Time into an exact number");
+      return makeTime(
+        seconds.data.nanoseconds,
+        seconds.data.offset,
+        seconds.data.zone,
+        seconds.data.exactOffset,
+        seconds.data.remainderNumerator,
+        seconds.data.remainderDenominator
+      );
+    }
+    const first = offsetFraction(
+      typeof seconds === 'bigint' || typeof seconds === 'number' || isRational(seconds)
+        ? seconds
+        : yield* exactNumber(seconds),
+      0
     );
-  }
-  const first = offsetFraction(
-    typeof seconds === 'bigint' || typeof seconds === 'number' || isRational(seconds)
-      ? seconds
-      : yield* exactNumber(seconds),
-    0
-  );
-  const second =
-    microseconds === undefined
-      ? { numerator: 0n, denominator: 1n }
-      : offsetFraction(
-          typeof microseconds === 'bigint' || typeof microseconds === 'number' || isRational(microseconds)
-            ? microseconds
-            : yield* exactNumber(microseconds),
-          0
-        );
-  return makeExactTime(
-    first.numerator * second.denominator * 1_000_000_000n + second.numerator * first.denominator * 1000n,
-    first.denominator * second.denominator
-  );
-});
+    const second =
+      microseconds === undefined
+        ? { numerator: 0n, denominator: 1n }
+        : offsetFraction(
+            typeof microseconds === 'bigint' || typeof microseconds === 'number' || isRational(microseconds)
+              ? microseconds
+              : yield* exactNumber(microseconds),
+            0
+          );
+    return makeExactTime(
+      first.numerator * second.denominator * 1_000_000_000n + second.numerator * first.denominator * 1000n,
+      first.denominator * second.denominator
+    );
+  },
+  { keywords: true }
+);
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTHS = [

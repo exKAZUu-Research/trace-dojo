@@ -1,4 +1,5 @@
-import { def } from './define';
+import { def, sdef } from './define';
+import { RUBY_CORE_METHODS } from './rubyCoreMethods';
 import { UnsupportedFeatureError } from './runtime';
 
 for (const [owner, methods] of Object.entries({
@@ -41,3 +42,26 @@ for (const [owner, methods] of Object.entries({
     def(owner, name, [0, -1], () => {
       throw new UnsupportedFeatureError(`${owner}#${name}`);
     });
+
+for (const [owner, methods] of Object.entries(RUBY_CORE_METHODS)) {
+  for (const name of methods.instance)
+    def(
+      owner,
+      name,
+      [0, -1],
+      () => {
+        throw new UnsupportedFeatureError(`${owner}#${name}`);
+      },
+      { ifMissing: true }
+    );
+  for (const name of methods.singleton)
+    sdef(
+      owner,
+      name,
+      [0, -1],
+      () => {
+        throw new UnsupportedFeatureError(`${owner}.${name}`);
+      },
+      { ifMissing: true }
+    );
+}
