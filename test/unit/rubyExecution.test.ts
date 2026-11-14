@@ -1899,6 +1899,9 @@ test('binary String segments keep source bytes and encoding', () => {
   expect(run('s=255.chr;begin;s.lines[0]+"é";rescue=>e;p e.class;end')).toMatchObject({
     stdout: 'Encoding::CompatibilityError\n',
   });
+  expect(run('p (255.chr+13.chr+10.chr).grapheme_clusters.map{|x|x.bytes}')).toMatchObject({
+    stdout: '[[255], [13], [10]]\n',
+  });
 });
 
 test('shuffle detects receiver changes from its randomizer', () => {

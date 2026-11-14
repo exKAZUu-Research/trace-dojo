@@ -549,16 +549,23 @@ def('String', 'each_codepoint', 0, function* (self: RString, _args, block) {
   return self;
 });
 def('String', 'grapheme_clusters', 0, function* (self: RString, _args, block) {
-  const segments = new Intl.Segmenter('und', { granularity: 'grapheme' }).segment(self.s);
   const values: Value[] = [];
-  for (const { segment } of segments) {
+  for (const value of graphemeSegments(self)) {
     rt().spend();
-    const value = textResult(self, segment);
     if (block) yield* callBlock(block, [value], false);
     else values.push(value);
   }
   return block ? self : arr(values);
 });
+
+function* graphemeSegments(self: RString): Iterable<RString> {
+  if (self.binary) {
+    for (const byte of stringBytes(self)) yield stringFromBytes(Uint8Array.of(byte), true);
+    return;
+  }
+  for (const { segment } of new Intl.Segmenter('und', { granularity: 'grapheme' }).segment(self.s))
+    yield textResult(self, segment);
+}
 def('String', 'each_byte', 0, function* (self: RString, _args, block) {
   if (!block) return makeEnumerator(self, 'each_byte', []);
   for (const byte of stringBytes(self)) yield* callBlock(block, [BigInt(byte)], false);
