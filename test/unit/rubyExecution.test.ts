@@ -2004,6 +2004,9 @@ test('Array delete retains unrelated in-place callback changes', () => {
   expect(run('class X;def ==(v);$a[0]=7;true;end;end;$a=[8,X.new,1];$a.delete(0);p $a')).toMatchObject({
     stdout: '[7, 1]\n',
   });
+  expect(run('class X;def ==(v);$a.replace([7,6,5]);true;end;end;$a=[8,X.new,1];$a.delete(0);p $a')).toMatchObject({
+    stdout: '[7, 5]\n',
+  });
 });
 
 test('Integer iteration uses relational coercion', () => {
