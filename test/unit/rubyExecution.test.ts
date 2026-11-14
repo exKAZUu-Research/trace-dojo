@@ -1984,6 +1984,12 @@ test('Set intersection initializes subclasses without arguments and keeps initia
   });
 });
 
+test('Set intersection initializes before iterating the operand', () => {
+  const source =
+    'class E;include Enumerable;def each;puts :each;raise "bad";end;end;class S<Set;def initialize(*a);puts :init;super(*a);end;end;s=S.new([1]);puts :start;begin;s & E.new;rescue=>e;p e.class;end';
+  expect(run(source)).toMatchObject({ stdout: 'init\nstart\ninit\neach\nRuntimeError\n' });
+});
+
 test('Set symmetric difference invokes subclass initialization with its operand', () => {
   expect(
     run('class S<Set;def initialize(x,y);super(x);end;end;s=S.new([1],2);begin;s ^ Set[2];rescue=>e;p e.message;end')
