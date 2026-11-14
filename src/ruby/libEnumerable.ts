@@ -1,4 +1,5 @@
 // code-gauge-allow-file fileNcss 677 -- The libEnumerable module keeps one concern's cases together.
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   caseEquals,
   compareValues,
@@ -154,6 +155,9 @@ def('Enumerable', ['flat_map', 'collect_concat'], 0, function* (self, _args, blo
   yield* collectInto(self, [results], function* (value) {
     const mapped = yield* call(block, value);
     const converted = yield* tryAry(mapped);
+    const added = converted ? converted.items.length : 1;
+    if (results.length + added > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+    rt().spend(Math.ceil(added / 64));
     if (converted) for (const item of converted.items) results.push(item);
     else results.push(mapped);
   });

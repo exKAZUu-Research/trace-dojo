@@ -449,7 +449,7 @@ def('Integer', ['to_s', 'inspect'], [0, 1], function* (self: bigint, args) {
   const base = args.length > 0 ? yield* toRubyInt(args[0]) : 10;
   if (base < 2 || base > 36) throw argumentError(`invalid radix ${base}`);
   rt().checkStringLength(Math.ceil(integerBits(self) / Math.log2(base)) + 1);
-  return str(self.toString(base));
+  return asciiString(self.toString(base));
 });
 def('Integer', ['to_i', 'to_int'], 0, (self) => self);
 def('Integer', 'hash', 0, (self: bigint) => self);
@@ -717,7 +717,13 @@ function isqrt(n: bigint): bigint {
 
 // Float ---------------------------------------------------------------------------------------------------------------
 
-def('Float', ['to_s', 'inspect'], 0, (self: number) => str(formatFloat(self)));
+def('Float', ['to_s', 'inspect'], 0, (self: number) => asciiString(formatFloat(self)));
+
+function asciiString(text: string): RString {
+  const value = str(text);
+  value.usAscii = true;
+  return value;
+}
 def('Float', 'hash', 0, (self: number) => {
   const bits = new DataView(new ArrayBuffer(8));
   bits.setFloat64(0, self === 0 ? 0 : self);

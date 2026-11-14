@@ -9,6 +9,7 @@ import {
   compareValues,
   inspect,
   rangeCovers,
+  rubyEncodingName,
   strInspect,
   symInspect,
   toIndex,
@@ -324,6 +325,11 @@ def('String', '+', 1, function* (self: RString, [other]) {
   const source = yield* stringArgValue(other);
   const right = stringBytes(source);
   const left = stringBytes(self);
+  checkUsAsciiConcat(
+    self.usAscii,
+    left.every((byte) => byte < 0x80),
+    source
+  );
   const binary = combinedStringEncoding(
     self.binary,
     left.every((byte) => byte < 0x80),
@@ -370,12 +376,17 @@ def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
     let chunk: Uint8Array;
     if (typeof arg === 'bigint') {
       validateConcatCodepoint(arg, binary || usAscii);
+      if (usAscii && arg >= 128n && length === 0) {
+        binary = true;
+        usAscii = false;
+      }
       chunk =
         (binary || usAscii) && arg <= 255n
           ? Uint8Array.of(Number(arg))
           : new TextEncoder().encode(String.fromCodePoint(Number(arg)));
     } else {
-      if (usAscii && stringBytes(arg).some((byte) => byte >= 0x80)) usAscii = false;
+      checkUsAsciiConcat(usAscii, ascii, arg);
+      if (usAscii && stringBytes(arg).some((byte) => byte >= 0x80)) usAscii = arg.usAscii;
       binary = combinedStringEncoding(binary, ascii, arg);
       chunk = stringBytes(arg);
     }
@@ -398,6 +409,13 @@ def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
   self.rawBytes = result.rawBytes;
   return self;
 });
+function checkUsAsciiConcat(usAscii: boolean, ascii: boolean, other: RString): void {
+  if (usAscii && !ascii && !other.usAscii && stringBytes(other).some((byte) => byte >= 0x80))
+    throw rubyError(
+      rt().c['Encoding::CompatibilityError'],
+      `incompatible character encodings: US-ASCII and ${rubyEncodingName(other.binary)}`
+    );
+}
 function* convertedConcatArgs(args: Value[]): Gen<(RString | bigint)[]> {
   const converted: (RString | bigint)[] = [];
   for (const arg of args) {

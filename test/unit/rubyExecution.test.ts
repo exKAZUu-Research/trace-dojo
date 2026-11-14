@@ -2576,6 +2576,21 @@ test('String results preserve US-ASCII through extraction and transforms', () =>
   });
 });
 
+test('US-ASCII integer append promotes encoding or rejects incompatible text', () => {
+  expect(
+    run('s=[[]].join;s<<128;begin;s<<"é";rescue=>e;p e.class;end;begin;s+"é";rescue=>e;p e.class;end')
+  ).toMatchObject({ stdout: 'Encoding::CompatibilityError\nEncoding::CompatibilityError\n' });
+  expect(run('s=[[],"a"].join(":");s<<128;begin;s<<"é";rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n',
+  });
+});
+
+test('numeric String conversions retain US-ASCII encoding', () => {
+  expect(run('s=1.to_s;s<<128;p s.bytes;s=1.5.to_s;s<<128;p s.bytes;s=7.inspect;s<<128;p s.bytes')).toMatchObject({
+    stdout: '[49, 128]\n[49, 46, 53, 128]\n[55, 128]\n',
+  });
+});
+
 test('interpolation retains the first empty binary segment when another follows', () => {
   expect(
     run(
