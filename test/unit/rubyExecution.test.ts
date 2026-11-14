@@ -3180,6 +3180,15 @@ test('boxed Float endpoints preserve Range and arithmetic sequence behavior', ()
   });
 });
 
+test('numeric Range steps support descending and infinite increments', () => {
+  expect(run('p (3..1).step(-1).to_a,(3.0...1.0).step(-1.0).to_a')).toMatchObject({
+    stdout: '[3, 2, 1]\n[3.0, 2.0]\n',
+  });
+  expect(run('p (1..3).step(Float::INFINITY).to_a,(1.0...2.0).step(Float::INFINITY).to_a')).toMatchObject({
+    stdout: '[1.0]\n[1.0]\n',
+  });
+});
+
 test('boxed Float keyword step limits produce Float sequence values', () => {
   expect(run('p 1.step(to:Float::INFINITY,by:1).first(2)')).toMatchObject({
     stdout: '[1.0, 2.0]\n',

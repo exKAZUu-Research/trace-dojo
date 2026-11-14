@@ -447,7 +447,7 @@ for (const method of ['step', '%'])
     if (typeof step !== 'bigint' && !isRubyFloat(step) && !customBegin && !respondsTo(step, 'coerce', true))
       throw typeError('no implicit conversion of String into Integer');
     if (isRubyNumber(step)) {
-      if (Number(step) < 0) throw argumentError("step can't be negative");
+      if (Number(step) < 0 && !isRubyNumber(self.begin)) throw argumentError("step can't be negative");
       if (Number(step) === 0) throw argumentError("step can't be 0");
     }
     if (!block) return makeEnumerator(self, method, args);
@@ -471,23 +471,32 @@ function* stepIntegerRange(self: RRange, begin: bigint, step: bigint, block: RPr
   const { end, exclusive } = self;
   for (
     let value = begin;
-    end === NIL || (exclusive ? value < (end as bigint) : value <= (end as bigint));
+    end === NIL ||
+    (step > 0n
+      ? exclusive
+        ? value < (end as bigint)
+        : value <= (end as bigint)
+      : exclusive
+        ? value > (end as bigint)
+        : value >= (end as bigint));
     value += step
   )
     yield* callBlock(block, [value], false);
   return self;
 }
 
+// code-gauge-allow functionCognitiveComplexity 22 -- Numeric Range bounds are directional and distinguish exclusive ends.
 function* stepNumericRange(self: RRange, start: number, by: number, block: RProc): Gen {
   const { end, exclusive } = self;
   const count = end === NIL ? Number.POSITIVE_INFINITY : floatStepCount(start, Number(end), by, exclusive);
   if (Number.isNaN(count)) return self;
   for (let index = 0; index < count; index++) {
     rt().spend();
-    let value = fusedMultiplyAdd(index, by, start);
+    let value = index === 0 ? start : fusedMultiplyAdd(index, by, start);
     if (end !== NIL) {
-      if (exclusive && value >= Number(end)) break;
-      if (value > Number(end)) value = Number(end);
+      const boundary = Number(end);
+      if (exclusive && (by > 0 ? value >= boundary : value <= boundary)) break;
+      if (by > 0 ? value > boundary : value < boundary) value = boundary;
     }
     yield* callBlock(block, [value], false);
   }
