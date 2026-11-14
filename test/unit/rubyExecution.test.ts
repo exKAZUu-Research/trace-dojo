@@ -1867,6 +1867,12 @@ test('warn validates keyword options before writing', () => {
   expect(run('begin;warn("x",foo:1);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'ArgumentError\n' });
   expect(run('begin;warn("x",uplevel:-1);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'ArgumentError\n' });
   expect(run('begin;warn("x",category: :bad);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'ArgumentError\n' });
+  expect(run('begin;warn("x",uplevel:10**30);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'RangeError\n' });
+  expect(
+    run('class A;def to_int;puts :conv;0;end;end;begin;warn("x",uplevel:A.new,foo:1);rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'ArgumentError\n',
+  });
 });
 
 test('deep Ruby containers remain within the interpreter stack', () => {

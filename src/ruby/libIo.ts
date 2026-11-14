@@ -1,5 +1,5 @@
 import type { OutputChannel } from '../interpreter/programIo';
-import { inspectValue, toInt, toSValue } from './conversions';
+import { inspectValue, toIndexExact, toInt, toSValue } from './conversions';
 import { def } from './define';
 import { argumentError, typeError } from './errors';
 import { exportBinaryInspect, formatString } from './format';
@@ -182,14 +182,18 @@ def(
   { ...PRIVATE, keywords: true }
 );
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Warn validates independent uplevel and category keyword protocols.
+// code-gauge-allow functionCognitiveComplexity 30 -- Warn rejects unknown names before validating uplevel and category values.
 function* validateWarnKeywords(keywords: RHash | undefined): Gen<void> {
   if (!keywords) return;
   for (const entry of keywords.map.values()) {
     const name = entry.key instanceof RSymbol ? entry.key.name : '';
+    if (name !== 'uplevel' && name !== 'category') throw argumentError(`unknown keyword: :${name}`);
+  }
+  for (const entry of keywords.map.values()) {
+    const name = entry.key instanceof RSymbol ? entry.key.name : '';
     if (name === 'uplevel') {
       if (entry.value === NIL) continue;
-      const level = yield* toInt(entry.value);
+      const { integer: level } = yield* toIndexExact(entry.value);
       if (level < 0n) throw argumentError(`negative level (${level})`);
     } else if (name === 'category') {
       if (entry.value === NIL) continue;
@@ -199,7 +203,7 @@ function* validateWarnKeywords(keywords: RHash | undefined): Gen<void> {
       else throw typeError(`no implicit conversion of ${realClassOf(entry.value).name} into Symbol`);
       if (!['deprecated', 'experimental', 'performance', 'strict_unused_block'].includes(category))
         throw argumentError(`unknown category: ${category}`);
-    } else throw argumentError(`unknown keyword: :${name}`);
+    }
   }
 }
 
