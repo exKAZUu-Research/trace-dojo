@@ -99,6 +99,7 @@ function setBytes(self: RString, bytes: Uint8Array, binary = self.binary): void 
 function textResult(self: RString, text: string): RString {
   const result = str(text);
   result.binary = self.binary;
+  result.usAscii = self.usAscii;
   return result;
 }
 
@@ -340,23 +341,23 @@ def('String', '*', 1, function* (self: RString, [count]) {
   const times = yield* toIndex(count);
   if (times < 0) throw argumentError('negative argument');
   const source = stringBytes(self);
-  if (source.length === 0) return stringFromBytes(source, self.binary);
+  if (source.length === 0) return stringFromBytes(source, self.binary, self.usAscii);
   if (source.length * times > 1_000_000) throw argumentError('argument too big');
   rt().spend(Math.floor((source.length * times) / 256));
   const repeated = new Uint8Array(source.length * times);
   for (let index = 0; index < times; index++) repeated.set(source, index * source.length);
-  return stringFromBytes(repeated, self.binary);
+  return stringFromBytes(repeated, self.binary, self.usAscii);
 });
 def('String', '%', 1, function* (self: RString, [value]) {
   return yield* formatString(self, value instanceof RArray ? value.items : [value]);
 });
 def('String', '-@', 0, (self: RString) => {
   if (self.frozen) return self;
-  const copy = stringFromBytes(stringBytes(self), self.binary);
+  const copy = copyStringEncoding(self);
   copy.frozen = true;
   return copy;
 });
-def('String', '+@', 0, (self: RString) => (self.frozen ? stringFromBytes(stringBytes(self), self.binary) : self));
+def('String', '+@', 0, (self: RString) => (self.frozen ? copyStringEncoding(self) : self));
 def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
   modify(self);
   const converted = yield* convertedConcatArgs(args);
@@ -462,21 +463,21 @@ function* substring(self: RString, args: Value[]): Gen {
   const [first] = args;
   if (args.length === 1 && first instanceof RString)
     return !(first.rawBytes && !first.binary && !self.binary) && byteIndex(stringBytes(self), stringBytes(first)) >= 0
-      ? stringFromBytes(stringBytes(first), self.binary)
+      ? stringFromBytes(stringBytes(first), self.binary, self.usAscii)
       : NIL;
   regexpUnsupported(first);
   const range = yield* substringRange(() => stringCharacterCount(self), args);
   if (!range) return NIL;
   const chars = stringCharacters(self);
   if (args.length === 1 && !(first instanceof RRange) && range.count === 1) return chars[range.start];
-  return joinStringCharacters(chars.slice(range.start, range.start + range.count), self.binary);
+  return joinStringCharacters(chars.slice(range.start, range.start + range.count), self.binary, self.usAscii);
 }
 
 def('String', ['[]', 'slice'], [1, 2], (self: RString, args) => substring(self, args));
 def('String', 'byteslice', [1, 2], function* (self: RString, args) {
   const range = yield* substringRange(() => stringBytes(self).length, args);
   const bytes = stringBytes(self);
-  return range ? stringFromBytes(bytes.slice(range.start, range.start + range.count), self.binary) : NIL;
+  return range ? stringFromBytes(bytes.slice(range.start, range.start + range.count), self.binary, self.usAscii) : NIL;
 });
 def('String', 'slice!', [1, 2], function* (self: RString, args) {
   modify(self);
@@ -487,7 +488,7 @@ def('String', 'slice!', [1, 2], function* (self: RString, args) {
     const found = byteIndex(bytes, stringBytes(first));
     if (found < 0) return NIL;
     setBytes(self, spliceBytes(bytes, found, stringBytes(first).length, new Uint8Array()));
-    return stringFromBytes(stringBytes(first), self.binary);
+    return stringFromBytes(stringBytes(first), self.binary, self.usAscii);
   }
   regexpUnsupported(first);
   const range = yield* substringRange(() => stringCharacterCount(self), args);
@@ -497,7 +498,7 @@ def('String', 'slice!', [1, 2], function* (self: RString, args) {
   setBytes(self, stringBytes(joinStringCharacters(chars, self.binary)));
   return args.length === 1 && !(first instanceof RRange) && range.count === 1
     ? removed[0]
-    : joinStringCharacters(removed, self.binary);
+    : joinStringCharacters(removed, self.binary, self.usAscii);
 });
 // code-gauge-allow functionCognitiveComplexity 17 -- String assignment supports substring, index, and Range selectors with different bounds errors.
 def('String', '[]=', [2, 3], function* (self: RString, args) {
@@ -693,7 +694,7 @@ def(
   'String',
   'chr',
   0,
-  (self: RString) => firstStringCharacter(self) ?? stringFromBytes(new Uint8Array(), self.binary)
+  (self: RString) => firstStringCharacter(self) ?? stringFromBytes(new Uint8Array(), self.binary, self.usAscii)
 );
 function currentStringBytes(self: RString, cursor: StringByteCursor): Uint8Array {
   if (cursor.text !== self.s || cursor.rawBytes !== self.rawBytes || cursor.binary !== self.binary) {
@@ -707,8 +708,15 @@ function currentStringBytes(self: RString, cursor: StringByteCursor): Uint8Array
 export function firstStringCharacter(self: RString): RString | undefined {
   if (self.s.length === 0) return undefined;
   if (self.binary) return stringFromBytes(Uint8Array.of(self.s.codePointAt(0) as number), true);
-  if (!self.rawBytes) return str(String.fromCodePoint(self.s.codePointAt(0) as number));
-  return characterFromBytes(self.rawBytes, 0, false, new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })).char;
+  if (!self.rawBytes) return textResult(self, String.fromCodePoint(self.s.codePointAt(0) as number));
+  const first = characterFromBytes(
+    self.rawBytes,
+    0,
+    false,
+    new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+  ).char;
+  first.usAscii = self.usAscii;
+  return first;
 }
 
 function characterFromBytes(
@@ -1434,10 +1442,12 @@ for (const [name, transform, maxArgs] of TRANSFORMS) {
     if (self.rawBytes && !self.binary) return transformInvalid(self, name, yield* invalidSeparator(name, selected));
     if (self.binary && (name === 'succ' || name === 'next'))
       return stringFromBytes(successorBytes(stringBytes(self), true), true);
-    if (name === 'chomp' && selected[0] === NIL) return stringFromBytes(stringBytes(self), self.binary);
+    if (name === 'chomp' && selected[0] === NIL) return copyStringEncoding(self);
     const strings: string[] = [];
     for (const arg of selected) strings.push(yield* stringArg(arg));
-    return self.binary ? binaryTransform(self.s, name, strings, transform) : str(transform(self.s, strings));
+    return self.binary
+      ? binaryTransform(self.s, name, strings, transform)
+      : textResult(self, transform(self.s, strings));
   });
   def('String', `${name}!`, [0, maxArgs], function* (self: RString, args) {
     const selected = name === 'chomp' && args.length === 0 ? [rt().globals.get('$/') ?? NIL] : args;
@@ -1525,7 +1535,9 @@ function* invalidSeparator(name: string, args: Value[]): Gen<RString | typeof NI
   return yield* stringArgValue(args[0]);
 }
 
-def('String', 'reverse', 0, (self: RString) => joinStringCharacters(stringCharacters(self).toReversed(), self.binary));
+def('String', 'reverse', 0, (self: RString) =>
+  joinStringCharacters(stringCharacters(self).toReversed(), self.binary, self.usAscii)
+);
 def('String', 'reverse!', 0, (self: RString) => {
   const reversed = joinStringCharacters(stringCharacters(self).toReversed(), self.binary);
   setBytes(self, stringBytes(reversed), reversed.binary);

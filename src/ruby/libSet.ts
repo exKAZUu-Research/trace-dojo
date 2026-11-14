@@ -137,6 +137,10 @@ def('Set', ['add', '<<'], 1, function* (self: RObject, [value]) {
   return self;
 });
 def('Set', 'add?', 1, function* (self: RObject, [value]) {
+  if (self.cls !== rt().c.Set) {
+    if (truthy(yield* callMethod(self, 'include?', [value]))) return NIL;
+    return yield* callMethod(self, 'add', [value]);
+  }
   yield* modify(self);
   const { inserted } = yield* hashGetOrInsert(membersOf(self), value, () => true);
   return inserted ? self : NIL;

@@ -35,7 +35,7 @@ export function stringBytes(value: RString): Uint8Array {
     : new TextEncoder().encode(value.s);
 }
 
-export function stringFromBytes(bytes: Uint8Array, binary = false): RString {
+export function stringFromBytes(bytes: Uint8Array, binary = false, usAscii = false): RString {
   if (binary) {
     let text = '';
     for (const byte of bytes) text += String.fromCodePoint(byte);
@@ -53,6 +53,7 @@ export function stringFromBytes(bytes: Uint8Array, binary = false): RString {
   const text = invalid ? decodeInvalidBytes(bytes) : new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes);
   rt().checkStringLength(text.length);
   const value = new RString(rt().c.String, text);
+  value.usAscii = usAscii;
   if (invalid) {
     value.rawBytes = Uint8Array.from(bytes);
   }
@@ -103,7 +104,12 @@ function encodeInvalidText(text: string): Uint8Array {
 }
 
 export function stringCharacters(value: RString): RString[] {
-  if (!value.rawBytes && !value.binary) return [...value.s].map((char) => str(char));
+  if (!value.rawBytes && !value.binary)
+    return [...value.s].map((char) => {
+      const result = str(char);
+      result.usAscii = value.usAscii;
+      return result;
+    });
   const bytes = stringBytes(value);
   const characters: RString[] = [];
   for (let index = 0; index < bytes.length;) {
@@ -121,10 +127,10 @@ export function stringCharacters(value: RString): RString[] {
       }
     }
     if (valid) {
-      characters.push(stringFromBytes(segment, value.binary));
+      characters.push(stringFromBytes(segment, value.binary, value.usAscii));
       index += segment.length;
     } else {
-      characters.push(stringFromBytes(bytes.slice(index, index + 1)));
+      characters.push(stringFromBytes(bytes.slice(index, index + 1), false, value.usAscii));
       index++;
     }
   }
@@ -141,7 +147,7 @@ export function stringCharacterCount(value: RString): number {
   return count;
 }
 
-export function joinStringCharacters(characters: RString[], binary = false): RString {
+export function joinStringCharacters(characters: RString[], binary = false, usAscii = false): RString {
   const chunks = characters.map(stringBytes);
   const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
   rt().checkStringLength(length);
@@ -151,7 +157,7 @@ export function joinStringCharacters(characters: RString[], binary = false): RSt
     bytes.set(chunk, offset);
     offset += chunk.length;
   }
-  return stringFromBytes(bytes, binary);
+  return stringFromBytes(bytes, binary, usAscii);
 }
 
 export function arr(items: Value[]): RArray {

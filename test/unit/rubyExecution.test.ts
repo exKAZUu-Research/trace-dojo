@@ -2341,6 +2341,15 @@ test('Set add? hashes a new member once and returns nil for existing members', (
   expect(run('s=Set[1];p s.add?(1),s.size')).toMatchObject({ stdout: 'nil\n1\n' });
 });
 
+test('Set subclass add? dispatches include? and add overrides', () => {
+  expect(run('class S<Set;def add(x);puts :add;super(x*2);end;end;s=S[];p s.add?(1).to_a')).toMatchObject({
+    stdout: 'add\n[2]\n',
+  });
+  expect(run('class S<Set;def include?(x);puts :include;true;end;end;s=S[];p s.add?(1)')).toMatchObject({
+    stdout: 'include\nnil\n',
+  });
+});
+
 test('Enumerable grouping and tally hash each new key once', () => {
   expect(run('class K;def hash;puts :hash;0;end;end;[1].group_by{K.new};[K.new].tally')).toMatchObject({
     stdout: 'hash\nhash\n',
@@ -2558,6 +2567,12 @@ test('Array join retains empty child US-ASCII encoding', () => {
   });
   expect(run('s=[[],"a"].join(":");[s.dup,s+"b",s.clear].each{|v|v<<128;p v.bytes}')).toMatchObject({
     stdout: '[58, 97, 128]\n[58, 97, 98, 128]\n[128]\n',
+  });
+});
+
+test('String results preserve US-ASCII through extraction and transforms', () => {
+  expect(run('s=[[]].join;[s.chr,s.upcase,s.reverse,s.strip,s.slice(0,0)].each{|t|t<<128;p t.bytes}')).toMatchObject({
+    stdout: '[128]\n'.repeat(5),
   });
 });
 
