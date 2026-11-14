@@ -2,6 +2,7 @@ import { formatFloat, toFloat, toInt, toStr } from './conversions';
 import { def } from './define';
 import { argumentError, floatDomainError, typeError, zeroDivisionError } from './errors';
 import { exactDecimal } from './floatFormat';
+import { bigintRatio } from './floatMath';
 import { callMethod, type Gen } from './interp';
 import { isRubyFloat, NIL, RArray, RObject, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
@@ -60,24 +61,7 @@ function asFraction(value: Value): { numerator: bigint; denominator: bigint } | 
 }
 
 function toNumber(fraction: { numerator: bigint; denominator: bigint }): number {
-  const negative = fraction.numerator < 0n;
-  const numerator = negative ? -fraction.numerator : fraction.numerator;
-  const denominator = fraction.denominator;
-  if (numerator === 0n) return 0;
-  let exponent = numerator.toString(2).length - denominator.toString(2).length;
-  if (exponent >= 0 ? numerator < denominator << BigInt(exponent) : numerator << BigInt(-exponent) < denominator)
-    exponent--;
-  if (exponent > 1023) return negative ? -Infinity : Infinity;
-  if (exponent < -1075) return negative ? -0 : 0;
-  const subnormal = exponent < -1022;
-  const scale = subnormal ? 1074 : 52 - exponent;
-  const scaledNumerator = scale >= 0 ? numerator << BigInt(scale) : numerator;
-  const scaledDenominator = scale < 0 ? denominator << BigInt(-scale) : denominator;
-  let quotient = scaledNumerator / scaledDenominator;
-  const remainder = scaledNumerator % scaledDenominator;
-  if (2n * remainder > scaledDenominator || (2n * remainder === scaledDenominator && quotient % 2n !== 0n)) quotient++;
-  const result = subnormal ? Number(quotient) * Number.MIN_VALUE : Number(quotient) * 2 ** -scale;
-  return negative ? -result : result;
+  return bigintRatio(fraction.numerator, fraction.denominator);
 }
 
 function* arithmetic(self: RObject, other: Value, op: string): Gen {

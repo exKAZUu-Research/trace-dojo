@@ -5394,6 +5394,14 @@ test('Time localtime validates offset before frozen state', () => {
   });
 });
 
+test('Time retains fractional offset values and formats rounded zones', () => {
+  expect(
+    run(
+      'p Time.new(2024,1,1,0,0,0,Rational(1,3)).utc_offset; p Time.utc(2024).getlocal(Rational(1,10)).utc_offset; p Time.utc(2024).getlocal(1.5).strftime("%::z")'
+    )
+  ).toMatchObject({ stdout: '(1/3)\n(1/10)\n"+00:00:02"\n' });
+});
+
 test('Rational Numeric methods and fdiv follow Ruby results', () => {
   expect(
     run(
