@@ -1010,8 +1010,11 @@ export class Converter {
     const args: Expr[] = [];
     const pairs: Node[] = [];
     let blockArg: Expr | undefined;
-    for (const child of nodes) {
-      if (child.type === 'comment') continue;
+    const meaningful = nodes.filter((node) => node.type !== 'comment');
+    for (const child of meaningful) {
+      const nestedArgs = child.type === 'call' ? child.childForFieldName('arguments') : undefined;
+      if (meaningful.length > 1 && nestedArgs && !nestedArgs.text.trimStart().startsWith('('))
+        this.fail(child, '引数の中に括弧のないメソッド呼び出しは書けません。');
       if (blockArg) this.fail(child, '& 引数の後に引数は書けません。');
       switch (child.type) {
         case 'pair':

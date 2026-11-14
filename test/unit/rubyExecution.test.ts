@@ -6740,6 +6740,20 @@ test('exclusive Range max follows successor iteration for Symbols', () => {
   ).toMatchObject({
     stdout: ':c\n"can\'t iterate from Time"\n',
   });
+  expect(
+    run(
+      '[[2.0,1],[1.0,1],[1.0,2],[Rational(1),Rational(3)]].each{|a|begin;p (a[0]...a[1]).max;rescue=>e;p e.message;end}'
+    )
+  ).toMatchObject({
+    stdout:
+      'nil\nnil\n"cannot exclude end value with non Integer begin value"\n"cannot exclude non Integer end value"\n',
+  });
+});
+
+test('non-leading unparenthesized command arguments fail before execution', () => {
+  for (const source of ['x=[1,2]; p x, x.join ","', 'def f1;1;end;def f2(a);a;end;p f1, f2 2'])
+    expect(run(source)).toMatchObject({ kind: 'compileError' });
+  expect(run('x=[1,2]; p x, x.join(",")')).toMatchObject({ stdout: '[1, 2]\n"1,2"\n' });
 });
 
 test('strftime distinguishes unknown from truncated directives', () => {
