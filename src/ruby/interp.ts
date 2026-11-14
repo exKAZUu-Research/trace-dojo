@@ -1189,6 +1189,9 @@ function* defineMethod(def: MethodDef, singleton: Expr | undefined, frame: Frame
   } else if (frame.kind === 'class') {
     owner = frame.self as RClass;
     visibility = frame.defaultVisibility;
+  } else if (frame.extra.definitionTarget) {
+    owner = frame.extra.definitionTarget;
+    visibility = frame.defaultVisibility;
   } else if (frame.home.kind === 'main') {
     owner = runtime.c.Object;
     visibility = frame.kind === 'main' ? 'private' : 'public';
@@ -1656,6 +1659,7 @@ export interface ProcCallOptions {
   /** The row of the `yield` or `call` that runs the block; undefined when library code runs it. */
   callRow?: number;
   self?: Value;
+  definitionTarget?: RClass;
 }
 
 /** Calls a block or proc with arguments, binding them as a block (or a lambda) does. */
@@ -1693,6 +1697,7 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
       block: options.block ?? outer.home.extra.block,
       method: outer.home.extra.method,
       def: outer.home.extra.def,
+      definitionTarget: options.definitionTarget ?? outer.extra.definitionTarget,
     }
   );
   if (options.block) frame.extra.block = options.block;

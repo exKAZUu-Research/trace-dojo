@@ -743,20 +743,28 @@ for (const name of [
   });
 }
 
-function* symbolNames(args: Value[]): Gen<string[]> {
+function* symbolNames(args: Value[], expandArrays = false): Gen<string[]> {
   const names: string[] = [];
   for (const arg of args) {
-    if (arg instanceof RSymbol) names.push(arg.name);
-    else if (arg instanceof RString) names.push(arg.s);
-    else if (arg instanceof RArray) for (const name of yield* symbolNames(arg.items)) names.push(name);
-    else throw typeError(`${yield* inspect(arg)} is not a symbol nor a string`);
+    if (arg instanceof RArray && expandArrays) {
+      for (const item of arg.items) names.push(yield* symbolName(item));
+    } else names.push(yield* symbolName(arg));
   }
   return names;
 }
 
+function* symbolName(value: Value): Gen<string> {
+  if (value instanceof RSymbol) return value.name;
+  if (value instanceof RString) return value.s;
+  throw typeError(`${yield* inspect(value)} is not a symbol nor a string`);
+}
+
 function defineAttributes(self: RClass, names: string[], reader: boolean, writer: boolean): RArray {
   const frame = rt().frame;
-  const visibility = frame.kind === 'class' && frame.self === self ? frame.defaultVisibility : 'public';
+  const visibility =
+    (frame.kind === 'class' && frame.self === self) || frame.extra.definitionTarget === self
+      ? frame.defaultVisibility
+      : 'public';
   const defined: Value[] = [];
   for (const name of names) {
     if (!/^[A-Za-z_\u0080-￿][\w\u0080-￿]*$/u.test(name)) {
@@ -774,8 +782,13 @@ function defineAttributes(self: RClass, names: string[], reader: boolean, writer
   return arr(defined);
 }
 
-def('Module', ['attr_reader', 'attr'], [0, -1], function* (self: RClass, args) {
+def('Module', 'attr_reader', [0, -1], function* (self: RClass, args) {
   return defineAttributes(self, yield* symbolNames(args), true, false);
+});
+def('Module', 'attr', [0, -1], function* (self: RClass, args) {
+  const writer = args.length === 2 && (args[1] === true || args[1] === false) ? args[1] : false;
+  const names = args.length === 2 && (args[1] === true || args[1] === false) ? args.slice(0, 1) : args;
+  return defineAttributes(self, yield* symbolNames(names), true, writer);
 });
 def('Module', 'attr_writer', [0, -1], function* (self: RClass, args) {
   return defineAttributes(self, yield* symbolNames(args), false, true);
@@ -787,14 +800,14 @@ def('Module', 'attr_accessor', [0, -1], function* (self: RClass, args) {
 function* setVisibility(self: RClass, args: Value[], visibility: Visibility): Gen {
   const frame = rt().frame;
   if (args.length === 0) {
-    if (frame.kind === 'class' && frame.self === self) {
+    if ((frame.kind === 'class' && frame.self === self) || frame.extra.definitionTarget === self) {
       frame.defaultVisibility = visibility;
       frame.moduleFunction = false;
     }
     return NIL;
   }
   if (self.frozen) throw frozenError(self, self.name ?? '');
-  for (const name of yield* symbolNames(args)) {
+  for (const name of yield* symbolNames(args, true)) {
     const method = self.findMethod(name);
     if (!method) {
       throw nameError(
@@ -880,7 +893,9 @@ sdef('Class', 'new', [0, 1], function* (_self, [superclass], block) {
   }
   const cls = new RClass(runtime.c.Class, undefined, parent, false);
   cls.isUserDefined = true;
-  if (block) yield* callProc(block, [cls], { self: cls });
+  const inherited = classOf(parent).findMethod('inherited');
+  if (inherited?.body.kind === 'user') yield* invoke(inherited, parent, [cls], undefined, undefined, false);
+  if (block) yield* callProc(block, [cls], { self: cls, definitionTarget: cls });
   return cls;
 });
 

@@ -2602,6 +2602,35 @@ test('default inclusion rejects a duplicate module on a frozen class', () => {
   });
 });
 
+test('method visibility names expand only one Array level', () => {
+  expect(run('class C;a=[];a<<a;begin;private a;rescue=>e;p e.class;end;end')).toMatchObject({
+    stdout: 'TypeError\n',
+  });
+  expect(run('class C;begin;attr_reader [:x];rescue=>e;p e.class;end;end')).toMatchObject({
+    stdout: 'TypeError\n',
+  });
+});
+
+test('Class new runs inherited before its definition block', () => {
+  expect(run('class A;def self.inherited(x);puts :inherited;end;end;B=Class.new(A){puts :body}')).toMatchObject({
+    stdout: 'inherited\nbody\n',
+  });
+});
+
+test('Class new blocks define methods with their visibility', () => {
+  expect(run('c=Class.new do;def x;1;end;end;p c.new.x')).toMatchObject({ stdout: '1\n' });
+  expect(run('c=Class.new do;private;attr_reader :x;end;begin;c.new.x;rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'NoMethodError\n',
+  });
+});
+
+test('Module attr accepts an optional writer flag', () => {
+  expect(run('class C;attr :x,true;end;c=C.new;c.x=1;p c.x')).toMatchObject({ stdout: '1\n' });
+  expect(run('class C;attr :x,false;end;p C.new.x;begin;C.new.x=1;rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'nil\nNoMethodError\n',
+  });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(

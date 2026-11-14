@@ -76,6 +76,7 @@ export function rootValues(frame: Frame, values: readonly Value[]): void {
 }
 
 export interface FrameExtra {
+  definitionTarget?: RClass;
   /** The running method. */
   method?: RMethod;
   def?: MethodDef;
