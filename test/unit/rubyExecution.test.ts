@@ -2230,6 +2230,27 @@ test('String translation stays bounded for broad character ranges', () => {
   expect(run(String.raw`s="a"*40000;p s.tr_s("a-\u{ffff}","x").size`)).toMatchObject({ stdout: '1\n' });
 });
 
+test('String codepoint iteration yields a valid prefix before invalid bytes', () => {
+  expect(run(String.raw`begin;"a\xFF".each_codepoint{|c|p c};rescue=>e;p e.class;end`)).toMatchObject({
+    stdout: '97\nArgumentError\n',
+  });
+  expect(run(String.raw`p "ab\xFF".each_codepoint.first`)).toMatchObject({ stdout: '97\n' });
+});
+
+test('String translation checks source and replacement pattern encodings', () => {
+  expect(
+    run('begin;"a".tr(255.chr,"é");rescue=>e;p e.class;end;begin;"a".tr_s(255.chr,"é");rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'Encoding::CompatibilityError\n'.repeat(2),
+  });
+});
+
+test('String chr keeps the encoding of an empty binary receiver', () => {
+  expect(run('s=255.chr;s.clear;t=s.chr;begin;t<<256;rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'RangeError\n',
+  });
+});
+
 test('Set reinitialization preserves existing members and frozen contents', () => {
   expect(
     run(

@@ -563,8 +563,10 @@ def('String', 'each_char', 0, function* (self: RString, _args, block) {
 });
 def('String', 'each_codepoint', 0, function* (self: RString, _args, block) {
   if (!block) return makeEnumerator(self, 'each_codepoint', []);
-  if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
-  for (const char of stringCharacters(self)) yield* callBlock(block, [BigInt(char.s.codePointAt(0) as number)], false);
+  for (const char of stringCharacters(self)) {
+    if (char.rawBytes && !char.binary) throw argumentError('invalid byte sequence in UTF-8');
+    yield* callBlock(block, [BigInt(char.s.codePointAt(0) as number)], false);
+  }
   return self;
 });
 def('String', 'grapheme_clusters', 0, function* (self: RString, _args, block) {
@@ -596,7 +598,7 @@ def('String', 'ord', 0, (self: RString) => {
   if (first.rawBytes && !first.binary) throw argumentError('invalid byte sequence in UTF-8');
   return BigInt(first.s.codePointAt(0) as number);
 });
-def('String', 'chr', 0, (self: RString) => stringCharacters(self)[0] ?? str(''));
+def('String', 'chr', 0, (self: RString) => stringCharacters(self)[0] ?? stringFromBytes(new Uint8Array(), self.binary));
 def('String', 'sum', [0, 1], function* (self: RString, args) {
   let total = 0n;
   for (const byte of stringBytes(self)) total += BigInt(byte);
@@ -966,7 +968,14 @@ function* translationPatterns(
     if (!(to instanceof RString)) yield* stringArgValue(to);
     return undefined;
   }
-  return { source: yield* characterSetPattern(self, from), replacement: yield* characterSetPattern(self, to) };
+  const source = yield* characterSetPattern(self, from);
+  const replacement = yield* characterSetPattern(self, to);
+  combinedStringEncoding(
+    source.binary,
+    stringBytes(source).every((byte) => byte < 0x80),
+    replacement
+  );
+  return { source, replacement };
 }
 
 // Substitution --------------------------------------------------------------------------------------------------------
