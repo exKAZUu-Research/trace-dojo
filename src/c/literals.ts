@@ -94,16 +94,20 @@ const SIMPLE_ESCAPES: Record<string, number> = {
 const ENCODER = new TextEncoder();
 
 /** The bytes of a literal's body, with escapes decoded and other characters in UTF-8. */
-function decodeBody(body: string, row: number): number[] {
+function decodeBody(body: string, row: number, character = false): number[] {
   const bytes: number[] = [];
   for (let index = 0; index < body.length;) {
     if (body[index] !== '\\') {
       const text = String.fromCodePoint(body.codePointAt(index) as number);
+      if (character && text.codePointAt(0)! > 127)
+        throw new CompileError([{ row, message: 'この文字は、文字定数の型に入りません。' }]);
       bytes.push(...ENCODER.encode(text));
       index += text.length;
       continue;
     }
     const escape = decodeEscape(body, index + 1, row);
+    if (character && escape.bytes.length > 1)
+      throw new CompileError([{ row, message: 'この文字は、文字定数の型に入りません。' }]);
     bytes.push(...escape.bytes);
     index += 1 + escape.length;
   }
@@ -168,7 +172,7 @@ function literalBody(text: string, row: number, what: string): string {
 
 /** The value of a character constant, which has the type int in C. */
 export function decodeCharLiteral(text: string, row: number): number {
-  const bytes = decodeBody(literalBody(text, row, '文字定数'), row);
+  const bytes = decodeBody(literalBody(text, row, '文字定数'), row, true);
   if (bytes.length === 0) throw new CompileError([{ row, message: "空の文字定数（''）は書けません。" }]);
   if (bytes.length === 1) return (bytes[0] << 24) >> 24;
   if (bytes.length > 4) throw new CompileError([{ row, message: '文字定数が長すぎます。' }]);

@@ -572,6 +572,12 @@ export function hasVla(type: CType): boolean {
   return false;
 }
 
+export function evaluatedArrayType(type: CType, lengths: readonly number[]): CType {
+  if (type.kind !== 'array') return type;
+  const { vla, ...array } = type;
+  return { ...array, length: vla === undefined ? type.length : lengths[vla], of: evaluatedArrayType(type.of, lengths) };
+}
+
 export function isVariablyModified(type: CType): boolean {
   if (type.kind === 'pointer') return isVariablyModified(type.to);
   if (type.kind === 'array') return type.vla !== undefined || isVariablyModified(type.of);

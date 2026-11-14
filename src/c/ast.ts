@@ -17,7 +17,7 @@ export interface Specifiers extends Span {
   qualifiers: Qualifiers;
   type: TypeSpecifier;
   /** `_Alignas(N)` or `_Alignas(T)`, which raises the alignment of a struct member. */
-  alignas?: { expression?: Expression; typeName?: TypeName; row: number };
+  alignas?: { expression?: Expression; typeName?: TypeName; row: number }[];
   /** Whether `inline` qualifies a function, whose definition alone then gives the function no external definition. */
   isInline?: boolean;
 }

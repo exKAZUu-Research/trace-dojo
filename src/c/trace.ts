@@ -239,11 +239,11 @@ class Snapshotter {
   }
 
   private arrayNode(type: Extract<CType, { kind: 'array' }>, address: number, seen: Set<number>): DisplayNode {
-    if (isCharType(type.of)) return { kind: 'value', value: this.stringAt(address, sizeIn(type, this.vla)) ?? '' };
     const size = sizeIn(type.of, this.vla);
     const entries: Record<string, DisplayNode> = {};
     const length =
       type.length === undefined && type.vla === undefined ? this.flexibleLength(address, size) : this.lengthOf(type);
+    if (isCharType(type.of)) return { kind: 'value', value: this.stringAt(address, length * size) ?? '' };
     for (let index = 0; index < length; index++) {
       entries[index] = this.nodeOf(type.of, { address: address + index * size }, seen) ?? NULL_NODE;
     }

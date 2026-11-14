@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 831 -- C syntax conversion shares scoped names and tree-sitter recovery.
+// code-gauge-allow-file fileNcss 833 -- C syntax conversion shares scoped names and tree-sitter recovery.
 import type { Node, Parser } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -25,7 +25,7 @@ import {
   type TypeSpecifier,
 } from './ast';
 import { validateDeclarationChildren, validateDeclaratorChildren } from './declarationSyntax';
-import { LAYOUT_ATTRIBUTES } from './preprocessor';
+import { checkAttributes } from './preprocessor';
 import { CSyntaxError } from './syntaxDiagnostics';
 import type { TypeScope } from './syntaxTokens';
 import { builtinType } from './types';
@@ -339,13 +339,14 @@ export class Converter {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of declaration specifier.
+  // code-gauge-allow functionNcss 33 -- Storage, qualifiers, attributes and type nodes share one declaration specification.
   private specifiers(node: Node): Specifiers {
     const typeNodes = declarationTypeNodes(node);
     if (typeNodes.length === 0) throw new CSyntaxError(node, '型の指定が必要です。');
     validateDeclarationChildren(node, typeNodes, (child) => this.checkUnsupported(child));
     let storage: StorageClass | undefined;
     let isInline = false;
-    let alignas: Specifiers['alignas'];
+    const alignas: NonNullable<Specifiers['alignas']> = [];
     const qualifiers = { isConst: false, isVolatile: false };
     for (const child of node.namedChildren) {
       if (child.type === 'storage_class_specifier') {
@@ -360,19 +361,25 @@ export class Converter {
           storage = word;
         }
       } else if (child.type === 'type_qualifier') {
-        alignas = this.qualifier(child, qualifiers) ?? alignas;
+        {
+          const requested = this.qualifier(child, qualifiers);
+          if (requested) alignas.push(requested);
+        }
       } else if (child.type === 'attribute_specifier' || child.type === 'attribute_declaration') {
         this.attributes(child);
       }
     }
     for (const child of typeNodes.flatMap((typeNode) => typeNode.namedChildren))
-      if (child.type === 'type_qualifier') alignas = this.qualifier(child, qualifiers) ?? alignas;
+      if (child.type === 'type_qualifier') {
+        const requested = this.qualifier(child, qualifiers);
+        if (requested) alignas.push(requested);
+      }
     return {
       storage,
       qualifiers,
       type: this.declarationType(typeNodes),
       row: node.startPosition.row,
-      ...(alignas ? { alignas } : {}),
+      ...(alignas.length > 0 ? { alignas } : {}),
       ...(isInline ? { isInline } : {}),
     };
   }
@@ -402,7 +409,10 @@ export class Converter {
   }
 
   /** Records a type qualifier, returning the alignment of `_Alignas`, which is no qualifier in C but parses as one. */
-  private qualifier(node: Node, qualifiers: { isConst: boolean; isVolatile: boolean }): Specifiers['alignas'] {
+  private qualifier(
+    node: Node,
+    qualifiers: { isConst: boolean; isVolatile: boolean }
+  ): NonNullable<Specifiers['alignas']>[number] | undefined {
     this.checkUnsupported(node);
     const word = node.text;
     const row = node.startPosition.row;
@@ -437,14 +447,8 @@ export class Converter {
     return undefined;
   }
 
-  /**
-   * Accepts attributes, which only change warnings and optimizations, except those that change a struct's layout,
-   * which the interpreter leaves out.
-   */
   private attributes(node: Node): void {
-    // GNU's __attribute__ never reaches here: the preprocessor drops it, or rejects it when it changes a layout.
-    const layout = LAYOUT_ATTRIBUTES.exec(node.text)?.[0];
-    if (layout) unsupported(node.startPosition.row, `配置や型を変える属性（${layout}）`);
+    checkAttributes(node.text, node.startPosition.row);
   }
 
   // code-gauge-allow functionCognitiveComplexity 17 -- Each C type specifier has a distinct AST form.

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 918 -- Expression compilation shares lvalue, conversion and pointer metadata state.
+// code-gauge-allow-file fileNcss 919 -- Expression compilation shares lvalue, conversion and pointer metadata state.
 import {
   binaryOperation,
   complement,
@@ -57,6 +57,7 @@ import {
   isConstQualified,
   isInteger,
   isScalar,
+  isVariablyModified,
   isVoidPointer,
   LONG,
   pointerTo,
@@ -70,7 +71,6 @@ import {
   VOID,
   withQualifiers,
 } from './types';
-import { unsupported } from './unsupported';
 
 /** Where a value is converted to another type, for the messages of the conversions clang rejects. */
 export type ConversionContext = 'assignment' | 'initialization' | 'argument' | 'return';
@@ -95,7 +95,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected abstract checkFunctionUse(fn: FunctionInfo, row: number): void;
 
   protected typeOfExpression(expression: Expression): CType {
-    return unqualified(this.expression(expression).type);
+    const operand = this.withoutVlaEvaluation(() => this.expression(expression));
+    if (!isVariablyModified(operand.type)) return unqualified(operand.type);
+    const evaluated = this.expression(expression);
+    this.pendingVla.push((frame) => {
+      (evaluated.effect ?? evaluated.value)(frame);
+    });
+    return unqualified(evaluated.type);
   }
 
   protected constantOperand(expression: Expression): Operand | undefined {
@@ -176,9 +182,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return withLengths(this.takePendingVla(), this.sizeofType(type, row));
       }
       case 'sizeofExpression': {
-        const operand = this.unevaluated(() => this.expression(expression.operand));
-        if (operand.lvalue?.isBitField) this.error(row, 'ビットフィールドに sizeof は使えません。');
-        return this.sizeofType(operand.type, row);
+        return this.sizeofExpression(expression);
       }
       case 'conditional': {
         return this.conditional(expression);
@@ -216,6 +220,22 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
   }
 
+  private sizeofExpression(expression: Extract<Expression, { kind: 'sizeofExpression' }>): Operand {
+    const row = expression.row;
+    const operand = this.withoutVlaEvaluation(() => this.expression(expression.operand));
+    if (operand.lvalue?.isBitField) this.error(row, 'ビットフィールドに sizeof は使えません。');
+    if (!hasVla(operand.type)) return this.sizeofType(operand.type, row);
+    const evaluated = this.expression(expression.operand);
+    const result = this.sizeofType(evaluated.type, row);
+    return {
+      type: result.type,
+      value: (frame) => {
+        (evaluated.effect ?? evaluated.value)(frame);
+        return result.value(frame);
+      },
+    };
+  }
+
   private binaryExpression(expression: Extract<Expression, { kind: 'binary' }>): Operand {
     const { left } = expression;
     const row = expression.operatorRow ?? expression.row;
@@ -239,7 +259,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   private alignof(expression: Extract<Expression, { kind: 'alignof' }>): Operand {
-    const type = this.typeOfName(expression.typeName);
+    const type = this.withoutVlaEvaluation(() => this.typeOfName(expression.typeName));
     if (type.kind !== 'void' && !isComplete(type))
       this.error(expression.row, `中身が決まっていない型（${typeName(type)}）に _Alignof は使えません。`);
     return constantOperand(SIZE_T, BigInt(alignOf(type)));
@@ -271,24 +291,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(row, `va_arg では ${typeName(type)} の値は読めません。`);
     }
     const size = sizeOf(type);
-    const read =
-      type.kind === 'record'
-        ? (frame: Frame, at: number): Value => loadRecord(frame.runtime, at, size)
-        : (() => {
-            const loader = loaderOf(type);
-            return (frame: Frame, at: number): Value => loader(frame.runtime, at);
-          })();
-    return {
-      type,
-      value: (frame) => {
-        const location = list.resolve(frame);
-        const address = location.load() as number;
-        checkVararg(frame, address, type);
-        const value = read(frame, address);
-        location.store(address + Math.ceil(size / 8) * 8);
-        return value;
-      },
-    };
+    const operand = this.memoryOperand(type, (frame) => {
+      const location = list.resolve(frame);
+      const address = location.load() as number;
+      checkVararg(frame, address, type);
+      location.store(address + Math.ceil(size / 8) * 8);
+      return address;
+    });
+    return { ...operand, lvalue: undefined };
   }
 
   /** The `va_list` variable that `va_start`, `va_arg`, and `va_copy` take. */
@@ -304,8 +314,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
   // Names and literals ----------------------------------------------------------------------------------------------
 
   private identifier(name: string, row: number): Operand {
-    const feature = UNSUPPORTED_NAMES[name];
-    if (feature && !this.scope.lookup(name)) unsupported(row, feature);
     const entity = this.scope.lookup(name);
     if (!entity && FUNCTION_NAMES.has(name)) {
       // clang gives __func__ outside a function an empty name, with a warning.
@@ -985,8 +993,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const { row } = expression;
     let direct: FunctionInfo | undefined;
     if (expression.callee.kind === 'identifier') {
-      const feature = UNSUPPORTED_NAMES[expression.callee.name];
-      if (feature && !this.scope.lookup(expression.callee.name)) unsupported(row, feature);
       const entity = this.scope.lookup(expression.callee.name);
       if (!entity) this.undeclaredFunction(expression.callee.name, row);
       if (entity.kind === 'function') {
@@ -1342,11 +1348,7 @@ function checkVararg(frame: Frame, address: number, type: CType): void {
   if (!block || !slots) throw new CRuntimeError('custom', 'va_list が va_start で始めた可変長引数を指していません。');
   const stored = slots[(address - block.base) / 8];
   if (!stored) throw new CRuntimeError('custom', 'va_arg で、渡された引数より多く読みました。');
-  const sameKind =
-    stored.kind === type.kind &&
-    sizeOf(stored) === sizeOf(type) &&
-    (stored.kind !== 'record' || (type.kind === 'record' && stored.info === type.info));
-  if (!sameKind) {
+  if (!compatible(unqualified(stored), unqualified(type))) {
     throw new CRuntimeError(
       'custom',
       `va_arg で読んだ型（${typeName(type)}）が、渡された引数の型（${typeName(stored)}）と合いません。`
@@ -1395,9 +1397,6 @@ function rvalueType(operand: Operand): CType {
 }
 
 const RELATIONAL = new Set<string>(['<', '>', '<=', '>=']);
-
-/** Names that clang defines in C17 for features the interpreter leaves out. */
-const UNSUPPORTED_NAMES: Record<string, string> = {};
 
 /** The names of the current function's name, which C defines as if a `static const char[]` held it. */
 const FUNCTION_NAMES = new Set(['__func__', '__FUNCTION__', '__PRETTY_FUNCTION__']);

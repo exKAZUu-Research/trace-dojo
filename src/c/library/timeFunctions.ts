@@ -61,17 +61,33 @@ function breakDown(time: number): BrokenDown {
 }
 
 function readTm(runtime: Runtime, address: number): BrokenDown {
-  const view = new DataView(readBytes(runtime, address, 36).buffer);
-  const field = (index: number): number => view.getInt32(index * 4, true);
+  const field = (index: number): number =>
+    new DataView(readBytes(runtime, address + index * 4, 4).buffer).getInt32(0, true);
   return {
-    second: field(0),
-    minute: field(1),
-    hour: field(2),
-    day: field(3),
-    month: field(4),
-    year: field(5),
-    weekday: field(6),
-    yearDay: field(7),
+    get second() {
+      return field(0);
+    },
+    get minute() {
+      return field(1);
+    },
+    get hour() {
+      return field(2);
+    },
+    get day() {
+      return field(3);
+    },
+    get month() {
+      return field(4);
+    },
+    get year() {
+      return field(5);
+    },
+    get weekday() {
+      return field(6);
+    },
+    get yearDay() {
+      return field(7);
+    },
   };
 }
 
@@ -103,7 +119,7 @@ function toTime(fields: BrokenDown): number {
 }
 
 /** The static `struct tm` and string that `localtime`, `gmtime`, `asctime`, and `ctime` return, as libc's are. */
-function staticBlock(runtime: Runtime, key: 'tm' | 'text', size: number): number {
+function staticBlock(runtime: Runtime, key: keyof Runtime['timeBuffers'], size: number): number {
   let block = runtime.timeBuffers[key];
   if (!block) {
     block = runtime.allocate(size, 'data');
@@ -210,8 +226,8 @@ function timeArgument(runtime: Runtime, value: Value | undefined): number {
   return Number(new DataView(bytes.buffer).getBigInt64(0, true));
 }
 
-function brokenDownTime(runtime: Runtime, value: Value | undefined): number {
-  const address = staticBlock(runtime, 'tm', TM_SIZE);
+function brokenDownTime(runtime: Runtime, value: Value | undefined, key: 'gmtime' | 'localtime'): number {
+  const address = staticBlock(runtime, key, TM_SIZE);
   writeTm(runtime, address, breakDown(timeArgument(runtime, value)));
   return address;
 }
@@ -240,8 +256,8 @@ export const TIME_FUNCTIONS: Record<string, NativeFunction> = {
     writeTm(runtime, asAddress(pointer), breakDown(time));
     return BigInt(time);
   },
-  gmtime: (runtime, [pointer]) => brokenDownTime(runtime, pointer),
-  localtime: (runtime, [pointer]) => brokenDownTime(runtime, pointer),
+  gmtime: (runtime, [pointer]) => brokenDownTime(runtime, pointer, 'gmtime'),
+  localtime: (runtime, [pointer]) => brokenDownTime(runtime, pointer, 'localtime'),
   asctime: (runtime, [pointer]) => returnString(runtime, asctimeText(readTm(runtime, asAddress(pointer)))),
   ctime: (runtime, [pointer]) => returnString(runtime, asctimeText(breakDown(timeArgument(runtime, pointer)))),
   strftime: (runtime, [buffer, size, format, pointer]) => {

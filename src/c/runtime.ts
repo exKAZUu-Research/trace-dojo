@@ -189,7 +189,7 @@ export class Runtime implements TracedRuntime<Frame> {
   tokenizerPosition = 0;
   readonly exitHandlers: number[] = [];
   /** The static struct tm and string of time.h's functions, created when first used. */
-  readonly timeBuffers: { tm?: Allocation; text?: Allocation } = {};
+  readonly timeBuffers: { gmtime?: Allocation; localtime?: Allocation; text?: Allocation } = {};
   private fallbackErrno = 0;
 
   get errno(): number {
@@ -309,7 +309,12 @@ export class Runtime implements TracedRuntime<Frame> {
       bindParameter(frame, param, args[index], argMetadata[index]);
     }
     if (fn.type.variadic)
-      frame.varargs = this.storeVarargs(frame, args.slice(fn.params.length), argTypes.slice(fn.params.length));
+      frame.varargs = this.storeVarargs(
+        frame,
+        args.slice(fn.params.length),
+        argTypes.slice(fn.params.length),
+        argMetadata.slice(fn.params.length)
+      );
     this.frames.push(frame);
     try {
       (fn.body as Exec)(frame);
@@ -329,7 +334,12 @@ export class Runtime implements TracedRuntime<Frame> {
    * Stores a variadic call's extra arguments in 8-byte slots, as arm64 macOS passes them on the stack, so that `va_arg`
    * reads them through a `va_list` that is a `char *`.
    */
-  private storeVarargs(frame: Frame, values: Value[], types: CType[]): number {
+  private storeVarargs(
+    frame: Frame,
+    values: Value[],
+    types: CType[],
+    metadata: Pick<Evaluated, 'range' | 'bytes'>[]
+  ): number {
     const slots: CType[] = [];
     for (const type of types) {
       slots.push(type);
@@ -339,7 +349,7 @@ export class Runtime implements TracedRuntime<Frame> {
     frame.blocks.set(-1, block);
     let offset = 0;
     for (const [index, type] of types.entries()) {
-      storeValue(this, block.base + offset, type, values[index]);
+      storeValue(this, block.base + offset, type, values[index], metadata[index]?.range, metadata[index]?.bytes);
       offset += Math.ceil(sizeOf(type) / 8) * 8;
     }
     this.varargTypes.set(block.base, slots);

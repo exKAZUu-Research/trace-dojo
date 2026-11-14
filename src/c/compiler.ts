@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 781 -- Declaration and initializer compilation share symbol and type state.
+// code-gauge-allow-file fileNcss 784 -- Declaration and initializer compilation share symbol and type state.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type { Value } from './arith';
 import type {
@@ -40,6 +40,7 @@ import {
   compatible,
   composite,
   type CType,
+  evaluatedArrayType,
   type Field,
   type FunctionType,
   hasVla,
@@ -223,6 +224,7 @@ export class Compiler extends StatementCompiler {
     for (const declarator of declaration.declarators) {
       const { type, name, row } = this.declaredType(base, declarator.declarator);
       if (name === undefined) this.error(row, '宣言する名前を書いてください。');
+      this.validateInline(specifiers, type, name);
       const alignment = this.objectAlignment(specifiers, type);
       if (specifiers.storage === 'typedef') {
         this.declareTypedef(name, type, row);
@@ -383,7 +385,7 @@ export class Compiler extends StatementCompiler {
   // Functions ---------------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionCognitiveComplexity 30 -- Declaring a function's parameters, checking main's form.
-  // code-gauge-allow functionNcss 49 -- Function setup shares linkage, parameter lengths, trace annotations and body state.
+  // code-gauge-allow functionNcss 50 -- Function setup shares linkage, parameter lengths, trace annotations and body state.
   private functionDefinition(definition: FunctionDefinition): void {
     const { specifiers, row } = definition;
     if (specifiers.storage === 'typedef' || specifiers.storage === 'auto' || specifiers.storage === 'register') {
@@ -396,9 +398,10 @@ export class Compiler extends StatementCompiler {
     const ret = unqualified(type.ret);
     if (ret.kind !== 'void' && !isComplete(ret))
       this.error(row, `戻り値の型（${typeName(ret)}）の中身が定義されていません。`);
+    this.validateInline(specifiers, type, name);
     if (name === 'main') this.checkMain(type, row);
     const info = this.declareFunction(name, type, row, specifiers.storage === 'static', undefined);
-    if (specifiers.isInline && specifiers.storage === undefined) info.isInlineDefinition = true;
+    if (specifiers.isInline && !info.isStatic && specifiers.storage === undefined) info.isInlineDefinition = true;
     else info.hasExternalDeclaration = true;
     if (info.isDefined) this.error(row, `関数「${name}」が2回定義されています。`);
     if (info.header !== undefined && !this.library(name)?.canDefine)
@@ -527,6 +530,7 @@ export class Compiler extends StatementCompiler {
     const name = declaredName(declarator.declarator);
     const entity = name === undefined ? undefined : this.scope.ordinary.get(name);
     if (entity) {
+      this.validateInline(specifiers, entity.type, name);
       const alignment = this.objectAlignment(specifiers, entity.type);
       if (entity.kind === 'local') {
         entity.local.alignment = alignment;
@@ -638,7 +642,7 @@ export class Compiler extends StatementCompiler {
           'stack',
           Math.max(alignOf(type), local.alignment ?? 0)
         );
-        block.type = type;
+        block.type = evaluatedArrayType(type, frame.vla);
         block.name = name;
         frame.bases[index] = block.base;
         frame.blocks.set(local.index, block);

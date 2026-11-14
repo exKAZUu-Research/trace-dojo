@@ -184,6 +184,21 @@ export abstract class CompilerBase {
     }
   }
 
+  protected withoutVlaEvaluation<T>(compile: () => T): T {
+    const previous = this.pendingVla;
+    this.pendingVla = [];
+    try {
+      return this.unevaluated(compile);
+    } finally {
+      this.pendingVla = previous;
+    }
+  }
+
+  protected validateInline(specifiers: Specifiers, type: CType, name?: string): void {
+    if (specifiers.isInline && (type.kind !== 'function' || specifiers.storage === 'typedef' || name === 'main'))
+      this.error(specifiers.row, 'inline は main 以外の関数にだけ指定できます。');
+  }
+
   protected withScope<T>(compile: () => T): T {
     const outer = this.scope;
     this.scope = new Scope(outer);
@@ -261,8 +276,13 @@ export abstract class CompilerBase {
   }
 
   /** The alignment that `_Alignas` asks for, which must be a power of two. */
-  protected requestedAlignment(alignas: NonNullable<Specifiers['alignas']>): number {
-    if (alignas.typeName) return alignOf(this.typeOfName(alignas.typeName));
+  protected requestedAlignment(requests: NonNullable<Specifiers['alignas']>): number {
+    return Math.max(...requests.map((request) => this.alignmentRequest(request)));
+  }
+
+  private alignmentRequest(alignas: NonNullable<Specifiers['alignas']>[number]): number {
+    const typeName = alignas.typeName;
+    if (typeName) return alignOf(this.withoutVlaEvaluation(() => this.typeOfName(typeName)));
     const value = this.integerConstant(alignas.expression as Expression, '_Alignas の大きさ');
     if (value !== 0 && (value < 0 || (value & (value - 1)) !== 0))
       this.error(alignas.row, '_Alignas の大きさは、2 のべき乗にしてください。');
@@ -313,6 +333,7 @@ export abstract class CompilerBase {
     const names = new Set<string>();
     const last = fields.flatMap((field) => field.declarators).at(-1);
     for (const field of fields) {
+      if (field.specifiers.isInline) this.error(field.row, '構造体・共用体のメンバに inline は指定できません。');
       const base = this.baseType(field.specifiers);
       if (field.specifiers.storage) this.error(field.row, '構造体のメンバに記憶域の指定（static など）は書けません。');
       const align = field.specifiers.alignas ? this.requestedAlignment(field.specifiers.alignas) : undefined;
@@ -551,6 +572,7 @@ export abstract class CompilerBase {
     if (param.specifiers.storage && param.specifiers.storage !== 'register') {
       this.error(param.row, '引数に記憶域の指定（static など）は書けません。');
     }
+    if (param.specifiers.isInline) this.error(param.row, '引数に inline は指定できません。');
     const previous = this.inParameter;
     this.inParameter = true;
     let declared: ReturnType<CompilerBase['declaredType']>;

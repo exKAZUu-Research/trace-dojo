@@ -1,7 +1,8 @@
-// code-gauge-allow-file fileNcss 497 -- Directive handling and macro expansion share preprocessing state.
+// code-gauge-allow-file fileNcss 513 -- Directive handling and macro expansion share preprocessing state.
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { type LogicalLine, type PPToken, spell, tokenize } from './lexer';
+import { decodeStringLiteral } from './literals';
 import { evaluatePreprocessorCondition } from './preprocessorCondition';
 import { TokenStream } from './tokenStream';
 import { unsupported } from './unsupported';
@@ -212,7 +213,7 @@ class Preprocessor {
     top.taken = value;
   }
 
-  // code-gauge-allow functionNcss 36 -- Each directive shares one source-row and macro context.
+  // code-gauge-allow functionNcss 38 -- Each directive shares one source-row and macro context.
   private otherDirective(name: string, nameToken: PPToken | undefined, rest: PPToken[], row: number): void {
     switch (name) {
       case '': {
@@ -233,10 +234,11 @@ class Preprocessor {
         this.include(rest, row);
         return;
       }
-      case 'pragma':
+      case 'pragma': {
+        checkPragma(spell(rest), row);
+        return;
+      }
       case 'warning': {
-        // A pragma tells the compiler things it may ignore (#pragma once changes nothing in one file), and a warning
-        // is no error.
         return;
       }
       case 'error': {
@@ -530,50 +532,91 @@ class Preprocessor {
 const GNU_ATTRIBUTE_KEYWORDS = new Set(['__attribute__', '__attribute']);
 
 function skipIgnored(queue: TokenStream, token: PPToken, expand: (tokens: PPToken[]) => PPToken[]): boolean {
+  if (token.text === '[' && queue.peek()?.text === '[') {
+    const tokens = takeAnnotation(queue, '[', ']', token.row, token);
+    checkAttributes(spell(tokens), token.row);
+    return true;
+  }
   if (
     token.kind !== 'identifier' ||
     queue.peek()?.text !== '(' ||
     (token.text !== '_Pragma' && !GNU_ATTRIBUTE_KEYWORDS.has(token.text))
   )
     return false;
-  const tokens: PPToken[] = [];
-  let depth = 0;
-  do {
-    const next = queue.take();
-    if (!next) throw new CompileError([{ row: token.row, message: '属性の ( と ) の数が合いません。' }]);
-    tokens.push(next);
-    if (next.text === '(') depth++;
-    else if (next.text === ')') depth--;
-  } while (depth > 0);
+  const tokens = takeAnnotation(queue, '(', ')', token.row);
+  const expanded = expand(tokens);
   if (token.text === '_Pragma') {
-    if (tokens.length !== 3 || tokens[1].kind !== 'string')
+    if (expanded.length !== 3 || expanded[1].kind !== 'string')
       throw new CompileError([{ row: token.row, message: '_Pragma の後には ( と文字列と ) を書いてください。' }]);
-  } else skipGnuAttribute(expand(tokens), 0, token.row);
+    const text = new TextDecoder().decode(decodeStringLiteral([expanded[1].text], token.row).slice(0, -1));
+    checkPragma(text, token.row);
+  } else checkAttributes(spell(expanded), token.row);
   return true;
 }
 
-/** The GNU attributes that change a type's layout, which the interpreter leaves out; the others only change warnings. */
-export const LAYOUT_ATTRIBUTES = /\b(?:packed|aligned|__packed__|__aligned__|vector_size|mode|transparent_union)\b/;
+function takeAnnotation(queue: TokenStream, open: string, close: string, row: number, first?: PPToken): PPToken[] {
+  const tokens: PPToken[] = first ? [first] : [];
+  let depth = first ? 1 : 0;
+  do {
+    const next = queue.take();
+    if (!next) throw new CompileError([{ row, message: '属性を囲む括弧の数が合いません。' }]);
+    tokens.push(next);
+    if (next.text === open) depth++;
+    else if (next.text === close) depth--;
+  } while (depth > 0);
+  return tokens;
+}
 
-/**
- * Skips `__attribute__((...))`, whose parentheses start at `open`, and returns the index after them. The attributes are
- * dropped before parsing, since clang accepts them in places tree-sitter's C grammar does not, such as between a
- * declarator and its initializer; one that changes a layout is rejected wherever it is written.
- */
-function skipGnuAttribute(queue: PPToken[], open: number, row: number): number {
+const LAYOUT_ATTRIBUTES = new Set(['packed', 'aligned', 'vector_size', 'mode', 'transparent_union']);
+const IGNORED_ATTRIBUTES = new Set([
+  'unused',
+  'maybe_unused',
+  'nodiscard',
+  'warn_unused_result',
+  'deprecated',
+  'fallthrough',
+  'noreturn',
+  'format',
+  'format_arg',
+  'nonnull',
+  'returns_nonnull',
+  'sentinel',
+  'alloc_size',
+  'alloc_align',
+  'always_inline',
+  'noinline',
+  'pure',
+  'const',
+  'hot',
+  'cold',
+  'flatten',
+  'leaf',
+  'artificial',
+  'not_tail_called',
+  'optnone',
+  'annotate',
+  'no_sanitize',
+  'disable_sanitizer_instrumentation',
+]);
+
+// code-gauge-allow functionCognitiveComplexity 19 -- Attribute names are classified only at list depth, leaving argument identifiers and strings untouched.
+export function checkAttributes(text: string, row: number): void {
   let depth = 0;
-  let index = open;
-  const words: string[] = [];
-  for (; index < queue.length; index++) {
-    const text = queue[index].text;
-    if (text === '(') depth++;
-    else if (text === ')' && --depth === 0) break;
-    words.push(text);
+  const tokens = tokenize(text).lines.flatMap((line) => line.tokens);
+  for (const [index, token] of tokens.entries()) {
+    if (token.text === '(' || token.text === '[') depth++;
+    else if (token.text === ')' || token.text === ']') depth--;
+    else if (depth === 2 && token.kind === 'identifier' && tokens[index + 1]?.text !== ':') {
+      const name = token.text.replaceAll(/^__|__$/g, '');
+      if (LAYOUT_ATTRIBUTES.has(name)) unsupported(row, `配置や型を変える属性（${name}）`);
+      if (!IGNORED_ATTRIBUTES.has(name)) unsupported(row, `属性（${name}）`);
+    }
   }
-  if (depth > 0) throw new CompileError([{ row, message: '__attribute__ の ( と ) の数が合いません。' }]);
-  const layout = LAYOUT_ATTRIBUTES.exec(words.join(' '))?.[0];
-  if (layout) unsupported(row, `配置や型を変える属性（${layout}）`);
-  return index + 1;
+}
+
+function checkPragma(text: string, row: number): void {
+  if (!text || /^(?:once|mark|message)\b/.test(text) || /^(?:GCC|clang)\s+diagnostic\b/.test(text)) return;
+  unsupported(row, `#pragma ${text}`);
 }
 
 // code-gauge-allow functionCognitiveComplexity 16 -- Balanced parentheses and variadic presence determine replacement.
