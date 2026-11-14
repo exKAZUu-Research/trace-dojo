@@ -1,3 +1,4 @@
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { formatFloat, toFloat, toInt, toStr } from './conversions';
 import { def } from './define';
 import { argumentError, floatDomainError, typeError, zeroDivisionError } from './errors';
@@ -313,8 +314,10 @@ function parseRationalText(text: string, exact: boolean): RObject | undefined {
   let numerator = BigInt(`${whole || '0'}${fraction}`);
   if (sign === '-') numerator = -numerator;
   const exponent = exponentText ? Number(exponentText.replaceAll('_', '')) : 0;
-  if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > 10_000)
-    throw new UnsupportedFeatureError('大きすぎる有理数の指数');
+  if (!Number.isSafeInteger(exponent)) throw new ExecutionLimitError('operations');
+  const estimatedWork = Math.ceil((Math.abs(exponent) * Math.log2(Math.abs(exponent) + 1)) / 64);
+  if (estimatedWork > LIMITS.maxOperations) throw new ExecutionLimitError('operations');
+  rt().spend(estimatedWork);
   const scale = fraction.length - exponent;
   const denominator = BigInt(denominatorText?.replaceAll('_', '') ?? '1');
   return makeRational(

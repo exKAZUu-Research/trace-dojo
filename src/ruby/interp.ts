@@ -1188,7 +1188,7 @@ function* definedText(e: Expr, frame: Frame): Gen {
       const method = classOf(recv).findMethod(e.name);
       if (!method) {
         const hook = classOf(recv).findMethod('respond_to_missing?');
-        return hook && truthy(yield* invoke(hook, recv, [RSymbol.of(e.name), true], undefined, undefined, false))
+        return hook && truthy(yield* invoke(hook, recv, [RSymbol.of(e.name), false], undefined, undefined, false))
           ? text('method')
           : NIL;
       }

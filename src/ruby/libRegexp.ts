@@ -514,7 +514,7 @@ export function setLiteralMatch(text: string, target: string, from: number): voi
     literal: true,
     groups: [[from, from + target.length]],
     names: [],
-    namedGroups: {},
+    namedGroups: Object.create(null) as Record<string, number>,
     regexp: makeRegexp(escapeRegexpSource(target), {}),
   });
 }

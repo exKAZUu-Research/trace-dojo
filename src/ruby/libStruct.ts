@@ -163,14 +163,14 @@ sdef(
       }
     }
     const names = first instanceof RString || first === NIL ? args.slice(1) : args;
-    if (names.length === 0 && !keywordInit && first !== NIL)
-      throw argumentError('wrong number of arguments (given 0, expected 1+)');
     const name = first instanceof RString ? first.s : undefined;
     if (name !== undefined) {
       if (!/^[\p{Lu}\p{Lt}][\p{L}\p{M}\p{N}_]*$/u.test(name))
         throw nameError(`identifier ${name} needs to be constant`);
       assertMutableClass(rt().c.Struct);
     }
+    if (names.length === 0 && !keywordInit && first !== NIL && name === undefined)
+      throw argumentError('wrong number of arguments (given 0, expected 1+)');
     const cls = yield* newStructClass(rt().c.Struct, yield* membersFrom(names), { keywordInit, kind: 'struct' });
     if (name !== undefined) {
       cls.baseName = name;

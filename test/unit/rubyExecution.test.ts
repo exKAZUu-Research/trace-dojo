@@ -6049,3 +6049,21 @@ test('extended regexp comments end after even backslash runs', () => {
   const source = String.raw`p(/(a)# ignored \\` + '\n' + String.raw`(?<real>b)/x.match("ab").to_a)`;
   expect(run(source)).toMatchObject({ stdout: '["ab", "b"]\n' });
 });
+
+test('conversion guards and literal match metadata follow Ruby lookup', () => {
+  expect(run('"a".sub("a","b");begin;p $~[:constructor];rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'IndexError\n',
+  });
+  expect(
+    run('class C;def respond_to_missing?(n,priv=false)=priv;def method_missing(n,*)=:h;end;p defined?(C.new.anything)')
+  ).toMatchObject({
+    stdout: 'nil\n',
+  });
+});
+
+test('large Rational exponents and named memberless Struct classes remain supported', () => {
+  expect(run('p "1e20000".to_r.class,Struct.new("Ok").name')).toMatchObject({
+    stdout: 'Rational\n"Struct::Ok"\n',
+  });
+  expect(run('p Struct.new("x")')).toMatchObject({ uncaughtException: expect.stringContaining('NameError') });
+});
