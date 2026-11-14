@@ -1876,6 +1876,31 @@ test('deep Ruby containers remain within the interpreter stack', () => {
   expect(run('a=1;b=1;5000.times{a=[a];b=[b]};p a==b,a.eql?(b)')).toMatchObject({ stdout: 'true\ntrue\n' });
 });
 
+test('String selectors read current contents after index conversion', () => {
+  expect(run('class I;def to_int;$s.replace("cd");0;end;end;$s="ab";p $s[I.new],$s')).toMatchObject({
+    stdout: '"c"\n"cd"\n',
+  });
+  expect(run('class I;def to_int;$s.replace("cd");0;end;end;$s="ab";p $s.byteslice(I.new)')).toMatchObject({
+    stdout: '"c"\n',
+  });
+  expect(
+    run('class I;def to_int;$s.replace("cd");0;end;end;$s="ab";p $s.slice!(I.new),$s;$s="ab";$s[I.new]="x";p $s')
+  ).toMatchObject({
+    stdout: '"c"\n"d"\n"xd"\n',
+  });
+});
+
+test('binary String segments keep source bytes and encoding', () => {
+  expect(
+    run('s=255.chr;p s.lines[0].bytes,s.grapheme_clusters[0].bytes,s.delete("a").bytes,s.squeeze.bytes')
+  ).toMatchObject({
+    stdout: '[255]\n[255]\n[255]\n[255]\n',
+  });
+  expect(run('s=255.chr;begin;s.lines[0]+"é";rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'Encoding::CompatibilityError\n',
+  });
+});
+
 test('shuffle detects receiver changes from its randomizer', () => {
   expect(
     run(

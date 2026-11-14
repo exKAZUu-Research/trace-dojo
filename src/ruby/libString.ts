@@ -85,6 +85,12 @@ function setBytes(self: RString, bytes: Uint8Array, binary = self.binary): void 
   self.rawBytes = result.rawBytes;
 }
 
+function textResult(self: RString, text: string): RString {
+  const result = str(text);
+  result.binary = self.binary;
+  return result;
+}
+
 function* stringArg(value: Value): Gen<string> {
   return yield* toStr(value);
 }
@@ -114,7 +120,7 @@ function regexpUnsupported(value: Value): void {
 
 /** Resolves `str[index]`, `str[start, length]`, and `str[range]` to a start and a length, or undefined. */
 function* substringRange(
-  length: number,
+  length: number | (() => number),
   args: Value[],
   firstIndex?: { number: number; integer: bigint }
 ): Gen<{ start: number; count: number } | undefined> {
@@ -122,9 +128,10 @@ function* substringRange(
   if (second !== undefined) {
     let start = firstIndex?.number ?? (yield* toIndex(first));
     const count = yield* toIndex(second);
-    if (start < 0) start += length;
-    if (start < 0 || start > length || count < 0) return undefined;
-    return { start, count: Math.min(count, length - start) };
+    const currentLength = typeof length === 'number' ? length : length();
+    if (start < 0) start += currentLength;
+    if (start < 0 || start > currentLength || count < 0) return undefined;
+    return { start, count: Math.min(count, currentLength - start) };
   }
   if (first instanceof RRange) {
     const resolved = yield* rangeBounds(first, length);
@@ -132,8 +139,9 @@ function* substringRange(
     return resolved;
   }
   let index = yield* toIndex(first);
-  if (index < 0) index += length;
-  if (index < 0 || index >= length) return undefined;
+  const currentLength = typeof length === 'number' ? length : length();
+  if (index < 0) index += currentLength;
+  if (index < 0 || index >= currentLength) return undefined;
   return { start: index, count: 1 };
 }
 
@@ -374,10 +382,10 @@ def('String', 'clear', 0, (self: RString) => {
   return self;
 });
 def('String', 'insert', 2, function* (self: RString, [index, other]) {
-  const chars = stringCharacters(self);
   const converted = yield* toIndexExact(index);
   let position = converted.number;
   const value = yield* stringArgValue(other);
+  const chars = stringCharacters(self);
   const binary = combinedStringEncoding(
     self.binary,
     stringBytes(self).every((byte) => byte < 0x80),
@@ -413,17 +421,17 @@ function* substring(self: RString, args: Value[]): Gen {
       ? stringFromBytes(stringBytes(first), self.binary)
       : NIL;
   regexpUnsupported(first);
-  const chars = stringCharacters(self);
-  const range = yield* substringRange(chars.length, args);
+  const range = yield* substringRange(() => stringCharacterCount(self), args);
   if (!range) return NIL;
+  const chars = stringCharacters(self);
   if (args.length === 1 && !(first instanceof RRange) && range.count === 1) return chars[range.start];
   return joinStringCharacters(chars.slice(range.start, range.start + range.count), self.binary);
 }
 
 def('String', ['[]', 'slice'], [1, 2], (self: RString, args) => substring(self, args));
 def('String', 'byteslice', [1, 2], function* (self: RString, args) {
+  const range = yield* substringRange(() => stringBytes(self).length, args);
   const bytes = stringBytes(self);
-  const range = yield* substringRange(bytes.length, args);
   return range ? stringFromBytes(bytes.slice(range.start, range.start + range.count), self.binary) : NIL;
 });
 def('String', 'slice!', [1, 2], function* (self: RString, args) {
@@ -438,9 +446,9 @@ def('String', 'slice!', [1, 2], function* (self: RString, args) {
     return stringFromBytes(stringBytes(first), self.binary);
   }
   regexpUnsupported(first);
-  const chars = stringCharacters(self);
-  const range = yield* substringRange(chars.length, args);
+  const range = yield* substringRange(() => stringCharacterCount(self), args);
   if (!range) return NIL;
+  const chars = stringCharacters(self);
   const removed = chars.splice(range.start, range.count);
   setBytes(self, stringBytes(joinStringCharacters(chars, self.binary)));
   return args.length === 1 && !(first instanceof RRange) && range.count === 1
@@ -452,7 +460,6 @@ def('String', '[]=', [2, 3], function* (self: RString, args) {
   const value = yield* stringArgValue(args.at(-1) as Value);
   const selectors = args.slice(0, -1);
   const [first] = selectors;
-  const chars = stringCharacters(self);
   if (selectors.length === 1 && first instanceof RString) {
     const bytes = stringBytes(self);
     const position = first.rawBytes && !first.binary && !self.binary ? -1 : byteIndex(bytes, stringBytes(first));
@@ -469,13 +476,14 @@ def('String', '[]=', [2, 3], function* (self: RString, args) {
   let range: { start: number; count: number } | undefined;
   if (selectors.length === 1 && !(first instanceof RRange)) {
     const converted = yield* toIndexExact(first);
+    const chars = stringCharacters(self);
     let index = converted.number;
     if (index < 0) index += chars.length;
     if (index < 0 || index >= chars.length) throw indexError(`index ${converted.integer} out of string`);
     range = { start: index, count: 1 };
   } else {
     const firstIndex = first instanceof RRange ? undefined : yield* toIndexExact(first);
-    range = yield* substringRange(chars.length, selectors, firstIndex);
+    range = yield* substringRange(() => stringCharacterCount(self), selectors, firstIndex);
     if (!range) {
       if (first instanceof RRange) throw rangeError(`${yield* inspect(first)} out of range`);
       throw indexError(`index ${firstIndex?.integer} out of string`);
@@ -486,6 +494,7 @@ def('String', '[]=', [2, 3], function* (self: RString, args) {
     stringBytes(self).every((byte) => byte < 0x80),
     value
   );
+  const chars = stringCharacters(self);
   chars.splice(range.start, range.count, value);
   setBytes(self, stringBytes(joinStringCharacters(chars, binary)), binary);
   return args.at(-1) as Value;
@@ -523,8 +532,8 @@ def('String', 'codepoints', 0, (self: RString) => {
 });
 def('String', 'bytes', 0, (self: RString) => arr([...stringBytes(self)].map(BigInt)));
 def('String', 'getbyte', 1, function* (self: RString, [index]) {
-  const bytes = stringBytes(self);
   let position = yield* toIndex(index);
+  const bytes = stringBytes(self);
   if (position < 0) position += bytes.length;
   return position >= 0 && position < bytes.length ? BigInt(bytes[position]) : NIL;
 });
@@ -544,7 +553,7 @@ def('String', 'grapheme_clusters', 0, function* (self: RString, _args, block) {
   const values: Value[] = [];
   for (const { segment } of segments) {
     rt().spend();
-    const value = str(segment);
+    const value = textResult(self, segment);
     if (block) yield* callBlock(block, [value], false);
     else values.push(value);
   }
@@ -615,7 +624,7 @@ def(
   [0, 1],
   function* (self: RString, args, _block, keywords) {
     const { separator, chomp } = yield* lineOptions(args, keywords);
-    return arr(linesOf(self.s, separator, chomp).map((line) => str(line)));
+    return arr(linesOf(self.s, separator, chomp).map((line) => textResult(self, line)));
   },
   { keywords: true }
 );
@@ -626,7 +635,7 @@ def(
   function* (self: RString, args, block, keywords) {
     if (!block) return makeEnumerator(self, 'each_line', args, keywords);
     const { separator, chomp } = yield* lineOptions(args, keywords);
-    for (const line of linesOf(self.s, separator, chomp)) yield* callBlock(block, [str(line)], false);
+    for (const line of linesOf(self.s, separator, chomp)) yield* callBlock(block, [textResult(self, line)], false);
     return self;
   },
   { keywords: true }
@@ -741,7 +750,8 @@ def('String', 'delete', [1, -1], function* (self: RString, args) {
   const sets: string[] = [];
   for (const arg of args) sets.push(yield* patternText(arg, 'characters'));
   const matches = characterSetMatcher(sets);
-  return str(
+  return textResult(
+    self,
     charsOf(self.s)
       .filter((char) => !matches(char))
       .join('')
@@ -778,7 +788,7 @@ def('String', 'squeeze', [0, -1], function* (self: RString, args) {
   if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   const sets: string[] = [];
   for (const arg of args) sets.push(yield* patternText(arg, 'characters'));
-  return str(squeeze(self.s, sets));
+  return textResult(self, squeeze(self.s, sets));
 });
 def('String', 'squeeze!', [0, -1], function* (self: RString, args) {
   if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
@@ -874,7 +884,8 @@ for (const [name, squeezeRuns] of [
       if (!(to instanceof RString)) yield* stringArgValue(to);
       return stringFromBytes(stringBytes(self), self.binary);
     }
-    return str(
+    return textResult(
+      self,
       translate(self.s, yield* patternText(from, 'characters'), yield* patternText(to, 'characters'), squeezeRuns).text
     );
   });
