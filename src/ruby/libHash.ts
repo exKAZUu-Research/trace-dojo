@@ -53,24 +53,31 @@ def(
 // code-gauge-allow functionCognitiveComplexity 18 -- Hash.[] accepts alternating key/value arguments or one pair collection and validates both forms.
 sdef('Hash', '[]', [0, -1], function* (self, args) {
   const hash = new RHash(self);
-  const source = args.length === 1 ? yield* hashLiteralSource(args[0]) : undefined;
-  if (source instanceof RHash) {
-    for (const entry of source.map.values()) yield* hashSet(hash, entry.key, entry.value);
-    return hash;
-  }
-  if (source instanceof RArray) {
-    for (const [index, item] of source.items.entries()) {
-      const pair = yield* tryAry(item);
-      if (!pair) throw argumentError(`wrong element type ${realClassOf(item).name} at ${index} (expected array)`);
-      if (pair.items.length === 0 || pair.items.length > 2)
-        throw argumentError(`invalid number of elements (${pair.items.length} for 1..2)`);
-      yield* hashSet(hash, pair.items[0], pair.items[1] ?? NIL);
+  const held = rt().held.length;
+  rt().held.push(hash);
+  try {
+    const source = args.length === 1 ? yield* hashLiteralSource(args[0]) : undefined;
+    if (source) rt().held.push(source);
+    if (source instanceof RHash) {
+      for (const entry of source.map.values()) yield* hashSet(hash, entry.key, entry.value);
+      return hash;
     }
+    if (source instanceof RArray) {
+      for (const [index, item] of source.items.entries()) {
+        const pair = yield* tryAry(item);
+        if (!pair) throw argumentError(`wrong element type ${realClassOf(item).name} at ${index} (expected array)`);
+        if (pair.items.length === 0 || pair.items.length > 2)
+          throw argumentError(`invalid number of elements (${pair.items.length} for 1..2)`);
+        yield* hashSet(hash, pair.items[0], pair.items[1] ?? NIL);
+      }
+      return hash;
+    }
+    if (args.length % 2 !== 0) throw argumentError('odd number of arguments for Hash');
+    for (let index = 0; index < args.length; index += 2) yield* hashSet(hash, args[index], args[index + 1]);
     return hash;
+  } finally {
+    rt().held.length = held;
   }
-  if (args.length % 2 !== 0) throw argumentError('odd number of arguments for Hash');
-  for (let index = 0; index < args.length; index += 2) yield* hashSet(hash, args[index], args[index + 1]);
-  return hash;
 });
 
 function* hashLiteralSource(value: Value): Gen<RHash | RArray | undefined> {
@@ -134,13 +141,23 @@ def('Hash', 'keys', 0, (self: RHash) => arr([...self.map.values()].map((entry) =
 def('Hash', 'values', 0, (self: RHash) => arr([...self.map.values()].map((entry) => entry.value)));
 def('Hash', 'values_at', [0, -1], function* (self: RHash, keys) {
   const values: Value[] = [];
-  for (const key of keys) values.push(yield* hashFetch(self, key));
-  return arr(values);
+  rt().heldArrays.push(values);
+  try {
+    for (const key of keys) values.push(yield* hashFetch(self, key));
+    return arr(values);
+  } finally {
+    rt().heldArrays.pop();
+  }
 });
 def('Hash', 'fetch_values', [0, -1], function* (self: RHash, keys, block) {
   const values: Value[] = [];
-  for (const key of keys) values.push(yield* callMethod(self, 'fetch', [key], undefined, block));
-  return arr(values);
+  rt().heldArrays.push(values);
+  try {
+    for (const key of keys) values.push(yield* callMethod(self, 'fetch', [key], undefined, block));
+    return arr(values);
+  } finally {
+    rt().heldArrays.pop();
+  }
 });
 def('Hash', ['length', 'size'], 0, (self: RHash) => BigInt(self.map.size));
 def('Hash', 'empty?', 0, (self: RHash) => self.map.size === 0);
@@ -150,15 +167,17 @@ def('Hash', ['to_s', 'inspect'], 0, function* (self: RHash) {
 def('Hash', 'to_h', 0, function* (self: RHash, _args, block) {
   if (!block) return self.cls === rt().c.Hash ? self : copy(self);
   const hash = newHash();
-  yield* eachEntry(self, function* (entry) {
-    const result = yield* pair(block, entry.key, entry.value);
-    const converted = yield* tryAry(result);
-    if (!converted) throw typeError(`wrong element type ${realClassOf(result).name} (expected array)`);
-    if (converted.items.length !== 2)
-      throw argumentError(`element has wrong array length (expected 2, was ${converted.items.length})`);
-    yield* hashSet(hash, converted.items[0], converted.items[1]);
+  return yield* whileHeld(hash, function* () {
+    yield* eachEntry(self, function* (entry) {
+      const result = yield* pair(block, entry.key, entry.value);
+      const converted = yield* tryAry(result);
+      if (!converted) throw typeError(`wrong element type ${realClassOf(result).name} (expected array)`);
+      if (converted.items.length !== 2)
+        throw argumentError(`element has wrong array length (expected 2, was ${converted.items.length})`);
+      yield* hashSet(hash, converted.items[0], converted.items[1]);
+    });
+    return hash;
   });
-  return hash;
 });
 def('Hash', 'to_hash', 0, (self) => self);
 def('Hash', 'to_a', 0, (self: RHash) => arr([...self.map.values()].map((entry) => arr([entry.key, entry.value]))));
@@ -417,11 +436,16 @@ def('Hash', 'except', [0, -1], function* (self: RHash, keys) {
 def('Hash', 'filter_map', 0, function* (self: RHash, _args, block) {
   if (!block) return makeEnumerator(self, 'filter_map', []);
   const results: Value[] = [];
-  yield* eachEntry(self, function* (entry) {
-    const value = yield* pair(block, entry.key, entry.value);
-    if (truthy(value)) results.push(value);
-  });
-  return arr(results);
+  rt().heldArrays.push(results);
+  try {
+    yield* eachEntry(self, function* (entry) {
+      const value = yield* pair(block, entry.key, entry.value);
+      if (truthy(value)) results.push(value);
+    });
+    return arr(results);
+  } finally {
+    rt().heldArrays.pop();
+  }
 });
 def('Hash', 'compact', 0, function* (self: RHash) {
   const hash = new RHash(self.cls);

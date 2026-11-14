@@ -47,6 +47,24 @@ test('Array combination snapshots keep later Turtles reachable', () => {
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
+test('random selection snapshots remain reachable during custom draws', () => {
+  const program = 'class R;def rand(n);$a.clear;x=1;0;end;end;$a=[1,Turtle.new];b=$a.shuffle(random:R.new)';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
+test('Hash constructors and selections retain pending Turtles', () => {
+  const constructor =
+    'class K;def hash;x=1;0;end;end;class A;def to_ary;[[K.new,1],[:b,Turtle.new]];end;end;h=Hash[A.new]';
+  expect(traceProgram('ruby', constructor, constructor).finalTurtles).toHaveLength(1);
+  const lookup = '$h={a:Turtle.new};$h.default_proc=proc{|h,k|h.clear;x=1;nil};a=$h.values_at(:a,:b)';
+  expect(traceProgram('ruby', lookup, lookup).finalTurtles).toHaveLength(1);
+});
+
+test('Hash callback results remain reachable during later entries', () => {
+  const program = 'h={a:1,b:2};a=h.to_h{|k,v|if k==:a;[Turtle.new,1];else;x=1;[:b,2];end}';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
 test('pending expression values remain visible in Turtle traces', () => {
   const programs = [
     'def v;x=1;42;end;h={Turtle.new=>v}',

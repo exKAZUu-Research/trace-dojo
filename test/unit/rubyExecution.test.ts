@@ -1707,6 +1707,12 @@ test('Array equality searches and extrema follow current storage', () => {
   });
 });
 
+test('Array to_h follows current contents after block callbacks', () => {
+  expect(run('$a=[1,2,3];p $a.to_h{|x|$a.clear if x==1;[x,x]}.size,$a')).toMatchObject({
+    stdout: '1\n[]\n',
+  });
+});
+
 test('shuffle detects receiver changes from its randomizer', () => {
   expect(
     run(

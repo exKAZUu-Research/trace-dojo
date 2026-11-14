@@ -1146,7 +1146,8 @@ function* arrayBsearch(self: RArray, block: RProc, indexOnly: boolean): Gen {
 def('Array', 'to_h', 0, function* (self: RArray, _args, block) {
   const hash = newHash();
   return yield* whileHeld(hash, function* () {
-    for (const [index, item] of self.items.entries()) {
+    for (let index = 0; index < self.items.length; index++) {
+      const item = self.items[index];
       const value = block ? yield* call(block, item) : item;
       const pair = yield* tryAry(value);
       if (!pair) {
@@ -1169,8 +1170,13 @@ def(
   [0, 1],
   function* (self: RArray, _args, _block, keywords) {
     const items = [...self.items];
-    yield* shuffle(items, yield* randomOption(keywords));
-    return arr(items);
+    rt().heldArrays.push(items);
+    try {
+      yield* shuffle(items, yield* randomOption(keywords));
+      return arr(items);
+    } finally {
+      rt().heldArrays.pop();
+    }
   },
   { keywords: true }
 );
@@ -1289,16 +1295,21 @@ def(
       return arr(result);
     }
     const result = [...items];
-    const draws: number[] = [];
-    for (let i = 0; i < n; i++) {
-      draws.push((yield* randomIndex(randomizer, length - i)) + i);
+    rt().heldArrays.push(result);
+    try {
+      const draws: number[] = [];
+      for (let i = 0; i < n; i++) {
+        draws.push((yield* randomIndex(randomizer, length - i)) + i);
+      }
+      for (let i = 0; i < Math.min(n, result.length); i++) {
+        const j = draws[i];
+        if (j >= result.length) continue;
+        [result[i], result[j]] = [result[j], result[i]];
+      }
+      return arr(result.slice(0, n));
+    } finally {
+      rt().heldArrays.pop();
     }
-    for (let i = 0; i < Math.min(n, result.length); i++) {
-      const j = draws[i];
-      if (j >= result.length) continue;
-      [result[i], result[j]] = [result[j], result[i]];
-    }
-    return arr(result.slice(0, n));
   },
   { keywords: true }
 );
