@@ -264,7 +264,10 @@ def('Array', 'values_at', [0, -1], function* (self: RArray, args) {
         let end = arg.end === NIL ? self.items.length : Number(yield* toIndex(arg.end));
         if (end < 0) end += self.items.length;
         if (!arg.exclusive && arg.end !== NIL) end++;
-        grow(Math.max(0, end - start));
+        const added = Math.max(0, end - start);
+        if (values.length + added > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+        rt().chargeSlots(added);
+        rt().spend(Math.ceil(added / 64));
         for (let index = start; index < end; index++) values.push(self.items[index] ?? NIL);
       } else {
         values.push(yield* elementAt(self, arg));
@@ -805,7 +808,7 @@ def('Array', 'intersect?', 1, function* (self: RArray, [other]) {
 /** `join`: elements' bytes with a separator, nested arrays joined on an explicit stack. */
 function* join(self: RArray, separator: RString): Gen<RString> {
   const stack: JoinFrame[] = [];
-  const chunks: Uint8Array[] = [];
+  const output: JoinOutput = { chunks: [], length: 0 };
   const seen = new Set<RArray>();
   const held = rt().held.length;
   try {
@@ -816,14 +819,14 @@ function* join(self: RArray, separator: RString): Gen<RString> {
         stack.pop();
         seen.delete(frame.source);
         rt().held.pop();
-        if (stack.length === 0) return finishJoinFrame(frame, chunks);
+        if (stack.length === 0) return finishJoinFrame(frame, output.chunks);
         mergeJoinFrame(stack.at(-1) as JoinFrame, frame);
         continue;
       }
-      if (frame.index > 0) appendJoinPart(frame, separator, chunks);
+      if (frame.index > 0) appendJoinPart(frame, separator, output);
       const value = frame.source.items[frame.index++];
       if (value instanceof RString) {
-        appendJoinPart(frame, value, chunks);
+        appendJoinPart(frame, value, output);
         continue;
       }
       if (value instanceof RArray) {
@@ -833,14 +836,14 @@ function* join(self: RArray, separator: RString): Gen<RString> {
       if (respondsTo(value, 'to_str', true)) {
         const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
         if (converted instanceof RString) {
-          appendJoinPart(frame, converted, chunks);
+          appendJoinPart(frame, converted, output);
           continue;
         }
         if (converted !== NIL) throw joinStringConversionError(value, converted);
       }
       const nested = yield* tryAry(value);
       if (nested) yield* enterJoinArray(nested);
-      else appendJoinPart(frame, yield* toSValue(value), chunks);
+      else appendJoinPart(frame, yield* toSValue(value), output);
     }
     throw new Error('Join stack emptied without a result');
   } finally {
@@ -865,12 +868,19 @@ interface JoinFrame {
   ascii: boolean;
 }
 
-function appendJoinPart(frame: JoinFrame, part: RString, chunks: Uint8Array[]): void {
+interface JoinOutput {
+  chunks: Uint8Array[];
+  length: number;
+}
+
+function appendJoinPart(frame: JoinFrame, part: RString, output: JoinOutput): void {
   frame.binary = combinedStringEncoding(frame.binary, frame.ascii, part);
   const bytes = stringBytes(part);
   frame.length += bytes.length;
   if (frame.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
-  chunks.push(bytes);
+  output.length += bytes.length;
+  if (output.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+  output.chunks.push(bytes);
   if (frame.ascii) frame.ascii = bytes.every((byte) => byte < 0x80);
 }
 
