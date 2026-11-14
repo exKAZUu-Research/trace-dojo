@@ -2253,6 +2253,12 @@ test('String codepoint iteration yields a valid prefix before invalid bytes', ()
   expect(run('s="x"*100000;10.times{p s.each_codepoint.first}')).toMatchObject({
     stdout: '120\n'.repeat(10),
   });
+  expect(run('s="éa";s.each_codepoint{|x|p x;s[0]="bb" if x==233}')).toMatchObject({
+    stdout: '233\n97\n',
+  });
+  expect(run('s="bba";s.each_codepoint{|x|p x;s[0,2]="é" if x==98}')).toMatchObject({
+    stdout: '98\n169\n97\n',
+  });
 });
 
 test('String translation checks source and replacement pattern encodings', () => {

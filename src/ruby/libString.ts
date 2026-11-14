@@ -563,15 +563,71 @@ def('String', 'each_char', 0, function* (self: RString, _args, block) {
 });
 def('String', 'each_codepoint', 0, function* (self: RString, _args, block) {
   if (!block) return makeEnumerator(self, 'each_codepoint', []);
-  for (let index = 0; index < self.s.length;) {
-    const point = self.s.codePointAt(index) as number;
-    if (self.rawBytes && !self.binary && point >= 0xdc_80 && point <= 0xdc_ff)
-      throw argumentError('invalid byte sequence in UTF-8');
-    index += point > 0xff_ff ? 2 : 1;
+  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+  let text: string | undefined;
+  let rawBytes: Uint8Array | undefined;
+  let binary: boolean | undefined;
+  let bytes: Uint8Array = new Uint8Array();
+  for (let offset = 0; ;) {
+    if (text !== self.s || rawBytes !== self.rawBytes || binary !== self.binary) {
+      text = self.s;
+      rawBytes = self.rawBytes;
+      binary = self.binary;
+      bytes = stringBytes(self);
+    }
+    if (offset >= bytes.length) break;
+    const { point, width } = codepointAtByte(bytes, offset, self.binary, decoder);
+    offset += width;
     yield* callBlock(block, [BigInt(point)], false);
   }
   return self;
 });
+
+function codepointAtByte(
+  bytes: Uint8Array,
+  offset: number,
+  binary: boolean,
+  decoder: TextDecoder
+): { point: number; width: number } {
+  const first = bytes[offset];
+  if (binary || first < 0x80) return { point: first, width: 1 };
+  const width = utf8SequenceWidth(first);
+  if (width > 0 && offset + width <= bytes.length) {
+    let decoded: string | undefined;
+    try {
+      decoded = decoder.decode(bytes.subarray(offset, offset + width));
+    } catch {
+      decoded = undefined;
+    }
+    if (decoded !== undefined) return { point: decoded.codePointAt(0) as number, width };
+  }
+  if (first >= 0x80 && first < 0xc0 && insideCurrentCodepoint(bytes, offset, decoder))
+    return { point: first, width: 1 };
+  throw argumentError('invalid byte sequence in UTF-8');
+}
+
+function insideCurrentCodepoint(bytes: Uint8Array, offset: number, decoder: TextDecoder): boolean {
+  for (let back = 1; back <= 3 && back <= offset; back++) {
+    const start = offset - back;
+    const first = bytes[start];
+    const width = utf8SequenceWidth(first);
+    if (width <= back || start + width > bytes.length) continue;
+    try {
+      decoder.decode(bytes.subarray(start, start + width));
+      return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
+function utf8SequenceWidth(first: number): number {
+  if (first < 0xc2) return 0;
+  if (first < 0xe0) return 2;
+  if (first < 0xf0) return 3;
+  if (first < 0xf5) return 4;
+  return 0;
+}
 def('String', 'grapheme_clusters', 0, function* (self: RString, _args, block) {
   const values: Value[] = [];
   for (const value of graphemeSegments(self)) {
