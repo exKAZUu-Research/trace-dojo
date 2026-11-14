@@ -9,7 +9,7 @@ import { makeEnumerator } from './libEnumerator';
 import { nameOf } from './libMeta';
 import { NIL, RArray, RClass, type RHash, RObject, type RProc, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
-import { arr, newHash, realClassOf, str, sym, truthy } from './values';
+import { arr, newHash, realClassOf, singletonClassOf, str, sym, truthy } from './values';
 
 /** The members of a Struct or Data class, and whether its `new` takes keywords only. */
 interface Layout {
@@ -111,6 +111,21 @@ function* newStructClass(superclass: RClass, members: string[], layout: Omit<Lay
   cls.isUserDefined = true;
   layouts.set(cls, { ...layout, members });
   defineAccessors(cls, members, layout.kind === 'struct');
+  if (layout.kind === 'struct') {
+    const singleton = singletonClassOf(cls);
+    addMethod(singleton, {
+      name: '[]',
+      owner: singleton,
+      visibility: 'public',
+      body: {
+        kind: 'native',
+        fn: (_self, args, block, keywords) => callMethod(cls, 'new', args, keywords, block),
+        min: 0,
+        max: -1,
+        takesKeywords: true,
+      },
+    });
+  }
   yield* [];
   return cls;
 }
@@ -146,7 +161,8 @@ sdef(
     const cls = yield* newStructClass(rt().c.Struct, yield* membersFrom(names), { keywordInit, kind: 'struct' });
     if (args[0] instanceof RString) {
       const name = args[0].s;
-      if (!/^[A-Z][A-Za-z_0-9]*$/.test(name)) throw nameError(`identifier ${name} needs to be constant`);
+      if (!/^[\p{Lu}\p{Lt}][\p{L}\p{M}\p{N}_]*$/u.test(name))
+        throw nameError(`identifier ${name} needs to be constant`);
       cls.baseName = name;
       cls.lexicalParent = rt().c.Struct;
       rt().c.Struct.constants.set(name, cls);
@@ -189,12 +205,7 @@ sdef('Struct', 'keyword_init?', 0, (self: RClass) => layoutOf(self).keywordInit 
 def('Struct', 'members', 0, (self: RObject) => arr(layoutOf(self.cls).members.map((name) => sym(name))));
 def('Struct', ['to_a', 'deconstruct', 'values'], 0, (self: RObject) => arr([...valuesOf(self)]));
 def('Struct', 'to_h', 0, (self: RObject, _args, block) => structToHash(self, block));
-def('Struct', 'deconstruct_keys', 1, function* (self: RObject) {
-  const hash = newHash();
-  for (const [index, name] of layoutOf(self.cls).members.entries())
-    yield* hashSet(hash, sym(name), valuesOf(self)[index]);
-  return hash;
-});
+def('Struct', 'deconstruct_keys', 1, (self: RObject, [keys]) => deconstructKeys(self, keys));
 def('Struct', '[]', 1, function* (self: RObject, [key]) {
   return valuesOf(self)[yield* memberIndex(self, key)];
 });
@@ -349,6 +360,22 @@ sdef('Data', 'members', 0, (self: RClass) => arr(layoutOf(self).members.map((nam
 def('Data', 'members', 0, (self: RObject) => arr(layoutOf(self.cls).members.map((name) => sym(name))));
 def('Data', 'to_h', 0, (self: RObject, _args, block) => structToHash(self, block));
 
+function* deconstructKeys(self: RObject, keys: Value): Gen<RHash> {
+  const hash = newHash();
+  const members = layoutOf(self.cls).members;
+  if (keys !== NIL && !(keys instanceof RArray))
+    throw typeError(`wrong argument type ${realClassOf(keys).name} (expected Array)`);
+  if (keys instanceof RArray && keys.items.length > members.length) return hash;
+  const names = keys === NIL ? members.map((name) => sym(name)) : (keys as RArray).items;
+  for (const key of names) {
+    if (!(key instanceof RSymbol)) break;
+    const index = members.indexOf(key.name);
+    if (index === -1) break;
+    yield* hashSet(hash, key, valuesOf(self)[index]);
+  }
+  return hash;
+}
+
 function* structToHash(self: RObject, block: RProc | undefined): Gen<RHash> {
   const hash = newHash();
   for (const [index, name] of layoutOf(self.cls).members.entries()) {
@@ -384,12 +411,7 @@ def('Data', '==', 1, (self: RObject, [other]) => sameValues(self, other, rEquals
 def('Data', 'eql?', 1, (self: RObject, [other]) => sameValues(self, other, rEql));
 def('Data', 'hash', 0, (self: RObject) => structuralHash(self));
 def('Data', ['inspect', 'to_s'], 0, (self: RObject) => inspectMembers(self, 'data'));
-def('Data', 'deconstruct_keys', 1, function* (self: RObject) {
-  const hash = newHash();
-  for (const [index, name] of layoutOf(self.cls).members.entries())
-    yield* hashSet(hash, sym(name), valuesOf(self)[index]);
-  return hash;
-});
+def('Data', 'deconstruct_keys', 1, (self: RObject, [keys]) => deconstructKeys(self, keys));
 def('Data', 'deconstruct', 0, (self: RObject) => arr([...valuesOf(self)]));
 
 export { addressOf };

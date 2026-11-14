@@ -5193,6 +5193,26 @@ test('Hash.[] rehashes keys when dropping identity comparison', () => {
   ).toMatchObject({ stdout: 'false\n2\n2\n1\n' });
 });
 
+test('Struct and Data deconstruct only requested keys', () => {
+  expect(
+    run(
+      'S=Struct.new(:a,:b);D=Data.define(:a,:b);p S.new(1,2).deconstruct_keys([:a]),D.new(a:1,b:2).deconstruct_keys([:b])'
+    )
+  ).toMatchObject({
+    stdout: '{a: 1}\n{b: 2}\n',
+  });
+});
+
+test('generated Struct classes expose bracket construction', () => {
+  expect(run('P=Struct.new(:a,:b);p P[1,2];K=Struct.new(:x,keyword_init:true);p K[x:5]')).toMatchObject({
+    stdout: '#<struct P a=1, b=2>\n#<struct K x=5>\n',
+  });
+});
+
+test('named Structs accept Unicode constant names', () => {
+  expect(run('p Struct.new("Éclair",:x).name')).toMatchObject({ stdout: '"Struct::Éclair"\n' });
+});
+
 test('Data copies remain frozen and Rational copies preserve identity', () => {
   expect(
     run(
