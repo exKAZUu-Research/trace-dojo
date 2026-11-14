@@ -1,5 +1,6 @@
 import { type Constant, exactInteger, floatToRational, rationalToFloat, toRational } from './constants';
 import {
+  effectiveTerms,
   identical,
   integerBits,
   isBasic,
@@ -172,7 +173,7 @@ function nilable(type: Type): boolean {
 }
 
 function everyTerm(type: TypeParamType, predicate: (term: Type) => boolean): boolean {
-  const terms = type.constraint.typeSet?.terms;
+  const terms = effectiveTerms(type.constraint);
   return terms !== undefined && terms.length > 0 && terms.every((term) => predicate(term.type));
 }
 
@@ -188,6 +189,8 @@ export function convertible(from: Type, to: Type): boolean {
   // A conversion ignores the tags of struct fields.
   if (identical(fromUnder, toUnder, true)) return true;
   if (
+    from.kind === 'pointer' &&
+    to.kind === 'pointer' &&
     fromUnder.kind === 'pointer' &&
     toUnder.kind === 'pointer' &&
     identical(underlying(fromUnder.element), underlying(toUnder.element), true)
@@ -212,7 +215,7 @@ export function convertible(from: Type, to: Type): boolean {
 
 /** The types a type parameter allows, or the type itself. */
 function termsOf(type: Type): Type[] {
-  return type.kind === 'typeParam' ? (type.constraint.typeSet?.terms?.map((term) => term.type) ?? []) : [type];
+  return type.kind === 'typeParam' ? (effectiveTerms(type.constraint)?.map((term) => term.type) ?? []) : [type];
 }
 
 function typeParamConvertible(from: Type, to: Type): boolean {

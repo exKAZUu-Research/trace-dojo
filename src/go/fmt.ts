@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 780 -- Transcribes Go formatting cases with their shared printer flags and token buffer.
+// code-gauge-allow-file fileNcss 791 -- Transcribes Go formatting cases with their shared printer flags and token buffer.
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { chargeFormatting, formatFloat } from './floatFormat';
 import { decodeRune, encodeRune, RUNE_ERROR, runesOf, utf8Encode } from './literals';
@@ -36,6 +36,7 @@ const UPPER_DIGITS = '0123456789ABCDEFX';
 const addressState = perRun(() => ({ addresses: new WeakMap<object, number>(), next: 0xc0_00_01_00_00 }));
 
 export function addressOf(object: object): string {
+  object = pointerObject(object as Value) ?? object;
   const state = addressState();
   let address = state.addresses.get(object);
   if (address === undefined) {
@@ -994,10 +995,25 @@ function intFromArg(args: Value[], argNum: number): [number | undefined, boolean
   return [undefined, false, argNum + 1];
 }
 
+const pointerLocations = perRun(() => new WeakMap<object, Map<number | 'v', object>>());
+
 function pointerObject(value: Value): object | undefined {
   if (value === undefined) return undefined;
-  if (value instanceof Pointer) return value.base;
-  if (value instanceof Slice) return value.array;
+  if (value instanceof Pointer) {
+    const [base, key] = value.address();
+    let locations = pointerLocations().get(base);
+    if (!locations) {
+      locations = new Map();
+      pointerLocations().set(base, locations);
+    }
+    let location = locations.get(key);
+    if (!location) {
+      location = {};
+      locations.set(key, location);
+    }
+    return location;
+  }
+  if (value instanceof Slice) return pointerObject(new Pointer(value.array, value.offset));
   if (value instanceof GoMap || value instanceof GoFunc) return value;
   return value as object;
 }

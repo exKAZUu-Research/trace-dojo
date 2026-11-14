@@ -254,7 +254,14 @@ export class Converter {
         };
       }
       const { type, values } = previous as { type?: TypeExpression; values: Expression[] };
-      specs.push({ ...spanOf(child), names: this.namesOf(child), type, values, iota: specs.length });
+      specs.push({
+        ...spanOf(child),
+        names: this.namesOf(child),
+        type,
+        values,
+        omitted: !valueNode,
+        iota: specs.length,
+      });
     }
     return specs;
   }

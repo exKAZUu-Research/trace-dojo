@@ -14,7 +14,7 @@ import {
   typeEntity,
 } from '../native';
 import type { Runtime } from '../runtime';
-import { nilPointerPanic, plainPanic } from '../runtimeErrors';
+import { nilPointerPanic } from '../runtimeErrors';
 import { type Goroutine, goroutineFunction, makeChannel, scheduler } from '../scheduler';
 import { BASIC, pointerTo, type Type } from '../types';
 import { Cell, type Channel, GoStruct, Iface, Pointer, type Value } from '../values';
@@ -468,7 +468,7 @@ function timerStateOf(receiver: Value, operation: string, allowZero = false): Ti
   if (!(receiver instanceof Pointer)) nilPointerPanic();
   const state = (receiver.load() as GoStruct).native?.timer as TimerState | undefined;
   if (!state && !allowZero)
-    plainPanic(`time: ${operation.split('.')[1]} called on uninitialized ${operation.split('.')[0]}`);
+    stringPanic(`time: ${operation.split('.')[1]} called on uninitialized ${operation.split('.')[0]}`);
   return state;
 }
 
@@ -524,7 +524,7 @@ addMethod(
 );
 
 function positivePeriod(period: bigint, name: string): bigint {
-  if (period <= 0n) plainPanic(`non-positive interval for ${name}`);
+  if (period <= 0n) stringPanic(`non-positive interval for ${name}`);
   return period;
 }
 

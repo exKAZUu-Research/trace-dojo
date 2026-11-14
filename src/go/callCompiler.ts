@@ -65,6 +65,7 @@ import {
   coreType,
   defaultType,
   describeType,
+  effectiveTerms,
   type FuncType,
   identical,
   isBasic,
@@ -492,7 +493,7 @@ export abstract class CallCompiler extends CompositeCompiler {
   }
 
   /** Infers the type arguments of a generic call from its arguments: typed ones first, then untyped defaults. */
-  // code-gauge-allow functionNcss 50 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
+  // code-gauge-allow functionNcss 51 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   private inferTypeArguments(
     span: Span,
     generic: GenericFunc,
@@ -510,6 +511,7 @@ export abstract class CallCompiler extends CompositeCompiler {
       return undefined;
     }
     const mapping: Substitution = new Map(written.map((arg, index) => [typeParams[index].id, arg]));
+    const inferredParams = typeParams.slice(written.length);
     const params = type.params;
     if ((!type.variadic || spread) && operands.length !== params.length) {
       this.error(
@@ -531,7 +533,7 @@ export abstract class CallCompiler extends CompositeCompiler {
         continue;
       }
       if (operand.mode === 'novalue' || operand.mode === 'type') return (this.asValue(operand), undefined);
-      if (!unify(param, operand.type, mapping, typeParams)) {
+      if (!unify(param, operand.type, mapping, inferredParams)) {
         this.error(
           operand.span,
           `${describeType(operand.type)} 型の値は、引数の型 ${describeType(param)} に合いません。`
@@ -722,6 +724,7 @@ export abstract class CallCompiler extends CompositeCompiler {
   protected methodExpression(span: Span, type: Type, name: string): Operand {
     const selection = lookupFieldOrMethod(type, name);
     if (selection.kind !== 'method' && selection.kind !== 'interfaceMethod') {
+      if (selection.kind === 'notFound' && this.unavailableMember(type, name, span)) return this.invalid(span);
       this.error(span, `${describeType(type)} 型には ${name} というメソッドがありません。`);
       return this.invalid(span);
     }
@@ -1123,8 +1126,7 @@ export abstract class CallCompiler extends CompositeCompiler {
     }
     if (type.kind === 'pointer' && underlying(type.element).kind === 'array') type = underlying(type.element);
     if (type.kind === 'array') {
-      // The length of an array is a constant, unless the expression calls a function.
-      if (!hasRuntimeCall) {
+      if (!hasRuntimeCall && this.constantArrayLength(expression.args[0], operand.type)) {
         return this.constant({ kind: 'int', value: BigInt(type.length) }, BASIC.int, expression);
       }
       const length = BigInt(type.length);
@@ -1172,7 +1174,8 @@ export abstract class CallCompiler extends CompositeCompiler {
     operand: Operand
   ): Operand | undefined {
     if (operand.type.kind !== 'typeParam') return undefined;
-    const terms = operand.type.constraint.typeSet?.terms;
+    this.constantArrayLength(expression.args[0], operand.type);
+    const terms = effectiveTerms(operand.type.constraint);
     if (!terms || terms.length === 0) return undefined;
     const results = terms.map((term) => this.lengthOperand(expression, name, { ...operand, type: term.type }, true));
     if (results.some((result) => this.isInvalid(result))) return this.invalid(expression);

@@ -395,3 +395,46 @@ func main(){c:=make(chan *Turtle,1);c<-NewTurtle(0,1);switch ${tag}{case other()
     });
   }
 });
+
+test('failed hoist evaluation releases partial argument and condition roots', () => {
+  for (const concurrent of [false, true]) {
+    for (const condition of [false, true]) {
+      const source = `package main
+import ("fmt";${concurrent ? '_ "time"' : ''})
+func boom()int{panic("oops")}
+func use(t *Turtle,i int)bool{return true}
+func main(){p:=NewTurtle(0,0);defer func(){recover();fmt.Println(p.CanMoveForward())}();${condition ? 'if use(NewTurtle(0,1),boom()){}' : 'use(NewTurtle(0,1),boom())'}}`;
+      expect(executeProgram('go', source)).toMatchObject({
+        kind: 'executed',
+        stdout: 'true\n',
+        uncaughtException: undefined,
+      });
+    }
+  }
+});
+
+test('channel close chooses the earliest blocked select case across both directions', () => {
+  for (const sendFirst of [false, true]) {
+    const sending = 'case c<-1:fmt.Println("sent")';
+    const receiving = 'case <-c:fmt.Println("receive")';
+    const source = `package main
+import "fmt"
+func main(){defer func(){if p:=recover();p!=nil{fmt.Println("panic",p)}}();c:=make(chan int);go func(){close(c)}();select{${sendFirst ? sending + ';' + receiving : receiving + ';' + sending}}}`;
+    expect(executeProgram('go', source)).toMatchObject({
+      kind: 'executed',
+      stdout: sendFirst ? 'panic send on closed channel\n' : 'receive\n',
+      uncaughtException: undefined,
+    });
+  }
+});
+
+test('final collection drops queued and blocked goroutines while retaining main roots', () => {
+  for (const blocked of [false, true]) {
+    const source = `package main
+import "time"
+func main(){keep:=NewTurtle(2,2);go func(t *Turtle){select{}}(NewTurtle(0,0));${blocked ? 'time.Sleep(1)' : '_ = time.Second'};_ = keep}`;
+    const result = executeProgram('go', source);
+    expect(result).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+    if (result.kind === 'executed') expect(result.finalTurtles).toEqual([expect.objectContaining({ x: 2, y: 2 })]);
+  }
+});

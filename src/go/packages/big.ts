@@ -1,21 +1,34 @@
+// code-gauge-allow-file fileNcss 427 -- Keeps the arithmetic algorithm and its operand-sized resource accounting together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import { rationalToFloat } from '../constants';
 import type { Entity } from '../entities';
+import { newError } from '../errorValues';
 import { formatFloat } from '../floatFormat';
 import { type BoundCall, dynamicMethod } from '../methods';
 import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
+import { quote } from '../quote';
 import { GoPanic } from '../runtime';
 import { nilPointerPanic } from '../runtimeErrors';
-import { BASIC, pointerTo, RUNE, type Type } from '../types';
+import { BASIC, ERROR_TYPE, pointerTo, RUNE, sliceOf, type Type } from '../types';
 import { Cell, GoStruct, Iface, Pointer, type Value } from '../values';
 import { probablyPrime } from './bigPrime';
 import { parseRational } from './bigRatParser';
 import { STATE } from './fmt';
-import { BOOL, byteSlice, INT, STRING } from './support';
+import { appendBytes, BOOL, byteSlice, bytesOf, INT, STRING } from './support';
 
 /** `big.Int` and `big.Rat`, whose values live in their native state as JavaScript bigints. */
-const INT_TYPE = namedType('big', 'Int', { kind: 'struct', fields: [] });
-const RAT_TYPE = namedType('big', 'Rat', { kind: 'struct', fields: [] });
+const INT_TYPE = namedType('big', 'Int', {
+  kind: 'struct',
+  fields: [],
+  nativeIdentity: 'big.Int',
+  nonComparable: true,
+});
+const RAT_TYPE = namedType('big', 'Rat', {
+  kind: 'struct',
+  fields: [],
+  nativeIdentity: 'big.Rat',
+  nonComparable: true,
+});
 const INT_POINTER = pointerTo(INT_TYPE);
 const RAT_POINTER = pointerTo(RAT_TYPE);
 const MAX_BIG_INT = 1n << BigInt(LIMITS.maxStringLength);
@@ -671,3 +684,80 @@ function chargeBits(bits: bigint): void {
   if (bits > BigInt(LIMITS.maxStringLength)) throw new ExecutionLimitError('storage');
   currentRuntime().spend();
 }
+
+function unmarshalBig(receiver: Value, input: Value, rational: boolean): Value {
+  const source = bytesOf(input);
+  const value = rational ? parseRational(source, parseInt, chargeBits) : parseInt(source, 0);
+  if (value === undefined)
+    return newError(`math/big: cannot unmarshal ${quote(source)} into a *big.${rational ? 'Rat' : 'Int'}`);
+  if (typeof value === 'bigint') setInt(receiver, value);
+  else setRat(receiver, normalize(value.num, value.den));
+  return undefined;
+}
+
+const BIG_BYTES = sliceOf(BASIC.uint8);
+for (const type of [INT_TYPE, RAT_TYPE]) {
+  const rational = type === RAT_TYPE;
+  const marshal = (receiver: Value): string => {
+    if (receiver === undefined) {
+      if (rational) nilPointerPanic();
+      return '<nil>';
+    }
+    if (!rational) return text(intOf(receiver), 10);
+    const value = ratOf(receiver);
+    return value.den === 1n ? value.num.toString() : `${value.num}/${value.den}`;
+  };
+  addMethod(
+    type,
+    'MarshalText',
+    fn([], [BIG_BYTES, ERROR_TYPE]),
+    (receiver) => [byteSlice(marshal(receiver)), undefined],
+    true
+  );
+  addMethod(
+    type,
+    'AppendText',
+    fn([BIG_BYTES], [BIG_BYTES, ERROR_TYPE]),
+    (receiver, [buffer]) => [appendBytes(buffer, marshal(receiver)), undefined],
+    true
+  );
+  addMethod(
+    type,
+    'UnmarshalText',
+    fn([BIG_BYTES], [ERROR_TYPE]),
+    (receiver, [input]) => unmarshalBig(receiver, input, rational),
+    true
+  );
+}
+addMethod(
+  INT_TYPE,
+  'MarshalJSON',
+  fn([], [BIG_BYTES, ERROR_TYPE]),
+  (receiver) => [byteSlice(receiver === undefined ? 'null' : text(intOf(receiver), 10)), undefined],
+  true
+);
+addMethod(
+  INT_TYPE,
+  'UnmarshalJSON',
+  fn([BIG_BYTES], [ERROR_TYPE]),
+  (receiver, [input]) => (bytesOf(input) === 'null' ? undefined : unmarshalBig(receiver, input, false)),
+  true
+);
+
+INT_TYPE.unsupported = new Set([
+  'Append',
+  'Bits',
+  'Bytes',
+  'Divide',
+  'FillBytes',
+  'Float64',
+  'GobDecode',
+  'GobEncode',
+  'ModSqrt',
+  'Rand',
+  'Scan',
+  'SetBit',
+  'SetBits',
+  'SetBytes',
+]);
+RAT_TYPE.unsupported = new Set(['Float32', 'FloatPrec', 'GobDecode', 'GobEncode', 'Scan', 'SetUint64']);

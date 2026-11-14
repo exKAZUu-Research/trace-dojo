@@ -40,6 +40,7 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
       runtime.globals = program.globalZeros.map((zero) => new Cell(zero()));
       // The turtles that main's variables still reach when it ends are the final ones, as in Java.
       const onMainEnd = (frame: Frame): void => {
+        runtime.scheduler?.finishMain();
         onEnd?.(frame);
         runtime.collectGarbage();
       };

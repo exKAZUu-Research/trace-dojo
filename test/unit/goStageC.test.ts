@@ -239,3 +239,53 @@ test('generic function and method expression values reject expanding instantiati
     if (result.kind === 'compileError') expect(JSON.stringify(result.diagnostics)).toContain('インスタンス化');
   }
 });
+
+test('generic constraints, native values and named pointers preserve compile rejection', () => {
+  for (const body of [
+    'func f[T any,M ~map[T]int](_ M){};func main(){}',
+    'func f[M ~map[[1]T]int,T any](_ M){};func main(){}',
+    'func f[M ~map[struct{V T}]int,T any](_ M){};func main(){}',
+    'func f[T ~int|~int64](x T){for range x{}};func main(){}',
+    'func f[T ~uint|~uint8](x T){for i:=range x{_=i}};func main(){}',
+    'import "math/big";func f[T comparable](x T){};func main(){f(big.Int{})}',
+    'import "math/big";func main(){_=map[big.Rat]int{}}',
+    'import "sync";func f[T comparable](x T){};func main(){f(sync.Map{})}',
+    'import "math/big";func main(){a:=big.Int{};_=a==a}',
+    'import "math/big";type N big.Int;func main(){_=map[N]int{}}',
+    'type A struct{X int `json:"a"`};type B struct{X int `json:"b"`};type P *A;type Q *B;func main(){var p P;_=Q(p)}',
+    'type A struct{X int `json:"a"`};type B struct{X int `json:"b"`};type P *A;func main(){var p P;_=(*B)(p)}',
+    'func choose[T any](a,b T)T{return a};func main(){var a chan<-int;var b <-chan int;_=choose(a,b)}',
+    'func choose[T any](a,b T)T{return a};type C chan int;func main(){var a C;var b chan<-int;_=choose(a,b)}',
+  ])
+    expect(executeProgram('go', 'package main;' + body)).toMatchObject({ kind: 'compileError' });
+});
+
+test('unavailable native methods and dot-import members share diagnostics', () => {
+  for (const body of [
+    'import . "time";func main(){_,_=LoadLocation("UTC")}',
+    'import . "runtime";func main(){_=NumGoroutine()}',
+    'import "math/big";func main(){_=big.NewInt(1).Bytes()}',
+    'import "math/big";func main(){_=(*big.Int).Bytes}',
+    'import "math/big";func main(){big.NewRat(1,2).SetUint64(3)}',
+  ]) {
+    const result = executeProgram('go', 'package main;' + body);
+    expect(result).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringMatching(/は、この採点環境では使えません。$/) })],
+    });
+  }
+});
+
+test('omitted constant diagnostics identify the active spec for 128 << iota', () => {
+  expect(executeProgram('go', 'package main\nconst (\n A uint8 = 128 << iota\n B\n)\nfunc main(){}')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 3 })],
+  });
+});
+
+test('omitted constant diagnostics identify the active spec for 1/(iota-1)', () => {
+  expect(executeProgram('go', 'package main\nconst (\n A = 1/(iota-1)\n B\n)\nfunc main(){}')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 3 })],
+  });
+});

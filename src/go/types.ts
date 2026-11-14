@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 474 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
+// code-gauge-allow-file fileNcss 482 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
 import type { Span } from './ast';
 import type { CalleeSummary } from './entities';
 import { utf8Decode } from './literals';
@@ -51,6 +51,8 @@ export interface Field {
 }
 
 export interface StructType {
+  nativeIdentity?: string;
+  nonComparable?: boolean;
   kind: 'struct';
   fields: Field[];
 }
@@ -97,10 +99,15 @@ export interface InterfaceMethod {
   type: FuncType;
 }
 
+export interface TypeTerm {
+  tilde: boolean;
+  type: Type;
+}
+
 /** The types a constraint allows, beyond its methods: `comparable`, or a union of terms such as `~int | ~string`. */
 export interface TypeSet {
   comparable?: boolean;
-  terms?: { tilde: boolean; type: Type }[];
+  terms?: TypeTerm[];
 }
 
 export interface InterfaceType {
@@ -267,12 +274,17 @@ export function underlying(type: Type): Type {
   return type;
 }
 
+export function effectiveTerms(constraint: InterfaceType): TypeTerm[] | undefined {
+  const set = constraint.typeSet;
+  return set?.comparable ? set.terms?.filter((term) => isComparable(term.type)) : set?.terms;
+}
+
 /**
  * A type set's common underlying type, including the most restrictive compatible channel direction, or an ordinary type's underlying type.
  */
 export function coreType(type: Type): Type | undefined {
   if (type.kind !== 'typeParam') return underlying(type);
-  const terms = type.constraint.typeSet?.terms;
+  const terms = effectiveTerms(type.constraint);
   if (!terms || terms.length === 0) return;
   const first = underlying(terms[0].type);
   const types = terms.map((term) => underlying(term.type));
@@ -314,7 +326,7 @@ const COMPLEX_KINDS = new Set<BasicKind>(['complex64', 'complex128', 'untypedCom
 /** Whether every type a type parameter allows satisfies the predicate, or the type itself does. */
 function allTerms(type: Type, predicate: (basicKind: BasicKind) => boolean): boolean {
   if (type.kind === 'typeParam') {
-    const terms = type.constraint.typeSet?.terms;
+    const terms = effectiveTerms(type.constraint);
     return terms !== undefined && terms.length > 0 && terms.every((term) => allTerms(term.type, predicate));
   }
   const under = underlying(type);
@@ -324,7 +336,7 @@ function allTerms(type: Type, predicate: (basicKind: BasicKind) => boolean): boo
 export const isInteger = (type: Type): boolean => allTerms(type, (kind) => INTEGER_KINDS.has(kind));
 export function isByteString(type: Type): boolean {
   if (type.kind === 'typeParam') {
-    const terms = type.constraint.typeSet?.terms;
+    const terms = effectiveTerms(type.constraint);
     return terms !== undefined && terms.length > 0 && terms.every((term) => isByteString(term.type));
   }
   const under = underlying(type);
@@ -448,6 +460,7 @@ export function identical(a: Type, b: Type, ignoreTags = false): boolean {
     case 'struct': {
       const other = b as StructType;
       return (
+        a.nativeIdentity === other.nativeIdentity &&
         a.fields.length === other.fields.length &&
         a.fields.every((field, index) => {
           const otherField = other.fields[index];
@@ -544,7 +557,7 @@ export function typeIdentityKey(type: Type, seen = new Set<Type>()): string {
             `${field.embedded ? '^' : ''}${JSON.stringify(field.name)}:${JSON.stringify(field.tag ?? '')}:${typeIdentityKey(field.type, seen)}`
         )
         .join(';');
-      return `struct{${fields}}`;
+      return `struct${type.nativeIdentity ?? ''}{${fields}}`;
     }
     case 'func': {
       const params = type.params.map((param) => typeIdentityKey(param, seen)).join(',');
@@ -679,7 +692,7 @@ export function isComparable(type: Type, seen = new Set<Type>()): boolean {
   if (type.kind === 'typeParam') {
     return (
       Boolean(type.constraint.typeSet?.comparable) ||
-      (type.constraint.typeSet?.terms?.every((term) => isComparable(term.type)) ?? false)
+      (effectiveTerms(type.constraint)?.every((term) => isComparable(term.type)) ?? false)
     );
   }
   const under = underlying(type);
@@ -691,7 +704,7 @@ export function isComparable(type: Type, seen = new Set<Type>()): boolean {
       return false;
     }
     case 'struct': {
-      return under.fields.every((field) => isComparable(field.type, seen));
+      return !under.nonComparable && under.fields.every((field) => isComparable(field.type, seen));
     }
     case 'array': {
       return isComparable(under.element, seen);

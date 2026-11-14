@@ -315,7 +315,7 @@ export function makeStructArshaler(type: Type, lookup: Lookup): Arshaler {
         if (
           !value ||
           (field.omitEmpty && emptyJsonValue(value.get(), field.type)) ||
-          (field.omitZero && zeroJsonValue(value.get(), field.type))
+          (field.omitZero && zeroJsonValue(value, field.type))
         )
           continue;
         err = enc.writeToken('"', field.name);
@@ -663,14 +663,13 @@ function unmarshalField(
   return lookup(field.type).unmarshal(dec, value, { ...uo, stringify: field.stringify });
 }
 
-function zeroJsonValue(value: Value, type: Type): boolean {
+function zeroJsonValue(ref: Ref, type: Type): boolean {
+  const value = ref.get();
   if (value === undefined) return true;
   const method = implementsVia(type, IS_ZERO);
   if (method === 'value') return callValueMethod(type, value, 'IsZero', []) as boolean;
   if (method === 'pointer') {
-    const variable = newVariable(type);
-    variable.store(value);
-    return callPointerMethod(type, variable, 'IsZero', []) as boolean;
+    return callPointerMethod(type, ref.pointer, 'IsZero', []) as boolean;
   }
   return structuralZero(value, type);
 }

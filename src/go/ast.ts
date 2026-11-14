@@ -74,6 +74,7 @@ export interface VarDeclaration extends Span {
 }
 
 export interface ConstSpec extends Span {
+  omitted?: boolean;
   names: NameSpan[];
   type?: TypeExpression;
   /** The values, or those of the spec before when this one omits them, as Go repeats them. */

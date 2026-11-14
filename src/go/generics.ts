@@ -1,4 +1,12 @@
-import { identical, type InterfaceType, type NamedType, type Type, type TypeParamType, underlying } from './types';
+import {
+  effectiveTerms,
+  identical,
+  type InterfaceType,
+  type NamedType,
+  type Type,
+  type TypeParamType,
+  underlying,
+} from './types';
 
 export type Substitution = Map<number, Type>;
 
@@ -40,7 +48,7 @@ export function substitute(
       return element === type.element ? type : { ...type, element };
     }
     case 'struct': {
-      return { kind: 'struct', fields: type.fields.map((field) => ({ ...field, type: recur(field.type) })) };
+      return { ...type, fields: type.fields.map((field) => ({ ...field, type: recur(field.type) })) };
     }
     case 'func': {
       return {
@@ -79,18 +87,11 @@ export function substituteInterface(
  * Infers type arguments by unifying parameter types with argument types, as Go's function argument type inference
  * does; returns false when the types cannot match.
  */
-// code-gauge-allow functionCognitiveComplexity 30 -- Structural unification over each kind of type.
-// code-gauge-allow functionNcss 41 -- Visits the Go type shapes while retaining substitution and inference context.
+// code-gauge-allow functionNcss 51 -- Visits the Go type shapes while retaining substitution and inference context.
+// code-gauge-allow functionCognitiveComplexity 20 -- Visits the Go type shapes while retaining substitution and inference context.
 export function unify(param: Type, arg: Type, mapping: Substitution, params: readonly TypeParamType[]): boolean {
   if (param.kind === 'typeParam' && params.some((candidate) => candidate.id === param.id)) {
-    const bound = mapping.get(param.id);
-    if (!bound) {
-      mapping.set(param.id, arg);
-      return true;
-    }
-    if (identical(bound, arg)) return true;
-    // A named type and its underlying type both match a parameter written as a type literal.
-    return identical(underlying(bound), underlying(arg));
+    return bindTypeArgument(param, arg, mapping);
   }
   switch (param.kind) {
     case 'pointer':
@@ -161,13 +162,32 @@ export function unify(param: Type, arg: Type, mapping: Substitution, params: rea
   }
 }
 
+function bindTypeArgument(param: TypeParamType, arg: Type, mapping: Substitution): boolean {
+  const bound = mapping.get(param.id);
+  if (!bound) {
+    mapping.set(param.id, arg);
+    return true;
+  }
+  if (identical(bound, arg)) return true;
+  const left = underlying(bound);
+  const right = underlying(arg);
+  if (left.kind === 'chan' && right.kind === 'chan' && identical(left.element, right.element)) {
+    if (left.dir !== right.dir && left.dir !== 'both' && right.dir !== 'both') return false;
+    if (bound.kind === 'named' && arg.kind === 'named') return false;
+    if (arg.kind === 'named' || (bound.kind !== 'named' && left.dir === 'both')) mapping.set(param.id, arg);
+    return true;
+  }
+  // A named type and its underlying type both match a parameter written as a type literal.
+  return identical(underlying(bound), underlying(arg));
+}
+
 /** Infers type parameters from the core types of the constraints of already-inferred ones, such as `S ~[]E`. */
 // code-gauge-allow functionCognitiveComplexity 18 -- Visits the Go type shapes while retaining substitution and inference context.
 export function inferFromConstraints(params: readonly TypeParamType[], mapping: Substitution): void {
   for (let changed = true; changed;) {
     changed = false;
     for (const param of params) {
-      const terms = param.constraint.typeSet?.terms;
+      const terms = effectiveTerms(param.constraint);
       if (terms?.length !== 1) continue;
       const bound = mapping.get(param.id);
       const core = terms[0].type;

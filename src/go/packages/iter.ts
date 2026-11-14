@@ -1,11 +1,11 @@
 import type { Entity } from '../entities';
 import { currentRuntime, definePackage, genericFunction, genericNamedType, nativeFunc, typeParam } from '../native';
-import { type Frame, runToEnd, type Suspending } from '../runtime';
-import { nilPointerPanic, plainPanic } from '../runtimeErrors';
+import { type Blocked, type Frame, runToEnd, type Suspending } from '../runtime';
+import { nilPointerPanic } from '../runtimeErrors';
 import { BASIC, EMPTY_INTERFACE, funcType, type NamedType, type Type } from '../types';
 import { GoFunc, type Value } from '../values';
 import { zeroValue } from './reflection';
-import { resumeFunction } from './support';
+import { resumeFunction, stringPanic } from './support';
 
 /** `iter.Seq[V]`: `func(yield func(V) bool)`. */
 const SEQ = genericNamedType('iter', 'Seq', [typeParam('V', EMPTY_INTERFACE)], ([value]) =>
@@ -79,14 +79,14 @@ class PullSequence {
 
   private *yieldValues(args: Value[]): Suspending<Value> {
     if (this.done) return false;
-    if (!this.yieldNext) plainPanic(`${this.name}: yield called again before next`);
+    if (!this.yieldNext) stringPanic(`${this.name}: yield called again before next`);
     this.yieldNext = false;
     const pulled: Pulled = { reason: 'pull', values: args };
     return (yield pulled) as Value;
   }
 
   private *next(): Suspending<Value[]> {
-    if (this.nextActive) plainPanic(`${this.name}: next called again before yield`);
+    if (this.nextActive) stringPanic(`${this.name}: next called again before yield`);
     if (this.done) return this.finished();
     this.nextActive = true;
     this.yieldNext = true;
@@ -186,13 +186,23 @@ const members: Record<string, Entity> = {
 
 export const ITER_PACKAGE = definePackage('iter', members);
 
-export function iteratorOf(iterate: () => Iterable<Value[]>, captured: Value[] = []): GoFunc {
+export function iteratorOf(iterate: () => Iterable<Value[] | Blocked>, captured: Value[] = []): GoFunc {
   const resume = function* ([callback]: Value[]): Suspending<Value> {
     if (!(callback instanceof GoFunc)) nilPointerPanic();
-    for (const values of iterate()) {
-      currentRuntime().spend();
-      const next = yield* resumeFunction(callback, values);
-      if (next !== true) break;
+    const iterator = iterate()[Symbol.iterator]();
+    let send: unknown;
+    try {
+      for (;;) {
+        const result = iterator.next(send);
+        if (result.done) break;
+        if (Array.isArray(result.value)) {
+          currentRuntime().spend();
+          if ((yield* resumeFunction(callback, result.value)) !== true) break;
+          send = undefined;
+        } else send = yield result.value;
+      }
+    } finally {
+      iterator.return?.();
     }
     return undefined;
   };

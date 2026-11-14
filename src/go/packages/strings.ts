@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 500 -- Groups related string operations with their shared UTF-8 byte and rune helpers.
+// code-gauge-allow-file fileNcss 503 -- Groups related string operations with their shared UTF-8 byte and rune helpers.
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { LIMITS } from '../../interpreter/limits';
 import { roundUpToSizeClass } from '../conversions';
@@ -15,6 +15,7 @@ import {
   opaqueType,
   typeEntity,
 } from '../native';
+import type { Suspending } from '../runtime';
 import { grownCapacity } from '../sliceOps';
 import { BASIC, ERROR_TYPE, funcType, pointerTo, RUNE, sliceOf, type StructType } from '../types';
 import { Cell, type GoFunc, GoStruct, type NativeState, Pointer, Slice, type Value } from '../values';
@@ -26,6 +27,7 @@ import {
   callFunction,
   INT,
   receiverStruct,
+  resumeFunction,
   sliceOfValues,
   sliceValues,
   spendFor,
@@ -63,13 +65,13 @@ function splitSequence(text: string, separator: string, after: boolean): GoFunc 
   });
 }
 
-function fieldSequence(s: string, isSeparator: (rune: number) => boolean, captured: Value[] = []): GoFunc {
+function fieldSequence(s: string, isSeparator: (rune: number) => Suspending<boolean>, captured: Value[] = []): GoFunc {
   return iteratorOf(function* () {
     let start = -1;
     for (let at = 0; at < s.length;) {
       spendFor(1);
       const { rune, size } = decodeRune(s, at);
-      if (isSeparator(rune)) {
+      if (yield* isSeparator(rune)) {
         if (start >= 0) yield [s.slice(start, at)];
         start = -1;
       } else if (start < 0) start = at;
@@ -862,9 +864,19 @@ const members: Record<string, Entity> = {
   SplitAfterSeq: nativeFunction('SplitAfterSeq', fn([STRING, STRING], [seqOf(STRING)]), ([s, sep]) =>
     splitSequence(s as string, sep as string, true)
   ),
-  FieldsSeq: nativeFunction('FieldsSeq', fn([STRING], [seqOf(STRING)]), ([s]) => fieldSequence(s as string, isSpace)),
+  FieldsSeq: nativeFunction('FieldsSeq', fn([STRING], [seqOf(STRING)]), ([s]) =>
+    fieldSequence(s as string, function* (rune) {
+      return isSpace(rune);
+    })
+  ),
   FieldsFuncSeq: nativeFunction('FieldsFuncSeq', fn([STRING, RUNE_PREDICATE], [seqOf(STRING)]), ([s, predicate]) =>
-    fieldSequence(s as string, (rune) => callFunction(predicate, [BigInt(rune)]) === true, [predicate])
+    fieldSequence(
+      s as string,
+      function* (rune) {
+        return (yield* resumeFunction(predicate, [BigInt(rune)])) === true;
+      },
+      [predicate]
+    )
   ),
   Lines: nativeFunction('Lines', fn([STRING], [seqOf(STRING)]), ([s]) => lines(s as string)),
   Split: nativeFunction(

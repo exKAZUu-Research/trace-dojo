@@ -895,3 +895,137 @@ func main(){fmt.Println(h(1.0000000000000002,1.0000000000000002,-1.0000000000000
     uncaughtException: undefined,
   });
 });
+
+test('field sequence predicates suspend through channels and mutexes', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import("fmt";"strings";"sync");func main(){c:=make(chan bool);go func(){for range 3{c<-true}}();for s:=range strings.FieldsFuncSeq("a b",func(r rune)bool{<-c;return r==\' \'}){fmt.Println(s)};var m sync.Mutex;m.Lock();go func(){m.Unlock()}();for s:=range strings.FieldsFuncSeq("x",func(r rune)bool{m.Lock();m.Unlock();return false}){fmt.Println(s)}}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'a\nb\nx\n', uncaughtException: undefined });
+});
+
+test('big numbers share text and JSON codec methods', () => {
+  expect(
+    executeProgram(
+      'go',
+      String.raw`package main;import("fmt";"math/big";"encoding/json");func main(){i:=big.NewInt(123);r:=big.NewRat(1,2);for _,v:=range []any{i,r,[]*big.Int{i,nil},map[string]*big.Rat{"r":r}}{b,e:=json.Marshal(v);fmt.Println(string(b),e)};fmt.Println(json.Unmarshal([]byte("456"),i),i);fmt.Println(json.Unmarshal([]byte("null"),i),i);fmt.Println(json.Unmarshal([]byte("\"3/4\""),r),r);for _,s:=range []string{"0x10","-42","bad"}{e:=i.UnmarshalText([]byte(s));fmt.Println(e==nil)};b,_:=r.AppendText([]byte("r="));fmt.Println(string(b));var p *big.Int;b,_=p.MarshalJSON();fmt.Println(string(b))}`
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '123 <nil>\n"1/2" <nil>\n[123,null] <nil>\n{"r":"1/2"} <nil>\n<nil> 456\n<nil> 456\n<nil> 3/4\ntrue\ntrue\nfalse\nr=3/4\nnull\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('comparable intersections exclude slices from generic operation sets', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";func f[T interface{~int|~[]int;comparable}](x T)T{return x+1};func g[T interface{~chan int|~[]int;comparable}](x T){close(x)};func main(){fmt.Println(f(3));c:=make(chan int);g(c);_,ok:=<-c;fmt.Println(ok)}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '4\nfalse\n', uncaughtException: undefined });
+});
+
+test('forward comparable constraints admit composite map keys', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";func f[M ~map[[1]T]int,T comparable](m M)int{return len(m)};func g[M ~map[struct{V T}]int,T comparable](m M)int{return len(m)};func main(){fmt.Println(f(map[[1]int]int{{1}:2}),g(map[struct{V int}]int{{1}:2}))}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '1 1\n', uncaughtException: undefined });
+});
+
+test('generic calls infer directional channels and honor written arguments', () => {
+  expect(
+    executeProgram(
+      'go',
+      String.raw`package main;import "fmt";func choose[T any](a,b T)T{return a};func show[T,U any](x T,y U){fmt.Printf("%T %v\n",x,y)};type Send chan<-int;func main(){c:=make(chan int);var s chan<-int=c;var r <-chan int=c;fmt.Printf("%T %T %T %T\n",choose(c,s),choose(s,c),choose(c,r),choose(r,c));n:=1;show[any](n,2);show[<-chan int](c,3);var named Send=c;fmt.Printf("%T\n",choose(c,named))}`
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'chan<- int chan<- int <-chan int <-chan int\nint 2\n<-chan int 3\nmain.Send\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('JSON zero methods retain addressable field identity', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import("fmt";"encoding/json");type N int;func(n *N)IsZero()bool{*n=7;return false};type Text string;func(s *Text)IsZero()bool{*s="normalized";return false};type S struct{N N `json:",omitzero"`;T Text `json:",omitzero"`};func main(){s:=S{1,"raw"};b,e:=json.Marshal(&s);fmt.Println(string(b),e,s.N,s.T);s=S{2,"other"};b,e=json.Marshal(s);fmt.Println(string(b),e,s.N,s.T)}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '{"N":7,"T":"normalized"} <nil> 7 normalized\n{"N":7,"T":"normalized"} <nil> 2 other\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('converted array pointers share formatted canonical locations', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";func main(){a:=[3]int{1,2,3};p:=(*[3]int)(a[:]);fmt.Println(p==&a,fmt.Sprintf("%p",p)==fmt.Sprintf("%p",&a));q:=(*[2]int)(a[1:]);r:=(*[2]int)(p[1:]);fmt.Println(q==r,fmt.Sprintf("%p",q)==fmt.Sprintf("%p",r),fmt.Sprintf("%p",q)!=fmt.Sprintf("%p",p));fmt.Println(fmt.Sprintf("%p",a[:])==fmt.Sprintf("%p",&a[0]))}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'true true\ntrue true true\ntrue\n', uncaughtException: undefined });
+});
+
+test('generic array ranges evaluate bounds and pointer dereferences', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";func f[T ~[3]int](a []T){defer func(){fmt.Println(recover()!=nil)}();for range a[99]{fmt.Println("body")}};func g[T ~[3]int](p *T){defer func(){fmt.Println(recover()!=nil)}();for range *p{fmt.Println("body")}};func main(){f([][3]int{{}});g[[3]int](nil)}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\n', uncaughtException: undefined });
+});
+
+test('package validation panics preserve string dynamic types', () => {
+  expect(
+    executeProgram(
+      'go',
+      String.raw`package main;import("fmt";"time";"iter");func check(f func()){defer func(){p:=recover();fmt.Printf("%T %v\n",p,p)}();f()};func main(){check(func(){time.NewTicker(0)});check(func(){var t time.Timer;t.Stop()});check(func(){var t time.Ticker;t.Reset(0)});check(func(){var next func()(int,bool);seq:=func(yield func(int)bool){next()};next,_=iter.Pull(seq);next()});check(func(){var escaped func(int)bool;next,_:=iter.Pull(func(yield func(int)bool){escaped=yield;yield(1);yield(2)});next();escaped(3)})}`
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'string non-positive interval for NewTicker\nstring time: Stop called on uninitialized Timer\nstring non-positive interval for Ticker.Reset\nstring iter.Pull: next called again before yield\nstring iter.Pull: yield called again before next\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('XML tags fail explicitly while unrelated tags preserve XML behavior', () => {
+  for (const decode of [false, true]) {
+    const source =
+      `package main
+import "encoding/xml"
+type S struct{N string ` +
+      '`xml:"name"`' +
+      `}
+func main(){${decode ? 'var s S;xml.Unmarshal([]byte("<S><name>A</name></S>"),&s)' : 'xml.Marshal(S{"A"})'}}`;
+    const result = executeProgram('go', source);
+    expect(result).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('は、この採点環境では使えません。'),
+    });
+  }
+  const source =
+    'package main;import("fmt";"encoding/xml");type S struct{N string `json:"name"`};func main(){b,e:=xml.Marshal(S{"A"});fmt.Println(string(b),e)}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '<S><N>A</N></S> <nil>\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('RWMutex reader batches run before the next waiting writer', () => {
+  const source = `package main
+import("fmt";"sync";"time";"slices")
+func main(){var m sync.RWMutex;done:=make(chan int,3);m.Lock();for _,n:=range []int{1,2}{go func(n int){time.Sleep(time.Duration(n*2-1)*time.Millisecond);m.RLock();done<-n;m.RUnlock()}(n)};go func(){time.Sleep(2*time.Millisecond);m.Lock();done<-3;m.Unlock()}();time.Sleep(4*time.Millisecond);m.Unlock();first:=[]int{<-done,<-done};slices.Sort(first);fmt.Println(first,<-done)}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1 2] 3\n',
+    uncaughtException: undefined,
+  });
+});

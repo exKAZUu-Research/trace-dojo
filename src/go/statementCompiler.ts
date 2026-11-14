@@ -1195,7 +1195,11 @@ export abstract class StatementCompiler extends CallCompiler {
     const read = range.eval;
     const arrayType = type.kind === 'pointer' ? underlying(type.element) : type;
     const value = statement.value && stripParens(statement.value);
-    if (arrayType.kind === 'array' && (!value || (value.kind === 'name' && value.name === '_'))) {
+    if (
+      this.constantArrayLength(statement.range, range.type) &&
+      arrayType.kind === 'array' &&
+      (!value || (value.kind === 'name' && value.name === '_'))
+    ) {
       // With at most one iteration variable, the length of an array type is constant, so Go evaluates the range
       // expression only for its calls and never reads or dereferences the array.
       const { length } = arrayType;
@@ -1227,7 +1231,7 @@ export abstract class StatementCompiler extends CallCompiler {
     }
     if (type.kind === 'slice') return { read, keyType: BASIC.int, valueType: type.element, iterate: iterateSlice };
     if (type.kind === 'map') return { read, keyType: type.key, valueType: type.value, iterate: iterateMap };
-    if (isInteger(type)) {
+    if (isInteger(type) && type.kind !== 'typeParam') {
       const target =
         !statement.define && statement.key
           ? this.part(() => this.hoistingCalls(() => this.assignmentTarget(statement.key as Expression))).value.result

@@ -87,6 +87,7 @@ import {
   coreType,
   defaultType,
   describeType,
+  effectiveTerms,
   type FuncType,
   identical,
   integerBits,
@@ -137,6 +138,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected abstract compileCall(expression: Extract<Expression, { kind: 'call' }>): Operand;
   protected abstract compileFuncLiteral(expression: Extract<Expression, { kind: 'funcLiteral' }>): Operand;
   protected abstract composite(expression: CompositeLiteral, elided: Type | undefined): Operand;
+
+  private readonly genericArrayExpressions = new WeakSet<Expression>();
+
+  protected constantArrayLength(expression: Expression, type: Type): boolean {
+    if (type.kind === 'typeParam') this.genericArrayExpressions.add(expression);
+    return !this.genericArrayExpressions.has(expression);
+  }
 
   protected invalid(span: Span): Operand {
     return { mode: 'value', type: BASIC.invalid, span, eval: () => {} };
@@ -463,7 +471,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(expression, '_ は値としては使えません。');
       return this.invalid(expression);
     }
-    const entity = this.lookup(name);
+    const entity = this.lookup(name, expression);
     if (!entity && name === 'iota') {
       if (this.iota !== undefined)
         return this.constant({ kind: 'int', value: BigInt(this.iota) }, BASIC.untypedInt, expression);
@@ -1752,7 +1760,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         this.error(expression.left, `シフトできるのは整数だけです（${describeType(target)} 型の値が書かれています）。`);
         return this.invalid(expression);
       }
-      for (const term of target.constraint.typeSet?.terms ?? []) {
+      for (const term of effectiveTerms(target.constraint) ?? []) {
         const rep = represent(leftConstant, term.type);
         if ('error' in rep) {
           this.reportRepresentation(untypedLeft, term.type, rep.error, 'オペランド');
@@ -1817,11 +1825,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const lookupType = type.kind === 'pointer' && underlying(type.element).kind === 'pointer' ? BASIC.invalid : type;
     const selection = lookupFieldOrMethod(lookupType, field);
     if (selection.kind === 'notFound') {
-      const named = type.kind === 'pointer' ? type.element : type;
-      if (named.kind === 'named' && named.unsupported?.has(field)) {
-        this.unsupported(span, `${typeString(named)}.${field}`);
-        return this.invalid(span);
-      }
+      if (this.unavailableMember(type, field, span)) return this.invalid(span);
       const hint = this.capitalizationHint(type, field);
       this.error(span, `${describeType(type)} 型には ${field} というフィールドやメソッドがありません${hint}。`);
       return this.invalid(span);
@@ -1842,6 +1846,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return { mode: 'method', type: NO_VALUE, span, eval: () => {}, method: { receiver: operand, selection } };
     }
     return this.fieldOperand(span, operand, selection.path, selection.type);
+  }
+
+  protected unavailableMember(type: Type, name: string, span: Span): boolean {
+    const named = type.kind === 'pointer' ? type.element : type;
+    if (named.kind !== 'named' || !named.unsupported?.has(name)) return false;
+    this.unsupported(span, `${typeString(named)}.${name}`);
+    return true;
   }
 
   private capitalizationHint(type: Type, field: string): string {
@@ -2080,7 +2091,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     indexExpression: Expression
   ): Operand | undefined {
     if (operand.type.kind !== 'typeParam') return undefined;
-    const terms = operand.type.constraint.typeSet?.terms;
+    const terms = effectiveTerms(operand.type.constraint);
     if (!terms || terms.length === 0) return undefined;
     const results = terms.map((term) =>
       this.indexOperand(expression, { ...operand, type: term.type }, indexExpression)
@@ -2278,7 +2289,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     operand: Operand
   ): Operand | undefined {
     if (operand.type.kind !== 'typeParam') return undefined;
-    const terms = operand.type.constraint.typeSet?.terms;
+    const terms = effectiveTerms(operand.type.constraint);
     if (!terms || terms.length === 0) return undefined;
     const types = terms.map((term) => underlying(term.type));
     const normalized = types.map((type): Type => (isString(type) ? { kind: 'slice', element: BASIC.uint8 } : type));
@@ -2914,7 +2925,7 @@ function untypedFamily(type: Type): string {
 
 function allowsBinaryOperator(operator: string, type: Type): boolean {
   if (type.kind === 'typeParam') {
-    const terms = type.constraint.typeSet?.terms;
+    const terms = effectiveTerms(type.constraint);
     return terms !== undefined && terms.length > 0 && terms.every((term) => allowsBinaryOperator(operator, term.type));
   }
   if (operator === '+') return isNumeric(type) || isString(type);
@@ -2938,7 +2949,7 @@ function untypedRank(type: Type): number {
 
 /** Whether every type a type parameter allows represents the constant, as converting the constant to it requires. */
 function fitsTypeParam(constant: Constant, target: TypeParamType): boolean {
-  const terms = target.constraint.typeSet?.terms;
+  const terms = effectiveTerms(target.constraint);
   return terms !== undefined && terms.length > 0 && terms.every((term) => 'constant' in represent(constant, term.type));
 }
 

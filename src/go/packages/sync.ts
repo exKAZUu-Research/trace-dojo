@@ -174,10 +174,6 @@ addMethod(
 
 // RWMutex -------------------------------------------------------------------------------------------------------------
 
-/**
- * A reader/writer lock. A waiting writer keeps new readers waiting, as in Go; unlocking wakes the goroutines waiting
- * longest: a writer, or all the readers ahead of the next writer.
- */
 class RWMutexState {
   writing = false;
   readers = 0;
@@ -206,6 +202,10 @@ class RWMutexState {
     if (writer) {
       if (!this.writing) throw new GoFatal('fatal error: sync: Unlock of unlocked RWMutex');
       this.writing = false;
+      const readers = this.queue.filter((waiter) => !waiter.writer);
+      this.queue = this.queue.filter((waiter) => waiter.writer);
+      this.readers += readers.length;
+      for (const reader of readers) scheduler().ready(reader.goroutine);
     } else {
       if (this.readers === 0) throw new GoFatal('fatal error: sync: RUnlock of unlocked RWMutex');
       this.readers--;
@@ -388,7 +388,12 @@ class MapState {
   }
 }
 
-const SYNC_MAP = namedType('sync', 'Map', { kind: 'struct', fields: [] });
+const SYNC_MAP = namedType('sync', 'Map', {
+  kind: 'struct',
+  fields: [],
+  nativeIdentity: 'sync.Map',
+  nonComparable: true,
+});
 const mapOf = (receiver: Value): MapState => stateOf(receiver, 'syncMap', () => new MapState());
 
 const mapMethods: [string, FuncType, (state: MapState, args: Value[]) => Value | Value[]][] = [

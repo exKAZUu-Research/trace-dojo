@@ -86,6 +86,11 @@ export class Scheduler {
     }
   }
 
+  finishMain(): void {
+    for (const goroutine of this.live) if (goroutine !== this.current) this.live.delete(goroutine);
+    this.timers.length = 0;
+  }
+
   /** What garbage collection must follow: the frames of the live goroutines and what blocked ones hold. */
   roots(): unknown[] {
     const stack: unknown[] = [];
@@ -292,17 +297,35 @@ export function* receive(channel: Channel | undefined): Suspending<[Value, boole
 }
 
 /** `close(ch)`: wakes the goroutines waiting to receive with zero values and makes those waiting to send panic. */
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps channel registration and wakeup cleanup in the same select lifecycle.
 export function closeChannel(channel: Channel | undefined): void {
   if (!channel) plainPanic('close of nil channel');
   if (channel.closed) plainPanic('close of closed channel');
   channel.closed = true;
   const running = scheduler();
-  for (let receiver = takeWaiter(channel.receivers); receiver; receiver = takeWaiter(channel.receivers)) {
-    running.ready(receiver.goroutine, { index: receiver.index, value: channel.zero(), ok: false } satisfies Completed);
+  const senders = new Set(channel.senders);
+  const waiters = [...channel.receivers, ...channel.senders] as Waiter[];
+  const chosen = new Map<NonNullable<Waiter['select']>, Waiter>();
+  for (const waiter of waiters) {
+    if (!waiter.select) continue;
+    const previous = chosen.get(waiter.select);
+    if (!previous || waiter.index < previous.index) chosen.set(waiter.select, waiter);
   }
-  for (let sender = takeWaiter(channel.senders); sender; sender = takeWaiter(channel.senders)) {
-    running.ready(sender.goroutine, { index: sender.index, ok: false, closed: true } satisfies Completed);
+  for (const waiter of waiters) {
+    if (waiter.select) {
+      if (waiter.select.done || chosen.get(waiter.select) !== waiter) continue;
+      waiter.select.done = true;
+    }
+    const sending = senders.has(waiter);
+    running.ready(waiter.goroutine, {
+      index: waiter.index,
+      value: sending ? undefined : channel.zero(),
+      ok: false,
+      closed: sending,
+    });
   }
+  channel.receivers.length = 0;
+  channel.senders.length = 0;
 }
 
 /** A case of a select: a send of a value, or a receive. */

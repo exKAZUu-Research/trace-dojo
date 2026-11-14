@@ -222,7 +222,7 @@ export class Runtime implements TracedRuntime<Frame> {
   /** The frames of the running goroutine. */
   frames: Frame[] = [];
   /** Runs the goroutines when the program uses them. */
-  scheduler: { roots(): unknown[]; now: bigint; transferCallRoots(): void } | undefined;
+  scheduler: { roots(): unknown[]; now: bigint; transferCallRoots(): void; finishMain(): void } | undefined;
   /** The package-level variables, which pointers may refer to. */
   globals: Cell[] = [];
   private allocated = 0;
@@ -504,7 +504,13 @@ export function writeLocal(frame: Frame, slot: number, value: Value): void {
 
 /** Runs the computations that may block of a statement, keeping their results in their hidden slots. */
 export function* runHoists(frame: Frame, hoists: readonly Hoist[]): Suspending<void> {
-  for (const hoist of hoists) frame.locals[hoist.slot] = (yield* hoist.run(frame)) as Value;
+  let completed = false;
+  try {
+    for (const hoist of hoists) frame.locals[hoist.slot] = (yield* hoist.run(frame)) as Value;
+    completed = true;
+  } finally {
+    if (!completed) clearHoists(frame, hoists);
+  }
 }
 
 /** Lets go of the results of the computations that may block once their statement used them. */

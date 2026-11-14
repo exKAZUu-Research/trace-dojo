@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 527 -- Resolves each Go type form together with its scope and diagnostic context.
+// code-gauge-allow-file fileNcss 533 -- Resolves each Go type form together with its scope and diagnostic context.
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import type { Expression, Span, TypeElementSyntax, TypeExpression, TypeParameter } from './ast';
 import type { Entity, FunctionContext, PackageEntity, TypeEntity, VarEntity } from './entities';
-import { substituteInterface } from './generics';
+import { containsTypeParam, substituteInterface } from './generics';
 import type { Eval, Exec, Frame, FunctionInfo, LocalInfo, Suspending } from './runtime';
 import { Scope } from './scope';
 import { sizeOf, STACK_BUFFER_SIZE } from './sliceOps';
@@ -13,6 +13,7 @@ import {
   COMPARABLE,
   CONSTRAINT_NAMES,
   describeType,
+  effectiveTerms,
   EMPTY_INTERFACE,
   type Field,
   type FuncType,
@@ -24,6 +25,7 @@ import {
   type NamedType,
   type Type,
   type TypeParamType,
+  type TypeTerm,
   underlying,
 } from './types';
 import { UNIVERSE } from './universe';
@@ -90,8 +92,11 @@ export abstract class CompilerBase {
 
   // Diagnostics ---------------------------------------------------------------------------------------------------
 
+  protected diagnosticSpan: Span | undefined;
+
   /** Records an error and returns the invalid type, which suppresses the errors that would follow from it. */
   protected error(span: Span, message: string): Type {
+    span = this.diagnosticSpan ?? span;
     if (this.reporting && !this.diagnostics.some((d) => d.row === span.row && d.message === message)) {
       this.diagnostics.push({ row: span.row, message });
     }
@@ -190,17 +195,6 @@ export abstract class CompilerBase {
     }
   }
 
-  /** Compiles code that runs where it cannot block, such as a deferred call, whose calls run to their end. */
-  protected withoutHoists<T>(compile: () => T): T {
-    const outer = this.hoists;
-    this.hoists = undefined;
-    try {
-      return compile();
-    } finally {
-      this.hoists = outer;
-    }
-  }
-
   /**
    * Runs a computation that may block before the statement, when the statement can block, and reads its result in its
    * place; elsewhere, runs it to its end in place.
@@ -222,8 +216,16 @@ export abstract class CompilerBase {
   protected readonly dotImports: PackageEntity[] = [];
   protected readonly dotMembers = new Map<Entity, PackageEntity>();
 
-  protected lookup(name: string): Entity | undefined {
+  protected lookup(name: string, span?: Span): Entity | undefined {
     const entity = this.scope.lookup(name);
+    if (!entity) {
+      const unavailable = this.dotImports.find((pkg) => pkg.package.unsupported?.has(name));
+      if (unavailable) {
+        unavailable.used = true;
+        this.unsupported(span ?? unavailable.span, `${unavailable.package.path}.${name}`);
+        return { kind: 'type', name, type: BASIC.invalid };
+      }
+    }
     const dotPackage = entity && this.dotMembers.get(entity);
     if (dotPackage) dotPackage.used = true;
     if (entity?.kind === 'var' && entity.owner && this.fn && entity.owner !== this.fn) this.capture(entity, this.fn);
@@ -357,7 +359,10 @@ export abstract class CompilerBase {
       return true;
     }
     // A constraint may use a type parameter whose own constraint comes later in the list.
-    if (type.kind === 'typeParam' && this.inConstraint) return true;
+    if (this.inConstraint && containsTypeParam(type)) {
+      if (span) this.deferredMapKeys.push({ key: type, span });
+      return true;
+    }
     return isComparable(type);
   }
 
@@ -453,7 +458,7 @@ export abstract class CompilerBase {
       entity = this.packageMember(pkg, syntax.name, syntax);
       if (!entity) return BASIC.invalid;
     } else {
-      entity = this.lookup(syntax.name);
+      entity = this.lookup(syntax.name, syntax);
     }
     if (!entity) return this.error(syntax, `${syntax.name} は宣言されていません。`);
     if (entity.kind !== 'type') return this.error(syntax, `${syntax.name} は型ではありません。`);
@@ -658,6 +663,7 @@ export abstract class CompilerBase {
       this.declare(parameter.name, { kind: 'type', name: parameter.name, type: declared[index] }, parameter);
       this.typeParamSpans.set(declared[index].id, parameter);
     }
+    const pendingKeys = this.deferredMapKeys.length;
     for (const [index, parameter] of parameters.entries()) {
       const constraint = this.resolveConstraint(parameter.constraint);
       if (constraint.kind === 'typeParam') {
@@ -672,6 +678,10 @@ export abstract class CompilerBase {
         under.kind === 'interface'
           ? under
           : { kind: 'interface', methods: [], typeSet: { terms: [{ tilde: false, type: constraint }] } };
+    }
+    for (const { key, span } of this.deferredMapKeys.splice(pendingKeys)) {
+      if (!isComparable(key))
+        this.error(span, `${describeType(key)} は比較できない型なので、map のキーには使えません。`);
     }
     return declared;
   }
@@ -701,14 +711,15 @@ export abstract class CompilerBase {
   protected unsatisfied(type: Type, constraint: InterfaceType): string | undefined {
     const set = constraint.typeSet;
     if (set?.comparable && !isComparable(type)) return '比較できない型です';
-    if (set?.terms) {
-      const matches = set.terms.some((term) =>
+    const terms = effectiveTerms(constraint);
+    if (terms) {
+      const matches = terms.some((term) =>
         term.tilde ? identical(underlying(type), underlying(term.type)) : identical(type, term.type)
       );
       if (!matches && type.kind !== 'typeParam') return '使える型の一覧にありません';
       if (type.kind === 'typeParam') {
-        const own = type.constraint.typeSet?.terms;
-        const covered = own?.every((ownTerm) => set.terms?.some((term) => termIncludes(term, ownTerm)));
+        const own = effectiveTerms(type.constraint);
+        const covered = own?.every((ownTerm) => terms.some((term) => termIncludes(term, ownTerm)));
         if (!covered) return '使える型の一覧にありません';
       }
     }
@@ -736,11 +747,6 @@ function describeConstraint(param: TypeParamType): string {
     return terms.map((term) => `${term.tilde ? '~' : ''}${describeType(term.type)}`).join(' | ');
   }
   return describeType(constraint);
-}
-
-interface TypeTerm {
-  tilde: boolean;
-  type: Type;
 }
 
 /** Whether a term's types all belong to another term's. */

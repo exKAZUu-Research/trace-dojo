@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 844 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+// code-gauge-allow-file fileNcss 847 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
 // oxlint-disable require-yield -- Statements that never block are generators like the others, so that all run alike.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { assignFailure, represent } from './assignability';
@@ -1244,11 +1244,14 @@ export class ProgramCompiler extends StatementCompiler {
   /** Computes the values of a constant spec, checking them against its type. */
   private constantSpec(spec: ConstDeclaration['specs'][number], entities: ConstEntity[]): void {
     const outerIota = this.iota;
+    const outerSpan = this.diagnosticSpan;
+    this.diagnosticSpan = spec.omitted ? spec : undefined;
     this.iota = spec.iota;
     try {
       this.constantValues(spec, entities);
     } finally {
       this.iota = outerIota;
+      this.diagnosticSpan = outerSpan;
     }
   }
 
