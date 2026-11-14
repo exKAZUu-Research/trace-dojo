@@ -3012,6 +3012,25 @@ test('Range step accepts numeric-like custom increments', () => {
   });
 });
 
+test('custom Range step stops when its first successor does not advance', () => {
+  const source = `class A
+  attr_reader :n
+  def initialize(n); @n=n; end
+  def <=>(x); return nil if @n==0 && x.n==1; @n<=>x.n; end
+  def +(x); A.new(@n+x); end
+end
+(A.new(0)..A.new(3)).step(1){|x|p x.n}
+puts :done`;
+  expect(run(source)).toMatchObject({ stdout: 'done\n' });
+  expect(
+    run(
+      'class A;attr_reader :n;def initialize(n);@n=n;end;def <=>(x);n<=>x.n;end;def +(x);self;end;end;(A.new(0)..A.new(3)).step(1){puts :yielded};puts :done'
+    )
+  ).toMatchObject({
+    stdout: 'done\n',
+  });
+});
+
 test('binary search rejects NaN comparison results', () => {
   expect(run('begin;p (1..5).bsearch{Float::NAN};rescue=>e;p e.class,e.message;end')).toMatchObject({
     stdout: 'ArgumentError\n"comparison of Float with 0 failed"\n',

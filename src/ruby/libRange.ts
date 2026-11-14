@@ -513,8 +513,9 @@ function* stepCustomRange(self: RRange, step: Value, block: RProc): Gen {
       return self;
     }
     const next = yield* callMethod(value, '+', [step]);
-    yield* spaceship(value, next);
-    if (initialOrder === undefined || initialOrder > 0) return self;
+    const progressOrder = yield* spaceship(value, next);
+    if (initialOrder === undefined || initialOrder > 0 || progressOrder === undefined || progressOrder >= 0)
+      return self;
   }
   for (;;) {
     rt().spend();
