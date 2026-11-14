@@ -1770,6 +1770,14 @@ test('shuffle permits same-length receiver edits and rejects size changes', () =
   ).toMatchObject({
     stdout: 'RuntimeError\n',
   });
+  expect(
+    run(
+      'class R;def rand(n);$a<<9;0;end;end;$a=[1,2,3];begin;$a.shuffle!(random:R.new);rescue=>e;p e.class,e.message;end;p $a'
+    )
+  ).toMatchObject({ stdout: 'RuntimeError\n"modified during shuffle"\n[1, 2, 3, 9]\n' });
+  expect(
+    run('class R;def rand(n);$a.pop;0;end;end;$a=[1,2,3];begin;$a.shuffle!(random:R.new);rescue=>e;p e.class;end;p $a')
+  ).toMatchObject({ stdout: 'RuntimeError\n[1, 2]\n' });
 });
 
 test('Hash initialization validates frozen state and capacity conversion', () => {

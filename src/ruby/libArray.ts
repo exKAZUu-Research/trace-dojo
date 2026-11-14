@@ -1301,11 +1301,12 @@ function* randomOption(keywords: RHash | undefined): Gen<Value | undefined> {
 }
 
 function* shuffle(items: Value[], randomizer: Value | undefined, owner?: RArray): Gen<void> {
-  let index = items.length;
+  const length = items.length;
+  let index = length;
   while (index > 1) {
     const other = yield* randomIndex(randomizer, index);
     const current = owner?.items ?? items;
-    if (current.length !== items.length) throw runtimeError('modified during shuffle');
+    if (current.length !== length) throw runtimeError('modified during shuffle');
     index--;
     [current[index], current[other]] = [current[other], current[index]];
   }
