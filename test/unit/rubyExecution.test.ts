@@ -2545,6 +2545,34 @@ test('clone validates positional and keyword arguments', () => {
   expect(run('begin;p "x".clone(foo:1);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'ArgumentError\n' });
 });
 
+test('raise validates explicit causes and cause-only calls', () => {
+  expect(run('begin;raise "x",cause:1;rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'TypeError\n"exception object expected"\n',
+  });
+  expect(run('begin;raise cause:nil;rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'ArgumentError\n"only cause is given with no arguments"\n',
+  });
+});
+
+test('raise rejects unsupported explicit backtraces', () => {
+  expect(run('begin;raise RuntimeError,"x",["fake:1"];rescue=>e;puts :caught;end')).toMatchObject({
+    uncaughtException: 'raise backtrace は、この採点環境では使えません。',
+  });
+});
+
+test('Kernel String invokes private implicit conversions', () => {
+  expect(run('class A;private;def to_str;"yes";end;public;def to_s;"no";end;end;p String(A.new)')).toMatchObject({
+    stdout: '"yes"\n',
+  });
+  expect(run('class A;private;def to_s;"yes";end;end;p String(A.new)')).toMatchObject({ stdout: '"yes"\n' });
+});
+
+test('exit! cannot be rescued as SystemExit', () => {
+  expect(run('begin;exit!;rescue Exception;puts :alive;end')).toMatchObject({
+    uncaughtException: 'Kernel#exit! は、この採点環境では使えません。',
+  });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(

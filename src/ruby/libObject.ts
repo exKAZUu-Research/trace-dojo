@@ -345,17 +345,15 @@ def(
 );
 
 /** Builds the exception `raise` throws from its arguments. */
-// code-gauge-allow functionNcss 34 -- raise accepts exception classes or instances, messages, and cause keywords in Ruby order.
+// code-gauge-allow functionNcss 36 -- raise accepts exception classes or instances, messages, and cause keywords in Ruby order.
 // code-gauge-allow functionCognitiveComplexity 25 -- raise accepts exception classes or instances, messages, and cause keywords in Ruby order.
 export function* makeRaise(args: Value[], keywords?: RHash): Gen<RubyError> {
   const runtime = rt();
-  let cause: Value | undefined;
-  if (keywords) {
-    for (const entry of keywords.map.values()) {
-      if (entry.key instanceof RSymbol && entry.key.name === 'cause') cause = entry.value;
-      else args = [...args, keywords];
-    }
-  }
+  const parsed = raiseArguments(args, keywords);
+  args = parsed.args;
+  const { cause } = parsed;
+  if (args.length === 0 && cause !== undefined) throw argumentError('only cause is given with no arguments');
+  if (args.length >= 3) throw new UnsupportedFeatureError('raise backtrace');
   let exception: Value;
   if (args.length === 0) {
     const current = runtime.globals.get('$!');
@@ -372,9 +370,23 @@ export function* makeRaise(args: Value[], keywords?: RHash): Gen<RubyError> {
   const object = exception as RObject;
   const state = object.exception as NonNullable<RObject['exception']>;
   const current = runtime.globals.get('$!') ?? NIL;
-  if (cause !== undefined) state.cause = cause;
-  else if (state.cause === NIL && current !== object) state.cause = current;
+  if (cause !== undefined) {
+    if (cause !== NIL && (!(cause instanceof RObject) || !cause.exception))
+      throw typeError('exception object expected');
+    state.cause = cause;
+  } else if (state.cause === NIL && current !== object) state.cause = current;
   return new RubyError(object);
+}
+
+function raiseArguments(args: Value[], keywords: RHash | undefined): { args: Value[]; cause?: Value } {
+  let cause: Value | undefined;
+  if (keywords) {
+    for (const entry of keywords.map.values()) {
+      if (entry.key instanceof RSymbol && entry.key.name === 'cause') cause = entry.value;
+      else args = [...args, keywords];
+    }
+  }
+  return { args, cause };
 }
 
 def(
@@ -426,7 +438,7 @@ def(
   'exit!',
   [0, 1],
   () => {
-    throw rubyError(rt().c.SystemExit, 'exit');
+    throw new UnsupportedFeatureError('Kernel#exit!');
   },
   PRIVATE
 );
@@ -485,15 +497,15 @@ def(
   1,
   function* (_self, [value]) {
     if (value instanceof RString) return value;
-    if (respondsTo(value, 'to_str')) {
-      const converted = yield* callMethod(value, 'to_str', []);
+    if (respondsTo(value, 'to_str', true)) {
+      const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
       if (converted instanceof RString) return converted;
       if (converted !== NIL)
         throw typeError(
           `can't convert ${realClassOf(value).name} to String (${realClassOf(value).name}#to_str gives ${realClassOf(converted).name})`
         );
     }
-    const converted = yield* callMethod(value, 'to_s', []);
+    const converted = yield* callMethod(value, 'to_s', [], undefined, undefined, { fcall: true });
     if (converted instanceof RString) return converted;
     throw typeError(
       `can't convert ${realClassOf(value).name} to String (${realClassOf(value).name}#to_s gives ${realClassOf(converted).name})`
