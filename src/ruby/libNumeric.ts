@@ -519,7 +519,10 @@ def('Integer', 'upto', 1, function* (self: bigint, [limit], block) {
       yield* callBlock(block, [index], false);
     return self;
   }
-  if (typeof limit !== 'bigint') throw comparisonFailed(self, limit);
+  if (typeof limit !== 'bigint') {
+    for (let index = self; (yield* compareValues(index, limit)) <= 0; index++) yield* callBlock(block, [index], false);
+    return self;
+  }
   for (let index = self; index <= limit; index++) yield* callBlock(block, [index], false);
   return self;
 });
@@ -530,7 +533,10 @@ def('Integer', 'downto', 1, function* (self: bigint, [limit], block) {
       yield* callBlock(block, [index], false);
     return self;
   }
-  if (typeof limit !== 'bigint') throw comparisonFailed(self, limit);
+  if (typeof limit !== 'bigint') {
+    for (let index = self; (yield* compareValues(index, limit)) >= 0; index--) yield* callBlock(block, [index], false);
+    return self;
+  }
   for (let index = self; index >= limit; index--) yield* callBlock(block, [index], false);
   return self;
 });
@@ -584,7 +590,11 @@ def('Integer', 'gcdlcm', 1, (self: bigint, [other]) => {
 function gcd(a: bigint, b: bigint): bigint {
   let x = a < 0n ? -a : a;
   let y = b < 0n ? -b : b;
-  while (y !== 0n) [x, y] = [y, x % y];
+  const cost = 1 + Math.ceil(Math.max(integerBits(x), integerBits(y)) / 4096);
+  while (y !== 0n) {
+    rt().spend(cost);
+    [x, y] = [y, x % y];
+  }
   return x;
 }
 

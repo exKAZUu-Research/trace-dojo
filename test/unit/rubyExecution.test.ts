@@ -2725,6 +2725,21 @@ test('Numeric step accepts numeric-like custom increments', () => {
   ).toMatchObject({ stdout: '[1, 3, 5]\n' });
 });
 
+test('Integer gcd charges large Euclidean divisions to the execution budget', () => {
+  const program =
+    'a=0;b=1;1000000.to_s(2).each_char{|c|x=a*(2*b-a);y=a*a+b*b;if c=="0";a=x;b=y;else;a=y;b=x+y;end};p a.gcd(b)';
+  expect(run(program)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('Integer iteration compares numeric-like custom limits', () => {
+  expect(run('class A;def coerce(x);[x,3];end;end;1.upto(A.new){|x|p x}')).toMatchObject({
+    stdout: '1\n2\n3\n',
+  });
+  expect(run('class A;def coerce(x);[x,2];end;end;3.downto(A.new){|x|p x}')).toMatchObject({
+    stdout: '3\n2\n',
+  });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(
