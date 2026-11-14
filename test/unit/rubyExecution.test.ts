@@ -6772,6 +6772,26 @@ test('MatchData source snapshots preserve binary bytes and freezing', () => {
   ]) {
     expect(run(source)).toMatchObject({ stdout: '[255]\n' });
   }
+  for (const source of [
+    's=255.chr;s.sub(255.chr){p $~.string.bytes;"x"}',
+    's=255.chr;s.scan(255.chr){p $~.string.bytes}',
+  ]) {
+    expect(run(source)).toMatchObject({ stdout: '[255]\n' });
+  }
+});
+
+test('Time constructor validates field widths before calendar bounds', () => {
+  expect(
+    run(
+      '[[2024,1,32],[2024,1,1,-1],[2024,16,1],[2024,1,1,24,1],[2024,1,1,24,0,1]].each{|a|begin;Time.utc(*a);rescue=>e;p e.message;end}'
+    )
+  ).toMatchObject({
+    stdout:
+      '"argument out of range"\n"argument out of range"\n"argument out of range"\n"min out of range"\n"sec out of range"\n',
+  });
+  expect(run('begin;Time.utc(nil);rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'TypeError\n"no implicit conversion of nil into Integer"\n',
+  });
 });
 
 test('Hash value transforms drop identity comparison', () => {

@@ -101,16 +101,19 @@ function* fieldArgs(args: Value[]): Gen<{ fields: number[]; seconds: number }> {
   for (const [index, arg] of args.slice(0, 5).entries()) fields.push(yield* fieldValue(arg, index));
   while (fields.length < 5) fields.push(fields.length < 3 ? 1 : 0);
   const seconds = args.length > 5 ? yield* secondsValue(args[5]) : 0;
+  for (const [index, width] of [16, 32, 32, 64].entries())
+    if (fields[index + 1] < 0 || fields[index + 1] >= width) throw argumentError('argument out of range');
+  if (seconds < 0 || seconds >= 64) throw argumentError('argument out of range');
   if (fields[1] < 1 || fields[1] > 12) throw argumentError('mon out of range');
   if (fields[2] < 1 || fields[2] > 31) throw argumentError('mday out of range');
-  if (fields[3] < 0 || fields[3] > 24) throw argumentError('hour out of range');
-  if (fields[4] < 0 || fields[4] > 59) throw argumentError('min out of range');
-  if (seconds < 0 || seconds >= 61) throw argumentError('sec out of range');
+  if (fields[3] > 24) throw argumentError('hour out of range');
+  if (fields[4] > 59 || (fields[3] === 24 && fields[4] > 0)) throw argumentError('min out of range');
+  if (seconds >= 61 || (fields[3] === 24 && seconds >= 1)) throw argumentError('sec out of range');
   return { fields, seconds };
 }
 
 function* fieldValue(arg: Value, index: number): Gen<number> {
-  if (arg === NIL) return index < 3 ? 1 : 0;
+  if (arg === NIL) return index === 0 ? Number(yield* toInt(arg)) : index < 3 ? 1 : 0;
   if (!(arg instanceof RString)) return Number(yield* toInt(arg));
   const month = index === 1 ? MONTHS.findIndex((name) => name.toLowerCase().startsWith(arg.s.toLowerCase())) : -1;
   if (month >= 0 && arg.s.length >= 3) return month + 1;

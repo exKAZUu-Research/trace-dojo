@@ -568,13 +568,14 @@ function setLastMatch(state: MatchState | undefined): Value {
   return match;
 }
 
-export function setLiteralMatch(text: string, target: string, from: number): void {
+export function setLiteralMatch(source: RString, text: string, target: string, from: number): void {
   if (from < 0) {
     setLastMatch(undefined);
     return;
   }
   setLastMatch({
     text,
+    snapshot: copyStringEncoding(source),
     literal: true,
     groups: [[from, from + target.length]],
     names: [],
