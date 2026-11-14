@@ -540,3 +540,30 @@ test('sorted iterator comparator panics unwind after suspension', () => {
     )
   ).toMatchObject({ kind: 'executed', stdout: 'stop\n[2 1]\nstop\n[2 1]\n', uncaughtException: undefined });
 });
+
+test('native and builtin calls retain lexical order inside select send values', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import("fmt";"strings");func grow(b *strings.Builder)int{b.WriteString("b");return 0};func main(){var b strings.Builder;b.WriteString("a");c:=make(chan int,1);select{case c<-b.Len()*10+grow(&b):};fmt.Println(<-c);b.Reset();b.WriteString("a");select{case c<-len(b.String())*10+grow(&b):};fmt.Println(<-c);s:=make([]int,1,3);touch:=func()int{s[0]=9;return 0};select{case c<-append(s,2)[0]*10+touch():};fmt.Println(<-c,s)}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '10\n10\n90 [9]\n', uncaughtException: undefined });
+});
+
+test('select channel operands order native calls before later calls', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import("fmt";"strings");func grow(b *strings.Builder)int{b.WriteString("b");return 0};func main(){var b strings.Builder;b.WriteString("a");cs:=[2]chan int{make(chan int,1),make(chan int,1)};select{case cs[(b.Len()+grow(&b))%2]<-7:};fmt.Println(len(cs[0]),len(cs[1]));b.Reset();b.WriteString("a");cs[0]<-4;select{case x:=<-cs[(b.Len()+grow(&b))%2]:fmt.Println(x)}}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '0 1\n7\n', uncaughtException: undefined });
+});
+
+test('select operand ordering preserves short circuiting suspension and unchosen evaluation', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import("fmt";"strings");func grow(b *strings.Builder)int{b.WriteString("b");return 0};func main(){var b strings.Builder;b.WriteString("a");c:=make(chan bool,1);select{case c<-b.Len()==1||grow(&b)==0:};fmt.Println(<-c,b.String());ready:=make(chan int);go func(){ready<-1}();wait:=func()int{<-ready;return grow(&b)};capture:=func(n int)int{fmt.Println(n);return n};var nilch chan int;select{case nilch<-capture(b.Len()*10+wait()):default:fmt.Println("default",b.String())}}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'true a\n10\ndefault ab\n', uncaughtException: undefined });
+});

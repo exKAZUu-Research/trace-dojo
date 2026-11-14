@@ -2,7 +2,7 @@
 import { LIMITS } from '../interpreter/limits';
 import { assignFailure, constantValue, convertible, represent } from './assignability';
 import { type CompositeLiteral, type Expression, type Span, stripParens, type TypeExpression } from './ast';
-import { CompilerBase } from './compilerBase';
+import { CompilerBase, type Part } from './compilerBase';
 import {
   binaryConstant,
   type Constant,
@@ -161,6 +161,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
   private hoisted:
     | { fn: FunctionContext | undefined; values: { slot: number; evaluate: Eval; key: number }[]; count: number }
     | undefined;
+
+  protected override part<T>(compile: () => T): Part<T> {
+    return super.part(() => (this.concurrent && this.fn ? this.hoistingCalls(compile).result : compile()));
+  }
 
   /**
    * Compiles a statement's expressions in Go's compiler's two passes (walk/order.go): the first evaluates the calls into
