@@ -1795,6 +1795,14 @@ test('Hash initialization validates frozen state and capacity conversion', () =>
   expect(run('begin;Hash.new(capacity:nil);rescue=>e;p e.message;end')).toMatchObject({
     stdout: '"no implicit conversion from nil to integer"\n',
   });
+  expect(
+    run(
+      'begin;Hash.new(capacity:Float::NAN);rescue=>e;p e.class,e.message;end;begin;Hash.new(capacity:9223372036854775808.0);rescue=>e;p e.class,e.message;end'
+    )
+  ).toMatchObject({
+    stdout:
+      'RangeError\n"float NaN out of range of integer"\nRangeError\n"float 9.223372037e+18 out of range of integer"\n',
+  });
 });
 
 test('Array reads current contents after conversion callbacks', () => {

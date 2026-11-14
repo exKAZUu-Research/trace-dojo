@@ -1,12 +1,20 @@
 import { inspect, inspectHash, rEql, rEquals, toIndexExact } from './conversions';
 import { def, sdef } from './define';
-import { argumentError, frozenError, implicitConversionError, rubyError, runtimeError, typeError } from './errors';
+import {
+  argumentError,
+  frozenError,
+  implicitConversionError,
+  rangeError,
+  rubyError,
+  runtimeError,
+  typeError,
+} from './errors';
 import { eachEntry, hashDefault, hashDelete, hashFetch, hashGet, hashSet, rehash, structuralHashValue } from './hashes';
 import { callBlock, callMethod, callProc, type Gen, nativeProc, respondsTo } from './interp';
 import { tryAry } from './libArray';
 import { sum } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
-import { type HashEntry, NIL, RArray, RHash, RProc, RSymbol, type Value } from './objects';
+import { type HashEntry, isRubyFloat, NIL, RArray, RHash, RProc, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { arr, newHash, realClassOf, snapshot, str, truthy } from './values';
 
@@ -46,7 +54,10 @@ def(
     }
     yield* modify(self);
     if (capacity === NIL) throw typeError('no implicit conversion from nil to integer');
-    if (capacity !== undefined) yield* toIndexExact(capacity);
+    if (capacity !== undefined) {
+      validateFloatCapacity(capacity);
+      yield* toIndexExact(capacity);
+    }
     if (block) {
       if (args.length > 0) throw argumentError('wrong number of arguments (given 1, expected 0)');
       self.defaultProc = block;
@@ -57,6 +68,19 @@ def(
   },
   { visibility: 'private', keywords: true }
 );
+function validateFloatCapacity(capacity: Value): void {
+  if (!isRubyFloat(capacity)) return;
+  const number = Number(capacity);
+  if (Number.isFinite(number) && number < 9_223_372_036_854_775_808 && number >= -9_223_372_036_854_775_808) return;
+  const formatted = Number.isNaN(number)
+    ? 'NaN'
+    : number === Number.POSITIVE_INFINITY
+      ? 'Inf'
+      : number === Number.NEGATIVE_INFINITY
+        ? '-Inf'
+        : number.toPrecision(10).replace(/\.?0+(e[+-]\d+)$/, '$1');
+  throw rangeError(`float ${formatted} out of range of integer`);
+}
 // code-gauge-allow functionCognitiveComplexity 18 -- Hash.[] accepts alternating key/value arguments or one pair collection and validates both forms.
 sdef('Hash', '[]', [0, -1], function* (self, args) {
   const hash = new RHash(self);
