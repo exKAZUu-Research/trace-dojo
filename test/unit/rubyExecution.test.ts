@@ -6765,4 +6765,31 @@ test('MatchData source snapshots preserve binary bytes and freezing', () => {
   ]) {
     expect(run(source)).toMatchObject({ stdout: '#<Encoding:BINARY (ASCII-8BIT)>\n[255]\n' });
   }
+  for (const source of [
+    's=255.chr;s.scan(/./){p $~.string.bytes}',
+    's=255.chr;s.gsub(/./){p $~.string.bytes;"x"}',
+    's=255.chr;s[/./];p $~.string.bytes',
+  ]) {
+    expect(run(source)).toMatchObject({ stdout: '[255]\n' });
+  }
+});
+
+test('Hash value transforms drop identity comparison', () => {
+  expect(
+    run(
+      'h={}.compare_by_identity;a="a";b="a";h[a]=1;h[b]=2;v=h.transform_values{|x|x};p v,v.size,v.compare_by_identity?'
+    )
+  ).toMatchObject({ stdout: '{"a" => 2}\n1\nfalse\n' });
+});
+
+test('respond_to_missing? definitions remain private', () => {
+  expect(
+    run(
+      'class D;def respond_to_missing?(n,p=false);true;end;end;d=D.new;p defined?(d.respond_to_missing?);begin;d.respond_to_missing?(:x);rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({ stdout: 'nil\nNoMethodError\n' });
+});
+
+test('DATA inspect identifies its script file', () => {
+  expect(run('p DATA\n__END__\ntext')).toMatchObject({ stdout: '#<File:main.rb>\n' });
 });

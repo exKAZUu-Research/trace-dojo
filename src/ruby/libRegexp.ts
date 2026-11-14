@@ -620,12 +620,13 @@ export function matchGlobal(name: string): Value {
 }
 
 /** All matches from the start of a text, advancing past empty matches as Ruby does. */
-function allMatches(regexp: RObject, text: string): MatchState[] {
+function allMatches(regexp: RObject, source: RString): MatchState[] {
   const matches: MatchState[] = [];
   let start = 0;
+  const text = source.s;
   const length = charIndex(text, text.length);
   while (start <= length) {
-    const state = execAt(regexp, text, start);
+    const state = execAt(regexp, text, start, source);
     if (!state) break;
     matches.push(state);
     const [from, to] = state.groups[0] as readonly [number, number];
@@ -1039,7 +1040,7 @@ function* substituteRegexp(
     chunks.push(part);
   };
   let position = 0;
-  let state = execAt(regexp, text, 0);
+  let state = execAt(regexp, text, 0, self);
   let last: MatchState | undefined;
   while (state) {
     const [from, to] = state.groups[0] as readonly [number, number];
@@ -1060,7 +1061,7 @@ function* substituteRegexp(
     append(piece);
     position = to;
     last = state;
-    state = global ? execAt(regexp, text, charIndex(text, to) + (from === to ? 1 : 0)) : undefined;
+    state = global ? execAt(regexp, text, charIndex(text, to) + (from === to ? 1 : 0), self) : undefined;
   }
   setLastMatch(last);
   append(text.slice(position));
@@ -1105,13 +1106,13 @@ wrapFirst('scan', function* (self, args, block) {
       ? arr(state.groups.slice(1).map((_range, group) => groupText(state, group + 1)))
       : groupText(state, 0);
   if (!block) {
-    const matches = allMatches(regexp, self.s);
+    const matches = allMatches(regexp, self);
     setLastMatch(matches.at(-1));
     return arr(matches.map(scanValue));
   }
   const sourceLength = stringBytes(self).length;
   let text = self.s;
-  let state = execAt(regexp, text, 0);
+  let state = execAt(regexp, text, 0, self);
   let last: MatchState | undefined;
   while (state) {
     const [from, to] = state.groups[0] as readonly [number, number];
@@ -1120,7 +1121,7 @@ wrapFirst('scan', function* (self, args, block) {
     if (stringBytes(self).length !== sourceLength) throw rubyError(rt().c.RuntimeError, 'string modified');
     text = self.s;
     last = state;
-    state = execAt(regexp, text, charIndex(text, to) + (from === to ? 1 : 0));
+    state = execAt(regexp, text, charIndex(text, to) + (from === to ? 1 : 0), self);
   }
   setLastMatch(last);
   return self;
@@ -1136,7 +1137,7 @@ wrapFirst('split', function* (self, args) {
   const length = charIndex(text, text.length);
   while (searchFrom <= length) {
     if (limit > 0 && fields === limit - 1) break;
-    const state = execAt(args[0] as RObject, text, searchFrom);
+    const state = execAt(args[0] as RObject, text, searchFrom, self);
     if (!state) break;
     const [from, to] = state.groups[0] as readonly [number, number];
     if (from === to) {
@@ -1170,12 +1171,12 @@ for (const name of ['index', 'rindex'] as const) {
     if (start < 0) start += length;
     if (start < 0 || start > length) return setLastMatch(undefined) && NIL;
     if (name === 'index') {
-      const state = execAt(regexp, self.s, start);
+      const state = execAt(regexp, self.s, start, self);
       setLastMatch(state);
       return state ? BigInt(charIndex(self.s, (state.groups[0] as readonly [number, number])[0])) : NIL;
     }
     for (let position = start; position >= 0; position--) {
-      const state = execAt(regexp, self.s, position);
+      const state = execAt(regexp, self.s, position, self);
       if (state && charIndex(self.s, (state.groups[0] as readonly [number, number])[0]) === position) {
         setLastMatch(state);
         return BigInt(position);
@@ -1187,7 +1188,7 @@ for (const name of ['index', 'rindex'] as const) {
 }
 for (const name of ['[]', 'slice'] as const) {
   wrapFirst(name, function* (self, args) {
-    const state = execAt(args[0] as RObject, self.s, 0);
+    const state = execAt(args[0] as RObject, self.s, 0, self);
     setLastMatch(state);
     if (!state) return NIL;
     if (args.length > 1) return yield* matchIndex(setLastMatch(state) as RObject, args[1]);
@@ -1196,7 +1197,7 @@ for (const name of ['[]', 'slice'] as const) {
 }
 wrapFirst('slice!', function* (self, args) {
   if (self.frozen) throw frozenError(self, strInspect(self.s));
-  const state = execAt(args[0] as RObject, self.s, 0);
+  const state = execAt(args[0] as RObject, self.s, 0, self);
   setLastMatch(state);
   if (!state) return NIL;
   const range = args.length > 1 ? yield* sliceCaptureRange(state, args[1]) : state.groups[0];
@@ -1223,7 +1224,7 @@ wrapFirst(
   function* (self, args, block, previous) {
     for (const arg of args) {
       if (isRegexp(arg)) {
-        const state = execAt(arg, self.s, 0);
+        const state = execAt(arg, self.s, 0, self);
         const prefix = state && (state.groups[0] as readonly [number, number])[0] === 0 ? state : undefined;
         setLastMatch(prefix);
         if (prefix) {
@@ -1243,12 +1244,12 @@ for (const [name, last] of [
 ] as const) {
   wrapFirst(name, function* (self, args) {
     const regexp = args[0] as RObject;
-    let state = execAt(regexp, self.s, 0);
+    let state = execAt(regexp, self.s, 0, self);
     if (last && state) {
       const literal = literalRegexpText(regexp);
       if (literal !== undefined) {
         const index = self.s.lastIndexOf(literal);
-        state = index === -1 ? undefined : execAt(regexp, self.s, charIndex(self.s, index));
+        state = index === -1 ? undefined : execAt(regexp, self.s, charIndex(self.s, index), self);
       } else if (dataOf(regexp).safeNative && !/^(?:\^|\\A)/.test(dataOf(regexp).source)) {
         const data = dataOf(regexp);
         const sticky = (data.reverseSticky ??= new RegExp(data.js.source, data.js.flags.replace('g', 'y')));
@@ -1256,14 +1257,14 @@ for (const [name, last] of [
           if (position % 64 === 0) rt().spend();
           sticky.lastIndex = unitIndex(self.s, position);
           if (sticky.test(self.s)) {
-            state = execAt(regexp, self.s, position);
+            state = execAt(regexp, self.s, position, self);
             break;
           }
         }
       } else {
         for (;;) {
           const from = (state.groups[0] as readonly [number, number])[0];
-          const next = execAt(regexp, self.s, charIndex(self.s, from) + 1);
+          const next = execAt(regexp, self.s, charIndex(self.s, from) + 1, self);
           if (!next) break;
           state = next;
         }
