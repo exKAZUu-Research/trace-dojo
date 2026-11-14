@@ -70,6 +70,8 @@ export interface Operand extends Storage {
   package?: PackageEntity;
   /** The function a name refers to, which a call may call directly. */
   func?: FuncEntity;
+  /** The type arguments written for a generic function, `f[int]`, which a call completes by inference. */
+  typeArgs?: Type[];
   method?: { receiver: Operand; selection: Extract<Selection, { kind: 'method' | 'interfaceMethod' }> };
   /** Whether the expression is a call, which the step rules and the "is not used" check need. */
   isCall?: boolean;

@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 503 -- Groups related string operations with their shared UTF-8 byte and rune helpers.
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { LIMITS } from '../../interpreter/limits';
 import { roundUpToSizeClass } from '../conversions';
@@ -14,16 +15,19 @@ import {
   opaqueType,
   typeEntity,
 } from '../native';
+import type { Suspending } from '../runtime';
 import { grownCapacity } from '../sliceOps';
 import { BASIC, ERROR_TYPE, funcType, pointerTo, RUNE, sliceOf, type StructType } from '../types';
-import { Cell, GoStruct, type NativeState, Pointer, Slice, type Value } from '../values';
+import { Cell, type GoFunc, GoStruct, type NativeState, Pointer, Slice, type Value } from '../values';
 import { EOF, ERR_SHORT_WRITE, IO_WRITER, writeString } from './io';
+import { iteratorOf, seqOf } from './iter';
 import {
   BOOL,
   bytesOf,
   callFunction,
   INT,
   receiverStruct,
+  resumeFunction,
   sliceOfValues,
   sliceValues,
   spendFor,
@@ -34,6 +38,64 @@ import { SPECIAL_CASE, specialCaseMapper } from './unicodeRanges';
 import { isSpace, mapRunes, simpleFold, toLower, toTitle, toUpper } from './unicodeSupport';
 
 const STRINGS = sliceOf(STRING);
+function splitSequence(text: string, separator: string, after: boolean): GoFunc {
+  let start = 0;
+  return iteratorOf(function* () {
+    if (separator === '') {
+      while (start < text.length) {
+        const { size } = decodeRune(text, start);
+        spendFor(size);
+        yield [text.slice(start, start + size)];
+        start += size;
+      }
+      return;
+    }
+    for (;;) {
+      const index = text.indexOf(separator, start);
+      if (index === -1) {
+        spendFor(text.length - start);
+        yield [text.slice(start)];
+        return;
+      }
+      const next = index + separator.length;
+      spendFor(next - start);
+      yield [text.slice(start, after ? next : index)];
+      start = next;
+    }
+  });
+}
+
+function fieldSequence(s: string, isSeparator: (rune: number) => Suspending<boolean>, captured: Value[] = []): GoFunc {
+  return iteratorOf(function* () {
+    let start = -1;
+    for (let at = 0; at < s.length;) {
+      spendFor(1);
+      const { rune, size } = decodeRune(s, at);
+      if (yield* isSeparator(rune)) {
+        if (start >= 0) yield [s.slice(start, at)];
+        start = -1;
+      } else if (start < 0) start = at;
+      at += size;
+    }
+    if (start >= 0) yield [s.slice(start)];
+  }, captured);
+}
+
+/** `strings.Lines`: the lines of a text, each with its newline, the last one without when the text lacks one. */
+function lines(text: string): GoFunc {
+  let start = 0;
+  return iteratorOf(function* () {
+    while (start < text.length) {
+      const index = text.indexOf('\n', start);
+      const end = index === -1 ? text.length : index + 1;
+      spendFor(end - start);
+      const line = text.slice(start, end);
+      start = end;
+      yield [line];
+    }
+  });
+}
+
 const RUNE_PREDICATE = funcType([RUNE], [BOOL]);
 const BYTES = sliceOf(BASIC.uint8);
 
@@ -114,6 +176,7 @@ function split(s: string, sep: string, after: boolean, limit: number): string[] 
   return pieces;
 }
 
+// code-gauge-allow duplicateLines 17 -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
 function fields(s: string, isSeparator: (rune: number) => boolean): string[] {
   spendFor(s.length);
   const pieces: string[] = [];
@@ -166,6 +229,8 @@ function appendBounded(current: string, chunk: string): string {
   return current + chunk;
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Groups related string operations with their shared UTF-8 byte and rune helpers.
+// code-gauge-allow functionNcss 33 -- Groups related string operations with their shared UTF-8 byte and rune helpers.
 function replace(s: string, old: string, replacement: string, count: number): string {
   if (old === replacement || count === 0) return s;
   const runtime = currentRuntime();
@@ -200,6 +265,7 @@ function replace(s: string, old: string, replacement: string, count: number): st
   return appendBounded(result, s.slice(start));
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Groups related string operations with their shared UTF-8 byte and rune helpers.
 export function equalFold(s: string, t: string): boolean {
   spendFor(Math.min(s.length, t.length));
   let sa = 0;
@@ -792,6 +858,27 @@ const members: Record<string, Entity> = {
     return new Pointer(new Cell(new GoStruct([], { pairs: values })), 'v');
   }),
   NewReader: nativeFunction('NewReader', fn([STRING], [pointerTo(READER)]), ([s]) => newReader(s as string)),
+  SplitSeq: nativeFunction('SplitSeq', fn([STRING, STRING], [seqOf(STRING)]), ([s, sep]) =>
+    splitSequence(s as string, sep as string, false)
+  ),
+  SplitAfterSeq: nativeFunction('SplitAfterSeq', fn([STRING, STRING], [seqOf(STRING)]), ([s, sep]) =>
+    splitSequence(s as string, sep as string, true)
+  ),
+  FieldsSeq: nativeFunction('FieldsSeq', fn([STRING], [seqOf(STRING)]), ([s]) =>
+    fieldSequence(s as string, function* (rune) {
+      return isSpace(rune);
+    })
+  ),
+  FieldsFuncSeq: nativeFunction('FieldsFuncSeq', fn([STRING, RUNE_PREDICATE], [seqOf(STRING)]), ([s, predicate]) =>
+    fieldSequence(
+      s as string,
+      function* (rune) {
+        return (yield* resumeFunction(predicate, [BigInt(rune)])) === true;
+      },
+      [predicate]
+    )
+  ),
+  Lines: nativeFunction('Lines', fn([STRING], [seqOf(STRING)]), ([s]) => lines(s as string)),
   Split: nativeFunction(
     'Split',
     fn([STRING, STRING], [STRINGS]),

@@ -1,7 +1,7 @@
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { LIMITS } from '../interpreter/limits';
 import { assignFailure, constantValue, convertible, represent } from './assignability';
-import { type CompositeLiteral, type Expression, type Span, stripParens } from './ast';
+import { type CompositeLiteral, type Expression, type Span, stripParens, type TypeExpression } from './ast';
 import { CompilerBase } from './compilerBase';
 import {
   binaryConstant,
@@ -10,6 +10,7 @@ import {
   ConstantOverflow,
   exactInteger,
   parseFloatLiteral,
+  type Rational,
   rationalToFloat,
   shiftConstant,
   unaryConstant,
@@ -18,6 +19,7 @@ import { conversion, stringToBytesWithMode, stringToRunesWithMode, toInterface }
 import {
   always,
   type Entity,
+  type FuncEntity,
   type FunctionContext,
   linkEscapeSource,
   linkTemporary,
@@ -32,6 +34,7 @@ import {
 } from './entities';
 import { checkKeyHashable, equalityOf, mapKeyOf } from './equality';
 import { fma } from './fma';
+import { containsTypeParam, inferFromConstraints, substitute, unify } from './generics';
 import { utf8Decode } from './literals';
 import { currentRuntime, libraryCell } from './native';
 import {
@@ -54,8 +57,27 @@ import {
   ordering,
   shift,
 } from './operators';
-import { type Eval, type Frame, type FunctionInfo, readLocal, UNASSIGNED, writeLocal } from './runtime';
-import { boundsPanic, indexPanic, nilPointerPanic, plainPanic, typeAssertionPanic } from './runtimeErrors';
+import {
+  clearHoists,
+  type Eval,
+  type Frame,
+  type FunctionInfo,
+  readLocal,
+  runHoists,
+  runToEnd,
+  type Suspending,
+  UNASSIGNED,
+  writeLocal,
+} from './runtime';
+import {
+  boundsPanic,
+  indexPanic,
+  nilPointerPanic,
+  plainPanic,
+  runtimeErrorPanic,
+  typeAssertionPanic,
+} from './runtimeErrors';
+import { receive } from './scheduler';
 import { boxesByAddress, isPointerShaped, moveToHeap, sizeOf } from './sliceOps';
 import { sliceMode, type SliceTracking, type SliceUse } from './slicePass';
 import { reachingValue } from './ssaValues';
@@ -65,6 +87,7 @@ import {
   coreType,
   defaultType,
   describeType,
+  effectiveTerms,
   type FuncType,
   identical,
   integerBits,
@@ -84,6 +107,7 @@ import {
   lookupFieldOrMethod,
   type MissingMethod,
   missingMethod,
+  type NamedType,
   NO_VALUE,
   RUNE,
   type Type,
@@ -93,15 +117,18 @@ import {
 } from './types';
 import {
   Cell,
+  type Channel,
   Complex,
   CONSTANT_IFACES,
   copyValue,
   GoArray,
+  type GoFunc,
   type GoMap,
   GoStruct,
   Iface,
   Pointer,
   Slice,
+  SliceArrayPointer,
   type Value,
   writeInPlace,
 } from './values';
@@ -111,6 +138,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected abstract compileCall(expression: Extract<Expression, { kind: 'call' }>): Operand;
   protected abstract compileFuncLiteral(expression: Extract<Expression, { kind: 'funcLiteral' }>): Operand;
   protected abstract composite(expression: CompositeLiteral, elided: Type | undefined): Operand;
+
+  private readonly genericArrayExpressions = new WeakSet<Expression>();
+
+  protected constantArrayLength(expression: Expression, type: Type): boolean {
+    if (type.kind === 'typeParam') this.genericArrayExpressions.add(expression);
+    return !this.genericArrayExpressions.has(expression);
+  }
 
   protected invalid(span: Span): Operand {
     return { mode: 'value', type: BASIC.invalid, span, eval: () => {} };
@@ -176,7 +210,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (!hoisted || hoisted.fn !== this.fn) return evaluate;
     const slot = this.hiddenSlot();
     const key = firstPass === undefined ? hoisted.count++ : firstPass - 0.5;
-    hoisted.values.push({ slot, evaluate, key });
+    if (this.hoists) {
+      this.hoists.push({
+        slot,
+        *run(frame) {
+          return evaluate(frame);
+        },
+      });
+    } else hoisted.values.push({ slot, evaluate, key });
     return (frame) => frame.locals[slot] as Value;
   }
 
@@ -284,7 +325,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per expression kind.
+  // code-gauge-allow functionNcss 40 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private compileExpression(expression: Expression): Operand {
     if (this.fn) this.fn.inlineCost++;
     switch (expression.kind) {
@@ -304,7 +345,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       case 'imaginary': {
         return this.literalConstant(
           expression,
-          () => ({ kind: 'complex', re: { num: 0n, den: 1n }, im: parseFloatLiteral(expression.text.slice(0, -1)) }),
+          () => ({ kind: 'complex', re: { num: 0n, den: 1n }, im: imaginaryPart(expression.text.slice(0, -1)) }),
           BASIC.untypedComplex
         );
       }
@@ -384,7 +425,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return this.asValue(this.expression(expression));
   }
 
-  protected asValue(operand: Operand): Operand {
+  protected asValue(operand: Operand, allowGeneric = false): Operand {
+    if (operand.func?.generic && !allowGeneric) return this.instantiateFunctionValue(operand);
     switch (operand.mode) {
       case 'type': {
         this.error(operand.span, `${describeType(operand.type)} は型なので、値としては使えません。`);
@@ -408,8 +450,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return this.invalid(operand.span);
       }
       case 'method': {
-        this.unsupported(operand.span, 'メソッド値（呼び出さずにメソッドを取り出す書き方）');
-        return this.invalid(operand.span);
+        return this.methodValue(operand);
       }
       default: {
         if (operand.type.kind === 'tuple') {
@@ -430,7 +471,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(expression, '_ は値としては使えません。');
       return this.invalid(expression);
     }
-    const entity = this.lookup(name);
+    const entity = this.lookup(name, expression);
+    if (!entity && name === 'iota') {
+      if (this.iota !== undefined)
+        return this.constant({ kind: 'int', value: BigInt(this.iota) }, BASIC.untypedInt, expression);
+      this.error(expression, 'iota は定数の宣言の中でしか使えません。');
+      return this.invalid(expression);
+    }
     if (!entity) {
       this.error(expression, `${name} は宣言されていません。`);
       return this.invalid(expression);
@@ -496,6 +543,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  // code-gauge-allow functionNcss 31 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   protected entityOperand(entity: Entity, span: Span, use: boolean): Operand {
     switch (entity.kind) {
       case 'var': {
@@ -690,6 +738,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
    * enters an interface, and structs and arrays are copied. Reports the mismatch as `context` says. The value escapes
    * unless `holder` is the local variable that receives it or links it to where it goes.
    */
+  // code-gauge-allow functionCognitiveComplexity 27 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  // code-gauge-allow functionNcss 38 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   protected assign(
     operand: Operand,
     target: Type,
@@ -697,7 +747,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     holder?: VarEntity | ((value: Operand) => void)
   ): Eval {
     if (this.isInvalid(operand) || target === BASIC.invalid) return () => {};
-    let value = this.asValue(operand);
+    let value = this.asValue(operand, true);
+    if (value.func?.generic) value = this.instantiateFunctionValue(value, target);
     if (this.isInvalid(value)) return () => {};
     if (typeof holder === 'function') holder(value);
     else if (holder?.owner === undefined) this.escapeOperand(value);
@@ -807,6 +858,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** Converts an untyped operand to the type of the other operand of a binary operator. */
+  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private convertUntyped(operand: Operand, target: Type): Operand {
     if (!isUntyped(operand.type) || isUntyped(target) || this.isInvalid(operand)) return operand;
     if (operand.type.kind === 'basic' && operand.type.basic === 'untypedNil') return { ...operand, type: target };
@@ -833,10 +885,149 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   // Operators ------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- One case per unary operator, as the specification lists them.
+  /** Compiles a channel that a receive uses, which a send-only channel cannot be. */
+  protected receivableChannel(expression: Expression): { eval: Eval; element: Type } | undefined {
+    const operand = this.value(expression);
+    if (this.isInvalid(operand)) return undefined;
+    const type = coreType(operand.type);
+    if (type?.kind !== 'chan') {
+      this.error(expression, `${describeType(operand.type)} 型の値はチャネルではないので、<- で受信できません。`);
+      return undefined;
+    }
+    if (type.dir === 'send') {
+      this.error(expression, '送信専用のチャネルからは受信できません。');
+      return undefined;
+    }
+    return { eval: operand.eval, element: type.element };
+  }
+
+  /**
+   * `<-ch`: the value received, or with `commaOk`, also whether a send gave it rather than the channel's closing, as
+   * `v, ok := <-ch` takes them.
+   */
+  protected receive(expression: Extract<Expression, { kind: 'unary' }>, commaOk: boolean): Operand {
+    this.runtimeCallCount++;
+    const channel = this.receivableChannel(expression.operand);
+    if (!channel) return this.invalid(expression);
+    const type = channel.element;
+    const run = function* (frame: Frame): Suspending<Value> {
+      const [value, ok] = yield* receive(channel.eval(frame) as Channel | undefined);
+      return (commaOk ? [value, ok] : value) as Value;
+    };
+    const evaluate = this.suspending(run, (frame) => runToEnd(run(frame)));
+    if (!commaOk) return { mode: 'value', type, span: expression, eval: evaluate, isCall: true };
+    return {
+      mode: 'value',
+      type,
+      span: expression,
+      eval: (frame) => (evaluate(frame) as unknown as [Value, boolean])[0],
+      commaOk: (frame) => evaluate(frame) as unknown as [Value, boolean],
+      isCall: true,
+    };
+  }
+
+  /** `Box[int]` written where an expression may stand, as in a conversion: the instance of a generic type. */
+  private genericTypeIndex(expression: Extract<Expression, { kind: 'index' }>): Operand | undefined {
+    const operand = expression.operand;
+    let entity;
+    if (operand.kind === 'name') entity = this.scope.lookup(operand.name);
+    else if (operand.kind === 'selector' && operand.operand.kind === 'name') {
+      const pkg = this.scope.lookup(operand.operand.name);
+      if (pkg?.kind === 'package') entity = pkg.package.members.get(operand.field);
+    }
+    if (entity?.kind !== 'type' || !entity.generic) return undefined;
+    const syntax = typeSyntaxOf(expression);
+    if (!syntax) {
+      this.error(expression, '型引数には型を書いてください。');
+      return this.invalid(expression);
+    }
+    const type = this.resolveType(syntax);
+    if (type === BASIC.invalid) return this.invalid(expression);
+    return { mode: 'type', type, span: expression, eval: () => {} };
+  }
+
+  /**
+   * `f[int, string]`: a generic function with written type arguments, which is an ordinary function when it has all
+   * of them; with fewer, a call infers the rest.
+   */
+  private instantiation(expression: Extract<Expression, { kind: 'index' }>, base: Operand): Operand {
+    const entity = base.func as FuncEntity;
+    const generic = entity.generic as NonNullable<FuncEntity['generic']>;
+    const args: Type[] = [];
+    for (const index of expression.indices) {
+      const syntax = typeSyntaxOf(index);
+      const type = syntax ? this.resolveType(syntax) : undefined;
+      if (!syntax) this.error(index, 'ここには型を書いてください。');
+      if (type === undefined || type === BASIC.invalid) return this.invalid(expression);
+      args.push(type);
+    }
+    if (args.length > generic.typeParams.length) {
+      this.error(
+        expression,
+        `${entity.name} の型引数が多すぎます（${generic.typeParams.length} 個ですが、${args.length} 個書かれています）。`
+      );
+      return this.invalid(expression);
+    }
+    if (args.length < generic.typeParams.length) return { ...base, span: expression, typeArgs: args };
+    return this.instantiatedFunction(base, args, expression);
+  }
+
+  private instantiateFunctionValue(operand: Operand, target?: Type): Operand {
+    const generic = (operand.func as FuncEntity).generic as NonNullable<FuncEntity['generic']>;
+    const mapping = new Map<number, Type>();
+    for (const [index, type] of (operand.typeArgs ?? []).entries()) mapping.set(generic.typeParams[index].id, type);
+    const fixed = new Set(mapping.keys());
+    const signature = target && coreType(target);
+    if (signature?.kind === 'func') {
+      unify(
+        generic.type,
+        signature,
+        mapping,
+        generic.typeParams.filter((param) => !fixed.has(param.id))
+      );
+      inferFromConstraints(generic.typeParams, mapping, fixed);
+    }
+    const missing = generic.typeParams.find((parameter) => !mapping.has(parameter.id));
+    if (missing) {
+      this.error(operand.span, `型引数 ${missing.name} を推論できません（型引数をすべて書いてください）。`);
+      return this.invalid(operand.span);
+    }
+    return this.instantiatedFunction(
+      operand,
+      generic.typeParams.map((parameter) => mapping.get(parameter.id) as Type),
+      operand.span
+    );
+  }
+
+  private instantiatedFunction(base: Operand, args: Type[], span: Span): Operand {
+    const entity = base.func as FuncEntity;
+    const generic = entity.generic as NonNullable<FuncEntity['generic']>;
+    if (!this.checkTypeArguments(generic.typeParams, args, span)) return this.invalid(span);
+    if (!this.recordGenericInstantiation(generic.typeParams, args)) return this.invalid(span);
+    const mapping = new Map<number, Type>(generic.typeParams.map((param, index) => [param.id, args[index]]));
+    const type = substitute(generic.type, mapping, (named: NamedType, typeArgs: Type[]) =>
+      this.instantiateNamed(named, typeArgs)
+    ) as FuncType;
+    if (args.some((arg) => containsTypeParam(arg))) return { mode: 'value', type, span, eval: () => {} };
+    const instance = generic.instantiate(args);
+    const func: FuncEntity = {
+      kind: 'func',
+      name: entity.name,
+      type,
+      value: () => instance,
+      direct: (values, row, stackBuffers) => instance.call(values, row, undefined, stackBuffers),
+      directResume:
+        instance.resume &&
+        ((values, row, stackBuffers) =>
+          (instance.resume as NonNullable<GoFunc['resume']>)(values, row, undefined, stackBuffers)),
+    };
+    return { mode: 'value', type, span, eval: () => instance, func };
+  }
+
   private unary(expression: Extract<Expression, { kind: 'unary' }>): Operand {
     const { operator } = expression;
     if (operator === '&') return this.addressOf(expression);
+    if (operator === '<-') return this.receive(expression, false);
     if (operator === '*') {
       const target = this.expression(expression.operand);
       // `*T` where T is a type is the pointer type, as in the conversion `(*T)(p)`.
@@ -869,6 +1060,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return this.applyUnary(expression, unaryOp, operand);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private applyUnary(span: Span, operator: '+' | '-' | '!' | '^', operand: Operand): Operand {
     const type = operand.type;
     const allowed = operator === '!' ? isBoolean(type) : operator === '^' ? isInteger(type) : isNumeric(type);
@@ -998,8 +1190,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 50 -- The binary operators and their type rules, one at a time.
   private binary(expression: Extract<Expression, { kind: 'binary' }>): Operand {
+    const { operator } = expression;
+    if ((operator === '&&' || operator === '||') && this.hoists) return this.blockingLogical(expression);
     if (expression.operator === '&&' || expression.operator === '||') {
       // Each operand orders its own calls, as the right one runs only when it is needed.
       return this.binaryOfOperands(
@@ -1017,7 +1210,33 @@ export abstract class ExpressionCompiler extends CompilerBase {
     );
   }
 
+  /**
+   * `a && b` and `a || b` in a statement that may block: the computations that may block in `b` run only when `a`
+   * does not decide the result, so the whole operation runs with them.
+   */
+  private blockingLogical(expression: Extract<Expression, { kind: 'binary' }>): Operand {
+    const left = this.value(expression.left);
+    const right = this.part(() => this.value(expression.right));
+    const result = this.binaryOfOperands(expression, expression.operator, left, right.value);
+    const hoists = right.hoists;
+    if (!hoists || this.isInvalid(result) || result.mode === 'constant') return result;
+    const readLeft = left.eval;
+    const readRight = right.value.eval;
+    const decides = expression.operator === '||';
+    const run = function* (frame: Frame): Suspending<Value> {
+      if ((readLeft(frame) as boolean) === decides) return decides;
+      yield* runHoists(frame, hoists);
+      try {
+        return readRight(frame);
+      } finally {
+        clearHoists(frame, hoists);
+      }
+    };
+    return { ...result, eval: this.suspending(run, result.eval) };
+  }
+
   /** Applies a binary operator to compiled operands, as `x op= y` also does. */
+  // code-gauge-allow functionNcss 60 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   protected binaryOfOperands(span: Span, operator: string, leftOperand: Operand, rightOperand: Operand): Operand {
     const expression = {
       ...span,
@@ -1155,6 +1374,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   /**
    * Fuses `a + x*y`, `a - x*y`, and `x*y - a` into one rounding, as Go's compiler does on arm64.
    */
+  // code-gauge-allow functionNcss 42 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private fusedMultiplyAdd(
     span: Span,
     operator: string,
@@ -1300,6 +1520,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  // code-gauge-allow functionNcss 56 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private comparison(
     expression: Extract<Expression, { kind: 'binary' }>,
     leftOperand: Operand,
@@ -1413,6 +1634,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  // code-gauge-allow functionNcss 59 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private shiftExpression(
     expression: Extract<Expression, { kind: 'binary' }>,
     leftOperand: Operand,
@@ -1513,6 +1735,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  // code-gauge-allow functionNcss 34 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private resolveUntypedShift(
     expression: Extract<Expression, { kind: 'binary' }>,
     operator: '<<' | '>>',
@@ -1542,7 +1766,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         this.error(expression.left, `シフトできるのは整数だけです（${describeType(target)} 型の値が書かれています）。`);
         return this.invalid(expression);
       }
-      for (const term of target.constraint.typeSet?.terms ?? []) {
+      for (const term of effectiveTerms(target.constraint) ?? []) {
         const rep = represent(leftConstant, term.type);
         if ('error' in rep) {
           this.reportRepresentation(untypedLeft, term.type, rep.error, 'オペランド');
@@ -1587,16 +1811,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     const base = this.expression(expression.operand);
     if (this.isInvalid(base)) return base;
-    if (base.mode === 'type') {
-      this.unsupported(expression, 'メソッド式（型.メソッド の形で関数として取り出す書き方）');
-      return this.invalid(expression);
-    }
+    if (base.mode === 'type') return this.methodExpression(expression, base.type, expression.field);
     const operand = this.asValue(base);
     if (this.isInvalid(operand)) return operand;
     return this.selectMember(expression, operand, expression.field);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Fields and methods through embedded fields and pointers.
+  /** `v.M` used as a value: a function that calls the method with the receiver evaluated now. */
+  protected abstract methodValue(operand: Operand): Operand;
+  /** `T.M`: a function that takes the receiver as its first argument. */
+  protected abstract methodExpression(span: Span, type: Type, name: string): Operand;
+
   protected selectMember(span: Span, operand: Operand, field: string): Operand {
     const type = operand.type;
     if (isBasic(type, 'untypedNil')) {
@@ -1606,11 +1831,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const lookupType = type.kind === 'pointer' && underlying(type.element).kind === 'pointer' ? BASIC.invalid : type;
     const selection = lookupFieldOrMethod(lookupType, field);
     if (selection.kind === 'notFound') {
-      const named = type.kind === 'pointer' ? type.element : type;
-      if (named.kind === 'named' && named.unsupported?.has(field)) {
-        this.unsupported(span, `${typeString(named)}.${field}`);
-        return this.invalid(span);
-      }
+      if (this.unavailableMember(type, field, span)) return this.invalid(span);
       const hint = this.capitalizationHint(type, field);
       this.error(span, `${describeType(type)} 型には ${field} というフィールドやメソッドがありません${hint}。`);
       return this.invalid(span);
@@ -1633,6 +1854,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return this.fieldOperand(span, operand, selection.path, selection.type);
   }
 
+  protected unavailableMember(type: Type, name: string, span: Span): boolean {
+    const named = type.kind === 'pointer' ? type.element : type;
+    if (named.kind !== 'named' || !named.unsupported?.has(name)) return false;
+    this.unsupported(span, `${typeString(named)}.${name}`);
+    return true;
+  }
+
   private capitalizationHint(type: Type, field: string): string {
     const other =
       field[0] === field[0].toUpperCase()
@@ -1642,6 +1870,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** A field reached through embedded fields, following pointers, which may be nil. */
+  // code-gauge-allow functionCognitiveComplexity 30 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  // code-gauge-allow functionNcss 49 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   protected fieldOperand(span: Span, operand: Operand, path: number[], type: Type): Operand {
     const read = operand.eval;
     const steps = path.slice(0, -1);
@@ -1718,6 +1948,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
   // Index and slice -------------------------------------------------------------------------------------------------
 
   /** Converts an index to a number, checking it as Go does: an integer, non-negative if constant. */
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  // code-gauge-allow functionNcss 31 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   protected indexValue(expression: Expression, length?: number): ((frame: Frame) => number) | undefined {
     let operand = this.value(expression);
     if (this.isInvalid(operand)) return undefined;
@@ -1758,11 +1990,27 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  // code-gauge-allow functionNcss 31 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private index(expression: Extract<Expression, { kind: 'index' }>): Operand {
+    const genericType = this.genericTypeIndex(expression);
+    if (genericType) return genericType;
     const base = this.expression(expression.operand);
     if (this.isInvalid(base)) return base;
-    if (base.mode === 'type' || (base.mode === 'value' && base.func?.generic)) {
-      this.unsupported(expression, '型引数を明示する書き方');
+    if (base.mode === 'value' && base.func?.generic) return this.instantiation(expression, base);
+    if (base.mode === 'method' && base.method?.selection.kind === 'method' && base.method.selection.method.typeParams) {
+      const typeArgs: Type[] = [];
+      for (const index of expression.indices) {
+        const syntax = typeSyntaxOf(index);
+        const type = syntax ? this.resolveType(syntax) : undefined;
+        if (!syntax) this.error(index, 'ここには型を書いてください。');
+        if (type === undefined || type === BASIC.invalid) return this.invalid(expression);
+        typeArgs.push(type);
+      }
+      return { ...base, span: expression, typeArgs };
+    }
+    if (base.mode === 'type') {
+      this.error(expression, `${describeType(base.type)} は型引数を持たない型です。`);
       return this.invalid(expression);
     }
     const operand = this.asValue(base);
@@ -1772,6 +2020,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return this.invalid(expression);
     }
     const [indexExpression] = expression.indices;
+    return this.indexOperand(expression, operand, indexExpression);
+  }
+
+  // code-gauge-allow functionNcss 43 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  private indexOperand(
+    expression: Extract<Expression, { kind: 'index' }>,
+    operand: Operand,
+    indexExpression: Expression
+  ): Operand {
+    const parameter = this.indexTypeParameter(expression, operand, indexExpression);
+    if (parameter) return parameter;
     const { type, read, viaPointer } = throughArrayPointer(operand);
     if (type.kind === 'map') return this.mapIndex(expression, operand, type.key, type.value);
     if (isString(type) && type.kind === 'basic') return this.stringIndex(expression, operand, indexExpression);
@@ -1832,6 +2091,38 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return this.invalid(expression);
   }
 
+  private indexTypeParameter(
+    expression: Extract<Expression, { kind: 'index' }>,
+    operand: Operand,
+    indexExpression: Expression
+  ): Operand | undefined {
+    if (operand.type.kind !== 'typeParam') return undefined;
+    const terms = effectiveTerms(operand.type.constraint);
+    if (!terms || terms.length === 0) return undefined;
+    const results = terms.map((term) =>
+      this.indexOperand(expression, { ...operand, type: term.type }, indexExpression)
+    );
+    const first = results[0];
+    const maps = terms.map((term) => underlying(term.type));
+    const firstMap = maps[0];
+    if (firstMap.kind === 'map' && maps.some((type) => type.kind !== 'map' || !identical(type.key, firstMap.key))) {
+      this.error(expression, '型集合の map のキーはすべて同じ型でなければなりません。');
+      return this.invalid(expression);
+    }
+    if (results.some((result) => this.isInvalid(result))) return this.invalid(expression);
+    if (
+      results.some(
+        (result) => !identical(result.type, first.type) || (result.mode === 'mapIndex') !== (first.mode === 'mapIndex')
+      )
+    ) {
+      this.error(expression, '型集合のすべての型で添字と要素の型が同じでなければなりません。');
+      return this.invalid(expression);
+    }
+    if (results.some((result) => result.mode === 'value'))
+      return { mode: 'value', type: first.type, span: expression, eval: first.eval };
+    return first;
+  }
+
   /** `s[i]`, a byte of a string, which is never a constant even when both are constants. */
   private stringIndex(span: Span, operand: Operand, indexExpression: Expression): Operand {
     const text =
@@ -1857,6 +2148,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  // code-gauge-allow functionNcss 41 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private mapIndex(span: Span, operand: Operand, keyType: Type, valueType: Type): Operand {
     const expression = span as Extract<Expression, { kind: 'index' }>;
     const keyOperand = this.expression(expression.indices[0]);
@@ -1917,6 +2210,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
   private sliceExpression(expression: Extract<Expression, { kind: 'slice' }>): Operand {
     const operand = this.value(expression.operand);
     if (this.isInvalid(operand)) return operand;
+    return this.sliceOperand(expression, operand);
+  }
+
+  // code-gauge-allow functionNcss 47 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  private sliceOperand(expression: Extract<Expression, { kind: 'slice' }>, operand: Operand): Operand {
+    const parameter = this.sliceTypeParameter(expression, operand);
+    if (parameter) return parameter;
     const { type, read, viaPointer } = throughArrayPointer(operand);
     if (type.kind === 'array' && !viaPointer && operand.mode !== 'variable') {
       this.error(expression, 'アドレスを取れない配列はスライスにできません。');
@@ -1924,11 +2224,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     const low = expression.low ? this.indexValue(expression.low) : () => 0;
     const high = expression.high ? this.indexValue(expression.high) : undefined;
-    if (!low || (expression.high && !high)) return this.invalid(expression);
-    let limit: number | undefined;
-    if (type.kind === 'array') limit = type.length;
-    else if (operand.constant?.kind === 'string') limit = operand.constant.value.length;
-    this.checkConstantBounds(expression, limit);
+    const max = expression.max ? this.indexValue(expression.max) : undefined;
+    if (!low || (expression.high && !high) || (expression.max && !max)) return this.invalid(expression);
+    this.checkConstantBounds(
+      expression,
+      type.kind === 'array'
+        ? type.length
+        : operand.constant?.kind === 'string'
+          ? operand.constant.value.length
+          : undefined
+    );
+    if (max) return this.fullSliceExpression(expression, operand, low, high as NonNullable<typeof high>, max);
     const bounds = (frame: Frame, length: number, limit: number, limitName: string): [number, number] => {
       const from = low(frame);
       const to = high ? high(frame) : length;
@@ -1984,26 +2290,86 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return this.invalid(expression);
   }
 
-  /** Reports constant bounds that are reversed or, for arrays and constant strings, beyond the length `limit`. */
-  private checkConstantBounds(expression: Extract<Expression, { kind: 'slice' }>, limit: number | undefined): void {
+  private sliceTypeParameter(
+    expression: Extract<Expression, { kind: 'slice' }>,
+    operand: Operand
+  ): Operand | undefined {
+    if (operand.type.kind !== 'typeParam') return undefined;
+    const terms = effectiveTerms(operand.type.constraint);
+    if (!terms || terms.length === 0) return undefined;
+    const types = terms.map((term) => underlying(term.type));
+    const normalized = types.map((type): Type => (isString(type) ? { kind: 'slice', element: BASIC.uint8 } : type));
+    if (!normalized.every((type) => identical(type, normalized[0]))) {
+      this.error(expression, '型集合のすべての型でスライス式の型が同じでなければなりません。');
+      return this.invalid(expression);
+    }
+    const representative = types.find((type) => isString(type)) ?? types[0];
+    const result = this.sliceOperand(expression, { ...operand, type: representative });
+    return this.isInvalid(result) ? result : { ...result, type: operand.type };
+  }
+
+  /** `a[low:high:max]`, whose result has the capacity max - low; strings cannot take a third index. */
+  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  private fullSliceExpression(
+    expression: Extract<Expression, { kind: 'slice' }>,
+    operand: Operand,
+    low: (frame: Frame) => number,
+    high: (frame: Frame) => number,
+    max: (frame: Frame) => number
+  ): Operand {
+    const { type, read } = throughArrayPointer(operand);
+    if (type.kind !== 'array' && type.kind !== 'slice') {
+      this.error(expression, `${describeType(operand.type)} 型の値には、3つの添字のスライス式を使えません。`);
+      return this.invalid(expression);
+    }
+    const resultType: Type = type.kind === 'array' ? { kind: 'slice', element: type.element } : operand.type;
+    return {
+      mode: 'value',
+      type: resultType,
+      span: expression,
+      eval: (frame) => {
+        const value = read(frame) as GoArray | Slice | undefined;
+        const array = value instanceof GoArray ? value.elements : (value?.array ?? []);
+        const offset = value instanceof Slice ? value.offset : 0;
+        const capacity = value instanceof GoArray ? value.elements.length : (value?.capacity ?? 0);
+        const from = low(frame);
+        const to = high(frame);
+        const limit = max(frame);
+        if (limit < 0 || limit > capacity)
+          boundsPanic(`slice bounds out of range [::${limit}] with capacity ${capacity}`);
+        if (to < 0 || to > limit) boundsPanic(`slice bounds out of range [:${to}:${limit}]`);
+        if (from < 0 || from > to) boundsPanic(`slice bounds out of range [${from}:${to}:]`);
+        if (value === undefined) return;
+        return new Slice(array, offset + from, to - from, limit - from);
+      },
+    };
+  }
+
+  private checkConstantBounds(expression: Extract<Expression, { kind: 'slice' }>, limit?: number): void {
     const low = expression.low ? this.constantExpression(expression.low).value : undefined;
     const high = expression.high ? this.constantExpression(expression.high).value : undefined;
+    const max = expression.max ? this.constantExpression(expression.max).value : undefined;
     for (const [bound, syntax] of [
       [low, expression.low],
       [high, expression.high],
+      [max, expression.max],
     ] as const) {
-      if (limit !== undefined && bound !== undefined && syntax && bound > BigInt(limit)) {
+      if (limit !== undefined && bound !== undefined && syntax && bound > BigInt(limit))
         this.error(syntax, `添字 ${bound} は範囲の外です（長さは ${limit} です）。`);
-        return;
-      }
     }
     if (low !== undefined && high !== undefined && low > high) {
       this.error(expression, `スライスの範囲が逆になっています（${low} > ${high}）。`);
+    } else if (high !== undefined && max !== undefined && high > max) {
+      this.error(expression, `スライスの範囲が逆になっています（${high} > ${max}）。`);
+    } else if (low !== undefined && max !== undefined && low > max) {
+      this.error(expression, `スライスの範囲が逆になっています（${low} > ${max}）。`);
     }
   }
 
   // Type assertions -------------------------------------------------------------------------------------------------
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
+  // code-gauge-allow functionNcss 37 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private typeAssertion(expression: Extract<Expression, { kind: 'typeAssert' }>): Operand {
     const operand = this.value(expression.operand);
     if (this.isInvalid(operand)) return operand;
@@ -2142,7 +2508,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** Converts an operand with `T(x)`, which the call compiler routes here. */
-  // code-gauge-allow functionCognitiveComplexity 25 -- Type conversions including untyped shifts and []rune capacity modes.
+  // code-gauge-allow functionNcss 56 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   protected convert(span: Span, target: Type, rawOperand: Operand): Operand {
     let operand = rawOperand;
     if (this.isInvalid(operand)) return operand;
@@ -2170,8 +2536,19 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (this.hasTypeParam(source.type) || this.hasTypeParam(target))
       return { mode: 'value', type: target, span, eval: () => {} };
     if (underlying(source.type).kind === 'slice' && underlying(target).kind === 'pointer') {
-      this.unsupported(span, 'スライスから配列へのポインタへの変換');
-      return this.invalid(span);
+      const length = (underlying((underlying(target) as { element: Type }).element) as { length: number }).length;
+      const read = source.eval;
+      return {
+        mode: 'value',
+        type: target,
+        span,
+        eval: (frame) => {
+          const slice = read(frame) as Slice | undefined;
+          if (slice === undefined) return length === 0 ? undefined : sliceToArrayPanic(0, length);
+          if (slice.length < length) sliceToArrayPanic(slice.length, length);
+          return new SliceArrayPointer(slice.array, slice.offset, length);
+        },
+      };
     }
     const targetUnder = underlying(target);
     const toRunes = targetUnder.kind === 'slice' && isBasic(targetUnder.element, 'int32');
@@ -2221,7 +2598,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- The conversions of constants, as the specification lists them.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps Go operand validation, evaluation order and result storage together for this expression.
   private convertConstant(span: Span, target: Type, operand: Operand): Operand | undefined {
     const constant = operand.constant as Constant;
     const under = underlying(target);
@@ -2554,7 +2931,7 @@ function untypedFamily(type: Type): string {
 
 function allowsBinaryOperator(operator: string, type: Type): boolean {
   if (type.kind === 'typeParam') {
-    const terms = type.constraint.typeSet?.terms;
+    const terms = effectiveTerms(type.constraint);
     return terms !== undefined && terms.length > 0 && terms.every((term) => allowsBinaryOperator(operator, term.type));
   }
   if (operator === '+') return isNumeric(type) || isString(type);
@@ -2578,7 +2955,7 @@ function untypedRank(type: Type): number {
 
 /** Whether every type a type parameter allows represents the constant, as converting the constant to it requires. */
 function fitsTypeParam(constant: Constant, target: TypeParamType): boolean {
-  const terms = target.constraint.typeSet?.terms;
+  const terms = effectiveTerms(target.constraint);
   return terms !== undefined && terms.length > 0 && terms.every((term) => 'constant' in represent(constant, term.type));
 }
 
@@ -2616,3 +2993,59 @@ export function describeConstant(constant: Constant): string {
 
 export type { FuncType };
 export { RUNE };
+
+/** The value of an imaginary literal's number, whose digits alone are decimal even after a leading 0, as Go keeps. */
+function imaginaryPart(text: string): Rational {
+  if (/^[\d_]+$/.test(text)) return { num: BigInt(text.replaceAll('_', '')), den: 1n };
+  const digits = text.replaceAll('_', '');
+  return /^0(?:[xX][\da-fA-F]+|[bB][01]+|[oO][0-7]+)$/.test(digits)
+    ? { num: BigInt(digits), den: 1n }
+    : parseFloatLiteral(text);
+}
+
+/** The type that an expression names, such as a type argument `[]int` or `Pair[int, string]`, if it names one. */
+function typeSyntaxOf(expression: Expression): TypeExpression | undefined {
+  switch (expression.kind) {
+    case 'name': {
+      return { kind: 'name', row: expression.row, column: expression.column, name: expression.name, typeArguments: [] };
+    }
+    case 'selector': {
+      if (expression.operand.kind !== 'name') return undefined;
+      return {
+        kind: 'name',
+        row: expression.row,
+        column: expression.column,
+        package: expression.operand.name,
+        name: expression.field,
+        typeArguments: [],
+      };
+    }
+    case 'index': {
+      const base = typeSyntaxOf(expression.operand);
+      if (base?.kind !== 'name') return undefined;
+      const args = expression.indices.map((index) => typeSyntaxOf(index));
+      if (args.includes(undefined)) return undefined;
+      return { ...base, typeArguments: args as TypeExpression[] };
+    }
+    case 'type': {
+      return expression.type;
+    }
+    case 'paren': {
+      return typeSyntaxOf(expression.expression);
+    }
+    case 'unary': {
+      if (expression.operator !== '*') return undefined;
+      const element = typeSyntaxOf(expression.operand);
+      return element && { kind: 'pointer', row: expression.row, column: expression.column, element };
+    }
+    default: {
+      return undefined;
+    }
+  }
+}
+
+function sliceToArrayPanic(length: number, wanted: number): never {
+  return runtimeErrorPanic(
+    `cannot convert slice with length ${length} to array or pointer to array with length ${wanted}`
+  );
+}

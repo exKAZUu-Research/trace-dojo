@@ -1,11 +1,13 @@
 import type { GoPackage } from '../entities';
 import { BASE64_PACKAGE } from './base64';
+import { BIG_PACKAGE } from './big';
+import { BINARY_PACKAGE } from './binary';
 import { BITS_PACKAGE } from './bits';
 import { BUFIO_PACKAGE } from './bufio';
 import { BYTES_PACKAGE } from './bytes';
 import { CMPLX_PACKAGE } from './cmplx';
 import { CMP_PACKAGE, MAPS_PACKAGE, SLICES_PACKAGE, SORT_PACKAGE } from './collections';
-import { HEAP_PACKAGE, LIST_PACKAGE } from './containers';
+import { HEAP_PACKAGE, LIST_PACKAGE, RING_PACKAGE } from './containers';
 import { ERRORS_PACKAGE } from './errors';
 import { FMT_PACKAGE } from './fmt';
 import {
@@ -21,6 +23,7 @@ import { HEX_PACKAGE } from './hex';
 import { IMAGE_PACKAGE } from './image';
 import { COLOR_PACKAGE } from './imageColor';
 import { IO_PACKAGE } from './ioStreams';
+import { ITER_PACKAGE } from './iter';
 import { JSON_PACKAGE } from './json';
 import { LOG_PACKAGE } from './log';
 import { MATH_PACKAGE } from './math';
@@ -33,6 +36,7 @@ import { REGEXP_PACKAGE } from './regexp';
 import { SLOG_PACKAGE } from './slog';
 import { STRCONV_PACKAGE } from './strconv';
 import { STRINGS_PACKAGE } from './strings';
+import { SYNC_PACKAGE } from './sync';
 import { TEXT_TEMPLATE_PACKAGE } from './template';
 import { TIME_PACKAGE } from './time';
 import { UNICODE_PACKAGE, UTF8_PACKAGE } from './unicode';
@@ -42,6 +46,11 @@ import { XML_PACKAGE } from './xml';
 const PACKAGES = new Map<string, GoPackage>(
   [
     BITS_PACKAGE,
+    BIG_PACKAGE,
+    BINARY_PACKAGE,
+    RING_PACKAGE,
+    ITER_PACKAGE,
+    SYNC_PACKAGE,
     BUFIO_PACKAGE,
     BYTES_PACKAGE,
     CMP_PACKAGE,

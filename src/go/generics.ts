@@ -1,9 +1,18 @@
-import { identical, type InterfaceType, type NamedType, type Type, type TypeParamType, underlying } from './types';
+import {
+  coreType,
+  effectiveTerms,
+  identical,
+  type InterfaceType,
+  type NamedType,
+  type Type,
+  type TypeParamType,
+  underlying,
+} from './types';
 
 export type Substitution = Map<number, Type>;
 
 /** Replaces type parameters by their type arguments, instantiating generic named types through `instantiateNamed`. */
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of type.
+// code-gauge-allow functionNcss 34 -- Visits the Go type shapes while retaining substitution and inference context.
 export function substitute(
   type: Type,
   mapping: Substitution,
@@ -35,8 +44,12 @@ export function substitute(
     case 'map': {
       return { kind: 'map', key: recur(type.key), value: recur(type.value) };
     }
+    case 'chan': {
+      const element = recur(type.element);
+      return element === type.element ? type : { ...type, element };
+    }
     case 'struct': {
-      return { kind: 'struct', fields: type.fields.map((field) => ({ ...field, type: recur(field.type) })) };
+      return { ...type, fields: type.fields.map((field) => ({ ...field, type: recur(field.type) })) };
     }
     case 'func': {
       return {
@@ -75,17 +88,11 @@ export function substituteInterface(
  * Infers type arguments by unifying parameter types with argument types, as Go's function argument type inference
  * does; returns false when the types cannot match.
  */
-// code-gauge-allow functionCognitiveComplexity 30 -- Structural unification over each kind of type.
+// code-gauge-allow functionNcss 51 -- Visits the Go type shapes while retaining substitution and inference context.
+// code-gauge-allow functionCognitiveComplexity 20 -- Visits the Go type shapes while retaining substitution and inference context.
 export function unify(param: Type, arg: Type, mapping: Substitution, params: readonly TypeParamType[]): boolean {
   if (param.kind === 'typeParam' && params.some((candidate) => candidate.id === param.id)) {
-    const bound = mapping.get(param.id);
-    if (!bound) {
-      mapping.set(param.id, arg);
-      return true;
-    }
-    if (identical(bound, arg)) return true;
-    // A named type and its underlying type both match a parameter written as a type literal.
-    return identical(underlying(bound), underlying(arg));
+    return bindTypeArgument(param, arg, mapping);
   }
   switch (param.kind) {
     case 'pointer':
@@ -100,6 +107,10 @@ export function unify(param: Type, arg: Type, mapping: Substitution, params: rea
         target.length === param.length &&
         unify(param.element, target.element, mapping, params)
       );
+    }
+    case 'chan': {
+      const target = underlying(arg);
+      return target.kind === 'chan' && unify(param.element, target.element, mapping, params);
     }
     case 'map': {
       const target = underlying(arg);
@@ -143,6 +154,7 @@ export function unify(param: Type, arg: Type, mapping: Substitution, params: rea
       if (arg.kind === 'named' && param.origin && arg.origin === param.origin) {
         return (param.typeArgs ?? []).every((type, index) => unify(type, (arg.typeArgs ?? [])[index], mapping, params));
       }
+      if (arg.kind !== 'named') return unify(underlying(param), arg, mapping, params);
       return true;
     }
     default: {
@@ -151,18 +163,44 @@ export function unify(param: Type, arg: Type, mapping: Substitution, params: rea
   }
 }
 
+function bindTypeArgument(param: TypeParamType, arg: Type, mapping: Substitution): boolean {
+  const bound = mapping.get(param.id);
+  if (!bound) {
+    mapping.set(param.id, arg);
+    return true;
+  }
+  if (identical(bound, arg)) return true;
+  const left = coreType(bound);
+  const right = coreType(arg);
+  if (left?.kind === 'chan' && right?.kind === 'chan' && identical(left.element, right.element)) {
+    if (left.dir !== right.dir && left.dir !== 'both' && right.dir !== 'both') return false;
+    if (bound.kind === 'named' && arg.kind === 'named') return false;
+    if (bound.kind !== 'named' && (arg.kind === 'named' || (underlying(arg).kind === 'chan' && right.dir !== 'both')))
+      mapping.set(param.id, arg);
+    return true;
+  }
+  // A named type and its underlying type both match a parameter written as a type literal.
+  return identical(underlying(bound), underlying(arg));
+}
+
 /** Infers type parameters from the core types of the constraints of already-inferred ones, such as `S ~[]E`. */
-export function inferFromConstraints(params: readonly TypeParamType[], mapping: Substitution): void {
+// code-gauge-allow functionCognitiveComplexity 18 -- Visits the Go type shapes while retaining substitution and inference context.
+export function inferFromConstraints(
+  params: readonly TypeParamType[],
+  mapping: Substitution,
+  fixed: ReadonlySet<number> = new Set()
+): void {
+  const inferred = params.filter((param) => !fixed.has(param.id));
   for (let changed = true; changed;) {
     changed = false;
     for (const param of params) {
-      const terms = param.constraint.typeSet?.terms;
+      const terms = effectiveTerms(param.constraint);
       if (terms?.length !== 1) continue;
       const bound = mapping.get(param.id);
       const core = terms[0].type;
       if (bound) {
         const before = mapping.size;
-        unify(core, terms[0].tilde ? underlying(bound) : bound, mapping, params);
+        unify(core, terms[0].tilde ? underlying(bound) : bound, mapping, inferred);
         if (mapping.size !== before) changed = true;
       } else if (!containsUnbound(core, params, mapping)) {
         mapping.set(param.id, core);
@@ -172,6 +210,7 @@ export function inferFromConstraints(params: readonly TypeParamType[], mapping: 
   }
 }
 
+// code-gauge-allow duplicateLines 29 -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
 function containsUnbound(
   type: Type,
   params: readonly TypeParamType[],
@@ -207,6 +246,7 @@ function containsUnbound(
   }
 }
 
+// code-gauge-allow duplicateLines 29 -- The adjacent operations retain distinct Go evaluation and control-flow protocols; merging their adapters would couple those contracts.
 export function containsTypeParam(type: Type, seen = new Set<Type>()): boolean {
   if (seen.has(type)) return false;
   seen.add(type);
@@ -219,7 +259,8 @@ export function containsTypeParam(type: Type, seen = new Set<Type>()): boolean {
     }
     case 'pointer':
     case 'slice':
-    case 'array': {
+    case 'array':
+    case 'chan': {
       return containsTypeParam(type.element, seen);
     }
     case 'map': {

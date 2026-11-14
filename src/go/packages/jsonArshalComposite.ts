@@ -1,7 +1,9 @@
+// code-gauge-allow-file fileNcss 480 -- Preserves JSON field dominance, tags and typed value handling in the composite encoder.
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { mapKeyOf } from '../equality';
-import { currentRuntime } from '../native';
+import { currentRuntime, fn, namedType } from '../native';
 import { grownCapacity } from '../sliceOps';
+import { lookupStructTag } from '../structTags';
 import {
   ANY,
   BASIC,
@@ -11,9 +13,10 @@ import {
   sliceOf,
   type Type,
   typeIdentityKey,
+  typeString,
   underlying,
 } from '../types';
-import { type GoArray, GoMap, type GoStruct, Iface, Pointer, Slice, type Value } from '../values';
+import { Complex, type GoArray, GoMap, type GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 import {
   ALL_MARSHALER_TYPES,
   type Arshaler,
@@ -38,11 +41,20 @@ import {
   type UnmarshalOptions,
   visiting,
 } from './jsonArshalCore';
-import { type DecoderState, type EncoderState, ERR_NON_STRING_NAME, SyntacticError } from './jsonText';
+import { parseJsonFieldTag } from './jsonFieldTags';
+import { type DecoderState, EncoderState, ERR_NON_STRING_NAME, SyntacticError } from './jsonText';
 import { type LibError, TextError, unquoteMayCopy } from './jsonWire';
-import { callValueMethod, fieldName, implementsVia, newVariable, structOf, zeroValue } from './reflection';
+import {
+  callPointerMethod,
+  callValueMethod,
+  fieldName,
+  implementsVia,
+  newVariable,
+  structOf,
+  zeroValue,
+} from './reflection';
 import { equalFold } from './strings';
-import { bytesOf } from './support';
+import { bytesOf, stringPanic } from './support';
 import { typeKind } from './templateReflect';
 
 /** Finds the arshaler of a type, which the composite arshalers use for their elements. */
@@ -201,7 +213,10 @@ interface StructField {
   index: number[];
   type: Type;
   name: string;
-  quotedName: string;
+  omitEmpty: boolean;
+  omitZero: boolean;
+  stringify: boolean;
+  tagged: boolean;
 }
 
 interface StructFields {
@@ -215,7 +230,7 @@ interface QueueEntry {
   visitChildren: boolean;
 }
 
-/** `makeStructFields` for structs without tags: exported fields, and the fields of embedded structs. */
+/** Exported fields and promoted fields, selected by depth and explicit JSON names. */
 function makeStructFields(root: Type): StructFields {
   const queue: QueueEntry[] = [{ type: root, index: [], visitChildren: true }];
   const seen = new Set<string>([typeIdentityKey(root)]);
@@ -231,21 +246,35 @@ function makeStructFields(root: Type): StructFields {
 }
 
 /** Adds the fields of one struct, queueing its embedded structs to visit later, as breadth-first order requires. */
+// code-gauge-allow functionCognitiveComplexity 20 -- Preserves JSON field dominance, tags and typed value handling in the composite encoder.
 function collectFields(entry: QueueEntry, queue: QueueEntry[], seen: Set<string>, allFields: StructField[]): void {
   const struct = structOf(entry.type);
   if (!struct) return;
   for (const [i, field] of struct.fields.entries()) {
+    const tag = lookupStructTag(field.tag, 'json');
+    if (tag === '-') continue;
+    const { name: tagName, options } = parseJsonFieldTag(tag);
+    const tagged = tagName !== undefined;
     const fieldExported = isExported(field.name);
     if (!fieldExported && !field.embedded) continue;
     const index = [...entry.index, i];
     const embedded = field.type.kind === 'pointer' ? field.type.element : field.type;
-    if (field.embedded && typeKind(embedded) === 'struct') {
+    if (!tagged && field.embedded && typeKind(embedded) === 'struct') {
       const key = typeIdentityKey(embedded);
       if (entry.visitChildren) queue.push({ type: embedded, index, visitChildren: !seen.has(key) });
       seen.add(key);
     } else if (fieldExported) {
-      const name = fieldName(field.name);
-      allFields.push({ id: allFields.length, index, type: field.type, name, quotedName: `"${name}"` });
+      const name = fieldName(tagged ? tagName : field.name);
+      allFields.push({
+        id: allFields.length,
+        index,
+        type: field.type,
+        name,
+        omitEmpty: options.includes('omitempty'),
+        omitZero: options.includes('omitzero'),
+        stringify: options.includes('string') && stringTagType(field.type),
+        tagged,
+      });
     }
   }
 }
@@ -259,6 +288,11 @@ function dominantFields(allFields: StructField[]): StructField[] {
     while (end < sorted.length && sorted[end].name === sorted[start].name) end++;
     if (end - start === 1 || sorted[start].index.length !== sorted[start + 1].index.length) {
       flattened.push(sorted[start]);
+    } else {
+      const shallow = sorted
+        .slice(start, end)
+        .filter((field) => field.index.length === sorted[start].index.length && field.tagged);
+      if (shallow.length === 1) flattened.push(shallow[0]);
     }
     start = end;
   }
@@ -279,11 +313,14 @@ export function makeStructArshaler(type: Type, lookup: Lookup): Arshaler {
       if (err) return err;
       for (const field of fields.flattened) {
         const value = walkField(ref, type, field, false);
-        if (!value) continue;
-        enc.buf += (enc.tokens.last.length > 0 ? ',' : '') + field.quotedName;
-        enc.names[enc.names.length - 1] = field.name;
-        enc.tokens.last.length++;
-        err = lookup(field.type).marshal(enc, value, mo);
+        if (
+          !value ||
+          (field.omitEmpty && emptyJsonValue(value.get(), field.type)) ||
+          (field.omitZero && zeroJsonValue(value, field.type))
+        )
+          continue;
+        err = enc.writeToken('"', field.name);
+        err ??= marshalField(enc, value, field, mo, lookup);
         if (err) return err;
       }
       return enc.writeToken('}');
@@ -315,7 +352,7 @@ function unmarshalStruct(
       if (uo.rejectUnknownMembers) errors.first ??= newUnmarshalErrorAfter(dec, type, ERR_UNKNOWN_NAME);
       fieldErr = dec.skipValue();
     } else if (value) {
-      fieldErr = lookup(field.type).unmarshal(dec, value, uo);
+      fieldErr = unmarshalField(dec, value, field, uo, lookup);
     } else {
       errors.first ??= newUnmarshalErrorBefore(dec, type, ERR_NIL_FIELD);
       fieldErr = dec.skipValue();
@@ -489,7 +526,9 @@ export function makePointerArshaler(type: Type, lookup: Lookup): Arshaler {
         pointer = newVariable(element);
         ref.set(pointer);
       }
-      return valFncs.unmarshal(dec, new Ref(pointer, false), uo);
+      const error = valFncs.unmarshal(dec, new Ref(pointer, false), uo);
+      if (!error && uo.stringify && dec.previousTokenOrValue() === '"null"') ref.set(undefined);
+      return error;
     },
   };
 }
@@ -578,4 +617,97 @@ function marshalNilPointerWithMethod(enc: EncoderState, iface: Iface, marshaler:
   const [text, err] = callValueMethod(iface.type, undefined, method, args) as [Value, Value];
   if (err !== undefined) return new MarshalerError(iface.type, goError(err), method);
   return enc.appendRaw('"', bytesOf(text));
+}
+
+function emptyJsonValue(value: Value, type: Type): boolean {
+  const under = underlying(type);
+  if (under.kind === 'basic') return value === false || value === 0n || value === 0 || value === '';
+  if (under.kind === 'array') return under.length === 0;
+  if (under.kind === 'slice') return ((value as Slice | undefined)?.length ?? 0) === 0;
+  if (under.kind === 'map') return ((value as GoMap | undefined)?.entries.size ?? 0) === 0;
+  return value === undefined;
+}
+
+const IS_ZERO = namedType('json', 'isZeroer', {
+  kind: 'interface',
+  methods: [{ name: 'IsZero', type: fn([], [BASIC.bool]) }],
+});
+
+function stringTagType(type: Type): boolean {
+  const declared = underlying(type);
+  const scalar = declared.kind === 'pointer' ? declared.element : type;
+  const under = underlying(scalar);
+  return under.kind === 'basic' && !['complex64', 'complex128', 'unsafe.Pointer'].includes(under.name);
+}
+
+function marshalField(
+  enc: EncoderState,
+  value: Ref,
+  field: StructField,
+  mo: MarshalOptions,
+  lookup: Lookup
+): LibError | undefined {
+  const arshaler = lookup(field.type);
+  if (!field.stringify || arshaler.nonDefault || value.get() === undefined) return arshaler.marshal(enc, value, mo);
+  const inner = new EncoderState(enc.options);
+  const err = arshaler.marshal(inner, value, mo);
+  return err ?? enc.writeToken('"', inner.buf);
+}
+
+function unmarshalField(
+  dec: DecoderState,
+  value: Ref,
+  field: StructField,
+  uo: UnmarshalOptions,
+  lookup: Lookup
+): LibError | undefined {
+  return lookup(field.type).unmarshal(dec, value, { ...uo, stringify: field.stringify });
+}
+
+function zeroJsonValue(ref: Ref, type: Type): boolean {
+  const value = ref.get();
+  if (value === undefined) return true;
+  const method = implementsVia(type, IS_ZERO);
+  if (method === 'value') return callValueMethod(type, value, 'IsZero', []) as boolean;
+  if (method === 'pointer') {
+    return callPointerMethod(type, ref.pointer, 'IsZero', []) as boolean;
+  }
+  const opaque = opaqueZeroType(value, type);
+  if (opaque) stringPanic(`${typeString(opaque)} の omitzeroは、この採点環境では使えません。`);
+  return structuralZero(value, type);
+}
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Inspects native state in value arrays and structs without changing pointer or interface zero rules.
+function opaqueZeroType(value: Value, type: Type): Type | undefined {
+  if (value === undefined) return undefined;
+  const under = underlying(type);
+  if (under.kind === 'array') {
+    for (const element of (value as GoArray).elements) {
+      const opaque = opaqueZeroType(element, under.element);
+      if (opaque) return opaque;
+    }
+  }
+  if (under.kind === 'struct') {
+    const struct = value as GoStruct;
+    if (under.nativeIdentity || struct.native) return type;
+    for (const [index, field] of under.fields.entries()) {
+      const opaque = opaqueZeroType(struct.fields[index], field.type);
+      if (opaque) return opaque;
+    }
+  }
+  return undefined;
+}
+
+function structuralZero(value: Value, type: Type): boolean {
+  if (value === undefined) return true;
+  const under = underlying(type);
+  if (under.kind === 'struct') {
+    const struct = value as GoStruct;
+    return under.fields.every((field, index) => structuralZero(struct.fields[index], field.type));
+  }
+  if (under.kind === 'array')
+    return (value as GoArray).elements.every((element) => structuralZero(element, under.element));
+  if (under.kind !== 'basic') return false;
+  if (value instanceof Complex) return value.re === 0 && value.im === 0;
+  return value === false || value === 0n || value === 0 || value === '';
 }

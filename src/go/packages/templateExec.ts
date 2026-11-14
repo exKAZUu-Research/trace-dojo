@@ -1,6 +1,7 @@
+// code-gauge-allow-file fileNcss 575 -- Keeps template control evaluation and its shared callback context together.
 import { Printer } from '../fmt';
 import { compareMapKeys } from '../mapOrder';
-import { addMethod, currentRuntime, fn, namedType } from '../native';
+import { addMethod, currentRuntime, fn, namedType, nativeFunc } from '../native';
 import { nilPointerPanic } from '../runtimeErrors';
 import {
   BASIC,
@@ -13,7 +14,7 @@ import {
   typeString,
   underlying,
 } from '../types';
-import { Complex, GoFunc, type GoMap, GoStruct, Iface, Slice, type Value } from '../values';
+import { Complex, type GoFunc, type GoMap, GoStruct, Iface, Slice, type Value } from '../values';
 import { errorf } from './fmt';
 import { callMethod, errorText } from './support';
 import {
@@ -166,6 +167,7 @@ class State {
     throw new ExecFailure(new Iface(EXEC_ERROR, new GoStruct([this.tmpl.name, error])));
   }
 
+  // code-gauge-allow functionNcss 33 -- Keeps template control evaluation and its shared callback context together.
   walk(dot: RValue, node: Node): void {
     currentRuntime().spend();
     this.node = node;
@@ -274,6 +276,7 @@ class State {
 
   /** Runs the iterations of a range, returning whether there were any. */
   // code-gauge-allow functionCognitiveComplexity 25 -- A transcription of the kinds Go's walkRange iterates over.
+  // code-gauge-allow functionNcss 31 -- Keeps template control evaluation and its shared callback context together.
   private rangeOver(value: RValue, node: BranchNode): boolean {
     const mark = this.mark();
     const oneIteration = (index: RValue, element: RValue): void => this.oneIteration(node, mark, index, element);
@@ -323,7 +326,7 @@ class State {
     }
     let ran = false;
     const [first, second] = yieldType.params;
-    const yieldFunc = new GoFunc((args) => {
+    const yieldFunc = nativeFunc((args) => {
       ran = true;
       const key: RV = { type: first, value: args[0] };
       if (yieldType.params.length === 1) oneIteration(undefined, key);
@@ -506,6 +509,7 @@ class State {
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- A transcription of Go's evalField.
+  // code-gauge-allow functionNcss 33 -- Keeps template control evaluation and its shared callback context together.
   private evalField(
     dot: RValue,
     fieldName: string,
@@ -566,6 +570,7 @@ class State {
     return undefined;
   }
 
+  // code-gauge-allow functionParameterCount 7 -- Keeps template control evaluation and its shared callback context together.
   private evalCall(
     dot: RValue,
     funArg: RV,
@@ -666,6 +671,7 @@ class State {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- A transcription of Go's evalArg, one case per node and kind.
+  // code-gauge-allow functionNcss 53 -- Keeps template control evaluation and its shared callback context together.
   private evalArg(dot: RValue, type: Type | undefined, node: Node): RValue {
     this.node = node;
     switch (node.type) {

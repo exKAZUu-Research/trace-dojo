@@ -1,5 +1,9 @@
+// code-gauge-allow-file fileNcss 488 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
 import type { Span } from './ast';
 import type { CalleeSummary } from './entities';
+import { utf8Decode } from './literals';
+import { quote } from './quote';
+import type { StackBuffers } from './runtime';
 
 export type BasicKind =
   | 'bool'
@@ -42,9 +46,13 @@ export interface Field {
   name: string;
   type: Type;
   embedded: boolean;
+  /** The field's tag, which encoding/json reads and which is part of the struct type's identity. */
+  tag?: string;
 }
 
 export interface StructType {
+  nativeIdentity?: string;
+  nonComparable?: boolean;
   kind: 'struct';
   fields: Field[];
 }
@@ -71,6 +79,13 @@ export interface MapType {
   value: Type;
 }
 
+/** A channel type: `chan T`, the send-only `chan<- T`, or the receive-only `<-chan T`. */
+export interface ChanType {
+  kind: 'chan';
+  dir: 'both' | 'send' | 'receive';
+  element: Type;
+}
+
 export interface FuncType {
   kind: 'func';
   params: Type[];
@@ -84,10 +99,15 @@ export interface InterfaceMethod {
   type: FuncType;
 }
 
+export interface TypeTerm {
+  tilde: boolean;
+  type: Type;
+}
+
 /** The types a constraint allows, beyond its methods: `comparable`, or a union of terms such as `~int | ~string`. */
 export interface TypeSet {
   comparable?: boolean;
-  terms?: { tilde: boolean; type: Type }[];
+  terms?: TypeTerm[];
 }
 
 export interface InterfaceType {
@@ -122,13 +142,31 @@ export interface Method {
   /** The function that runs the method, receiving the receiver first. */
   code?: MethodCode;
   span?: Span;
+  /** The method's own type parameters, which Go 1.27 allows; such a method satisfies no interface. */
+  typeParams?: TypeParamType[];
+  /** The code of the method for its own type arguments, for a method with type parameters. */
+  instantiate?: (args: Type[]) => MethodCode;
 }
 
 /** The runtime half of a method, filled in once the method's body compiles. */
 export interface MethodCode {
-  call?: (receiver: unknown, args: unknown[], callRow?: number, deferredFor?: unknown) => unknown;
+  call?: (
+    receiver: unknown,
+    args: unknown[],
+    callRow?: number,
+    deferredFor?: unknown,
+    stackBuffers?: StackBuffers
+  ) => unknown;
   /** What calls learn from the body of a method the program declares. */
   summary?: CalleeSummary;
+  /** Runs the method as `call` does, yielding when its goroutine blocks; absent when it never blocks. */
+  resume?: (
+    receiver: unknown,
+    args: unknown[],
+    callRow?: number,
+    deferredFor?: unknown,
+    stackBuffers?: StackBuffers
+  ) => Generator<{ reason: string }, unknown, unknown>;
 }
 
 export interface NamedType {
@@ -145,6 +183,8 @@ export interface NamedType {
   span?: Span;
   /** Methods of a library type that this environment does not provide, which are rejected rather than undefined. */
   unsupported?: ReadonlySet<string>;
+  /** Instantiates a generic library type, which the program's generic code may instantiate with its own types. */
+  instantiateLibrary?: (args: Type[]) => NamedType;
 }
 
 export type Type =
@@ -154,6 +194,7 @@ export type Type =
   | SliceType
   | ArrayType
   | MapType
+  | ChanType
   | StructType
   | FuncType
   | InterfaceType
@@ -233,16 +274,29 @@ export function underlying(type: Type): Type {
   return type;
 }
 
+export function effectiveTerms(constraint: InterfaceType): TypeTerm[] | undefined {
+  const set = constraint.typeSet;
+  return set?.comparable ? set.terms?.filter((term) => comparableType(term.type, false, new Set())) : set?.terms;
+}
+
 /**
- * The single underlying type of a type parameter's type set, which the operations on its values follow (the core type
- * of the specification), or the underlying type of any other type.
+ * A type set's common underlying type, including the most restrictive compatible channel direction, or an ordinary type's underlying type.
  */
 export function coreType(type: Type): Type | undefined {
   if (type.kind !== 'typeParam') return underlying(type);
-  const terms = type.constraint.typeSet?.terms;
+  const terms = effectiveTerms(type.constraint);
   if (!terms || terms.length === 0) return;
   const first = underlying(terms[0].type);
-  return terms.every((term) => identical(underlying(term.type), first)) ? first : undefined;
+  const types = terms.map((term) => underlying(term.type));
+  if (types.every((type) => identical(type, first))) return first;
+  if (
+    first.kind !== 'chan' ||
+    !types.every((type): type is ChanType => type.kind === 'chan' && identical(type.element, first.element))
+  )
+    return undefined;
+  const directions = new Set(types.map((type) => type.dir));
+  if (directions.has('send') && directions.has('receive')) return undefined;
+  return { ...first, dir: directions.has('send') ? 'send' : 'receive' };
 }
 
 export function isBasic(type: Type, ...kinds: BasicKind[]): boolean {
@@ -272,7 +326,7 @@ const COMPLEX_KINDS = new Set<BasicKind>(['complex64', 'complex128', 'untypedCom
 /** Whether every type a type parameter allows satisfies the predicate, or the type itself does. */
 function allTerms(type: Type, predicate: (basicKind: BasicKind) => boolean): boolean {
   if (type.kind === 'typeParam') {
-    const terms = type.constraint.typeSet?.terms;
+    const terms = effectiveTerms(type.constraint);
     return terms !== undefined && terms.length > 0 && terms.every((term) => allTerms(term.type, predicate));
   }
   const under = underlying(type);
@@ -280,6 +334,15 @@ function allTerms(type: Type, predicate: (basicKind: BasicKind) => boolean): boo
 }
 
 export const isInteger = (type: Type): boolean => allTerms(type, (kind) => INTEGER_KINDS.has(kind));
+export function isByteString(type: Type): boolean {
+  if (type.kind === 'typeParam') {
+    const terms = effectiveTerms(type.constraint);
+    return terms !== undefined && terms.length > 0 && terms.every((term) => isByteString(term.type));
+  }
+  const under = underlying(type);
+  return isString(type) || (under.kind === 'slice' && identical(under.element, BASIC.uint8));
+}
+
 export const isUnsigned = (type: Type): boolean => allTerms(type, (kind) => UNSIGNED_KINDS.has(kind));
 export const isFloat = (type: Type): boolean => allTerms(type, (kind) => FLOAT_KINDS.has(kind));
 export const isComplex = (type: Type): boolean => allTerms(type, (kind) => COMPLEX_KINDS.has(kind));
@@ -365,8 +428,8 @@ export function integerBits(kind: BasicKind): { bits: number; signed: boolean } 
 
 // Identity --------------------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of type, as the specification defines identity.
-export function identical(a: Type, b: Type): boolean {
+// code-gauge-allow functionNcss 40 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
+export function identical(a: Type, b: Type, ignoreTags = false): boolean {
   if (a === b) return true;
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
@@ -380,26 +443,32 @@ export function identical(a: Type, b: Type): boolean {
     }
     case 'pointer':
     case 'slice': {
-      return identical(a.element, (b as PointerType | SliceType).element);
+      return identical(a.element, (b as PointerType | SliceType).element, ignoreTags);
     }
     case 'array': {
       const other = b as ArrayType;
-      return a.length === other.length && identical(a.element, other.element);
+      return a.length === other.length && identical(a.element, other.element, ignoreTags);
     }
     case 'map': {
       const other = b as MapType;
-      return identical(a.key, other.key) && identical(a.value, other.value);
+      return identical(a.key, other.key, ignoreTags) && identical(a.value, other.value, ignoreTags);
+    }
+    case 'chan': {
+      const other = b as ChanType;
+      return a.dir === other.dir && identical(a.element, other.element, ignoreTags);
     }
     case 'struct': {
       const other = b as StructType;
       return (
+        a.nativeIdentity === other.nativeIdentity &&
         a.fields.length === other.fields.length &&
         a.fields.every((field, index) => {
           const otherField = other.fields[index];
           return (
             field.name === otherField.name &&
             field.embedded === otherField.embedded &&
-            identical(field.type, otherField.type)
+            (ignoreTags || (field.tag ?? '') === (otherField.tag ?? '')) &&
+            identical(field.type, otherField.type, ignoreTags)
           );
         })
       );
@@ -408,8 +477,8 @@ export function identical(a: Type, b: Type): boolean {
       const other = b as FuncType;
       return (
         a.variadic === other.variadic &&
-        identicalLists(a.params, other.params) &&
-        identicalLists(a.results, other.results)
+        identicalLists(a.params, other.params, ignoreTags) &&
+        identicalLists(a.results, other.results, ignoreTags)
       );
     }
     case 'interface': {
@@ -418,14 +487,14 @@ export function identical(a: Type, b: Type): boolean {
         a.methods.length === other.methods.length &&
         a.methods.every(
           (method, index) =>
-            method.name === other.methods[index].name && identical(method.type, other.methods[index].type)
+            method.name === other.methods[index].name && identical(method.type, other.methods[index].type, ignoreTags)
         ) &&
         Boolean(a.typeSet?.comparable) === Boolean(other.typeSet?.comparable) &&
         identicalTerms(a.typeSet?.terms, other.typeSet?.terms)
       );
     }
     case 'tuple': {
-      return identicalLists(a.types, (b as TupleType).types);
+      return identicalLists(a.types, (b as TupleType).types, ignoreTags);
     }
     case 'typeParam': {
       return a.id === (b as TypeParamType).id;
@@ -433,8 +502,8 @@ export function identical(a: Type, b: Type): boolean {
   }
 }
 
-function identicalLists(a: Type[], b: Type[]): boolean {
-  return a.length === b.length && a.every((type, index) => identical(type, b[index]));
+function identicalLists(a: Type[], b: Type[], ignoreTags = false): boolean {
+  return a.length === b.length && a.every((type, index) => identical(type, b[index], ignoreTags));
 }
 
 function identicalTerms(a: TypeSet['terms'], b: TypeSet['terms']): boolean {
@@ -450,6 +519,7 @@ let nextNamedTypeId = 0;
 
 /** A canonical key that agrees with Go's `identical(a, b)` for every type, including local named types. */
 // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of type, matching identical.
+// code-gauge-allow functionNcss 41 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
 export function typeIdentityKey(type: Type, seen = new Set<Type>()): string {
   switch (type.kind) {
     case 'basic': {
@@ -464,6 +534,9 @@ export function typeIdentityKey(type: Type, seen = new Set<Type>()): string {
       const args = type.typeArgs.map((arg) => typeIdentityKey(arg, seen)).join(',');
       seen.delete(type);
       return `n:${id}[${args}]`;
+    }
+    case 'chan': {
+      return `chan:${type.dir}(${typeIdentityKey(type.element, seen)})`;
     }
     case 'pointer': {
       return `*${typeIdentityKey(type.element, seen)}`;
@@ -480,10 +553,11 @@ export function typeIdentityKey(type: Type, seen = new Set<Type>()): string {
     case 'struct': {
       const fields = type.fields
         .map(
-          (field) => `${field.embedded ? '^' : ''}${JSON.stringify(field.name)}:${typeIdentityKey(field.type, seen)}`
+          (field) =>
+            `${field.embedded ? '^' : ''}${JSON.stringify(field.name)}:${JSON.stringify(field.tag ?? '')}:${typeIdentityKey(field.type, seen)}`
         )
         .join(';');
-      return `struct{${fields}}`;
+      return `struct${type.nativeIdentity ?? ''}{${fields}}`;
     }
     case 'func': {
       const params = type.params.map((param) => typeIdentityKey(param, seen)).join(',');
@@ -522,7 +596,8 @@ function namedTypeId(type: NamedType): number {
  * The name `%T` and `%v` print, as reflection names types: `main.Vertex`, `[]int`, `map[string]int`,
  * `struct { X int }`.
  */
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of type.
+// code-gauge-allow functionNcss 48 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
+// code-gauge-allow functionCognitiveComplexity 26 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
 export function typeString(type: Type, qualify = true): string {
   switch (type.kind) {
     case 'basic': {
@@ -546,21 +621,28 @@ export function typeString(type: Type, qualify = true): string {
     case 'map': {
       return `map[${typeString(type.key, qualify)}]${typeString(type.value, qualify)}`;
     }
+    case 'chan': {
+      const element = typeString(type.element, qualify);
+      if (type.dir === 'send') return `chan<- ${element}`;
+      if (type.dir === 'receive') return `<-chan ${element}`;
+      // `chan (<-chan T)` keeps the inner direction apart from the outer channel.
+      return type.element.kind === 'chan' && type.element.dir === 'receive' ? `chan (${element})` : `chan ${element}`;
+    }
     case 'struct': {
       if (type.fields.length === 0) return 'struct {}';
-      const fields = type.fields.map((field) =>
-        field.embedded ? typeString(field.type, qualify) : `${field.name} ${typeString(field.type, qualify)}`
-      );
+      const fields = type.fields.map((field) => {
+        const name = field.embedded
+          ? typeString(field.type, qualify)
+          : `${field.name} ${typeString(field.type, qualify)}`;
+        return field.tag ? `${name} ${utf8Decode(quote(field.tag))}` : name;
+      });
       return `struct { ${fields.join('; ')} }`;
     }
     case 'func': {
       return `func${signatureString(type, qualify)}`;
     }
     case 'interface': {
-      if (type.typeSet?.comparable && type.methods.length === 0) return 'comparable';
-      if (type.methods.length === 0 && !type.typeSet) return 'interface {}';
-      const methods = type.methods.map((method) => `${method.name}${signatureString(method.type, qualify)}`);
-      return `interface { ${methods.join('; ')} }`;
+      return interfaceString(type, qualify);
     }
     case 'tuple': {
       return `(${type.types.map((element) => typeString(element, qualify)).join(', ')})`;
@@ -569,6 +651,18 @@ export function typeString(type: Type, qualify = true): string {
       return type.name;
     }
   }
+}
+
+function interfaceString(type: InterfaceType, qualify: boolean): string {
+  if (type.typeSet?.comparable && !type.typeSet.terms && type.methods.length === 0) return 'comparable';
+  if (type.methods.length === 0 && !type.typeSet) return 'interface {}';
+  const methods = type.methods.map((method) => `${method.name}${signatureString(method.type, qualify)}`);
+  if (type.typeSet?.comparable) methods.push('comparable');
+  if (type.typeSet?.terms)
+    methods.push(
+      type.typeSet.terms.map((term) => `${term.tilde ? '~' : ''}${typeString(term.type, qualify)}`).join(' | ')
+    );
+  return `interface { ${methods.join('; ')} }`;
 }
 
 export function signatureString(type: FuncType, qualify = true): string {
@@ -593,16 +687,14 @@ export function describeType(type: Type): string {
 // Comparison --------------------------------------------------------------------------------------------------------
 
 /** Whether `==` compares values of the type, which Go decides from the type alone. */
-export function isComparable(type: Type, seen = new Set<Type>()): boolean {
+export function isComparable(type: Type): boolean {
+  return comparableType(type, true, new Set());
+}
+
+function comparableType(type: Type, dynamic: boolean, seen: Set<Type>): boolean {
   if (seen.has(type)) return true;
-  if (type.kind === 'typeParam') {
-    return (
-      Boolean(type.constraint.typeSet?.comparable) ||
-      (type.constraint.typeSet?.terms?.every((term) => isComparable(term.type)) ?? false)
-    );
-  }
-  const under = underlying(type);
   seen.add(type);
+  const under = type.kind === 'typeParam' ? type.constraint : underlying(type);
   switch (under.kind) {
     case 'slice':
     case 'map':
@@ -610,10 +702,17 @@ export function isComparable(type: Type, seen = new Set<Type>()): boolean {
       return false;
     }
     case 'struct': {
-      return under.fields.every((field) => isComparable(field.type, seen));
+      return !under.nonComparable && under.fields.every((field) => comparableType(field.type, dynamic, seen));
     }
     case 'array': {
-      return isComparable(under.element, seen);
+      return comparableType(under.element, dynamic, seen);
+    }
+    case 'interface': {
+      if (dynamic && type.kind !== 'typeParam') return true;
+      return (
+        Boolean(under.typeSet?.comparable) ||
+        (under.typeSet?.terms?.every((term) => comparableType(term.type, false, seen)) ?? false)
+      );
     }
     default: {
       return true;
@@ -648,6 +747,7 @@ interface EmbeddedEntry {
  * Finds a field or method by name through embedded fields, as a selector does: the shallowest depth wins, and two at
  * the same depth make the name ambiguous. `path` lists the embedded fields to go through and then the field itself.
  */
+// code-gauge-allow functionNcss 56 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
 export function lookupFieldOrMethod(type: Type, name: string): LookupResult {
   if (name === '_') return { kind: 'notFound' };
   if (type.kind === 'named' && type.underlying.kind === 'pointer') {
@@ -746,7 +846,7 @@ export function missingMethod(type: Type, iface: InterfaceType): MissingMethod |
       if (!identical(found.method.type, wanted.type)) return { name: wanted.name, wrongType: found.method.type };
       continue;
     }
-    if (found.kind !== 'method') return { name: wanted.name };
+    if (found.kind !== 'method' || found.method.typeParams) return { name: wanted.name };
     if (!identical(found.method.type, wanted.type)) return { name: wanted.name, wrongType: found.method.type };
     // A value's method set lacks the methods with pointer receivers, unless an embedded pointer provides them.
     if (found.method.pointerReceiver && type.kind !== 'pointer' && !found.indirect) {

@@ -80,7 +80,7 @@ function printTo(bytes: string): Value[] {
 
 // Formatter ---------------------------------------------------------------------------------------------------------
 
-const STATE = namedType('fmt', 'State', {
+export const STATE = namedType('fmt', 'State', {
   kind: 'interface',
   methods: [
     { name: 'Flag', type: fn([INT], [BOOL]) },

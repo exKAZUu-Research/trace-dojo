@@ -1,9 +1,10 @@
+import { LIMITS } from '../../interpreter/limits';
 import type { Entity } from '../entities';
 import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
 import { nilPointerPanic } from '../runtimeErrors';
 import { ANY, BASIC, type NamedType, pointerTo } from '../types';
 import { Cell, GoStruct, Pointer, type Value } from '../values';
-import { BOOL, callMethod, INT, spendFor } from './support';
+import { BOOL, callFunction, callMethod, INT, spendFor } from './support';
 
 // container/heap: transcribed from Go's heap.go ---------------------------------------------------------------------
 
@@ -299,3 +300,130 @@ const listMembers: Record<string, Entity> = {
 };
 
 export const LIST_PACKAGE = definePackage('container/list', listMembers);
+
+// container/ring: transcribed from Go's ring.go, with Ring as a Go struct ------------------------------------------
+
+const RING: NamedType = namedType('ring', 'Ring', { kind: 'struct', fields: [] });
+const RING_POINTER = pointerTo(RING);
+RING.underlying = {
+  kind: 'struct',
+  fields: [
+    { name: 'next', type: RING_POINTER, embedded: false },
+    { name: 'prev', type: RING_POINTER, embedded: false },
+    { name: 'Value', type: ANY, embedded: false },
+  ],
+};
+
+const VALUE_OF_RING = 2;
+
+const newRingPointer = (): Pointer => {
+  currentRuntime().allocate(3);
+  spendFor(1);
+  return new Pointer(new Cell(new GoStruct([undefined, undefined, undefined])), 'v');
+};
+const ringOf = (pointer: Value): GoStruct => {
+  if (!(pointer instanceof Pointer)) nilPointerPanic();
+  return pointer.load() as GoStruct;
+};
+
+/** Go's (*Ring).init: a ring of one element links to itself. */
+function initRing(r: Pointer): Pointer {
+  ringOf(r).fields[NEXT] = r;
+  ringOf(r).fields[PREV] = r;
+  return r;
+}
+
+function ringNext(r: Pointer): Pointer {
+  if (ringOf(r).fields[NEXT] === undefined) return initRing(r);
+  return ringOf(r).fields[NEXT] as Pointer;
+}
+
+function ringPrev(r: Pointer): Pointer {
+  if (ringOf(r).fields[NEXT] === undefined) return initRing(r);
+  return ringOf(r).fields[PREV] as Pointer;
+}
+
+function ringMove(r: Pointer, steps: number): Pointer {
+  if (ringOf(r).fields[NEXT] === undefined) return initRing(r);
+  spendFor(Math.abs(steps));
+  let current = r;
+  if (steps < 0) for (let n = steps; n < 0; n++) current = ringOf(current).fields[PREV] as Pointer;
+  else for (let n = steps; n > 0; n--) current = ringOf(current).fields[NEXT] as Pointer;
+  return current;
+}
+
+function ringLink(r: Pointer, s: Value): Pointer {
+  const n = ringNext(r);
+  if (s instanceof Pointer) {
+    const p = ringPrev(s);
+    ringOf(r).fields[NEXT] = s;
+    ringOf(s).fields[PREV] = r;
+    ringOf(n).fields[PREV] = p;
+    ringOf(p).fields[NEXT] = n;
+  }
+  return n;
+}
+
+function ringLength(r: Value): number {
+  if (!(r instanceof Pointer)) return 0;
+  let count = 1;
+  for (let p = ringNext(r); !p.equals(r); p = ringOf(p).fields[NEXT] as Pointer) {
+    spendFor(1);
+    count++;
+  }
+  return count;
+}
+
+addMethod(RING, 'Next', fn([], [RING_POINTER]), (r) => ringNext(r as Pointer), true);
+addMethod(RING, 'Prev', fn([], [RING_POINTER]), (r) => ringPrev(r as Pointer), true);
+addMethod(RING, 'Move', fn([INT], [RING_POINTER]), (r, [n]) => ringMove(r as Pointer, Number(n as bigint)), true);
+addMethod(RING, 'Link', fn([RING_POINTER], [RING_POINTER]), (r, [s]) => ringLink(r as Pointer, s), true);
+addMethod(
+  RING,
+  'Unlink',
+  fn([INT], [RING_POINTER]),
+  (r, [count]) => {
+    const n = Number(count as bigint);
+    if (n <= 0) return;
+    return ringLink(r as Pointer, ringMove(r as Pointer, n + 1));
+  },
+  true
+);
+addMethod(RING, 'Len', fn([], [INT]), (r) => BigInt(ringLength(r)), true);
+addMethod(
+  RING,
+  'Do',
+  fn([fn([ANY], [])], []),
+  (r, [visit]) => {
+    if (!(r instanceof Pointer)) return;
+    callFunction(visit, [ringOf(r).fields[VALUE_OF_RING]]);
+    for (let p = ringNext(r); !p.equals(r); p = ringOf(p).fields[NEXT] as Pointer) {
+      spendFor(1);
+      callFunction(visit, [ringOf(p).fields[VALUE_OF_RING]]);
+    }
+    return;
+  },
+  true
+);
+
+const ringMembers: Record<string, Entity> = {
+  Ring: typeEntity(RING),
+  New: nativeFunction('New', fn([INT], [RING_POINTER]), ([count]) => {
+    const n = Number(count as bigint);
+    if (n <= 0) return;
+    if (n > LIMITS.maxSlots / 3) currentRuntime().allocate(n * 3);
+    const r = initRing(newRingPointer());
+    let p = r;
+    for (let index = 1; index < n; index++) {
+      const next = newRingPointer();
+      ringOf(next).fields[PREV] = p;
+      ringOf(p).fields[NEXT] = next;
+      p = next;
+    }
+    ringOf(p).fields[NEXT] = r;
+    ringOf(r).fields[PREV] = p;
+    return r;
+  }),
+};
+
+export const RING_PACKAGE = definePackage('container/ring', ringMembers);

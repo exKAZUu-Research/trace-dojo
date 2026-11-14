@@ -2,7 +2,7 @@
 import { assignFailure } from '../assignability';
 import { decodeRune } from '../literals';
 import { dynamicMethod } from '../methods';
-import { namedType } from '../native';
+import { namedType, nativeFunc } from '../native';
 import { plainPanic } from '../runtimeErrors';
 import {
   BASIC,
@@ -19,7 +19,7 @@ import {
   typeString,
   underlying,
 } from '../types';
-import { copyValue, GoArray, GoFunc, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
+import { copyValue, GoArray, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 import { zeroValue } from './reflection';
 import { stringPanic } from './support';
 import { isUpper } from './unicodeSupport';
@@ -298,7 +298,7 @@ export function methodByName(value: RV, name: string): RV | undefined {
   if (typeKind(value.type) === 'interface') {
     return {
       type: selection.method.type,
-      value: new GoFunc((args) => {
+      value: nativeFunc((args) => {
         if (!(receiver instanceof Iface)) stringPanic('reflect: Method on nil interface value');
         return call(receiver.value, args);
       }),
@@ -313,9 +313,9 @@ export function methodByName(value: RV, name: string): RV | undefined {
     // Go's wrapper of a value method for the pointer type reports a nil receiver this way.
     const { name: typeName, pkg } = selection.receiverBase;
     const message = `value method ${pkg.split('/').at(-1)}.${typeName}.${name} called using nil *${typeName} pointer`;
-    return { type: selection.method.type, value: new GoFunc(() => plainPanic(message)) };
+    return { type: selection.method.type, value: nativeFunc(() => plainPanic(message)) };
   }
-  return { type: selection.method.type, value: new GoFunc((args) => call(receiver, args), [receiver]) };
+  return { type: selection.method.type, value: nativeFunc((args) => call(receiver, args), [receiver]) };
 }
 
 /** `Value.String`. */

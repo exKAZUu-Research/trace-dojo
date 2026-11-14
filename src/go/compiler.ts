@@ -1,3 +1,5 @@
+// code-gauge-allow-file fileNcss 847 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+// oxlint-disable require-yield -- Statements that never block are generators like the others, so that all run alike.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { assignFailure, represent } from './assignability';
 import type { ConstDeclaration, File, FunctionDeclaration, Span, TypeDeclaration, TypeSpec, VarSpec } from './ast';
@@ -9,6 +11,7 @@ import {
   type FunctionContext,
   type GenericFunc,
   newCalleeSummary,
+  type PackageEntity,
   type TypeEntity,
   type VarEntity,
 } from './entities';
@@ -17,10 +20,18 @@ import { containsTypeParam, substitute } from './generics';
 import { currentRuntime } from './native';
 import type { Operand } from './operand';
 import { lookupPackage } from './packages/index';
-import { type Eval, evaluateAll, type Frame, type FunctionInfo, type LocalInfo, type StackBuffers } from './runtime';
+import {
+  type Eval,
+  evaluateAll,
+  type Exec,
+  type FunctionInfo,
+  type LocalInfo,
+  type StackBuffers,
+  type Suspending,
+} from './runtime';
 import { Scope } from './scope';
 import { STANDARD_PACKAGES } from './standardPackages';
-import { declareValue, StatementCompiler } from './statementCompiler';
+import { declareValue, execOf, StatementCompiler } from './statementCompiler';
 import {
   BASIC,
   describeType,
@@ -45,6 +56,10 @@ export interface CompiledProgram {
   initializer: FunctionInfo;
   globals: { name: string; type: Type; slot: number }[];
   globalZeros: (() => Value)[];
+  /** The init functions in the order declared, which run before main. */
+  inits: FunctionInfo[];
+  /** Whether the program uses goroutines, channels, locks, or sleeps, which the scheduler runs. */
+  concurrent: boolean;
 }
 
 interface FunctionDeclarationState {
@@ -56,18 +71,20 @@ interface FunctionDeclarationState {
 export class ProgramCompiler extends StatementCompiler {
   private readonly globals: VarEntity[] = [];
   private readonly globalZeros: (() => Value)[] = [];
-  private readonly initContext = this.newFunctionContext('init', undefined, () => {});
+  private readonly initContext = this.newFunctionContext('init', undefined, function* () {
+    return;
+  });
   private readonly initializers: {
     spec: VarSpec;
     variables: VarEntity[];
-    run: (frame: never) => void;
+    run: Exec;
     references: Set<unknown>;
     done: boolean;
   }[] = [];
   /** Code that must compile once every declaration is known: function bodies and instances of generic code. */
   private readonly pendingBodies: (() => void)[] = [];
   private readonly pendingGenericChecks: (() => void)[] = [];
-  private readonly typeStates = new Map<TypeEntity, { spec: TypeSpec; resolved: boolean }>();
+  private readonly typeStates = new Map<TypeEntity, { spec: TypeSpec; resolved: boolean; scope: Scope }>();
   private readonly namedRhs = new Map<NamedType, Type>();
   private readonly newlyResolvedTypes: TypeEntity[] = [];
   private useTypeDepth = 0;
@@ -91,6 +108,7 @@ export class ProgramCompiler extends StatementCompiler {
         `package ${file.packageName} ではなく package main にしてください（実行できるのは main パッケージだけです）。`
       );
     }
+    this.concurrent = usesConcurrency(file);
     this.declareImports();
     this.collectDeclarations();
     for (const [entity] of this.typeStates) this.useType(entity);
@@ -112,6 +130,8 @@ export class ProgramCompiler extends StatementCompiler {
         .filter((variable) => variable.name !== '_')
         .map(({ name, type, slot }) => ({ name, type, slot })),
       globalZeros: this.globalZeros,
+      inits: this.inits.map((init) => init.info as FunctionInfo),
+      concurrent: this.concurrent,
     };
   }
 
@@ -139,17 +159,39 @@ export class ProgramCompiler extends StatementCompiler {
 
   // Imports -------------------------------------------------------------------------------------------------------
 
+  // code-gauge-allow functionCognitiveComplexity 27 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionNcss 33 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private declareImports(): void {
     for (const spec of this.file.imports) {
       const pkg = lookupPackage(spec.path);
       if (!pkg) {
-        if (STANDARD_PACKAGES.has(spec.path)) this.unsupported(spec, `パッケージ ${spec.path}`);
-        else if (/^[^/]*\./.test(spec.path)) this.unsupported(spec, `標準ライブラリ以外のパッケージ（${spec.path}）`);
+        if (spec.path === 'C' || STANDARD_PACKAGES.has(spec.path)) {
+          this.unsupported(spec, `パッケージ ${spec.path}`);
+          // Its uses then report nothing more, as the import already says why the program cannot run.
+          const name = spec.alias ?? spec.path.split('/').at(-1) ?? spec.path;
+          const unavailable = { path: spec.path, name, members: new Map(), unavailable: true };
+          if (name !== '_' && !this.fileScope.entities.has(name))
+            this.fileScope.entities.set(name, { kind: 'package', name, package: unavailable, span: spec, used: true });
+        } else if (/^[^/]*\./.test(spec.path)) this.unsupported(spec, `標準ライブラリ以外のパッケージ（${spec.path}）`);
         else this.error(spec, `パッケージ ${spec.path} は標準ライブラリにありません。`);
         continue;
       }
       const name = spec.alias ?? pkg.name;
       if (name === '_') continue;
+      if (name === '.') {
+        // `import . "fmt"` puts the package's members in the file's scope, as if declared there.
+        const entity: PackageEntity = { kind: 'package', name: pkg.name, package: pkg, span: spec, used: false };
+        this.dotImports.push(entity);
+        for (const [member, memberEntity] of pkg.members) {
+          if (this.fileScope.entities.has(member)) {
+            this.error(spec, `${member} はこのファイルですでに宣言されています。`);
+            continue;
+          }
+          this.fileScope.entities.set(member, memberEntity);
+          this.dotMembers.set(memberEntity, entity);
+        }
+        continue;
+      }
       if (this.fileScope.entities.has(name)) {
         this.error(spec, `パッケージの名前 ${name} が2回 import されています。`);
         continue;
@@ -159,6 +201,10 @@ export class ProgramCompiler extends StatementCompiler {
   }
 
   private checkImportsUsed(): void {
+    for (const entity of this.dotImports) {
+      if (!entity.used)
+        this.error(entity.span, `パッケージ "${entity.package.path}" を import していますが、使っていません。`);
+    }
     for (const entity of this.fileScope.entities.values()) {
       if (entity.kind === 'package' && !entity.used) {
         this.error(entity.span, `パッケージ "${entity.package.path}" を import していますが、使っていません。`);
@@ -181,7 +227,6 @@ export class ProgramCompiler extends StatementCompiler {
     this.packageScope.entities.set(name, entity);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of top-level declaration.
   private collectDeclarations(): void {
     for (const declaration of this.file.declarations) {
       switch (declaration.kind) {
@@ -222,7 +267,8 @@ export class ProgramCompiler extends StatementCompiler {
       span: spec,
     };
     const entity: TypeEntity = { kind: 'type', name: spec.name, type: shell, span: spec };
-    if (spec.typeParameters.length > 0) {
+    if (spec.alias && spec.typeParameters.length > 0) this.unsupported(spec, '型引数を持つ型の別名');
+    if (spec.typeParameters.length > 0 && !spec.alias) {
       const cache = new Map<string, NamedType>();
       this.instances.set(entity, cache);
       entity.generic = {
@@ -232,14 +278,32 @@ export class ProgramCompiler extends StatementCompiler {
     }
     if (scope === this.packageScope) this.declarePackageName(spec.name, entity, spec);
     else this.declare(spec.name, entity, spec);
-    this.typeStates.set(entity, { spec, resolved: false });
+    this.typeStates.set(entity, { spec, resolved: false, scope });
     return entity;
   }
 
+  private bindingAliases = false;
+  private readonly unboundAliases = new Set<TypeEntity>();
+  private readonly aliasCycles = new Set<TypeEntity>();
+  private readonly invalidAliases = new Set<TypeEntity>();
+  private readonly pendingAliases: { entity: TypeEntity; state: { spec: TypeSpec; scope: Scope } }[] = [];
+
+  // code-gauge-allow functionNcss 40 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   protected useType(entity: TypeEntity): void {
     const state = this.typeStates.get(entity);
-    if (!state || state.resolved) return;
+    if (!state) return;
+    if (this.unboundAliases.has(entity)) {
+      this.aliasCycles.add(entity);
+      for (const dependent of this.unboundAliases) this.invalidAliases.add(dependent);
+      return;
+    }
+    if (state.resolved) return;
+    if (this.bindingAliases && !state.spec.alias) return;
     state.resolved = true;
+    if (state.spec.alias) {
+      this.resolveAlias(entity, state);
+      return;
+    }
     const shell = entity.type as NamedType;
     const outerScope = this.scope;
     const outerFn = this.fn;
@@ -266,6 +330,46 @@ export class ProgramCompiler extends StatementCompiler {
     }
   }
 
+  // code-gauge-allow functionNcss 35 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  private resolveAlias(entity: TypeEntity, state: { spec: TypeSpec; scope: Scope }): void {
+    const outerBinding = this.bindingAliases;
+    const outerReporting = this.reporting;
+    const outerFn = this.fn;
+    this.bindingAliases = true;
+    this.reporting = false;
+    this.unboundAliases.add(entity);
+    entity.type = BASIC.invalid;
+    try {
+      entity.type = this.withScopeOf(this.scopeOfType(entity), () => this.resolveType(state.spec.type, false, true));
+      this.pendingAliases.push({ entity, state });
+    } finally {
+      this.unboundAliases.delete(entity);
+      this.bindingAliases = outerBinding;
+      this.reporting = outerReporting;
+      this.fn = outerFn;
+    }
+    if (outerBinding) return;
+    for (const cyclic of this.aliasCycles)
+      this.error(cyclic.span as Span, `型の別名 ${cyclic.name} が循環しています。`);
+    this.aliasCycles.clear();
+    const invalid = new Set(this.invalidAliases);
+    this.invalidAliases.clear();
+    for (const entity of invalid) entity.type = BASIC.invalid;
+    for (const pending of this.pendingAliases.splice(0)) {
+      if (invalid.has(pending.entity)) continue;
+      const initial = pending.entity.type;
+      const resolved = this.withScopeOf(this.scopeOfType(pending.entity), () =>
+        this.resolveType(pending.state.spec.type, false, true)
+      );
+      if (initial !== resolved && initial.kind !== 'named' && initial.kind !== 'basic') {
+        for (const key of Object.keys(initial)) Reflect.deleteProperty(initial, key);
+        Object.assign(initial, resolved);
+      } else pending.entity.type = resolved;
+    }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionNcss 33 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private finishResolvedTypes(): void {
     const batch = this.newlyResolvedTypes.splice(0);
     const cyclic = new Set<TypeEntity>();
@@ -305,6 +409,7 @@ export class ProgramCompiler extends StatementCompiler {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private reachesDirectly(start: NamedType): boolean {
     const seen = new Set<Type>();
     const stack: Type[] = [];
@@ -344,10 +449,11 @@ export class ProgramCompiler extends StatementCompiler {
     }
   }
 
+  /** The scope a type's declaration resolves in: the file's for a package-level type, its block's for a local one. */
   private scopeOfType(entity: TypeEntity): Scope {
-    return this.typeStates.has(entity) && this.packageScope.entities.get(entity.name) === entity
-      ? this.fileScope
-      : this.scope;
+    const state = this.typeStates.get(entity);
+    if (!state) return this.scope;
+    return this.packageScope.entities.get(entity.name) === entity ? this.fileScope : state.scope;
   }
 
   /** Instantiates a generic type with type arguments, once per distinct list of arguments. */
@@ -407,8 +513,14 @@ export class ProgramCompiler extends StatementCompiler {
         type,
         code: { summary: newCalleeSummary() },
         span: method.span,
+        typeParams: method.typeParams,
       };
       instance.methods.push(instanceMethod);
+      const genericDeclaration = this.genericMethodDeclarations.get(method);
+      if (method.typeParams && genericDeclaration && !args.some((arg) => containsTypeParams(arg))) {
+        instanceMethod.instantiate = this.methodInstances(genericDeclaration, instance, instanceMethod, args);
+        continue;
+      }
       const declaration = this.genericMethodDeclarations.get(method);
       if (declaration?.body && !this.hasGenericCycle && !args.some((arg) => containsTypeParam(arg))) {
         this.pendingBodies.push(() => {
@@ -427,6 +539,7 @@ export class ProgramCompiler extends StatementCompiler {
   private readonly instances = new Map<TypeEntity, Map<string, NamedType>>();
 
   protected instantiateNamed(named: NamedType, args: Type[]): NamedType {
+    if (named.instantiateLibrary) return named.instantiateLibrary(args);
     const entity = [...this.typeStates.keys()].find((candidate) => candidate.type === named);
     if (!entity?.generic || this.hasGenericCycle) return named;
     const span = named.span ?? { row: 0, column: 0 };
@@ -436,7 +549,7 @@ export class ProgramCompiler extends StatementCompiler {
 
   private readonly genericMethodDeclarations = new Map<Method, FunctionDeclaration>();
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Methods of named types, generic or not, with Go's checks.
+  // code-gauge-allow functionNcss 50 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private attachMethods(): void {
     for (const [typeName, declarations] of this.methodSpecs) {
       const entity = this.packageScope.entities.get(typeName);
@@ -448,7 +561,18 @@ export class ProgramCompiler extends StatementCompiler {
         for (const declaration of declarations) this.error(declaration.receiver as Span, message);
         continue;
       }
-      const shell = entity.type as NamedType;
+      const shell = entity.type;
+      if (
+        shell.kind !== 'named' ||
+        ![...this.typeStates].some(([candidate, state]) => candidate.type === shell && !state.spec.alias)
+      ) {
+        for (const declaration of declarations)
+          this.error(
+            declaration.receiver as Span,
+            `${typeName} はこのパッケージで宣言した型ではないので、メソッドを付けられません。`
+          );
+        continue;
+      }
       if (underlying(shell).kind === 'pointer' || underlying(shell).kind === 'interface') {
         for (const declaration of declarations) {
           this.error(
@@ -484,19 +608,22 @@ export class ProgramCompiler extends StatementCompiler {
           );
           continue;
         }
-        const type = this.withTypeArguments(
-          generic?.typeParams ?? [],
-          receiver.typeArguments,
-          undefined,
-          () => this.resolveSignature(declaration.signature).type
-        );
+        let methodTypeParams: TypeParamType[] | undefined;
+        const type = this.withTypeArguments(generic?.typeParams ?? [], receiver.typeArguments, undefined, () => {
+          if (declaration.typeParameters.length > 0)
+            methodTypeParams = this.declareTypeParameters(declaration.typeParameters);
+          return this.resolveSignature(declaration.signature).type;
+        });
         const method: Method = {
           name: declaration.name,
           pointerReceiver: receiver.pointer,
           type,
           code: { summary: newCalleeSummary() },
           span: declaration,
+          typeParams: methodTypeParams,
         };
+        if (methodTypeParams && !generic)
+          method.instantiate = this.methodInstances(declaration, shell, method, undefined);
         shell.methods.push(method);
         if (!declaration.body) {
           this.error(declaration, `メソッド ${declaration.name} に本体がありません。`);
@@ -546,14 +673,40 @@ export class ProgramCompiler extends StatementCompiler {
     }
   }
 
+  /**
+   * The code of a method with its own type parameters for each list of its type arguments, compiled once per list as a
+   * generic function's instances are.
+   */
+  private methodInstances(
+    declaration: FunctionDeclaration,
+    owner: NamedType,
+    method: Method,
+    receiverArgs: Type[] | undefined
+  ): (args: Type[]) => NonNullable<Method['code']> {
+    const cache = new Map<string, NonNullable<Method['code']>>();
+    return (args) => {
+      const key = args.map((arg) => typeIdentityKey(arg)).join(',');
+      const cached = cache.get(key);
+      if (cached) return cached;
+      const code: NonNullable<Method['code']> = {};
+      cache.set(key, code);
+      this.pendingBodies.push(() => this.compileMethod(declaration, owner, method, receiverArgs, { args, code }));
+      return code;
+    };
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionNcss 33 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private compileMethod(
     declaration: FunctionDeclaration,
     owner: NamedType,
     method: Method,
-    args: Type[] | undefined
+    args: Type[] | undefined,
+    /** The type arguments of a method with its own type parameters, and the code to fill for them. */
+    methodInstance?: { args: Type[]; code: NonNullable<Method['code']> }
   ): void {
     const receiver = declaration.receiver as NonNullable<FunctionDeclaration['receiver']>;
-    const isInstance = args !== undefined;
+    const isInstance = args !== undefined || methodInstance !== undefined;
     const origin = owner.origin ?? owner;
     const params = origin.typeParams ?? [];
     const outerReporting = this.reporting;
@@ -561,6 +714,11 @@ export class ProgramCompiler extends StatementCompiler {
     if (isInstance) this.reporting = false;
     try {
       this.withTypeArguments(params, receiver.typeArguments, args, () => {
+        const methodParams = method.typeParams ?? [];
+        for (const [index, param] of declaration.typeParameters.entries()) {
+          const type = methodInstance ? methodInstance.args[index] : methodParams[index];
+          if (type) this.scope.entities.set(param.name, { kind: 'type', name: param.name, type });
+        }
         const receiverBase: Type = params.length > 0 ? this.instantiateNamed(origin, args ?? params) : owner;
         const receiverType: Type = receiver.pointer ? { kind: 'pointer', element: receiverBase } : receiverBase;
         const type = this.resolveSignature(declaration.signature).type;
@@ -574,26 +732,31 @@ export class ProgramCompiler extends StatementCompiler {
           this.isAtomic(declaration)
         );
         this.functionReferences.set(method, fn.references);
-        if (params.length > 0 && !isInstance) return;
+        if ((params.length > 0 && args === undefined) || (methodParams.length > 0 && !methodInstance)) return;
         const { info } = fn;
-        const summary = method.code?.summary;
-        if (summary) this.completeSummary(summary, method, fn);
-        (method.code as { call?: unknown }).call = (
-          receiverValue: Value,
-          argValues: Value[],
-          callRow?: number,
-          deferredFor?: unknown,
-          stackBuffers?: StackBuffers
-        ) =>
+        const code = methodInstance?.code ?? (method.code as NonNullable<typeof method.code>);
+        code.call = (receiverValue, argValues, callRow, deferredFor, stackBuffers) =>
           currentRuntime().call(
             info,
             [],
-            [receiverValue, ...argValues],
+            [receiverValue, ...argValues] as Value[],
             callRow,
             deferredFor as never,
             undefined,
             stackBuffers
           );
+        code.resume = (receiverValue, argValues, callRow, deferredFor, stackBuffers) =>
+          currentRuntime().resume(
+            info,
+            [],
+            [receiverValue, ...argValues] as Value[],
+            callRow,
+            deferredFor as never,
+            undefined,
+            stackBuffers
+          );
+        const summary = code.summary;
+        if (summary) this.completeSummary(summary, method, fn);
       });
     } finally {
       this.reporting = outerReporting;
@@ -601,11 +764,10 @@ export class ProgramCompiler extends StatementCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Functions, generic or not, and the checks of main and init.
   private declareFunction(declaration: FunctionDeclaration): void {
     const { name } = declaration;
     if (name === 'init') {
-      this.unsupported(declaration, 'init 関数');
+      this.declareInit(declaration);
       return;
     }
     if (!declaration.body) {
@@ -634,6 +796,21 @@ export class ProgramCompiler extends StatementCompiler {
         undefined,
         stackBuffers
       );
+    const resume = (
+      args: Value[],
+      callRow?: number,
+      deferredFor?: unknown,
+      stackBuffers?: StackBuffers
+    ): Suspending<Value | Value[]> =>
+      currentRuntime().resume(
+        state.info as FunctionInfo,
+        [],
+        args,
+        callRow,
+        deferredFor as never,
+        undefined,
+        stackBuffers
+      );
     const entity = {
       kind: 'func' as const,
       name,
@@ -641,9 +818,11 @@ export class ProgramCompiler extends StatementCompiler {
       span: declaration,
       declaration,
       summary: newCalleeSummary(),
-      value: () => (value ??= new GoFunc(call)),
+      value: () => (value ??= new GoFunc(call, [], resume)),
       direct: (args: Value[], callRow: number | undefined, stackBuffers?: StackBuffers) =>
         call(args, callRow, undefined, stackBuffers),
+      directResume: (args: Value[], callRow: number | undefined, stackBuffers?: StackBuffers) =>
+        resume(args, callRow, undefined, stackBuffers),
     };
     this.declarePackageName(name, entity, declaration.nameSpan);
     this.pendingSignatures.push(() => {
@@ -669,6 +848,38 @@ export class ProgramCompiler extends StatementCompiler {
     if (name === 'main') this.mainEntity = { entity, state, declaration };
   }
 
+  /** The init functions, which run in the order declared after the package-level variables are initialized. */
+  private readonly inits: { info?: FunctionInfo }[] = [];
+
+  private declareInit(declaration: FunctionDeclaration): void {
+    const { signature } = declaration;
+    if (declaration.typeParameters.length > 0) this.error(declaration, 'init 関数は型引数を持てません。');
+    if (signature.parameters.length > 0 || signature.results.length > 0) {
+      this.error(declaration, 'init 関数は引数も結果も持てません。');
+      return;
+    }
+    if (!declaration.body) {
+      this.error(declaration, '関数 init に本体がありません。');
+      return;
+    }
+    const state: { info?: FunctionInfo } = {};
+    this.inits.push(state);
+    this.pendingBodies.push(() => {
+      this.fn = undefined;
+      const fn = this.withScopeOf(this.fileScope, () =>
+        this.functionBody(
+          'init',
+          signature,
+          funcType([], []),
+          declaration.body as NonNullable<FunctionDeclaration['body']>,
+          undefined,
+          this.isAtomic(declaration)
+        )
+      );
+      state.info = fn.info;
+    });
+  }
+
   private readonly pendingSignatures: (() => void)[] = [];
   private mainEntity:
     | { entity: { type: FuncType }; state: { info?: FunctionInfo }; declaration: FunctionDeclaration }
@@ -684,6 +895,7 @@ export class ProgramCompiler extends StatementCompiler {
     }
   }
 
+  // code-gauge-allow functionNcss 40 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private declareGenericFunction(declaration: FunctionDeclaration): void {
     const { name } = declaration;
     const cache = new Map<string, GoFunc>();
@@ -697,8 +909,12 @@ export class ProgramCompiler extends StatementCompiler {
         if (this.hasGenericCycle) return new GoFunc(() => {});
         this.countGenericInstance(declaration);
         const state: { info?: FunctionInfo } = {};
-        const instance = new GoFunc((argValues, callRow, deferredFor) =>
-          currentRuntime().call(state.info as FunctionInfo, [], argValues, callRow, deferredFor as never)
+        const instance = new GoFunc(
+          (argValues, callRow, deferredFor) =>
+            currentRuntime().call(state.info as FunctionInfo, [], argValues, callRow, deferredFor as never),
+          [],
+          (argValues, callRow, deferredFor) =>
+            currentRuntime().resume(state.info as FunctionInfo, [], argValues, callRow, deferredFor as never)
         );
         cache.set(key, instance);
         this.pendingBodies.push(() => {
@@ -837,6 +1053,8 @@ export class ProgramCompiler extends StatementCompiler {
     for (const variable of variables) variable.pending = resolve;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 25 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionNcss 56 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private compileGlobal(spec: VarSpec, variables: VarEntity[]): void {
     const outerScope = this.scope;
     const outerFn = this.fn;
@@ -863,12 +1081,15 @@ export class ProgramCompiler extends StatementCompiler {
       const compiled = units.map((unit) => {
         const unitTypes: Type[] = [];
         const unitOperands: Operand[] = [];
-        const { result: values, run: ordered } = this.hoistingCalls(() =>
-          this.rightSide(spec, unit.values, unit.variables.length, () => declaredType, unitTypes, unitOperands)
+        const { value: orderedUnit, hoists } = this.part(() =>
+          this.hoistingCalls(() =>
+            this.rightSide(spec, unit.values, unit.variables.length, () => declaredType, unitTypes, unitOperands)
+          )
         );
+        const { result: values, run: ordered } = orderedUnit;
         types.push(...unitTypes);
         operands.push(...unitOperands);
-        return { values, ordered, variables: unit.variables };
+        return { values, ordered, hoists, variables: unit.variables };
       });
       for (const [index, variable] of variables.entries()) {
         if (!declaredType) variable.type = types[index] ?? BASIC.invalid;
@@ -881,22 +1102,29 @@ export class ProgramCompiler extends StatementCompiler {
         operands.length === spec.values.length && operands.every((operand) => operand.mode === 'constant');
       const row = this.trace && !isConstant ? spec.row : undefined;
       const createsObjects = spec.values.every((value) => this.createsObject(value));
-      const run = (frame: Frame): void => {
-        const evaluate = (): void => {
-          for (const unit of compiled) {
-            unit.ordered(frame, () => {
-              const evaluated = evaluateAll(frame, unit.values as Eval[]);
-              for (const [index, variable] of unit.variables.entries()) {
-                const cell = frame.runtime.globals[variable.slot];
-                cell.v = writeInPlace(cell.v, evaluated[index]);
-              }
-            });
-          }
-        };
-        if (row === undefined) evaluate();
-        else frame.runtime.steps.runStatement(row, createsObjects, evaluate);
+      const actions = compiled.map((unit) =>
+        execOf(
+          {
+            run: (frame) => {
+              unit.ordered(frame, () => {
+                const evaluated = evaluateAll(frame, unit.values as Eval[]);
+                for (const [index, variable] of unit.variables.entries()) {
+                  const cell = frame.runtime.globals[variable.slot];
+                  cell.v = writeInPlace(cell.v, evaluated[index]);
+                }
+              });
+            },
+            onlyCalls: createsObjects,
+          },
+          unit.hoists
+        )
+      );
+      const run: Exec = function* (frame) {
+        const mark = frame.runtime.steps.statementMark();
+        for (const action of actions) yield* action(frame);
+        if (row !== undefined) frame.runtime.steps.completeStatement(row, createsObjects, mark);
       };
-      this.initializers.push({ spec, variables, run: run as never, references, done: false });
+      this.initializers.push({ spec, variables, run, references, done: false });
     } finally {
       this.scope = outerScope;
       this.fn = outerFn;
@@ -908,8 +1136,8 @@ export class ProgramCompiler extends StatementCompiler {
   private initializerFunction(): FunctionInfo {
     const order = this.initializationOrder();
     const info = this.initContext.info;
-    info.body = (frame) => {
-      for (const initializer of order) initializer.run(frame as never);
+    info.body = function* (frame) {
+      for (const initializer of order) yield* initializer.run(frame);
       return;
     };
     return info;
@@ -1015,6 +1243,20 @@ export class ProgramCompiler extends StatementCompiler {
 
   /** Computes the values of a constant spec, checking them against its type. */
   private constantSpec(spec: ConstDeclaration['specs'][number], entities: ConstEntity[]): void {
+    const outerIota = this.iota;
+    const outerSpan = this.diagnosticSpan;
+    this.diagnosticSpan = spec.omitted ? spec : undefined;
+    this.iota = spec.iota;
+    try {
+      this.constantValues(spec, entities);
+    } finally {
+      this.iota = outerIota;
+      this.diagnosticSpan = outerSpan;
+    }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  private constantValues(spec: ConstDeclaration['specs'][number], entities: ConstEntity[]): void {
     if (spec.values.length !== spec.names.length) {
       this.error(spec, spec.values.length < spec.names.length ? '定数の値が足りません。' : '定数の値が多すぎます。');
       for (const value of spec.values) this.expression(value);
@@ -1053,10 +1295,6 @@ export class ProgramCompiler extends StatementCompiler {
 
   protected localTypeDeclaration(declaration: TypeDeclaration): void {
     for (const spec of declaration.specs) {
-      if (spec.typeParameters.length > 0) {
-        this.unsupported(spec, '関数の中で宣言する、型引数を持つ型');
-        continue;
-      }
       const entity = this.declareTypeSpec(spec, this.scope);
       this.useType(entity);
     }
@@ -1080,6 +1318,44 @@ export class ProgramCompiler extends StatementCompiler {
 export function compileProgram(file: File, trace?: TraceSettings): CompiledProgram {
   const compiler = new ProgramCompiler(file, trace);
   return compiler.compile();
+}
+
+function containsTypeParams(type: Type): boolean {
+  if (type.kind === 'typeParam') return true;
+  if (type.kind === 'named') return (type.typeArgs ?? []).some(containsTypeParams);
+  if (type.kind === 'pointer' || type.kind === 'slice' || type.kind === 'array' || type.kind === 'chan')
+    return containsTypeParams(type.element);
+  if (type.kind === 'map') return containsTypeParams(type.key) || containsTypeParams(type.value);
+  return false;
+}
+
+/**
+ * Packages whose functions block, which only programs run by the scheduler can call; iter's Pull suspends the
+ * iterator it runs, which needs the statements that can wait too.
+ */
+const BLOCKING_PACKAGES = new Set(['sync', 'time', 'iter', 'runtime']);
+
+/**
+ * Whether a program uses goroutines, channels, or packages that block, which compiles its statements so that they can
+ * wait; other programs run their calls directly.
+ */
+// code-gauge-allow functionCognitiveComplexity 18 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+function usesConcurrency(file: File): boolean {
+  if (file.imports.some((spec) => BLOCKING_PACKAGES.has(spec.path))) return true;
+  const pending: unknown[] = [file.declarations];
+  while (pending.length > 0) {
+    const item = pending.pop();
+    if (typeof item !== 'object' || item === null) continue;
+    if (Array.isArray(item)) {
+      pending.push(...(item as unknown[]));
+      continue;
+    }
+    const node = item as { kind?: unknown; operator?: unknown };
+    if (node.kind === 'go' || node.kind === 'select' || node.kind === 'send' || node.kind === 'chan') return true;
+    if (node.kind === 'unary' && node.operator === '<-') return true;
+    for (const value of Object.values(node)) if (typeof value === 'object') pending.push(value);
+  }
+  return false;
 }
 
 export { declareValue };

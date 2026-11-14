@@ -174,6 +174,39 @@ func main() {
   ]);
 });
 
+test('goroutines record their steps in the order the scheduler runs them', () => {
+  const program = `package main
+
+import "sync"
+
+func main() {
+\tvar wg sync.WaitGroup
+\ttotal := 0
+\tfor i := 1; i <= 2; i++ {
+\t\twg.Add(1)
+\t\tgo func(n int) {
+\t\t\tdefer wg.Done()
+\t\t\ttotal += n
+\t\t}(i)
+\t}
+\twg.Wait()
+\tch := make(chan int, 1)
+\tch <- total
+\tv := <-ch
+\t_ = v
+}
+`;
+  const trace = traceProgram('go', program, program);
+  expect(trace.uncaughtException).toBeUndefined();
+  const steps = trace.traceItems.map((item) => [item.line, JSON.stringify(item.vars)]);
+  // The goroutines run in the order they started once main waits, each until it ends.
+  expect(steps.filter(([line]) => line === 12)).toEqual([
+    [12, '{"n":1,"total":1}'],
+    [12, '{"n":2,"total":3}'],
+  ]);
+  expect(steps.at(-1)).toEqual([19, '{"total":3,"v":3}']);
+});
+
 test('a turtle captured by an evaluated callee stays reachable while call arguments run', () => {
   const program = `package main
 
@@ -244,4 +277,45 @@ func main() {
 }`;
   const { finalVars } = traceProgram('go', program, program);
   expect(finalVars.x).toBe(9_007_199_254_740_993n);
+});
+
+test('Pull keeps suspended iterator frames reachable between calls', () => {
+  const program = `package main
+import "iter"
+func sequence(yield func(int) bool) {
+  turtle := NewTurtle()
+  yield(1)
+  turtle.Forward()
+}
+func main() {
+  next, stop := iter.Pull(sequence)
+  next()
+  marker := 1
+  _ = marker
+  next()
+  stop()
+}`;
+  const trace = traceProgram('go', program, program);
+  expect(trace.uncaughtException).toBeUndefined();
+  expect(trace.traceItems.filter(({ vars }) => vars.marker === 1).map(({ turtles }) => turtles.length)).toContain(1);
+  expect(trace.traceItems.some(({ turtles }) => turtles.some(({ x, y }) => x === 0 && y === 1))).toBe(true);
+});
+
+test('lazy string predicates keep their captured turtles reachable', () => {
+  const program = `package main
+import ("iter"; "strings")
+func words() iter.Seq[string] {
+  turtle := NewTurtle()
+  return strings.FieldsFuncSeq("a b", func(r rune) bool { turtle.Forward(); return r == ' ' })
+}
+func main() {
+  sequence := words()
+  marker := 1
+  _ = marker
+  for range sequence {}
+}`;
+  const trace = traceProgram('go', program, program);
+  expect(trace.uncaughtException).toBeUndefined();
+  expect(trace.traceItems.filter(({ vars }) => vars.marker === 1).map(({ turtles }) => turtles.length)).toContain(1);
+  expect(trace.traceItems.some(({ turtles }) => turtles.some(({ x, y }) => x === 0 && y === 3))).toBe(true);
 });

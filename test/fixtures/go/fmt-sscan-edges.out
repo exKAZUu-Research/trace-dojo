@@ -1,0 +1,23 @@
+2 <nil>
+123 45
+2 <nil>
+97 98
+1 <nil>
+1 EOF
+1 input does not match format
+2 <nil>
+350 x
+3 <nil>
+31 -3 17
+1 <nil>
+36.6
+1 <nil>
+50
+1 <nil>
+1 expected integer
+2 expected newline
+2 <nil>
+7 8
+1 newline in format does not match input
+0 syntax error scanning boolean
+0 type not a pointer: int

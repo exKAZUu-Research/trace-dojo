@@ -4,6 +4,7 @@ import type { Operand, StaticValue, Storage } from './operand';
 import type { FunctionInfo, LocalInfo, StackBuffers } from './runtime';
 import type { SliceTracking } from './slicePass';
 import type { SsaValues } from './ssaValues';
+import type { StatementFlow } from './statementFlow';
 import type { FuncType, NamedType, Type, TypeParamType } from './types';
 import type { GoFunc, Value } from './values';
 
@@ -103,6 +104,12 @@ export interface FuncEntity {
   summary?: CalleeSummary;
   /** What Go's compiler sees of the result of a library function it inlines, such as cmplx.Conj's negated part. */
   inlinedResult?: Pick<Operand, 'partNegations'>;
+  /** Calls the function directly as `direct` does, yielding when its goroutine blocks; absent when it never blocks. */
+  directResume?: (
+    args: Value[],
+    callRow: number | undefined,
+    stackBuffers?: StackBuffers
+  ) => Generator<{ reason: string }, Value | Value[], unknown>;
   generic?: GenericFunc;
   declaration?: FunctionDeclaration;
 }
@@ -130,6 +137,8 @@ export interface GoPackage {
   members: Map<string, Entity>;
   /** Members this environment does not provide, which are rejected rather than reported as undefined. */
   unsupported?: ReadonlySet<string>;
+  /** A package this environment does not provide, whose uses report nothing more than its import did. */
+  unavailable?: boolean;
 }
 
 /** The compile-time state of one function body. */
@@ -167,9 +176,28 @@ export interface FunctionContext {
   /** Whether each float64 addition of two products adds them, which decides how Go's compiler orders operands. */
   sumsOfProducts: (() => boolean)[];
   ssa: SsaValues;
+  flow?: StatementFlow;
   loopDepth: number;
   breakDepth: number;
   recordsSteps: boolean;
+  /** The labels of the function and the statements that refer to them, which the checks at its end use. */
+  labels?: LabelState;
+}
+
+/** What the labels of a function need while it compiles: where each is, and the jumps to them. */
+export interface LabelState {
+  declared: Map<string, { span: { row: number; column: number }; used: boolean; path: number[]; index: number }>;
+  gotos: { label: string; span: { row: number; column: number }; path: number[]; positions: number[] }[];
+  /** The statements that `break` and `continue` with a label may refer to, innermost last. */
+  enclosing: { label?: string; kind: 'for' | 'switch' | 'select' }[];
+  /** The statement lists being compiled, outermost first, with the position in each. */
+  path: number[];
+  positions: number[];
+  /** The positions of the declarations of each statement list, which a goto must not jump over. */
+  declarations: Map<number, number[]>;
+  nextList: number;
+  /** The label of the statement about to compile, which a loop, switch, or select takes. */
+  pending?: string;
 }
 
 /** A multiplication as Go's common subexpression elimination sees it: products of the same factors are one value. */

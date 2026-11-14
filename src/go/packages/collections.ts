@@ -1,3 +1,5 @@
+// code-gauge-allow-file fileNcss 604 -- Groups the related generic collection adapters and their shared type constructors.
+// code-gauge-allow-file duplicateLines 26 -- Each map iterator adapter has a distinct yield signature but the same generic registration protocol.
 import { LIMITS } from '../../interpreter/limits';
 import type { Entity } from '../entities';
 import { equalityOf, mapKeyOf } from '../equality';
@@ -6,13 +8,16 @@ import {
   currentRuntime,
   definePackage,
   fn,
+  genericBlockingFunction,
   genericFunction,
   namedType,
+  nativeFunc,
   nativeFunction,
   typeEntity,
   typeParam,
 } from '../native';
-import { boundsPanic, runtimeErrorPanic } from '../runtimeErrors';
+import { runToEnd, type Suspending } from '../runtime';
+import { boundsPanic, plainPanic, runtimeErrorPanic } from '../runtimeErrors';
 import { appendValues, grownCapacity } from '../sliceOps';
 import {
   ANY,
@@ -29,9 +34,10 @@ import {
   type TypeParamType,
   underlying,
 } from '../types';
-import { Cell, copyValue, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
+import { Cell, copyValue, type GoFunc, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
+import { iteratorOf, seq2Of, seqOf } from './iter';
 import { zeroValue } from './reflection';
-import { pdqsort, type SortData, stableSort } from './sorting';
+import { pdqsort, resumeSort, type SortData, stableSort } from './sorting';
 import {
   BOOL,
   callFunction,
@@ -39,6 +45,7 @@ import {
   FLOAT64,
   INT,
   receiverStruct,
+  resumeFunction,
   sliceValues,
   spendFor,
   STRING,
@@ -100,22 +107,33 @@ function swapSliceElements(slice: Slice, i: number, j: number): void {
   slice.set(j, left);
 }
 
-/** Sorts a slice's elements in place, as the slices and sort packages do. */
 function sortSlice(slice: Value, isLess: (a: Value, b: Value) => boolean, stable = false): undefined {
-  if (!(slice instanceof Slice)) return undefined;
-  const { length } = slice;
+  runToEnd(resumeSortSlice(slice, isLess, stable));
+  return undefined;
+}
+
+function* resumeSortSlice(
+  slice: Value,
+  isLess: (a: Value, b: Value) => boolean | Suspending<boolean>,
+  stable: boolean
+): Suspending<void> {
+  if (!(slice instanceof Slice)) return;
   const runtime = currentRuntime();
   let comparisons = 0;
-  const data: SortData = {
+  const data: SortData<boolean | Suspending<boolean>> = {
     less: (i, j) => {
       if (++comparisons % 16 === 0) runtime.spend();
       return isLess(slice.get(i), slice.get(j));
     },
     swap: (i, j) => swapSliceElements(slice, i, j),
   };
-  if (stable) stableSort(data, length);
-  else pdqsort(data, length);
-  return undefined;
+  yield* resumeSort(data, slice.length, stable);
+}
+
+function resumableLess(fnValue: Value): (a: Value, b: Value) => Suspending<boolean> {
+  return function* (a, b) {
+    return Number((yield* resumeFunction(fnValue, [a, b])) as bigint) < 0;
+  };
 }
 
 function cmpResult(fnValue: Value): (a: Value, b: Value) => number {
@@ -386,6 +404,38 @@ function cloneSlice(value: Value, element: Type): Value {
   return appendValues(new Slice([], 0, 0, 0), values, element, zero, (count) => allocateElements(count, element));
 }
 
+const SEQ = (element: Type): Type => seqOf(element);
+
+/** Collects the values an iterator yields, by calling it with a yield function that accepts every value. */
+function* collect(seq: Value): Suspending<Value[]> {
+  const values: Value[] = [];
+  return yield* currentRuntime().resumeWithRoots(
+    [seq, values],
+    (function* () {
+      yield* resumeFunction(seq, [
+        nativeFunc(
+          ([value]) => {
+            values.push(copyValue(value));
+            return true;
+          },
+          [values]
+        ),
+      ]);
+      return values;
+    })()
+  );
+}
+
+function* sortCollected(
+  seq: Value,
+  isLess: (a: Value, b: Value) => boolean | Suspending<boolean>,
+  stable = false
+): Suspending<Value> {
+  const slice = newSlice(yield* collect(seq));
+  yield* currentRuntime().resumeWithRoots([slice], resumeSortSlice(slice, isLess, stable));
+  return slice.length === 0 ? undefined : slice;
+}
+
 const slicesMembers: Record<string, Entity> = {
   Sort: sliceGeneric(
     'Sort',
@@ -613,6 +663,7 @@ const slicesMembers: Record<string, Entity> = {
     'Concat',
     EMPTY_INTERFACE,
     (s) => ({ params: [sliceOf(s)], results: [s], variadic: true }),
+    // code-gauge-allow functionCognitiveComplexity 16 -- Groups the related generic collection adapters and their shared type constructors.
     (types) =>
       ([lists]) => {
         const parts = sliceValues(lists);
@@ -701,6 +752,7 @@ function allocate(count: number): void {
   currentRuntime().allocate(count);
 }
 
+// code-gauge-allow functionNcss 33 -- Groups the related generic collection adapters and their shared type constructors.
 function insert(slice: Value, at: number, values: Value[], types: Type[]): Value {
   const length = (slice as Slice | undefined)?.length ?? 0;
   if (at < 0 || at > length) boundsPanic(`slice bounds out of range [${at}:${length}]`);
@@ -738,7 +790,58 @@ function deleteRange(slice: Value, from: number, to: number, types: Type[]): Val
   return overwrite(current, kept, types);
 }
 
+const SEQ2 = (key: Type, value: Type): Type => seq2Of(key, value);
+
+function* insertPairs(map: GoMap | undefined, seq: Value): Suspending<undefined> {
+  yield* resumeFunction(seq, [
+    nativeFunc(
+      ([key, value]) => {
+        if (!map) plainPanic('assignment to entry in nil map');
+        const hash = map.keyOf(key);
+        if (!map.entries.has(hash)) allocate(2);
+        map.entries.set(hash, { key: copyValue(key), value: copyValue(value) });
+        return true;
+      },
+      [map]
+    ),
+  ]);
+}
+
+/** An iterator over pairs, which stops when the yield function returns false, as range-over-func requires. */
+function pairIterator(pairs: () => Iterable<[Value, Value]>, captured: Value[] = []): GoFunc {
+  return iteratorOf(pairs, captured);
+}
+
 Object.assign(slicesMembers, {
+  AppendSeq: (() => {
+    const [s, e] = sliceParams(EMPTY_INTERFACE);
+    return genericBlockingFunction(
+      'AppendSeq',
+      [s, e],
+      funcType([s, SEQ(e)], [s]),
+      (types) =>
+        function* ([slice, seq]) {
+          let result = slice as Slice | undefined;
+          const roots: unknown[] = [result, seq];
+          return yield* currentRuntime().resumeWithRoots(
+            [roots],
+            (function* () {
+              yield* resumeFunction(seq, [
+                nativeFunc(
+                  ([value]) => {
+                    result = appendValues(result, [value], types[1], () => zeroValue(types[1]), allocate);
+                    roots[0] = result;
+                    return true;
+                  },
+                  [roots]
+                ),
+              ]);
+              return result;
+            })()
+          );
+        }
+    );
+  })(),
   Compare: sliceGeneric(
     'Compare',
     ORDERED,
@@ -860,11 +963,135 @@ Object.assign(slicesMembers, {
   ),
 });
 
+Object.assign(slicesMembers, {
+  Sorted: (() => {
+    const e = typeParam('E', ORDERED);
+    return genericBlockingFunction(
+      'Sorted',
+      [e],
+      funcType([SEQ(e)], [sliceOf(e)]),
+      () =>
+        function* ([seq]) {
+          return yield* sortCollected(seq, less);
+        }
+    );
+  })(),
+  Collect: (() => {
+    const e = typeParam('E', EMPTY_INTERFACE);
+    return genericBlockingFunction(
+      'Collect',
+      [e],
+      funcType([SEQ(e)], [sliceOf(e)]),
+      () =>
+        function* ([seq]) {
+          const values = yield* collect(seq);
+          return values.length === 0 ? undefined : newSlice(values);
+        }
+    );
+  })(),
+  Values: sliceGeneric(
+    'Values',
+    EMPTY_INTERFACE,
+    (s, e) => ({ params: [s], results: [SEQ(e)] }),
+    () =>
+      ([slice]) =>
+        iteratorOf(
+          function* () {
+            const source = slice as Slice | undefined;
+            const length = source?.length ?? 0;
+            for (let index = 0; index < length; index++) yield [(source as Slice).get(index)];
+          },
+          [slice]
+        )
+  ),
+  All: sliceGeneric(
+    'All',
+    EMPTY_INTERFACE,
+    (s, e) => ({ params: [s], results: [SEQ2(INT, e)] }),
+    () =>
+      ([slice]) =>
+        pairIterator(
+          function* () {
+            const source = slice as Slice | undefined;
+            const length = source?.length ?? 0;
+            for (let index = 0; index < length; index++) yield [BigInt(index), (source as Slice).get(index)];
+          },
+          [slice]
+        )
+  ),
+  Backward: sliceGeneric(
+    'Backward',
+    EMPTY_INTERFACE,
+    (s, e) => ({ params: [s], results: [SEQ2(INT, e)] }),
+    () =>
+      ([slice]) =>
+        pairIterator(
+          function* () {
+            const source = slice as Slice | undefined;
+            for (let index = (source?.length ?? 0) - 1; index >= 0; index--)
+              yield [BigInt(index), (source as Slice).get(index)];
+          },
+          [slice]
+        )
+  ),
+  Chunk: sliceGeneric(
+    'Chunk',
+    EMPTY_INTERFACE,
+    (s) => ({ params: [s, INT], results: [SEQ(s)] }),
+    () =>
+      ([slice, size]) => {
+        const n = Number(size as bigint);
+        if (n < 1) stringPanic('cannot be less than 1');
+        return iteratorOf(
+          function* () {
+            const current = slice as Slice | undefined;
+            for (let start = 0; start < (current?.length ?? 0); start += n) {
+              const end = Math.min(start + n, (current as Slice).length);
+              // Each chunk is a slice of the original array whose capacity ends with the chunk.
+              const chunk = new Slice(
+                (current as Slice).array,
+                (current as Slice).offset + start,
+                end - start,
+                end - start
+              );
+              yield [chunk];
+            }
+          },
+          [slice]
+        );
+      }
+  ),
+  SortedFunc: (() => {
+    const e = typeParam('E', EMPTY_INTERFACE);
+    return genericBlockingFunction(
+      'SortedFunc',
+      [e],
+      funcType([SEQ(e), funcType([e, e], [INT])], [sliceOf(e)]),
+      () =>
+        function* ([seq, cmpFn]) {
+          return yield* sortCollected(seq, resumableLess(cmpFn));
+        }
+    );
+  })(),
+  SortedStableFunc: (() => {
+    const e = typeParam('E', EMPTY_INTERFACE);
+    return genericBlockingFunction(
+      'SortedStableFunc',
+      [e],
+      funcType([SEQ(e), funcType([e, e], [INT])], [sliceOf(e)]),
+      () =>
+        function* ([seq, cmpFn]) {
+          return yield* sortCollected(seq, resumableLess(cmpFn), true);
+        }
+    );
+  })(),
+});
+
 export const SLICES_PACKAGE = definePackage(
   'slices',
   slicesMembers,
-  // The iterator functions need iter and range-over-func, which this stage rejects.
-  ['All', 'AppendSeq', 'Backward', 'Chunk', 'Collect', 'Sorted', 'SortedFunc', 'SortedStableFunc', 'Values']
+
+  ['All', 'Backward', 'Chunk', 'Collect', 'Sorted', 'SortedFunc', 'SortedStableFunc', 'Values']
 );
 
 // maps ------------------------------------------------------------------------------------------------------------
@@ -881,6 +1108,89 @@ function mapParams(keyConstraint: InterfaceType = COMPARABLE): [TypeParamType, T
 }
 
 const mapsMembers: Record<string, Entity> = {
+  Keys: (() => {
+    const [m, k, v] = mapParams();
+    return genericFunction(
+      'Keys',
+      [m, k, v],
+      funcType([m], [SEQ(k)]),
+      () =>
+        ([map]) =>
+          iteratorOf(
+            function* () {
+              for (const entry of (map as GoMap | undefined)?.entries.values() ?? []) yield [entry.key];
+            },
+            [map]
+          )
+    );
+  })(),
+  Values: (() => {
+    const [m, k, v] = mapParams();
+    return genericFunction(
+      'Values',
+      [m, k, v],
+      funcType([m], [SEQ(v)]),
+      () =>
+        ([map]) =>
+          iteratorOf(
+            function* () {
+              for (const entry of (map as GoMap | undefined)?.entries.values() ?? []) yield [entry.value];
+            },
+            [map]
+          )
+    );
+  })(),
+  All: (() => {
+    const [m, k, v] = mapParams();
+    return genericFunction(
+      'All',
+      [m, k, v],
+      funcType([m], [SEQ2(k, v)]),
+      () =>
+        ([map]) =>
+          pairIterator(
+            function* () {
+              for (const entry of (map as GoMap | undefined)?.entries.values() ?? []) yield [entry.key, entry.value];
+            },
+            [map]
+          )
+    );
+  })(),
+  Collect: (() => {
+    const k = typeParam('K', COMPARABLE);
+    const v = typeParam('V', EMPTY_INTERFACE);
+    return genericBlockingFunction(
+      'Collect',
+      [k, v],
+      funcType([SEQ2(k, v)], [{ kind: 'map', key: k, value: v }]),
+      (types) =>
+        function* ([seq]) {
+          const keyOf = mapKeyOf(types[0]);
+          const map = new GoMap(keyOf);
+          return yield* currentRuntime().resumeWithRoots(
+            [map],
+            (function* () {
+              yield* insertPairs(map, seq);
+              return map;
+            })()
+          );
+        }
+    );
+  })(),
+  Insert: (() => {
+    const [m, k, v] = mapParams();
+    return genericBlockingFunction(
+      'Insert',
+      [m, k, v],
+      funcType([m, SEQ2(k, v)], []),
+      () =>
+        function* ([map, seq]) {
+          yield* insertPairs(map as GoMap | undefined, seq);
+          return;
+        }
+    );
+  })(),
+
   Clone: (() => {
     const [m, k, v] = mapParams();
     return genericFunction('Clone', [m, k, v], funcType([m], [m]), (types) => ([map]) => {
@@ -1017,3 +1327,8 @@ const cmpMembers: Record<string, Entity> = {
 };
 
 export const CMP_PACKAGE = definePackage('cmp', cmpMembers);
+
+function newSlice(values: Value[]): Slice {
+  currentRuntime().allocate(values.length);
+  return new Slice(values, 0, values.length, values.length);
+}
