@@ -45,6 +45,7 @@ def(
       }
     }
     yield* modify(self);
+    if (capacity === NIL) throw typeError('no implicit conversion from nil to integer');
     if (capacity !== undefined) yield* toIndexExact(capacity);
     if (block) {
       if (args.length > 0) throw argumentError('wrong number of arguments (given 1, expected 0)');

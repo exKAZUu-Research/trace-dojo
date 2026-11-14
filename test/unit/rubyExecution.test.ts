@@ -1792,6 +1792,9 @@ test('Hash initialization validates frozen state and capacity conversion', () =>
     stdout: 'convert\n{}\n',
   });
   expect(run('begin;Hash.new(capacity:10**30);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'RangeError\n' });
+  expect(run('begin;Hash.new(capacity:nil);rescue=>e;p e.message;end')).toMatchObject({
+    stdout: '"no implicit conversion from nil to integer"\n',
+  });
 });
 
 test('Array reads current contents after conversion callbacks', () => {
