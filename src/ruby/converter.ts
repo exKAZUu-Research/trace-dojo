@@ -960,6 +960,12 @@ export class Converter {
     const methodNode = node.childForFieldName('method');
     const argumentsNode = node.childForFieldName('arguments');
     const blockNode = node.childForFieldName('block');
+    if (argumentsNode && !argumentsNode.text.trimStart().startsWith('(')) {
+      const first = namedChildren(argumentsNode).find((child) => child.type !== 'comment');
+      if (first?.type === 'hash' && first.text.startsWith('{'))
+        this.fail(first, '括弧のない呼び出しの直後にハッシュの波括弧は書けません。');
+      if (blockNode?.text.startsWith('{')) this.fail(blockNode, '括弧のない呼び出しの引数の後に { を書けません。');
+    }
     const operator = node.childForFieldName('operator')?.text;
     const recv = receiverNode ? this.valueExpr(receiverNode) : undefined;
     const { args, blockArg } = argumentsNode ? this.argumentList(argumentsNode) : { args: [], blockArg: undefined };

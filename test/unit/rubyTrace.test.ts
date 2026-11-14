@@ -830,3 +830,9 @@ test('Lazy callbacks retain pending flattened and deduplicated turtles', () => {
   const deduplicated = 'class K;def hash;q=1;0;end;end\na=[1].lazy.map{Turtle.new}.uniq{|t|K.new}.force';
   expect(traceProgram('ruby', deduplicated, deduplicated).finalTurtles).toMatchObject([{ x: 0, y: 0 }]);
 });
+
+test('exhausted Enumerator retains its StopIteration result', () => {
+  const program =
+    'e=Enumerator.new do |y|\n t=Turtle.new\n y << 1\n t\nend\ne.next\nbegin\n e.next\nrescue StopIteration\nend\nx=1\nbegin\n e.next\nrescue StopIteration => ex\n ex.result.forward\nend\n';
+  expect(traceProgram('ruby', program, program).finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
+});

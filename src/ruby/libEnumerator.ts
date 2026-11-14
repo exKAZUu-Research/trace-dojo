@@ -666,6 +666,7 @@ function cursorRoots(cursor: Cursor | undefined): Value[] {
   if (!cursor) return [];
   const values = [...cursor.held, ...cursor.catchTags, ...cursor.peeked.flat()];
   if (cursor.feedSet) values.push(cursor.feed as Value);
+  if (cursor.result !== undefined) values.push(cursor.result);
   for (const frame of cursor.frames) pushFrameReferences(frame, values);
   return values;
 }

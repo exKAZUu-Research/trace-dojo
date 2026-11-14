@@ -6654,6 +6654,12 @@ test('String.new retains UTF-8 bytes when choosing binary encoding', () => {
   expect(run('s=String.new("é",encoding:"ASCII-8BIT");p s.bytes,s.bytesize')).toMatchObject({
     stdout: '[195, 169]\n2\n',
   });
+  expect(run('p 65.chr.encoding,String.new(65.chr).encoding')).toMatchObject({
+    stdout: '#<Encoding:US-ASCII>\n#<Encoding:US-ASCII>\n',
+  });
+  expect(run('s=String.new("é",encoding:Encoding::US_ASCII);p s.valid_encoding?,s.bytes')).toMatchObject({
+    stdout: 'false\n[195, 169]\n',
+  });
 });
 
 test('END registers each syntax site once', () => {
@@ -6753,12 +6759,18 @@ test('exclusive Range max follows successor iteration for Symbols', () => {
     stdout:
       'nil\nnil\n"cannot exclude end value with non Integer begin value"\n"cannot exclude non Integer end value"\n',
   });
+  expect(run('begin;(1.0...1.0).max;rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'TypeError\n"cannot exclude non Integer end value"\n',
+  });
 });
 
 test('non-leading unparenthesized command arguments fail before execution', () => {
   for (const source of ['x=[1,2]; p x, x.join ","', 'def f1;1;end;def f2(a);a;end;p f1, f2 2'])
     expect(run(source)).toMatchObject({ kind: 'compileError' });
   expect(run('x=[1,2]; p x, x.join(",")')).toMatchObject({ stdout: '[1, 2]\n"1,2"\n' });
+  for (const source of ['p {a: 1}', 'p 1 { }', '"x".each_char { a: 1 }'])
+    expect(run(source)).toMatchObject({ kind: 'compileError' });
+  expect(run('p({a: 1})')).toMatchObject({ stdout: '{a: 1}\n' });
 });
 
 test('large Integer quo retains finite Float results', () => {
@@ -6845,6 +6857,12 @@ test('Time constructor validates field widths before calendar bounds', () => {
   });
   expect(run('begin;Time.utc(nil);rescue=>e;p e.class,e.message;end')).toMatchObject({
     stdout: 'TypeError\n"no implicit conversion of nil into Integer"\n',
+  });
+  expect(
+    run('[Float::NAN,Float::INFINITY].each{|s|begin;Time.utc(2024,1,1,0,0,s);rescue=>e;p e.class,e.message;end}')
+  ).toMatchObject({ stdout: 'FloatDomainError\n"NaN"\nFloatDomainError\n"Infinity"\n' });
+  expect(run('begin;Time.utc(2024,1,1,0,0,0,0,1,2);rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'ArgumentError\n"wrong number of arguments (given 9, expected 1..8)"\n',
   });
 });
 

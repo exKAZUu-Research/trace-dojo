@@ -39,6 +39,7 @@ def(
     rt().c.Encoding.constants.get(self.binary ? 'ASCII_8BIT' : self.usAscii ? 'US_ASCII' : 'UTF_8') as Value
 );
 def('String', 'valid_encoding?', 0, (self: RString) => {
+  if (self.usAscii) return stringBytes(self).every((byte) => byte < 0x80);
   if (self.binary || !self.rawBytes) return true;
   try {
     new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(stringBytes(self));

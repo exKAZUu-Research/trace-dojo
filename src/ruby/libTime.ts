@@ -1,7 +1,7 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { compareValues, toFloat, toInt, toStr } from './conversions';
 import { def, sdef } from './define';
-import { argumentError, frozenError, rangeError, typeError } from './errors';
+import { argumentError, floatDomainError, frozenError, rangeError, typeError } from './errors';
 import { bigintRatio } from './floatMath';
 import type { Gen } from './interp';
 import { floatToRational, isRational } from './libRational';
@@ -101,6 +101,8 @@ function* fieldArgs(args: Value[]): Gen<{ fields: number[]; seconds: number }> {
   for (const [index, arg] of args.slice(0, 5).entries()) fields.push(yield* fieldValue(arg, index));
   while (fields.length < 5) fields.push(fields.length < 3 ? 1 : 0);
   const seconds = args.length > 5 ? yield* secondsValue(args[5]) : 0;
+  if (!Number.isFinite(seconds))
+    throw floatDomainError(Number.isNaN(seconds) ? 'NaN' : seconds > 0 ? 'Infinity' : '-Infinity');
   for (const [index, width] of [16, 32, 32, 64].entries())
     if (fields[index + 1] < 0 || fields[index + 1] >= width) throw argumentError('argument out of range');
   if (seconds < 0 || seconds >= 64) throw argumentError('argument out of range');
@@ -174,6 +176,11 @@ function zoneFromOffset(value: Value): TimeData['zone'] {
   return value instanceof RString && (value.s === 'UTC' || value.s === 'Z') ? 'utc' : 'fixed';
 }
 
+function calendarArgs(args: Value[]): Value[] {
+  if (args.length === 9) throw argumentError('wrong number of arguments (given 9, expected 1..8)');
+  return args.length === 10 ? [args[5], args[4], args[3], args[2], args[1], args[0]] : args.slice(0, 6);
+}
+
 function* buildTime(args: Value[], offset: number, zone: TimeData['zone'], microseconds?: Value, exact?: Value): Gen {
   const { fields, seconds } = yield* fieldArgs(args);
   const [year, month, day, hour, minute] = fields;
@@ -245,20 +252,10 @@ sdef(
   { keywords: true }
 );
 sdef('Time', ['local', 'mktime'], [1, 10], (_self, args) =>
-  buildTime(
-    args.length === 10 ? [args[5], args[4], args[3], args[2], args[1], args[0]] : args.slice(0, 6),
-    LOCAL_OFFSET,
-    'local',
-    args.length === 10 ? undefined : args[6]
-  )
+  buildTime(calendarArgs(args), LOCAL_OFFSET, 'local', args.length === 10 ? undefined : args[6])
 );
 sdef('Time', ['utc', 'gm'], [1, 10], (_self, args) =>
-  buildTime(
-    args.length === 10 ? [args[5], args[4], args[3], args[2], args[1], args[0]] : args.slice(0, 6),
-    0,
-    'utc',
-    args.length === 10 ? undefined : args[6]
-  )
+  buildTime(calendarArgs(args), 0, 'utc', args.length === 10 ? undefined : args[6])
 );
 sdef(
   'Time',

@@ -205,6 +205,7 @@ def(
       const source = yield* toStrValue(args[0]);
       sourceBytes = stringBytes(source);
       setBytes(self, sourceBytes, source.binary);
+      self.usAscii = source.usAscii;
     }
     if (keywords)
       for (const entry of keywords.map.values()) {

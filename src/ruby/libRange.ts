@@ -198,9 +198,10 @@ def('Range', 'max', [0, 1], function* (self: RRange, args, block) {
   if (self.end === NIL) throw rangeError('cannot get the maximum of endless range');
   if (self.exclusive && !isA(self.end, rt().c.Numeric)) return yield* callEnumerable(self, 'max', [], undefined);
   const order = yield* spaceship(self.begin, self.end);
-  if (order === undefined || order > 0 || (order === 0 && self.exclusive)) return NIL;
+  if (order === undefined || order > 0) return NIL;
   if (self.exclusive) {
     if (typeof self.end !== 'bigint') throw typeError('cannot exclude non Integer end value');
+    if (order === 0) return NIL;
     if (typeof self.begin !== 'bigint') throw typeError('cannot exclude end value with non Integer begin value');
     return self.end - 1n;
   }
