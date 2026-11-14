@@ -1,3 +1,4 @@
+import { fma } from './fma';
 import { divideByZeroPanic, runtimeErrorPanic } from './runtimeErrors';
 import {
   type BasicKind,
@@ -97,11 +98,7 @@ function complexArithmetic(operator: string, single: boolean): Binary {
       return (a, b) => make((a as Complex).re - (b as Complex).re, (a as Complex).im - (b as Complex).im);
     }
     case '*': {
-      return (a, b) => {
-        const x = a as Complex;
-        const y = b as Complex;
-        return make(x.re * y.re - x.im * y.im, x.re * y.im + x.im * y.re);
-      };
+      return (a, b) => complexProduct(a as Complex, b as Complex, false, single);
     }
     case '/': {
       return (a, b) => complexDivide(a as Complex, b as Complex, make);
@@ -110,20 +107,62 @@ function complexArithmetic(operator: string, single: boolean): Binary {
   throw new Error(`Invalid complex operator ${operator}`);
 }
 
+/**
+ * Multiplies as Go's arm64 code does, complex64 included (it multiplies in float64). Its rules fuse a product of
+ * plain factors (FMULD) before one with a negated factor (FNMULD), given by `negated` for each part of x and y. Among
+ * products of the same kind, the real part fuses its second product, and the imaginary part, a sum of two products,
+ * fuses `im(x)*re(y)`, or `re(x)*im(y)` when common subexpression elimination orders the function's sums of products
+ * (`groupedSums`).
+ */
+export function complexProduct(
+  x: Complex,
+  y: Complex,
+  groupedSums: boolean,
+  single: boolean,
+  negated: ComplexNegations = NO_NEGATIONS
+): Complex {
+  const round = single ? Math.fround : (value: number): number => value;
+  const reLeftPlain = !negated.xRe && !negated.yRe;
+  const reRightPlain = !negated.xIm && !negated.yIm;
+  const re = reLeftPlain && !reRightPlain ? fma(x.re, y.re, -(x.im * y.im)) : fma(-x.im, y.im, x.re * y.re);
+  const imFirstPlain = !negated.xRe && !negated.yIm;
+  const imSecondPlain = !negated.xIm && !negated.yRe;
+  const fusesFirst = imFirstPlain === imSecondPlain ? groupedSums : imFirstPlain;
+  const im = fusesFirst ? fma(x.re, y.im, x.im * y.re) : fma(x.im, y.re, x.re * y.im);
+  return new Complex(round(re), round(im));
+}
+
+/** Which parts of the operands of a complex product Go's compiler computes as negations. */
+export interface ComplexNegations {
+  xRe: boolean;
+  xIm: boolean;
+  yRe: boolean;
+  yIm: boolean;
+}
+
+const NO_NEGATIONS: ComplexNegations = { xRe: false, xIm: false, yRe: false, yIm: false };
+
+/** A complex product of constants, which Go's compiler folds with each operation rounded on its own. */
+export function foldedComplexProduct(x: Complex, y: Complex, single: boolean): Complex {
+  const round = single ? Math.fround : (value: number): number => value;
+  return new Complex(round(x.re * y.re - x.im * y.im), round(x.re * y.im + x.im * y.re));
+}
+
 /** Divides as Go's runtime does (complex128div), including its handling of infinities and NaNs. */
 function complexDivide(n: Complex, m: Complex, make: (re: number, im: number) => Complex): Complex {
   let e: number;
   let f: number;
+  // Go's runtime is compiled for arm64 with these multiply-adds fused.
   if (Math.abs(m.re) >= Math.abs(m.im)) {
     const ratio = m.im / m.re;
-    const denom = m.re + ratio * m.im;
-    e = (n.re + n.im * ratio) / denom;
-    f = (n.im - n.re * ratio) / denom;
+    const denom = fma(ratio, m.im, m.re);
+    e = fma(n.im, ratio, n.re) / denom;
+    f = fma(-n.re, ratio, n.im) / denom;
   } else {
     const ratio = m.re / m.im;
-    const denom = m.im + ratio * m.re;
-    e = (n.re * ratio + n.im) / denom;
-    f = (n.im * ratio - n.re) / denom;
+    const denom = fma(ratio, m.re, m.im);
+    e = fma(n.re, ratio, n.im) / denom;
+    f = fma(n.im, ratio, -n.re) / denom;
   }
   if (Number.isNaN(e) && Number.isNaN(f)) {
     // Correct final result to infinities and zeros if applicable. Matches C99: ISO/IEC 9899:1999 - G.5.1.
@@ -134,9 +173,28 @@ function complexDivide(n: Complex, m: Complex, make: (re: number, im: number) =>
     if (c === 0 && d === 0 && (!Number.isNaN(a) || !Number.isNaN(b))) {
       e = copySign(Infinity, c) * a;
       f = copySign(Infinity, c) * b;
+    } else if (isInfinite(a, b) && Number.isFinite(c) && Number.isFinite(d)) {
+      const [x, y] = [infToOne(a), infToOne(b)];
+      e = Infinity * (x * c + y * d);
+      f = Infinity * (y * c - x * d);
+    } else if (isInfinite(c, d) && Number.isFinite(a) && Number.isFinite(b)) {
+      const [x, y] = [infToOne(c), infToOne(d)];
+      // oxlint-disable-next-line erasing-op -- Multiplying by 0 keeps the sign of the product as Go's runtime does.
+      e = 0 * (a * x + b * y);
+      // oxlint-disable-next-line erasing-op -- As above.
+      f = 0 * (b * x - a * y);
     }
   }
   return make(e, f);
+}
+
+function isInfinite(x: number, y: number): boolean {
+  return Math.abs(x) === Infinity || Math.abs(y) === Infinity;
+}
+
+/** Go's inf2one: ±1 for an infinity and ±0 otherwise, keeping the sign. */
+function infToOne(value: number): number {
+  return copySign(Math.abs(value) === Infinity ? 1 : 0, value);
 }
 
 function copySign(magnitude: number, sign: number): number {

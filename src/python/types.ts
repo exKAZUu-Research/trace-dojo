@@ -1,14 +1,20 @@
-import { DictStore, NamespaceDictStore } from './dictStore';
+import { DictStore } from './dictStore';
+import { assertIteratorName } from './iteratorTypes';
+import { toIndex } from './numbers';
+import { lookupSpecial } from './objects';
 import { SetTable } from './setTable';
+import { recordRootClass, recordSubclass } from './subclasses';
 import {
   type ExceptionState,
   type Kwargs,
+  NamespaceMap,
   type NativeBinding,
   type NativeFunction,
   PyBuiltinFunction,
   PyClass,
   PyDict,
   PyError,
+  PyGenerator,
   PyInstance,
   PyList,
   PyObject,
@@ -24,6 +30,8 @@ export const objectClass = new PyClass('object', []);
 typeClass.cls = typeClass;
 objectClass.cls = typeClass;
 typeClass.bases = [objectClass];
+recordSubclass(typeClass);
+recordRootClass(objectClass);
 objectClass.mro = [objectClass];
 typeClass.mro = [typeClass, objectClass];
 typeClass.isBaseType = true;
@@ -44,6 +52,9 @@ export const boolClass = builtinClass('bool', intClass);
 export const floatClass = builtinClass('float');
 export const complexClass = builtinClass('complex');
 export const strClass = builtinClass('str');
+export const bytesClass = builtinClass('bytes');
+export const bytearrayClass = builtinClass('bytearray');
+export const memoryviewClass = builtinClass('memoryview');
 export const listClass = builtinClass('list');
 export const tupleClass = builtinClass('tuple');
 export const dictClass = builtinClass('dict');
@@ -57,12 +68,31 @@ export const notImplementedClass = builtinClass('NotImplementedType');
 export const functionClass = builtinClass('function');
 export const methodClass = builtinClass('method');
 export const builtinFunctionClass = builtinClass('builtin_function_or_method');
+// The type of CPython's builtin methods that take their defining class, which none here are, but which pydoc lists.
+builtinClass('builtin_method', builtinFunctionClass);
 export const methodDescriptorClass = builtinClass('method_descriptor');
+/** The class of a builtin type's special method that fills one of CPython's type slots, such as `int.__add__`. */
+export const wrapperDescriptorClass = builtinClass('wrapper_descriptor');
+/** The class of a slot's special method bound to an object, such as `(1).__add__`. */
+export const methodWrapperClass = builtinClass('method-wrapper');
+/** The class of a builtin type's class method as its dictionary holds it, such as `dict.fromkeys`. */
+export const classmethodDescriptorClass = builtinClass('classmethod_descriptor');
 export const moduleClass = builtinClass('module');
 export const generatorClass = builtinClass('generator');
+export const coroutineClass = builtinClass('coroutine');
+export const asyncGeneratorClass = builtinClass('async_generator');
 export const staticmethodClass = builtinClass('staticmethod');
 export const classmethodClass = builtinClass('classmethod');
 export const propertyClass = builtinClass('property');
+/** `collections._tuplegetter`, the read-only descriptor of a namedtuple's field, which works as a property does. */
+export const tupleGetterClass = builtinClass('_tuplegetter');
+tupleGetterClass.module = 'collections';
+
+/** Whether a descriptor's class is property's kind: property, or a namedtuple field's `_tuplegetter`. */
+export function isPropertyKind(cls: PyClass): boolean {
+  return cls === propertyClass || cls === tupleGetterClass;
+}
+for (const cls of [staticmethodClass, classmethodClass, propertyClass]) cls.isBaseType = true;
 export const superClass = builtinClass('super');
 export const dictKeysClass = builtinClass('dict_keys');
 export const dictValuesClass = builtinClass('dict_values');
@@ -91,11 +121,19 @@ export const iteratorClasses = new Map<string, PyClass>();
 /** Gives each new iterator class the iterator protocol, registered by the module that defines it. */
 export const iteratorClassSetup: ((cls: PyClass) => void)[] = [];
 
-/** The class of a native iterator, such as `list_iterator`. */
+/** The class of a native iterator, such as `list_iterator` or `collections._deque_iterator`. */
 export function iteratorClass(name: string): PyClass {
+  assertIteratorName(name);
   let cls = iteratorClasses.get(name);
   if (!cls) {
-    cls = builtinClass(name);
+    const dot = name.indexOf('.');
+    if (dot === -1) {
+      cls = builtinClass(name);
+    } else {
+      cls = builtinClass(name.slice(dot + 1));
+      cls.module = name.slice(0, dot);
+      cls.typeName = name;
+    }
     iteratorClasses.set(name, cls);
     for (const setup of iteratorClassSetup) setup(cls);
   }
@@ -167,6 +205,7 @@ const EXCEPTION_TREE: [string, string][] = [
   ['ProcessLookupError', 'OSError'],
   ['TimeoutError', 'OSError'],
   ['IndentationError', 'SyntaxError'],
+  ['_IncompleteInputError', 'SyntaxError'],
   ['IndexError', 'LookupError'],
   ['KeyError', 'LookupError'],
   ['ModuleNotFoundError', 'ImportError'],
@@ -222,21 +261,86 @@ export type ExceptionName =
   | 'RuntimeError'
   | 'RecursionError'
   | 'StopIteration'
+  | 'StopAsyncIteration'
   | 'NotImplementedError'
   | 'MemoryError'
   | 'ImportError'
   | 'ModuleNotFoundError'
   | 'SystemError'
   | 'LookupError'
+  | 'UnicodeError'
   | 'UnicodeEncodeError'
+  | 'EOFError'
   | 'SystemExit';
 
 /** Creates an exception instance whose `args` are `args`. */
 export function newException(cls: PyClass, args: readonly PyValue[]): PyInstance {
   const exception = new PyInstance(cls);
   const state: ExceptionState = { args: newTuple(args), suppressContext: false };
+  initExceptionFields(cls, state, args);
   exception.exception = state;
   return exception;
+}
+
+/** Initializes the C member attributes a builtin exception class derives from its constructor arguments. */
+// code-gauge-allow functionCognitiveComplexity 20 -- One case per builtin exception type with C member attributes.
+export function initExceptionFields(
+  cls: PyClass,
+  state: ExceptionState,
+  args: readonly PyValue[],
+  kwargs?: ReadonlyMap<string, PyValue>
+): void {
+  const is = (name: string): boolean => cls.mro.some((each) => each.isBuiltin && each.name === name);
+  const fields = (state.fields ??= new Map<string, PyValue>());
+  if (is('StopIteration')) fields.set('value', args[0] ?? None);
+  if (is('SystemExit')) fields.set('code', args.length === 0 ? None : args.length === 1 ? args[0] : state.args);
+  if (is('ImportError')) {
+    fields.set('msg', args.length === 1 ? args[0] : None);
+    fields.set('name', kwargs?.get('name') ?? None);
+    fields.set('path', kwargs?.get('path') ?? None);
+    fields.set('name_from', kwargs?.get('name_from') ?? None);
+  }
+  if (is('AttributeError') || is('NameError')) {
+    const name = kwargs?.get('name') ?? state.name ?? None;
+    fields.set('name', name);
+    if (is('AttributeError')) fields.set('obj', kwargs?.get('obj') ?? state.object ?? None);
+  }
+  if (is('OSError')) initOSErrorFields(cls, state, fields, args);
+  const errorName = fields.get('name');
+  if (errorName !== undefined) state.name = stringValue(errorName);
+  if (fields.has('obj')) state.object = fields.get('obj');
+}
+
+/** The fields of OSError, whose `args` keep only errno and strerror when a filename is given. */
+function initOSErrorFields(
+  cls: PyClass,
+  state: ExceptionState,
+  fields: Map<string, PyValue>,
+  args: readonly PyValue[]
+): void {
+  const tupleForm = args.length >= 2 && args.length <= 5;
+  fields.set('errno', tupleForm ? args[0] : None);
+  fields.set('strerror', tupleForm ? args[1] : None);
+  let hasFile = args.length >= 3 && args.length <= 5 && args[2] !== None;
+  if (hasFile && cls === exceptionClassNamed('BlockingIOError') && isNumericArgument(args[2])) {
+    const written = toIndex(args[2]);
+    if (written < -(2n ** 63n) || written >= 2n ** 63n)
+      throw valueError("cannot fit 'int' into an index-sized integer");
+    if (written !== -1n) fields.set('characters_written', written);
+    hasFile = false;
+  }
+  fields.set('filename', hasFile ? args[2] : None);
+  fields.set('filename2', hasFile && args.length === 5 ? args[4] : None);
+  if (hasFile) state.args = newTuple(args.slice(0, 2));
+}
+
+function isNumericArgument(value: PyValue): boolean {
+  return (
+    typeof value === 'bigint' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    ['__int__', '__float__', '__index__'].some((name) => lookupSpecial(value, name) !== undefined)
+  );
 }
 
 /** The JavaScript error that raises a builtin exception with a message. */
@@ -255,12 +359,15 @@ export function valueError(message: string): PyError {
 // Containers --------------------------------------------------------------------------------------------------------
 
 /** BaseException.add_note on an exception, which the interpreter also calls as CPython's _PyErr_FormatNote does. */
-export function addNote(exception: PyInstance, note: string): void {
-  const state = exception.exception;
-  if (!state) return;
-  state.notes ??= newList([]);
-  if (!(state.notes instanceof PyList)) throw typeError('Cannot add note: __notes__ is not a list');
-  state.notes.append(note);
+export function addNote(exception: PyInstance, note: PyValue): void {
+  if (!exception.exception) return;
+  let notes = exception.dict.get('__notes__');
+  if (notes === undefined) {
+    notes = newList([]);
+    exception.dict.set('__notes__', notes);
+  }
+  if (!(notes instanceof PyList)) throw typeError('Cannot add note: __notes__ is not a list');
+  notes.append(note);
 }
 
 export function newList(items: PyValue[]): PyList {
@@ -275,19 +382,8 @@ export function newTuple(items: readonly PyValue[]): PyTuple {
 
 export function newDict(entries: Iterable<[PyValue, PyValue]> = []): PyDict {
   const dict = new PyDict(dictClass, new DictStore());
-  for (const [key, value] of entries) dict.store.set(key, value);
-  return dict;
-}
-
-const namespaceDicts = new WeakMap<Map<string, PyValue>, PyDict>();
-
-/** The `__dict__` of an attribute map, one dict per map, which reads and writes the attributes themselves. */
-export function namespaceDict(namespace: Map<string, PyValue>): PyDict {
-  let dict = namespaceDicts.get(namespace);
-  if (!dict) {
-    dict = new PyDict(dictClass, new NamespaceDictStore(namespace));
-    namespaceDicts.set(namespace, dict);
-  }
+  for (const [key, value] of entries instanceof NamespaceMap ? entries.rawEntries() : entries)
+    dict.store.set(key, value);
   return dict;
 }
 
@@ -296,6 +392,31 @@ export function newSet(items: Iterable<PyValue> = [], frozen = false): PySet {
   for (const item of items) set.table.add(item);
   return set;
 }
+
+/** The class that defines each builtin method descriptor, whose name its repr shows. */
+export const descriptorOwners = new WeakMap<PyBuiltinFunction, PyClass>();
+
+/** The special methods that fill CPython's type slots, which `wrapper_descriptor` objects stand for. */
+const SLOT_NAMES = new Set(
+  [
+    'repr str hash call getattribute getattr setattr delattr init del lt le eq ne gt ge iter next get set delete',
+    'len contains getitem setitem delitem await aiter anext buffer release_buffer bool int float index',
+    'neg pos abs invert add sub mul matmul truediv floordiv mod divmod pow lshift rshift and or xor',
+    'radd rsub rmul rmatmul rtruediv rfloordiv rmod rdivmod rpow rlshift rrshift rand ror rxor',
+    'iadd isub imul imatmul itruediv ifloordiv imod ipow ilshift irshift iand ior ixor',
+  ]
+    .join(' ')
+    .split(' ')
+    .map((name) => `__${name}__`)
+);
+
+/** The special methods that a builtin type defines as ordinary methods although they fill a slot, as METH_COEXIST does. */
+const METHOD_TABLE_SLOTS = new Map<PyClass, readonly string[]>([
+  [listClass, ['__getitem__']],
+  [dictClass, ['__contains__', '__getitem__']],
+  [setClass, ['__contains__']],
+  [frozensetClass, ['__contains__']],
+]);
 
 // Builtin functions -------------------------------------------------------------------------------------------------
 
@@ -317,35 +438,87 @@ export interface MethodOptions {
   ownerName?: string;
 }
 
-/** Adds a builtin method to a class, which receives the instance as its first argument. */
+/**
+ * Adds a builtin method to a class, which receives the instance as its first argument. The methods of int, float, and
+ * str receive the builtin values that instances of a program's subclasses stand for, as their own arguments too,
+ * except where CPython renders an argument with its own methods.
+ */
 export function defineMethod(
   cls: PyClass,
   name: string,
   run: (self: PyValue, args: PyValue[], kwargs: Kwargs, boundTo?: PyValue) => PyValue,
-  { binding = 'method', receiver = 'method', ownerName }: MethodOptions = {}
+  options: NativeBinding | MethodOptions = {}
 ): void {
-  const check = binding === 'method' ? receiverCheck(cls, name, receiver, ownerName) : undefined;
-  cls.dict.set(
+  const opts = typeof options === 'string' ? { binding: options } : options;
+  const binding = opts.binding ?? 'method';
+  const descriptorClass = descriptorClassOf(cls, name, binding);
+  const receiver = opts.receiver ?? (descriptorClass === wrapperDescriptorClass ? 'wrapper' : 'method');
+  const check = binding === 'method' ? receiverCheck(cls, name, receiver, opts.ownerName) : undefined;
+  const unboxes = PRIMITIVE_CLASSES.has(cls) && binding === 'method';
+  const unboxesArguments = unboxes && !RENDERING_METHODS.has(name);
+  const fn = new PyBuiltinFunction(
+    descriptorClass,
     name,
-    new PyBuiltinFunction(
-      methodDescriptorClass,
-      name,
-      (args, kwargs, boundTo) => {
-        check?.(args[0]);
-        return run(args[0], args.slice(1), kwargs, boundTo);
-      },
-      undefined,
-      binding,
-      cls.name
-    )
+    (args, kwargs, boundTo) => {
+      check?.(args[0]);
+      if (!unboxes) return run(args[0], args.slice(1), kwargs, boundTo);
+      return run(unbox(args[0]), unboxesArguments ? args.slice(1).map(unbox) : args.slice(1), kwargs, boundTo);
+    },
+    // A static method of a builtin type is a builtin function bound to the type, which calling passes no instance.
+    binding === 'static' ? cls : undefined,
+    binding,
+    cls.name
   );
+  descriptorOwners.set(fn, cls);
+  cls.dict.set(name, fn);
+}
+
+/**
+ * Whether a special method found on a class is a builtin type's own, which the interpreter implements natively rather
+ * than by calling it.
+ */
+export function isNativeMethod(value: PyValue | undefined): boolean {
+  if (!(value instanceof PyBuiltinFunction)) return false;
+  const { cls } = value;
+  return cls.name === 'method_descriptor' || cls === wrapperDescriptorClass || cls === classmethodDescriptorClass;
+}
+
+/** The class CPython gives a builtin method that `cls` defines under `name`. */
+export function descriptorClassOf(cls: PyClass, name: string, binding: NativeBinding): PyClass {
+  if (cls.isWrittenInPython && binding !== 'class') return functionClass;
+  if (binding === 'static') return builtinFunctionClass;
+  if (binding === 'class') return classmethodDescriptorClass;
+  return SLOT_NAMES.has(name) && !METHOD_TABLE_SLOTS.get(cls)?.includes(name)
+    ? wrapperDescriptorClass
+    : methodDescriptorClass;
+}
+
+const PRIMITIVE_CLASSES = new Set([intClass, boolClass, floatClass, strClass]);
+const RENDERING_METHODS = new Set(['__mod__', '__rmod__', 'format', 'format_map']);
+
+export function stringValue(value: PyValue | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const text = unbox(value);
+  return typeof text === 'string' ? text : undefined;
+}
+
+/** Native payloads of value subclasses and mixed-in Enum members; ordinary Enum members stay boxed. */
+export function unbox(value: PyValue): PyValue {
+  if (!(value instanceof PyInstance)) return value;
+  if (value.primitive !== undefined) return value.primitive;
+  const { enumValue, cls } = value;
+  if (enumValue !== undefined) {
+    const valueClass = classOf(enumValue);
+    if (valueClass !== objectClass && cls.isSubclassOf(valueClass)) return enumValue;
+  }
+  return value;
 }
 
 function receiverCheck(
   cls: PyClass,
   name: string,
   receiver: ReceiverCheck,
-  ownerName = cls.tpName ?? cls.name
+  ownerName = cls.typeName ?? cls.name
 ): ((self: PyValue | undefined) => void) | undefined {
   if (receiver === 'unchecked') return undefined;
   return (self) => {
@@ -391,10 +564,28 @@ export function classOf(value: PyValue): PyClass {
   }
 }
 
+/**
+ * The class of the instance that a builtin method copying or combining an instance of `cls` creates: the builtin
+ * type itself for a program's subclass of list, tuple, dict, set, or frozenset, which CPython's C types create, and
+ * `cls` for the others, such as the collections types, which create an instance of the receiver's class.
+ */
+export function resultClassOf(cls: PyClass): PyClass {
+  if (cls.isBuiltin) return cls;
+  const base = cls.mro.find((each) => each.isBuiltin) ?? objectClass;
+  return [listClass, tupleClass, dictClass, setClass, frozensetClass].includes(base) ? base : cls;
+}
+
 /** The name of a value's class, as error messages quote it. */
+/** A class's name as CPython's `%T` and `%N` formats show it: qualified by its module unless builtin or `__main__`. */
+export function fullyQualifiedName(cls: PyClass): string {
+  return cls.module === '__main__' || cls.module === 'builtins'
+    ? cls.qualifiedName
+    : `${cls.module}.${cls.qualifiedName}`;
+}
+
 export function typeName(value: PyValue): string {
   const cls = classOf(value);
-  return cls.tpName ?? cls.name;
+  return cls.typeName ?? cls.name;
 }
 
 /** The type an Argument Clinic error names for an argument, which spells None as `None` rather than its type. */
@@ -403,3 +594,11 @@ export function argumentTypeName(value: PyValue): string {
 }
 
 export type { Kwargs };
+
+/**
+ * Whether a value is a generator object that is an iterator: a generator or an awaitable helper, but not a coroutine or
+ * an async generator, which share the machinery of generators without being iterators.
+ */
+export function isIteratorGenerator(value: PyValue): value is PyGenerator {
+  return value instanceof PyGenerator && value.cls !== coroutineClass && value.cls !== asyncGeneratorClass;
+}

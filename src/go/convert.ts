@@ -63,9 +63,6 @@ export class Converter {
           declarations.push(this.convertDeclaration(child));
           break;
         }
-        case 'comment': {
-          break;
-        }
         default: {
           throw syntaxError(child, '関数や型、変数の宣言の外に文は書けません。');
         }
@@ -108,12 +105,12 @@ export class Converter {
   }
 
   private convertReceiver(node: Node): Receiver {
-    const parameters = named(node).filter((child) => child.type !== 'comment');
+    const parameters = named(node);
     if (parameters.length !== 1) throw syntaxError(node, 'メソッドのレシーバは1つだけ書けます。');
     const parameter = parameters[0];
     if (parameter.type === 'variadic_parameter_declaration')
       throw syntaxError(parameter, 'レシーバに ... は使えません。');
-    const names = parameter.childrenForFieldName('name').filter((child) => child !== null);
+    const names = parameter.childrenForFieldName('name');
     if (names.length > 1) throw syntaxError(parameter, 'メソッドのレシーバは1つだけ書けます。');
     let typeNode = required(parameter.childForFieldName('type'));
     while (typeNode.type === 'parenthesized_type') typeNode = named(typeNode)[0];
@@ -143,13 +140,9 @@ export class Converter {
 
   private convertTypeParameters(node: Node): TypeParameter[] {
     return named(node).flatMap((declaration) => {
-      if (declaration.type === 'comment') return [];
       const constraintNode = required(declaration.childForFieldName('type'));
       const constraint = this.convertConstraint(constraintNode);
-      return declaration
-        .childrenForFieldName('name')
-        .filter((name) => name !== null)
-        .map((name) => ({ ...spanOf(name), name: name.text, constraint }));
+      return declaration.childrenForFieldName('name').map((name) => ({ ...spanOf(name), name: name.text, constraint }));
     });
   }
 
@@ -186,7 +179,7 @@ export class Converter {
   }
 
   private convertParameters(node: Node): Parameter[] {
-    const declarations = named(node).filter((child) => child.type !== 'comment');
+    const declarations = named(node);
     const result: Parameter[] = [];
     for (const declaration of declarations) {
       const variadic = declaration.type === 'variadic_parameter_declaration' ? true : undefined;
@@ -443,7 +436,7 @@ export class Converter {
   }
 
   private convertStatements(list: Node): Statement[] {
-    return named(list).flatMap((child) => (child.type === 'comment' ? [] : [this.convertStatement(child)]));
+    return named(list).map((child) => this.convertStatement(child));
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- One case per statement kind.
@@ -492,7 +485,7 @@ export class Converter {
         return { kind: 'fallthrough', ...span };
       }
       case 'defer_statement': {
-        const call = named(node).find((child) => child.type !== 'comment');
+        const call = named(node)[0];
         return { kind: 'defer', ...span, call: this.convertExpression(required(call)) };
       }
       case 'labeled_statement': {
@@ -623,7 +616,7 @@ export class Converter {
   private convertFor(node: Node): Statement {
     const span = spanOf(node);
     const body = this.convertBlock(required(node.childForFieldName('body')));
-    const header = named(node).find((child) => child.type !== 'block' && child.type !== 'comment');
+    const header = named(node).find((child) => child.type !== 'block');
     if (!header) return { kind: 'for', ...span, body };
     if (header.type === 'range_clause') {
       const left = header.childForFieldName('left');
@@ -698,7 +691,7 @@ export class Converter {
           ? undefined
           : child
               .childrenForFieldName('type')
-              .filter((type) => type !== null && type.isNamed)
+              .filter((type) => type.isNamed)
               .map((type) =>
                 type.type === 'type_identifier' && type.text === 'nil' ? undefined : this.convertType(type)
               );
@@ -718,7 +711,7 @@ export class Converter {
 
   private convertExpressionList(node: Node): Expression[] {
     if (node.type !== 'expression_list') return [this.convertExpression(node)];
-    return named(node).flatMap((child) => (child.type === 'comment' ? [] : [this.convertExpression(child)]));
+    return named(node).map((child) => this.convertExpression(child));
   }
 
   // code-gauge-allow functionCognitiveComplexity 40 -- One case per expression kind.
@@ -791,10 +784,7 @@ export class Converter {
           kind: 'index',
           ...span,
           operand: this.convertExpression(required(node.childForFieldName('operand'))),
-          indices: node
-            .childrenForFieldName('index')
-            .filter((index) => index !== null)
-            .map((index) => this.convertExpression(index)),
+          indices: node.childrenForFieldName('index').map((index) => this.convertExpression(index)),
         };
       }
       case 'slice_expression': {
@@ -928,7 +918,6 @@ export class Converter {
     const body = required(node.type === 'literal_value' ? node : node.childForFieldName('body'));
     const elements: LiteralElement[] = [];
     for (const child of named(body)) {
-      if (child.type === 'comment') continue;
       if (child.type === 'keyed_element') {
         const key = required(child.childForFieldName('key'));
         const value = required(child.childForFieldName('value'));
@@ -946,10 +935,6 @@ export class Converter {
     if (inner.type === 'literal_value') return this.convertComposite(inner, undefined);
     return this.convertExpression(inner);
   }
-}
-
-function named(node: Node): Node[] {
-  return node.namedChildren.filter((child): child is Node => child !== null);
 }
 
 function required(node: Node | null | undefined): Node {
@@ -988,4 +973,9 @@ function checkNumberLiteral(node: Node): void {
 
 function unsupported(node: Node, what: string): never {
   throw new CompileError([{ row: node.startPosition.row, message: `${what}は、この採点環境では使えません。` }]);
+}
+
+/** The named children of a node without comments, which tree-sitter places among them wherever they appear. */
+function named(node: Node): Node[] {
+  return node.namedChildren.filter((child) => child.type !== 'comment');
 }

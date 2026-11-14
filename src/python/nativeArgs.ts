@@ -1,7 +1,9 @@
 import { pushAll } from './arrays';
+import { keywordEntries } from './callArguments';
 import { bindArguments, type Signature } from './calls';
 import { bestSuggestion } from './describe';
-import { typeError } from './types';
+import { equals } from './operators';
+import { stringValue, typeError } from './types';
 import type { Kwargs, PyTuple, PyValue } from './values';
 
 /**
@@ -72,8 +74,9 @@ function checkPositional(prefix: string, min: number, max: number, count: number
 }
 
 function checkKeywordNames(short: string, accepted: readonly string[], kwargs: Kwargs): void {
-  for (const key of kwargs?.keys() ?? []) {
-    if (accepted.includes(key)) continue;
+  for (const [rawKey] of keywordEntries(kwargs)) {
+    const key = stringValue(rawKey) as string;
+    if (accepted.some((name) => equals(rawKey, name))) continue;
     const suggestion = bestSuggestion(key, [...accepted]);
     throw typeError(
       `${short}() got an unexpected keyword argument '${key}'${suggestion ? `. Did you mean '${suggestion}'?` : ''}`
@@ -81,7 +84,6 @@ function checkKeywordNames(short: string, accepted: readonly string[], kwargs: K
   }
 }
 
-/** Follows `_PyArg_UnpackKeywords` (Python/getargs.c), whose checks run in this order. */
 function checkKeywordParser(
   short: string,
   { min, max, named = 0 }: ArgSpec,

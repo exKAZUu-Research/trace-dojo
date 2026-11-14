@@ -13,7 +13,8 @@ export interface TurtleTrace {
 export type TraceScalar = number | bigint | string | boolean | null;
 
 export type DisplayNode =
-  | { kind: 'value'; value: TraceScalar }
+  /** A value; `verbatim` text, such as a symbol's description, is shown without quotes. */
+  | { kind: 'value'; value: TraceScalar; verbatim?: true }
   | { kind: 'object' | 'array'; entries: Record<string, DisplayNode> };
 
 export interface TraceItem {

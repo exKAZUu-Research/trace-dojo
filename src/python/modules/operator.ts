@@ -1,4 +1,4 @@
-import { registerModule, registerModuleValues, registerUnsupportedAttributes } from '../modules';
+import { registerModule } from '../modules';
 import { checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import {
@@ -6,18 +6,18 @@ import {
   deleteItem,
   exactLength,
   getAttribute,
-  getAttributeOrUndefined,
   getItem,
   isTruthy,
   iterateOr,
   lookupSpecial,
   type NextFunction,
+  remainingOf,
   setItem,
 } from '../objects';
 import { binaryOp, compareOp, contains, equals, inplaceOp, isSame, unaryOp } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { exceptionClassNamed, nativeFunction, None, NotImplemented, typeError, typeName, valueError } from '../types';
-import { DONE, type Kwargs, PyError, type PyValue } from '../values';
+import { DONE, type Kwargs, PyDict, PyError, PyIterator, type PyValue } from '../values';
 import { attrgetterClass, itemgetterClass, methodcallerClass } from './operatorCallables';
 
 const BINARY = {
@@ -133,15 +133,6 @@ registerModule('operator', () => {
   }
   return namespace;
 });
-registerModuleValues('operator', '', PUBLIC_NAMES);
-registerUnsupportedAttributes('operator', {
-  __builtins__: 'モジュールの __builtins__（組み込みの名前空間そのもの）',
-  __cached__: 'モジュールの __cached__（ファイルのパス）',
-  __doc__: 'モジュールの説明文（__doc__）',
-  __file__: 'モジュールの __file__（ファイルのパス）',
-  __loader__: 'モジュールの __loader__（import の仕組み）',
-  __spec__: 'モジュールの __spec__（import の仕組み）',
-});
 
 /** The functions of `_operator`, each with the number of arguments it takes. */
 function operatorFunctions(): [string, number, Run][] {
@@ -194,10 +185,12 @@ function variadic(name: string, min: number, max: number, run: Run, hasKeywords 
   });
 }
 
+/** Whether a value is a sequence as `PySequence_Check` decides: it supports indexing and is not a dict. */
 function sequenceOperand(value: PyValue): PyValue {
-  if (getAttributeOrUndefined(value, '__getitem__') === undefined) {
-    throw typeError(`'${typeName(value)}' object can't be concatenated`);
-  }
+  const isSequence =
+    typeof value === 'string' ||
+    (typeof value === 'object' && !(value instanceof PyDict) && lookupSpecial(value, '__getitem__') !== undefined);
+  if (!isSequence) throw typeError(`'${typeName(value)}' object can't be concatenated`);
   return value;
 }
 
@@ -206,7 +199,7 @@ function countOf(container: PyValue, item: PyValue): PyValue {
   const next = iterateArgument(container);
   for (let element = next(); element !== DONE; element = next()) {
     currentRuntime().spend();
-    if (equals(element, item)) count++;
+    if (isSame(element, item) || equals(element, item)) count++;
   }
   return count;
 }
@@ -216,7 +209,7 @@ function indexOf(container: PyValue, item: PyValue): PyValue {
   const next = iterateArgument(container);
   for (let element = next(); element !== DONE; element = next()) {
     currentRuntime().spend();
-    if (equals(element, item)) return index;
+    if (isSame(element, item) || equals(element, item)) return index;
     index++;
   }
   throw valueError('sequence.index(x): x not in sequence');
@@ -233,6 +226,10 @@ function lengthHint(value: PyValue, fallback: PyValue): PyValue {
     return exactLength(value);
   } catch (error) {
     if (!(error instanceof PyError) || !error.exception.cls.isSubclassOf(exceptionClassNamed('TypeError'))) throw error;
+  }
+  if (value instanceof PyIterator) {
+    const remaining = remainingOf(value.next);
+    if (remaining !== undefined) return BigInt(remaining);
   }
   const hint = lookupSpecial(value, '__length_hint__');
   if (hint === undefined) return defaultLength;

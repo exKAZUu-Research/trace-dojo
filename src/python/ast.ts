@@ -3,9 +3,6 @@ export interface Span {
   row: number;
 }
 
-/** The row of every construct of standard library code written in Python, which is not part of the program. */
-export const LIBRARY_ROW = -1;
-
 /** How a name is read and written, settled by the scopes of the program before it runs. */
 export type NameAccess =
   /** A variable of the running function. */
@@ -29,7 +26,9 @@ export type Constant =
   | { kind: 'int'; value: bigint }
   | { kind: 'float'; value: number }
   | { kind: 'imaginary'; value: number }
-  | { kind: 'str'; value: string }
+  /** A string, which `isUnicode` marks when it starts with a `u` prefix, as annotations stringified keep. */
+  | { kind: 'str'; value: string; isUnicode?: boolean }
+  | { kind: 'bytes'; value: Uint8Array }
   | { kind: 'bool'; value: boolean }
   | { kind: 'none' }
   | { kind: 'ellipsis' };
@@ -40,6 +39,8 @@ export interface FormattedValue {
   spec?: Expression;
   /** The source text of a self-documenting `{x=}`, which precedes the value. */
   debugText?: string;
+  /** The source text of the expression, which a t-string's Interpolation keeps. */
+  expressionText?: string;
 }
 
 export type Argument =
@@ -56,13 +57,26 @@ export interface Comprehension {
   target: Target;
   iterable: Expression;
   conditions: Expression[];
+  /** Whether the clause is `async for`, which iterates with `__aiter__` and `__anext__`. */
+  isAsync?: true;
+}
+
+/**
+ * Marks an expression or a statement that may suspend the running generator or coroutine in the middle of it, because
+ * it contains a `yield` or an `await`, or, in a program that may run threads, a call, which may wait for another thread.
+ * Only those take the slower path that can suspend; the others evaluate synchronously.
+ */
+export interface Suspends {
+  suspends?: true;
 }
 
 export type Expression = Span &
+  Suspends &
   (
     | { kind: 'constant'; value: Constant }
     | NameRef
-    | { kind: 'fstring'; parts: (string | FormattedValue)[] }
+    /** An f-string, or a t-string (PEP 750) when `template` is set. */
+    | { kind: 'fstring'; parts: (string | FormattedValue)[]; template?: boolean }
     | { kind: 'list' | 'tuple' | 'set'; elements: Element[] }
     | { kind: 'dict'; items: DictItem[] }
     | { kind: 'attribute'; object: Expression; name: string }
@@ -73,6 +87,7 @@ export type Expression = Span &
     | { kind: 'unary'; operator: '-' | '+' | '~'; operand: Expression }
     | { kind: 'not'; operand: Expression }
     | { kind: 'boolean'; operator: 'and' | 'or'; left: Expression; right: Expression }
+    | { kind: 'conditional'; test: Expression; body: Expression; orelse: Expression }
     | { kind: 'compare'; operands: Expression[]; operators: CompareOperator[] }
     | { kind: 'lambda'; fn: FunctionDef }
     | { kind: 'namedExpression'; target: NameRef; value: Expression }
@@ -87,6 +102,9 @@ export type Expression = Span &
         /** A generator expression's `__qualname__`, such as `f.<locals>.<genexpr>`. */
         qualifiedName?: string;
       }
+    | { kind: 'yield'; value?: Expression }
+    | { kind: 'yieldFrom'; value: Expression }
+    | { kind: 'await'; value: Expression }
   );
 
 export type BinaryOperator = '+' | '-' | '*' | '/' | '//' | '%' | '**' | '@' | '<<' | '>>' | '&' | '|' | '^';
@@ -98,7 +116,12 @@ export type Target =
   | NameRef
   | (Span & { kind: 'attribute'; object: Expression; name: string })
   | (Span & { kind: 'subscript'; object: Expression; index: Expression })
-  | (Span & { kind: 'unpack'; elements: Target[] });
+  | (Span & {
+      kind: 'unpack';
+      elements: Target[];
+      /** The index of the starred element, which takes a list of the items the others leave. */
+      starIndex?: number;
+    });
 
 /** The variables of a function, a class body, a comprehension, or the module, as the compiler settles them. */
 export interface ScopeInfo {
@@ -110,6 +133,15 @@ export interface ScopeInfo {
   /** Names captured from enclosing functions. */
   frees: string[];
   isGenerator: boolean;
+  /** The cells of the list, set, and dict comprehensions in a function, which CPython inlines into its code. */
+  inlinedCells?: string[];
+  /**
+   * Whether the scope is an `async def` (a coroutine, or an async generator when it also yields) or a comprehension
+   * that awaits, which then suspends the coroutine running it or, for a generator expression, is an async generator.
+   */
+  isAsync?: true;
+  /** The `__future__` features enabled in the compilation unit this scope belongs to. */
+  futureFeatures?: readonly string[];
 }
 
 export interface Parameter {
@@ -118,6 +150,26 @@ export interface Parameter {
   default?: Expression;
   annotation?: Expression;
   row: number;
+}
+
+/** A type parameter written in brackets, such as `T: int` in `def f[T: int]()`. */
+export interface TypeParam extends Span {
+  kind: 'TypeVar' | 'TypeVarTuple' | 'ParamSpec';
+  /** The name as written, which the parameter's `__name__` gives. */
+  name: string;
+  binding: NameRef;
+  bound?: Expression;
+  constraints?: Expression[];
+  default?: Expression;
+}
+
+/**
+ * The type parameters of a definition, which a scope of their own binds between the enclosing scope and the
+ * definition's. Their bounds and defaults, the annotations of a function, and the bases of a class belong to it.
+ */
+export interface TypeParams {
+  scope: ScopeInfo;
+  params: TypeParam[];
 }
 
 export interface FunctionDef extends Span {
@@ -136,6 +188,7 @@ export interface FunctionDef extends Span {
   className?: string;
   /** Whether the body uses `super` or `__class__`, which then needs the class it is defined in. */
   usesClassCell: boolean;
+  typeParams?: TypeParams;
 }
 
 export interface ClassDef extends Span {
@@ -148,6 +201,8 @@ export interface ClassDef extends Span {
   scope: ScopeInfo;
   decorators: Expression[];
   doc?: string;
+  /** The type parameters, with the names their scope binds to the tuple of them and to `Generic[...]`, its last base. */
+  typeParams?: TypeParams & { tuple: NameRef; genericBase: NameRef };
 }
 
 export interface ExceptHandler extends Span {
@@ -190,21 +245,45 @@ export interface ImportName {
 }
 
 export type Statement = Span &
+  Suspends &
+  /** `displays` marks a statement of code compiled in 'single' mode, which shows its value as `sys.displayhook` does. */
   (
-    | { kind: 'expression'; expression: Expression; stepRow?: number }
-    | { kind: 'yield'; value?: Expression }
+    | { kind: 'expression'; expression: Expression; stepRow?: number; displays?: true }
     | { kind: 'assign'; targets: Target[]; value: Expression; stepRow?: number }
     | { kind: 'augmentedAssign'; target: Target; operator: BinaryOperator; value: Expression; stepRow?: number }
-    | { kind: 'annotatedAssign'; target: Target; annotation: Expression; value?: Expression; stepRow?: number }
+    | {
+        kind: 'annotatedAssign';
+        target: Target;
+        annotation: Expression;
+        value?: Expression;
+        stepRow?: number;
+        /** Whether the annotation is stored into `__annotations__`, as `from __future__ import annotations` does. */
+        storesAnnotation?: boolean;
+        /** The position among a module's annotations, which running it adds to `__conditional_annotations__`. */
+        annotationIndex?: number;
+      }
+    /** Creates the `__annotations__` dict that annotated assignments store into under `from __future__ import annotations`. */
+    | { kind: 'setupAnnotations' }
+    /** Binds a module's `__annotate__` and `__conditional_annotations__`, which its annotations need. */
+    | { kind: 'setupAnnotate' }
     | { kind: 'delete'; targets: Target[]; stepRow?: number }
     | { kind: 'pass' }
     | { kind: 'break' | 'continue' }
     | { kind: 'return'; value?: Expression }
     | { kind: 'raise'; exception?: Expression; cause?: Expression }
+    | { kind: 'assert'; test: Expression; message?: Expression }
     | { kind: 'global' | 'nonlocal' }
     | { kind: 'if'; test: Expression; body: Statement[]; orelse: Statement[] }
     | { kind: 'while'; test: Expression; body: Statement[]; orelse: Statement[] }
-    | { kind: 'for'; target: Target; iterable: Expression; body: Statement[]; orelse: Statement[]; stepRow?: number }
+    | {
+        kind: 'for';
+        target: Target;
+        iterable: Expression;
+        body: Statement[];
+        orelse: Statement[];
+        stepRow?: number;
+        isAsync?: true;
+      }
     | {
         kind: 'try';
         body: Statement[];
@@ -213,10 +292,12 @@ export type Statement = Span &
         orelse: Statement[];
         finalbody: Statement[];
       }
-    | { kind: 'with'; items: WithItem[]; body: Statement[]; stepRow?: number }
+    | { kind: 'with'; items: WithItem[]; body: Statement[]; stepRow?: number; isAsync?: true }
     | { kind: 'match'; subject: Expression; cases: MatchCase[] }
     | { kind: 'functionDef'; fn: FunctionDef; binding: NameRef }
     | { kind: 'classDef'; cls: ClassDef; binding: NameRef }
+    /** `type Name[T] = value`, whose value its type parameters' scope evaluates when first read. */
+    | { kind: 'typeAlias'; name: string; binding: NameRef; typeParams: TypeParams; value: Expression }
     | { kind: 'import'; names: ImportName[] }
     | { kind: 'importFrom'; module: string; names: { name: string; binding: NameRef }[] }
     | { kind: 'importStar'; module: string }
@@ -226,4 +307,10 @@ export interface Module {
   body: Statement[];
   scope: ScopeInfo;
   doc?: string;
+  /** The `__future__` features the module enables, which the code it compiles inherits. */
+  futureFeatures: string[];
+  /** The source text the module was parsed from. */
+  source?: string;
+  /** The depth of the deepest node of its syntax tree, which tells how deeply its code may recurse when evaluated. */
+  nestingDepth?: number;
 }

@@ -59,15 +59,35 @@ function mod(x: number, y: number): number {
   return x % y;
 }
 
-/** `math.Remainder` (IEEE 754): x - n*y with n the integer nearest x/y, halves to even. */
+/** `math.Remainder` (IEEE 754), transcribed from Go's `math/remainder.go`. */
 function remainder(x: number, y: number): number {
+  const tiny = 4.450147717014403e-308;
+  const halfMax = Number.MAX_VALUE / 2;
   if (Number.isNaN(x) || Number.isNaN(y) || !Number.isFinite(x) || y === 0) return Number.NaN;
   if (!Number.isFinite(y)) return x;
-  const quotient = x / y;
-  let n = Math.round(quotient);
-  if (Math.abs(quotient - Math.trunc(quotient)) === 0.5) n = 2 * Math.round(quotient / 2);
-  const result = x - n * y;
-  return result === 0 ? Math.sign(x) * 0 : result;
+  let sign = false;
+  let ax = x;
+  let ay = y;
+  if (ax < 0) {
+    ax = -ax;
+    sign = true;
+  }
+  if (ay < 0) ay = -ay;
+  if (ax === ay) return sign ? -0 : 0;
+  if (ay <= halfMax) ax %= ay + ay;
+  if (ay < tiny) {
+    if (ax + ax > ay) {
+      ax -= ay;
+      if (ax + ax >= ay) ax -= ay;
+    }
+  } else {
+    const yHalf = 0.5 * ay;
+    if (ax > yHalf) {
+      ax -= ay;
+      if (ax >= yHalf) ax -= ay;
+    }
+  }
+  return sign ? -ax : ax;
 }
 
 /** `math.Round`: halves away from zero. */
@@ -150,6 +170,15 @@ export function hypot(x: number, y: number): number {
   return p * Math.sqrt(fma(q, q, 1));
 }
 
+/** `math.Nextafter32`: the next float32 after x towards y. */
+function nextafter32(x: number, y: number): number {
+  if (Number.isNaN(x) || Number.isNaN(y)) return Number.NaN;
+  if (x === y) return x;
+  if (x === 0) return copysign(float32frombits(1n), y);
+  const bits = float32bits(x);
+  return float32frombits(y > x === x > 0 ? bits + 1n : bits - 1n);
+}
+
 const MAX_UINT64 = (1n << 64n) - 1n;
 
 const members: Record<string, Entity> = {
@@ -200,23 +229,8 @@ const members: Record<string, Entity> = {
   Log10: unary('Log10', goMath.log10),
   Log1p: unary('Log1p', goMath.log1p),
   Sin: unary('Sin', goMath.sin),
-  Sincos: nativeFunction('Sincos', fn([FLOAT64], [FLOAT64, FLOAT64]), ([x]) => [
-    goMath.sin(x as number),
-    goMath.cos(x as number),
-  ]),
-  Pow10: nativeFunction('Pow10', fn([INT], [FLOAT64]), ([n]) => pow10(Number(n as bigint))),
-  Logb: unary('Logb', (x) => {
-    if (x === 0) return -Infinity;
-    if (!Number.isFinite(x)) return Number.isNaN(x) ? x : Infinity;
-    return goMath.frexp(x)[1] - 1;
-  }),
-  Ilogb: nativeFunction('Ilogb', fn([FLOAT64], [INT]), ([value]) => {
-    const x = value as number;
-    if (x === 0) return -(2n ** 31n);
-    if (!Number.isFinite(x)) return 2n ** 31n - 1n;
-    return BigInt(goMath.frexp(x)[1] - 1);
-  }),
   Cos: unary('Cos', goMath.cos),
+  Sincos: nativeFunction('Sincos', fn([FLOAT64], [FLOAT64, FLOAT64]), ([x]) => goMath.sincos(x as number)),
   Tan: unary('Tan', goMath.tan),
   Asin: unary('Asin', goMath.asin),
   Acos: unary('Acos', goMath.acos),
@@ -230,6 +244,22 @@ const members: Record<string, Entity> = {
   Atan2: binary('Atan2', goMath.atan2),
   Hypot: binary('Hypot', hypot),
   Pow: binary('Pow', goMath.pow),
+  Pow10: nativeFunction('Pow10', fn([INT], [FLOAT64]), ([n]) => goMath.pow10(n as bigint)),
+  Gamma: unary('Gamma', goMath.gamma),
+  Lgamma: nativeFunction('Lgamma', fn([FLOAT64], [FLOAT64, INT]), ([x]) => {
+    const [lgamma, sign] = goMath.lgamma(x as number);
+    return [lgamma, BigInt(sign)];
+  }),
+  Erf: unary('Erf', goMath.erf),
+  Erfc: unary('Erfc', goMath.erfc),
+  Erfinv: unary('Erfinv', goMath.erfinv),
+  Erfcinv: unary('Erfcinv', goMath.erfcinv),
+  J0: unary('J0', goMath.j0),
+  J1: unary('J1', goMath.j1),
+  Jn: nativeFunction('Jn', fn([INT, FLOAT64], [FLOAT64]), ([n, x]) => goMath.jn(n as bigint, x as number)),
+  Y0: unary('Y0', goMath.y0),
+  Y1: unary('Y1', goMath.y1),
+  Yn: nativeFunction('Yn', fn([INT, FLOAT64], [FLOAT64]), ([n, x]) => goMath.yn(n as bigint, x as number)),
   Mod: binary('Mod', mod),
   Remainder: binary('Remainder', remainder),
   Max: binary('Max', max),
@@ -252,6 +282,8 @@ const members: Record<string, Entity> = {
     const [fraction, exponent] = goMath.frexp(x as number);
     return [fraction, BigInt(exponent)];
   }),
+  Ilogb: nativeFunction('Ilogb', fn([FLOAT64], [INT]), ([x]) => BigInt(goMath.ilogb(x as number))),
+  Logb: unary('Logb', goMath.logb),
   Ldexp: nativeFunction('Ldexp', fn([FLOAT64, INT], [FLOAT64]), ([x, exponent]) =>
     goMath.ldexp(x as number, Number(exponent as bigint))
   ),
@@ -262,6 +294,9 @@ const members: Record<string, Entity> = {
   Float32bits: nativeFunction('Float32bits', fn([BASIC.float32], [BASIC.uint32]), ([x]) => float32bits(x as number)),
   Float32frombits: nativeFunction('Float32frombits', fn([BASIC.uint32], [BASIC.float32]), ([bits]) =>
     float32frombits(bits as bigint)
+  ),
+  Nextafter32: nativeFunction('Nextafter32', fn([BASIC.float32, BASIC.float32], [BASIC.float32]), ([x, y]) =>
+    nextafter32(x as number, y as number)
   ),
   Nextafter: binary('Nextafter', (x, y) => {
     if (Number.isNaN(x) || Number.isNaN(y)) return Number.NaN;
@@ -282,31 +317,7 @@ function exactLog(name: string, of: string): Entity {
   return exactFloat(name, 10n ** BigInt(fraction.length), BigInt(whole + fraction));
 }
 
-export const MATH_PACKAGE = definePackage('math', members, [
-  'Gamma',
-  'Lgamma',
-  'Erf',
-  'Erfc',
-  'Erfinv',
-  'Erfcinv',
-  'J0',
-  'J1',
-  'Jn',
-  'Y0',
-  'Y1',
-  'Yn',
-]);
+export const MATH_PACKAGE = definePackage('math', members);
 
 export { Complex };
 export type { Value };
-
-const POW10_TAB = Array.from({ length: 32 }, (_, index) => Number(`1e${index}`));
-const POW10_POS_TAB32 = Array.from({ length: 10 }, (_, index) => Number(`1e${index * 32}`));
-const POW10_NEG_TAB32 = Array.from({ length: 11 }, (_, index) => Number(`1e-${index * 32}`));
-
-/** Go's Pow10, which multiplies entries of its tables of powers of ten. */
-function pow10(n: number): number {
-  if (n >= 0 && n <= 308) return POW10_POS_TAB32[Math.floor(n / 32)] * POW10_TAB[n % 32];
-  if (n >= -323 && n <= 0) return POW10_NEG_TAB32[Math.floor(-n / 32)] / POW10_TAB[-n % 32];
-  return n > 0 ? Infinity : 0;
-}

@@ -1,3 +1,4 @@
+// oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt reads as raw bytes.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -5,7 +6,20 @@ import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { Hoist, Part } from './compilerBase';
 import type { Type } from './types';
-import { Cell, Channel, GoArray, GoFunc, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from './values';
+import {
+  Cell,
+  Channel,
+  copyValue,
+  GoArray,
+  GoFunc,
+  GoMap,
+  GoStruct,
+  Iface,
+  Pointer,
+  Slice,
+  type Value,
+  writeInPlace,
+} from './values';
 
 /** What a statement does next, when it does not simply complete. */
 export type Completion =
@@ -72,6 +86,33 @@ export interface FunctionInfo {
   params: { slot: number; boxed: boolean }[];
 }
 
+/**
+ * The stack buffers of a function's call, and those of the calls inlined into it, by call site; `resultStaysLocal`
+ * tells whether the result of an inlined call stays in the caller, which lets what the callee returns live on its stack,
+ * and `constants` what of an inlined call Go's compiler knows as constants from the caller.
+ */
+export interface StackBuffers {
+  used: WeakSet<object>;
+  inlined: WeakMap<object, StackBuffers>;
+  resultStaysLocal: boolean;
+  constants: InlinedConstants;
+}
+
+/**
+ * What Go's compiler knows as constants in a call it inlines: the parameters, by index, from the arguments, and the
+ * variables the callee captures, from their definitions reaching the call.
+ */
+export interface InlinedConstants {
+  params: readonly boolean[];
+  captures: ReadonlySet<object>;
+}
+
+const NO_CONSTANTS: InlinedConstants = { params: [], captures: new Set() };
+
+function newStackBuffers(resultStaysLocal = false, constants = NO_CONSTANTS): StackBuffers {
+  return { used: new WeakSet(), inlined: new WeakMap(), resultStaysLocal, constants };
+}
+
 /** Marks a local whose scope has not begun or has ended. */
 export const UNASSIGNED: unique symbol = Symbol('unassigned');
 
@@ -95,9 +136,52 @@ export class Frame implements TracedFrame {
     readonly cells: readonly Cell[],
     readonly callRow: number | undefined,
     /** The frame whose deferred call this frame runs, where `recover` may stop the panic. */
-    readonly deferredFor: Frame | undefined
+    readonly deferredFor: Frame | undefined,
+    /**
+     * The stack buffers appends have taken, by the append that took each; a call that Go's compiler inlines shares the
+     * caller's, as its body becomes part of the caller.
+     */
+    private stackBuffers?: StackBuffers
   ) {
     this.locals = Array.from({ length: info.slotCount }, () => UNASSIGNED);
+  }
+
+  usedStackBuffer(append: object): boolean {
+    return this.stackBuffers?.used.has(append) ?? false;
+  }
+
+  useStackBuffer(append: object): void {
+    (this.stackBuffers ??= newStackBuffers()).used.add(append);
+  }
+
+  /** Whether the values this call returns stay in a caller that Go's compiler inlines it into. */
+  get resultStaysLocal(): boolean {
+    return this.stackBuffers?.resultStaysLocal ?? false;
+  }
+
+  /** Whether Go's compiler knows the parameter at `index` as a constant, from the argument of the call it inlined. */
+  constantParam(index: number): boolean {
+    return this.stackBuffers?.constants.params[index] ?? false;
+  }
+
+  /** Whether Go's compiler knows a variable the function captures as a constant, in the call it inlined. */
+  constantCapture(variable: object): boolean {
+    return this.stackBuffers?.constants.captures.has(variable) ?? false;
+  }
+
+  /** The stack buffers of a call at `site` that Go's compiler inlines into this function. */
+  inlinedStackBuffers(
+    site: object,
+    resultStaysLocal: boolean,
+    constants: (frame: Frame) => InlinedConstants
+  ): StackBuffers {
+    const { inlined } = (this.stackBuffers ??= newStackBuffers());
+    let buffers = inlined.get(site);
+    if (!buffers) {
+      buffers = newStackBuffers(resultStaysLocal, constants(this));
+      inlined.set(site, buffers);
+    }
+    return buffers;
   }
 }
 
@@ -141,9 +225,30 @@ export class Runtime implements TracedRuntime<Frame> {
   /** The package-level variables, which pointers may refer to. */
   globals: Cell[] = [];
   private allocated = 0;
+  private readonly stdoutDecoder = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
+  private readonly stderrDecoder = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
+  }
+
+  writeStdout(bytes: string): void {
+    if (bytes.length === 0) return;
+    const text = this.stdoutDecoder.decode(rawBytes(bytes), { stream: true });
+    if (text.length > 0) this.io.stdout.write(text);
+  }
+
+  writeStderr(bytes: string): void {
+    if (bytes.length === 0) return;
+    const text = this.stderrDecoder.decode(rawBytes(bytes), { stream: true });
+    if (text.length > 0) this.io.stderr.write(text);
+  }
+
+  flushOutput(): void {
+    const out = this.stdoutDecoder.decode();
+    if (out.length > 0) this.io.stdout.write(out);
+    const err = this.stderrDecoder.decode();
+    if (err.length > 0) this.io.stderr.write(err);
   }
 
   spend(cost = 1): void {
@@ -172,9 +277,10 @@ export class Runtime implements TracedRuntime<Frame> {
     callRow: number | undefined,
     deferredFor?: Frame,
     /** Receives the frame when the call ends, for reading the entry point's final variables. */
-    onExit?: (frame: Frame) => void
+    onExit?: (frame: Frame) => void,
+    stackBuffers?: StackBuffers
   ): Value | Value[] {
-    return runToEnd(this.resume(info, cells, args, callRow, deferredFor, onExit));
+    return runToEnd(this.resume(info, cells, args, callRow, deferredFor, onExit, stackBuffers));
   }
 
   /** Calls a compiled function as {@link call} does, yielding when its goroutine blocks. */
@@ -184,13 +290,14 @@ export class Runtime implements TracedRuntime<Frame> {
     args: Value[],
     callRow: number | undefined,
     deferredFor?: Frame,
-    onExit?: (frame: Frame) => void
+    onExit?: (frame: Frame) => void,
+    stackBuffers?: StackBuffers
   ): Suspending<Value | Value[]> {
     this.spend();
     if (this.frames.length >= LIMITS.maxCallDepth) {
       throw new GoFatal('runtime: goroutine stack exceeds 1000000000-byte limit\nfatal error: stack overflow');
     }
-    const frame = new Frame(this, info, cells, callRow, deferredFor);
+    const frame = new Frame(this, info, cells, callRow, deferredFor, stackBuffers);
     for (const [index, { slot, boxed }] of info.params.entries())
       frame.locals[slot] = boxed ? new Cell(args[index]) : args[index];
     const frames = this.frames;
@@ -286,15 +393,24 @@ export function runToEnd<T>(computation: Suspending<T>): T {
   );
 }
 
+function rawBytes(bytes: string): Uint8Array {
+  const array = new Uint8Array(bytes.length);
+  for (let index = 0; index < bytes.length; index++) array[index] = bytes.charCodeAt(index) & 0xff;
+  return array;
+}
+
 function pushChildren(item: object, stack: unknown[], turtles: Set<unknown>): void {
   if (item instanceof Cell) stack.push(item.v);
   else if (item instanceof Pointer) stack.push(item.base);
-  else if (Array.isArray(item)) stack.push(...(item as unknown[]));
-  else if (item instanceof GoStruct) {
+  else if (Array.isArray(item)) {
+    for (const entry of item as unknown[]) stack.push(entry);
+  } else if (item instanceof GoStruct) {
     stack.push(item.fields);
     const native = item.native;
     if (native?.turtle) turtles.add(native.turtle);
-    else if (native) stack.push(...Object.values(native));
+    else if (native) {
+      for (const value of Object.values(native)) stack.push(value);
+    }
   } else if (item instanceof GoArray) stack.push(item.elements);
   else if (item instanceof Slice) stack.push(item.array);
   else if (item instanceof GoMap) for (const entry of item.entries.values()) stack.push(entry.key, entry.value);
@@ -333,6 +449,15 @@ export function evaluateAll(frame: Frame, evals: readonly Eval[]): Value[] {
   return values;
 }
 
+export function withTemporary<T>(frame: Frame, value: unknown, run: () => T): T {
+  frame.temporaries.push(value);
+  try {
+    return run();
+  } finally {
+    frame.temporaries.pop();
+  }
+}
+
 /** Reads a local, which is a cell when a closure or a pointer may share it. */
 export function readLocal(frame: Frame, slot: number): Value {
   const value = frame.locals[slot];
@@ -341,8 +466,9 @@ export function readLocal(frame: Frame, slot: number): Value {
 
 export function writeLocal(frame: Frame, slot: number, value: Value): void {
   const current = frame.locals[slot];
-  if (current instanceof Cell) current.v = value;
-  else frame.locals[slot] = value;
+  if (current instanceof Cell) current.v = writeInPlace(current.v, value);
+  else if (current === UNASSIGNED) frame.locals[slot] = copyValue(value);
+  else frame.locals[slot] = writeInPlace(current, value);
 }
 
 /** Runs the computations that may block of a statement, keeping their results in their hidden slots. */

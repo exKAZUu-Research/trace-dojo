@@ -81,16 +81,11 @@ test.each([
   ['a turtle leaving the board', 't = Turtle(0, 6)\nt.前に進む()', 'RuntimeError: Out of bounds: (0, 7)'],
   ['an invalid color', "Turtle(0, 0, 'Z')", 'RuntimeError: Invalid color: Z'],
   ['unbounded recursion', 'def f(n):\n    return f(n + 1)\nf(0)', 'RecursionError: maximum recursion depth exceeded'],
-  ['standard input', 'input()', '標準入力（input()）は、この採点環境では使えません。'],
+  ['standard input at EOF', 'input()', 'EOFError: EOF when reading a line'],
   [
-    'a subclass of a builtin type',
-    'class Stack(list):\n    pass',
-    '組み込み型 list を継承するクラスは、この採点環境では使えません。',
-  ],
-  [
-    'a subclass of a library type, even inside try',
-    'import collections\ntry:\n    class C(collections.Counter):\n        pass\nexcept TypeError:\n    pass',
-    '組み込み型 Counter を継承するクラスは、この採点環境では使えません。',
+    'random bytes from the operating system',
+    'import random\ntry:\n    random.SystemRandom().randbytes(4)\nexcept BaseException:\n    pass',
+    'random.SystemRandom（OS の乱数）は、この採点環境では使えません。',
   ],
   ['a subclass of bool', 'class B(bool):\n    pass', "TypeError: type 'bool' is not an acceptable base type"],
 ])('%s ends the program as CPython describes it', (_, source, description) => {
@@ -270,8 +265,8 @@ Derived.kept.forward()`;
 });
 
 test('a run does not see the classes an earlier run defined', () => {
-  executeProgram('python', 'class Leaked:\n    pass');
-  const program = `names = [cls.__name__ for cls in object.__subclasses__()]
+  executeProgram('python', 'class Leaked(int):\n    pass');
+  const program = `names = [cls.__name__ for cls in int.__subclasses__()]
 if 'Leaked' in names:
     raise ValueError(str(names))`;
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
@@ -302,7 +297,7 @@ test.each([
     'match 5:\n    case 1 | _:\n        pass\n    case _:\n        pass',
     1,
   ],
-  ['a try without except or finally', 'try:\n    pass\nelse:\n    pass', 0],
+  ['a try without except or finally', 'try:\n    pass\nelse:\n    pass', 2],
   ['an else clause after a statement on its line', 'if True: x = 1; else: x = 2', 0],
   ['a bare * followed only by **kwargs', 'def f(*, **kwargs):\n    pass', 0],
   [
@@ -338,7 +333,6 @@ test.each([
   ['two as in one pattern', 'match 1:\n    case 1 as a as b:\n        pass', 1],
   ['an else indented as deep as its if body', 'if True:\n    x = 1\n    else:\n        x = 2', 2],
   ['an except indented as deep as its try body', 'try:\n    x = 1\n    except ValueError:\n        x = 2', 2],
-  ['a conditional expression, which this grader does not support', 'x = 1 if True else 2', 0],
   ['an import of a file', 'import mymodule', 0],
   ['a missing indented block at the end', 'x = 1\nif x:\n', 1],
   ['an unexpected indent after a syntax error', 'x = = 1\n    y = 2', 0],
@@ -466,11 +460,6 @@ test.each([
   ['hash() of a list', 'hash([])', "TypeError: unhashable type: 'list'"],
   ['a Counter of lists', 'import collections\ncollections.Counter([[]])', "TypeError: unhashable type: 'list'"],
   [
-    'the traceback of a raised exception',
-    'try:\n    1 / 0\nexcept Exception as e:\n    e.__traceback__',
-    '例外のトレースバック（__traceback__）は、この採点環境では使えません。',
-  ],
-  [
     'math.erf, which CPython takes from the C library',
     'import math\nmath.erf(1.5)',
     'math.erf()（C ライブラリの erf と最後の桁まで同じ値を出せないため）は、この採点環境では使えません。',
@@ -486,6 +475,28 @@ for name, listed in names:
         raise ValueError(name)
 if dir(1) != sorted(dir(int)) or '__dict__' in dir(object()):
     raise ValueError('dir')`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test('the functional API of Enum and dataclasses with slots give what CPython gives', () => {
+  const program = `from dataclasses import dataclass
+from enum import Enum, Flag, IntEnum
+import typing
+@dataclass(slots=True, frozen=True)
+class S:
+    a: int
+    b: int = 2
+E = Enum('E', 'A B')
+H = Enum('H', [('X', 10)])
+J = IntEnum('J', 'A,B', start=5)
+K = Flag('K', 'R W')
+actual = [repr(S(1)), S.__slots__, hasattr(S(1), '__dict__'), hash(S(1)) == hash((1, 2)), repr(list(E)), repr(H.X),
+          repr(list(J)), repr(K.R | K.W), repr(typing.List[typing.TypeVar('T')][int]), repr(int | None)]
+expected = ['S(a=1, b=2)', ('a', 'b'), False, True, '[<E.A: 1>, <E.B: 2>]', '<H.X: 10>', '[<J.A: 5>, <J.B: 6>]',
+            '<K.R|W: 3>', 'typing.List[int]', 'int | None']
+for a, e in zip(actual, expected):
+    if a != e:
+        raise ValueError(repr(a) + ' != ' + repr(e))`;
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 

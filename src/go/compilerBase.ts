@@ -4,9 +4,13 @@ import type { Entity, FunctionContext, PackageEntity, TypeEntity, VarEntity } fr
 import { substituteInterface } from './generics';
 import type { Eval, Exec, Frame, FunctionInfo, LocalInfo, Suspending } from './runtime';
 import { Scope } from './scope';
+import { sizeOf, STACK_BUFFER_SIZE } from './sliceOps';
+import { newSliceTracking } from './slicePass';
+import { newSsaValues } from './ssaValues';
 import {
   BASIC,
   COMPARABLE,
+  CONSTRAINT_NAMES,
   describeType,
   EMPTY_INTERFACE,
   type Field,
@@ -45,6 +49,7 @@ export interface Part<T = Eval> {
   value: T;
   hoists: Hoist[] | undefined;
 }
+const NO_SPAN: Span = { row: 0, column: 0 };
 
 /** The shared state of compiling one file: scopes, diagnostics, and the function being compiled. */
 export abstract class CompilerBase {
@@ -64,8 +69,23 @@ export abstract class CompilerBase {
   protected concurrent = false;
   /** Where the computations that may block of the expression being compiled go, when it may block. */
   protected hoists: Hoist[] | undefined;
+  /** The compiled functions by their runtime information, for finding the function a frame runs. */
+  protected readonly functionContexts = new Map<FunctionInfo, FunctionContext>();
+  protected runtimeCallCount = 0;
+  /**
+   * Whether the expression being compiled is an element of a slice that Go's compiler allocates before evaluating
+   * the elements, apart from the calls it hoists, which keeps it from forwarding stores to package-level variables.
+   */
+  protected inAllocatedSlice = false;
+  protected readonly builtinPanicCalls = new WeakSet<Expression>();
 
   constructor(protected readonly trace: TraceSettings | undefined) {}
+
+  protected withRuntimeCallTracking<T>(run: () => T): { result: T; hasRuntimeCall: boolean } {
+    const before = this.runtimeCallCount;
+    const result = run();
+    return { result, hasRuntimeCall: this.runtimeCallCount > before };
+  }
 
   // Diagnostics ---------------------------------------------------------------------------------------------------
 
@@ -140,8 +160,17 @@ export abstract class CompilerBase {
     const local: LocalInfo = { name, slot, type, isReceiver };
     if (name !== '_') fn.info.locals.push(local);
     const entity: VarEntity = { kind: 'var', name, type, span, used: false, boxed: false, owner: fn, slot, local };
+    const under = underlying(type);
+    if (under.kind === 'slice' && sizeOf(under.element) <= STACK_BUFFER_SIZE) {
+      entity.slice = newSliceTracking(fn.loopDepth);
+    }
     this.declare(name, entity, span);
     return entity;
+  }
+
+  /** A variable of the function being compiled that holds no value, which only follows where values go. */
+  protected hiddenVariable(name = '', span: Span = NO_SPAN): VarEntity {
+    return { kind: 'var', name, type: BASIC.invalid, span, used: true, boxed: false, owner: this.fn, slot: -1 };
   }
 
   // Blocking -----------------------------------------------------------------------------------------------------
@@ -205,9 +234,11 @@ export abstract class CompilerBase {
   /** The index of a captured variable in a function's cells, capturing it through every enclosing closure. */
   protected capture(entity: VarEntity, fn: FunctionContext): number {
     entity.boxed = true;
-    entity.escapes = true;
+    entity.captured = true;
     const existing = fn.captures.get(entity);
     if (existing !== undefined) return existing;
+    // Go's slice optimization pass gives up on a variable that a closure refers to.
+    entity.slice?.uses.push({});
     if (fn.parent && fn.parent !== entity.owner) this.capture(entity, fn.parent);
     const index = fn.captures.size;
     fn.captures.set(entity, index);
@@ -226,19 +257,30 @@ export abstract class CompilerBase {
       resultSlots: [],
       params: [],
     };
-    return {
+    const fn: FunctionContext = {
       info,
       parent,
       captures: new Map(),
+      params: [],
       results: [],
       resultVariables: [],
       hasNamedResults: false,
+      inlineCost: 0,
+      callees: [],
+      returnedValues: [],
+      onComplete: [],
+      closureCalls: new Map(),
+      notInlinable: false,
       references: new Set(),
-      productOrders: new Map(),
+      products: new Map(),
+      sumsOfProducts: [],
+      ssa: newSsaValues(),
       loopDepth: 0,
       breakDepth: 0,
       recordsSteps: this.trace !== undefined,
     };
+    this.functionContexts.set(info, fn);
+    return fn;
   }
 
   // Types ---------------------------------------------------------------------------------------------------------
@@ -247,13 +289,22 @@ export abstract class CompilerBase {
 
   /**
    * Resolves type syntax. `direct` tells whether the type is stored directly in the type being declared, where a
-   * reference to that type makes it infinitely large.
+   * reference to that type makes it infinitely large. `constraint` tells whether the syntax stands where Go allows an
+   * interface with a type set: as a type parameter's constraint, or as the whole type of a type declaration.
    */
   // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of type syntax.
-  resolveType(syntax: TypeExpression, direct = false): Type {
+  resolveType(syntax: TypeExpression, direct = false, constraint = false): Type {
     switch (syntax.kind) {
       case 'name': {
-        return this.resolveNamedType(syntax, direct);
+        const type = this.resolveNamedType(syntax, direct);
+        const under = underlying(type);
+        if (!constraint && !this.inConstraint && under.kind === 'interface' && under.typeSet) {
+          return this.error(
+            syntax,
+            `${describeType(type)} 型は、型の制約にしか使えません（型の集合を持つインターフェースです）。`
+          );
+        }
+        return type;
       }
       case 'pointer': {
         return { kind: 'pointer', element: this.resolveType(syntax.element) };
@@ -275,7 +326,7 @@ export abstract class CompilerBase {
       case 'map': {
         const key = this.resolveType(syntax.key);
         const value = this.resolveType(syntax.value);
-        if (key !== BASIC.invalid && !this.isComparableKey(key)) {
+        if (key !== BASIC.invalid && !this.isComparableKey(key, syntax.key)) {
           this.error(syntax.key, `${describeType(key)} は比較できない型なので、map のキーには使えません。`);
         }
         return { kind: 'map', key, value };
@@ -295,16 +346,98 @@ export abstract class CompilerBase {
     }
   }
 
-  private isComparableKey(type: Type): boolean {
+  private isComparableKey(type: Type, span?: Span): boolean {
     // A named type still being declared is checked when it is complete.
-    if (type.kind === 'named' && type.underlying === BASIC.invalid) return true;
+    if (type.kind === 'named' && type.underlying === BASIC.invalid) {
+      if (span) this.deferredMapKeys.push({ key: type, span });
+      return true;
+    }
     // A constraint may use a type parameter whose own constraint comes later in the list.
     if (type.kind === 'typeParam' && this.inConstraint) return true;
     return isComparable(type);
   }
 
-  /** Types whose declarations are being resolved, for detecting `type T struct { t T }`. */
+  protected readonly deferredMapKeys: { key: Type; span: Span }[] = [];
+
+  /** Types whose declarations are currently resolving, so generic instances wait until `underlying` is ready. */
   protected readonly resolvingTypes = new Set<NamedType>();
+  /**
+   * The graph that Go's type checker builds to find instantiation cycles: a vertex per type parameter, and an edge from
+   * each type parameter mentioned in a type argument to the parameter it instantiates, weighing 1 when the argument
+   * wraps it in a bigger type. Vertices and edges keep the order in which Go's checker creates them, which decides where
+   * it reports a cycle.
+   */
+  private readonly instantiationVertices = new Map<number, number>();
+  private readonly instantiationVertexParams: TypeParamType[] = [];
+  private readonly instantiationEdges: { source: number; target: number; weight: number }[] = [];
+  protected readonly typeParamSpans = new Map<number, Span>();
+  protected hasGenericCycle = false;
+
+  protected recordGenericInstantiation(params: TypeParamType[], args: Type[]): boolean {
+    if (this.hasGenericCycle) return false;
+    for (const [index, param] of params.entries()) {
+      const arg = args[index];
+      // Library type parameters belong to other packages, so their instantiations cannot form a cycle.
+      if (!arg || param.id < 0) continue;
+      const mentioned: TypeParamType[] = [];
+      collectTypeParams(arg, mentioned);
+      for (const source of mentioned) {
+        const sourceVertex = this.instantiationVertex(source);
+        const target = this.instantiationVertex(param);
+        this.instantiationEdges.push({ source: sourceVertex, target, weight: arg === source ? 0 : 1 });
+      }
+    }
+    const cycleAt = this.findInstantiationCycle();
+    if (cycleAt === undefined) return true;
+    this.hasGenericCycle = true;
+    const param = this.instantiationVertexParams[cycleAt];
+    this.error(
+      this.typeParamSpans.get(param.id) ?? { row: 0, column: 0 },
+      `型パラメータ ${param.name} のインスタンス化が循環しています（インスタンス化のたびに型引数が大きくなり、終わりません）。`
+    );
+    return false;
+  }
+
+  private instantiationVertex(param: TypeParamType): number {
+    let vertex = this.instantiationVertices.get(param.id);
+    if (vertex === undefined) {
+      vertex = this.instantiationVertexParams.push(param) - 1;
+      this.instantiationVertices.set(param.id, vertex);
+    }
+    return vertex;
+  }
+
+  /**
+   * Finds a cycle through an edge of positive weight as Go's checker does (monomorph in go/types/mono.go): Bellman-Ford
+   * for the heaviest paths, where a path as long as the number of vertices contains a cycle, which is reported at the
+   * first vertex found twice walking that path backwards.
+   */
+  private findInstantiationCycle(): number | undefined {
+    const vertices = this.instantiationVertexParams.map(() => ({ weight: 0, previous: -1, length: 0 }));
+    for (let again = true; again;) {
+      again = false;
+      for (const [index, edge] of this.instantiationEdges.entries()) {
+        const source = vertices[edge.source];
+        const target = vertices[edge.target];
+        const weight = source.weight + edge.weight;
+        if (weight <= target.weight) continue;
+        target.previous = index;
+        target.length = source.length + 1;
+        if (target.length === vertices.length) {
+          const seen = new Set<number>();
+          let vertex = edge.target;
+          while (!seen.has(vertex) && vertices[vertex].previous >= 0) {
+            seen.add(vertex);
+            vertex = this.instantiationEdges[vertices[vertex].previous].source;
+          }
+          return vertex;
+        }
+        target.weight = weight;
+        again = true;
+      }
+    }
+    return undefined;
+  }
 
   private resolveNamedType(syntax: Extract<TypeExpression, { kind: 'name' }>, direct: boolean): Type {
     let entity: Entity | undefined;
@@ -329,13 +462,12 @@ export abstract class CompilerBase {
         return this.error(syntax, `型 ${syntax.name} の型引数の数が合いません。`);
       }
       if (!this.checkTypeArguments(entity.generic.typeParams, args, syntax)) return BASIC.invalid;
+      if (!this.recordGenericInstantiation(entity.generic.typeParams, args)) return BASIC.invalid;
       return entity.generic.instantiate(args, syntax);
     }
     if (syntax.typeArguments.length > 0) return this.error(syntax, `${syntax.name} は型引数を持たない型です。`);
     const type = entity.type;
-    if (direct && type.kind === 'named' && this.resolvingTypes.has(type)) {
-      return this.error(type.span ?? syntax, `型 ${type.name} が自分自身を直接含んでいます。`);
-    }
+    void direct;
     this.checkConstraintUse(type, syntax);
     return type;
   }
@@ -391,10 +523,7 @@ export abstract class CompilerBase {
           continue;
         }
         name = base.name;
-        const under = type.kind === 'pointer' ? type.element : type;
-        if (field.type.kind === 'pointer' && under.kind === 'named' && underlying(under).kind === 'pointer') {
-          this.error(field, '埋め込むフィールドに、ポインタの型へのポインタは使えません。');
-        }
+        this.checkEmbeddedType(field, type);
       }
       if (name !== '_' && names.has(name)) this.error(field, `フィールド ${name} が2回宣言されています。`);
       names.add(name);
@@ -404,6 +533,17 @@ export abstract class CompilerBase {
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- Methods, embedded interfaces, and unions of type terms.
+  /** Go embeds a type or a pointer to one, but neither a pointer type nor a pointer to an interface. */
+  private checkEmbeddedType(field: Span, type: Type): void {
+    const isPointer = type.kind === 'pointer';
+    const under = underlying(isPointer ? type.element : type);
+    if (under.kind === 'pointer') {
+      this.error(field, '埋め込むフィールドの型には、ポインタの型を使えません。');
+    } else if (under.kind === 'interface' && isPointer) {
+      this.error(field, '埋め込むフィールドの型には、インターフェースへのポインタを使えません。');
+    }
+  }
+
   private resolveInterface(syntax: Extract<TypeExpression, { kind: 'interface' }>): InterfaceType {
     if (syntax.methods.length === 0 && syntax.elements.length === 0) return EMPTY_INTERFACE;
     const methods: InterfaceMethod[] = [];
@@ -506,6 +646,7 @@ export abstract class CompilerBase {
     }));
     for (const [index, parameter] of parameters.entries()) {
       this.declare(parameter.name, { kind: 'type', name: parameter.name, type: declared[index] }, parameter);
+      this.typeParamSpans.set(declared[index].id, parameter);
     }
     for (const [index, parameter] of parameters.entries()) {
       const constraint = this.resolveConstraint(parameter.constraint);
@@ -532,7 +673,7 @@ export abstract class CompilerBase {
       if (failure) {
         this.error(
           span,
-          `${describeType(args[index])} は ${param.name} の制約 ${describeConstraint(param.constraint)} を満たしていません（${failure}）。`
+          `${describeType(args[index])} は ${param.name} の制約 ${describeConstraint(param)} を満たしていません（${failure}）。`
         );
         return false;
       }
@@ -571,10 +712,17 @@ export abstract class CompilerBase {
   protected abstract instantiateNamed(named: NamedType, args: Type[]): NamedType;
 }
 
-function describeConstraint(constraint: InterfaceType): string {
+function describeConstraint(param: TypeParamType): string {
+  const { constraint } = param;
   if (constraint === COMPARABLE || (constraint.typeSet?.comparable && constraint.methods.length === 0))
     return 'comparable';
   if (constraint === EMPTY_INTERFACE) return 'any';
+  const named = param.constraintName ?? CONSTRAINT_NAMES.get(constraint);
+  if (named) return named.pkg && named.pkg !== 'main' ? `${named.pkg.split('/').at(-1)}.${named.name}` : named.name;
+  const terms = constraint.typeSet?.terms;
+  if (terms && constraint.methods.length === 0) {
+    return terms.map((term) => `${term.tilde ? '~' : ''}${describeType(term.type)}`).join(' | ');
+  }
   return describeType(constraint);
 }
 
@@ -599,4 +747,52 @@ function intersectTerms(a: TypeTerm[], b: TypeTerm[]): TypeTerm[] {
     }
   }
   return result;
+}
+
+// code-gauge-allow functionCognitiveComplexity 25 -- Traverses all composite type constructors.
+function collectTypeParams(type: Type, out: TypeParamType[], seen = new Set<Type>()): void {
+  if (type.kind === 'typeParam') {
+    out.push(type);
+    return;
+  }
+  if (seen.has(type)) return;
+  seen.add(type);
+  switch (type.kind) {
+    case 'named': {
+      for (const arg of type.typeArgs ?? []) collectTypeParams(arg, out, seen);
+      return;
+    }
+    case 'pointer':
+    case 'slice':
+    case 'array': {
+      collectTypeParams(type.element, out, seen);
+      return;
+    }
+    case 'map': {
+      collectTypeParams(type.key, out, seen);
+      collectTypeParams(type.value, out, seen);
+      return;
+    }
+    case 'struct': {
+      for (const field of type.fields) collectTypeParams(field.type, out, seen);
+      return;
+    }
+    case 'func': {
+      for (const param of type.params) collectTypeParams(param, out, seen);
+      for (const result of type.results) collectTypeParams(result, out, seen);
+      return;
+    }
+    case 'interface': {
+      for (const method of type.methods) collectTypeParams(method.type, out, seen);
+      for (const term of type.typeSet?.terms ?? []) collectTypeParams(term.type, out, seen);
+      return;
+    }
+    case 'tuple': {
+      for (const element of type.types) collectTypeParams(element, out, seen);
+      return;
+    }
+    default: {
+      return;
+    }
+  }
 }

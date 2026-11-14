@@ -1,59 +1,66 @@
+// code-gauge-allow-file fileNcss 497 -- The state of a run and the operations the interpreter reaches through it.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
-import { LIBRARY_ROW } from './ast';
+import { PyAnnotateFunction } from './annotations';
+import { pushAll } from './arrays';
 import { createBuiltins } from './builtins';
+import type { PyMemoryView } from './bytesValues';
 import { bindArguments } from './calls';
-import { instantiate } from './classes';
+import { markIterableCoroutine } from './coroutines';
+import { ensureThreadLocalDict, isThreadLocal } from './descriptors';
+import { enumClassDir, enumMemberDir, membersByName } from './enums';
 import { Evaluator } from './evaluator';
-import { type AnnotationThunk, Frame } from './frame';
-import { findReachableTurtles } from './garbageCollection';
+import { GeneratorFinalizer } from './finalization';
+import { Frame } from './frame';
+import { findReachableObjects, findReachableTurtles } from './garbageCollection';
+import { resumeGenerator } from './generators';
 import { pyHash } from './hashing';
+import { hostRoots } from './hostRoots';
+import { deepNestingError, isHostStackOverflow } from './hostStack';
+import { createInputStream } from './inputStream';
+import { instantiate } from './instances';
 import { keyError } from './items';
-import { importModule } from './modules';
+import { viewOf } from './memoryview';
+import { importModule, resolveImport } from './modules';
 import { systemExitError } from './modules/sys';
+import { checkNamespaceView, cpythonDirNames } from './namespaceDifferences';
 import { DEFAULT_MAX_STR_DIGITS } from './numbers';
-import {
-  bindValue,
-  callValue,
-  getIterator,
-  isExceptionOf,
-  isTruthy,
-  lookupSpecial,
-  newSuper,
-  setAttribute,
-  toArray,
-} from './objects';
+import { bindValue, callValue, getIterator, isTruthy, overriding, setAttribute, toArray } from './objects';
+import type { ProgramSource } from './programSource';
 import { withoutCharge } from './runtimeContext';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
-import { newGenericAlias, unionClass, unionGetItem } from './typeHints';
+import { TemporaryScope } from './temporaryScope';
+import { DEFAULT_SWITCH_INTERVAL, type Scheduler } from './threads';
+import { frameReferences, noteUnwinding, setFrameGenerator } from './tracebacks';
+import { newGenericAlias, unionOf } from './typeHints';
+import { boundSuper } from './typeObject';
+import { genericClass, subscriptGeneric } from './typeParams';
 import {
+  asyncGeneratorClass,
   classOf,
+  coroutineClass,
   exceptionClassNamed,
   generatorClass,
-  moduleClass,
-  newDict,
   newList,
   newTuple,
   None,
   pyError,
+  stringValue,
   superClass,
-  typeClass,
   typeError,
   valueError,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
+import { unsupportedClassAttributeNames } from './unsupportedAttributes';
 import {
   DONE,
-  type ExceptionState,
   type Kwargs,
-  ownAttributesOf,
   PyCell,
   PyClass,
-  PyDescriptor,
-  PyDict,
+  type PyDict,
   PyError,
   PyFunction,
   PyGenerator,
@@ -66,6 +73,18 @@ import {
   type PyTuple,
   type PyValue,
 } from './values';
+import { hasWeakCallbacks, runWeakCallbacks } from './weakReferences';
+
+/**
+ * How a call of a program's function starts: the frame its body runs in, with whether the evaluator called it itself,
+ * or the value the call gives at once, a generator or what a compiler's `__annotate__` computes.
+ */
+export type FunctionEntry =
+  | { frame: Frame; direct: boolean; value?: undefined }
+  | { frame?: undefined; value: PyValue };
+
+/** The magnitude below which multiplying two ints costs no more than one operation. */
+const SAFE_INTEGER_BOUND = 1n << 53n;
 
 export class Runtime {
   readonly world = new TurtleWorld();
@@ -75,15 +94,35 @@ export class Runtime {
   readonly builtins: Map<string, PyValue>;
   readonly modules = new Map<string, PyModule>();
   readonly evaluator: Evaluator;
-  private row: number | undefined;
+  readonly finalizer = new GeneratorFinalizer(this);
+  /** `sys.getrecursionlimit()`, which {@link LIMITS.maxCallDepth} caps. */
+  recursionLimit = 1000;
+  /** The row of the call being evaluated, from which calls the interpreter makes implicitly count as called. */
+  currentRow: number | undefined;
   /** The row each running frame was entered from, which its own statements replace while it runs. */
   private readonly entryRows: (number | undefined)[] = [];
-  /** The classes this run defined, by base class: builtin classes outlive a run, so they cannot hold them. */
-  private readonly subclasses = new Map<PyClass, PyClass[]>();
+  /** The program's source and definitions, which `inspect.getsource()` reads. */
+  program?: ProgramSource;
+  /** The scheduler of the program's threads, once it starts one or waits. */
+  threads?: Scheduler;
+  /** The program's module variables, which the bottom frame of the main thread holds. */
+  mainGlobals?: Map<string, PyValue>;
+  /**
+   * Whether the program nests expressions or statements so deeply that evaluating them may exhaust the host's stack
+   * where CPython's does not, which then stops the program instead of raising RecursionError.
+   */
+  deepNesting = false;
+  /** The globals of the standard library modules written in Python. */
+  readonly libraryNamespaces = new WeakSet<Map<string, PyValue>>();
+  readonly nativeImplementationDefinitions: WeakSet<object>[] = [];
+  /** Whether any library module written in Python was imported, without which no frame is a library frame. */
+  private hasLibraryNamespaces = false;
+  private readonly libraryEntryRows = new WeakMap<Frame, number | undefined>();
+  /** The allocations after which CPython's automatic collector could have collected cyclic garbage with `__del__`. */
+  cyclicGarbageDeadline: number | undefined;
   private slots = 0;
   private reprDepth = 0;
 
-  /** The standard streams and files of the run; Python writes standard output only. */
   readonly io: ProgramIO;
 
   constructor(input?: ProgramInput) {
@@ -92,26 +131,33 @@ export class Runtime {
     this.evaluator = new Evaluator(this);
   }
 
-  /** The row of the call being evaluated, from which calls the interpreter makes implicitly count as called. */
-  get currentRow(): number | undefined {
-    return this.row;
-  }
-
-  /** Library code keeps the row of the program's code that called it. */
-  set currentRow(row: number | undefined) {
-    if (row !== LIBRARY_ROW) this.row = row;
-  }
-
   get frame(): Frame {
     return this.frames.at(-1) as Frame;
   }
 
   // Budget ----------------------------------------------------------------------------------------------------------
 
+  /** The operations the run has spent, which the thread scheduler measures slices with. */
+  operations = 0;
   /** How many builds that charge nothing are running; the run itself stays installed for them. */
   private freeBuilds = 0;
+  /** How many trace displays are being built, during which the program's own code must not run. */
+  private displaying = 0;
 
   /** Builds a value at no charge; see the function of the same name in runtimeContext. */
+  /**
+   * Builds the text a trace shows for a value, charging nothing and refusing to run the program's own code (a
+   * `__repr__` it defines), which would record steps and print where CPython runs nothing.
+   */
+  forDisplay<T>(build: () => T): T {
+    this.displaying++;
+    try {
+      return this.withoutCharge(build);
+    } finally {
+      this.displaying--;
+    }
+  }
+
   withoutCharge<T>(build: () => T): T {
     this.freeBuilds++;
     try {
@@ -122,7 +168,23 @@ export class Runtime {
   }
 
   spend(cost = 1): void {
-    if (this.freeBuilds === 0) this.budget.spend(cost);
+    const scope = this.frames.at(-1)?.scope;
+    if (scope && this.isNativeImplementation(scope)) {
+      if (this.freeBuilds === 0) this.budget.spend(0);
+      return;
+    }
+    this.spendNative(cost);
+  }
+
+  isNativeImplementation(definition: object): boolean {
+    return this.nativeImplementationDefinitions.some((definitions) => definitions.has(definition));
+  }
+
+  spendNative(cost: number): void {
+    if (this.freeBuilds === 0) {
+      this.operations += cost;
+      this.budget.spend(cost);
+    }
   }
 
   scan(length: number): void {
@@ -139,6 +201,9 @@ export class Runtime {
     if (this.freeBuilds > 0) return;
     this.ensureRoom(count);
     this.slots += count;
+    if (this.cyclicGarbageDeadline !== undefined && this.slots > this.cyclicGarbageDeadline) {
+      this.finalizer.automaticCollectionDue();
+    }
     this.spend(Math.ceil(count / 64));
   }
 
@@ -175,23 +240,92 @@ export class Runtime {
   }
 
   chargeBigint(a: bigint, b: bigint): void {
-    if (a < 1n << 53n && a > -(1n << 53n) && b < 1n << 53n && b > -(1n << 53n)) return;
+    if (a < SAFE_INTEGER_BOUND && a > -SAFE_INTEGER_BOUND && b < SAFE_INTEGER_BOUND && b > -SAFE_INTEGER_BOUND) return;
     this.chargeBits(BigInt(a.toString(16).length * 4 + b.toString(16).length * 4));
   }
 
   // Frames and calls ------------------------------------------------------------------------------------------------
 
+  /** Whether the running code is a standard library module's written in Python. */
+  inLibraryCode(): boolean {
+    const frame = this.frames.at(-1);
+    return frame !== undefined && this.libraryNamespaces.has(frame.globals);
+  }
+
+  /** Marks the globals of a standard library module written in Python, whose frames stay out of the trace. */
+  addLibraryNamespace(namespace: Map<string, PyValue>): void {
+    this.libraryNamespaces.add(namespace);
+    this.hasLibraryNamespaces = true;
+  }
+
   pushFrame(frame: Frame): void {
-    if (this.frames.length >= LIMITS.maxCallDepth) throw pyError('RecursionError', 'maximum recursion depth exceeded');
+    if (this.frames.length >= Math.min(this.recursionLimit, LIMITS.maxCallDepth)) {
+      throw pyError('RecursionError', 'maximum recursion depth exceeded');
+    }
+    if (this.displaying > 0 && !this.libraryNamespaces.has(frame.globals)) throw new ProgramCodeInDisplayError();
+    if (this.hasLibraryNamespaces) this.noteLibraryFrame(frame);
     frame.nativeCalls = this.nativeCalls;
     this.frames.push(frame);
-    this.entryRows.push(this.row);
+    this.entryRows.push(this.currentRow);
+  }
+
+  private noteLibraryFrame(frame: Frame): void {
+    // The frames of standard library modules written in Python stay out of the trace, as native code does: they show
+    // no call line, and the program's functions they call count as called from the program's row that entered them.
+    if (this.libraryNamespaces.has(frame.globals)) {
+      this.libraryEntryRows.set(frame, this.callerRow());
+      frame.callRow = undefined;
+    } else if (frame.callRow !== undefined && this.libraryEntryRows.has(this.frames.at(-1) as Frame)) {
+      frame.callRow = this.callerRow();
+    }
   }
 
   popFrame(): void {
     const frame = this.frames.pop();
-    this.row = this.entryRows.pop();
+    this.currentRow = this.entryRows.pop();
     if (frame?.isAtomic) this.steps.completeAtomicCall();
+    if (this.hasLibraryNamespaces && frame && this.libraryEntryRows.has(frame))
+      this.currentRow = this.libraryEntryRows.get(frame);
+  }
+
+  /**
+   * The frames of the program's own code with the row each is running, innermost first, skipping the frames of library
+   * modules, as `warnings` and `traceback` report them.
+   */
+  programFrames(): { frame: Frame; row: number | undefined }[] {
+    const result: { frame: Frame; row: number | undefined }[] = [];
+    let row = this.currentRow;
+    for (const frame of this.frames.toReversed()) {
+      if (this.libraryEntryRows.has(frame)) {
+        row = this.libraryEntryRows.get(frame);
+        continue;
+      }
+      result.push({ frame, row });
+      if (!frame.inlinedIn) row = frame.callRow ?? frame.resumeRow;
+    }
+    return result;
+  }
+
+  /**
+   * Every frame with the row it is running, innermost first. A library module's frame counts as running the program's
+   * row that entered it, since its own rows are not the program's.
+   */
+  allFrames(): { frame: Frame; row: number | undefined }[] {
+    const result: { frame: Frame; row: number | undefined }[] = [];
+    let row = this.callerRow();
+    for (const frame of this.frames.toReversed()) {
+      result.push({ frame, row });
+      if (!frame.inlinedIn) {
+        row = this.libraryEntryRows.has(frame) ? this.libraryEntryRows.get(frame) : (frame.callRow ?? frame.resumeRow);
+      }
+    }
+    return result;
+  }
+
+  /** The program's row that the running code counts as, which is the row that entered a library module's code. */
+  private callerRow(): number | undefined {
+    const top = this.frames.at(-1);
+    return top && this.libraryEntryRows.has(top) ? this.libraryEntryRows.get(top) : this.currentRow;
   }
 
   /** Runs `run`, turning a refusal of the host into the exception Python raises for it. */
@@ -199,7 +333,7 @@ export class Runtime {
     try {
       return run();
     } catch (error) {
-      throw hostRefusal(error) ?? error;
+      throw hostRefusal(error, this.deepNesting) ?? error;
     }
   }
 
@@ -214,87 +348,148 @@ export class Runtime {
       const value = bound.get(param.name);
       if (value !== undefined && !def.scope.cells.includes(param.name)) locals.set(param.name, value);
     }
-    // A call into library code is part of the step of the program's code that made it.
-    const callRow = def.row === LIBRARY_ROW ? undefined : this.currentRow;
-    return new Frame('function', locals, cells, fn.globals, callRow, def.isAtomic, def.scope, fn, fn.classCell);
+    return new Frame('function', locals, cells, fn.globals, this.currentRow, def.isAtomic, def.scope, fn, fn.classCell);
   }
 
+  // code-gauge-allow duplicateLines 15 -- The synchronous and suspending calls of a function share entry and exit, not the body's run.
   callFunction(fn: PyFunction, args: readonly PyValue[], kwargs: Kwargs): PyValue {
-    const frame = this.newFunctionFrame(fn, args, kwargs);
-    if (fn.def.scope.isGenerator) return this.newGenerator(fn, frame);
-    this.pushFrame(frame);
-    let result: PyValue;
+    const entry = this.enterFunction(fn, args, kwargs);
+    if (!entry.frame) return entry.value;
+    let result: PyValue | undefined;
     try {
-      result = this.guardRecursion(() => this.evaluator.runFunction(fn, frame));
+      result = this.evaluator.runFunction(fn, entry.frame);
+      this.finalizer.locals.returned(result, entry.direct);
+    } catch (error) {
+      throw this.unwindFunction(entry.frame, error);
     } finally {
-      this.popFrame();
+      this.leaveFunction(entry.frame, result);
     }
     this.handToNative(result);
     return result;
   }
 
+  /**
+   * Starts a call of a program's function, which `callFunction` and a thread's suspending call share: the frame its
+   * body then runs in, pushed, or the value the call gives without running the body in a frame.
+   */
+  enterFunction(fn: PyFunction, args: readonly PyValue[], kwargs: Kwargs): FunctionEntry {
+    const { locals } = this.finalizer;
+    const direct = locals.takeDirectCall();
+    const frame = this.newFunctionFrame(fn, args, kwargs);
+    // The compiler's `__annotate__` binds its arguments as a Python function and runs its body natively.
+    if (fn instanceof PyAnnotateFunction) return { value: fn.run(frame.locals.get('format') as PyValue) };
+    const { scope } = fn.def;
+    if (scope.isGenerator || scope.isAsync) return { value: this.newGenerator(fn, frame) };
+    locals.enterFunction(frame);
+    this.pushFrame(frame);
+    return { frame, direct };
+  }
+
+  /** The error to raise for `error`, which ends the call running in `frame`. */
+  unwindFunction(frame: Frame, error: unknown): unknown {
+    const raised = hostRefusal(error, this.deepNesting) ?? error;
+    noteUnwinding(raised);
+    // The exception's traceback keeps the frame, and with it the function's variables, while a generator may close.
+    const state = raised instanceof PyError ? raised.exception.exception : undefined;
+    if (state && this.finalizer.pending.size > 0) {
+      this.finalizer.locals.escapeFrame(frame);
+    }
+    return raised;
+  }
+
+  /** Ends the call running in `frame`, which returned `result`, or raised when it is undefined. */
+  leaveFunction(frame: Frame, result: PyValue | undefined): void {
+    this.popFrame();
+    if (hasWeakCallbacks(this)) runWeakCallbacks([result]);
+    const { finalizer } = this;
+    if (finalizer.pending.size > 0 && result !== undefined) {
+      finalizer.release(frameReferences(frame), [result]);
+    }
+  }
+
   private newGenerator(fn: PyFunction, frame: Frame): PyGenerator {
-    const body = this.evaluator.runGenerator(fn, frame);
-    let handled: PyInstance[] = [];
-    const generator: PyGenerator = new PyGenerator(
-      generatorClass,
+    const { scope } = fn.def;
+    const cls = scope.isAsync ? (scope.isGenerator ? asyncGeneratorClass : coroutineClass) : generatorClass;
+    const generator = this.frameGenerator(
+      cls,
       fn.name,
       fn.qualifiedName,
-      () => {
-        if (fn.def.row !== LIBRARY_ROW) frame.callRow = this.currentRow;
+      frame,
+      this.evaluator.runGenerator(fn, frame)
+    );
+    if (!scope.isAsync) markIterableCoroutine(generator, fn);
+    this.finalizer.locals.generatorCreated(generator, frame);
+    return generator;
+  }
+
+  /**
+   * The coroutine that code compiled with `ast.PyCF_ALLOW_TOP_LEVEL_AWAIT` gives when it awaits: running it runs the
+   * code in `frame`, a frame of its own over the namespaces exec() or eval() gave.
+   */
+  newModuleCoroutine(frame: Frame, body: Generator<PyValue, PyValue, PyValue>): PyGenerator {
+    return this.frameGenerator(coroutineClass, '<module>', '<module>', frame, body);
+  }
+
+  /** A generator, coroutine, or async generator object that runs `body` in `frame` step by step. */
+  // code-gauge-allow functionNcss 35 -- Frame entry and exit must keep exception, trace, and ownership state in one try/finally.
+  // code-gauge-allow functionCognitiveComplexity 16 -- Frame entry and exit keep exception, trace and ownership state together.
+  frameGenerator(
+    cls: PyClass,
+    name: string,
+    qualifiedName: string,
+    frame: Frame,
+    body: Generator<PyValue, PyValue, PyValue>
+  ): PyGenerator {
+    const { evaluator } = this;
+    // The exceptions the generator handles where it suspended, which its caller does not handle.
+    let handling: PyInstance[] = [];
+    let completed = false;
+    const holds = (): unknown[] => [...frameReferences(frame), ...handling];
+    const generator: PyGenerator = new PyGenerator(
+      cls,
+      name,
+      qualifiedName,
+      (input) => {
+        const callerRow = this.currentRow;
+        if (frame.kind === 'comprehension') frame.resumeRow = callerRow;
+        frame.callRow = frame.kind === 'comprehension' ? undefined : callerRow;
         this.pushFrame(frame);
-        const depth = this.evaluator.resumeHandling(handled);
+        const depth = evaluator.attachHandling(handling);
+        let finished = true;
+        let step: IteratorResult<PyValue, PyValue> | undefined;
+        let escaping: PyValue | undefined;
         try {
-          return this.guardRecursion(() => body.next());
+          step = this.guardRecursion(() => (input.error ? body.throw(input.error) : body.next(input.value)));
+          finished = step.done === true;
+          return step;
+        } catch (error) {
+          if (error instanceof PyError) escaping = error.exception;
+          noteUnwinding(error);
+          throw error;
         } finally {
-          handled = this.evaluator.suspendHandling(depth);
+          handling = evaluator.detachHandling(depth);
           this.popFrame();
+          // The caller goes on at the row that resumed the generator, as its later calls and errors report.
+          this.currentRow = callerRow;
+          this.finalizer.update(generator, frame, finished);
+          if (finished) {
+            const dropped = holds();
+            completed = true;
+            this.finalizer.release(dropped, [step?.value, escaping]);
+          }
         }
       },
-      () => [
-        ...frame.locals.values(),
-        ...[...frame.cells.values()].map((cell) => cell.value),
-        ...frame.temporaries,
-        ...handled,
-      ]
+      () => (completed ? [] : holds())
     );
+    generator.frame = frame;
+    setFrameGenerator(frame, generator);
     return generator;
   }
 
   /** Runs a generator to its next `yield`, returning the value it yields or DONE when it ends. */
   resumeGenerator(generator: PyGenerator): PyValue | typeof DONE {
-    if (generator.finished) {
-      // Only the call that observed the end may report the return value; any later call ends without it.
-      generator.returned = undefined;
-      return DONE;
-    }
-    if (generator.running) throw pyError('ValueError', 'generator already executing');
-    generator.running = true;
-    generator.started = true;
-    try {
-      const result = generator.resume();
-      if (result.done) {
-        generator.finished = true;
-        if (result.value !== None) generator.returned = result.value;
-        return DONE;
-      }
-      this.handToNative(result.value);
-      return result.value;
-    } catch (error) {
-      generator.finished = true;
-      if (isExceptionOf(error, 'StopIteration')) {
-        // As CPython's gen_send_ex does, the StopIteration is the cause of the RuntimeError that replaces it.
-        const replaced = pyError('RuntimeError', 'generator raised StopIteration');
-        const state = replaced.exception.exception as ExceptionState;
-        state.cause = (error as PyError).exception;
-        state.context = (error as PyError).exception;
-        state.suppressContext = true;
-        throw replaced;
-      }
-      throw error;
-    } finally {
-      generator.running = false;
-    }
+    const step = resumeGenerator(generator, { value: None });
+    return step.done ? DONE : step.value;
   }
 
   instantiate(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyValue {
@@ -303,6 +498,11 @@ export class Runtime {
 
   importModule(name: string): PyModule {
     return importModule(this, name);
+  }
+
+  /** Imports a module as an import statement does, which may give what a program put in `sys.modules`. */
+  resolveImport(name: string): PyValue {
+    return resolveImport(this, name);
   }
 
   // Delegated operations --------------------------------------------------------------------------------------------
@@ -352,45 +552,9 @@ export class Runtime {
   readonly none = None;
   /** The limit sys.set_int_max_str_digits sets, 0 for none. */
   intMaxStrDigits = DEFAULT_MAX_STR_DIGITS;
-  private builtinsModuleValue: PyModule | undefined;
-
-  /** The builtins module, which is the `__self__` of the builtin functions. */
-  builtinsModule(): PyModule {
-    this.builtinsModuleValue ??= new PyModule(moduleClass, 'builtins', this.builtins);
-    return this.builtinsModuleValue;
-  }
-  /** The annotations of each class body, evaluated when the program reads `__annotations__` or `@dataclass` does. */
-  readonly classAnnotationThunks = new Map<PyClass, AnnotationThunk[]>();
-  /** The class whose annotations are being read in the FORWARDREF format, in which undefined names are forward references. */
-  forwardRefOwner: PyClass | undefined;
-
-  withForwardRefOwner<T>(owner: PyClass, run: () => T): T {
-    const outer = this.forwardRefOwner;
-    this.forwardRefOwner = owner;
-    try {
-      return run();
-    } finally {
-      this.forwardRefOwner = outer;
-    }
-  }
+  /** The switch interval of `sys.setswitchinterval`, in microseconds, which scales the thread scheduler's slice. */
+  switchInterval = DEFAULT_SWITCH_INTERVAL;
   private readonly streams = new Map<string, PyValue>();
-
-  /** The entries of a class's `__annotations__`, which `@dataclass` and `get_type_hints()` read as a program does. */
-  classAnnotations(cls: PyClass): [PyValue, PyValue][] {
-    const annotations = this.classAnnotationsValue(cls);
-    return annotations instanceof PyDict ? annotations.store.ordered().map((entry) => [entry.key, entry.value]) : [];
-  }
-
-  /** A class's `__annotations__`: what the first read evaluated or the program assigned, as CPython keeps it. */
-  classAnnotationsValue(cls: PyClass): PyValue {
-    cls.annotations ??= newDict(this.evaluateClassAnnotations(cls));
-    return cls.annotations;
-  }
-
-  evaluateClassAnnotations(cls: PyClass): [PyValue, PyValue][] {
-    return (this.classAnnotationThunks.get(cls) ?? []).map(([name, thunk]) => [name, thunk()]);
-  }
-
   exceptionClass(name: string): PyClass {
     return exceptionClassNamed(name);
   }
@@ -431,8 +595,20 @@ export class Runtime {
     return systemExitError(code);
   }
 
+  /** The memoryview `memoryview(value)` gives. */
+  bufferView(value: PyValue): PyMemoryView {
+    return viewOf(value);
+  }
+
+  /** `int | None` and the like, which isinstance accepts and type hints use. */
+  unionType(left: PyValue, right: PyValue): PyValue {
+    return unionOf([left, right]);
+  }
+
   /** The value of a key missing from a dict: a Counter's zero, a defaultdict's default, or a KeyError. */
   missingKey(dict: PyDict, key: PyValue): PyValue {
+    const missing = overriding(dict, '__missing__');
+    if (missing !== undefined) return callValue(bindValue(missing, dict), [key]);
     if (dict.defaultFactory !== undefined && dict.defaultFactory !== None) {
       const value = callValue(dict.defaultFactory, []);
       dict.store.set(key, value);
@@ -444,19 +620,21 @@ export class Runtime {
 
   /** `cls[key]`: an Enum member by name, or a generic alias such as `list[int]`. */
   classItem(cls: PyClass, key: PyValue): PyValue {
-    if (cls.enumMembers) {
-      const member = cls.enumMembers.find((each) => each.dict.get('_name_') === key) ?? cls.dict.get(key as string);
+    if (cls.isSubclassOf(genericClass)) return subscriptGeneric(cls, key);
+    if (cls.flags.isEnum) {
+      const name = stringValue(key);
+      if (name === undefined) {
+        pyHash(key);
+        throw keyError(key);
+      }
+      const member = membersByName(cls).get(name) ?? cls.dict.get(name);
       if (member === undefined || !(member instanceof PyInstance) || member.enumValue === undefined)
         throw keyError(key);
       return member;
     }
-    // Builtin and library classes define __class_getitem__, which is a classmethod even without the decorator.
-    const classGetItem = cls.lookup('__class_getitem__');
-    if (classGetItem instanceof PyFunction) return callValue(classGetItem, [cls, key]);
-    if (classGetItem instanceof PyDescriptor) return callValue(classGetItem.fn, [cls, key]);
+    const classGetItem = cls.isBuiltin ? cls.dict.get('__class_getitem__') : cls.lookup('__class_getitem__');
     if (classGetItem !== undefined) return callValue(bindValue(classGetItem, cls, cls), [key]);
-    if (cls === unionClass) return unionGetItem(key);
-    if (cls === typeClass) return newGenericAlias(cls, key);
+    if (cls.isBuiltin) return newGenericAlias(cls, key);
     throw typeError(`type '${cls.qualifiedName}' is not subscriptable`);
   }
 
@@ -469,57 +647,45 @@ export class Runtime {
     const self = frame.kind === 'comprehension' ? genexprArgument(frame) : firstParameterOf(frame);
     if (!(cls instanceof PyClass)) throw pyError('RuntimeError', 'super(): __class__ cell not found');
     if (self === undefined) throw pyError('RuntimeError', 'super(): arg[0] deleted');
-    return newSuper(superClass, cls, self);
+    return boundSuper(superClass, cls, self);
   }
 
-  /** The classes defined with `cls` as a base, for `__subclasses__()`. */
-  subclassesOf(cls: PyClass): PyClass[] {
-    let subclasses = this.subclasses.get(cls);
-    if (!subclasses) {
-      subclasses = [];
-      this.subclasses.set(cls, subclasses);
-    }
-    return subclasses;
-  }
-
-  /** The object `print` writes to for `sys.stdout` or `sys.stderr`. */
-  standardStream(name: 'stdout' | 'stderr'): PyValue {
+  standardStream(name: 'stdin' | 'stdout' | 'stderr'): PyValue {
     let stream = this.streams.get(name);
     if (!stream) {
-      stream = createStream(this, name);
+      stream = name === 'stdin' ? createInputStream(this) : createStream(this, name);
       this.streams.set(name, stream);
     }
     return stream;
   }
 
-  /** `vars()` without an argument: the calling frame's variables. */
-  localsOfCaller(): PyDict {
-    const frame = this.frame;
-    const dict = newDict(frame.locals.entries());
-    for (const [name, cell] of frame.cells)
-      if (cell.value !== undefined && frame.scope.cells.includes(name)) dict.store.set(name, cell.value);
-    return dict;
-  }
-
-  dir(value: PyValue | undefined): PyList {
-    if (value === undefined) {
-      const frame = this.frame;
-      return this.listOf([...frame.locals.keys()].toSorted());
-    }
+  dir(value: PyValue): PyList {
     return this.listOf(this.dirNames(value));
   }
 
-  /** The sorted attribute names `dir()` lists, which AttributeError suggestions choose from. */
+  /** The sorted attribute names `dir()` lists. */
   dirNames(value: PyValue): string[] {
-    const native = value instanceof PyClass ? undefined : classOf(value).mro.find((cls) => cls.dirNames)?.dirNames;
-    if (native) return [...new Set(native(value))].toSorted(compareNames);
-    const custom = value instanceof PyClass ? undefined : lookupSpecial(value, '__dir__');
-    if (custom instanceof PyFunction)
-      return this.toArray(callValue(bindValue(custom, value), []))
-        .map(String)
-        .toSorted(compareNames);
-    const names = value instanceof PyModule ? new Set(value.names()) : objectAttributeNames(value);
-    return [...names].toSorted(compareNames);
+    checkNamespaceView(value, 'dir()');
+    return this.listedNames(value);
+  }
+
+  /**
+   * The sorted names an AttributeError suggestion chooses from: those CPython's `dir()` lists, which a namespace that
+   * differs from CPython's does not refuse to give.
+   */
+  suggestionNames(value: PyValue): string[] {
+    return sortedNames(cpythonDirNames(value, this.listedNames(value)));
+  }
+
+  private listedNames(value: PyValue): string[] {
+    if (value instanceof PyClass && value.flags.isEnum && value.enumMembers) return enumClassDir(value, this);
+    if (value instanceof PyInstance && value.enumValue !== undefined) return enumMemberDir(value, this);
+    // A module lists the names this grader does not support too, as CPython's module has them.
+    const names =
+      value instanceof PyModule
+        ? new Set([...value.dict.keys(), ...value.unsupported.keys(), ...value.imports.keys()])
+        : new Set([...objectAttributeNames(value), ...unsupportedClassAttributeNames(value)]);
+    return sortedNames(names);
   }
 
   idOf(value: PyValue): bigint {
@@ -539,14 +705,16 @@ export class Runtime {
    * returns, and its own result passes on to the native code that called it.
    */
   runNative<T>(run: () => T): T {
-    const roots = this.nativeRoots.length;
+    const scope = new TemporaryScope(this.nativeRoots);
     this.nativeCalls++;
     let result: T;
     try {
-      result = run();
+      result = scope.keep(run());
+    } catch (error) {
+      throw scope.capture(error);
     } finally {
       this.nativeCalls--;
-      this.nativeRoots.length = roots;
+      scope.release();
     }
     this.handToNative(result);
     return result;
@@ -554,60 +722,104 @@ export class Runtime {
 
   /** Keeps a value reachable while the native code it is handed to runs, if Python code hands it to native code. */
   handToNative(value: unknown): void {
-    if (this.nativeCalls > (this.frames.at(-1)?.nativeCalls ?? 0)) this.nativeRoots.push(value);
+    if (typeof value === 'object' && value !== null && this.nativeCalls > (this.frames.at(-1)?.nativeCalls ?? 0))
+      this.nativeRoots.push(value);
   }
 
   /** Removes the turtles that no variable, object, pending value, or running native code can reach any more. */
   collectGarbage(): void {
     if (!this.world.hasTurtles) return;
-    const roots: unknown[] = [this.nativeRoots];
-    for (const frame of this.frames) {
-      for (const value of frame.locals.values()) roots.push(value);
-      for (const cell of frame.cells.values()) roots.push(cell.value);
-      for (const value of frame.temporaries) roots.push(value);
-      if (frame.globals !== frame.locals) for (const value of frame.globals.values()) roots.push(value);
-    }
-    const { reached, scanned } = findReachableTurtles(roots);
+    const { reached, scanned } = findReachableTurtles(this.roots());
     this.spend(Math.ceil(scanned / 64));
     this.world.retain((turtle) => reached.has(turtle));
   }
-}
 
-export { Frame, PyCell };
+  heldByNative(): readonly unknown[] {
+    return this.nativeRoots;
+  }
 
-/**
- * The Python exception for an error of the host itself: RecursionError when its stack ran out, which can happen before
- * the call depth limit when each call nests many statements, and MemoryError when it refused a value for its size
- * (a string, an array, or an integer beyond what it can hold).
- */
-export function hostRefusal(error: unknown): PyError | undefined {
-  if (!(error instanceof RangeError)) return undefined;
-  return isHostStackOverflow(error)
-    ? pyError('RecursionError', 'maximum recursion depth exceeded')
-    : withoutCharge(() => pyError('MemoryError'));
-}
+  /** The objects that variables, objects, or pending values still reach, which reference counting would keep. */
+  reachableObjects(inFlight: unknown[] = [], targets?: ReadonlySet<object>): Set<object> {
+    if (targets?.size && [...targets].every((target) => this.nativeRoots.includes(target))) return new Set(targets);
+    const roots = [...inFlight, ...this.evaluator.handledExceptions, ...this.modules.values(), ...this.roots()];
+    const visited = findReachableObjects(roots, targets);
+    this.spend(Math.ceil(visited.size / 64));
+    return visited;
+  }
 
-function isHostStackOverflow(error: RangeError): boolean {
-  try {
-    // JavaScriptCore and V8 both word it "Maximum call stack size exceeded".
-    return error.message.includes('call stack');
-  } catch {
-    // Reading the message overflowed again, so the stack is exhausted.
-    return true;
+  private roots(): unknown[] {
+    const roots: unknown[] = [this.nativeRoots];
+    for (const frame of this.frames) pushAll(roots, frameReferences(frame));
+    pushAll(roots, hostRoots(this));
+    pushAll(roots, this.finalizer.finalizing());
+    return roots;
   }
 }
 
-function compareNames(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
+/** Stops a trace display that reached the program's own code, which then shows no value. */
+class ProgramCodeInDisplayError extends Error {}
+
+/**
+ * The Python exception for an error of the host itself: RecursionError (or the deep-nesting unsupported error) when its
+ * stack ran out, and MemoryError when it refused a value for its size (a string, an array, or an integer beyond what it
+ * can hold).
+ */
+export function hostRefusal(error: unknown, deepNesting = false): PyError | UnsupportedFeatureError | undefined {
+  if (!(error instanceof RangeError)) return undefined;
+  if (isHostStackOverflow(error)) {
+    return deepNesting ? deepNestingError() : pyError('RecursionError', 'maximum recursion depth exceeded');
+  }
+  return withoutCharge(() => pyError('MemoryError'));
 }
 
-/** The attribute names `dir()` lists for an object other than a module: its own and its class's, with their bases'. */
+export { Frame, PyCell };
+export { isHostStackOverflow } from './hostStack';
+
+/** The attributes of a function that its class reads natively. */
+function sortedNames(names: Iterable<string>): string[] {
+  return [...names].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+const FUNCTION_ATTRIBUTES = [
+  '__annotate__',
+  '__annotations__',
+  '__defaults__',
+  '__dict__',
+  '__kwdefaults__',
+  '__module__',
+  '__name__',
+  '__qualname__',
+  '__type_params__',
+];
+
+/** The attributes of each kind of generator object that its class reads natively. */
+const GENERATOR_ATTRIBUTES: Record<string, string[]> = {
+  generator: ['gi_code', 'gi_frame', 'gi_yieldfrom'],
+  coroutine: ['cr_await', 'cr_code', 'cr_frame', 'cr_origin', 'cr_running', 'cr_suspended'],
+  async_generator: ['ag_await', 'ag_code', 'ag_frame', 'ag_running', 'ag_suspended'],
+};
+
+/** The attribute names `dir()` lists for an object other than a module. */
+// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of object whose attributes dir() lists.
 function objectAttributeNames(value: PyValue): Set<string> {
   const names = new Set<string>();
+  const add = (keys: Iterable<string>): void => {
+    for (const name of keys) names.add(name);
+  };
   const cls = value instanceof PyClass ? value : classOf(value);
-  for (const each of cls.mro) for (const name of each.dict.keys()) names.add(name);
-  if (value instanceof PyInstance || value instanceof PyFunction) for (const name of value.dict.keys()) names.add(name);
-  for (const name of ownAttributesOf(value)?.keys() ?? []) names.add(name);
+  for (const each of cls.mro) add(each.dict.keys());
+  if (value instanceof PyInstance || value instanceof PyFunction) add(value.dict.keys());
+  if (isThreadLocal(value)) add(ensureThreadLocalDict(value)?.keys() ?? []);
+  if (value instanceof PyObject && value.instanceDict) add(value.instanceDict.keys());
+  if (value instanceof PyObject && value.slotValues) add(value.slotValues.keys());
+  add(['__class__', '__doc__']);
+  if (!cls.isBuiltin || (value instanceof PyClass && !value.isBuiltin)) add(['__module__']);
+  if (value instanceof PyFunction) add(FUNCTION_ATTRIBUTES);
+  if (value instanceof PyGenerator) add(GENERATOR_ATTRIBUTES[value.cls.name] ?? []);
+  if (value instanceof PyInstance && value.exception) {
+    add(['__dict__', 'args', '__traceback__', '__cause__', '__context__', '__suppress_context__']);
+  }
+  if (value instanceof PyInstance && value.enumValue !== undefined) add(['name', 'value']);
   return names;
 }
 

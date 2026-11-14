@@ -255,3 +255,7 @@ export type Statement =
   | ({ kind: 'defer'; call: Expression } & Span)
   | ({ kind: 'go'; call: Expression } & Span)
   | ({ kind: 'select'; cases: SelectCase[] } & Span);
+
+export function stripParens(expression: Expression): Expression {
+  return expression.kind === 'paren' ? stripParens(expression.expression) : expression;
+}

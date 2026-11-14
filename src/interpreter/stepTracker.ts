@@ -39,27 +39,31 @@ export class StepTracker {
    * an argument whose evaluation recorded steps, a variable a `return` expression updates), needs this step.
    */
   runStatement<T>(row: number | undefined, onlyCalls: boolean | (() => boolean), run: () => T): T {
-    const { recordedSteps } = this;
+    const mark = this.statementMark();
     const result = run();
-    this.completeStatement(row, onlyCalls, recordedSteps);
+    this.completeStatement(row, onlyCalls, mark);
     return result;
   }
 
-  /** The number of steps recorded so far, which {@link completeStatement} compares to tell what a statement's calls showed. */
-  get recorded(): number {
+  statementMark(): number {
+    return this.recordedSteps;
+  }
+
+  completeStatement(row: number | undefined, onlyCalls: boolean | (() => boolean), mark: number): void {
+    this.finishStatement(row, typeof onlyCalls === 'function' ? onlyCalls() : onlyCalls, mark);
+  }
+
+  /** How many steps have been recorded, which a statement that cannot run as a callback reads before it runs. */
+  get stepCount(): number {
     return this.recordedSteps;
   }
 
   /**
-   * Records the step of a statement that has run, as {@link runStatement} does, for an interpreter that cannot run the
-   * statement inside a callback; `recordedBefore` is {@link recorded} when the statement began.
+   * Records the step of a statement that ran since `stepCount` was `begun`, as `runStatement` does after running one.
    */
-  completeStatement(row: number | undefined, onlyCalls: boolean | (() => boolean), recordedBefore: number): void {
+  finishStatement(row: number | undefined, onlyCalls: boolean, begun: number): void {
     const callsShowedIt =
-      (typeof onlyCalls === 'function' ? onlyCalls() : onlyCalls) &&
-      this.recordedSteps !== recordedBefore &&
-      !this.atomicCallUnshown &&
-      this.recorder?.showsState() === true;
+      onlyCalls && this.recordedSteps !== begun && !this.atomicCallUnshown && this.recorder?.showsState() === true;
     if (!callsShowedIt) this.step(row);
   }
 

@@ -1,79 +1,319 @@
+import { acceleratorModule } from './builtinDocs';
+import { SYS_BUILTIN_MODULE_NAMES } from './data/sysModuleNames';
+import { absentModule } from './moduleNames';
+import { addLayoutAttributes, orderNamespace, recordFunctionOwners } from './modules/moduleLayout';
 import type { Runtime } from './runtime';
-import { UNSUPPORTED_SYS_ATTRIBUTES } from './sysAttributes';
-import { moduleClass } from './types';
+import { exceptionClassNamed, moduleClass, newException, None } from './types';
+import { isUnavailable } from './unavailableValues';
 import { UnsupportedFeatureError } from './unsupported';
-import { PyBuiltinFunction, PyModule, type PyValue } from './values';
+import { NamespaceMap, PyBuiltinFunction, PyError, PyModule, type PyValue } from './values';
 
-type ModuleFactory = (runtime: Runtime) => Map<string, PyValue>;
+/** Creates a module's attributes; a module written in Python instead runs its code in `namespace` and returns none. */
+type ModuleFactory = (runtime: Runtime, namespace: Map<string, PyValue>) => Map<string, PyValue>;
 
 const factories = new Map<string, ModuleFactory>();
-const lazyAttributes = new Map<string, Map<string, (runtime: Runtime) => PyValue>>();
-const unsupportedAttributes = new Map<string, Record<string, string>>([['sys', UNSUPPORTED_SYS_ATTRIBUTES]]);
+const aliases = new Map<string, string>();
+/** The `sys.modules` of each run that read it, which every later import adds its module to. */
+const moduleTables = new WeakMap<Runtime, Map<string, PyValue>>();
+const unsupportedAttributes = new Map<string, Record<string, string>>();
+/** The module each builtin function of a module's namespace belongs to, which its `__module__` names. */
+const functionModules = new WeakMap<PyBuiltinFunction, string>();
 
-const moduleValues = new Map<string, { package: string; all?: readonly string[] }>();
-const hiddenAttributes = new Map<string, readonly string[]>();
-
-/** Registers the attributes of a module that `dir()` does not list. */
-export function registerHiddenAttributes(module: string, names: readonly string[]): void {
-  hiddenAttributes.set(module, names);
-}
-
-/** Registers a module's `__package__` and `__all__`, for the modules whose code does not define them. */
-export function registerModuleValues(module: string, packageName: string, all: readonly string[] | undefined): void {
-  moduleValues.set(module, { package: packageName, all });
-}
-
-/** Registers the attributes of a module this grader does not support, with the feature each error names. */
-export function registerUnsupportedAttributes(module: string, features: Record<string, string>): void {
-  unsupportedAttributes.set(module, { ...unsupportedAttributes.get(module), ...features });
-}
-
-/** Registers a standard library module, whose namespace is created once per run when first imported. */
-export function registerModule(name: string, factory: ModuleFactory): void {
+/**
+ * Registers a standard library module, whose namespace is created once per run when first imported. `unsupported`
+ * names the attributes this grader does not support, with the feature to name in the error.
+ */
+export function registerModule(
+  name: string,
+  factory: ModuleFactory,
+  unsupported: Record<string, string> = {},
+  isSource = false
+): void {
   factories.set(name, factory);
+  if (isSource) sourceModules.add(name);
+  registerUnsupportedAttributes(name, unsupported);
+}
+
+/** The modules whose code is CPython's Python code, which reloading runs again as CPython does. */
+const sourceModules = new Set<string>();
+
+/** Whether a module of this name is registered, as a submodule a package imports on demand may be. */
+export function isRegisteredModule(name: string): boolean {
+  return factories.has(name) || aliases.has(name);
+}
+
+/** Makes `name` another name of the module `target`, as `os.path` is of `posixpath`. */
+/** Whether a module's code is CPython's Python, which creates its classes in each run that imports it. */
+export function isSourceModule(name: string): boolean {
+  return sourceModules.has(name);
+}
+
+export function registerModuleAlias(name: string, target: string): void {
+  aliases.set(name, target);
+}
+
+/** Makes `table` the run's `sys.modules`, which every later import adds its module to. */
+export function trackModules(runtime: Runtime, table: Map<string, PyValue>): void {
+  moduleTables.set(runtime, table);
+}
+
+/** The run's `sys.modules`, once a program has read it. */
+export function getModuleTable(runtime: Runtime): Map<string, PyValue> | undefined {
+  return moduleTables.get(runtime);
 }
 
 /**
- * Registers attributes of a module that are created when a program first reads them, such as the classes of
- * collections that standard library code written in Python defines, so that importing the module stays cheap.
+ * Imports a module as an import statement does: what `sys.modules` holds under the name, which a program may have
+ * replaced with another object, or else the module, which importing creates anew once a program deleted it there.
  */
-export function registerLazyAttributes(
-  module: string,
-  names: readonly string[],
-  create: (runtime: Runtime, name: string) => PyValue
-): void {
-  let attributes = lazyAttributes.get(module);
-  if (!attributes) {
-    attributes = new Map();
-    lazyAttributes.set(module, attributes);
+export function resolveImport(runtime: Runtime, name: string): PyValue {
+  const table = moduleTables.get(runtime);
+  if (table) {
+    const parts = name.split('.');
+    for (let index = 1; index <= parts.length; index++) {
+      const prefix = parts.slice(0, index).join('.');
+      if (table.get(prefix) === None)
+        throw moduleNotFoundError(`import of ${prefix} halted; None in sys.modules`, prefix);
+    }
+    const entry = table.get(name);
+    if (entry === undefined) runtime.modules.delete(name);
+    else if (!isUnavailable(entry)) return entry;
   }
-  for (const name of names) attributes.set(name, (runtime) => create(runtime, name));
+  return importModule(runtime, name);
 }
+
+/** A ModuleNotFoundError whose `name` is the module that importing did not find. */
+export function moduleNotFoundError(message: string, name: string): PyError {
+  const error = newException(exceptionClassNamed('ModuleNotFoundError'), [message]);
+  error.exception?.fields?.set('name', name);
+  return new PyError(error);
+}
+
+const moduleAlls = new Map<string, readonly string[]>();
+
+/** Registers a module's `__all__`, for the modules whose code does not define it. */
+export function registerModuleAll(module: string, all: readonly string[]): void {
+  moduleAlls.set(module, all);
+}
+
+/** Names attributes of a module that this grader does not support, with the feature to name in their error. */
+export function registerUnsupportedAttributes(name: string, attributes: Record<string, string>): void {
+  unsupportedAttributes.set(name, { ...unsupportedAttributes.get(name), ...attributes });
+}
+
+const sharedAttributes = new Map<string, Record<string, string>>();
+
+/**
+ * Makes attributes of a module the objects another module defines, named `module:attribute`, which are read from it
+ * when first used, as `_thread._local` is `threading.local`, which the `threading` module defines here.
+ */
+export function registerSharedAttributes(name: string, attributes: Record<string, string>): void {
+  sharedAttributes.set(name, { ...sharedAttributes.get(name), ...attributes });
+}
+
+type ExtraAttributes = (runtime: Runtime, namespace: Map<string, PyValue>) => [string, PyValue][];
+
+const extraAttributes = new Map<string, ExtraAttributes[]>();
+
+/**
+ * Adds to a module the attributes `create` makes that CPython's module has and its code here does not define;
+ * `create` may also define them in the module's namespace itself, as code written in Python does.
+ */
+export function registerExtraAttributes(name: string, create: ExtraAttributes): void {
+  extraAttributes.set(name, [...(extraAttributes.get(name) ?? []), create]);
+}
+
+/** Sets how a run creates its `__main__` module, whose namespace is the program's globals. */
+export function registerMainModule(create: (runtime: Runtime) => PyModule): void {
+  createMainModule = create;
+}
+
+let createMainModule: ((runtime: Runtime) => PyModule) | undefined;
 
 export function importModule(runtime: Runtime, name: string): PyModule {
   const cached = runtime.modules.get(name);
   if (cached) return cached;
+  if (name === '__main__' && createMainModule) {
+    const module = createMainModule(runtime);
+    runtime.modules.set(name, module);
+    moduleTables.get(runtime)?.set(name, module);
+    return module;
+  }
+  const target = aliases.get(name);
+  if (target !== undefined) {
+    const module = importModule(runtime, target);
+    runtime.modules.set(name, module);
+    moduleTables.get(runtime)?.set(name, module);
+    return module;
+  }
   const factory = factories.get(name);
-  if (!factory) throw new UnsupportedFeatureError(`モジュール ${name}`);
-  const module = new PyModule(moduleClass, name, new Map());
-  runtime.modules.set(name, module);
-  module.dict.set('__name__', name);
-  for (const [key, value] of factory(runtime)) module.dict.set(key, ownedBy(name, value));
-  for (const [key, create] of lazyAttributes.get(name) ?? []) module.lazy.set(key, () => create(runtime));
-  for (const [key, feature] of Object.entries(unsupportedAttributes.get(name) ?? {})) {
-    if (!module.dict.has(key) && !module.lazy.has(key)) module.unsupported.set(key, feature);
+  if (!factory) {
+    const absent = absentModule(name, runtime.inLibraryCode());
+    if (absent) throw moduleNotFoundError(absent.message, absent.name);
+    throw new UnsupportedFeatureError(`モジュール ${name}`);
   }
-  for (const hidden of hiddenAttributes.get(name) ?? []) module.hidden.add(hidden);
-  const values = moduleValues.get(name);
-  if (values) {
-    if (!module.dict.has('__package__')) module.dict.set('__package__', values.package);
-    if (values.all && !module.dict.has('__all__')) module.dict.set('__all__', runtime.listOf([...values.all]));
-  }
+  // As in CPython, a package is imported before its submodule, and its code may import the submodule itself.
+  const dot = name.lastIndexOf('.');
+  const parent = dot === -1 ? undefined : importModule(runtime, name.slice(0, dot));
+  const module = runtime.modules.get(name) ?? createModule(runtime, name, factory);
+  parent?.dict.set(name.slice(dot + 1), module);
   return module;
 }
 
-/** Records the module that a native function belongs to, which its `__module__` reports. */
-function ownedBy(module: string, value: PyValue): PyValue {
-  if (value instanceof PyBuiltinFunction && value.self === undefined) value.module ??= module;
-  return value;
+function createModule(runtime: Runtime, name: string, factory: ModuleFactory): PyModule {
+  // The builtins module's namespace is the one names fall back to, so that changing either changes the other.
+  const module = new PyModule(moduleClass, name, name === 'builtins' ? runtime.builtins : new NamespaceMap());
+  // As in CPython, the module is in sys.modules while its code runs, which a cyclic import finds it in.
+  runtime.modules.set(name, module);
+  moduleTables.get(runtime)?.set(name, module);
+  module.dict.set('__name__', name);
+  for (const [key, value] of runFactory(runtime, name, factory, module)) module.dict.set(key, value);
+  addRegisteredAttributes(runtime, module);
+  recordFunctionModules(module);
+  addLayoutAttributes(module, name);
+  orderNamespace(module, name);
+  recordFunctionOwners(module, name);
+  loadAccelerators(runtime, module);
+  for (const [key, value] of module.dict) runtime.finalizer.recordModuleBinding(module, key, value);
+  return module;
+}
+
+/** Adds to a new module the names this grader does not support, which its code did not define, and its `__all__`. */
+function addRegisteredAttributes(runtime: Runtime, module: PyModule): void {
+  const { name, dict } = module;
+  const missing = <T>(record: Record<string, T> | undefined): [string, T][] =>
+    Object.entries(record ?? {}).filter(([key]) => !dict.has(key));
+  for (const [key, feature] of missing(unsupportedAttributes.get(name))) module.unsupported.set(key, feature);
+  for (const [key, target] of missing(sharedAttributes.get(name))) module.imports.set(key, target);
+  for (const create of extraAttributes.get(name) ?? []) {
+    for (const [key, value] of create(runtime, dict)) if (!dict.has(key)) dict.set(key, value);
+  }
+  // A name defined after all, or shared from another module, is no longer one this grader lacks.
+  for (const key of module.unsupported.keys())
+    if (dict.has(key) || module.imports.has(key)) module.unsupported.delete(key);
+  const all = moduleAlls.get(name);
+  if (all && !dict.has('__all__')) dict.set('__all__', runtime.listOf([...all]));
+}
+
+/** Records the module of the builtin functions a module creates, which their `__module__` names. */
+function recordFunctionModules(module: PyModule): void {
+  for (const [key, value] of module.dict) {
+    if (
+      value instanceof PyBuiltinFunction &&
+      value.self === undefined &&
+      !functionModules.has(value) &&
+      !modulelessFunctions.has(value)
+    ) {
+      // CPython's function may come from a C accelerator, such as operator's from _operator.
+      functionModules.set(value, acceleratorModule(module.name, key) ?? module.name);
+    }
+  }
+}
+
+/**
+ * Loads the C accelerators a module's functions come from, as CPython's module imports them, so that
+ * `inspect.getmodule` finds them: a module this grader has, or else one holding those functions.
+ */
+function loadAccelerators(runtime: Runtime, module: PyModule): void {
+  for (const [name, functions] of acceleratedFunctions(module)) {
+    if (runtime.modules.has(name)) continue;
+    if (!isRegisteredModule(name)) {
+      registerModule(name, () => new Map(functions));
+      partialAccelerators.add(name);
+    }
+    if (aliases.has(name) || unloadableAccelerators.has(name)) continue;
+    const accelerator = importModule(runtime, name);
+    // The module holds only the functions of CPython's that the module importing it has.
+    if (partialAccelerators.has(name)) accelerator.partialFeature = `モジュール ${name} のほかの名前`;
+  }
+}
+
+/** The functions of a module that come from C accelerators, by accelerator. */
+function acceleratedFunctions(module: PyModule): Map<string, [string, PyValue][]> {
+  const accelerators = new Map<string, [string, PyValue][]>();
+  for (const [key, value] of module.dict) {
+    const accelerator = value instanceof PyBuiltinFunction ? acceleratorModule(module.name, key) : undefined;
+    if (accelerator === undefined || accelerator === module.name) continue;
+    accelerators.set(accelerator, [...(accelerators.get(accelerator) ?? []), [key, value]]);
+  }
+  return accelerators;
+}
+
+/** The accelerators whose import fails here, as for the platform modules CPython's macOS build lacks. */
+const unloadableAccelerators = new Set(['posix']);
+/** The accelerators this grader has no module of, which hold only the functions the modules importing them have. */
+const partialAccelerators = new Set<string>();
+
+/**
+ * What runs when a run creates a module, before its code: it may return what to run after that code, as the cache
+ * token of `abc` needs.
+ */
+type ModuleCreationHook = (runtime: Runtime, name: string) => (() => void) | undefined;
+
+/**
+ * The module creation hooks, kept on a hoisted function rather than in a module constant, since modules imported in a
+ * cycle with this one add theirs while it is still loading.
+ */
+function creationHooks(): ModuleCreationHook[] {
+  const holder = creationHooks as { hooks?: ModuleCreationHook[] };
+  holder.hooks ??= [];
+  return holder.hooks;
+}
+
+export function addModuleCreationHook(hook: ModuleCreationHook): void {
+  creationHooks().push(hook);
+}
+
+function runFactory(runtime: Runtime, name: string, factory: ModuleFactory, module: PyModule): Map<string, PyValue> {
+  const after = creationHooks().map((hook) => hook(runtime, name));
+  try {
+    return factory(runtime, module.dict);
+  } catch (error) {
+    // As in CPython, a module whose code failed leaves sys.modules, so that importing it again runs it again.
+    runtime.modules.delete(name);
+    moduleTables.get(runtime)?.delete(name);
+    throw error;
+  } finally {
+    for (const each of after) each?.();
+  }
+}
+
+/**
+ * `importlib.reload(module)`: runs the code of a module again in its namespace, as CPython does for a module written
+ * in Python, which keeps the names the code does not set; a module CPython builds into its executable stays as it is.
+ */
+export function reloadModule(runtime: Runtime, module: PyModule): PyModule {
+  const { name } = module;
+  if ((moduleTables.get(runtime) ?? runtime.modules).get(name) !== module) {
+    const error = newException(exceptionClassNamed('ImportError'), [`module ${name} not in sys.modules`]);
+    error.exception?.fields?.set('name', name);
+    throw new PyError(error);
+  }
+  if (name === '__main__') throw new UnsupportedFeatureError('プログラムのモジュール（__main__）の再読み込み');
+  const factory = factories.get(name);
+  if (!factory || SYS_BUILTIN_MODULE_NAMES.includes(name)) return module;
+  // A module this grader writes natively would create its objects anew where CPython's code imports them.
+  if (!sourceModules.has(name))
+    throw new UnsupportedFeatureError(`モジュール ${name} の再読み込み（importlib.reload）`);
+  factory(runtime, module.dict);
+  return module;
+}
+
+/** Makes a builtin function created in one module's namespace say it belongs to another, as `_pickle.dumps` does. */
+export function setBuiltinFunctionModule(fn: PyBuiltinFunction, module: string): void {
+  functionModules.set(fn, module);
+}
+
+/** Makes a builtin function belong to no module, as the codec error handlers CPython creates inside do. */
+export function setNoModule(fn: PyBuiltinFunction): void {
+  modulelessFunctions.add(fn);
+}
+
+const modulelessFunctions = new WeakSet<PyBuiltinFunction>();
+
+/** The `__module__` of a builtin function: the module whose namespace it was created in, if any. */
+export function builtinFunctionModule(runtime: Runtime, fn: PyBuiltinFunction): string | undefined {
+  if (fn.self instanceof PyModule) return fn.self.name;
+  if (modulelessFunctions.has(fn)) return undefined;
+  return functionModules.get(fn) ?? (runtime.builtins.get(fn.name) === fn ? 'builtins' : undefined);
 }

@@ -1,5 +1,5 @@
 import { toIndex } from './numbers';
-import { bindValue, callValue, lookupSpecial, toArray } from './objects';
+import { bindValue, callValue, lookupSpecial, overriding, toArray } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { codePointAt, sliceStr, strLength } from './strings';
 import {
@@ -23,14 +23,26 @@ export interface SliceIndices {
   count: number;
 }
 
-function sliceIndex(value: PyValue): bigint | undefined {
-  if (value === None) return undefined;
-  return toIndex(value, () => 'slice indices must be integers or None or have an __index__ method');
+export interface UnpackedSlice {
+  start: bigint | undefined;
+  stop: bigint | undefined;
+  step: bigint;
 }
 
 /** Resolves a slice against the length of a sequence held in an array, whose indices are numbers. */
 export function sliceIndices(slice: PySlice, length: number): SliceIndices {
-  const bounds = exactSliceBounds(slice, BigInt(length));
+  return adjustSlice(unpackSlice(slice), length);
+}
+
+/** Evaluates a slice's indices and rejects a zero step before adjusting against a container's length. */
+export function unpackSlice(slice: PySlice): UnpackedSlice {
+  const step = sliceIndex(slice.step) ?? 1n;
+  if (step === 0n) throw valueError('slice step cannot be zero');
+  return { start: sliceIndex(slice.start), stop: sliceIndex(slice.stop), step };
+}
+
+export function adjustSlice(slice: UnpackedSlice, length: number): SliceIndices {
+  const bounds = clampSliceBounds(slice, BigInt(length));
   const [start, stop, step] = [Number(bounds.start), Number(bounds.stop), Number(bounds.step)];
   let count = 0;
   if (step < 0) {
@@ -45,22 +57,30 @@ export function sliceIndices(slice: PySlice, length: number): SliceIndices {
  * Resolves a slice against a length with exact integers, as CPython's PySlice_AdjustIndices does for sequences and
  * _PySlice_GetLongIndices for ranges and `slice.indices`.
  */
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes CPython's PySlice_AdjustIndices.
 export function exactSliceBounds(slice: PySlice, length: bigint): { start: bigint; stop: bigint; step: bigint } {
-  const step = sliceIndex(slice.step) ?? 1n;
-  if (step === 0n) throw valueError('slice step cannot be zero');
-  const clamp = (value: bigint | undefined, defaultValue: bigint): bigint => {
-    if (value === undefined) return defaultValue;
-    if (value < 0n) {
-      const index = value + length;
-      return index < 0n ? (step < 0n ? -1n : 0n) : index;
-    }
-    if (value >= length) return step < 0n ? length - 1n : length;
-    return value;
-  };
-  const start = clamp(sliceIndex(slice.start), step < 0n ? length - 1n : 0n);
-  const stop = clamp(sliceIndex(slice.stop), step < 0n ? -1n : length);
+  return clampSliceBounds(unpackSlice(slice), length);
+}
+
+function clampSliceBounds(slice: UnpackedSlice, length: bigint): { start: bigint; stop: bigint; step: bigint } {
+  const { step } = slice;
+  const start = clampSliceEndpoint(slice.start, length, step, step < 0n ? length - 1n : 0n);
+  const stop = clampSliceEndpoint(slice.stop, length, step, step < 0n ? -1n : length);
   return { start, stop, step };
+}
+
+function clampSliceEndpoint(value: bigint | undefined, length: bigint, step: bigint, defaultValue: bigint): bigint {
+  if (value === undefined) return defaultValue;
+  if (value < 0n) {
+    const index = value + length;
+    return index < 0n ? (step < 0n ? -1n : 0n) : index;
+  }
+  if (value >= length) return step < 0n ? length - 1n : length;
+  return value;
+}
+
+function sliceIndex(value: PyValue): bigint | undefined {
+  if (value === None) return undefined;
+  return toIndex(value, () => 'slice indices must be integers or None or have an __index__ method');
 }
 
 function sliceItems<T>(items: readonly T[], indices: SliceIndices): T[] {
@@ -79,12 +99,17 @@ function normalizeIndex(key: PyValue, length: number, kind: string): number | un
   return Number(resolved);
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of subscriptable builtin.
 export function getItem(container: PyValue, key: PyValue): PyValue {
+  const special = overriding(container, '__getitem__');
+  if (special !== undefined) return callValue(bindValue(special, container), [key]);
+  return builtinGetItem(container, key);
+}
+
+/** `container[key]` as the builtin type of `container` defines it, whatever `__getitem__` its class defines. */
+// code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of subscriptable builtin.
+export function builtinGetItem(container: PyValue, key: PyValue): PyValue {
   const runtime = currentRuntime();
   if (container instanceof PyList || container instanceof PyTuple) {
-    const special = classOf(container).isBuiltin ? undefined : userMethod(container, '__getitem__');
-    if (special !== undefined) return callValue(special, [key]);
     const kind = container instanceof PyList ? 'list' : 'tuple';
     if (key instanceof PySlice) {
       const items = sliceItems(container.items, sliceIndices(key, container.items.length));
@@ -101,14 +126,6 @@ export function getItem(container: PyValue, key: PyValue): PyValue {
   const special = lookupSpecial(container, '__getitem__');
   if (special !== undefined) return callValue(bindValue(special, container), [key]);
   throw typeError(`'${typeName(container)}' object is not subscriptable`);
-}
-
-function userMethod(container: PyValue, name: string): PyValue | undefined {
-  const method = lookupSpecial(container, name);
-  const builtin = classOf(container)
-    .mro.find((cls) => cls.isBuiltin)
-    ?.dict.get(name);
-  return method === undefined || method === builtin ? undefined : bindValue(method, container);
 }
 
 function stringItem(text: string, key: PyValue): string {
@@ -132,8 +149,6 @@ function stringItem(text: string, key: PyValue): string {
 }
 
 function dictItem(dict: PyDict, key: PyValue): PyValue {
-  const special = classOf(dict).isBuiltin ? undefined : userMethod(dict, '__getitem__');
-  if (special !== undefined) return callValue(special, [key]);
   const value = dict.store.get(key);
   if (value !== undefined) return value;
   return currentRuntime().missingKey(dict, key);
@@ -161,27 +176,34 @@ function rangeItem(range: PyRange, key: PyValue): PyValue {
 
 export function setItem(container: PyValue, key: PyValue, value: PyValue): void {
   currentRuntime().spend();
-  if (container instanceof PyList && classOf(container).isBuiltin) {
-    if (key instanceof PySlice) {
-      assignSlice(container, key, value);
-      return;
-    }
-    const index = normalizeIndex(key, container.items.length, 'list');
-    if (index === undefined) throw pyError('IndexError', 'list assignment index out of range');
-    container.editableItems[index] = value;
+  if (container instanceof PyList && overriding(container, '__setitem__') === undefined) {
+    setListItem(container, key, value);
     return;
   }
   if (container instanceof PyDict && classOf(container).isBuiltin) {
     container.store.set(key, value);
     return;
   }
-  const special = lookupSpecial(container, '__setitem__');
-  if (special !== undefined) {
-    callValue(bindValue(special, container), [key, value]);
+  const name = container instanceof PyClass ? 'type' : typeName(container);
+  callItemMethod(container, '__setitem__', [key, value], `'${name}' object does not support item assignment`);
+}
+
+/** Calls the item method of a container's class, raising TypeError with `missing` when it has none. */
+function callItemMethod(container: PyValue, name: string, args: PyValue[], missing: string): void {
+  const special = lookupSpecial(container, name);
+  if (special === undefined) throw typeError(missing);
+  callValue(bindValue(special, container), args);
+}
+
+/** `list[key] = value` as list defines it. */
+export function setListItem(list: PyList, key: PyValue, value: PyValue): void {
+  if (key instanceof PySlice) {
+    assignSlice(list, key, value);
     return;
   }
-  if (container instanceof PyClass) throw typeError(`'type' object does not support item assignment`);
-  throw typeError(`'${typeName(container)}' object does not support item assignment`);
+  const index = normalizeIndex(key, list.items.length, 'list');
+  if (index === undefined) throw pyError('IndexError', 'list assignment index out of range');
+  list.editableItems[index] = value;
 }
 
 function assignSlice(list: PyList, slice: PySlice, value: PyValue): void {
@@ -201,24 +223,10 @@ function assignSlice(list: PyList, slice: PySlice, value: PyValue): void {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of builtin that supports item deletion.
 export function deleteItem(container: PyValue, key: PyValue): void {
-  if (container instanceof PyList && classOf(container).isBuiltin) {
-    if (key instanceof PySlice) {
-      const indices = sliceIndices(key, container.items.length);
-      if (indices.step === 1) {
-        container.removeRange(indices.start, Math.max(0, indices.stop - indices.start));
-        return;
-      }
-      // As list_ass_subscript does, an empty slice removes nothing without visiting the list.
-      if (indices.count === 0) return;
-      currentRuntime().scan(container.items.length);
-      container.replaceItems(withoutSlice(container.items, indices));
-      return;
-    }
-    const index = normalizeIndex(key, container.items.length, 'list');
-    if (index === undefined) throw pyError('IndexError', 'list assignment index out of range');
-    container.removeRange(index, 1);
+  currentRuntime().spend();
+  if (container instanceof PyList && overriding(container, '__delitem__') === undefined) {
+    deleteListItem(container, key);
     return;
   }
   if (container instanceof PyDict && classOf(container).isBuiltin) {
@@ -231,6 +239,25 @@ export function deleteItem(container: PyValue, key: PyValue): void {
     return;
   }
   throw unsupportedDeletion(container, key);
+}
+
+/** `del list[key]` as list defines it. */
+export function deleteListItem(list: PyList, key: PyValue): void {
+  if (key instanceof PySlice) {
+    const indices = sliceIndices(key, list.items.length);
+    if (indices.step === 1) {
+      list.removeRange(indices.start, Math.max(0, indices.stop - indices.start));
+      return;
+    }
+    // As list_ass_subscript does, an empty slice removes nothing without visiting the list.
+    if (indices.count === 0) return;
+    currentRuntime().scan(list.items.length);
+    list.replaceItems(withoutSlice(list.items, indices));
+    return;
+  }
+  const index = normalizeIndex(key, list.items.length, 'list');
+  if (index === undefined) throw pyError('IndexError', 'list assignment index out of range');
+  list.removeRange(index, 1);
 }
 
 /** The items left after deleting an extended slice, kept in order. */

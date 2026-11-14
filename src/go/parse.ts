@@ -2,7 +2,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAnnotations';
-import { loadParser, parseSource } from '../interpreter/treeSitter';
+import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { File } from './ast';
 import { Converter } from './convert';
 
@@ -24,23 +24,9 @@ const MISSING_TOKEN_NAMES = {
   package_identifier: 'パッケージの名前',
 };
 
-/** The `// atomic` annotations of a file, read from its comment tokens. */
+/** The `// atomic` annotations of a file, read from its line comments. */
 export function findGoTraceAnnotations(source: string): TraceAnnotation[] {
-  const tree = parser.parse(source);
-  if (!tree) throw new Error('The Go parser returned no tree');
-  try {
-    const comments: TraceAnnotation[] = [];
-    const visit = (node: Node): void => {
-      if (node.type === 'comment' && node.text.startsWith('//')) {
-        comments.push({ index: node.startIndex, text: node.text });
-      }
-      for (const child of node.children) if (child) visit(child);
-    };
-    visit(tree.rootNode);
-    return traceAnnotationsIn(comments);
-  } finally {
-    tree.delete();
-  }
+  return traceAnnotationsIn(commentTokens(parser, source).filter((comment) => comment.text.startsWith('//')));
 }
 
 /** The tokens after which Go's lexer ends a statement at a newline. */
@@ -93,6 +79,8 @@ const SEMICOLON_LISTS = new Set([
   'labeled_statement',
 ]);
 
+const SWITCH_STATEMENTS = new Set(['expression_switch_statement', 'type_switch_statement', 'select_statement']);
+
 /**
  * Finds newlines that Go's lexer turns into a semicolon where the grammar allows none, which tree-sitter's grammar,
  * lacking the lexer's rule, accepts: a `{` or `else` on the next line, or a list of arguments or elements whose line
@@ -107,7 +95,7 @@ function findMisplacedNewlines(root: Node): SourceDiagnostic[] {
       leaves.push(node);
       return;
     }
-    for (const child of node.children) if (child) collect(child);
+    for (const child of node.children) collect(child);
   };
   collect(root);
   const errors: SourceDiagnostic[] = [];
@@ -116,11 +104,18 @@ function findMisplacedNewlines(root: Node): SourceDiagnostic[] {
     const next = leaves[index + 1];
     if (next.startPosition.row <= token.endPosition.row || !triggersSemicolon(token)) continue;
     const container = commonAncestor(token, next);
-    if (container && SEMICOLON_LISTS.has(container.type)) continue;
+    if (container && SEMICOLON_LISTS.has(container.type) && !beforeBody(container, next)) continue;
     errors.push({ row: token.endPosition.row, message: newlineMessage(next) });
     if (errors.length >= 5) break;
   }
   return errors;
+}
+
+/** Whether a token lies in the header of a `switch` or `select`, before the `{` that opens the clauses. */
+function beforeBody(container: Node, token: Node): boolean {
+  if (!SWITCH_STATEMENTS.has(container.type)) return false;
+  const brace = container.children.find((child) => child.type === '{');
+  return brace !== undefined && token.startIndex <= brace.startIndex;
 }
 
 function triggersSemicolon(token: Node): boolean {

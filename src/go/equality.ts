@@ -1,6 +1,6 @@
-import { runtimeErrorPanic } from './runtimeErrors';
-import { identical, isComparable, type Type, typeString, underlying } from './types';
-import { type Complex, type GoArray, type GoStruct, type Iface, type Pointer, type Value } from './values';
+import { runtimeErrorPanic, unhashableKeyPanic } from './runtimeErrors';
+import { identical, isComparable, type Type, typeIdentityKey, typeString, underlying } from './types';
+import { type Complex, type GoArray, type GoStruct, Iface, type Pointer, type Value } from './values';
 
 type Equal = (a: Value, b: Value) => boolean;
 
@@ -86,13 +86,35 @@ export function mapKeyOf(type: Type): KeyOf {
   return keyOf;
 }
 
+/**
+ * Panics as Go's map lookup and delete do on a nil or empty map, which check the key without hashing it: with
+ * `maps.unhashableTypeError` for the first dynamic value of an unhashable type the key holds (Go's mapKeyError).
+ */
+export function checkKeyHashable(type: Type, value: Value): void {
+  const under = underlying(type);
+  if (under.kind === 'interface') {
+    if (!(value instanceof Iface)) return;
+    if (!isComparable(value.type)) unhashableKeyPanic(typeString(value.type));
+    checkKeyHashable(value.type, value.value);
+  } else if (under.kind === 'array') {
+    for (const element of (value as GoArray).elements) checkKeyHashable(under.element, element);
+  } else if (under.kind === 'struct') {
+    for (const [index, field] of under.fields.entries()) {
+      if (field.name !== '_') checkKeyHashable(field.type, (value as GoStruct).fields[index]);
+    }
+  }
+}
+
 // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of comparable type.
 function buildKey(type: Type): KeyOf {
   const under = underlying(type);
   switch (under.kind) {
     case 'basic': {
       if (under.basic === 'complex64' || under.basic === 'complex128') {
-        return (value) => `${(value as Complex).re},${(value as Complex).im}`;
+        return (value) => {
+          const { re, im } = value as Complex;
+          return Number.isNaN(re) || Number.isNaN(im) ? Symbol('NaN') : `${re},${im}`;
+        };
       }
       if (under.basic === 'float32' || under.basic === 'float64') {
         // Each NaN is a distinct key in Go, and 0 and -0 are the same key, as in Map.
@@ -118,8 +140,7 @@ function buildKey(type: Type): KeyOf {
         if (value === undefined) return 'nil';
         const iface = value as Iface;
         if (!isComparable(iface.type)) runtimeErrorPanic(`hash of unhashable type ${typeString(iface.type)}`);
-        // Type names tell the dynamic types apart, except for types declared alike in two functions.
-        return `${typeString(iface.type)}|${stringKey(mapKeyOf(iface.type)(iface.value))}`;
+        return `${typeIdentityKey(iface.type)}|${stringKey(mapKeyOf(iface.type)(iface.value))}`;
       };
     }
     default: {

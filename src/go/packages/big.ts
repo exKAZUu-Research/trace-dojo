@@ -1,12 +1,12 @@
 import type { Entity } from '../entities';
 import { newError } from '../errorValues';
 import { formatFloat } from '../floatFormat';
-import { STATE } from '../fmt';
 import { type BoundCall, dynamicMethod } from '../methods';
 import { addMethod, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
 import { GoPanic } from '../runtime';
 import { BASIC, pointerTo, RUNE, type Type } from '../types';
 import { Cell, GoStruct, Iface, Pointer, type Value } from '../values';
+import { STATE } from './fmt';
 import { BOOL, byteSlice, INT, STRING } from './support';
 
 /** `big.Int` and `big.Rat`, whose values live in their native state as JavaScript bigints. */

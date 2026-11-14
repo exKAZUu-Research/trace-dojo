@@ -2,7 +2,7 @@ import { pyHash } from './hashing';
 import { iterate } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { SetTable } from './setTable';
-import { dictClass, exceptionClassNamed, frozensetClass, newTuple, setClass } from './types';
+import { dictClass, exceptionClassNamed, frozensetClass, newTuple, resultClassOf, setClass } from './types';
 import { DONE, PyDict, PyDictView, PyError, PySet, type PyValue } from './values';
 
 /**
@@ -27,7 +27,7 @@ export function lookupSetKey<T>(key: PyValue, lookup: (key: PyValue) => T): T {
 
 /** A new set or frozenset filled from a table: the builtin type of `like`, as CPython gives for a subclass too. */
 function setLike(like: PySet, table: SetTable): PySet {
-  return new PySet(like.cls.isSubclassOf(frozensetClass) ? frozensetClass : setClass, table);
+  return new PySet(resultClassOf(like.cls), table);
 }
 
 /** Adds the elements of an iterable as CPython's set_update_internal does, which decides the resulting order. */

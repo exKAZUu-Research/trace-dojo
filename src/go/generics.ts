@@ -117,10 +117,26 @@ export function unify(param: Type, arg: Type, mapping: Substitution, params: rea
         unify(param.value, target.value, mapping, params)
       );
     }
+    case 'struct': {
+      const target = underlying(arg);
+      return (
+        target.kind === 'struct' &&
+        target.fields.length === param.fields.length &&
+        param.fields.every((field, index) => {
+          const other = target.fields[index];
+          return (
+            field.name === other.name &&
+            field.embedded === other.embedded &&
+            unify(field.type, other.type, mapping, params)
+          );
+        })
+      );
+    }
     case 'func': {
       const target = underlying(arg);
       if (
         target.kind !== 'func' ||
+        target.variadic !== param.variadic ||
         target.params.length !== param.params.length ||
         target.results.length !== param.results.length
       ) {
@@ -164,13 +180,39 @@ export function inferFromConstraints(params: readonly TypeParamType[], mapping: 
   }
 }
 
-function containsUnbound(type: Type, params: readonly TypeParamType[], mapping: Substitution): boolean {
-  if (type.kind === 'typeParam') return params.some((param) => param.id === type.id) && !mapping.has(type.id);
-  if (type.kind === 'slice' || type.kind === 'pointer' || type.kind === 'array' || type.kind === 'chan')
-    return containsUnbound(type.element, params, mapping);
-  if (type.kind === 'map')
-    return containsUnbound(type.key, params, mapping) || containsUnbound(type.value, params, mapping);
-  return false;
+function containsUnbound(
+  type: Type,
+  params: readonly TypeParamType[],
+  mapping: Substitution,
+  seen = new Set<Type>()
+): boolean {
+  if (seen.has(type)) return false;
+  seen.add(type);
+  switch (type.kind) {
+    case 'typeParam': {
+      return params.some((param) => param.id === type.id) && !mapping.has(type.id);
+    }
+    case 'named': {
+      return (type.typeArgs ?? []).some((arg) => containsUnbound(arg, params, mapping, seen));
+    }
+    case 'slice':
+    case 'pointer':
+    case 'array': {
+      return containsUnbound(type.element, params, mapping, seen);
+    }
+    case 'map': {
+      return containsUnbound(type.key, params, mapping, seen) || containsUnbound(type.value, params, mapping, seen);
+    }
+    case 'struct': {
+      return type.fields.some((field) => containsUnbound(field.type, params, mapping, seen));
+    }
+    case 'func': {
+      return [...type.params, ...type.results].some((inner) => containsUnbound(inner, params, mapping, seen));
+    }
+    default: {
+      return false;
+    }
+  }
 }
 
 export function containsTypeParam(type: Type, seen = new Set<Type>()): boolean {

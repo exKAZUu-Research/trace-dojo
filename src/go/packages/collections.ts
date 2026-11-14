@@ -1,3 +1,4 @@
+import { LIMITS } from '../../interpreter/limits';
 import type { Entity } from '../entities';
 import { equalityOf, mapKeyOf } from '../equality';
 import { newError } from '../errorValues';
@@ -13,8 +14,8 @@ import {
   typeParam,
 } from '../native';
 import { GoPanic } from '../runtime';
-import { boundsPanic } from '../runtimeErrors';
-import { appendValues } from '../sliceOps';
+import { boundsPanic, runtimeErrorPanic } from '../runtimeErrors';
+import { appendValues, grownCapacity } from '../sliceOps';
 import {
   ANY,
   BASIC,
@@ -32,8 +33,20 @@ import {
 } from '../types';
 import { Cell, copyValue, GoFunc, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 import { seq2Of, seqOf } from './iter';
+import { zeroValue } from './reflection';
 import { pdqsort, type SortData, stableSort } from './sorting';
-import { BOOL, callFunction, callMethod, FLOAT64, INT, sliceValues, spendFor, STRING } from './support';
+import {
+  BOOL,
+  callFunction,
+  callMethod,
+  FLOAT64,
+  INT,
+  receiverStruct,
+  sliceValues,
+  spendFor,
+  STRING,
+  stringPanic,
+} from './support';
 
 // Ordering --------------------------------------------------------------------------------------------------------
 
@@ -82,18 +95,26 @@ function compare(a: Value, b: Value): number {
   return 0;
 }
 
+function swapSliceElements(slice: Slice, i: number, j: number): void {
+  if (i === j) return;
+  const left = copyValue(slice.get(i));
+  const right = copyValue(slice.get(j));
+  slice.set(i, right);
+  slice.set(j, left);
+}
+
 /** Sorts a slice's elements in place, as the slices and sort packages do. */
 function sortSlice(slice: Value, isLess: (a: Value, b: Value) => boolean, stable = false): undefined {
   if (!(slice instanceof Slice)) return undefined;
-  const { array, offset, length } = slice;
-  spendFor(length * Math.max(1, Math.ceil(Math.log2(length + 1))));
+  const { length } = slice;
+  const runtime = currentRuntime();
+  let comparisons = 0;
   const data: SortData = {
-    less: (i, j) => isLess(array[offset + i], array[offset + j]),
-    swap: (i, j) => {
-      const value = array[offset + i];
-      array[offset + i] = array[offset + j];
-      array[offset + j] = value;
+    less: (i, j) => {
+      if (++comparisons % 16 === 0) runtime.spend();
+      return isLess(slice.get(i), slice.get(j));
     },
+    swap: (i, j) => swapSliceElements(slice, i, j),
   };
   if (stable) stableSort(data, length);
   else pdqsort(data, length);
@@ -144,7 +165,7 @@ const REVERSE = namedType('sort', 'reverse', {
   kind: 'struct',
   fields: [{ name: 'Interface', type: SORT_INTERFACE, embedded: true }],
 });
-const reversed = (receiver: Value): Value => ((receiver as Pointer).load() as GoStruct).fields[0];
+const reversed = (receiver: Value): Value => receiverStruct(receiver).fields[0];
 addMethod(REVERSE, 'Len', fn([], [INT]), (receiver) => callMethod(reversed(receiver), 'Len'), true);
 addMethod(
   REVERSE,
@@ -169,15 +190,16 @@ function sliceType(name: string, element: Type, isLess: (a: Value, b: Value) => 
     isLess((receiver as Slice).get(Number(i)), (receiver as Slice).get(Number(j)))
   );
   addMethod(type, 'Swap', fn([INT, INT], []), (receiver, [i, j]) => {
-    const slice = receiver as Slice;
-    const value = slice.get(Number(i));
-    slice.set(Number(i), slice.get(Number(j)));
-    slice.set(Number(j), value);
+    swapSliceElements(receiver as Slice, Number(i), Number(j));
     return;
   });
   addMethod(type, 'Sort', fn([], []), (receiver) => {
     sortSlice(receiver, isLess);
     return;
+  });
+  addMethod(type, 'Search', fn([element], [INT]), (receiver, [target]) => {
+    const slice = receiver as Slice | undefined;
+    return BigInt(search(slice?.length ?? 0, (index) => ((slice as Slice).get(index) as bigint) >= (target as bigint)));
   });
   return type;
 }
@@ -188,6 +210,7 @@ const FLOAT64_SLICE = sliceType('Float64Slice', FLOAT64, less);
 
 function isSorted(slice: Value, isLess: (a: Value, b: Value) => boolean): boolean {
   const values = sliceValues(slice);
+  spendFor(values.length);
   for (let index = values.length - 1; index > 0; index--) if (isLess(values[index], values[index - 1])) return false;
   return true;
 }
@@ -206,9 +229,7 @@ function search(count: number, predicate: (index: number) => boolean): number {
 /** The slice inside the `any` that `sort.Slice` receives, which must hold a slice. */
 function anySlice(value: Value, name: string): Slice | undefined {
   if (!(value instanceof Iface) || underlying(value.type).kind !== 'slice') {
-    throw new GoPanic(
-      newError(`reflect: call of Swapper on ${value instanceof Iface ? underlying(value.type).kind : 'zero'} Value`)
-    );
+    stringPanic(`reflect: call of Swapper on ${value instanceof Iface ? underlying(value.type).kind : 'zero'} Value`);
   }
   void name;
   return value.value as Slice | undefined;
@@ -291,14 +312,10 @@ const sortMembers: Record<string, Entity> = {
 
 /** `sort.Slice`: sorts with a less function of indexes, swapping elements as reflect.Swapper does. */
 function sortByIndex(slice: Slice, isLessFn: Value, stable: boolean): void {
-  const { array, offset, length } = slice;
+  const { length } = slice;
   const data: SortData = {
     less: (i, j) => callFunction(isLessFn, [BigInt(i), BigInt(j)]) === true,
-    swap: (i, j) => {
-      const value = array[offset + i];
-      array[offset + i] = array[offset + j];
-      array[offset + j] = value;
-    },
+    swap: (i, j) => swapSliceElements(slice, i, j),
   };
   if (stable) stableSort(data, length);
   else pdqsort(data, length);
@@ -346,16 +363,30 @@ function elementTypeOf(types: Type[]): Type {
   return types[1];
 }
 
-function newSlice(values: Value[]): Slice {
-  currentRuntime().allocate(values.length);
-  return new Slice(values, 0, values.length, values.length);
+function zeroSlotCount(type: Type): number {
+  const under = underlying(type);
+  if (under.kind === 'array') return Math.max(1, under.length * zeroSlotCount(under.element));
+  if (under.kind === 'struct') {
+    let total = Math.max(1, under.fields.length);
+    for (const field of under.fields) total += zeroSlotCount(field.type) - 1;
+    return total;
+  }
+  return 1;
+}
+
+function allocateElements(count: number, element: Type): void {
+  const slots = BigInt(count) * BigInt(zeroSlotCount(element));
+  if (slots > BigInt(LIMITS.maxSlots)) allocate(LIMITS.maxSlots + 1);
+  allocate(Number(slots));
 }
 
 function cloneSlice(value: Value, element: Type): Value {
   if (value === undefined) return undefined;
-  const values = sliceValues(value).map(copyValue);
-  void element;
-  return newSlice(values);
+  const values = sliceValues(value);
+  if (values.length === 0) return new Slice([], 0, 0, 0);
+  spendFor(values.length);
+  const zero = zeroValueOf(element);
+  return appendValues(new Slice([], 0, 0, 0), values, element, zero, (count) => allocateElements(count, element));
 }
 
 const SEQ = (element: Type): Type => seqOf(element);
@@ -447,7 +478,10 @@ const slicesMembers: Record<string, Entity> = {
     (s, e) => ({ params: [s, e], results: [BOOL] }),
     (types) => {
       const equal = equalityOf(elementTypeOf(types));
-      return ([slice, value]) => sliceValues(slice).some((element) => equal(element, value));
+      return ([slice, value]) => {
+        spendFor(sliceValues(slice).length);
+        return sliceValues(slice).some((element) => equal(element, value));
+      };
     }
   ),
   ContainsFunc: sliceGeneric(
@@ -464,7 +498,10 @@ const slicesMembers: Record<string, Entity> = {
     (s, e) => ({ params: [s, e], results: [INT] }),
     (types) => {
       const equal = equalityOf(elementTypeOf(types));
-      return ([slice, value]) => BigInt(sliceValues(slice).findIndex((element) => equal(element, value)));
+      return ([slice, value]) => {
+        spendFor(sliceValues(slice).length);
+        return BigInt(sliceValues(slice).findIndex((element) => equal(element, value)));
+      };
     }
   ),
   IndexFunc: sliceGeneric(
@@ -484,6 +521,7 @@ const slicesMembers: Record<string, Entity> = {
       return ([a, b]) => {
         const x = sliceValues(a);
         const y = sliceValues(b);
+        spendFor(Math.min(x.length, y.length));
         return x.length === y.length && x.every((element, index) => equal(element, y[index]));
       };
     }
@@ -495,11 +533,8 @@ const slicesMembers: Record<string, Entity> = {
     () =>
       ([slice]) => {
         if (!(slice instanceof Slice)) return;
-        for (let i = 0, j = slice.length - 1; i < j; i++, j--) {
-          const value = slice.get(i);
-          slice.set(i, slice.get(j));
-          slice.set(j, value);
-        }
+        spendFor(slice.length);
+        for (let i = 0, j = slice.length - 1; i < j; i++, j--) swapSliceElements(slice, i, j);
         return;
       }
   ),
@@ -595,61 +630,67 @@ const slicesMembers: Record<string, Entity> = {
     'Concat',
     EMPTY_INTERFACE,
     (s) => ({ params: [sliceOf(s)], results: [s], variadic: true }),
-    () =>
+    (types) =>
       ([lists]) => {
-        const values = sliceValues(lists).flatMap((list) => sliceValues(list).map(copyValue));
-        if (values.length === 0) return;
-        return newSlice(values);
+        const parts = sliceValues(lists);
+        let totalBig = 0n;
+        for (const part of parts) {
+          totalBig += BigInt((part as Slice | undefined)?.length ?? 0);
+          if (totalBig >= 1n << 63n) stringPanic('len out of range');
+        }
+        if (totalBig === 0n) return;
+        if (totalBig > BigInt(LIMITS.maxSlots)) allocate(LIMITS.maxSlots + 1);
+        const total = Number(totalBig);
+        const element = elementTypeOf(types);
+        const capacity = grownCapacity(0, total, element);
+        allocateElements(capacity, element);
+        spendFor(capacity);
+        const zero = zeroValueOf(element);
+        const array: Value[] = [];
+        for (const part of parts) {
+          currentRuntime().spend();
+          for (const item of sliceValues(part)) array.push(copyValue(item));
+        }
+        while (array.length < capacity) array.push(zero());
+        return new Slice(array, 0, total, capacity);
       }
   ),
   Repeat: sliceGeneric(
     'Repeat',
     EMPTY_INTERFACE,
     (s) => ({ params: [s, INT], results: [s] }),
-    () =>
+    (types) =>
       ([slice, count]) => {
-        const times = Number(count as bigint);
-        if (times < 0) throw new GoPanic(newError('cannot be negative'));
+        const times = count as bigint;
+        if (times < 0n) stringPanic('cannot be negative');
         const values = sliceValues(slice);
+        const totalBig = BigInt(values.length) * times;
+        if (totalBig >= 1n << 63n) stringPanic('the result of (len(x) * count) overflows');
+        if (totalBig > BigInt(LIMITS.maxSlots)) allocate(LIMITS.maxSlots + 1);
+        const total = Number(totalBig);
+        const element = elementTypeOf(types);
+        allocateElements(total, element);
+        spendFor(total);
+        const runtime = currentRuntime();
         const repeated: Value[] = [];
-        for (let index = 0; index < times; index++) repeated.push(...values.map(copyValue));
-        return newSlice(repeated);
+        if (values.length > 0) {
+          for (let index = 0; index < Number(times); index++) {
+            runtime.spend();
+            for (const value of values) repeated.push(copyValue(value));
+          }
+        }
+        return new Slice(repeated, 0, total, total);
       }
-  ),
-  Sorted: (() => {
-    const e = typeParam('E', ORDERED);
-    return genericFunction('Sorted', [e], funcType([SEQ(e)], [sliceOf(e)]), () => ([seq]) => {
-      const slice = newSlice(collect(seq));
-      sortSlice(slice, less);
-      return slice.length === 0 ? undefined : slice;
-    });
-  })(),
-  Collect: (() => {
-    const e = typeParam('E', EMPTY_INTERFACE);
-    return genericFunction('Collect', [e], funcType([SEQ(e)], [sliceOf(e)]), () => ([seq]) => {
-      const values = collect(seq);
-      return values.length === 0 ? undefined : newSlice(values);
-    });
-  })(),
-  Values: sliceGeneric(
-    'Values',
-    EMPTY_INTERFACE,
-    (s, e) => ({ params: [s], results: [SEQ(e)] }),
-    () =>
-      ([slice]) =>
-        new GoFunc(([yieldFn]) => {
-          for (const value of sliceValues(slice)) if (callFunction(yieldFn, [value]) !== true) break;
-          return;
-        })
   ),
 };
 
 function extreme(slice: Value, message: string, better: (a: Value, b: Value) => boolean): Value {
   const values = sliceValues(slice);
-  if (values.length === 0) throw new GoPanic(newError(message));
+  if (values.length === 0) stringPanic(message);
+  spendFor(values.length);
   let best = values[0];
   for (const value of values.slice(1)) if (better(value, best)) best = value;
-  return best;
+  return copyValue(best);
 }
 
 function compact(slice: Value, equal: (a: Value, b: Value) => boolean, types: Type[]): Value {
@@ -662,24 +703,15 @@ function compact(slice: Value, equal: (a: Value, b: Value) => boolean, types: Ty
 
 /** Writes values over the front of a slice's array, clears the rest of its old length, and shortens it. */
 function overwrite(slice: Slice, kept: Value[], types: Type[]): Slice {
+  spendFor(slice.length);
   const zero = zeroValueOf(elementTypeOf(types));
-  for (let index = 0; index < slice.length; index++) slice.set(index, index < kept.length ? kept[index] : zero());
+  for (let index = 0; index < slice.length; index++)
+    slice.set(index, index < kept.length ? copyValue(kept[index]) : zero());
   return new Slice(slice.array, slice.offset, kept.length, slice.capacity);
 }
 
 function zeroValueOf(type: Type): () => Value {
-  const under = underlying(type);
-  if (under.kind === 'basic') {
-    if (under.basic === 'string') return () => '';
-    if (under.basic === 'bool') return () => false;
-    if (under.basic.startsWith('float')) return () => 0;
-    if (under.basic.startsWith('int') || under.basic.startsWith('uint')) return () => 0n;
-  }
-  if (under.kind === 'struct') {
-    const zeros = under.fields.map((field) => zeroValueOf(field.type));
-    return () => new GoStruct(zeros.map((zero) => zero()));
-  }
-  return () => {};
+  return () => zeroValue(type);
 }
 
 function allocate(count: number): void {
@@ -690,23 +722,23 @@ function insert(slice: Value, at: number, values: Value[], types: Type[]): Value
   const length = (slice as Slice | undefined)?.length ?? 0;
   if (at < 0 || at > length) boundsPanic(`slice bounds out of range [${at}:${length}]`);
   if (values.length === 0) return slice;
+  spendFor(length + values.length);
   const element = elementTypeOf(types);
   const zero = zeroValueOf(element);
-  if (at === length) return appendValues(slice as Slice | undefined, values, element, zero, allocate);
+  const alloc = (count: number): void => allocateElements(count, element);
+  if (at === length) return appendValues(slice as Slice | undefined, values, element, zero, alloc);
   const current = slice as Slice;
-  const tail = current.values().slice(at);
+  const tail = current.values().slice(at).map(copyValue);
   if (length + values.length > current.capacity) {
-    const head = new Slice(current.array, current.offset, at, current.capacity);
-    const grown = appendValues(
-      head,
-      Array.from({ length: length + values.length - at }, zero),
-      element,
-      zero,
-      allocate
-    ) as Slice;
-    for (const [index, value] of values.entries()) grown.set(at + index, copyValue(value));
-    for (const [index, value] of tail.entries()) grown.set(at + values.length + index, value);
-    return grown;
+    const newLength = length + values.length;
+    const newCapacity = grownCapacity(current.capacity, newLength, element);
+    alloc(newCapacity);
+    spendFor(newCapacity);
+    const array: Value[] = current.values().slice(0, at).map(copyValue);
+    for (const value of values) array.push(copyValue(value));
+    for (const value of tail) array.push(value);
+    while (array.length < newCapacity) array.push(zero());
+    return new Slice(array, 0, newLength, newCapacity);
   }
   const result = new Slice(current.array, current.offset, length + values.length, current.capacity);
   for (const [index, value] of tail.entries()) result.set(at + values.length + index, value);
@@ -746,6 +778,154 @@ function pairIterator(pairs: () => [Value, Value][]): GoFunc {
 }
 
 Object.assign(slicesMembers, {
+  Compare: sliceGeneric(
+    'Compare',
+    ORDERED,
+    (s) => ({ params: [s, s], results: [INT] }),
+    () =>
+      ([a, b]) => {
+        const x = sliceValues(a);
+        const y = sliceValues(b);
+        spendFor(Math.min(x.length, y.length));
+        for (let index = 0; index < Math.min(x.length, y.length); index++) {
+          const order = compare(x[index], y[index]);
+          if (order !== 0) return BigInt(order);
+        }
+        return BigInt(Math.sign(x.length - y.length));
+      }
+  ),
+  EqualFunc: (() => {
+    const [s1, e1] = sliceParams(EMPTY_INTERFACE);
+    const [s2, e2] = sliceParams(EMPTY_INTERFACE);
+    return genericFunction(
+      'EqualFunc',
+      [s1, s2, e1, e2],
+      funcType([s1, s2, funcType([e1, e2], [BOOL])], [BOOL]),
+      () =>
+        ([a, b, eq]) => {
+          const x = sliceValues(a);
+          const y = sliceValues(b);
+          return x.length === y.length && x.every((value, index) => callFunction(eq, [value, y[index]]) === true);
+        }
+    );
+  })(),
+  CompareFunc: (() => {
+    const [s1, e1] = sliceParams(EMPTY_INTERFACE);
+    const [s2, e2] = sliceParams(EMPTY_INTERFACE);
+    return genericFunction(
+      'CompareFunc',
+      [s1, s2, e1, e2],
+      funcType([s1, s2, funcType([e1, e2], [INT])], [INT]),
+      () =>
+        ([a, b, cmp]) => {
+          const x = a as Slice | undefined;
+          const y = b as Slice | undefined;
+          const xLength = x?.length ?? 0;
+          const yLength = y?.length ?? 0;
+          for (let index = 0; index < xLength; index++) {
+            if (index >= yLength) return 1n;
+            const order = callFunction(cmp, [(x as Slice).get(index), (y as Slice).get(index)]) as bigint;
+            if (order !== 0n) return order;
+          }
+          return xLength < yLength ? -1n : 0n;
+        }
+    );
+  })(),
+  Clip: sliceGeneric(
+    'Clip',
+    EMPTY_INTERFACE,
+    (s) => ({ params: [s], results: [s] }),
+    () =>
+      ([slice]) => {
+        const current = slice as Slice | undefined;
+        return current && new Slice(current.array, current.offset, current.length, current.length);
+      }
+  ),
+  Grow: sliceGeneric(
+    'Grow',
+    EMPTY_INTERFACE,
+    (s) => ({ params: [s, INT], results: [s] }),
+    (types) =>
+      ([slice, count]) => {
+        const nBig = count as bigint;
+        if (nBig < 0n) stringPanic('cannot be negative');
+        const current = slice as Slice | undefined;
+        const length = current?.length ?? 0;
+        const capacity = current?.capacity ?? 0;
+        if (BigInt(capacity - length) >= nBig) return slice;
+        if (BigInt(length) + nBig > BigInt(LIMITS.maxSlots)) allocate(LIMITS.maxSlots + 1);
+        const n = Number(nBig);
+        const element = elementTypeOf(types);
+        const newCapacity = grownCapacity(capacity, length + n, element);
+        allocateElements(newCapacity, element);
+        spendFor(newCapacity);
+        const zero = zeroValueOf(element);
+        const array: Value[] = current
+          ? current.array.slice(current.offset, current.offset + capacity).map(copyValue)
+          : [];
+        while (array.length < newCapacity) array.push(zero());
+        return new Slice(array, 0, length, newCapacity);
+      }
+  ),
+  Replace: sliceGeneric(
+    'Replace',
+    EMPTY_INTERFACE,
+    (s, e) => ({ params: [s, INT, INT, sliceOf(e)], results: [s], variadic: true }),
+    (types) =>
+      ([slice, from, to, values]) => {
+        const current = slice as Slice | undefined;
+        const length = current?.length ?? 0;
+        const i = Number(from as bigint);
+        const j = Number(to as bigint);
+        if (i < 0 || j < i || j > length) boundsPanic(`slice bounds out of range [${i}:${j}]`);
+        const element = elementTypeOf(types);
+        spendFor(length + sliceValues(values).length);
+        const inserted = sliceValues(values).map(copyValue);
+        const kept = [
+          ...(current?.values() ?? []).slice(0, i).map(copyValue),
+          ...inserted,
+          ...(current?.values() ?? []).slice(j).map(copyValue),
+        ];
+        if (current && kept.length <= current.capacity) {
+          const zero = zeroValueOf(element);
+          for (let index = 0; index < Math.max(kept.length, length); index++)
+            current.set(index, index < kept.length ? kept[index] : zero());
+          return new Slice(current.array, current.offset, kept.length, current.capacity);
+        }
+        const head = current && new Slice(current.array, current.offset, i, current.capacity);
+        const zero = zeroValueOf(element);
+        return appendValues(head, kept.slice(i), element, zero, (count) => allocateElements(count, element));
+      }
+  ),
+});
+
+Object.assign(slicesMembers, {
+  Sorted: (() => {
+    const e = typeParam('E', ORDERED);
+    return genericFunction('Sorted', [e], funcType([SEQ(e)], [sliceOf(e)]), () => ([seq]) => {
+      const slice = newSlice(collect(seq));
+      sortSlice(slice, less);
+      return slice.length === 0 ? undefined : slice;
+    });
+  })(),
+  Collect: (() => {
+    const e = typeParam('E', EMPTY_INTERFACE);
+    return genericFunction('Collect', [e], funcType([SEQ(e)], [sliceOf(e)]), () => ([seq]) => {
+      const values = collect(seq);
+      return values.length === 0 ? undefined : newSlice(values);
+    });
+  })(),
+  Values: sliceGeneric(
+    'Values',
+    EMPTY_INTERFACE,
+    (s, e) => ({ params: [s], results: [SEQ(e)] }),
+    () =>
+      ([slice]) =>
+        new GoFunc(([yieldFn]) => {
+          for (const value of sliceValues(slice)) if (callFunction(yieldFn, [value]) !== true) break;
+          return;
+        })
+  ),
   All: sliceGeneric(
     'All',
     EMPTY_INTERFACE,
@@ -791,94 +971,6 @@ Object.assign(slicesMembers, {
         });
       }
   ),
-  Compare: sliceGeneric(
-    'Compare',
-    ORDERED,
-    (s) => ({ params: [s, s], results: [INT] }),
-    () =>
-      ([a, b]) => {
-        const x = sliceValues(a);
-        const y = sliceValues(b);
-        for (let index = 0; index < Math.min(x.length, y.length); index++) {
-          const order = compare(x[index], y[index]);
-          if (order !== 0) return BigInt(order);
-        }
-        return BigInt(Math.sign(x.length - y.length));
-      }
-  ),
-  EqualFunc: (() => {
-    const [s1, e1] = sliceParams(EMPTY_INTERFACE);
-    const [s2, e2] = sliceParams(EMPTY_INTERFACE);
-    return genericFunction(
-      'EqualFunc',
-      [s1, s2, e1, e2],
-      funcType([s1, s2, funcType([e1, e2], [BOOL])], [BOOL]),
-      () =>
-        ([a, b, eq]) => {
-          const x = sliceValues(a);
-          const y = sliceValues(b);
-          return x.length === y.length && x.every((value, index) => callFunction(eq, [value, y[index]]) === true);
-        }
-    );
-  })(),
-  Clip: sliceGeneric(
-    'Clip',
-    EMPTY_INTERFACE,
-    (s) => ({ params: [s], results: [s] }),
-    () =>
-      ([slice]) => {
-        const current = slice as Slice | undefined;
-        return current && new Slice(current.array, current.offset, current.length, current.length);
-      }
-  ),
-  Grow: sliceGeneric(
-    'Grow',
-    EMPTY_INTERFACE,
-    (s) => ({ params: [s, INT], results: [s] }),
-    (types) =>
-      ([slice, count]) => {
-        const n = Number(count as bigint);
-        if (n < 0) throw new GoPanic(newError('cannot be negative'));
-        const current = slice as Slice | undefined;
-        const length = current?.length ?? 0;
-        const capacity = current?.capacity ?? 0;
-        if (capacity - length >= n) return slice;
-        const zero = zeroValueOf(elementTypeOf(types));
-        const full = current && new Slice(current.array, current.offset, capacity, capacity);
-        const grown = appendValues(
-          full,
-          Array.from({ length: n }, zero),
-          elementTypeOf(types),
-          zero,
-          allocate
-        ) as Slice;
-        return new Slice(grown.array, grown.offset, length, grown.capacity);
-      }
-  ),
-  Replace: sliceGeneric(
-    'Replace',
-    EMPTY_INTERFACE,
-    (s, e) => ({ params: [s, INT, INT, sliceOf(e)], results: [s], variadic: true }),
-    (types) =>
-      ([slice, from, to, values]) => {
-        const current = slice as Slice | undefined;
-        const length = current?.length ?? 0;
-        const i = Number(from as bigint);
-        const j = Number(to as bigint);
-        if (i < 0 || j < i || j > length) boundsPanic(`slice bounds out of range [${i}:${j}]`);
-        const inserted = sliceValues(values).map(copyValue);
-        const kept = [...(current?.values() ?? []).slice(0, i), ...inserted, ...(current?.values() ?? []).slice(j)];
-        if (current && kept.length <= current.capacity) {
-          const zero = zeroValueOf(elementTypeOf(types));
-          for (let index = 0; index < Math.max(kept.length, length); index++)
-            current.array[current.offset + index] = index < kept.length ? kept[index] : zero();
-          return new Slice(current.array, current.offset, kept.length, current.capacity);
-        }
-        const head = current && new Slice(current.array, current.offset, i, current.capacity);
-        const zero = zeroValueOf(elementTypeOf(types));
-        return appendValues(head, kept.slice(i), elementTypeOf(types), zero, allocate);
-      }
-  ),
   SortedFunc: (() => {
     const e = typeParam('E', EMPTY_INTERFACE);
     return genericFunction(
@@ -914,20 +1006,8 @@ Object.assign(slicesMembers, {
 export const SLICES_PACKAGE = definePackage(
   'slices',
   slicesMembers,
-  [
-    'All',
-    'Backward',
-    'AppendSeq',
-    'Chunk',
-    'Clip',
-    'Grow',
-    'EqualFunc',
-    'IndexFunc',
-    'Replace',
-    'SortedFunc',
-    'SortedStableFunc',
-    'ContainsFunc',
-  ].filter((name) => !(name in slicesMembers))
+
+  ['All', 'AppendSeq', 'Backward', 'Chunk', 'Collect', 'Sorted', 'SortedFunc', 'SortedStableFunc', 'Values']
 );
 
 // maps ------------------------------------------------------------------------------------------------------------
@@ -941,10 +1021,6 @@ function mapParams(keyConstraint: InterfaceType = COMPARABLE): [TypeParamType, T
     typeSet: { terms: [{ tilde: true, type: { kind: 'map', key: k, value: v } }] },
   });
   return [m, k, v];
-}
-
-function mapEntries(value: Value): { key: Value; value: Value }[] {
-  return [...((value as GoMap | undefined)?.entries.values() ?? [])];
 }
 
 const mapsMembers: Record<string, Entity> = {
@@ -974,65 +1050,6 @@ const mapsMembers: Record<string, Entity> = {
             for (const entry of mapEntries(map)) if (callFunction(yieldFn, [entry.value]) !== true) break;
             return;
           })
-    );
-  })(),
-  Clone: (() => {
-    const [m, k, v] = mapParams();
-    return genericFunction('Clone', [m, k, v], funcType([m], [m]), (types) => ([map]) => {
-      if (map === undefined) return;
-      const copy = new GoMap(mapKeyOf(types[1]));
-      for (const [key, entry] of (map as GoMap).entries)
-        copy.entries.set(key, { key: entry.key, value: copyValue(entry.value) });
-      return copy;
-    });
-  })(),
-  Copy: (() => {
-    const [m, k, v] = mapParams();
-    const m2 = typeParam('M2', m.constraint);
-    return genericFunction('Copy', [m, m2, k, v], funcType([m, m2], []), () => ([destination, source]) => {
-      for (const [key, entry] of (source as GoMap | undefined)?.entries ?? []) {
-        if (!destination) throw new GoPanic(newError('assignment to entry in nil map'));
-        (destination as GoMap).entries.set(key, { key: entry.key, value: copyValue(entry.value) });
-      }
-      return;
-    });
-  })(),
-  Equal: (() => {
-    const k = typeParam('K', COMPARABLE);
-    const v = typeParam('V', COMPARABLE);
-    const m = typeParam('M1', {
-      kind: 'interface',
-      methods: [],
-      typeSet: { terms: [{ tilde: true, type: { kind: 'map', key: k, value: v } }] },
-    });
-    const m2 = typeParam('M2', m.constraint);
-    return genericFunction('Equal', [m, m2, k, v], funcType([m, m2], [BOOL]), (types) => {
-      const equal = equalityOf(types[3]);
-      return ([a, b]) => {
-        const x = (a as GoMap | undefined)?.entries ?? new Map();
-        const y = (b as GoMap | undefined)?.entries ?? new Map();
-        if (x.size !== y.size) return false;
-        for (const [key, entry] of x) {
-          const other = y.get(key);
-          if (!other || !equal(entry.value, other.value)) return false;
-        }
-        return true;
-      };
-    });
-  })(),
-  DeleteFunc: (() => {
-    const [m, k, v] = mapParams();
-    return genericFunction(
-      'DeleteFunc',
-      [m, k, v],
-      funcType([m, funcType([k, v], [BOOL])], []),
-      () =>
-        ([map, predicate]) => {
-          for (const [key, entry] of (map as GoMap | undefined)?.entries ?? []) {
-            if (callFunction(predicate, [entry.key, entry.value]) === true) (map as GoMap).entries.delete(key);
-          }
-          return;
-        }
     );
   })(),
   All: (() => {
@@ -1075,6 +1092,71 @@ const mapsMembers: Record<string, Entity> = {
       return;
     });
   })(),
+
+  Clone: (() => {
+    const [m, k, v] = mapParams();
+    return genericFunction('Clone', [m, k, v], funcType([m], [m]), (types) => ([map]) => {
+      if (map === undefined) return;
+      spendFor((map as GoMap).entries.size);
+      allocate(2 * (map as GoMap).entries.size);
+      const copy = new GoMap(mapKeyOf(types[1]));
+      for (const [key, entry] of (map as GoMap).entries)
+        copy.entries.set(key, { key: copyValue(entry.key), value: copyValue(entry.value) });
+      return copy;
+    });
+  })(),
+  Copy: (() => {
+    const [m, k, v] = mapParams();
+    const m2 = typeParam('M2', m.constraint);
+    return genericFunction('Copy', [m, m2, k, v], funcType([m, m2], []), () => ([destination, source]) => {
+      spendFor((source as GoMap | undefined)?.entries.size ?? 0);
+      for (const [key, entry] of (source as GoMap | undefined)?.entries ?? []) {
+        if (!destination) runtimeErrorPanic('assignment to entry in nil map');
+        if (!(destination as GoMap).entries.has(key)) allocate(2);
+        (destination as GoMap).entries.set(key, { key: copyValue(entry.key), value: copyValue(entry.value) });
+      }
+      return;
+    });
+  })(),
+  Equal: (() => {
+    const k = typeParam('K', COMPARABLE);
+    const v = typeParam('V', COMPARABLE);
+    const m = typeParam('M1', {
+      kind: 'interface',
+      methods: [],
+      typeSet: { terms: [{ tilde: true, type: { kind: 'map', key: k, value: v } }] },
+    });
+    const m2 = typeParam('M2', m.constraint);
+    return genericFunction('Equal', [m, m2, k, v], funcType([m, m2], [BOOL]), (types) => {
+      const equal = equalityOf(types[3]);
+      return ([a, b]) => {
+        const x = (a as GoMap | undefined)?.entries ?? new Map();
+        const y = (b as GoMap | undefined)?.entries ?? new Map();
+        if (x.size !== y.size) return false;
+        spendFor(x.size);
+        for (const [key, entry] of x) {
+          const other = y.get(key);
+          if (!other || !equal(entry.value, other.value)) return false;
+        }
+        return true;
+      };
+    });
+  })(),
+  DeleteFunc: (() => {
+    const [m, k, v] = mapParams();
+    return genericFunction(
+      'DeleteFunc',
+      [m, k, v],
+      funcType([m, funcType([k, v], [BOOL])], []),
+      () =>
+        ([map, predicate]) => {
+          for (const [key, entry] of (map as GoMap | undefined)?.entries ?? []) {
+            if (callFunction(predicate, [entry.key, entry.value]) === true) (map as GoMap).entries.delete(key);
+          }
+          return;
+        }
+    );
+  })(),
   EqualFunc: (() => {
     const k = typeParam('K', COMPARABLE);
     const v1 = typeParam('V1', EMPTY_INTERFACE);
@@ -1108,7 +1190,7 @@ const mapsMembers: Record<string, Entity> = {
   })(),
 };
 
-export const MAPS_PACKAGE = definePackage('maps', mapsMembers);
+export const MAPS_PACKAGE = definePackage('maps', mapsMembers, ['All', 'Collect', 'Insert', 'Keys', 'Values']);
 
 // cmp -------------------------------------------------------------------------------------------------------------
 
@@ -1141,9 +1223,18 @@ const cmpMembers: Record<string, Entity> = {
     return genericFunction('Or', [t], funcType([sliceOf(t)], [t], true), (types) => {
       const zero = zeroValueOf(types[0]);
       const equal = equalityOf(types[0]);
-      return ([values]) => sliceValues(values).find((value) => !equal(value, zero())) ?? zero();
+      return ([values]) => copyValue(sliceValues(values).find((value) => !equal(value, zero())) ?? zero());
     });
   })(),
 };
 
 export const CMP_PACKAGE = definePackage('cmp', cmpMembers);
+
+function newSlice(values: Value[]): Slice {
+  currentRuntime().allocate(values.length);
+  return new Slice(values, 0, values.length, values.length);
+}
+
+function mapEntries(value: Value): { key: Value; value: Value }[] {
+  return [...((value as GoMap | undefined)?.entries.values() ?? [])];
+}

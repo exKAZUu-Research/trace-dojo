@@ -1,3 +1,4 @@
+import type { StackBuffers } from './runtime';
 import { nilPointerPanic } from './runtimeErrors';
 import { funcType, lookupFieldOrMethod, type Method, type Type, underlying } from './types';
 import { copyValue, type GoStruct, type Iface, Pointer, type Value } from './values';
@@ -5,7 +6,13 @@ import { copyValue, type GoStruct, type Iface, Pointer, type Value } from './val
 /** Stands for a method with a pointer receiver, for reaching an embedded field's address. */
 export const POINTER_METHOD: Method = { name: '', pointerReceiver: true, type: funcType([], []) };
 
-export type BoundCall = (receiver: Value, args: Value[], callRow?: number, deferredFor?: unknown) => Value | Value[];
+export type BoundCall = (
+  receiver: Value,
+  args: Value[],
+  callRow?: number,
+  deferredFor?: unknown,
+  stackBuffers?: StackBuffers
+) => Value | Value[];
 
 /** Calls a method's code with a receiver of the right form: a pointer for pointer receivers, a copy otherwise. */
 export function invokeMethod(
@@ -13,11 +20,12 @@ export function invokeMethod(
   receiver: Value,
   args: Value[],
   callRow?: number,
-  deferredFor?: unknown
+  deferredFor?: unknown,
+  stackBuffers?: StackBuffers
 ): Value | Value[] {
-  const call = method.code?.call;
+  const call = method.code?.call as BoundCall | undefined;
   if (!call) throw new Error(`Method ${method.name} has no code`);
-  return call(receiver, args, callRow, deferredFor) as Value | Value[];
+  return call(receiver, args, callRow, deferredFor, stackBuffers);
 }
 
 /**

@@ -37,11 +37,13 @@ export function describeIntegerIndex(value: PyValue): string {
 }
 
 /** Interprets a value as an integer index, as `operator.index()` does. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows operator.index for each kind of value.
+// code-gauge-allow functionCognitiveComplexity 19 -- Follows operator.index for each kind of value.
 export function toIndex(value: PyValue, describe: (value: PyValue) => string = describeIntegerIndex): bigint {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'boolean') return value ? 1n : 0n;
   if (value instanceof PyInstance) {
+    // An int subclass is an int, whatever its `__index__` says.
+    if (typeof value.primitive === 'bigint') return value.primitive;
     const index = lookupSpecial(value, '__index__');
     if (index !== undefined) {
       const result = callValue(bindValue(index, value), []);
@@ -224,18 +226,6 @@ export function scaleToFloat(mantissa: bigint, exponent: number): number {
   return scaleByPowerOfTwo(mantissa, exponent);
 }
 
-/** A finite double as an exact integer mantissa times a power of two. */
-export function exactBinary(value: number): { mantissa: bigint; exponent: number } {
-  const view = new DataView(new ArrayBuffer(8));
-  view.setFloat64(0, Math.abs(value));
-  const bits = view.getBigUint64(0);
-  const biased = Number(bits >> 52n);
-  let mantissa = bits & ((1n << 52n) - 1n);
-  if (biased !== 0) mantissa |= 1n << 52n;
-  const exponent = biased === 0 ? -1074 : biased - 1075;
-  return { mantissa: value < 0 ? -mantissa : mantissa, exponent };
-}
-
 function scaleByPowerOfTwo(mantissa: bigint, exponent: number): number {
   const bits = mantissa.toString(2).length;
   const lowestBit = Math.max(bits + exponent - 53, -1074);
@@ -263,17 +253,11 @@ export interface Decimal {
 }
 
 /** The exact decimal expansion of a finite double's magnitude. */
+// code-gauge-allow duplicateLines 15 -- Numeric conversions preserve their reference language's zero representation and coefficient normalization.
 export function exactDecimal(value: number): Decimal {
   const magnitude = Math.abs(value);
   if (magnitude === 0) return { digits: '0', point: 1 };
-  const view = new DataView(new ArrayBuffer(8));
-  view.setFloat64(0, magnitude);
-  const bits = view.getBigUint64(0);
-  const biased = Number(bits >> 52n);
-  let mantissa = bits & ((1n << 52n) - 1n);
-  let exponent = biased - 1075;
-  if (biased === 0) exponent = -1074;
-  else mantissa |= 1n << 52n;
+  const { mantissa, exponent } = exactBinary(magnitude);
   let text: string;
   let point: number;
   if (exponent >= 0) {
@@ -288,6 +272,18 @@ export function exactDecimal(value: number): Decimal {
   return { digits: stripped.slice(leading) || '0', point: point - leading };
 }
 
+/** A finite double as an exact integer mantissa times a power of two. */
+export function exactBinary(value: number): { mantissa: bigint; exponent: number } {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, Math.abs(value));
+  const bits = view.getBigUint64(0);
+  const biased = Number(bits >> 52n);
+  let mantissa = bits & ((1n << 52n) - 1n);
+  if (biased !== 0) mantissa |= 1n << 52n;
+  const exponent = biased === 0 ? -1074 : biased - 1075;
+  return { mantissa: value < 0 ? -mantissa : mantissa, exponent };
+}
+
 /** The shortest decimal digits that read back as the same double, as `repr()` uses. */
 export function shortestDecimal(value: number): Decimal {
   const magnitude = Math.abs(value);
@@ -297,6 +293,7 @@ export function shortestDecimal(value: number): Decimal {
 }
 
 /** Rounds a decimal to `count` significant digits, halves to even, as correctly rounded formatting does. */
+// code-gauge-allow duplicateLines 15 -- Go drops trailing zeros, while Python formatting preserves them.
 export function roundDecimal({ digits, point }: Decimal, count: number): Decimal {
   if (digits === '0') return { digits: '0', point: 1 };
   if (count >= digits.length) return { digits, point };

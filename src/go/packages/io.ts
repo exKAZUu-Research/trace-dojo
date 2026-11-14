@@ -1,318 +1,285 @@
-import type { Entity, FuncEntity } from '../entities';
+import { assignFailure } from '../assignability';
+import type { Entity } from '../entities';
 import { newError } from '../errorValues';
-import { addMethod, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
-import {
-  BASIC,
-  ERROR_TYPE,
-  type FuncType,
-  lookupFieldOrMethod,
-  type NamedType,
-  pointerTo,
-  sliceOf,
-  type Type,
-  typeString,
-} from '../types';
-import { Cell, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
-import { byteSlice, bytesOf, callMethod } from './support';
+import { currentRuntime, fn, namedType, nativeFunction, typeEntity } from '../native';
+import { grownCapacity } from '../sliceOps';
+import { BASIC, ERROR_TYPE, type FuncType, type NamedType, sliceOf, type Type } from '../types';
+import { Iface, Pointer, Slice, type Value } from '../values';
+import { byteSlice, callMethod } from './support';
 
 const BYTE_SLICE = sliceOf(BASIC.uint8);
+const INT = BASIC.int;
+const INT64 = BASIC.int64;
 
-export const IO_WRITER = namedType('io', 'Writer', {
-  kind: 'interface',
-  methods: [{ name: 'Write', type: fn([BYTE_SLICE], [BASIC.int, ERROR_TYPE]) }],
-});
+function ioInterface(name: string, methods: Record<string, FuncType>): NamedType {
+  return namedType('io', name, {
+    kind: 'interface',
+    methods: Object.keys(methods)
+      .toSorted()
+      .map((method) => ({ name: method, type: methods[method] })),
+  });
+}
 
-export const IO_READER = namedType('io', 'Reader', {
-  kind: 'interface',
-  methods: [{ name: 'Read', type: fn([BYTE_SLICE], [BASIC.int, ERROR_TYPE]) }],
+const READ = fn([BYTE_SLICE], [INT, ERROR_TYPE]);
+const CLOSE = fn([], [ERROR_TYPE]);
+const SEEK = fn([INT64, INT], [INT64, ERROR_TYPE]);
+const AT = fn([BYTE_SLICE, INT64], [INT, ERROR_TYPE]);
+const RUNE_READ = fn([], [BASIC.int32, INT, ERROR_TYPE]);
+const BYTE_READ = fn([], [BASIC.uint8, ERROR_TYPE]);
+const UNREAD = fn([], [ERROR_TYPE]);
+
+export const IO_WRITER = ioInterface('Writer', { Write: READ });
+export const IO_READER = ioInterface('Reader', { Read: READ });
+export const IO_RUNE_SCANNER = ioInterface('RuneScanner', { ReadRune: RUNE_READ, UnreadRune: UNREAD });
+export const IO_STRING_WRITER = ioInterface('StringWriter', {
+  WriteString: fn([BASIC.string], [INT, ERROR_TYPE]),
 });
+export const IO_READER_FROM = ioInterface('ReaderFrom', { ReadFrom: fn([IO_READER], [INT64, ERROR_TYPE]) });
+export const IO_WRITER_TO = ioInterface('WriterTo', { WriteTo: fn([IO_WRITER], [INT64, ERROR_TYPE]) });
+export const IO_READER_AT = ioInterface('ReaderAt', { ReadAt: AT });
+export const IO_WRITER_AT = ioInterface('WriterAt', { WriteAt: AT });
+export const IO_CLOSER = ioInterface('Closer', { Close: CLOSE });
+export const IO_WRITE_CLOSER = ioInterface('WriteCloser', { Write: READ, Close: CLOSE });
+export const IO_READ_CLOSER = ioInterface('ReadCloser', { Read: READ, Close: CLOSE });
+
+export const IO_RUNE_READER = ioInterface('RuneReader', { ReadRune: RUNE_READ });
+
+const INTERFACES = [
+  IO_WRITER,
+  IO_READER,
+  IO_RUNE_SCANNER,
+  IO_RUNE_READER,
+  IO_STRING_WRITER,
+  IO_READER_FROM,
+  IO_WRITER_TO,
+  IO_READER_AT,
+  IO_WRITER_AT,
+  IO_CLOSER,
+  IO_WRITE_CLOSER,
+  IO_READ_CLOSER,
+  ioInterface('Seeker', { Seek: SEEK }),
+  ioInterface('ReadWriter', { Read: READ, Write: READ }),
+  ioInterface('ReadWriteCloser', { Read: READ, Write: READ, Close: CLOSE }),
+  ioInterface('ReadSeeker', { Read: READ, Seek: SEEK }),
+  ioInterface('ReadSeekCloser', { Read: READ, Seek: SEEK, Close: CLOSE }),
+  ioInterface('WriteSeeker', { Write: READ, Seek: SEEK }),
+  ioInterface('ReadWriteSeeker', { Read: READ, Write: READ, Seek: SEEK }),
+  ioInterface('ByteReader', { ReadByte: BYTE_READ }),
+  ioInterface('ByteScanner', { ReadByte: BYTE_READ, UnreadByte: UNREAD }),
+  ioInterface('ByteWriter', { WriteByte: fn([BASIC.uint8], [ERROR_TYPE]) }),
+];
 
 /** `io.EOF`, which readers return at the end and programs compare with ==. */
 export const EOF = newError('EOF');
+export const ERR_SHORT_WRITE = newError('short write');
+export const ERR_SHORT_BUFFER = newError('short buffer');
+export const ERR_UNEXPECTED_EOF = newError('unexpected EOF');
+export const ERR_NO_PROGRESS = newError('multiple Read calls return no data or error');
+const ERR_CLOSED_PIPE = newError('io: read/write on closed pipe');
+const ERR_INVALID_WRITE = newError('invalid write result');
+export const ERR_WHENCE = newError('Seek: invalid whence');
+export const ERR_OFFSET = newError('Seek: invalid offset');
 
-/** Reads everything from a reader through its Read method, 512 bytes at a time as io.ReadAll starts. */
-function readAll(reader: Value): [string, Value] {
-  let data = '';
-  for (;;) {
-    const buffer = byteSlice('\0'.repeat(512));
-    const [count, error] = callMethod(reader, 'Read', [buffer]) as [bigint, Value];
-    data += bytesOf(buffer).slice(0, Number(count));
-    if (error !== undefined) return [data, error === EOF ? undefined : error];
-  }
+/** Whether two error values are the same error, as `==` compares the pointers that `errors.New` returns. */
+export function sameError(a: Value, b: Value): boolean {
+  if (a === b) return true;
+  return (
+    a instanceof Iface &&
+    b instanceof Iface &&
+    a.type === b.type &&
+    a.value instanceof Pointer &&
+    b.value instanceof Pointer &&
+    a.value.equals(b.value)
+  );
 }
 
-const members: Record<string, Entity> = {
-  Reader: typeEntity(IO_READER),
-  Writer: typeEntity(IO_WRITER),
-  EOF: {
+/** Whether an interface value's dynamic type implements the interface, as a type assertion `v.(I)` checks. */
+export function implementsInterface(value: Value, type: Type): boolean {
+  return value instanceof Iface && assignFailure(value.type, type) === undefined;
+}
+
+/** `io.WriteString`: the writer's own WriteString when it has one, and Write otherwise. */
+export function writeString(writer: Value, text: string): [bigint, Value] {
+  const viaString = implementsInterface(writer, IO_STRING_WRITER);
+  return callMethod(writer, viaString ? 'WriteString' : 'Write', [viaString ? text : byteSlice(text)]) as [
+    bigint,
+    Value,
+  ];
+}
+
+/** A package-level library variable; a function value gives each run its own value. */
+export function libraryVariable(name: string, type: Type, value: Value | (() => Value)): Entity {
+  return {
     kind: 'var',
-    name: 'EOF',
-    type: ERROR_TYPE,
+    name,
+    type,
     span: { row: 0, column: 0 },
     used: true,
     boxed: false,
     owner: undefined,
     slot: -1,
-    library: () => EOF,
-  },
-  Copy: nativeFunction('Copy', fn([IO_WRITER, IO_READER], [BASIC.int64, ERROR_TYPE]), ([writer, reader]) => {
-    const [data, error] = readAll(reader);
-    if (data.length > 0) {
-      const [, writeError] = callMethod(writer, 'Write', [byteSlice(data)]) as [bigint, Value];
-      if (writeError !== undefined) return [0n, writeError];
-    }
-    return [BigInt(data.length), error];
-  }),
-  ReadAll: nativeFunction('ReadAll', fn([IO_READER], [BYTE_SLICE, ERROR_TYPE]), ([reader]) => {
-    const [data, error] = readAll(reader);
-    return [byteSlice(data) as Slice, error];
-  }),
-  WriteString: nativeFunction(
-    'WriteString',
-    fn([IO_WRITER, BASIC.string], [BASIC.int, ERROR_TYPE]),
-    ([writer, text]) => callMethod(writer, 'Write', [byteSlice(text as string)]) as Value[]
-  ),
-};
-
-// Helpers transcribed from Go's io.go and multi.go ----------------------------------------------------------------
-
-export const ERR_UNEXPECTED_EOF = newError('unexpected EOF');
-const ERR_SHORT_WRITE = newError('short write');
-const ERR_SHORT_BUFFER = newError('short buffer');
-const ERR_NO_PROGRESS = newError('multiple Read calls return no data or error');
-
-const subslice = (slice: Slice | undefined, from: number, to = slice?.length ?? 0): Slice | undefined =>
-  slice && new Slice(slice.array, slice.offset + from, to - from, slice.capacity - from);
-
-const readInto = (reader: Value, target: Slice | undefined): [number, Value] => {
-  const [count, error] = callMethod(reader, 'Read', [target]) as [bigint, Value];
-  return [Number(count), error];
-};
-
-function readAtLeast(reader: Value, buffer: Slice | undefined, min: number): [bigint, Value] {
-  if ((buffer?.length ?? 0) < min) return [0n, ERR_SHORT_BUFFER];
-  let count = 0;
-  let error: Value;
-  while (count < min && error === undefined) {
-    const [read, readError] = readInto(reader, subslice(buffer, count));
-    count += read;
-    error = readError;
-  }
-  if (count >= min) error = undefined;
-  else if (count > 0 && error === EOF) error = ERR_UNEXPECTED_EOF;
-  return [BigInt(count), error];
+    library: typeof value === 'function' ? value : () => value,
+  };
 }
 
-const variable = (name: string, type: Type, value: Value): Entity => ({
-  kind: 'var',
-  name,
-  type,
-  span: { row: 0, column: 0 },
-  used: true,
-  boxed: false,
-  owner: undefined,
-  slot: -1,
-  library: () => value,
-});
+function intConstant(name: string, value: number): Entity {
+  return {
+    kind: 'const',
+    name,
+    type: BASIC.untypedInt,
+    value: { kind: 'int', value: BigInt(value) },
+    span: { row: 0, column: 0 },
+    used: true,
+  };
+}
 
-const READ = fn([BYTE_SLICE], [BASIC.int, ERROR_TYPE]);
-const interfaceOf = (name: string, methods: { name: string; type: FuncType }[]): NamedType =>
-  namedType('io', name, {
-    kind: 'interface',
-    methods: methods.toSorted((a, b) => (a.name < b.name ? -1 : 1)),
-  });
-const CLOSE = { name: 'Close', type: fn([], [ERROR_TYPE]) };
-const READ_METHOD = { name: 'Read', type: READ };
-const WRITE_METHOD = { name: 'Write', type: READ };
-const CLOSER = interfaceOf('Closer', [CLOSE]);
-const READ_CLOSER = interfaceOf('ReadCloser', [READ_METHOD, CLOSE]);
-const READ_WRITER = interfaceOf('ReadWriter', [READ_METHOD, WRITE_METHOD]);
-const WRITE_CLOSER = interfaceOf('WriteCloser', [WRITE_METHOD, CLOSE]);
-const READ_WRITE_CLOSER = interfaceOf('ReadWriteCloser', [READ_METHOD, WRITE_METHOD, CLOSE]);
-const BYTE_READER = interfaceOf('ByteReader', [{ name: 'ReadByte', type: fn([], [BASIC.uint8, ERROR_TYPE]) }]);
-const BYTE_WRITER = interfaceOf('ByteWriter', [{ name: 'WriteByte', type: fn([BASIC.uint8], [ERROR_TYPE]) }]);
-const RUNE_READER = interfaceOf('RuneReader', [
-  { name: 'ReadRune', type: fn([], [BASIC.int32, BASIC.int, ERROR_TYPE]) },
-]);
-const STRING_WRITER = interfaceOf('StringWriter', [
-  { name: 'WriteString', type: fn([BASIC.string], [BASIC.int, ERROR_TYPE]) },
-]);
+/** A new zeroed byte slice of the length, counted against the run's memory. */
+export function makeBytes(length: number, capacity = length): Slice {
+  currentRuntime().allocate(capacity);
+  return new Slice(
+    Array.from({ length: capacity }, (): Value => 0n),
+    0,
+    length,
+    capacity
+  );
+}
 
-/** `io.LimitedReader`, whose exported fields hold the reader and the bytes it may still read. */
-const LIMITED_READER = namedType('io', 'LimitedReader', {
-  kind: 'struct',
-  fields: [
-    { name: 'R', type: IO_READER, embedded: false },
-    { name: 'N', type: BASIC.int64, embedded: false },
-  ],
-});
-addMethod(
-  LIMITED_READER,
-  'Read',
-  READ,
-  (receiver, [target]) => {
-    const fields = ((receiver as Pointer).load() as GoStruct).fields;
-    const left = fields[1] as bigint;
-    if (left <= 0n) return [0n, EOF];
-    const buffer = target as Slice | undefined;
-    const limited = (buffer?.length ?? 0) > left ? subslice(buffer, 0, Number(left)) : buffer;
-    const [count, error] = readInto(fields[0], limited);
-    fields[1] = left - BigInt(count);
-    return [BigInt(count), error];
-  },
-  true
-);
-const newLimitedReader = (reader: Value, limit: bigint): Iface =>
-  new Iface(pointerTo(LIMITED_READER), new Pointer(new Cell(new GoStruct([reader, limit])), 'v'));
+/** `s[from:to]` of a byte slice, where a nil slice stays nil. */
+export function subslice(slice: Value, from: number, to?: number): Slice | undefined {
+  const s = slice as Slice | undefined;
+  if (!s) return undefined;
+  const end = to ?? s.length;
+  return new Slice(s.array, s.offset + from, end - from, s.capacity - from);
+}
 
-/** The unexported reader types of io, which hold Go values in their native state. */
-const MULTI_READER = namedType('io', 'multiReader', { kind: 'struct', fields: [] });
-addMethod(
-  MULTI_READER,
-  'Read',
-  READ,
-  (receiver, [target]) => {
-    const readers = ((receiver as Pointer).load() as GoStruct).native?.readers as Value[];
-    while (readers.length > 0) {
-      const [count, error] = readInto(readers[0], target as Slice | undefined);
-      if (error === EOF) readers.shift();
-      if (count > 0 || error !== EOF) return [BigInt(count), error === EOF && readers.length > 0 ? undefined : error];
+/** Calls `Read` and returns the count as a number with the error. */
+export function readInto(reader: Value, buffer: Value): [number, Value] {
+  const [count, error] = callMethod(reader, 'Read', [buffer]) as [bigint, Value];
+  return [Number(count), error];
+}
+
+/** Calls `Write` and returns the count as a number with the error. */
+export function writeFrom(writer: Value, buffer: Value): [number, Value] {
+  const [count, error] = callMethod(writer, 'Write', [buffer]) as [bigint, Value];
+  return [Number(count), error];
+}
+
+/** `io.copyBuffer`: prefers the source's WriteTo and the destination's ReadFrom, as Go's Copy does. */
+export function copyBuffer(
+  dst: Value,
+  src: Value,
+  buffer: Slice | undefined,
+  limitOf?: (src: Value) => bigint | undefined
+): [bigint, Value] {
+  if (implementsInterface(src, IO_WRITER_TO)) return callMethod(src, 'WriteTo', [dst]) as [bigint, Value];
+  if (implementsInterface(dst, IO_READER_FROM)) return callMethod(dst, 'ReadFrom', [src]) as [bigint, Value];
+  let buf = buffer;
+  if (!buf) {
+    let size = 32 * 1024;
+    const limit = limitOf?.(src);
+    if (limit !== undefined && BigInt(size) > limit) size = limit < 1n ? 1 : Number(limit);
+    buf = makeBytes(size);
+  }
+  const runtime = currentRuntime();
+  let written = 0n;
+  for (;;) {
+    runtime.spend();
+    const [nr, er] = readInto(src, buf);
+    if (nr > 0) {
+      let [nw, ew] = writeFrom(dst, subslice(buf, 0, nr));
+      if (nw < 0 || nr < nw) {
+        nw = 0;
+        ew ??= ERR_INVALID_WRITE;
+      }
+      written += BigInt(nw);
+      if (ew !== undefined) return [written, ew];
+      if (nr !== nw) return [written, ERR_SHORT_WRITE];
     }
-    return [0n, EOF];
-  },
-  true
-);
-const MULTI_WRITER = namedType('io', 'multiWriter', { kind: 'struct', fields: [] });
-addMethod(
-  MULTI_WRITER,
-  'Write',
-  READ,
-  (receiver, [data]) => {
-    const writers = ((receiver as Pointer).load() as GoStruct).native?.writers as Value[];
-    const length = (data as Slice | undefined)?.length ?? 0;
-    for (const writer of writers) {
-      const [count, error] = callMethod(writer, 'Write', [data]) as [bigint, Value];
-      if (error !== undefined) return [count, error];
-      if (Number(count) !== length) return [count, ERR_SHORT_WRITE];
-    }
-    return [BigInt(length), undefined];
-  },
-  true
-);
-const TEE_READER = namedType('io', 'teeReader', { kind: 'struct', fields: [] });
-addMethod(
-  TEE_READER,
-  'Read',
-  READ,
-  (receiver, [target]) => {
-    const { reader, writer } = ((receiver as Pointer).load() as GoStruct).native as { reader: Value; writer: Value };
-    const [count, error] = readInto(reader, target as Slice | undefined);
-    if (count > 0) {
-      const [written, writeError] = callMethod(writer, 'Write', [subslice(target as Slice, 0, count)]) as [
-        bigint,
-        Value,
-      ];
-      if (writeError !== undefined) return [written, writeError];
-    }
-    return [BigInt(count), error];
-  },
-  true
-);
-const DISCARD = namedType('io', 'discard', { kind: 'struct', fields: [] });
-addMethod(DISCARD, 'Write', READ, (_receiver, [data]) => [BigInt((data as Slice | undefined)?.length ?? 0), undefined]);
-addMethod(DISCARD, 'WriteString', fn([BASIC.string], [BASIC.int, ERROR_TYPE]), (_receiver, [text]) => [
-  BigInt((text as string).length),
-  undefined,
-]);
-const NOP_CLOSER = namedType('io', 'nopCloser', {
-  kind: 'struct',
-  fields: [{ name: 'Reader', type: IO_READER, embedded: true }],
-});
-addMethod(NOP_CLOSER, 'Close', fn([], [ERROR_TYPE]), () => {});
-/** NopCloser's type for readers that also have WriteTo, as the library's readers of strings and bytes do. */
-const NOP_CLOSER_WRITER_TO = namedType('io', 'nopCloserWriterTo', {
-  kind: 'struct',
-  fields: [{ name: 'Reader', type: IO_READER, embedded: true }],
-});
-addMethod(NOP_CLOSER_WRITER_TO, 'Close', fn([], [ERROR_TYPE]), () => {});
-const WRITER_TO_TYPES = new Set(['*strings.Reader', '*bytes.Reader', '*bytes.Buffer']);
+    if (er !== undefined) return [written, sameError(er, EOF) ? undefined : er];
+  }
+}
 
-const native = (type: NamedType, state: Record<string, unknown>): Iface =>
-  new Iface(pointerTo(type), new Pointer(new Cell(new GoStruct([], state)), 'v'));
+/** `io.ReadAll`, which reads into a 512-byte buffer and then into growing chunks, as Go's does. */
+function readAll(reader: Value): [Slice, Value] {
+  const runtime = currentRuntime();
+  let b = makeBytes(0, 512);
+  let next = 256;
+  const chunks: Slice[] = [];
+  let finalSize = 0;
+  for (;;) {
+    runtime.spend();
+    const [n, readError] = readInto(
+      reader,
+      new Slice(b.array, b.offset + b.length, b.capacity - b.length, b.capacity - b.length)
+    );
+    b = new Slice(b.array, b.offset, b.length + n, b.capacity);
+    if (readError !== undefined) {
+      const error = sameError(readError, EOF) ? undefined : readError;
+      if (chunks.length === 0) return [b, error];
+      finalSize += b.length;
+      const final = makeBytes(0, grownCapacity(0, finalSize, BASIC.uint8));
+      let at = 0;
+      for (const chunk of [...chunks, b]) {
+        for (const byte of chunk.values()) final.array[at++] = byte;
+      }
+      runtime.spend(finalSize >> 4);
+      return [new Slice(final.array, 0, finalSize, final.capacity), error];
+    }
+    if (b.capacity - b.length < Math.floor(b.capacity / 16)) {
+      chunks.push(b);
+      finalSize += b.length;
+      runtime.checkStringLength(finalSize);
+      b = makeBytes(0, grownCapacity(0, next, BASIC.uint8));
+      next += Math.floor(next / 2);
+    }
+  }
+}
 
-Object.assign(members, {
-  ReadCloser: typeEntity(READ_CLOSER),
-  ReadWriter: typeEntity(READ_WRITER),
-  WriteCloser: typeEntity(WRITE_CLOSER),
-  ReadWriteCloser: typeEntity(READ_WRITE_CLOSER),
-  Closer: typeEntity(CLOSER),
-  ByteReader: typeEntity(BYTE_READER),
-  ByteWriter: typeEntity(BYTE_WRITER),
-  RuneReader: typeEntity(RUNE_READER),
-  StringWriter: typeEntity(STRING_WRITER),
-  LimitedReader: typeEntity(LIMITED_READER),
-  ErrUnexpectedEOF: variable('ErrUnexpectedEOF', ERROR_TYPE, ERR_UNEXPECTED_EOF),
-  ErrShortWrite: variable('ErrShortWrite', ERROR_TYPE, ERR_SHORT_WRITE),
-  ErrShortBuffer: variable('ErrShortBuffer', ERROR_TYPE, ERR_SHORT_BUFFER),
-  ErrNoProgress: variable('ErrNoProgress', ERROR_TYPE, ERR_NO_PROGRESS),
-  Discard: variable('Discard', IO_WRITER, new Iface(DISCARD, new GoStruct([]))),
-  ReadFull: nativeFunction('ReadFull', fn([IO_READER, BYTE_SLICE], [BASIC.int, ERROR_TYPE]), ([reader, buffer]) =>
-    readAtLeast(reader, buffer as Slice | undefined, (buffer as Slice | undefined)?.length ?? 0)
-  ),
+/** `io.ReadAtLeast`. */
+function readAtLeast(reader: Value, buffer: Value, min: number): [bigint, Value] {
+  const length = (buffer as Slice | undefined)?.length ?? 0;
+  if (length < min) return [0n, ERR_SHORT_BUFFER];
+  const runtime = currentRuntime();
+  let n = 0;
+  let error: Value;
+  while (n < min && error === undefined) {
+    runtime.spend();
+    const [count, readError] = readInto(reader, subslice(buffer, n));
+    n += count;
+    error = readError;
+  }
+  if (n >= min) error = undefined;
+  else if (n > 0 && sameError(error, EOF)) error = ERR_UNEXPECTED_EOF;
+  return [BigInt(n), error];
+}
+
+export const IO_TYPES: Record<string, Entity> = Object.fromEntries(
+  INTERFACES.map((type) => [type.name, typeEntity(type)])
+);
+
+export const IO_ERRORS: Record<string, Entity> = {
+  EOF: libraryVariable('EOF', ERROR_TYPE, EOF),
+  ErrShortWrite: libraryVariable('ErrShortWrite', ERROR_TYPE, ERR_SHORT_WRITE),
+  ErrShortBuffer: libraryVariable('ErrShortBuffer', ERROR_TYPE, ERR_SHORT_BUFFER),
+  ErrUnexpectedEOF: libraryVariable('ErrUnexpectedEOF', ERROR_TYPE, ERR_UNEXPECTED_EOF),
+  ErrNoProgress: libraryVariable('ErrNoProgress', ERROR_TYPE, ERR_NO_PROGRESS),
+  ErrClosedPipe: libraryVariable('ErrClosedPipe', ERROR_TYPE, ERR_CLOSED_PIPE),
+  SeekStart: intConstant('SeekStart', 0),
+  SeekCurrent: intConstant('SeekCurrent', 1),
+  SeekEnd: intConstant('SeekEnd', 2),
+};
+
+export const IO_FUNCTIONS: Record<string, Entity> = {
+  ReadAll: nativeFunction('ReadAll', fn([IO_READER], [BYTE_SLICE, ERROR_TYPE]), ([reader]) => readAll(reader)),
   ReadAtLeast: nativeFunction(
     'ReadAtLeast',
-    fn([IO_READER, BYTE_SLICE, BASIC.int], [BASIC.int, ERROR_TYPE]),
-    ([reader, buffer, min]) => readAtLeast(reader, buffer as Slice | undefined, Number(min as bigint))
+    fn([IO_READER, BYTE_SLICE, INT], [INT, ERROR_TYPE]),
+    ([reader, buffer, min]) => readAtLeast(reader, buffer, Number(min as bigint))
   ),
-  LimitReader: nativeFunction('LimitReader', fn([IO_READER, BASIC.int64], [IO_READER]), ([reader, limit]) =>
-    newLimitedReader(reader, limit as bigint)
+  ReadFull: nativeFunction('ReadFull', fn([IO_READER, BYTE_SLICE], [INT, ERROR_TYPE]), ([reader, buffer]) =>
+    readAtLeast(reader, buffer, (buffer as Slice | undefined)?.length ?? 0)
   ),
-  MultiReader: nativeFunction('MultiReader', fn([sliceOf(IO_READER)], [IO_READER], true), ([readers]) =>
-    native(MULTI_READER, { readers: (readers as Slice | undefined)?.values() ?? [] })
+  WriteString: nativeFunction('WriteString', fn([IO_WRITER, BASIC.string], [INT, ERROR_TYPE]), ([writer, text]) =>
+    writeString(writer, text as string)
   ),
-  MultiWriter: nativeFunction('MultiWriter', fn([sliceOf(IO_WRITER)], [IO_WRITER], true), ([writers]) =>
-    native(MULTI_WRITER, { writers: (writers as Slice | undefined)?.values() ?? [] })
-  ),
-  TeeReader: nativeFunction('TeeReader', fn([IO_READER, IO_WRITER], [IO_READER]), ([reader, writer]) =>
-    native(TEE_READER, { reader, writer })
-  ),
-  NopCloser: nativeFunction(
-    'NopCloser',
-    fn([IO_READER], [READ_CLOSER]),
-    ([reader]) =>
-      new Iface(
-        reader instanceof Iface &&
-          (WRITER_TO_TYPES.has(typeString(reader.type)) ||
-            lookupFieldOrMethod(reader.type, 'WriteTo').kind === 'method')
-          ? NOP_CLOSER_WRITER_TO
-          : NOP_CLOSER,
-        new GoStruct([reader])
-      )
-  ),
-  CopyN: nativeFunction(
-    'CopyN',
-    fn([IO_WRITER, IO_READER, BASIC.int64], [BASIC.int64, ERROR_TYPE]),
-    ([writer, reader, count]) => {
-      const copy = (members.Copy as FuncEntity).direct as NonNullable<FuncEntity['direct']>;
-      const [written, error] = copy([writer, newLimitedReader(reader, count as bigint)], undefined) as [bigint, Value];
-      if (written === count) return [written, undefined];
-      return [written, error ?? EOF];
-    }
-  ),
-});
-
-export const IO_PACKAGE = definePackage('io', members, [
-  'Pipe',
-  'PipeReader',
-  'PipeWriter',
-  'SectionReader',
-  'NewSectionReader',
-  'CopyBuffer',
-  'Seeker',
-  'ReadSeeker',
-  'ReaderAt',
-  'WriterAt',
-  'ReaderFrom',
-  'WriterTo',
-  'ErrClosedPipe',
-]);
+};

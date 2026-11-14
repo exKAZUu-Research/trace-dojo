@@ -1,10 +1,12 @@
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
-import { utf8Decode, utf8Encode } from '../literals';
+import { utf8Encode } from '../literals';
 import { callDynamic } from '../methods';
 import { currentRuntime } from '../native';
+import { GoPanic } from '../runtime';
 import { nilPointerPanic } from '../runtimeErrors';
+import { appendValues } from '../sliceOps';
 import { ANY, BASIC, ERROR_TYPE, sliceOf, type Type } from '../types';
-import { GoFunc, Iface, Slice, type Value } from '../values';
+import { copyValue, GoFunc, type GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 
 export const INT = BASIC.int;
 export const STRING = BASIC.string;
@@ -16,12 +18,23 @@ export { ANY, ERROR_TYPE };
 
 /** Writes UTF-8 bytes to standard output. */
 export function writeStdout(bytes: string): void {
-  currentRuntime().io.stdout.write(utf8Decode(bytes));
+  currentRuntime().writeStdout(bytes);
 }
 
 /** Writes UTF-8 bytes to standard error. */
 export function writeStderr(bytes: string): void {
-  currentRuntime().io.stderr.write(utf8Decode(bytes));
+  currentRuntime().writeStderr(bytes);
+}
+
+/** Panics with a plain `string` value, as Go's library `panic("...")` calls do. */
+export function stringPanic(message: string): never {
+  throw new GoPanic(new Iface(BASIC.string, message));
+}
+
+/** Loads the struct behind a pointer receiver, raising Go's nil-pointer panic when the receiver is nil. */
+export function receiverStruct(receiver: Value): GoStruct {
+  if (!(receiver instanceof Pointer)) nilPointerPanic();
+  return receiver.load() as GoStruct;
 }
 
 /** Spends operations in proportion to the work a library call does on `size` items. */
@@ -48,15 +61,29 @@ export function byteSlice(bytes: string): Slice {
   return sliceOfValues(Array.from(bytes, (char) => BigInt(char.charCodeAt(0))));
 }
 
+/** `append(slice, bytes...)` for a []byte, which writes into spare capacity and grows as Go's append does. */
+export function appendBytes(slice: Value, bytes: string): Slice | undefined {
+  const runtime = currentRuntime();
+  spendFor(bytes.length);
+  return appendValues(
+    slice as Slice | undefined,
+    Array.from(bytes, (char) => BigInt(char.charCodeAt(0))),
+    BASIC.uint8,
+    () => 0n,
+    (count) => runtime.allocate(count)
+  );
+}
+
 /** Calls a function value from the library, as `sort.Slice` calls its less function. */
 export function callFunction(fn: Value, args: Value[]): Value | Value[] {
   if (!(fn instanceof GoFunc)) nilPointerPanic();
-  return fn.call(args);
+  return fn.call(args.map(copyValue));
 }
 
 /** Calls a method of an interface value, as `sort.Sort` calls `Less`. */
 export function callMethod(receiver: Value, name: string, args: Value[] = []): Value | Value[] {
-  return callDynamic(receiver as Iface, name, args);
+  if (receiver === undefined) nilPointerPanic();
+  return callDynamic(receiver as Iface, name, args.map(copyValue));
 }
 
 /** The text of an error value, for messages that quote it. */
@@ -69,5 +96,5 @@ export function goString(text: string): string {
 }
 
 export function boxed(type: Type, value: Value): Iface {
-  return new Iface(type, value);
+  return new Iface(type, copyValue(value));
 }

@@ -1,13 +1,13 @@
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
-import { formatFloat } from './floatFormat';
+import { chargeFormatting, formatFloat } from './floatFormat';
 import { decodeRune, encodeRune, RUNE_ERROR, runesOf } from './literals';
 import { compareMapKeys } from './mapOrder';
 import { dynamicMethod } from './methods';
-import { addMethod, fn, namedType } from './native';
+import { currentRuntime, perRun } from './native';
 import { canBackquote, isPrint, quote, quoteRune } from './quote';
 import { GoPanic } from './runtime';
-import { ERROR_TYPE, isExported, missingMethod, pointerTo, RUNE, type Type, typeString, underlying } from './types';
-import { Cell, type Complex, type GoArray, GoFunc, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from './values';
+import { ERROR_TYPE, isExported, missingMethod, type Type, typeString, underlying } from './types';
+import { type Complex, type GoArray, GoFunc, GoMap, type GoStruct, Iface, Pointer, Slice, type Value } from './values';
 
 const STRINGER = {
   kind: 'interface',
@@ -24,122 +24,21 @@ const STRINGER = {
   ],
 } as const;
 
-const INT_TYPE: Type = { kind: 'basic', basic: 'int', name: 'int' };
-const BOOL_TYPE: Type = { kind: 'basic', basic: 'bool', name: 'bool' };
-const BYTES_TYPE: Type = { kind: 'slice', element: { kind: 'basic', basic: 'uint8', name: 'uint8' } };
-
-/** `fmt.State`, which a Formatter's Format method receives: the printer, with its flags and its output. */
-export const STATE = namedType('fmt', 'State', {
-  kind: 'interface',
-  methods: [
-    { name: 'Flag', type: fn([INT_TYPE], [BOOL_TYPE]) },
-    { name: 'Precision', type: fn([], [INT_TYPE, BOOL_TYPE]) },
-    { name: 'Width', type: fn([], [INT_TYPE, BOOL_TYPE]) },
-    { name: 'Write', type: fn([BYTES_TYPE], [INT_TYPE, ERROR_TYPE]) },
-  ],
-});
-
-/** `fmt.Formatter`: a value that prints itself, given the printer's state and the verb. */
-export const FORMATTER = namedType('fmt', 'Formatter', {
-  kind: 'interface',
-  methods: [{ name: 'Format', type: fn([STATE, RUNE], []) }],
-});
-
-/** `fmt.GoStringer`: a value that gives its Go syntax for `%#v`. */
-export const GO_STRINGER = namedType('fmt', 'GoStringer', {
-  kind: 'interface',
-  methods: [{ name: 'GoString', type: fn([], [{ kind: 'basic', basic: 'string', name: 'string' }]) }],
-});
-
-/** The printer as a Go value, which a Format method writes to and asks for the flags, as Go's *pp. */
-const PRINTER_STATE = namedType('fmt', 'pp', { kind: 'struct', fields: [] });
-const printerOf = (receiver: Value): Printer => ((receiver as Pointer).load() as GoStruct).native?.printer as Printer;
-addMethod(
-  PRINTER_STATE,
-  'Write',
-  fn([BYTES_TYPE], [INT_TYPE, ERROR_TYPE]),
-  (receiver, [bytes]) => {
-    const text = ((bytes as Slice | undefined)?.values() ?? [])
-      .map((byte) => String.fromCharCode(Number(byte)))
-      .join('');
-    printerOf(receiver).buffer += text;
-    return [BigInt(text.length), undefined];
-  },
-  true
-);
-addMethod(
-  PRINTER_STATE,
-  'WriteString',
-  fn([{ kind: 'basic', basic: 'string', name: 'string' }], [INT_TYPE, ERROR_TYPE]),
-  (receiver, [text]) => {
-    printerOf(receiver).buffer += text as string;
-    return [BigInt((text as string).length), undefined];
-  },
-  true
-);
-addMethod(
-  PRINTER_STATE,
-  'Width',
-  fn([], [INT_TYPE, BOOL_TYPE]),
-  (receiver) => {
-    const { width } = printerOf(receiver).flags;
-    return [BigInt(width ?? 0), width !== undefined];
-  },
-  true
-);
-addMethod(
-  PRINTER_STATE,
-  'Precision',
-  fn([], [INT_TYPE, BOOL_TYPE]),
-  (receiver) => {
-    const { precision } = printerOf(receiver).flags;
-    return [BigInt(precision ?? 0), precision !== undefined];
-  },
-  true
-);
-addMethod(
-  PRINTER_STATE,
-  'Flag',
-  fn([INT_TYPE], [BOOL_TYPE]),
-  (receiver, [flag]) => {
-    const { flags } = printerOf(receiver);
-    switch (String.fromCharCode(Number(flag as bigint))) {
-      case '-': {
-        return flags.minus;
-      }
-      case '+': {
-        return flags.plus || flags.plusV;
-      }
-      case '#': {
-        return flags.sharp || flags.sharpV;
-      }
-      case ' ': {
-        return flags.space;
-      }
-      case '0': {
-        return flags.zero;
-      }
-      default: {
-        return false;
-      }
-    }
-  },
-  true
-);
+const GO_STRINGER = { kind: 'interface', methods: [{ ...STRINGER.methods[0], name: 'GoString' }] } as const;
 
 const LOWER_DIGITS = '0123456789abcdefx';
 const UPPER_DIGITS = '0123456789ABCDEFX';
 
 /** The address `%p` and `%v` print for a pointer-like value, stable for each object while the program runs. */
-const addresses = new WeakMap<object, number>();
-let nextAddress = 0xc0_00_01_00_00;
+const addressState = perRun(() => ({ addresses: new WeakMap<object, number>(), next: 0xc0_00_01_00_00 }));
 
 export function addressOf(object: object): string {
-  let address = addresses.get(object);
+  const state = addressState();
+  let address = state.addresses.get(object);
   if (address === undefined) {
-    address = nextAddress;
-    nextAddress += 0x10;
-    addresses.set(object, address);
+    address = state.next;
+    state.next += 0x10;
+    state.addresses.set(object, address);
   }
   return `0x${address.toString(16)}`;
 }
@@ -183,17 +82,29 @@ function noFlags(): Flags {
 
 /** Formats values as Go's fmt package does; the output holds UTF-8 bytes. */
 export class Printer {
+  /** Calls the Format method of a value that implements fmt.Formatter, with this printer as its fmt.State. */
+  static formatter: ((printer: Printer, iface: Iface, verb: string) => boolean) | undefined;
   /** The errors that %w verbs referred to, which only Errorf, constructed with `wrapErrors`, accepts. */
   readonly wrapped: Value[] = [];
-  /** The output so far, which a Formatter writes to through fmt.State. */
-  buffer = '';
-  /** The flags of the verb being printed, which a Formatter reads through fmt.State. */
-  flags = noFlags();
+  private text = '';
+  private flags = noFlags();
   /** The value being printed by its methods, to detect a String method that prints its own receiver forever. */
   private readonly depthLimit = 1000;
   private depth = 0;
 
   constructor(private readonly wrapErrors = false) {}
+
+  private get buffer(): string {
+    return this.text;
+  }
+
+  /** Every write of the output goes through here, which keeps it within the string limit and charges its work. */
+  private set buffer(value: string) {
+    const runtime = currentRuntime();
+    runtime.checkStringLength(value.length);
+    runtime.spend(1 + Math.floor((value.length - this.text.length) / 64));
+    this.text = value;
+  }
 
   // Entry points --------------------------------------------------------------------------------------------------
 
@@ -427,30 +338,51 @@ export class Printer {
     this.printValue(iface.value, iface.type, verb, 0);
   }
 
-  /** Prints with the value's Error or String method, for the verbs that use them. */
-  /** Whether a bad verb's value is being printed, which prints without calling its methods, as Go's erroring. */
-  private erroring = false;
+  // fmt.State ----------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Go's handleMethods: Format, GoString, Error, and String.
+  write(bytes: string): void {
+    this.buffer += bytes;
+  }
+
+  flag(char: number): boolean {
+    const flags = this.flags;
+    const set: Record<number, boolean> = {
+      0x2d: flags.minus,
+      0x2b: flags.plus || flags.plusV,
+      0x23: flags.sharp || flags.sharpV,
+      0x20: flags.space,
+      0x30: flags.zero,
+    };
+    return set[char] ?? false;
+  }
+
+  width(): number | undefined {
+    return this.flags.width;
+  }
+
+  precision(): number | undefined {
+    return this.flags.precision;
+  }
+
+  /** Prints with the value's Format, Error, or String method, for the verbs that use them. */
   private handleMethods(iface: Iface, verb: string): boolean {
-    if (this.erroring) return false;
-    if (!missingMethod(iface.type, FORMATTER.underlying as never)) {
-      this.callMethod(iface, verb, 'Format', (call) => {
-        call(iface.value, [this.stateValue(), BigInt(verb.codePointAt(0) ?? 0)]);
-      });
-      return true;
+    if (Printer.formatter) {
+      try {
+        if (Printer.formatter(this, iface, verb)) return true;
+      } catch (error) {
+        if (!(error instanceof GoPanic)) throw error;
+        this.catchPanic(iface, verb, 'Format', error);
+        return true;
+      }
     }
+    let method: string | undefined;
     if (this.flags.sharpV) {
-      if (missingMethod(iface.type, GO_STRINGER.underlying as never)) return false;
-      this.callMethod(iface, verb, 'GoString', (call) => {
-        const text = call(iface.value, []) as string;
-        this.fmtString(text, 's');
-      });
-      return true;
+      method = missingMethod(iface.type, GO_STRINGER as never) ? undefined : 'GoString';
+    } else {
+      if (!['v', 's', 'x', 'X', 'q'].includes(verb)) return false;
+      const errorMethod = !missingMethod(iface.type, ERROR_TYPE.underlying as never) ? 'Error' : undefined;
+      method = errorMethod ?? (!missingMethod(iface.type, STRINGER as never) ? 'String' : undefined);
     }
-    if (!['v', 's', 'x', 'X', 'q'].includes(verb)) return false;
-    const errorMethod = !missingMethod(iface.type, ERROR_TYPE.underlying as never) ? 'Error' : undefined;
-    const method = errorMethod ?? (!missingMethod(iface.type, STRINGER as never) ? 'String' : undefined);
     if (!method) return false;
     const call = dynamicMethod(iface.type, method);
     if (!call) return false;
@@ -468,36 +400,8 @@ export class Printer {
     } finally {
       this.depth--;
     }
-    this.fmtString(text, verb);
+    this.fmtString(text, method === 'GoString' ? 's' : verb);
     return true;
-  }
-
-  /** Calls a method of the value being printed, catching a panic in it as Go's catchPanic does. */
-  private callMethod(
-    iface: Iface,
-    verb: string,
-    name: string,
-    run: (call: NonNullable<ReturnType<typeof dynamicMethod>>) => void
-  ): void {
-    const call = dynamicMethod(iface.type, name);
-    if (!call) return;
-    this.depth++;
-    const saved = this.flags;
-    try {
-      if (this.depth > this.depthLimit) throw new RangeError('Maximum call stack size exceeded');
-      run(call);
-    } catch (error) {
-      if (!(error instanceof GoPanic)) throw error;
-      this.flags = saved;
-      this.catchPanic(iface, verb, name, error);
-    } finally {
-      this.flags = saved;
-      this.depth--;
-    }
-  }
-
-  private stateValue(): Iface {
-    return new Iface(pointerTo(PRINTER_STATE), new Pointer(new Cell(new GoStruct([], { printer: this })), 'v'));
   }
 
   private catchPanic(iface: Iface, verb: string, method: string, panic: GoPanic): void {
@@ -554,8 +458,9 @@ export class Printer {
 
   /** A nested value with an Error or String method prints with it, when reflection could call it. */
   private printNestedWithMethods(value: Value, type: Type, verb: string): boolean {
+    if (!this.canInterface) return false;
     if (value instanceof Iface) return this.handleMethods(value, verb);
-    if (!this.canInterface || isInterfaceType(type)) return false;
+    if (isInterfaceType(type)) return false;
     return this.handleMethods(new Iface(type, value), verb);
   }
 
@@ -568,12 +473,11 @@ export class Printer {
   ): void {
     if (this.flags.sharpV) this.buffer += typeString(type);
     this.buffer += '{';
+    const values = struct.native?.fieldValues?.() ?? struct.fields;
     for (const [index, field] of under.fields.entries()) {
       if (index > 0) this.buffer += this.flags.sharpV ? ', ' : ' ';
       if (this.flags.plusV || this.flags.sharpV) this.buffer += `${field.name}:`;
-      this.withInterface(isExported(field.name), () =>
-        this.printValue(struct.fields[index], field.type, verb, depth + 1)
-      );
+      this.withInterface(isExported(field.name), () => this.printValue(values[index], field.type, verb, depth + 1));
     }
     this.buffer += '}';
   }
@@ -644,7 +548,10 @@ export class Printer {
       return;
     }
     if (this.flags.sharpV) {
-      this.buffer += typeString(type);
+      // Go's printArg hands a []byte argument itself to fmtBytes, which spells its type []byte.
+      const topLevelBytes =
+        depth === 0 && type.kind === 'slice' && under.element.kind === 'basic' && under.element.basic === 'uint8';
+      this.buffer += topLevelBytes ? '[]byte' : typeString(type);
       if (under.kind === 'slice' && value === undefined) {
         this.buffer += '(nil)';
         return;
@@ -703,20 +610,19 @@ export class Printer {
     } else {
       // Go keeps the width and precision for the value, as its badVerb prints with the flags it parsed.
       this.buffer += `${typeString(type)}=`;
-      const wasErroring = this.erroring;
-      this.erroring = true;
-      try {
-        this.printValue(value, type, 'v', 0);
-      } finally {
-        this.erroring = wasErroring;
-      }
+      this.printValue(value, type, 'v', 0);
     }
     this.buffer += ')';
   }
 
   /** Pads to the width with spaces, or zeros when the 0 flag asks, counting runes. */
+  /** Go's writePadding: zeros with the 0 flag unless the - flag pads on the right, spaces otherwise. */
+  private padding(count: number): string {
+    return (this.flags.zero && !this.flags.minus ? '0' : ' ').repeat(count);
+  }
+
   private pad(text: string): void {
-    const { width, minus, zero } = this.flags;
+    const { width, minus } = this.flags;
     if (width === undefined || width === 0) {
       this.buffer += text;
       return;
@@ -726,7 +632,7 @@ export class Printer {
       this.buffer += text;
       return;
     }
-    const padding = (zero && !minus ? '0' : ' ').repeat(count);
+    const padding = this.padding(count);
     this.buffer += minus ? text + padding : padding + text;
   }
 
@@ -834,12 +740,15 @@ export class Printer {
   }
 
   private fmtUnicode(value: bigint): void {
-    let text = value.toString(16).toUpperCase();
+    const unsigned = BigInt.asUintN(64, value);
+    let text = unsigned.toString(16).toUpperCase();
     const precision = Math.max(this.flags.precision ?? 4, 4);
     if (text.length < precision) text = '0'.repeat(precision - text.length) + text;
     text = `U+${text}`;
-    const rune = Number(value);
-    if (this.flags.sharp && value <= 0x10_ff_ffn && isPrint(rune)) text += ` '${encodeRune(rune)}'`;
+    if (this.flags.sharp && unsigned <= 0x10_ff_ffn) {
+      const rune = Number(unsigned);
+      if (isPrint(rune)) text += ` '${encodeRune(rune)}'`;
+    }
     const zero = this.flags.zero;
     this.flags.zero = false;
     this.pad(text);
@@ -876,10 +785,6 @@ export class Printer {
         return;
       }
     }
-    if (this.flags.sharpV) {
-      format = 'g';
-      precision = -1;
-    }
     let num = formatFloat(value, format, precision, size);
     if (num[0] !== '-' && num[0] !== '+') num = `+${num}`;
     if (this.flags.space && num[0] === '+' && !this.flags.plus) num = ` ${num.slice(1)}`;
@@ -891,7 +796,11 @@ export class Printer {
       this.flags.zero = zero;
       return;
     }
-    if (this.flags.sharp && format !== 'b') num = sharpFloat(num, format, precision);
+    if (this.flags.sharp && format !== 'b') {
+      // The # flag pads %g with zeros up to the precision.
+      if (precision > 0) chargeFormatting(precision);
+      num = sharpFloat(num, format, precision);
+    }
     if (this.flags.plus || num[0] !== '+') {
       if (this.flags.zero && !this.flags.minus && this.flags.width !== undefined && this.flags.width > num.length) {
         this.buffer += num[0];
@@ -998,11 +907,11 @@ export class Printer {
         width += 2;
       }
     } else {
-      if (this.flags.width !== undefined) this.buffer += ' '.repeat(this.flags.width);
+      if (this.flags.width !== undefined) this.buffer += this.padding(this.flags.width);
       return;
     }
     const { width: fieldWidth, minus } = this.flags;
-    if (fieldWidth !== undefined && fieldWidth > width && !minus) this.buffer += ' '.repeat(fieldWidth - width);
+    if (fieldWidth !== undefined && fieldWidth > width && !minus) this.buffer += this.padding(fieldWidth - width);
     let result = '';
     if (this.flags.sharp) result += `0${digits[16]}`;
     for (let index = 0; index < length; index++) {
@@ -1014,7 +923,7 @@ export class Printer {
       result += digits[byte >> 4] + digits[byte & 0xf];
     }
     this.buffer += result;
-    if (fieldWidth !== undefined && fieldWidth > width && minus) this.buffer += ' '.repeat(fieldWidth - width);
+    if (fieldWidth !== undefined && fieldWidth > width && minus) this.buffer += this.padding(fieldWidth - width);
   }
 
   private fmtPointer(value: Value, type: Type, verb: string): void {
@@ -1042,8 +951,7 @@ export class Printer {
       case 'x':
       case 'X': {
         const address = BigInt(object === undefined ? 0 : addressOf(object));
-        if (verb === 'x' || verb === 'X') this.fmtInteger(address, false, verb, false, address, type);
-        else this.fmtInteger(address, false, verb, false, address, type);
+        this.fmtInteger(address, false, verb, false, address, type);
         return;
       }
       default: {
@@ -1070,8 +978,9 @@ function parseNumber(text: string, start: number): [number | undefined, number] 
 function intFromArg(args: Value[], argNum: number): [number | undefined, boolean, number] {
   if (argNum >= args.length) return [undefined, false, argNum];
   const arg = args[argNum];
-  if (arg instanceof Iface && arg.type.kind === 'basic' && /^u?int/.test(arg.type.basic)) {
-    const value = Number(arg.value as bigint);
+  const under = arg instanceof Iface ? underlying(arg.type) : undefined;
+  if (under?.kind === 'basic' && /^u?int/.test(under.basic) && ((arg as Iface).value as bigint) < 1n << 63n) {
+    const value = Number((arg as Iface).value as bigint);
     if (value > 1e6 || value < -1e6) return [undefined, false, argNum + 1];
     return [value, true, argNum + 1];
   }
@@ -1080,7 +989,7 @@ function intFromArg(args: Value[], argNum: number): [number | undefined, boolean
 
 function pointerObject(value: Value): object | undefined {
   if (value === undefined) return undefined;
-  if (value instanceof Pointer) return value.key === 'v' ? value.base : value.base;
+  if (value instanceof Pointer) return value.base;
   if (value instanceof Slice) return value.array;
   if (value instanceof GoMap || value instanceof GoFunc) return value;
   return value as object;
@@ -1095,36 +1004,30 @@ function runeOf(value: bigint): number {
 }
 
 /** Go's handling of the # flag for floats: keep the decimal point and, for %g, the trailing zeros. */
-function sharpFloat(num: string, format: string, precision: number): string {
+/** The # flag of fmtFloat: a decimal point always, and trailing zeros up to the precision for %g and %x. */
+function sharpFloat(text: string, format: string, precision: number): string {
+  let num = text;
   let digits = 0;
-  if (format === 'g' || format === 'G' || format === 'v') {
-    digits = precision < 0 ? 6 : precision;
-    if (digits === 0) digits = 1;
-  }
+  if (format === 'v' || format === 'g' || format === 'G' || format === 'x') digits = precision === -1 ? 6 : precision;
   let tail = '';
-  const exponentIndex = num.search(/[eEpP]/);
-  let body = num;
-  if (exponentIndex >= 0) {
-    tail = num.slice(exponentIndex);
-    body = num.slice(0, exponentIndex);
+  let hasDecimalPoint = false;
+  let sawNonzeroDigit = false;
+  for (let index = 1; index < num.length; index++) {
+    const char = num[index];
+    if (char === '.') {
+      hasDecimalPoint = true;
+    } else if (char === 'p' || char === 'P' || ((char === 'e' || char === 'E') && format !== 'x' && format !== 'X')) {
+      tail = num.slice(index);
+      num = num.slice(0, index);
+    } else {
+      if (char !== '0') sawNonzeroDigit = true;
+      if (sawNonzeroDigit) digits--;
+    }
   }
-  let sawDot = body.includes('.');
-  let sawNonzero = false;
-  for (const char of body.slice(1)) {
-    if (char === '.') continue;
-    if (char !== '0') sawNonzero = true;
-    if (sawNonzero || char !== '0') digits--;
-    else if (char === '0' && sawNonzero) digits--;
+  if (!hasDecimalPoint) {
+    if (num.length === 2 && num[1] === '0') digits--;
+    num += '.';
   }
-  if (!sawDot) {
-    body += '.';
-    sawDot = true;
-  }
-  if (format === 'g' || format === 'G') {
-    // Count the significant digits already present to know how many zeros to add.
-    const significant = body.slice(1).replace('.', '').replace(/^0+/, '').length;
-    const wanted = (precision < 0 ? 6 : precision === 0 ? 1 : precision) - (significant === 0 ? 1 : significant);
-    if (wanted > 0) body += '0'.repeat(wanted);
-  }
-  return body + tail;
+  if (digits > 0) num += '0'.repeat(digits);
+  return num + tail;
 }

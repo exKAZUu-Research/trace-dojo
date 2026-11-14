@@ -1,7 +1,8 @@
-import type { Entity, FuncEntity, GoPackage } from './entities';
+import type { Entity, FuncEntity, GoPackage, VarEntity } from './entities';
 import { containsTypeParam } from './generics';
 import { type Runtime, runToEnd, type Suspending } from './runtime';
 import {
+  CONSTRAINT_NAMES,
   type FuncType,
   funcType,
   type InterfaceType,
@@ -11,7 +12,7 @@ import {
   type TypeParamType,
   typeString,
 } from './types';
-import { GoFunc, type Value } from './values';
+import { Cell, GoFunc, type Value } from './values';
 
 let running: Runtime | undefined;
 
@@ -19,6 +20,41 @@ let running: Runtime | undefined;
 export function currentRuntime(): Runtime {
   if (!running) throw new Error('No Go program is running');
   return running;
+}
+
+const perRunValues = new WeakMap<Runtime, Map<object, unknown>>();
+
+/** A library value that each run creates on first use, since a program may change it and runs must not share it. */
+export function perRun<T>(create: () => T): () => T {
+  const key = {};
+  return () => {
+    const runtime = currentRuntime();
+    let values = perRunValues.get(runtime);
+    if (!values) {
+      values = new Map();
+      perRunValues.set(runtime, values);
+    }
+    if (!values.has(key)) values.set(key, create());
+    return values.get(key) as T;
+  };
+}
+
+const libraryCells = new WeakMap<Runtime, Map<VarEntity, Cell>>();
+
+/** The storage of a library variable in the running program, which assignments to the variable change. */
+export function libraryCell(entity: VarEntity): Cell {
+  const runtime = currentRuntime();
+  let cells = libraryCells.get(runtime);
+  if (!cells) {
+    cells = new Map();
+    libraryCells.set(runtime, cells);
+  }
+  let cell = cells.get(entity);
+  if (!cell) {
+    cell = new Cell((entity.library as () => Value)());
+    cells.set(entity, cell);
+  }
+  return cell;
 }
 
 export function withRuntime<T>(runtime: Runtime, run: () => T): T {
@@ -33,8 +69,22 @@ export function withRuntime<T>(runtime: Runtime, run: () => T): T {
 
 export type NativeImpl = (args: Value[]) => Value | Value[];
 
+const opaqueTypes = new WeakSet<Type>();
+
+/** Marks a library type whose fields are implementation details, which the trace does not show. */
+export function opaqueType(type: NamedType): NamedType {
+  opaqueTypes.add(type);
+  return type;
+}
+
+export function isOpaque(type: Type): boolean {
+  return opaqueTypes.has(type);
+}
+
 export function namedType(pkg: string, name: string, underlyingType: Type): NamedType {
-  return { kind: 'named', name, pkg, underlying: underlyingType, methods: [] };
+  const type: NamedType = { kind: 'named', name, pkg, underlying: underlyingType, methods: [] };
+  if (underlyingType.kind === 'interface') CONSTRAINT_NAMES.set(underlyingType, type);
+  return type;
 }
 
 /** Adds a library method to a type; the implementation receives the receiver first. */

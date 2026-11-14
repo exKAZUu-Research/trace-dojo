@@ -2,7 +2,9 @@ import type { OutputChannel } from '../interpreter/programIo';
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
 import { defineArrayCopy } from './arrayCopy';
 import { defineClassClass, runtimeClassNameOf } from './builtinClass';
+import { retainClosureOperands } from './builtinClosureRoots';
 import { type Collections, defineCollections, javaEquals, javaHash, linkComparator } from './builtinCollections';
+import { checkNullLookups } from './builtinCollectionSupport';
 import { makeEnumGeneric } from './builtinEnum';
 import { defineFunctions, type Functions } from './builtinFunctions';
 import { defineFileIO, standardStreamsOf } from './builtinIo';
@@ -77,6 +79,7 @@ export function getBuiltins(): Builtins {
   return cachedBuiltins;
 }
 
+// code-gauge-allow functionNcss 32 -- One call per builtin family, in the order their definitions depend on.
 function createBuiltins(): Builtins {
   const registry = createRegistry();
   const objectClass = registry.define('Object', undefined);
@@ -114,6 +117,8 @@ function createBuiltins(): Builtins {
     ...standardStreamsOf(registry.classes.get('System') as ClassInfo),
   });
   defineSerializable(registry, collections);
+  retainClosureOperands(registry.qualifiedNames.keys(), objectClass, registry.classes.get('Collector') as ClassInfo);
+  checkNullLookups(registry.qualifiedNames.keys(), collections.collectionClass, collections.mapClass);
   return {
     classes: registry.classes,
     objectClass,

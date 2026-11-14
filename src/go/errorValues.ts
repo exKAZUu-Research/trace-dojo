@@ -1,4 +1,5 @@
 import { addMethod, fn, namedType } from './native';
+import { nilPointerPanic } from './runtimeErrors';
 import { BASIC, type NamedType, pointerTo } from './types';
 import { Cell, GoStruct, Iface, Pointer, type Value } from './values';
 
@@ -11,7 +12,10 @@ addMethod(
   ERROR_STRING_TYPE,
   'Error',
   fn([], [BASIC.string]),
-  (receiver) => ((receiver as Pointer).load() as GoStruct).fields[0],
+  (receiver) => {
+    if (!(receiver instanceof Pointer)) nilPointerPanic();
+    return (receiver.load() as GoStruct).fields[0];
+  },
   true
 );
 
