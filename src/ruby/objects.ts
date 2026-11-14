@@ -200,7 +200,8 @@ export type ProcBody =
 export type NativeProc = (
   args: Value[],
   block: RProc | undefined,
-  used: boolean
+  used: boolean,
+  keywords?: RHash
 ) => Value | Generator<unknown, Value, unknown>;
 
 export type Visibility = 'public' | 'private' | 'protected';

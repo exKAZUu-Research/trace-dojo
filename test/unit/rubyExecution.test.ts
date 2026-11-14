@@ -126,6 +126,37 @@ test('calendar Time constructors retain exact fractional seconds', () => {
   });
 });
 
+test('Method#to_proc forwards keyword arguments', () => {
+  expect(run('def f(k:); p k; end; method(:f).to_proc.call(k: 3)')).toMatchObject({ stdout: '3\n' });
+});
+
+test('Regexp case comparison coerces strings and clears failed matches', () => {
+  expect(run('o=Object.new; def o.to_str; "abc"; end; /a/=~"a"; p(/a/ === 1); p $~; p(/a/ === o)')).toMatchObject({
+    stdout: 'false\nnil\ntrue\n',
+  });
+});
+
+test('anonymous forwarding requires the matching parameter declaration', () => {
+  expect(run('def f(...); g(*); end; def g(*a); a; end; p f(1)')).toMatchObject({ kind: 'compileError' });
+  expect(run('def f(...); g(...); end; def g(*a,**k,&b); p a,k;end; f(1,x:2)')).toMatchObject({
+    stdout: '[1]\n{x: 2}\n',
+  });
+});
+
+test('undef in class_eval targets the evaluated class', () => {
+  expect(run('class A; def x;1;end;end; A.class_eval { undef x }; p A.new.respond_to?(:x)')).toMatchObject({
+    stdout: 'false\n',
+  });
+});
+
+test('static regexp literals retain identity within a program', () => {
+  expect(run('def f; /abc/; end; p f.equal?(f)')).toMatchObject({ stdout: 'true\n' });
+});
+
+test('quoted hash pattern keys decode their escapes', () => {
+  expect(run(String.raw`p(({"a\n": 1} in {"a\n": 1}))`)).toMatchObject({ stdout: 'true\n' });
+});
+
 test('imaginary unit remains unsupported', () => {
   expect(run('p 1.i')).toMatchObject({
     uncaughtException: 'Numeric#i（複素数）は、この採点環境では使えません。',

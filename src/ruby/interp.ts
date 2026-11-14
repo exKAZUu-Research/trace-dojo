@@ -385,7 +385,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
       return NIL;
     }
     case 'undef': {
-      const owner = frame.kind === 'class' ? (frame.self as RClass) : frame.cref[0];
+      const owner = frame.kind === 'class' ? (frame.self as RClass) : (frame.extra.definee ?? frame.cref[0]);
       for (const name of e.names) {
         if (!owner.findMethod(name))
           throw nameError(`undefined method '${name}' for class '${owner.name}'`, owner, name);
@@ -432,6 +432,9 @@ export function* ev(e: Expr, frame: Frame): Gen {
       return constInModule(rt().c.Encoding, 'UTF_8');
     }
     case 'regex': {
+      const staticLiteral = e.parts.every((part) => typeof part === 'string' || 'text' in part);
+      const cached = staticLiteral ? rt().regexpLiterals.get(e) : undefined;
+      if (cached) return cached;
       let source = '';
       for (const part of e.parts) {
         if (typeof part === 'string') source += part;
@@ -448,6 +451,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
         extended: e.flags.includes('x'),
       });
       regexp.frozen = true;
+      if (staticLiteral) rt().regexpLiterals.set(e, regexp);
       return regexp;
     }
     case 'matchWrite': {
@@ -2005,7 +2009,7 @@ export function makeBlock(def: BlockDef, frame: Frame): RProc {
 
 export function nativeProc(
   arity: number,
-  call: (args: Value[], block: RProc | undefined, used: boolean) => Value | Gen,
+  call: (args: Value[], block: RProc | undefined, used: boolean, keywords?: RHash) => Value | Gen,
   lambda = false
 ): RProc {
   const proc = new RProc(rt().c.Proc, { kind: 'native', arity, lambda, call }, NIL, undefined);
@@ -2039,10 +2043,11 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
   runtime.spend();
   const { body } = proc;
   if (body.kind === 'native') {
-    if (body.lambda && body.arity >= 0 && args.length !== body.arity) {
-      throw argumentCountError(args.length, body.arity, body.arity);
+    const count = args.length + Number(options.keywords !== undefined);
+    if (body.lambda && body.arity >= 0 && count !== body.arity) {
+      throw argumentCountError(count, body.arity, body.arity);
     }
-    const result = body.call(args, options.block, options.used ?? true);
+    const result = body.call(args, options.block, options.used ?? true, options.keywords);
     const value = isGenerator(result) ? yield* result : result;
     return typeof value === 'number' ? boxFloat(value) : value;
   }

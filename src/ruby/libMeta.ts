@@ -156,7 +156,11 @@ def(
 );
 def('Method', 'to_proc', 0, (self: RObject) => {
   const { recv, method } = self.data as MethodData;
-  return nativeProc(methodArity(method), (args, block) => invoke(method, recv, args, undefined, block, true), true);
+  return nativeProc(
+    methodArity(method),
+    (args, block, _used, keywords) => invoke(method, recv, args, keywords, block, true),
+    true
+  );
 });
 def('Method', 'receiver', 0, (self: RObject) => (self.data as MethodData).recv);
 def('Method', 'unbind', 0, (self: RObject) => {

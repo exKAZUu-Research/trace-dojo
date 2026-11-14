@@ -161,6 +161,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly globals = new Map<string, Value>();
   readonly symbols = new Map<string, RSymbol>();
   readonly coreStrings = new Map<string, RString>();
+  readonly regexpLiterals = new WeakMap<object, RObject>();
   /** Values native code holds while it calls back into the program, such as the array `each` iterates. */
   readonly held: Value[] = [];
   currentNumericReceiver?: Value;

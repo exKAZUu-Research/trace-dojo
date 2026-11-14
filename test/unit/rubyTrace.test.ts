@@ -19,7 +19,7 @@ const rubyTrace = (program: string): TraceItem[] => traceProgram('ruby', program
 
 test('Struct, Data and value objects remain visible in the variable trace', () => {
   const program =
-    'S=Struct.new(:a)\nD=Data.define(:x)\ns=S.new(1)\nd=D.new(2)\nr=1/3r\nt=Time.utc(2024)\nre=/a/\np s.a\n';
+    'S=Struct.new(:a)\nD=Data.define(:x)\ns=S.new(1)\nd=D.new(2)\nr=1/3r\nt=Time.utc(2024)\nre=/a/\nm=/a(b)/.match("ab")\np s.a\n';
   const last = rubyTrace(program).at(-1);
   expect(last?.referenceVars).toMatchObject({
     s: { kind: 'object', entries: { a: { kind: 'value', value: 1 } } },
@@ -27,6 +27,7 @@ test('Struct, Data and value objects remain visible in the variable trace', () =
     r: { kind: 'value', value: '(1/3)' },
     t: { kind: 'value', value: '2024-01-01 00:00:00 UTC' },
     re: { kind: 'value', value: '/a/' },
+    m: { kind: 'value', value: '#<MatchData "ab" 1:"b">' },
   });
 });
 

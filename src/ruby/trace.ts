@@ -5,7 +5,7 @@ import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { formatFloat, strInspect, symInspect } from './conversions';
-import { regexpDisplayOf } from './libRegexp';
+import { regexpValueDisplayOf } from './libRegexp';
 import { structEntriesOf } from './libStruct';
 import { timeDisplayOf } from './libTime';
 import {
@@ -187,7 +187,7 @@ function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: num
       const { numerator, denominator } = value.data as { numerator: bigint; denominator: bigint };
       return { kind: 'value', value: `(${numerator}/${denominator})` };
     }
-    const nativeText = timeDisplayOf(value) ?? regexpDisplayOf(value);
+    const nativeText = timeDisplayOf(value) ?? regexpValueDisplayOf(value);
     if (nativeText !== undefined) return { kind: 'value', value: nativeText };
     const members = structEntriesOf(value);
     if (!members) return undefined;

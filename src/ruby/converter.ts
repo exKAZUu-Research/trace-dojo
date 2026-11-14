@@ -763,7 +763,9 @@ export class Converter {
         continue;
       }
       if (node.type === 'forward_argument') {
-        items.push({ splat: this.anonymousOr(node, FORWARD_KEYWORDS) });
+        items.push({
+          splat: { k: 'lvar', name: FORWARD_KEYWORDS, depth: this.ctx.scope.forwardingDepth(FORWARD_ALL) },
+        });
         continue;
       }
       if (node.type !== 'pair') this.unsupportedNode(node);
@@ -1020,7 +1022,8 @@ export class Converter {
           if (this.ctx.scope.forwardingDepth(FORWARD_ALL) < 0)
             this.fail(child, '引数を転送する ... は、... を受け取るメソッドの中でしか使えません。');
           if (pairs.length > 0) this.fail(child, 'キーワード引数の後に位置引数は書けません。');
-          const reference = (name: string): Expr => ({ k: 'lvar', name, depth: this.ctx.scope.forwardingDepth(name) });
+          const depth = this.ctx.scope.forwardingDepth(FORWARD_ALL);
+          const reference = (name: string): Expr => ({ k: 'lvar', name, depth });
           args.push({ k: 'splat', e: reference(FORWARD_REST) });
           pairs.push(child);
           blockArg = reference(FORWARD_BLOCK);
@@ -1323,9 +1326,9 @@ export class Converter {
         }
         case 'forward_parameter': {
           if (this.ctx.inBlock) this.fail(child, 'ブロックの引数には ... を書けません。');
-          params.rest = declare(child, FORWARD_REST);
-          params.keywordRest = declare(child, FORWARD_KEYWORDS);
-          params.block = declare(child, FORWARD_BLOCK);
+          params.rest = FORWARD_REST;
+          params.keywordRest = FORWARD_KEYWORDS;
+          params.block = FORWARD_BLOCK;
           declare(child, FORWARD_ALL);
           break;
         }
@@ -1647,7 +1650,15 @@ export class Converter {
         continue;
       }
       const keyNode = required(child.childForFieldName('key'));
-      const key = keyNode.type === 'hash_key_symbol' ? keyNode.text : keyNode.text.replaceAll(/^["']|["']:?$/g, '');
+      if (namedChildren(keyNode).some((part) => part.type === 'interpolation'))
+        this.fail(keyNode, 'パターンのキーには式を埋め込めません。');
+      const rawKey = keyNode.text.replaceAll(/^["']|["']:?$/g, '');
+      const key =
+        keyNode.type === 'hash_key_symbol'
+          ? keyNode.text
+          : keyNode.text.startsWith("'")
+            ? decodeSingleQuoted(rawKey)
+            : this.decode(keyNode, rawKey).text;
       const valueNode = child.childForFieldName('value');
       if (valueNode) pairs.push({ key, pattern: this.pattern(valueNode) });
       else pairs.push({ key, target: this.bindTarget(keyNode) });

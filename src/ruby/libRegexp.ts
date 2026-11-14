@@ -2,7 +2,7 @@ import vm from 'node:vm';
 
 // code-gauge-allow-file fileNcss 558 -- The libRegexp module keeps one concern's cases together.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { inspect, rEquals, strInspect, toIndex, toS, toStr } from './conversions';
+import { inspect, rEquals, strInspect, toIndex, toS, toStr, tryImplicitConversion } from './conversions';
 import { def, extend, sdef } from './define';
 import { argumentError, frozenError, indexError, rubyError, typeError } from './errors';
 import { hashGet, hashSet } from './hashes';
@@ -694,8 +694,10 @@ function regexpInspect(regexp: RObject): string {
   return `/${source}/${data.multiline ? 'm' : ''}${data.ignoreCase ? 'i' : ''}${data.extended ? 'x' : ''}`;
 }
 
-export function regexpDisplayOf(value: RObject): string | undefined {
-  return isRegexp(value) ? regexpInspect(value) : undefined;
+export function regexpValueDisplayOf(value: RObject): string | undefined {
+  if (value.cls === rt().c.Regexp) return regexpInspect(value);
+  if (value.cls === rt().c.MatchData) return matchDataInspect(value);
+  return undefined;
 }
 
 def('Regexp', 'source', 0, (self: RObject) => str(dataOf(self).source));
@@ -747,8 +749,17 @@ def('Regexp', '=~', 1, function* (self: RObject, [value]) {
   return state ? BigInt(charIndex(text, (state.groups[0] as readonly [number, number])[0])) : NIL;
 });
 def('Regexp', '===', 1, function* (self: RObject, [value]) {
-  if (!(value instanceof RString) && !(value instanceof RSymbol)) return false;
-  const state = execAt(self, value instanceof RString ? value.s : value.name, 0);
+  const converted =
+    value instanceof RString || value instanceof RSymbol ? value : yield* tryImplicitConversion(value, 'to_str');
+  if (converted === undefined) {
+    setLastMatch(undefined);
+    return false;
+  }
+  if (!(converted instanceof RString) && !(converted instanceof RSymbol)) {
+    const name = realClassOf(value).name;
+    throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
+  }
+  const state = execAt(self, converted instanceof RString ? converted.s : converted.name, 0);
   setLastMatch(state);
   yield* [];
   return state !== undefined;
@@ -860,11 +871,13 @@ def('MatchData', 'values_at', [0, -1], function* (self: RObject, args) {
 });
 def('MatchData', 'string', 0, (self: RObject) => str(stateOf(self).text));
 def('MatchData', 'regexp', 0, (self: RObject) => stateOf(self).regexp);
-def('MatchData', 'inspect', 0, (self: RObject) => {
-  const state = stateOf(self);
+def('MatchData', 'inspect', 0, (self: RObject) => str(matchDataInspect(self)));
+
+function matchDataInspect(match: RObject): string {
+  const state = stateOf(match);
   if (state.literal) {
     const range = state.groups[0] as readonly [number, number];
-    return str(`#<MatchData: ${state.text.slice(range[0], range[1])}>`);
+    return `#<MatchData: ${state.text.slice(range[0], range[1])}>`;
   }
   const parts = state.groups.map((range, group) => {
     const shown = range ? strInspect(state.text.slice(range[0], range[1])) : 'nil';
@@ -872,8 +885,8 @@ def('MatchData', 'inspect', 0, (self: RObject) => {
     const name = state.names.find((candidate) => state.namedGroups[candidate] === group);
     return `${name ?? group}:${shown}`;
   });
-  return str(`#<MatchData ${parts.join(' ')}>`);
-});
+  return `#<MatchData ${parts.join(' ')}>`;
+}
 def('MatchData', 'deconstruct', 0, (self: RObject) =>
   arr(
     stateOf(self)
