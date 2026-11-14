@@ -54,7 +54,7 @@ import {
   type Visibility,
 } from './objects';
 import { bindParams } from './params';
-import { guardFailed, matchPattern, noMatchingPattern } from './patterns';
+import { type DeconstructionCache, guardFailed, matchPattern, noMatchingPattern } from './patterns';
 import {
   BreakSignal,
   Frame,
@@ -402,12 +402,15 @@ export function* ev(e: Expr, frame: Frame): Gen {
     case 'caseIn': {
       const subject = yield* ev(e.subject, frame);
       const mark = frame.temporaries.length;
+      const arraysMark = rt().heldArrays.length;
       frame.temporaries.push(subject);
-      const cache = { subject };
+      const cache: DeconstructionCache = { subject };
       try {
         for (const clause of e.clauses) {
           rt().currentRow = clause.row;
-          if (!(yield* matchPattern(clause.pattern, subject, frame, cache))) continue;
+          const matched = yield* matchPattern(clause.pattern, subject, frame, cache);
+          if (cache.items) rt().heldArrays.push(cache.items);
+          if (!matched) continue;
           if (clause.guard && truthy(yield* ev(clause.guard.cond, frame)) === clause.guard.unless) {
             guardFailed();
             continue;
@@ -418,6 +421,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
         throw yield* noMatchingPattern(subject, e.clauses.length === 1);
       } finally {
         frame.temporaries.length = mark;
+        rt().heldArrays.length = arraysMark;
       }
     }
     case 'matchPattern': {

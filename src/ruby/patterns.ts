@@ -14,7 +14,7 @@ interface Failure {
   matchee?: Value;
 }
 
-interface DeconstructionCache {
+export interface DeconstructionCache {
   subject: Value;
   attempted?: boolean;
   items?: Value[];
@@ -66,7 +66,11 @@ export function* matchPattern(pattern: Pattern, value: Value, frame: Frame, cach
         return true;
       }
       case 'alt': {
-        for (const option of pattern.options) if (yield* matchPattern(option, value, frame, cache)) return true;
+        for (const option of pattern.options) {
+          const matched = yield* matchPattern(option, value, frame, cache);
+          if (cache?.items) rt().heldArrays.push(cache.items);
+          if (matched) return true;
+        }
         return false;
       }
       case 'array': {
