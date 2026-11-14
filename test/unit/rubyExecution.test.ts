@@ -2523,6 +2523,15 @@ test('nested Array join reports Ruby encoding names', () => {
   });
 });
 
+test('Array join retains an empty binary first element', () => {
+  expect(
+    run('a=255.chr.clear;[[a],[a,["a"]],[a,[]]].each{|items|s=items.join(":");begin;s<<256;rescue=>e;p e.class;end}')
+  ).toMatchObject({ stdout: 'RangeError\nRangeError\nRangeError\n' });
+  expect(run('a=255.chr.clear;s=[a,"é"].join;s<<256;p s.bytes')).toMatchObject({
+    stdout: '[195, 169, 196, 128]\n',
+  });
+});
+
 test('Array join enforces String storage as an execution limit', () => {
   expect(run('begin;Array.new(2,"a"*600000).join;rescue=>e;p e.class;end;p :after')).toEqual({
     kind: 'limitExceeded',

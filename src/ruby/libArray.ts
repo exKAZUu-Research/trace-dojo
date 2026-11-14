@@ -855,7 +855,7 @@ function* join(self: RArray, separator: RString): Gen<RString> {
     if (stack.length >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
     seen.add(source);
     rt().held.push(source);
-    stack.push({ source, index: 0, length: 0, binary: false, ascii: true });
+    stack.push({ source, index: 0, length: 0, binary: false, ascii: true, started: false });
     yield* preflightJoinFirst(source);
   }
 }
@@ -866,6 +866,7 @@ interface JoinFrame {
   length: number;
   binary: boolean;
   ascii: boolean;
+  started: boolean;
 }
 
 interface JoinOutput {
@@ -874,7 +875,8 @@ interface JoinOutput {
 }
 
 function appendJoinPart(frame: JoinFrame, part: RString, output: JoinOutput): void {
-  frame.binary = combinedStringEncoding(frame.binary, frame.ascii, part);
+  frame.binary = frame.started ? combinedStringEncoding(frame.binary, frame.ascii, part) : part.binary;
+  frame.started = true;
   const bytes = stringBytes(part);
   frame.length += bytes.length;
   if (frame.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
@@ -885,12 +887,17 @@ function appendJoinPart(frame: JoinFrame, part: RString, output: JoinOutput): vo
 }
 
 function mergeJoinFrame(parent: JoinFrame, child: JoinFrame): void {
-  if (parent.binary !== child.binary && !parent.ascii && !child.ascii) {
-    const left = rubyEncodingName(parent.binary);
-    const right = rubyEncodingName(child.binary);
-    throw rubyError(rt().c['Encoding::CompatibilityError'], `incompatible character encodings: ${left} and ${right}`);
+  if (!parent.started) {
+    parent.binary = child.binary;
+    parent.started = true;
+  } else {
+    if (parent.binary !== child.binary && !parent.ascii && !child.ascii) {
+      const left = rubyEncodingName(parent.binary);
+      const right = rubyEncodingName(child.binary);
+      throw rubyError(rt().c['Encoding::CompatibilityError'], `incompatible character encodings: ${left} and ${right}`);
+    }
+    if (parent.binary !== child.binary && parent.ascii && !child.ascii) parent.binary = child.binary;
   }
-  if (parent.binary !== child.binary && parent.ascii && !child.ascii) parent.binary = child.binary;
   parent.ascii &&= child.ascii;
   parent.length += child.length;
   if (parent.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
