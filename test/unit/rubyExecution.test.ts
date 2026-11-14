@@ -6913,6 +6913,13 @@ test('MatchData source snapshots preserve binary bytes and freezing', () => {
     stdout: '[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
   });
   expect(run(String.raw`p 233.chr.gsub(/./, "\\&").bytes`)).toMatchObject({ stdout: '[233]\n' });
+  expect(
+    run(
+      's=String.new("a",encoding:"US-ASCII");p s.sub(/a/,"").encoding,s.sub(/a/,"b").encoding,"a".sub(/a/,65.chr).encoding,s.sub(/a/,"é").encoding'
+    )
+  ).toMatchObject({
+    stdout: '#<Encoding:US-ASCII>\n#<Encoding:US-ASCII>\n#<Encoding:UTF-8>\n#<Encoding:UTF-8>\n',
+  });
 });
 
 test('Time constructor validates field widths before calendar bounds', () => {

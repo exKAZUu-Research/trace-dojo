@@ -1110,7 +1110,7 @@ function concatRegexpPieces(parts: RString[], limit: number): RString {
     offset += buffer.length;
   }
   const result = stringFromBytes(bytes, binary);
-  result.usAscii = !binary && parts.every((part) => part.usAscii);
+  result.usAscii = !binary && (parts[0]?.usAscii ?? false) && ascii;
   return result;
 }
 
