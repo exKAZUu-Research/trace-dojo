@@ -7,6 +7,7 @@ import {
   inspectArray,
   rEql,
   rEquals,
+  rubyEncodingName,
   searchNumericSign,
   toIndex,
   toIndexExact,
@@ -875,8 +876,8 @@ function appendJoinPart(frame: JoinFrame, part: RString, chunks: Uint8Array[]): 
 
 function mergeJoinFrame(parent: JoinFrame, child: JoinFrame): void {
   if (parent.binary !== child.binary && !parent.ascii && !child.ascii) {
-    const left = parent.binary ? 'BINARY (ASCII-8BIT)' : 'utf8';
-    const right = child.binary ? 'BINARY (ASCII-8BIT)' : 'utf8';
+    const left = rubyEncodingName(parent.binary);
+    const right = rubyEncodingName(child.binary);
     throw rubyError(rt().c['Encoding::CompatibilityError'], `incompatible character encodings: ${left} and ${right}`);
   }
   if (parent.binary !== child.binary && parent.ascii && !child.ascii) parent.binary = child.binary;

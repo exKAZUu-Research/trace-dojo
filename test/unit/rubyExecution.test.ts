@@ -2514,6 +2514,15 @@ test('Array join streams nested bytes without repeated reconstruction', () => {
   expect(run('a="x"*900000;500.times{a=[a]};p a.join.size')).toMatchObject({ stdout: '900000\n' });
 });
 
+test('nested Array join reports Ruby encoding names', () => {
+  expect(
+    run('begin;["é",[255.chr]].join;rescue=>e;p e.message;end;begin;[255.chr,["é"]].join;rescue=>e;p e.message;end')
+  ).toMatchObject({
+    stdout:
+      '"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n',
+  });
+});
+
 test('Array join enforces String storage as an execution limit', () => {
   expect(run('begin;Array.new(2,"a"*600000).join;rescue=>e;p e.class;end;p :after')).toEqual({
     kind: 'limitExceeded',

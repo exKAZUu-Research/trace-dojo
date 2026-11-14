@@ -116,14 +116,18 @@ export function combinedStringEncoding(leftBinary: boolean, leftAscii: boolean, 
   if (leftBinary === right.binary) return leftBinary;
   const rightAscii = stringBytes(right).every((byte) => byte < 0x80);
   if (!leftAscii && !rightAscii) {
-    const leftName = leftBinary ? 'BINARY (ASCII-8BIT)' : String.raw`UTF-8`;
-    const rightName = right.binary ? 'BINARY (ASCII-8BIT)' : String.raw`UTF-8`;
+    const leftName = rubyEncodingName(leftBinary);
+    const rightName = rubyEncodingName(right.binary);
     throw rubyError(
       rt().c['Encoding::CompatibilityError'],
       `incompatible character encodings: ${leftName} and ${rightName}`
     );
   }
   return leftAscii && !rightAscii ? right.binary : leftBinary;
+}
+
+export function rubyEncodingName(binary: boolean): string {
+  return binary ? 'BINARY (ASCII-8BIT)' : String.raw`UTF-8`;
 }
 
 export function toStrSync(value: Value): string {
