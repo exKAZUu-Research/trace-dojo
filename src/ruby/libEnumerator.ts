@@ -800,6 +800,8 @@ sdef('Enumerator', 'new', [0, 1], function* (_self, args, block) {
   return enumerator;
 });
 def('Enumerator::Generator', 'each', [0, -1], function* (self: RObject, args, block) {
+  const producer = (self.data as GeneratorData | undefined)?.block;
+  if (!producer) throw argumentError('uninitialized generator');
   const yielder = new RObject(rt().c['Enumerator::Yielder']);
   const consumer = requireBlock(block);
   const data: { consumer: RProc; held(): Value[] } = {
@@ -809,12 +811,38 @@ def('Enumerator::Generator', 'each', [0, -1], function* (self: RObject, args, bl
     },
   };
   yielder.data = data;
-  return yield* callProc((self.data as GeneratorData).block, [yielder, ...args]);
+  return yield* callProc(producer, [yielder, ...args]);
 });
 
+def(
+  'Enumerator::Generator',
+  'initialize',
+  0,
+  (self: RObject, _args, block) => {
+    if (!block) throw rubyError(rt().c.LocalJumpError, 'no block given');
+    self.data = { block, held: () => [block] } satisfies GeneratorData;
+    return NIL;
+  },
+  { visibility: 'private' }
+);
+
 function consumerOf(self: RObject): RProc {
-  return (self.data as { consumer: RProc }).consumer;
+  const consumer = (self.data as { consumer?: RProc } | undefined)?.consumer;
+  if (!consumer) throw argumentError('uninitialized yielder');
+  return consumer;
 }
+
+def(
+  'Enumerator::Yielder',
+  'initialize',
+  0,
+  (self: RObject, _args, block) => {
+    if (!block) throw rubyError(rt().c.LocalJumpError, 'no block given');
+    self.data = { consumer: block, held: () => [block] };
+    return NIL;
+  },
+  { visibility: 'private' }
+);
 
 def('Enumerator::Yielder', ['<<'], 1, function* (self: RObject, [value]) {
   yield* callProc(consumerOf(self), [value]);
@@ -1221,7 +1249,10 @@ function* streamFlattened(mapped: Value, next: (value: Value) => Gen<unknown>): 
     const array = yield* tryImplicitConversion(mapped, 'to_ary');
     if (array !== undefined) {
       if (array instanceof RArray) return yield* streamFlattened(array, next);
-      if (array !== NIL) throw typeError(`can't convert ${realClassOf(mapped).name} to Array`);
+      if (array !== NIL)
+        throw typeError(
+          `can't convert ${realClassOf(mapped).name} to Array (${realClassOf(mapped).name}#to_ary gives ${realClassOf(array).name})`
+        );
     }
     return yield* next(mapped);
   } finally {

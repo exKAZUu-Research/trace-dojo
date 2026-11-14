@@ -87,6 +87,7 @@ function offsetFraction(value: Value | undefined, offset: number): { numerator: 
 }
 
 function dataOf(time: RObject): TimeData {
+  if (!(time.data instanceof TimeData)) throw typeError('uninitialized Time');
   return time.data as TimeData;
 }
 

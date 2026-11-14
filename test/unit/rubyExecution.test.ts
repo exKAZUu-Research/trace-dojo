@@ -6544,6 +6544,9 @@ test('Lazy preserves source yield argument lists', () => {
       'class A;def respond_to_missing?(n,*)=n==:to_ary;def method_missing(n,*)=[1,2];end;p [0].lazy.flat_map{A.new}.map{|x|x.class}.force'
     )
   ).toMatchObject({ stdout: '[Integer, Integer]\n' });
+  expect(
+    run('class A;def to_ary;1;end;end;begin;[0].lazy.flat_map{A.new}.force;rescue=>e;p e.class,e.message;end')
+  ).toMatchObject({ stdout: 'TypeError\n"can\'t convert A to Array (A#to_ary gives Integer)"\n' });
 });
 
 test('regexp replacement expands the last participating capture', () => {
@@ -6673,6 +6676,27 @@ test('Enumerator.new normalizes numeric size and calls size Procs', () => {
   expect(
     run('[Float::NAN,-Float::INFINITY].each{|s|begin;Enumerator.new(s){};rescue=>e;p e.class,e.message;end}')
   ).toMatchObject({ stdout: 'FloatDomainError\n"NaN"\nFloatDomainError\n"-Infinity"\n' });
+});
+
+test('direct Enumerator helpers initialize their blocks and guard allocate', () => {
+  expect(run('Enumerator::Yielder.new{|v|p v}.yield(1);Enumerator::Generator.new{|y|y<<2}.each{|x|p x}')).toMatchObject(
+    {
+      stdout: '1\n2\n',
+    }
+  );
+  expect(
+    run(
+      'begin;Enumerator::Yielder.allocate.yield(1);rescue=>e;p e.class,e.message;end;begin;Enumerator::Generator.allocate.each{|x|};rescue=>e;p e.class,e.message;end'
+    )
+  ).toMatchObject({ stdout: 'ArgumentError\n"uninitialized yielder"\nArgumentError\n"uninitialized generator"\n' });
+});
+
+test('allocated Regexp and Time reject native operations as Ruby errors', () => {
+  expect(
+    run(
+      'begin;Regexp.allocate.match("a");rescue=>e;p e.class,e.message;end;begin;Time.allocate.year;rescue=>e;p e.class,e.message;end'
+    )
+  ).toMatchObject({ stdout: 'TypeError\n"uninitialized Regexp"\nTypeError\n"uninitialized Time"\n' });
 });
 
 test('regexp replacement Hash uses its default callback', () => {

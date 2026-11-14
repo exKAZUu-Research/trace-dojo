@@ -458,6 +458,7 @@ export function isRegexp(value: Value): value is RObject {
 }
 
 function dataOf(regexp: RObject): RegexpData {
+  if (!regexp.data) throw typeError('uninitialized Regexp');
   return regexp.data as RegexpData;
 }
 
