@@ -169,7 +169,7 @@ export function* toSValue(value: Value): Gen<RString> {
   if (value instanceof RString) return value;
   const fast = fastToS(value);
   if (fast !== undefined && !isOverridden(value, 'to_s')) return str(fast);
-  const converted = yield* callMethod(value, 'to_s', []);
+  const converted = yield* callMethod(value, 'to_s', [], undefined, undefined, { fcall: true });
   if (converted instanceof RString) return converted;
   return str(anyToS(value));
 }
@@ -225,7 +225,7 @@ export function* inspect(value: Value): Gen<string> {
 export function* inspectValue(value: Value): Gen<RString> {
   const fast = fastInspect(value);
   if (fast !== undefined && !isOverridden(value, 'inspect')) return str(fast);
-  const converted = yield* callMethod(value, 'inspect', []);
+  const converted = yield* callMethod(value, 'inspect', [], undefined, undefined, { fcall: true });
   return converted instanceof RString ? converted : yield* toSValue(converted);
 }
 
@@ -321,7 +321,7 @@ function pushInspected(parts: string[], part: string, length: number, separatorL
 
 export function* inspectException(exception: RObject): Gen<string> {
   const name = realClassOf(exception).name ?? anonymousClassName(realClassOf(exception));
-  const message = yield* toS(yield* callMethod(exception, 'to_s', []));
+  const message = yield* toS(yield* callMethod(exception, 'to_s', [], undefined, undefined, { fcall: true }));
   if (message === '') return name;
   if (message.includes('\n')) return `#<${name}: ${strInspect(message)}>`;
   return `#<${name}: ${message}>`;
@@ -420,7 +420,7 @@ function isPrintable(code: number): boolean {
   if (code < 0x20 || code === 0x7f) return false;
   if (code >= 0x80 && code < 0xa0) return false;
   if (code >= 0xd8_00 && code <= 0xdf_ff) return false;
-  return !/[\p{Cc}\p{Cn}\p{Co}\p{Cs}\p{Zl}\p{Zp}]/u.test(String.fromCodePoint(code)) || code === 0x20;
+  return !/[\p{Cc}\p{Cn}\p{Cs}\p{Zl}\p{Zp}]/u.test(String.fromCodePoint(code)) || code === 0x20;
 }
 
 const OPERATOR_SYMBOLS = new Set([
@@ -526,7 +526,8 @@ function* compareHashEntries(a: RHash, b: RHash, equals: (left: Value, right: Va
   try {
     for (const entry of a.map.values()) {
       const other = yield* hashGet(b, entry.key);
-      if (!other || !((yield equals(entry.value, other.value)) as boolean)) return false;
+      if (!other || (entry.value !== other.value && !((yield equals(entry.value, other.value)) as boolean)))
+        return false;
     }
     return true;
   } finally {
@@ -559,7 +560,8 @@ function* eqlArray(a: RArray, b: RArray, pairs: Map<RBasic, Set<RBasic>>): Gen<b
   return yield* eqlContainer(a, b, pairs, function* () {
     if (a.items.length !== b.items.length) return false;
     for (let index = 0; index < a.items.length; index++)
-      if (!((yield rEql(a.items[index], b.items[index], pairs)) as boolean)) return false;
+      if (a.items[index] !== b.items[index] && !((yield rEql(a.items[index], b.items[index], pairs)) as boolean))
+        return false;
     return true;
   });
 }
@@ -572,8 +574,8 @@ function* eqlRange(a: RRange, b: RRange, pairs: Map<RBasic, Set<RBasic>>): Gen<b
   return yield* eqlContainer(a, b, pairs, function* () {
     return (
       a.exclusive === b.exclusive &&
-      ((yield rEql(a.begin, b.begin, pairs)) as boolean) &&
-      ((yield rEql(a.end, b.end, pairs)) as boolean)
+      (a.begin === b.begin || ((yield rEql(a.begin, b.begin, pairs)) as boolean)) &&
+      (a.end === b.end || ((yield rEql(a.end, b.end, pairs)) as boolean))
     );
   });
 }

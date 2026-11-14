@@ -2033,6 +2033,25 @@ test('indexed method calls accept block arguments', () => {
   expect(run('class A;def [];yield;end;end;p A.new[&proc{42}]')).toMatchObject({ stdout: '42\n' });
 });
 
+test('implicit output conversions invoke private methods', () => {
+  expect(run('class A;private;def to_s;"yes";end;def inspect;"shown";end;end;puts A.new;p A.new')).toMatchObject({
+    stdout: 'yes\nshown\n',
+  });
+});
+
+test('String inspection prints private-use Unicode characters', () => {
+  expect(run(String.raw`p "\u{e000}","\u{f0000}"`)).toMatchObject({ stdout: '"\uE000"\n"\u{F0000}"\n' });
+});
+
+test('container eql skips callbacks for identical members', () => {
+  expect(run('class X;def eql?(v);puts :called;false;end;end;x=X.new;p [x].eql?([x]),{a:x}.eql?({a:x})')).toMatchObject(
+    {
+      stdout: 'true\ntrue\n',
+    }
+  );
+  expect(run('x=Float::NAN;p [x].eql?([x])')).toMatchObject({ stdout: 'true\n' });
+});
+
 test('ArithmeticSequence last computes ratios before infinite-step results', () => {
   for (const source of [
     'Float::INFINITY.step(1.0, Float::INFINITY).last',

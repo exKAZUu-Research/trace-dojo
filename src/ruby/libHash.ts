@@ -190,7 +190,7 @@ def('Hash', 'eql?', 1, function* (self: RHash, [other]) {
   try {
     for (const entry of self.map.values()) {
       const match = yield* hashGet(other, entry.key);
-      if (!match || !(yield* rEql(entry.value, match.value))) return false;
+      if (!match || (entry.value !== match.value && !(yield* rEql(entry.value, match.value)))) return false;
     }
     return true;
   } finally {

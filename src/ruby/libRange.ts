@@ -429,8 +429,8 @@ def('Range', 'eql?', 1, function* (self: RRange, [other]) {
   return (
     other instanceof RRange &&
     self.exclusive === other.exclusive &&
-    (yield* rEql(self.begin, other.begin)) &&
-    (yield* rEql(self.end, other.end))
+    (self.begin === other.begin || (yield* rEql(self.begin, other.begin))) &&
+    (self.end === other.end || (yield* rEql(self.end, other.end)))
   );
 });
 def('Range', 'hash', 0, function* (self: RRange) {
