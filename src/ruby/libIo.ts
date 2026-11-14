@@ -4,17 +4,22 @@ import { def } from './define';
 import { argumentError, frozenError, typeError } from './errors';
 import { exportBinaryInspect, formatString } from './format';
 import { callMethod, type Gen, respondsTo } from './interp';
+import { firstStringCharacter } from './libString';
 import { NIL, RArray, type RHash, RObject, RString, RSymbol, type Value, type Visibility } from './objects';
 import { writePretty } from './prettyPrint';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
-import { arr, classOf, realClassOf, str, stringBytes, stringCharacters, stringFromBytes, truthy } from './values';
+import { arr, classOf, realClassOf, str, stringBytes, stringFromBytes, truthy } from './values';
 
 const PRIVATE = { visibility: 'private' as Visibility };
 
 /** Writes each puts value as it is visited, bounding recursive output. */
 function* writePuts(target: Value, args: Value[]): Gen<void> {
+  yield* emitPuts(args, (part) => write(target, part));
+}
+
+function* emitPuts(args: Value[], emit: (part: string | RString) => Gen<void>): Gen<void> {
   if (args.length === 0) {
-    yield* write(target, '\n');
+    yield* emit('\n');
     return;
   }
   const visit = function* (value: Value, seen: Set<RArray>): Gen<void> {
@@ -31,8 +36,8 @@ function* writePuts(target: Value, args: Value[]): Gen<void> {
     }
     if (array) {
       if (seen.has(array)) {
-        yield* write(target, '[...]');
-        yield* write(target, '\n');
+        yield* emit('[...]');
+        yield* emit('\n');
         return;
       }
       return yield* whileHeld(array, function* () {
@@ -46,8 +51,8 @@ function* writePuts(target: Value, args: Value[]): Gen<void> {
     }
     const line = value instanceof RString ? value : yield* toSValue(value);
     const needsNewline = !line.s.endsWith('\n');
-    if (line.s.length > 0) yield* write(target, line);
-    if (needsNewline) yield* write(target, '\n');
+    if (line.s.length > 0) yield* emit(line);
+    if (needsNewline) yield* emit('\n');
   };
   for (const arg of args) yield* visit(arg, new Set());
 }
@@ -183,11 +188,29 @@ def(
   [0, -1],
   function* (_self, args, _block, keywords) {
     yield* validateWarnKeywords(keywords, args.length > 0);
-    if (args.length > 0) yield* writePuts(rt().globals.get('$stderr') ?? NIL, args);
+    if (args.length > 0 && warnCategoryEnabled(keywords)) {
+      const target = rt().globals.get('$stderr') ?? NIL;
+      const parts: string[] = [];
+      yield* emitPuts(args, function* (part) {
+        parts.push(part instanceof RString ? part.s : part);
+      });
+      yield* write(target, parts.join(''));
+    }
     return NIL;
   },
   { ...PRIVATE, keywords: true }
 );
+
+function warnCategoryEnabled(keywords: RHash | undefined): boolean {
+  if (!keywords) return true;
+  for (const entry of keywords.map.values())
+    if (entry.key instanceof RSymbol && entry.key.name === 'category') {
+      if (entry.value === NIL) return true;
+      const category = entry.value instanceof RSymbol ? entry.value.name : (entry.value as RString).s;
+      return category === 'experimental';
+    }
+  return true;
+}
 
 // code-gauge-allow functionCognitiveComplexity 23 -- Warn validates names, categories, then bounded levels, skipping levels for empty calls.
 function* validateWarnKeywords(keywords: RHash | undefined, hasMessages: boolean): Gen<void> {
@@ -220,7 +243,7 @@ function validateWarnCategory(value: Value): void {
 }
 
 function* charOf(value: Value): Gen<RString> {
-  if (value instanceof RString) return stringCharacters(value)[0] ?? str('');
+  if (value instanceof RString) return firstStringCharacter(value) ?? str('');
   return stringFromBytes(Uint8Array.of(Number((yield* toInt(value)) & 0xffn)), true);
 }
 

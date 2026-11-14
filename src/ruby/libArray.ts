@@ -9,7 +9,6 @@ import {
   searchNumericSign,
   toIndex,
   toIndexExact,
-  toInt,
   toStrValue,
   toSValue,
 } from './conversions';
@@ -1219,7 +1218,7 @@ function* arrayExtreme(self: RArray, wantMax: boolean): Gen {
 
 def('Array', 'cycle', [0, 1], function* (self: RArray, args, block) {
   if (!block) return makeEnumerator(self, 'cycle', args);
-  const times = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : undefined;
+  const times = args.length > 0 && args[0] !== NIL ? (yield* toIndexExact(args[0])).integer : undefined;
   if (times !== undefined && times <= 0n) return NIL;
   for (let round = 0n; times === undefined || round < times; round++) {
     if (self.items.length === 0) return NIL;

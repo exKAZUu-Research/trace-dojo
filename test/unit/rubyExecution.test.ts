@@ -2379,6 +2379,40 @@ test('String searches check pattern encodings and between uses comparison method
   });
 });
 
+test('cycle rejects counts outside Ruby native bounds', () => {
+  expect(
+    run(
+      'begin;[1].cycle(10**30){break};rescue=>e;p e.class;end;begin;p [1].cycle(10**30).size;rescue=>e;p e.class;end;p [].cycle(10**30).size'
+    )
+  ).toMatchObject({ stdout: 'RangeError\nRangeError\n0\n' });
+});
+
+test('Set operations raise ArgumentError for non-enumerable operands', () => {
+  expect(
+    run(
+      's=Set[];begin;s.merge(3);rescue=>e;p e.class;end;begin;s.subtract(3);rescue=>e;p e.class;end;begin;s.replace(3);rescue=>e;p e.class;end;begin;s.intersection(3);rescue=>e;p e.class;end;begin;s.disjoint?(3);rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({ stdout: 'ArgumentError\n'.repeat(5) });
+});
+
+test('putc reads only the first character of a long String', () => {
+  expect(run('s="x"*100000;10.times{putc s}')).toMatchObject({ stdout: 'xxxxxxxxxx' });
+});
+
+test('warn suppresses disabled categories and writes each warning once', () => {
+  expect(
+    run(
+      'class W;def write(x);$v<<x;end;end;$v=[];$stderr=W.new;warn "a",category: :deprecated;warn "b",category: :experimental;warn "c","d";$stderr=STDERR;p $v'
+    )
+  ).toMatchObject({ stdout: '["b\\n", "c\\nd\\n"]\n' });
+});
+
+test('Range cover excludes empty Range arguments', () => {
+  expect(run('p (1..3).cover?(2...2),(1..3).cover?(3..2),(1..3).cover?(2..2)')).toMatchObject({
+    stdout: 'false\nfalse\ntrue\n',
+  });
+});
+
 test('recursive Sets inspect with a cycle marker', () => {
   expect(run('s=Set[];s.add(s);p s')).toMatchObject({ stdout: 'Set[Set[...]]\n' });
   expect(run('a=Set[];b=Set[a];a.add(b);p a')).toMatchObject({ stdout: 'Set[Set[Set[...]]]\n' });

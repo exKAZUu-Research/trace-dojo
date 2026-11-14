@@ -692,7 +692,7 @@ function currentStringBytes(self: RString, cursor: StringByteCursor): Uint8Array
   }
   return cursor.bytes;
 }
-function firstStringCharacter(self: RString): RString | undefined {
+export function firstStringCharacter(self: RString): RString | undefined {
   if (self.s.length === 0) return undefined;
   if (self.binary) return stringFromBytes(Uint8Array.of(self.s.codePointAt(0) as number), true);
   if (!self.rawBytes) return str(String.fromCodePoint(self.s.codePointAt(0) as number));

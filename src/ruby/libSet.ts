@@ -77,7 +77,7 @@ function* eachOther(value: Value, visit: (item: Value) => Gen<void>): Gen<void> 
     });
     return;
   }
-  if (!respondsTo(value, 'each')) throw typeError('value must be enumerable');
+  if (!respondsTo(value, 'each')) throw argumentError('value must be enumerable');
   yield* iterate(value, visit);
 }
 
@@ -230,7 +230,7 @@ def('Set', '^', 1, function* (self: RObject, [value]) {
 });
 
 function* setFromEnumerable(value: Value): Gen<RObject> {
-  if (!respondsTo(value, 'each')) throw typeError('value must be enumerable');
+  if (!respondsTo(value, 'each')) throw argumentError('value must be enumerable');
   const result = yield* newSet([]);
   return yield* whileHeld(result, function* () {
     yield* iterate(value, function* (item) {
@@ -288,7 +288,7 @@ function* someOther(value: Value, predicate: (item: Value) => Gen): Gen<boolean>
       members.iterating--;
     }
   }
-  if (!respondsTo(value, 'each')) throw typeError('value must be enumerable');
+  if (!respondsTo(value, 'each')) throw argumentError('value must be enumerable');
   let found = false;
   yield* iterate(value, function* (item) {
     if (truthy(yield* predicate(item))) {
@@ -340,7 +340,7 @@ def('Set', 'replace', 1, function* (self: RObject, [value]) {
   yield* modify(self);
   if (membersOf(self).iterating > 0) throw runtimeError('cannot replace set during iteration');
   if (value === self) return self;
-  if (!respondsTo(value, 'each')) throw typeError('value must be enumerable');
+  if (!respondsTo(value, 'each')) throw argumentError('value must be enumerable');
   membersOf(self).map.clear();
   yield* eachOther(value, function* (item) {
     yield* self.cls === rt().c.Set ? hashSet(membersOf(self), item, true) : callMethod(self, 'add', [item]);
@@ -411,9 +411,11 @@ def('Set', 'classify', 0, function* (self: RObject, _args, block) {
   const groups = newHash();
   return yield* whileHeld(groups, function* () {
     yield* eachEntry(membersOf(self), function* (entry) {
-      const key = yield* callBlock(block, [entry.key]);
-      const group = yield* hashGetOrInsert(groups, key, () => callMethod(self.cls, 'new', []));
-      yield* callMethod(group.value, 'add', [entry.key]);
+      yield* whileHeld(entry.key, function* () {
+        const key = yield* callBlock(block, [entry.key]);
+        const group = yield* hashGetOrInsert(groups, key, () => callMethod(self.cls, 'new', []));
+        yield* callMethod(group.value, 'add', [entry.key]);
+      });
     });
     return groups;
   });

@@ -8,7 +8,6 @@ import {
   spaceship,
   toIndex,
   toIndexExact,
-  toInt,
   toStrValue,
 } from './conversions';
 import { def } from './define';
@@ -1186,7 +1185,7 @@ export function* zipCollections(self: Value, others: Value[], block: RProc | und
 }
 def('Enumerable', 'cycle', [0, 1], function* (self, args, block) {
   if (!block) return makeEnumerator(self, 'cycle', args);
-  const times = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : undefined;
+  const times = args.length > 0 && args[0] !== NIL ? (yield* toIndexExact(args[0])).integer : undefined;
   if (times !== undefined && times <= 0n) return NIL;
   const items: Value[] = [];
   const held = rt().heldArrays;

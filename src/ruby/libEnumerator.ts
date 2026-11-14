@@ -118,7 +118,7 @@ function* enumeratorSize(recv: Value, method: string, args: Value[], keywords?: 
   }
   if (method === 'cycle' && typeof base === 'bigint') {
     if (base === 0n) return 0n;
-    const count = args[0] === undefined || args[0] === NIL ? undefined : yield* toInt(args[0]);
+    const count = args[0] === undefined || args[0] === NIL ? undefined : (yield* toIndexExact(args[0])).integer;
     if (count !== undefined && count <= 0n) return 0n;
     return count === undefined ? Number.POSITIVE_INFINITY : base * count;
   }

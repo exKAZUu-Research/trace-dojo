@@ -274,6 +274,10 @@ def('Range', '===', 1, function* (self: RRange, [value]) {
 });
 def('Range', 'cover?', 1, function* (self: RRange, [value]) {
   if (value instanceof RRange) {
+    if (value.begin !== NIL && value.end !== NIL) {
+      const innerOrder = yield* spaceship(value.begin, value.end);
+      if (innerOrder !== undefined && (innerOrder > 0 || (innerOrder === 0 && value.exclusive))) return false;
+    }
     const coversBegin = value.begin === NIL ? self.begin === NIL : yield* rangeCovers(self, value.begin);
     if (!coversBegin) return false;
     if (value.end === NIL) return self.end === NIL;
