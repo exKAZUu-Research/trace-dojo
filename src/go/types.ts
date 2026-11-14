@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 460 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
+// code-gauge-allow-file fileNcss 474 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
 import type { Span } from './ast';
 import type { CalleeSummary } from './entities';
 import { utf8Decode } from './literals';
@@ -268,15 +268,23 @@ export function underlying(type: Type): Type {
 }
 
 /**
- * The single underlying type of a type parameter's type set, which the operations on its values follow (the core type
- * of the specification), or the underlying type of any other type.
+ * A type set's common underlying type, including the most restrictive compatible channel direction, or an ordinary type's underlying type.
  */
 export function coreType(type: Type): Type | undefined {
   if (type.kind !== 'typeParam') return underlying(type);
   const terms = type.constraint.typeSet?.terms;
   if (!terms || terms.length === 0) return;
   const first = underlying(terms[0].type);
-  return terms.every((term) => identical(underlying(term.type), first)) ? first : undefined;
+  const types = terms.map((term) => underlying(term.type));
+  if (types.every((type) => identical(type, first))) return first;
+  if (
+    first.kind !== 'chan' ||
+    !types.every((type): type is ChanType => type.kind === 'chan' && identical(type.element, first.element))
+  )
+    return undefined;
+  const directions = new Set(types.map((type) => type.dir));
+  if (directions.has('send') && directions.has('receive')) return undefined;
+  return { ...first, dir: directions.has('send') ? 'send' : 'receive' };
 }
 
 export function isBasic(type: Type, ...kinds: BasicKind[]): boolean {
@@ -314,6 +322,15 @@ function allTerms(type: Type, predicate: (basicKind: BasicKind) => boolean): boo
 }
 
 export const isInteger = (type: Type): boolean => allTerms(type, (kind) => INTEGER_KINDS.has(kind));
+export function isByteString(type: Type): boolean {
+  if (type.kind === 'typeParam') {
+    const terms = type.constraint.typeSet?.terms;
+    return terms !== undefined && terms.length > 0 && terms.every((term) => isByteString(term.type));
+  }
+  const under = underlying(type);
+  return isString(type) || (under.kind === 'slice' && identical(under.element, BASIC.uint8));
+}
+
 export const isUnsigned = (type: Type): boolean => allTerms(type, (kind) => UNSIGNED_KINDS.has(kind));
 export const isFloat = (type: Type): boolean => allTerms(type, (kind) => FLOAT_KINDS.has(kind));
 export const isComplex = (type: Type): boolean => allTerms(type, (kind) => COMPLEX_KINDS.has(kind));

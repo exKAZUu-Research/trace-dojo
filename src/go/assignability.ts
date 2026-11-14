@@ -13,6 +13,7 @@ import {
   missingMethod,
   type Type,
   typeIdentityKey,
+  type TypeParamType,
   underlying,
 } from './types';
 import { Complex, type Value } from './values';
@@ -123,15 +124,13 @@ export type AssignFailure = { kind: 'mismatch' } | { kind: 'missingMethod'; miss
  * Whether a value of a typed type is assignable to another type, as the specification defines. Untyped constants
  * and nil are handled by the caller.
  */
-// code-gauge-allow functionCognitiveComplexity 23 -- Applies Go assignment rules in their precedence order with one diagnostic result.
+// code-gauge-allow functionCognitiveComplexity 26 -- Applies Go assignment rules in their precedence order with one diagnostic result.
 export function assignFailure(from: Type, to: Type): AssignFailure | undefined {
   if (identical(from, to)) return undefined;
   const fromUnder = underlying(from);
   const toUnder = underlying(to);
   if (from.kind === 'basic' && from.basic === 'untypedNil') {
-    return ['pointer', 'slice', 'map', 'chan', 'func', 'interface'].includes(toUnder.kind) && to.kind !== 'typeParam'
-      ? undefined
-      : { kind: 'mismatch' };
+    return nilable(to) ? undefined : { kind: 'mismatch' };
   }
   if (from.kind === 'basic' && from.basic === 'untypedBool' && isBasic(to, 'bool') && to.kind !== 'typeParam')
     return undefined;
@@ -162,7 +161,19 @@ export function assignFailure(from: Type, to: Type): AssignFailure | undefined {
   ) {
     return undefined;
   }
+  if (!fromNamed && to.kind === 'typeParam' && everyTerm(to, (term) => !assignFailure(from, term))) return undefined;
+  if (from.kind === 'typeParam' && !toNamed && everyTerm(from, (term) => !assignFailure(term, to))) return undefined;
   return { kind: 'mismatch' };
+}
+
+function nilable(type: Type): boolean {
+  if (type.kind === 'typeParam') return everyTerm(type, nilable);
+  return ['pointer', 'slice', 'map', 'chan', 'func', 'interface'].includes(underlying(type).kind);
+}
+
+function everyTerm(type: TypeParamType, predicate: (term: Type) => boolean): boolean {
+  const terms = type.constraint.typeSet?.terms;
+  return terms !== undefined && terms.length > 0 && terms.every((term) => predicate(term.type));
 }
 
 /** Whether an explicit conversion `T(x)` from one non-constant type to another is allowed. */

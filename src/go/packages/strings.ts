@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 499 -- Groups related string operations with their shared UTF-8 byte and rune helpers.
+// code-gauge-allow-file fileNcss 500 -- Groups related string operations with their shared UTF-8 byte and rune helpers.
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { LIMITS } from '../../interpreter/limits';
 import { roundUpToSizeClass } from '../conversions';
@@ -37,17 +37,17 @@ import { isSpace, mapRunes, simpleFold, toLower, toTitle, toUpper } from './unic
 
 const STRINGS = sliceOf(STRING);
 function splitSequence(text: string, separator: string, after: boolean): GoFunc {
+  let start = 0;
   return iteratorOf(function* () {
     if (separator === '') {
-      for (let at = 0; at < text.length;) {
-        const { size } = decodeRune(text, at);
+      while (start < text.length) {
+        const { size } = decodeRune(text, start);
         spendFor(size);
-        yield [text.slice(at, at + size)];
-        at += size;
+        yield [text.slice(start, start + size)];
+        start += size;
       }
       return;
     }
-    let start = 0;
     for (;;) {
       const index = text.indexOf(separator, start);
       if (index === -1) {
@@ -81,14 +81,15 @@ function fieldSequence(s: string, isSeparator: (rune: number) => boolean, captur
 
 /** `strings.Lines`: the lines of a text, each with its newline, the last one without when the text lacks one. */
 function lines(text: string): GoFunc {
+  let start = 0;
   return iteratorOf(function* () {
-    let start = 0;
     while (start < text.length) {
       const index = text.indexOf('\n', start);
       const end = index === -1 ? text.length : index + 1;
       spendFor(end - start);
-      yield [text.slice(start, end)];
+      const line = text.slice(start, end);
       start = end;
+      yield [line];
     }
   });
 }

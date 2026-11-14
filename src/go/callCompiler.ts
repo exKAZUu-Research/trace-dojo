@@ -68,6 +68,7 @@ import {
   type FuncType,
   identical,
   isBasic,
+  isByteString,
   isComplex,
   isFloat,
   isInteger,
@@ -1224,7 +1225,7 @@ export abstract class CallCompiler extends CompositeCompiler {
     }
     const added = this.value(expression.args[1]);
     if (this.isInvalid(added)) return added;
-    const fromString = isString(added.type) && isBasic(element, 'uint8');
+    const fromString = isByteString(added.type) && identical(element, BASIC.uint8);
     const source = fromString ? this.defaulted(added).eval : this.assign(added, { kind: 'slice', element }, '引数');
     const read = slice.eval;
     const zero = this.zeroOf(element);
@@ -1478,10 +1479,11 @@ export abstract class CallCompiler extends CompositeCompiler {
     if (this.isInvalid(destination) || this.isInvalid(source)) return this.invalid(expression);
     const target = coreType(destination.type);
     const from = coreType(source.type);
-    const stringSource = isString(source.type) && target?.kind === 'slice' && isBasic(target.element, 'uint8');
+    const byteStringSource =
+      isByteString(source.type) && target?.kind === 'slice' && identical(target.element, BASIC.uint8);
     if (
       target?.kind !== 'slice' ||
-      (!stringSource && (from?.kind !== 'slice' || !identical(target.element, from.element)))
+      (!byteStringSource && (from?.kind !== 'slice' || !identical(target.element, from.element)))
     ) {
       this.error(expression, 'copy の引数には、要素の型が同じ2つのスライスを書いてください。');
       return this.invalid(expression);
@@ -1496,10 +1498,12 @@ export abstract class CallCompiler extends CompositeCompiler {
       eval: (frame) => {
         const to = readTarget(frame) as Slice | undefined;
         const value = readSource(frame);
-        const items = stringSource
-          ? Array.from(value as string, (char) => BigInt(char.charCodeAt(0)) as Value)
-          : ((value as Slice | undefined)?.values().map(copyValue) ?? []);
-        const count = Math.min(to?.length ?? 0, items.length);
+        const input = value as Slice | undefined;
+        const length = typeof value === 'string' ? value.length : (input?.length ?? 0);
+        const count = Math.min(to?.length ?? 0, length);
+        const items = Array.from({ length: count }, (_, index) =>
+          typeof value === 'string' ? BigInt(value.charCodeAt(index)) : copyValue((input as Slice).get(index))
+        );
         for (let index = 0; index < count; index++) (to as Slice).set(index, items[index]);
         frame.runtime.spend(Math.floor(count / 16));
         return BigInt(count);

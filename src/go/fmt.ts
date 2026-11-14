@@ -640,6 +640,7 @@ export class Printer {
     this.buffer += minus ? text + padding : padding + text;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 28 -- Transcribes Go formatting cases with their shared printer flags and token buffer.
   private fmtInteger(
     value: bigint,
     signed: boolean,

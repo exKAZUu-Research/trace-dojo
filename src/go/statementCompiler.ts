@@ -1328,7 +1328,7 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss 59 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss 60 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private switchStatement(statement: Extract<Statement, { kind: 'switch' }>): Exec {
     const label = this.takeLabel();
     const init = statement.init ? this.simpleStatement(statement.init) : undefined;
@@ -1342,25 +1342,28 @@ export abstract class StatementCompiler extends CallCompiler {
     if (defaults.length > 1) this.error(defaults[1], 'switch 文に default が2つあります。');
     const seenConstants = new Map<string, Span>();
     const fn = this.fn as FunctionContext;
-    const cases = statement.cases.map((switchCase, index) => {
-      const tests = (switchCase.values ?? []).map((value) =>
-        this.part(() => this.caseTest(value, tag, tagType, seenConstants))
-      );
-      const last = unlabel(switchCase.body.at(-1));
-      const fallsThrough = last?.kind === 'fallthrough';
-      if (fallsThrough && index === statement.cases.length - 1) {
-        this.error(last, '最後の case では fallthrough を使えません。');
-      }
-      if (fallsThrough && last) this.allowedFallthrough.add(last);
-      fn.breakDepth++;
-      let body: Exec;
-      try {
-        body = this.breakable(label, 'switch', () => this.scoped(() => this.statements(switchCase.body)));
-      } finally {
-        fn.breakDepth--;
-      }
-      return { tests, body, fallsThrough, isDefault: !switchCase.values };
-    });
+    const cases = joining(fn, false, (branch) =>
+      statement.cases.map((switchCase, index) => {
+        branch(unlabel(statement.cases[index - 1]?.body.at(-1))?.kind === 'fallthrough');
+        const tests = (switchCase.values ?? []).map((value) =>
+          this.part(() => this.caseTest(value, tag, tagType, seenConstants))
+        );
+        const last = unlabel(switchCase.body.at(-1));
+        const fallsThrough = last?.kind === 'fallthrough';
+        if (fallsThrough && index === statement.cases.length - 1) {
+          this.error(last, '最後の case では fallthrough を使えません。');
+        }
+        if (fallsThrough && last) this.allowedFallthrough.add(last);
+        fn.breakDepth++;
+        let body: Exec;
+        try {
+          body = this.breakable(label, 'switch', () => this.scoped(() => this.statements(switchCase.body)));
+        } finally {
+          fn.breakDepth--;
+        }
+        return { tests, body, fallsThrough, isDefault: !switchCase.values };
+      })
+    );
     const readTag: Part = {
       value:
         tag && !this.isInvalid(tag)
@@ -1494,6 +1497,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- Type switches with their bound variable per clause.
+  // code-gauge-allow functionNcss 32 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private typeSwitchStatement(statement: Extract<Statement, { kind: 'typeSwitch' }>): Exec {
     const label = this.takeLabel();
     const init = statement.init ? this.simpleStatement(statement.init) : undefined;
@@ -1510,8 +1514,13 @@ export abstract class StatementCompiler extends CallCompiler {
     if (defaults.length > 1) this.error(defaults[1], 'switch 文に default が2つあります。');
     const bindings: VarEntity[] = [];
     const seenTypes = new Set<string>();
-    const cases = this.breakable(label, 'switch', () =>
-      statement.cases.map((typeCase) => this.typeSwitchCase(statement, typeCase, operand.type, bindings, seenTypes))
+    const cases = joining(this.fn, false, (branch) =>
+      this.breakable(label, 'switch', () =>
+        statement.cases.map((typeCase) => {
+          branch();
+          return this.typeSwitchCase(statement, typeCase, operand.type, bindings, seenTypes);
+        })
+      )
     );
     if (statement.binding && bindings.length > 0 && bindings.every((binding) => !binding.used)) {
       this.error(statement.binding, `宣言した変数 ${statement.binding.name} を使っていません。`);
@@ -2015,7 +2024,7 @@ export abstract class StatementCompiler extends CallCompiler {
    * `select`: evaluates every case's channel and value once in order, waits for a case that can proceed, then makes
    * that case's receive assignment and runs its statements.
    */
-  // code-gauge-allow functionNcss 59 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss 60 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private selectStatement(statement: Extract<Statement, { kind: 'select' }>): Exec {
     const label = this.takeLabel();
     const defaults = statement.cases.filter((selectCase) => !selectCase.comm);
@@ -2050,14 +2059,19 @@ export abstract class StatementCompiler extends CallCompiler {
         return { kind: 'receive', channel: received as Channel | undefined };
       };
     });
-    const bodies = statement.cases.map((selectCase) => {
-      fn.breakDepth++;
-      try {
-        return this.breakable(label, 'select', () => this.scoped(() => this.selectCaseBody(selectCase, receiveTypes)));
-      } finally {
-        fn.breakDepth--;
-      }
-    });
+    const bodies = joining(fn, false, (branch) =>
+      statement.cases.map((selectCase) => {
+        branch();
+        fn.breakDepth++;
+        try {
+          return this.breakable(label, 'select', () =>
+            this.scoped(() => this.selectCaseBody(selectCase, receiveTypes))
+          );
+        } finally {
+          fn.breakDepth--;
+        }
+      })
+    );
     const defaultIndex = statement.cases.findIndex((selectCase) => !selectCase.comm);
     const caseIndexes = ops.flatMap((op, index) => (op ? [index] : []));
     const evaluators = caseIndexes.map((index) => ops[index] as (frame: Frame) => Suspending<SelectOp>);

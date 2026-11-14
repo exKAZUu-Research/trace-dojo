@@ -1,7 +1,6 @@
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import { rationalToFloat } from '../constants';
 import type { Entity } from '../entities';
-import { newError } from '../errorValues';
 import { formatFloat } from '../floatFormat';
 import { type BoundCall, dynamicMethod } from '../methods';
 import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
@@ -61,8 +60,11 @@ function text(value: bigint, base: number): string {
 
 /** Int.SetString: digits in the base, or with base 0 a prefix that chooses it, with `_` between digits. */
 // code-gauge-allow functionCognitiveComplexity 25 -- Keeps the arithmetic algorithm and its operand-sized resource accounting together.
-function parseInt(source: string, base: number): bigint | undefined {
-  if (base !== 0 && (base < 2 || base > 62)) throw new GoPanic(new Iface(BASIC.string, `invalid number base ${base}`));
+// code-gauge-allow functionNcss 31 -- Keeps the arithmetic algorithm and its operand-sized resource accounting together.
+function parseInt(source: string, givenBase: number | bigint): bigint | undefined {
+  if (givenBase !== 0 && givenBase !== 0n && (givenBase < 2 || givenBase > 62))
+    throw new GoPanic(new Iface(BASIC.string, `invalid number base ${givenBase}`));
+  const base = Number(givenBase);
   let rest = source;
   let negative = false;
   if (rest.startsWith('+') || rest.startsWith('-')) {
@@ -94,7 +96,7 @@ function parseInt(source: string, base: number): bigint | undefined {
 
 /** Truncated division, as Go's Quo and Rem. */
 function quoRem(x: bigint, y: bigint): [bigint, bigint] {
-  if (y === 0n) throw new GoPanic(newError('division by zero'));
+  if (y === 0n) throw new GoPanic(new Iface(BASIC.string, 'division by zero'));
   return [x / y, x % y];
 }
 
@@ -209,7 +211,7 @@ const methods: [string, Type[], Type[], (z: Value, args: Value[]) => Value | Val
     [STRING, INT],
     [INT_POINTER, BOOL],
     (z, [s, base]) => {
-      const value = parseInt(s as string, Number(base as bigint));
+      const value = parseInt(s as string, base as bigint);
       if (value === undefined) return [undefined, false];
       return [setInt(z, value), true];
     },

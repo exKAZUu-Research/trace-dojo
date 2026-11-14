@@ -163,3 +163,20 @@ test('invalid recursive aliases, constraints, spread calls, ranges and receive d
   ])
     expect(executeProgram('go', 'package main;' + body)).toMatchObject({ kind: 'compileError' });
 });
+
+test('generic byte and channel operations retain element direction and assignment restrictions', () => {
+  for (const body of [
+    'type B byte;func main(){_=append([]B{},"x"...)}',
+    'type B byte;func main(){copy([]B{0},"x")}',
+    'func f[C ~chan int|~<-chan int](c C){c<-1};func main(){}',
+    'func f[C ~chan int|~<-chan int](c C){close(c)};func main(){}',
+    'func f[C ~chan int|~chan<- int](c C)int{return <-c};func main(){}',
+    'func f[C ~chan int|~<-chan string](c C)int{return <-c};func main(){}',
+    'func f[T ~[]int|~int]()T{return nil};func main(){}',
+    'func f[T any]()T{return nil};func main(){}',
+    'type N []int;func f[T ~[]int](x N)T{return x};func main(){}',
+    'type N []int;func f[T ~[]int](x T)N{return x};func main(){}',
+    'func f[T ~string|~[]byte](x T)[]byte{return x};func main(){}',
+  ])
+    expect(executeProgram('go', 'package main;' + body)).toMatchObject({ kind: 'compileError' });
+});

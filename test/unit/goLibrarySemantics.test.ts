@@ -738,3 +738,75 @@ test('omitzero handles structural complex zeros', () => {
     )
   ).toMatchObject({ kind: 'executed', stdout: '{} <nil>\n', uncaughtException: undefined });
 });
+
+test('byte string constraints support append and copy across string and slice sources', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";type Bytes interface{~string|~[]byte};func app[T Bytes](x T)[]byte{return append([]byte{1},x...)};func cp[T Bytes](x T)[]byte{out:=make([]byte,len(x));copy(out,x);return out};type Named []byte;func main(){fmt.Println(app("ab"),app([]byte("cd")),app(Named("ef")),string(cp("gh")),string(cp([]byte("ij"))))}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '[1 97 98] [1 99 100] [1 101 102] gh ij\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('single use string iterators retain their positions with reference update timing', () => {
+  expect(
+    executeProgram(
+      'go',
+      String.raw`package main;import("fmt";"strings";"iter");func first(seq iter.Seq[string]){seq(func(s string)bool{fmt.Printf("first:%q\n",s);return false})};func rest(seq iter.Seq[string]){seq(func(s string)bool{fmt.Printf("rest:%q\n",s);return true})};func main(){for _,seq:=range []iter.Seq[string]{strings.Lines("a\nb\nc\n"),strings.SplitSeq("a,b,c",","),strings.SplitAfterSeq("a,b,c",","),strings.SplitSeq("a日","")}{first(seq);rest(seq);rest(seq)}}`
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'first:"a\\n"\nrest:"b\\n"\nrest:"c\\n"\nfirst:"a"\nrest:"a"\nrest:"b"\nrest:"c"\nrest:"c"\nfirst:"a,"\nrest:"a,"\nrest:"b,"\nrest:"c"\nrest:"c"\nfirst:"a"\nrest:"a"\nrest:"日"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('switch and select branches merge floating product facts at joins', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";func a(n int,x,y float64)float64{defer func(){}();p:=0.0;switch n{case 1:p=x*y};return p+1};func b(n any,x,y float64)float64{defer func(){}();p:=0.0;switch n.(type){case string:p=x*y};return p+1};func c(n bool,x,y float64)float64{defer func(){}();p:=0.0;ch:=make(chan int,1);if n{ch<-1};select{case <-ch:p=x*y;default:};return p+1};func d(n int,x,y float64)float64{defer func(){}();p:=0.0;switch n{case 0:p=x*y;fallthrough;case 1:p+=1;case 2:p=5};return p+1};func main(){fmt.Println(a(0,1.1,2.2),a(1,1.1,2.2),b(0,1.1,2.2),b("s",1.1,2.2),c(false,1.1,2.2),c(true,1.1,2.2));fmt.Println(d(0,1.1,2.2),d(1,1.1,2.2),d(2,1.1,2.2),d(3,1.1,2.2))}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '1 3.4200000000000004 1 3.4200000000000004 1 3.4200000000000004\n4.42 2 6 1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('generic channels preserve compatible directions and element types', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";func recv[C ~chan int|~<-chan int](c C)int{return <-c};func send[C ~chan int|~chan<- int](c C,n int){c<-n};func finish[C ~chan int|~chan<- int](c C){close(c)};func create[C ~chan int|~<-chan int]()C{return make(C,1)};func main(){c:=make(chan int,2);var out chan<- int=c;send(c,7);send(out,8);var in <-chan int=c;fmt.Println(recv(c),recv(in));finish(out);fmt.Println(len(create[chan int]()),cap(create[<-chan int]()))}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '7 8\n0 1\n', uncaughtException: undefined });
+});
+
+test('generic assignments preserve unnamed types and all term nilability', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";func values[S ~[]E,E any](s S)[]E{return s};func into[S ~[]int](s []int)S{return s};func empty[S ~[]int]()S{return nil};func clearChan[C ~chan int](c C)C{return nil};func mixed[T ~[]int|~map[string]int]()T{return nil};type Named []int;func main(){fmt.Println(values(Named{1,2}),into[Named]([]int{3}),empty[Named]()==nil,clearChan(make(chan int))==nil,mixed[map[string]int]()==nil)}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '[1 2] [3] true true true\n', uncaughtException: undefined });
+});
+
+test('big integer division families panic with strings and preserve exact invalid bases', () => {
+  expect(
+    executeProgram(
+      'go',
+      String.raw`package main;import("fmt";"math/big");func main(){for _,f:=range []func(*big.Int,*big.Int,*big.Int)*big.Int{(*big.Int).Quo,(*big.Int).Rem,(*big.Int).Div,(*big.Int).Mod}{func(){defer func(){p:=recover();fmt.Printf("%T %v\n",p,p)}();f(new(big.Int),big.NewInt(1),big.NewInt(0))}()};func(){defer func(){fmt.Println(recover())}();new(big.Int).SetString("1",9223372036854775807)}()}`
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'string division by zero\nstring division by zero\nstring division by zero\nstring division by zero\ninvalid number base 9223372036854775807\n',
+    uncaughtException: undefined,
+  });
+});
