@@ -25,7 +25,7 @@ import {
   rubyError,
   typeError,
 } from './errors';
-import { hashGet, hashSet } from './hashes';
+import { hashGet, hashSet, hashSetStored } from './hashes';
 import {
   boxFloat,
   invalidateMethodCaches,
@@ -292,7 +292,8 @@ export function* ev(e: Expr, frame: Frame): Gen {
       const value = e.value ? yield* ev(e.value, frame) : NIL;
       if (!e.inBlock) throw new BreakSignal(value, undefined);
       const proc = frame.extra.proc as RProc;
-      if (!proc.isLambda && !proc.callSiteActive) throw rubyError(rt().c.LocalJumpError, 'break from proc-closure');
+      if (!proc.isLambda && !proc.callSiteState?.active)
+        throw rubyError(rt().c.LocalJumpError, 'break from proc-closure');
       throw new BreakSignal(value, proc.breakTag);
     }
     case 'next': {
@@ -448,7 +449,7 @@ function* evalHash(e: Extract<Expr, { k: 'hash' }>, frame: Frame): Gen<RHash> {
 function* fillHash(hash: RHash, e: Extract<Expr, { k: 'hash' }>, frame: Frame): Gen<void> {
   for (const item of e.items) {
     if ('splat' in item) {
-      yield* copyHashSplat(hash, yield* ev(item.splat, frame), frame);
+      yield* copyHashSplat(hash, yield* ev(item.splat, frame), frame, e.braces);
       continue;
     }
     const key = yield* ev(item.key, frame);
@@ -462,7 +463,7 @@ function* fillHash(hash: RHash, e: Extract<Expr, { k: 'hash' }>, frame: Frame): 
   }
 }
 
-function* copyHashSplat(hash: RHash, value: Value, frame: Frame): Gen<void> {
+function* copyHashSplat(hash: RHash, value: Value, frame: Frame, literal: boolean): Gen<void> {
   if (value === NIL) return;
   if (!(value instanceof RHash)) {
     const source = value;
@@ -477,7 +478,8 @@ function* copyHashSplat(hash: RHash, value: Value, frame: Frame): Gen<void> {
   frame.temporaries.push(value);
   value.iterating++;
   try {
-    for (const entry of value.map.values()) yield* hashSet(hash, entry.key, entry.value);
+    for (const [slot, entry] of value.map)
+      yield* literal ? hashSet(hash, entry.key, entry.value) : hashSetStored(hash, slot, entry);
   } finally {
     value.iterating--;
     frame.temporaries.length = sourceMark;
@@ -1361,14 +1363,14 @@ function* evalCall(e: Call, frame: Frame): Gen {
       if (!e.block)
         return yield* callMethod(recv, e.name, args, keywords, block, { fcall: e.fcall, vcall: e.vcall, used });
       const proc = block as RProc;
-      proc.callSiteActive = true;
+      if (proc.callSiteState) proc.callSiteState.active = true;
       try {
         return yield* callMethod(recv, e.name, args, keywords, proc, { fcall: e.fcall, vcall: e.vcall, used });
       } catch (error) {
         if (error instanceof BreakSignal && error.tag === proc.breakTag) return error.value;
         throw error;
       } finally {
-        proc.callSiteActive = false;
+        if (proc.callSiteState) proc.callSiteState.active = false;
       }
     } finally {
       if (block) block.literalAtCall = previousLiteralAtCall;
@@ -1596,14 +1598,14 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
     rt().currentRow = e.row;
     if (!e.block) return yield* invoke(superMethod, home.self, args, keywords, block, used);
     const proc = block as RProc;
-    proc.callSiteActive = true;
+    if (proc.callSiteState) proc.callSiteState.active = true;
     try {
       return yield* invoke(superMethod, home.self, args, keywords, proc, used);
     } catch (error) {
       if (error instanceof BreakSignal && error.tag === proc.breakTag) return error.value;
       throw error;
     } finally {
-      proc.callSiteActive = false;
+      if (proc.callSiteState) proc.callSiteState.active = false;
     }
   } finally {
     frame.temporaries.length = mark;
@@ -1676,10 +1678,10 @@ function* superKeywordRest(value: Value): Gen<RHash> {
 }
 
 function* addSuperKeywordRest(target: RHash, rest: RHash, named: Set<string> | undefined): Gen<void> {
-  for (const entry of rest.map.values()) {
+  for (const [slot, entry] of rest.map) {
     const key = entry.key;
     if (key instanceof RSymbol && named?.has(key.name)) continue;
-    yield* hashSet(target, key, entry.value);
+    yield* hashSetStored(target, slot, entry);
   }
 }
 
@@ -1687,8 +1689,8 @@ function* addSuperKeywordRest(target: RHash, rest: RHash, named: Set<string> | u
 
 declare module './objects' {
   interface RProc {
-    /** Whether the call that received this block literal is still running, so that `break` can leave it. */
-    callSiteActive?: boolean;
+    /** Shared by block copies so `break` uses the original call's lifetime. */
+    callSiteState?: { active: boolean };
     literalAtCall?: boolean;
   }
 }
@@ -1696,6 +1698,7 @@ declare module './objects' {
 export function makeBlock(def: BlockDef, frame: Frame): RProc {
   const proc = new RProc(rt().c.Proc, { kind: 'block', def }, frame.self, frame as never);
   proc.breakTag = {};
+  proc.callSiteState = { active: false };
   return proc;
 }
 

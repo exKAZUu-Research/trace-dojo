@@ -2066,6 +2066,64 @@ test('frozen standard streams reject writes and sync changes', () => {
   });
 });
 
+test('boxed Floats reject singleton classes within Ruby execution', () => {
+  expect(
+    run(
+      'begin;Float::MAX.singleton_class;rescue=>e;p e.class;end;begin;Float::NAN.singleton_class;rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({
+    stdout: 'TypeError\nTypeError\n',
+  });
+});
+
+test('copied block Procs share the original call lifetime', () => {
+  expect(run('def f(&b);b.dup.call;end;p f{break 7}')).toMatchObject({ stdout: '7\n' });
+  expect(run('def f(&b);$copy=b.dup;end;f{break 7};begin;$copy.call;rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'LocalJumpError\n',
+  });
+});
+
+test('Hash conversion tries Array overrides before the empty shortcut', () => {
+  expect(run('class Array;def to_hash;{a:1};end;end;p Hash([]),Hash([1])')).toMatchObject({
+    stdout: '{a: 1}\n{a: 1}\n',
+  });
+});
+
+test('keyword forwarding copies stored Hash keys without rehashing', () => {
+  const source =
+    'class K;def hash;puts :hash;0;end;end;class A;def f(**x);p x.size;end;end;class B<A;def f(**x);x=$h;super;end;end;$h={K.new=>1};puts :start;B.new.f';
+  expect(run(source)).toMatchObject({ stdout: 'hash\nstart\n1\n' });
+  expect(
+    run('class K;def hash;puts :hash;0;end;end;def f(**x);p x.size;end;h={K.new=>1};puts :start;f(**h)')
+  ).toMatchObject({
+    stdout: 'hash\nstart\n1\n',
+  });
+});
+
+test('attribute declarations retain earlier names after a later error', () => {
+  expect(run('class A;begin;attr_reader :x,1;rescue;end;end;p A.new.x')).toMatchObject({ stdout: 'nil\n' });
+});
+
+test('frozen exceptions preserve their message during initialization and copying', () => {
+  expect(
+    run(
+      'class E<StandardError;def reset;initialize("b");end;end;e=E.new("a").freeze;begin;e.reset;rescue=>x;p x.class;end;p e.message'
+    )
+  ).toMatchObject({
+    stdout: 'FrozenError\n"a"\n',
+  });
+  expect(run('e=RuntimeError.new("a").freeze;begin;e.exception("b");rescue=>x;p x.class;end')).toMatchObject({
+    stdout: 'FrozenError\n',
+  });
+});
+
+test('lambda curry counts keyword slots in explicit bounds', () => {
+  expect(run('f=->(x:){};begin;p f.curry(0).class;rescue=>e;p e.class;end;p f.curry(1).class')).toMatchObject({
+    stdout: 'ArgumentError\nProc\n',
+  });
+  expect(run('f=->(x:1){};p f.curry(0).class,f.curry(1).class')).toMatchObject({ stdout: 'Proc\nProc\n' });
+});
+
 test('Set reinitialization preserves existing members and frozen contents', () => {
   expect(
     run(

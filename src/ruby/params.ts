@@ -1,7 +1,7 @@
 import type { Params, ParamTarget } from './ast';
 import { inspect } from './conversions';
 import { argumentError, expectedArity, typeError } from './errors';
-import { hashSet } from './hashes';
+import { hashSetStored } from './hashes';
 import { callMethod, destructure, ev, type Gen, respondsTo } from './interp';
 import { NIL, RArray, type RHash, RSymbol, type Value } from './objects';
 import { type Frame, rootValues } from './runtime';
@@ -92,14 +92,14 @@ function* bindKeywords(params: Params, frame: Frame, keywords: RHash | undefined
   const given = new Map<string, Value>();
   const extra = newHash();
   if (keywords) {
-    for (const entry of keywords.map.values()) {
+    for (const [slot, entry] of keywords.map) {
       if (
         entry.key instanceof RSymbol &&
         params.keywords.some((keyword) => keyword.name === (entry.key as RSymbol).name)
       ) {
         given.set(entry.key.name, entry.value);
       } else {
-        yield* hashSet(extra, entry.key, entry.value);
+        yield* hashSetStored(extra, slot, entry);
       }
     }
   }

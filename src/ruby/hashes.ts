@@ -109,6 +109,14 @@ export function stringKeyEquals(left: RString, other: Value): boolean {
 function* findEntry(hash: RHash, key: Value): Gen<{ base: string; slot: string; entry: HashEntry | undefined }> {
   const keyHash = key instanceof RString ? stringKeyHash(key) : yield* toInt(yield* callMethod(key, 'hash', []));
   const base = `h${digest(String(keyHash))}`;
+  return yield* findEntryInBucket(hash, key, base);
+}
+
+function* findEntryInBucket(
+  hash: RHash,
+  key: Value,
+  base: string
+): Gen<{ base: string; slot: string; entry: HashEntry | undefined }> {
   if (hash.bucketVersion !== hash.map.version) rebuildBuckets(hash);
   for (const slot of hash.buckets.get(base) ?? []) {
     const entry = hash.map.get(slot);
@@ -125,6 +133,17 @@ function* findEntry(hash: RHash, key: Value): Gen<{ base: string; slot: string; 
     const slot = JSON.stringify([base, index]);
     if (!hash.map.has(slot)) return { base, slot, entry: undefined };
   }
+}
+
+export function* hashSetStored(hash: RHash, storedSlot: string, source: HashEntry): Gen<boolean> {
+  const [base] = JSON.parse(storedSlot) as [string, number];
+  return yield* hashPut(
+    hash,
+    source.key,
+    source.value,
+    () => findEntryInBucket(hash, source.key, base),
+    () => source.key
+  );
 }
 
 function rebuildBuckets(hash: RHash): void {
@@ -155,11 +174,27 @@ export function* hashDefault(hash: RHash, key: Value): Gen {
 }
 
 export function* hashSet(hash: RHash, key: Value, value: Value): Gen<boolean> {
+  return yield* hashPut(
+    hash,
+    key,
+    value,
+    () => findEntry(hash, key),
+    () => (key instanceof RString && key.cls === rt().c.String && !key.frozen ? frozenCopy(key) : key)
+  );
+}
+
+function* hashPut(
+  hash: RHash,
+  key: Value,
+  value: Value,
+  locate: () => Gen<{ base: string; slot: string; entry: HashEntry | undefined }>,
+  storedKey: () => Value
+): Gen<boolean> {
   const held = rt().held.length;
   rt().held.push(hash, key, value);
   try {
     if (hash.frozen) throw frozenError(hash, yield* inspect(hash));
-    const { base, slot, entry } = yield* findEntry(hash, key);
+    const { base, slot, entry } = yield* locate();
     if (hash.frozen) throw frozenError(hash, yield* inspect(hash));
     if (entry) {
       entry.value = value;
@@ -170,8 +205,7 @@ export function* hashSet(hash: RHash, key: Value, value: Value): Gen<boolean> {
     if (hash.iterating > 0) throw runtimeError(hash.iterationError ?? "can't add a new key into hash during iteration");
     rt().chargeSlots(1);
     rt().spend();
-    const stored = key instanceof RString && key.cls === rt().c.String && !key.frozen ? frozenCopy(key) : key;
-    hash.map.set(slot, { key: stored, value });
+    hash.map.set(slot, { key: storedKey(), value });
     const bucket = hash.buckets.get(base) ?? [];
     bucket.push(slot);
     hash.buckets.set(base, bucket);

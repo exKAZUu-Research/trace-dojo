@@ -109,7 +109,7 @@ function hashString(text: string): number {
 
 def('Kernel', 'class', 0, (self) => realClassOf(self));
 def('Kernel', 'singleton_class', 0, (self) => {
-  if (!(self instanceof RBasic)) throw typeError("can't define singleton");
+  if (!(self instanceof RBasic) || self instanceof RFloat) throw typeError("can't define singleton");
   return singletonClassOf(self);
 });
 def('Kernel', 'frozen?', 0, (self) => (self instanceof RBasic ? self.frozen : true));
@@ -212,6 +212,7 @@ function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
     proc.isLambda = self.isLambda;
     proc.captured = self.captured ? [...self.captured] : undefined;
     proc.breakTag = self.breakTag;
+    proc.callSiteState = self.callSiteState;
     copy = proc;
   } else if (self instanceof RRange) {
     copy = new RRange(self.cls, self.begin, self.end, self.exclusive);
@@ -337,7 +338,7 @@ def(
   (_self, _args, block) => {
     const proc = requireProcBlock(block);
     if (!proc.literalAtCall) throw argumentError('lambda requires a literal block');
-    if (proc.body.kind === 'block' && proc.callSiteActive !== undefined) proc.isLambda = true;
+    if (proc.body.kind === 'block' && proc.callSiteState !== undefined) proc.isLambda = true;
     return proc;
   },
   PRIVATE
@@ -556,12 +557,13 @@ def(
   1,
   function* (_self, [value]) {
     if (value instanceof RHash) return value;
-    if (value === NIL || (value instanceof RArray && value.items.length === 0)) return newHash();
+    if (value === NIL) return newHash();
     if (respondsTo(value, 'to_hash', true)) {
       const converted = yield* callMethod(value, 'to_hash', [], undefined, undefined, { fcall: true });
       if (converted instanceof RHash) return converted;
       if (converted !== NIL) throw collectionConversionError(value, converted, 'Hash', 'to_hash');
     }
+    if (value instanceof RArray && value.items.length === 0) return newHash();
     throw typeError(`can't convert ${realClassOf(value).name} into Hash`);
   },
   PRIVATE
@@ -769,14 +771,15 @@ function* symbolName(value: Value): Gen<string> {
   throw typeError(`${yield* inspect(value)} is not a symbol nor a string`);
 }
 
-function defineAttributes(self: RClass, names: string[], reader: boolean, writer: boolean): RArray {
+function* defineAttributes(self: RClass, names: Value[], reader: boolean, writer: boolean): Gen<RArray> {
   const frame = rt().frame;
   const visibility =
     (frame.kind === 'class' && frame.self === self) || frame.extra.definitionTarget === self
       ? frame.defaultVisibility
       : 'public';
   const defined: Value[] = [];
-  for (const name of names) {
+  for (const value of names) {
+    const name = yield* symbolName(value);
     if (!/^[A-Za-z_\u0080-￿][\w\u0080-￿]*$/u.test(name)) {
       throw nameError(`invalid attribute name '${name}'`, self, name);
     }
@@ -793,18 +796,18 @@ function defineAttributes(self: RClass, names: string[], reader: boolean, writer
 }
 
 def('Module', 'attr_reader', [0, -1], function* (self: RClass, args) {
-  return defineAttributes(self, yield* symbolNames(args), true, false);
+  return yield* defineAttributes(self, args, true, false);
 });
 def('Module', 'attr', [0, -1], function* (self: RClass, args) {
   const writer = args.length === 2 && (args[1] === true || args[1] === false) ? args[1] : false;
   const names = args.length === 2 && (args[1] === true || args[1] === false) ? args.slice(0, 1) : args;
-  return defineAttributes(self, yield* symbolNames(names), true, writer);
+  return yield* defineAttributes(self, names, true, writer);
 });
 def('Module', 'attr_writer', [0, -1], function* (self: RClass, args) {
-  return defineAttributes(self, yield* symbolNames(args), false, true);
+  return yield* defineAttributes(self, args, false, true);
 });
 def('Module', 'attr_accessor', [0, -1], function* (self: RClass, args) {
-  return defineAttributes(self, yield* symbolNames(args), true, true);
+  return yield* defineAttributes(self, args, true, true);
 });
 
 function* setVisibility(self: RClass, args: Value[], visibility: Visibility): Gen {
@@ -976,7 +979,8 @@ def(
   'Exception',
   'initialize',
   [0, 1],
-  (self: RObject, [message = NIL]) => {
+  function* (self: RObject, [message = NIL]) {
+    if (self.frozen) throw frozenError(self, yield* inspectException(self));
     (self.exception as NonNullable<RObject['exception']>).message = message;
     return NIL;
   },
@@ -988,6 +992,7 @@ sdef('Exception', 'exception', [0, -1], function* (self: RClass, args, block, ke
 def('Exception', 'exception', [0, 1], function* (self: RObject, args) {
   if (args.length === 0 || args[0] === self) return self;
   const copy = (yield* callMethod(self, 'clone', [])) as RObject;
+  if (copy.frozen) throw frozenError(copy, yield* inspectException(copy));
   (copy.exception as NonNullable<RObject['exception']>).message = args[0];
   return copy;
 });
@@ -1128,8 +1133,10 @@ function lambdaCurryBounds(proc: RProc): [number, number] {
   }
   const params = proc.body.def.params;
   if (!params) return [0, 0];
-  const required = params.required.length + params.post.length;
-  return [required, params.rest === undefined ? required + params.optional.length : -1];
+  const positional = params.required.length + params.post.length;
+  const hasKeywords = params.keywords.length > 0 || params.keywordRest !== undefined;
+  const required = positional + Number(params.keywords.some((keyword) => !keyword.value));
+  return [required, params.rest === undefined ? positional + params.optional.length + Number(hasKeywords) : -1];
 }
 sdef('Proc', 'new', 0, (_self, _args, block) => requireProcBlock(block));
 

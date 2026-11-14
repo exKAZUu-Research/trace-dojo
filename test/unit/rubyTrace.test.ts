@@ -114,6 +114,20 @@ test('implicit super roots converted keyword rests while copying', () => {
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
+test('Enumerable reductions root retained accumulator values', () => {
+  const injected = 'class E;include Enumerable;def each;yield Turtle.new;q=1;yield 2;end;end;x=E.new.inject{|a,b|a}';
+  expect(traceProgram('ruby', injected, injected).finalTurtles).toHaveLength(1);
+  const summed =
+    'class B;def initialize;@t=Turtle.new;end;def +(x);self;end;end;class E;include Enumerable;def each;yield 1;q=1;yield 2;end;end;x=E.new.sum(B.new)';
+  expect(traceProgram('ruby', summed, summed).finalTurtles).toHaveLength(1);
+});
+
+test('Enumerable reverse_each roots its collected snapshot during callbacks', () => {
+  const program =
+    'class E;include Enumerable;def each;yield Turtle.new;yield 2;end;end;t=nil;E.new.reverse_each{|v|q=1;t=v if v.is_a?(Turtle)}';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
 test('Array concat roots early conversion results', () => {
   const program =
     'class A;def to_ary;[Turtle.new];end;end;class B;def to_ary;q=1;[];end;end;a=[];a.concat(A.new,B.new)';

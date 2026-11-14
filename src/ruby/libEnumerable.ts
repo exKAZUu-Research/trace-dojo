@@ -264,8 +264,13 @@ def('Enumerable', 'each_entry', [0, -1], function* (self, args, block) {
 def('Enumerable', 'reverse_each', [0, -1], function* (self, args, block) {
   if (!block) return makeEnumerator(self, 'reverse_each', args);
   const items = yield* toArray(self, args);
-  for (let index = items.length - 1; index >= 0; index--) yield* callBlock(block, [items[index]], false);
-  return self;
+  rt().heldArrays.push(items);
+  try {
+    for (let index = items.length - 1; index >= 0; index--) yield* callBlock(block, [items[index]], false);
+    return self;
+  } finally {
+    rt().heldArrays.pop();
+  }
 });
 
 /** `inject`/`reduce`: folds with a block or with the method a symbol names, from an initial value or the first. */
@@ -282,17 +287,22 @@ export function* inject(self: Value, args: Value[], block: RProc | undefined): G
   } else if (args.length === 1) {
     accumulator = args[0];
   }
-  yield* iterate(self, function* (value) {
-    if (accumulator === undefined) {
-      accumulator = value;
-      return;
-    }
-    accumulator =
-      operator === undefined
-        ? yield* callBlock(block as RProc, [accumulator, value])
-        : yield* fastOperator(accumulator, operator, value);
-  });
-  return accumulator ?? NIL;
+  const mark = rt().held.length;
+  rt().held.push(accumulator ?? NIL);
+  try {
+    yield* iterate(self, function* (value) {
+      if (accumulator === undefined) accumulator = value;
+      else
+        accumulator =
+          operator === undefined
+            ? yield* callBlock(block as RProc, [accumulator, value])
+            : yield* fastOperator(accumulator, operator, value);
+      rt().held[mark] = accumulator;
+    });
+    return accumulator ?? NIL;
+  } finally {
+    rt().held.length = mark;
+  }
 }
 
 function* operatorName(value: Value): Gen<string> {
@@ -310,49 +320,58 @@ def('Enumerable', ['inject', 'reduce'], [0, -1], (self, args, block) => inject(s
 /** `sum`, adding Integers exactly and Floats with Kahan-Babuska compensation as Ruby does. */
 export function* sum(self: Value, args: Value[], block: RProc | undefined): Gen {
   let total: Value = args.length > 0 ? args[0] : 0n;
+  const mark = rt().held.length;
+  rt().held.push(total);
   const initial = isRubyFloat(total) ? Number(total) : undefined;
   let exact = typeof total === 'bigint' ? total : 0n;
   let floating: number | undefined;
   let compensation = 0;
   let sawValue = false;
   let generic = false;
-  yield* iterate(self, function* (value) {
-    const item = block ? yield* call(block, value) : value;
-    sawValue = true;
-    if (!generic && floating === undefined && (typeof total === 'bigint' || initial !== undefined)) {
-      if (typeof item === 'bigint') {
-        exact += item;
-        total = exact;
-        return;
-      }
-      if (isRubyFloat(item) || initial !== undefined) {
-        floating = initial === undefined ? Number(exact) : initial + Number(exact);
-      }
-    }
-    if (floating !== undefined) {
-      if (isRubyNumber(item)) {
-        const x = Number(item);
-        if (Number.isNaN(floating)) return;
-        if (Number.isNaN(x)) floating = x;
-        else if (!Number.isFinite(x))
-          floating = !Number.isFinite(floating) && Math.sign(x) !== Math.sign(floating) ? Number.NaN : x;
-        else if (Number.isFinite(floating)) {
-          const next = floating + x;
-          compensation += Math.abs(floating) >= Math.abs(x) ? floating - next + x : x - next + floating;
-          floating = next;
+  try {
+    yield* iterate(self, function* (value) {
+      const item = block ? yield* call(block, value) : value;
+      sawValue = true;
+      if (!generic && floating === undefined && (typeof total === 'bigint' || initial !== undefined)) {
+        if (typeof item === 'bigint') {
+          exact += item;
+          total = exact;
+          rt().held[mark] = total;
+          return;
         }
-        return;
+        if (isRubyFloat(item) || initial !== undefined) {
+          floating = initial === undefined ? Number(exact) : initial + Number(exact);
+        }
       }
-      total = floating;
-      floating = undefined;
-    }
-    generic = true;
-    total = yield* callMethod(total, '+', [item]);
-  });
-  if (!sawValue) return total;
-  if (floating !== undefined) return floating + compensation;
-  if (!generic && initial !== undefined && typeof total === 'bigint') return initial + Number(exact);
-  return total;
+      if (floating !== undefined) {
+        if (isRubyNumber(item)) {
+          const x = Number(item);
+          if (Number.isNaN(floating)) return;
+          if (Number.isNaN(x)) floating = x;
+          else if (!Number.isFinite(x))
+            floating = !Number.isFinite(floating) && Math.sign(x) !== Math.sign(floating) ? Number.NaN : x;
+          else if (Number.isFinite(floating)) {
+            const next = floating + x;
+            compensation += Math.abs(floating) >= Math.abs(x) ? floating - next + x : x - next + floating;
+            floating = next;
+          }
+          return;
+        }
+        total = floating;
+        rt().held[mark] = total;
+        floating = undefined;
+      }
+      generic = true;
+      total = yield* callMethod(total, '+', [item]);
+      rt().held[mark] = total;
+    });
+    if (!sawValue) return total;
+    if (floating !== undefined) return floating + compensation;
+    if (!generic && initial !== undefined && typeof total === 'bigint') return initial + Number(exact);
+    return total;
+  } finally {
+    rt().held.length = mark;
+  }
 }
 
 def('Enumerable', 'sum', [0, 1], (self, args, block) => sum(self, args, block));
