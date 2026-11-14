@@ -2500,6 +2500,22 @@ test('Set inspection charges new member text once', () => {
   expect(run('s=Set.new(1..10000);p s.inspect.size')).toMatchObject({ stdout: '58897\n' });
 });
 
+test('Array flatten charges each appended element once', () => {
+  expect(run('p Array.new(20000,1).flatten.size')).toMatchObject({ stdout: '20000\n' });
+});
+
+test('Array join enforces String storage as an execution limit', () => {
+  expect(run('begin;Array.new(2,"a"*600000).join;rescue=>e;p e.class;end;p :after')).toEqual({
+    kind: 'limitExceeded',
+    limit: 'storage',
+  });
+});
+
+test('Array join bounds nested container depth without host stack errors', () => {
+  expect(run('a="x";129.times{a=[a]};p a.join')).toMatchObject({ stdout: '"x"\n' });
+  expect(run('a="x";600.times{a=[a]};p a.join')).toEqual({ kind: 'limitExceeded', limit: 'output' });
+});
+
 test('Range cover dispatches the receiver endpoint comparison', () => {
   expect(
     run(

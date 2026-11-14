@@ -1,4 +1,5 @@
 // code-gauge-allow-file fileNcss 879 -- The libArray module keeps one concern's cases together.
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   combinedStringEncoding,
   compareValues,
@@ -356,7 +357,12 @@ def('Array', 'concat', [0, -1], function* (self: RArray, args) {
   const additions: Value[] = [];
   rt().heldArrays.push(additions);
   try {
-    for (const arg of args) for (const item of (yield* toAry(arg)).items) additions.push(item);
+    for (const arg of args) {
+      const items = (yield* toAry(arg)).items;
+      rt().chargeSlots(items.length);
+      rt().spend(Math.ceil(items.length / 64));
+      for (const item of items) additions.push(item);
+    }
     grow(self.items.length + additions.length, self);
     yield* modify(self);
     for (const item of additions) self.items.push(item);
@@ -506,8 +512,9 @@ function* flatten(source: RArray, depth: number, seen: Set<RArray>, expanded?: {
       const item = frame.source.items[frame.index++];
       const nested = frame.depth !== 0 ? yield* tryAry(item) : undefined;
       if (!nested) {
+        rt().chargeSlots(1);
+        rt().spend();
         result.push(item);
-        grow(result.length);
         continue;
       }
       if (expanded) expanded.value = true;
@@ -787,39 +794,87 @@ def('Array', 'intersect?', 1, function* (self: RArray, [other]) {
   }
 });
 
-/** `join`: elements' bytes with a separator, nested arrays joined recursively. */
-function* join(self: RArray, separator: RString, seen = new Set<RArray>()): Gen<RString> {
-  if (seen.has(self)) throw argumentError('recursive array join');
-  seen.add(self);
-  const chunks: Uint8Array[] = [];
-  let length = 0;
-  let binary = false;
-  let ascii = true;
+/** `join`: elements' bytes with a separator, nested arrays joined on an explicit stack. */
+function* join(self: RArray, separator: RString): Gen<RString> {
+  const stack: JoinFrame[] = [];
+  const seen = new Set<RArray>();
+  const held = rt().held.length;
   try {
-    yield* preflightJoinFirst(self);
-    for (let index = 0; index < self.items.length; index++) {
-      if (index > 0) append(separator);
-      append(yield* joinValue(self.items[index], separator, seen));
+    yield* enterJoinArray(self);
+    while (stack.length > 0) {
+      const frame = stack.at(-1) as JoinFrame;
+      if (frame.index >= frame.source.items.length) {
+        const joined = finishJoinFrame(frame);
+        stack.pop();
+        seen.delete(frame.source);
+        rt().held.pop();
+        if (stack.length === 0) return joined;
+        appendJoinPart(stack.at(-1) as JoinFrame, joined);
+        continue;
+      }
+      if (frame.index > 0) appendJoinPart(frame, separator);
+      const value = frame.source.items[frame.index++];
+      if (value instanceof RString) {
+        appendJoinPart(frame, value);
+        continue;
+      }
+      if (value instanceof RArray) {
+        yield* enterJoinArray(value);
+        continue;
+      }
+      if (respondsTo(value, 'to_str', true)) {
+        const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
+        if (converted instanceof RString) {
+          appendJoinPart(frame, converted);
+          continue;
+        }
+        if (converted !== NIL) throw joinStringConversionError(value, converted);
+      }
+      const nested = yield* tryAry(value);
+      if (nested) yield* enterJoinArray(nested);
+      else appendJoinPart(frame, yield* toSValue(value));
     }
+    throw new Error('Join stack emptied without a result');
   } finally {
-    seen.delete(self);
+    rt().held.length = held;
   }
-  const bytes = new Uint8Array(length);
+
+  function* enterJoinArray(source: RArray): Gen<void> {
+    if (seen.has(source)) throw argumentError('recursive array join');
+    if (stack.length >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
+    seen.add(source);
+    rt().held.push(source);
+    stack.push({ source, index: 0, chunks: [], length: 0, binary: false, ascii: true });
+    yield* preflightJoinFirst(source);
+  }
+}
+
+interface JoinFrame {
+  source: RArray;
+  index: number;
+  chunks: Uint8Array[];
+  length: number;
+  binary: boolean;
+  ascii: boolean;
+}
+
+function appendJoinPart(frame: JoinFrame, part: RString): void {
+  frame.binary = combinedStringEncoding(frame.binary, frame.ascii, part);
+  const bytes = stringBytes(part);
+  frame.length += bytes.length;
+  if (frame.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+  frame.chunks.push(bytes);
+  if (frame.ascii) frame.ascii = bytes.every((byte) => byte < 0x80);
+}
+
+function finishJoinFrame(frame: JoinFrame): RString {
+  const bytes = new Uint8Array(frame.length);
   let offset = 0;
-  for (const chunk of chunks) {
+  for (const chunk of frame.chunks) {
     bytes.set(chunk, offset);
     offset += chunk.length;
   }
-  return stringFromBytes(bytes, binary);
-
-  function append(part: RString): void {
-    binary = combinedStringEncoding(binary, ascii, part);
-    const bytes = stringBytes(part);
-    length += bytes.length;
-    if (length > 1_000_000) throw argumentError('string size too big');
-    chunks.push(bytes);
-    ascii &&= bytes.every((byte) => byte < 0x80);
-  }
+  return stringFromBytes(bytes, frame.binary);
 }
 
 function* preflightJoinFirst(self: RArray): Gen<void> {
@@ -837,22 +892,6 @@ def('Array', 'join', [0, 1], function* (self: RArray, args) {
   const separator = args.length > 0 && args[0] !== NIL ? yield* toStrValue(args[0]) : str('');
   return yield* join(self, separator);
 });
-
-function* joinValue(value: Value, separator: RString, seen: Set<RArray>): Gen<RString> {
-  if (value instanceof RString) return value;
-  if (value instanceof RArray) return yield* join(value, separator, seen);
-  if (respondsTo(value, 'to_str', true)) {
-    const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
-    if (converted instanceof RString) return converted;
-    if (converted !== NIL) throw joinStringConversionError(value, converted);
-  }
-  const converted = yield* tryAry(value);
-  return converted
-    ? yield* whileHeld(converted, function* () {
-        return yield* join(converted, separator, seen);
-      })
-    : yield* toSValue(value);
-}
 
 function joinStringConversionError(value: Value, converted: Value): unknown {
   const name = realClassOf(value).name;
@@ -899,7 +938,10 @@ def('Array', 'transpose', 0, function* (self: RArray) {
     const length = self.items.length;
     let width: number | undefined;
     for (let index = 0; index < length; index++) {
-      const row = [...(yield* toAry(self.items[index] ?? NIL)).items];
+      const items = (yield* toAry(self.items[index] ?? NIL)).items;
+      rt().chargeSlots(items.length);
+      rt().spend(Math.ceil(items.length / 64));
+      const row = [...items];
       width ??= row.length;
       if (row.length !== width) throw indexError(`element size differs (${row.length} should be ${width})`);
       rows.push(row);
