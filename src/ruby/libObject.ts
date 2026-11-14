@@ -41,6 +41,7 @@ import {
   RClass,
   RFloat,
   RHash,
+  type RMethod,
   RObject,
   RProc,
   RRange,
@@ -827,7 +828,7 @@ function* setVisibility(self: RClass, args: Value[], visibility: Visibility): Ge
           name
         );
       }
-      if (method.owner === self) method.visibility = visibility;
+      if (method.owner === self) (self.methods.get(name) as RMethod).visibility = visibility;
       else addMethod(self, { name, owner: self, visibility, body: { kind: 'visibility' } });
     }
   invalidateMethodCaches();

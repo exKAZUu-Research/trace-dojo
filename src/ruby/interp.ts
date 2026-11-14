@@ -1175,7 +1175,11 @@ function* definedText(e: Expr, frame: Frame): Gen {
     }
     case 'super': {
       const method = frame.home.extra.method;
-      return text(method && classOf(frame.home.self).findSuperMethod(method.name, method.owner) ? 'super' : undefined);
+      return text(
+        method && classOf(frame.home.self).findSuperMethod(method.name, method.owner, method.lookupIndex)
+          ? 'super'
+          : undefined
+      );
     }
     case 'self': {
       return text('self');
@@ -1427,7 +1431,7 @@ export function addMethod(owner: RClass, method: RMethod): void {
   invalidateMethodCaches();
 }
 
-function assertMutableClass(owner: RClass): void {
+export function assertMutableClass(owner: RClass): void {
   const target = owner.attached instanceof RBasic ? owner.attached : owner;
   if (target.frozen)
     throw frozenError(target, target instanceof RClass ? (target.name ?? '') : (realClassOf(target).name ?? ''));
@@ -1794,7 +1798,8 @@ let overflowDepth: number | undefined;
 function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
   const home = frame.home;
   const method = home.extra.method;
-  if (!method || home.kind !== 'method') {
+  const procMethod = home.kind === 'block' && method?.body.kind === 'proc';
+  if (!method || (home.kind !== 'method' && !procMethod)) {
     throw rubyError(rt().c.RuntimeError, 'super called outside of method');
   }
   let args: Value[];
@@ -1802,6 +1807,11 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
   if (e.args) {
     ({ args, keywords } = yield* evalArgs(e.args, frame));
   } else {
+    if (procMethod)
+      throw rubyError(
+        rt().c.RuntimeError,
+        'implicit argument passing of super from method defined by define_method() is not supported. Specify all arguments explicitly.'
+      );
     ({ args, keywords } = yield* implicitSuperArgs(home));
   }
   const mark = frame.temporaries.length;
@@ -1811,7 +1821,7 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
     let block: RProc | undefined = home.extra.block;
     if (e.block) block = makeBlock(e.block, frame);
     else if (e.blockArg) block = yield* toBlock(yield* ev(e.blockArg, frame));
-    const superMethod = classOf(home.self).findSuperMethod(method.name, method.owner);
+    const superMethod = classOf(home.self).findSuperMethod(method.name, method.owner, method.lookupIndex);
     if (!superMethod) {
       throw noMethodError(
         `super: no superclass method '${method.name}' for ${receiverDescription(home.self)}`,
@@ -1981,17 +1991,17 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
     false,
     options.used ?? true,
     {
-      home: outer.home,
+      home: options.method ? undefined : outer.home,
       outer,
       proc,
       args,
       keywords: options.keywords,
       blockDef: def,
       isLambda: proc.isLambda || options.lambdaArgs,
-      block: options.block ?? outer.home.extra.block,
+      block: options.method ? options.block : (options.block ?? outer.home.extra.block),
       method: options.method ?? outer.home.extra.method,
       def: outer.home.extra.def,
-      definee: options.definee,
+      definee: options.definee ?? outer.extra.definee,
       definitionTarget: options.definitionTarget ?? outer.extra.definitionTarget,
     }
   );

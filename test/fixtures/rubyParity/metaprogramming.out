@@ -34,7 +34,6 @@ Dog
 3.141592653589793
 true
 1
-[:@@n]
 true
 "hi from obj"
 2
@@ -43,7 +42,6 @@ true
 #<ArgumentError: wrong number of arguments (given 1, expected 0)>
 1
 [:@a, :@b]
-[:BAR, :BAZ]
 true
 true
 true

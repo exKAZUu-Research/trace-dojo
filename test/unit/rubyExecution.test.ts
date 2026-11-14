@@ -5103,3 +5103,64 @@ test('negative Integer and Rational powers charge before large allocation', () =
   expect(run('p Rational(2) ** 1000000000000')).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
   expect(run('p Rational(2) ** Rational(1,2)')).toMatchObject({ stdout: '1.4142135623730951\n' });
 });
+
+test('define_method bodies use their own method context for super', () => {
+  const source = 'class A;def f(x)=x+1;end;class B<A;define_method(:f){|x|super(x)+1};end;p B.new.f(1)';
+  expect(run(source)).toMatchObject({ stdout: '3\n' });
+  expect(run('class A;def f(x)=x;end;class B<A;define_method(:f){|x|super};end;B.new.f(1)')).toMatchObject({
+    uncaughtException: expect.stringContaining('implicit argument passing of super'),
+  });
+});
+
+test('nested evaluation blocks keep their method definition target', () => {
+  const source =
+    'C=Class.new;C.class_eval do;1.times do;def value = 42;end;end;p C.instance_method(:value).owner;p C.new.value';
+  expect(run(source)).toMatchObject({ stdout: 'C\n42\n' });
+});
+
+test('Method and UnboundMethod share reflection and validate binding', () => {
+  const source =
+    'class A;def hi(x)=x;define_method(:hey,instance_method(:hi));end;a=A.new;u=A.instance_method(:hi);p a.hey(3),u.arity,u.parameters,a.method(:hi).unbind.bind(a).call(4),u.bind_call(a,5);begin;u.bind(Object.new);rescue TypeError=>e;p e.class;end';
+  expect(run(source)).toMatchObject({ stdout: '3\n1\n[[:req, :x]]\n4\n5\nTypeError\n' });
+});
+
+test('Method reflection keeps the alias name distinct from its original method', () => {
+  expect(
+    run('class A;def a = 1;alias b a;alias_method :c,:a;end;p A.new.method(:b).name;p A.instance_method(:c).name')
+  ).toMatchObject({
+    stdout: ':b\n:c\n',
+  });
+});
+
+test('reflection honors inheritance flags and frozen state', () => {
+  const source =
+    'class A;X=1;def x;1;end;end;class B<A;end;p B.const_defined?(:X,false);p B.method_defined?(:x,false);p B.const_get(:X);begin;B.const_get(:X,false);rescue NameError=>e;p e.class;end';
+  expect(run(source)).toMatchObject({ stdout: 'false\nfalse\n1\nNameError\n' });
+  expect(run('class A;def x;1;end;end;A.freeze;A.alias_method(:y,:x)')).toMatchObject({
+    uncaughtException: expect.stringContaining('FrozenError'),
+  });
+  expect(run('class A;end;A.freeze;A.const_set(:X,1)')).toMatchObject({
+    uncaughtException: expect.stringContaining('FrozenError'),
+  });
+  expect(run('o=Object.new;o.instance_variable_set(:@x,1);o.freeze;o.remove_instance_variable(:@x)')).toMatchObject({
+    uncaughtException: expect.stringContaining('FrozenError'),
+  });
+});
+
+test('unordered constant and class-variable listings fail explicitly', () => {
+  expect(run('class A;X=1;end;A.constants')).toMatchObject({
+    uncaughtException: expect.stringContaining('使えません。'),
+  });
+  expect(run('class A;@@x=1;end;A.class_variables')).toMatchObject({
+    uncaughtException: expect.stringContaining('使えません。'),
+  });
+});
+
+test('prepend preserves repeated module positions for super', () => {
+  const inherited =
+    'module M;def x;"M"+super;end;end;class A;include M;def x;"A";end;end;class B<A;prepend M;end;p B.ancestors.take(5);p B.new.x';
+  expect(run(inherited)).toMatchObject({ stdout: '[M, B, A, M, Object]\n"MA"\n' });
+  const local =
+    'class Object;def x;"A";end;end;module M;def x;"M"+super;end;end;class C;include M;prepend M;end;p C.ancestors.take(4);p C.new.x';
+  expect(run(local)).toMatchObject({ stdout: '[M, C, M, Object]\n"MMA"\n' });
+});

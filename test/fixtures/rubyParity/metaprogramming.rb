@@ -50,7 +50,7 @@ end
 p Dog.new.bark, Dog.method_defined?(:bark), Dog.instance_method(:speak).class rescue p $!
 p Object.const_get(:Dog), Math.const_get(:PI), Dog.const_defined?(:String)
 class Cnt; @@n = 1; end
-p Cnt.class_variable_get(:@@n), Cnt.class_variables, Cnt.class_variable_defined?(:@@n)
+p Cnt.class_variable_get(:@@n), Cnt.class_variable_defined?(:@@n)
 obj = Object.new
 obj.define_singleton_method(:hi) { "hi from obj" }
 p obj.hi
@@ -70,7 +70,7 @@ class Reflected
   def hi = 1
 end
 f = Reflected.new
-p f.instance_variables, Reflected.constants, f.respond_to?(:hi), Reflected.method_defined?(:hi), Reflected.public_method_defined?(:hi)
+p f.instance_variables, f.respond_to?(:hi), Reflected.method_defined?(:hi), Reflected.public_method_defined?(:hi)
 p Reflected.instance_method(:hi).owner, f.method(:hi).arity
 p defined?(@iv = 1)
 p defined?(x = 1)

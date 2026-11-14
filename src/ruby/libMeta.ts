@@ -1,10 +1,11 @@
 import type { Params } from './ast';
 import { className, inspect, toStr } from './conversions';
 import { def } from './define';
-import { argumentError, nameError, typeError } from './errors';
+import { argumentError, frozenError, nameError, typeError } from './errors';
 import { hashGet } from './hashes';
 import {
   addMethod,
+  assertMutableClass,
   callMethod,
   callProc,
   constInModule,
@@ -30,7 +31,7 @@ import {
   type Value,
 } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
-import { arr, classOf, realClassOf, singletonClassOf, str, sym, truthy } from './values';
+import { arr, classOf, isA, realClassOf, singletonClassOf, str, sym, truthy } from './values';
 
 /** The name a method takes as a Symbol or a String, raising as Ruby does for anything else. */
 export function* nameOf(value: Value): Gen<string> {
@@ -91,14 +92,16 @@ def('Kernel', 'respond_to_missing?', 2, () => false, { visibility: 'private' });
 interface MethodData {
   recv: Value;
   method: RMethod;
+  name: string;
   held(): Value[];
 }
 
-function methodObject(recv: Value, method: RMethod): RObject {
+function methodObject(recv: Value, method: RMethod, name = method.name): RObject {
   const object = new RObject(rt().c.Method);
   const data: MethodData = {
     recv,
     method,
+    name,
     held() {
       return [this.recv];
     },
@@ -133,10 +136,12 @@ function* findForMethodObject(self: Value, name: string, publicOnly = false): Ge
 }
 
 def('Kernel', 'method', 1, function* (self, [name]) {
-  return methodObject(self, yield* findForMethodObject(self, yield* nameOf(name)));
+  const requested = yield* nameOf(name);
+  return methodObject(self, yield* findForMethodObject(self, requested), requested);
 });
 def('Kernel', 'public_method', 1, function* (self, [name]) {
-  return methodObject(self, yield* findForMethodObject(self, yield* nameOf(name), true));
+  const requested = yield* nameOf(name);
+  return methodObject(self, yield* findForMethodObject(self, requested, true), requested);
 });
 def(
   'Method',
@@ -152,18 +157,47 @@ def('Method', 'to_proc', 0, (self: RObject) => {
   const { recv, method } = self.data as MethodData;
   return nativeProc(methodArity(method), (args, block) => invoke(method, recv, args, undefined, block, true), true);
 });
-def('Method', 'arity', 0, (self: RObject) => BigInt(methodArity((self.data as MethodData).method)));
-def('Method', 'name', 0, (self: RObject) => sym((self.data as MethodData).method.name));
-def('Method', 'owner', 0, (self: RObject) => (self.data as MethodData).method.owner);
 def('Method', 'receiver', 0, (self: RObject) => (self.data as MethodData).recv);
-def('Method', ['inspect', 'to_s'], 0, (self: RObject) => {
-  const { recv, method } = self.data as MethodData;
+def('Method', 'unbind', 0, (self: RObject) => {
+  const { method, name } = self.data as MethodData;
+  return unboundMethod(method, name);
+});
+
+function unboundMethod(method: RMethod, name = method.name): RObject {
+  const unbound = methodObject(NIL, method, name);
+  unbound.cls = rt().c.UnboundMethod;
+  return unbound;
+}
+
+function methodDescription(self: RObject): string {
+  const { recv, method, name } = self.data as MethodData;
   const owner = method.owner.isSingleton ? `${className(realClassOf(recv))}.` : `${className(method.owner)}#`;
-  return str(`#<Method: ${owner}${method.name}(*)>`);
-});
-def('Method', 'unbind', 0, () => {
-  throw typeError('UnboundMethod is not supported');
-});
+  const definition =
+    method.body.kind === 'user'
+      ? method.body.def
+      : method.body.kind === 'proc' && method.body.proc.body.kind === 'block'
+        ? method.body.proc.body.def
+        : undefined;
+  const params = definition?.params;
+  const signature = params
+    ? [
+        ...params.required.map((param) => (typeof param === 'string' ? param : '*')),
+        ...params.optional.map((param) => `${param.name}=...`),
+        ...(params.rest === undefined ? [] : [`*${params.rest}`]),
+        ...params.post.map((param) => (typeof param === 'string' ? param : '*')),
+        ...params.keywords.map((param) => `${param.name}:${param.value ? ' ...' : ''}`),
+        ...(params.keywordRest === undefined ? [] : [`**${params.keywordRest}`]),
+        ...(params.block === undefined ? [] : [`&${params.block}`]),
+      ].join(', ')
+    : methodArity(method) === 0
+      ? ''
+      : methodArity(method) === 1
+        ? '_'
+        : '*';
+  const row = definition?.row;
+  const kind = self.cls === rt().c.UnboundMethod ? 'UnboundMethod' : 'Method';
+  return `#<${kind}: ${owner}${name}(${signature})${row === undefined ? '' : ` main.rb:${row + 1}`}>`;
+}
 
 /** What `parameters` lists for parameters a program wrote: each one's kind and, when it has one, its name. */
 // code-gauge-allow functionCognitiveComplexity 17 -- Ruby's method takes these argument forms, which the branches mirror.
@@ -204,16 +238,25 @@ def(
   },
   { keywords: true }
 );
-def('Method', 'parameters', 0, (self: RObject) => {
-  const { method } = self.data as MethodData;
-  if (method.body.kind === 'user') return parameterList(method.body.def.params, true);
-  if (method.body.kind === 'proc') return callParameters(method.body.proc);
-  return nativeParameterList(methodArity(method));
-});
-
 function callParameters(proc: RProc): Value {
   if (proc.body.kind === 'native') return nativeParameterList(proc.body.arity);
   return proc.body.def.params ? parameterList(proc.body.def.params, true) : arr([]);
+}
+
+for (const owner of ['Method', 'UnboundMethod']) {
+  def(owner, 'arity', 0, (self: RObject) => BigInt(methodArity((self.data as MethodData).method)));
+  def(owner, 'parameters', 0, (self: RObject) => {
+    const { method } = self.data as MethodData;
+    if (method.body.kind === 'user') return parameterList(method.body.def.params, true);
+    if (method.body.kind === 'proc') return callParameters(method.body.proc);
+    return nativeParameterList(methodArity(method));
+  });
+  def(owner, 'name', 0, (self: RObject) => sym((self.data as MethodData).name));
+  def(owner, 'owner', 0, (self: RObject) => (self.data as MethodData).method.owner);
+  def(owner, ['inspect', 'to_s'], 0, (self: RObject) => str(methodDescription(self)));
+  def(owner, 'source_location', 0, () => {
+    throw new UnsupportedFeatureError(`${owner}#source_location`);
+  });
 }
 
 function methodArity(method: RMethod): number {
@@ -263,6 +306,7 @@ def('Kernel', 'instance_variables', 0, (self) => {
 });
 def('Kernel', 'remove_instance_variable', 1, function* (self, [name]) {
   const ivar = yield* ivarName(name);
+  if (self instanceof RBasic && self.frozen) throw frozenError(self, yield* inspect(self));
   if (!(self instanceof RBasic) || !self.ivars?.has(ivar)) {
     throw nameError(`instance variable ${ivar} not defined`, self, ivar);
   }
@@ -314,7 +358,10 @@ function* defineMethodFrom(
   let method: RMethod;
   if (body instanceof RProc) {
     method = { name, owner, visibility, body: { kind: 'proc', proc: body } };
-  } else if (body instanceof RObject && body.cls === rt().c.Method) {
+  } else if (body instanceof RObject && (body.cls === rt().c.Method || body.cls === rt().c.UnboundMethod)) {
+    const source = (body.data as MethodData).method;
+    if (body.cls === rt().c.UnboundMethod && !owner.ancestors().includes(source.owner))
+      throw typeError(`bind argument must be a subclass of ${className(source.owner)}`);
     method = { ...(body.data as MethodData).method, name, owner, visibility };
   } else {
     throw typeError(`wrong argument type ${realClassOf(body).name} (expected Proc/Method/UnboundMethod)`);
@@ -334,12 +381,14 @@ def('Module', 'alias_method', 2, function* (self: RClass, [newName, oldName]) {
   const old = yield* nameOf(oldName);
   const method = self.findMethod(old);
   if (!method) throw nameError(`undefined method '${old}' for class '${className(self)}'`, self, old);
+  assertMutableClass(self);
   // An alias keeps the original method, whose owner and name `super` in it continues from.
   self.methods.set(name, { ...method });
   invalidateMethodCaches();
   return sym(name);
 });
 def('Module', 'remove_method', [0, -1], function* (self: RClass, names) {
+  assertMutableClass(self);
   for (const value of names) {
     const name = yield* nameOf(value);
     if (!self.methods.delete(name)) {
@@ -359,29 +408,45 @@ def('Module', 'undef_method', [0, -1], function* (self: RClass, names) {
   }
   return self;
 });
-def('Module', ['method_defined?', 'public_method_defined?'], [1, 2], function* (self: RClass, [name]) {
-  const method = self.findMethod(yield* nameOf(name));
+function reflectedMethod(self: RClass, name: string, inherit: boolean): RMethod | undefined {
+  const method = inherit ? self.findMethod(name) : self.methods.get(name);
+  return method?.body.kind === 'undefined' ? undefined : method;
+}
+
+def('Module', ['method_defined?', 'public_method_defined?'], [1, 2], function* (self: RClass, args) {
+  const method = reflectedMethod(self, yield* nameOf(args[0]), args.length < 2 || truthy(args[1]));
   return method !== undefined && method.visibility !== 'private';
 });
-def('Module', 'private_method_defined?', [1, 2], function* (self: RClass, [name]) {
-  return self.findMethod(yield* nameOf(name))?.visibility === 'private';
+def('Module', 'private_method_defined?', [1, 2], function* (self: RClass, args) {
+  return reflectedMethod(self, yield* nameOf(args[0]), args.length < 2 || truthy(args[1]))?.visibility === 'private';
 });
-def('Module', 'protected_method_defined?', [1, 2], function* (self: RClass, [name]) {
-  return self.findMethod(yield* nameOf(name))?.visibility === 'protected';
+def('Module', 'protected_method_defined?', [1, 2], function* (self: RClass, args) {
+  return reflectedMethod(self, yield* nameOf(args[0]), args.length < 2 || truthy(args[1]))?.visibility === 'protected';
 });
 def('Module', 'instance_method', 1, function* (self: RClass, [name]) {
   const methodName = yield* nameOf(name);
   const method = self.findMethod(methodName);
   if (!method) throw nameError(`undefined method '${methodName}' for class '${className(self)}'`, self, methodName);
-  const unbound = methodObject(NIL, method);
-  unbound.cls = rt().c.UnboundMethod;
-  return unbound;
+  return unboundMethod(method, methodName);
 });
 def('UnboundMethod', 'bind', 1, function* (self: RObject, [recv]) {
-  return methodObject(recv, (self.data as MethodData).method);
+  return methodObject(recv, validBoundMethod(self, recv), (self.data as MethodData).name);
 });
-def('UnboundMethod', 'name', 0, (self: RObject) => sym((self.data as MethodData).method.name));
-def('UnboundMethod', 'owner', 0, (self: RObject) => (self.data as MethodData).method.owner);
+def(
+  'UnboundMethod',
+  'bind_call',
+  [1, -1],
+  function* (self: RObject, [recv, ...args], block, keywords) {
+    return yield* invoke(validBoundMethod(self, recv), recv, args, keywords, block, true);
+  },
+  { keywords: true }
+);
+
+function validBoundMethod(self: RObject, recv: Value): RMethod {
+  const { method } = self.data as MethodData;
+  if (!isA(recv, method.owner)) throw typeError(`bind argument must be an instance of ${className(method.owner)}`);
+  return method;
+}
 def(
   'BasicObject',
   'method_missing',
@@ -399,6 +464,7 @@ def('Module', 'prepend', [1, -1], function* (self: RClass, modules) {
   }
   for (const module of modules.toReversed() as RClass[]) {
     if (self.prepends.includes(module)) continue;
+    assertMutableClass(self);
     self.prepends.unshift(module);
     invalidateMethodCaches();
     const hook = classOf(module).findMethod('prepended');
@@ -415,16 +481,22 @@ function* constantName(value: Value): Gen<string> {
   return name;
 }
 
-def('Module', 'const_get', [1, 2], function* (self: RClass, [name]) {
+def('Module', 'const_get', [1, 2], function* (self: RClass, args) {
+  const inherit = args.length < 2 || truthy(args[1]);
   let module: Value = self;
-  for (const part of (yield* nameOf(name)).split('::')) {
+  for (const part of (yield* nameOf(args[0])).split('::')) {
     if (!(module instanceof RClass)) throw typeError(`${yield* inspect(module)} is not a class/module`);
-    module = constInModule(module, yield* constantName(str(part)));
+    const constant = yield* constantName(str(part));
+    const value: Value | undefined = inherit ? constInModule(module, constant) : module.constants.get(constant);
+    if (value === undefined)
+      throw nameError(`uninitialized constant ${className(module)}::${constant}`, module, constant);
+    module = value;
   }
   return module;
 });
 def('Module', 'const_set', 2, function* (self: RClass, [name, value]) {
   const constant = yield* constantName(name);
+  assertMutableClass(self);
   self.constants.set(constant, value);
   if (value instanceof RClass && value.baseName === undefined) {
     value.baseName = constant;
@@ -432,11 +504,14 @@ def('Module', 'const_set', 2, function* (self: RClass, [name, value]) {
   }
   return value;
 });
-def('Module', 'const_defined?', [1, 2], function* (self: RClass, [name]) {
-  const constant = yield* nameOf(name);
+def('Module', 'const_defined?', [1, 2], function* (self: RClass, args) {
+  const constant = yield* nameOf(args[0]);
+  if (args.length > 1 && !truthy(args[1])) return self.constants.has(constant);
   return self.ancestors().some((module) => module.constants.has(constant)) || rt().c.Object.constants.has(constant);
 });
-def('Module', 'constants', [0, 1], (self: RClass) => arr([...self.constants.keys()].map((name) => sym(name))));
+def('Module', 'constants', [0, 1], () => {
+  throw new UnsupportedFeatureError('Module#constants（定数の並び順）');
+});
 def('Module', 'class_variable_get', 1, function* (self: RClass, [name]) {
   const variable = yield* toStr(str(yield* nameOf(name)));
   for (const module of self.ancestors()) {
@@ -446,6 +521,7 @@ def('Module', 'class_variable_get', 1, function* (self: RClass, [name]) {
   throw nameError(`uninitialized class variable ${variable} in ${className(self)}`, self, variable);
 });
 def('Module', 'class_variable_set', 2, function* (self: RClass, [name, value]) {
+  assertMutableClass(self);
   self.classVariables.set(yield* nameOf(name), value);
   return value;
 });
@@ -453,8 +529,6 @@ def('Module', 'class_variable_defined?', 1, function* (self: RClass, [name]) {
   const variable = yield* nameOf(name);
   return self.ancestors().some((module) => module.classVariables.has(variable));
 });
-def('Module', 'class_variables', [0, 1], (self: RClass) => {
-  const names = new Set<string>();
-  for (const module of self.ancestors()) for (const name of module.classVariables.keys()) names.add(name);
-  return arr([...names].map((name) => sym(name)));
+def('Module', 'class_variables', [0, 1], () => {
+  throw new UnsupportedFeatureError('Module#class_variables（クラス変数の並び順）');
 });
