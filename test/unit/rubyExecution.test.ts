@@ -5400,6 +5400,12 @@ test('Time retains fractional offset values and formats rounded zones', () => {
       'p Time.new(2024,1,1,0,0,0,Rational(1,3)).utc_offset; p Time.utc(2024).getlocal(Rational(1,10)).utc_offset; p Time.utc(2024).getlocal(1.5).strftime("%::z")'
     )
   ).toMatchObject({ stdout: '(1/3)\n(1/10)\n"+00:00:02"\n' });
+  expect(
+    run('t=Time.new(2024,1,1,0,0,0,Rational(1,3));p t.strftime("%F %T"),t.nsec,Time.new(2024,1,1,0,0,0,0.0001).nsec')
+  ).toMatchObject({ stdout: '"2024-01-01 00:00:00"\n666666666\n999899999\n' });
+  expect(run('p Time.at(0,0.0009)>Time.at(0),Time.at(0,0.0009)==Time.at(0),Time.at(0.3).nsec')).toMatchObject({
+    stdout: 'true\nfalse\n299999999\n',
+  });
 });
 
 test('Rational Numeric methods and fdiv follow Ruby results', () => {
@@ -5471,6 +5477,7 @@ test('pattern validation rejects duplicate captures, alternative binds and unkno
     'p case [1];in [a] | [b] then a;end',
     'p case [1];in [^missing] then 1;end',
     'p(case {a:1};in {a:}|{};a;end)',
+    'puts :before;p(([1] in ([^a] => a)))',
   ])
     expect(run(source)).toMatchObject({ kind: 'compileError' });
   expect(run('a=1;p(case [1];in [^a]|[2];true;else;false;end)')).toMatchObject({ stdout: 'true\n' });

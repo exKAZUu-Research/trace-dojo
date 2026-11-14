@@ -1,6 +1,7 @@
 import { compareValues, toFloat, toInt, toStr } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, typeError } from './errors';
+import { bigintRatio } from './floatMath';
 import type { Gen } from './interp';
 import { floatToRational, isRational } from './libRational';
 import { NIL, RObject, RString, type Value } from './objects';
@@ -17,16 +18,25 @@ class TimeData {
     readonly nanoseconds: bigint,
     readonly offset: number,
     readonly zone: 'local' | 'utc' | 'fixed',
-    readonly exactOffset?: Value
+    readonly exactOffset?: Value,
+    readonly remainderNumerator = 0n,
+    readonly remainderDenominator = 1n
   ) {}
 
   hashKey(): string {
-    return `t${this.nanoseconds}`;
+    return `t${this.nanoseconds}:${this.remainderNumerator}/${this.remainderDenominator}`;
   }
 
   /** The fields as UTC fields of the shifted instant, which shows the local fields. */
   fields(): Date {
-    return new Date(Number(floorDivide(this.nanoseconds, 1_000_000n)) + this.offset * 1000);
+    const offset = offsetFraction(this.exactOffset, this.offset);
+    const numerator =
+      this.exactNumerator() * offset.denominator + offset.numerator * this.remainderDenominator * 1_000_000_000n;
+    return new Date(Number(floorDivide(numerator, this.remainderDenominator * offset.denominator * 1_000_000n)));
+  }
+
+  exactNumerator(): bigint {
+    return this.nanoseconds * this.remainderDenominator + this.remainderNumerator;
   }
 }
 
@@ -39,11 +49,37 @@ function makeTime(
   nanoseconds: bigint,
   offset = LOCAL_OFFSET,
   zone: TimeData['zone'] = 'local',
-  exactOffset?: Value
+  exactOffset?: Value,
+  remainderNumerator = 0n,
+  remainderDenominator = 1n
 ): RObject {
   const time = new RObject(rt().c.Time);
-  time.data = new TimeData(nanoseconds, offset, zone, exactOffset);
+  time.data = new TimeData(nanoseconds, offset, zone, exactOffset, remainderNumerator, remainderDenominator);
   return time;
+}
+
+function makeExactTime(
+  numerator: bigint,
+  denominator: bigint,
+  offset = LOCAL_OFFSET,
+  zone: TimeData['zone'] = 'local',
+  exactOffset?: Value
+): RObject {
+  const nanoseconds = floorDivide(numerator, denominator);
+  let remainder = numerator - nanoseconds * denominator;
+  if (remainder === 0n) return makeTime(nanoseconds, offset, zone, exactOffset);
+  let a = remainder;
+  let b = denominator;
+  while (b !== 0n) [a, b] = [b, a % b];
+  remainder /= a;
+  return makeTime(nanoseconds, offset, zone, exactOffset, remainder, denominator / a);
+}
+
+function offsetFraction(value: Value | undefined, offset: number): { numerator: bigint; denominator: bigint } {
+  if (typeof value === 'bigint') return { numerator: value, denominator: 1n };
+  if (value !== undefined && isRational(value)) return value.data as { numerator: bigint; denominator: bigint };
+  if (typeof value === 'number') return floatToRational(value).data as { numerator: bigint; denominator: bigint };
+  return { numerator: BigInt(offset), denominator: 1n };
 }
 
 function dataOf(time: RObject): TimeData {
@@ -116,7 +152,7 @@ function* buildTime(args: Value[], offset: number, zone: TimeData['zone'], micro
   const date = new Date(0);
   date.setUTCFullYear(year, month - 1, day);
   date.setUTCHours(hour, minute, whole);
-  const utcNanoseconds = BigInt(date.getTime()) * 1_000_000n - BigInt(Math.round(offset * 1e9));
+  const localNanoseconds = BigInt(date.getTime()) * 1_000_000n;
   const fraction = BigInt(Math.round((seconds - whole) * 1e9));
   const micros =
     microseconds === undefined
@@ -124,7 +160,14 @@ function* buildTime(args: Value[], offset: number, zone: TimeData['zone'], micro
       : typeof microseconds === 'bigint'
         ? microseconds * 1000n
         : BigInt(Math.floor((yield* toFloat(microseconds)) * 1000));
-  return makeTime(utcNanoseconds + fraction + micros, offset, zone, exact);
+  const fractionOffset = offsetFraction(exact, offset);
+  return makeExactTime(
+    (localNanoseconds + fraction + micros) * fractionOffset.denominator - fractionOffset.numerator * 1_000_000_000n,
+    fractionOffset.denominator,
+    offset,
+    zone,
+    exact
+  );
 }
 
 sdef('Time', 'now', 0, () => makeTime(nowNanoseconds()));
@@ -142,15 +185,34 @@ sdef('Time', 'at', [1, 2], function* (_self, args) {
   const [seconds, microseconds] = args;
   if (seconds instanceof RObject && seconds.data instanceof TimeData) {
     if (microseconds !== undefined) throw typeError("can't convert Time into an exact number");
-    return makeTime(seconds.data.nanoseconds, seconds.data.offset, seconds.data.zone, seconds.data.exactOffset);
+    return makeTime(
+      seconds.data.nanoseconds,
+      seconds.data.offset,
+      seconds.data.zone,
+      seconds.data.exactOffset,
+      seconds.data.remainderNumerator,
+      seconds.data.remainderDenominator
+    );
   }
-  const secondsNumber = typeof seconds === 'bigint' ? undefined : yield* toFloat(seconds);
-  const wholeSeconds = typeof seconds === 'bigint' ? seconds : BigInt(Math.floor(secondsNumber ?? 0));
-  const fraction = secondsNumber === undefined ? 0 : (secondsNumber - Math.floor(secondsNumber)) * 1e9;
-  const microsNumber =
-    microseconds === undefined || typeof microseconds === 'bigint' ? 0 : (yield* toFloat(microseconds)) * 1e3;
-  const microsInteger = typeof microseconds === 'bigint' ? microseconds * 1000n : 0n;
-  return makeTime(wholeSeconds * 1_000_000_000n + microsInteger + BigInt(Math.floor(fraction + microsNumber)));
+  const first = offsetFraction(
+    typeof seconds === 'bigint' || typeof seconds === 'number' || isRational(seconds)
+      ? seconds
+      : yield* toFloat(seconds),
+    0
+  );
+  const second =
+    microseconds === undefined
+      ? { numerator: 0n, denominator: 1n }
+      : offsetFraction(
+          typeof microseconds === 'bigint' || typeof microseconds === 'number' || isRational(microseconds)
+            ? microseconds
+            : yield* toFloat(microseconds),
+          0
+        );
+  return makeExactTime(
+    first.numerator * second.denominator * 1_000_000_000n + second.numerator * first.denominator * 1000n,
+    first.denominator * second.denominator
+  );
 });
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -466,13 +528,27 @@ def('Time', ['utc_offset', 'gmt_offset', 'gmtoff'], 0, (self: RObject) => {
 });
 def('Time', ['utc?', 'gmt?'], 0, (self: RObject) => dataOf(self).zone === 'utc');
 def('Time', 'to_i', 0, (self: RObject) => floorDivide(dataOf(self).nanoseconds, 1_000_000_000n));
-def('Time', 'to_f', 0, (self: RObject) => Number(dataOf(self).nanoseconds) / 1e9);
-def('Time', ['getutc', 'getgm'], 0, (self: RObject) => makeTime(dataOf(self).nanoseconds, 0, 'utc'));
+def('Time', 'to_f', 0, (self: RObject) => {
+  const data = dataOf(self);
+  return bigintRatio(data.exactNumerator(), data.remainderDenominator * 1_000_000_000n);
+});
+def('Time', ['getutc', 'getgm'], 0, (self: RObject) => {
+  const data = dataOf(self);
+  return makeTime(data.nanoseconds, 0, 'utc', undefined, data.remainderNumerator, data.remainderDenominator);
+});
 def('Time', ['utc', 'gmtime'], 0, (self: RObject) => changeZone(self, 0, 'utc'));
 def('Time', 'getlocal', [0, 1], function* (self: RObject, args) {
+  const data = dataOf(self);
   return args.length > 0 && args[0] !== NIL
-    ? makeTime(dataOf(self).nanoseconds, yield* parseOffset(args[0]), 'fixed', exactOffset(args[0]))
-    : makeTime(dataOf(self).nanoseconds);
+    ? makeTime(
+        data.nanoseconds,
+        yield* parseOffset(args[0]),
+        'fixed',
+        exactOffset(args[0]),
+        data.remainderNumerator,
+        data.remainderDenominator
+      )
+    : makeTime(data.nanoseconds, LOCAL_OFFSET, 'local', undefined, data.remainderNumerator, data.remainderDenominator);
 });
 def('Time', 'localtime', [0, 1], function* (self: RObject, args) {
   if (args.length === 0 || args[0] === NIL) return changeZone(self, LOCAL_OFFSET, 'local');
@@ -485,7 +561,7 @@ function changeZone(self: RObject, offset: number, zone: TimeData['zone'], exact
   const data = dataOf(self);
   if (data.offset === offset && data.zone === zone && data.exactOffset === exact) return self;
   if (self.frozen) throw frozenError(self, timeText(data, true));
-  self.data = new TimeData(data.nanoseconds, offset, zone, exact);
+  self.data = new TimeData(data.nanoseconds, offset, zone, exact, data.remainderNumerator, data.remainderDenominator);
   return self;
 }
 def('Time', 'to_a', 0, (self: RObject) => {
@@ -506,34 +582,67 @@ def('Time', 'to_a', 0, (self: RObject) => {
 });
 def('Time', 'round', [0, 1], function* (self: RObject, args) {
   const digits = args.length > 0 ? Number(yield* toInt(args[0])) : 0;
-  if (digits >= 9) {
+  if (digits > 9) {
     const data = dataOf(self);
-    return makeTime(data.nanoseconds, data.offset, data.zone, data.exactOffset);
+    return makeTime(
+      data.nanoseconds,
+      data.offset,
+      data.zone,
+      data.exactOffset,
+      data.remainderNumerator,
+      data.remainderDenominator
+    );
   }
   const unit = 10n ** BigInt(9 - digits);
   const data = dataOf(self);
-  const rounded = floorDivide(data.nanoseconds + unit / 2n, unit) * unit;
+  const rounded =
+    floorDivide(2n * data.exactNumerator() + unit * data.remainderDenominator, 2n * unit * data.remainderDenominator) *
+    unit;
   return makeTime(rounded, data.offset, data.zone, data.exactOffset);
 });
 def('Time', '+', 1, function* (self: RObject, [seconds]) {
   if (seconds instanceof RObject && seconds.data instanceof TimeData) throw typeError('time + time?');
   const data = dataOf(self);
-  const delta =
-    typeof seconds === 'bigint' ? seconds * 1_000_000_000n : BigInt(Math.round((yield* toFloat(seconds)) * 1e9));
-  return makeTime(data.nanoseconds + delta, data.offset, data.zone, data.exactOffset);
+  const delta = offsetFraction(
+    typeof seconds === 'bigint' || typeof seconds === 'number' || isRational(seconds)
+      ? seconds
+      : yield* toFloat(seconds),
+    0
+  );
+  return makeExactTime(
+    data.exactNumerator() * delta.denominator + delta.numerator * data.remainderDenominator * 1_000_000_000n,
+    data.remainderDenominator * delta.denominator,
+    data.offset,
+    data.zone,
+    data.exactOffset
+  );
 });
 def('Time', '-', 1, function* (self: RObject, [other]) {
   const data = dataOf(self);
   if (other instanceof RObject && other.data instanceof TimeData) {
-    return Number(data.nanoseconds - other.data.nanoseconds) / 1e9;
+    return bigintRatio(
+      data.exactNumerator() * other.data.remainderDenominator - other.data.exactNumerator() * data.remainderDenominator,
+      data.remainderDenominator * other.data.remainderDenominator * 1_000_000_000n
+    );
   }
-  const delta = typeof other === 'bigint' ? other * 1_000_000_000n : BigInt(Math.round((yield* toFloat(other)) * 1e9));
-  return makeTime(data.nanoseconds - delta, data.offset, data.zone, data.exactOffset);
+  const delta = offsetFraction(
+    typeof other === 'bigint' || typeof other === 'number' || isRational(other) ? other : yield* toFloat(other),
+    0
+  );
+  return makeExactTime(
+    data.exactNumerator() * delta.denominator - delta.numerator * data.remainderDenominator * 1_000_000_000n,
+    data.remainderDenominator * delta.denominator,
+    data.offset,
+    data.zone,
+    data.exactOffset
+  );
 });
 def('Time', '<=>', 1, (self: RObject, [other]) => {
   if (!(other instanceof RObject && other.data instanceof TimeData)) return NIL;
-  const a = dataOf(self).nanoseconds;
-  const b = other.data.nanoseconds;
+  const left = dataOf(self);
+  const right = other.data;
+  const a = left.exactNumerator() * right.remainderDenominator;
+  const b = right.exactNumerator() * left.remainderDenominator;
   return a < b ? -1n : a > b ? 1n : 0n;
 });
 def(
@@ -541,9 +650,15 @@ def(
   ['==', 'eql?'],
   1,
   (self: RObject, [other]) =>
-    other instanceof RObject && other.data instanceof TimeData && other.data.nanoseconds === dataOf(self).nanoseconds
+    other instanceof RObject &&
+    other.data instanceof TimeData &&
+    other.data.exactNumerator() * dataOf(self).remainderDenominator ===
+      dataOf(self).exactNumerator() * other.data.remainderDenominator
 );
-def('Time', 'hash', 0, (self: RObject) => dataOf(self).nanoseconds % 1_000_000_007n);
+def('Time', 'hash', 0, (self: RObject) => {
+  const data = dataOf(self);
+  return (data.exactNumerator() ^ data.remainderDenominator) % 1_000_000_007n;
+});
 
 def(
   'Kernel',

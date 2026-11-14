@@ -1479,8 +1479,8 @@ export class Converter {
         return { k: 'bind', target: this.bindTarget(node) };
       }
       case 'as_pattern': {
-        const target = this.bindTarget(required(node.childForFieldName('name')));
         const pattern = this.pattern(required(node.childForFieldName('value')));
+        const target = this.bindTarget(required(node.childForFieldName('name')));
         return target ? { k: 'as', pattern, target } : pattern;
       }
       case 'alternative_pattern': {
