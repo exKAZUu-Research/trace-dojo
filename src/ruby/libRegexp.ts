@@ -59,6 +59,9 @@ const SYNTAX = String.raw`^$\.*+?()[]{}|/-`;
 export function translate(source: string, extended: boolean): string {
   let out = '';
   let inClass = 0;
+  let atomStart = 0;
+  let intervalAtomStart: number | undefined;
+  const groupStarts: number[] = [];
   const namedCaptures = regexpCaptureNames(source).length > 0;
   for (let index = 0; index < source.length; index++) {
     const char = source[index];
@@ -70,6 +73,7 @@ export function translate(source: string, extended: boolean): string {
       }
     }
     if (char === '\\') {
+      if (inClass === 0) atomStart = out.length;
       const next = source[++index] ?? '\\';
       out += translateEscape(next, source, index, inClass > 0, (count) => {
         index += count;
@@ -91,6 +95,7 @@ export function translate(source: string, extended: boolean): string {
         out += String.raw`\[`;
         continue;
       }
+      atomStart = out.length;
       inClass++;
       out += char;
       continue;
@@ -112,6 +117,7 @@ export function translate(source: string, extended: boolean): string {
           throw unsupportedSyntax('中のオプションの指定（(?x:...)）');
         const on = enabled.replaceAll('m', 's').replaceAll('x', '');
         const off = disabled.replaceAll('m', 's').replaceAll('x', '');
+        groupStarts.push(out.length);
         out += on || off ? `(?${on}${off ? `-${off}` : ''}:` : '(?:';
         index += scoped[0].length + 1;
         continue;
@@ -125,17 +131,33 @@ export function translate(source: string, extended: boolean): string {
       }
     }
     if (inClass === 0 && char === '(' && source[index + 1] !== '?' && namedCaptures) {
+      groupStarts.push(out.length);
       out += '(?:';
       continue;
+    }
+    if (inClass === 0 && char === '(') groupStarts.push(out.length);
+    if (inClass === 0 && char === ')') atomStart = groupStarts.pop() ?? out.length;
+    if (inClass === 0 && char === '{') {
+      const interval = /^\{\d+(?:,\d*)?\}/.exec(source.slice(index));
+      if (interval) {
+        intervalAtomStart = atomStart;
+        out += interval[0];
+        index += interval[0].length - 1;
+        continue;
+      }
     }
     if (inClass === 0 && char === '+' && /[*+?]/.test(source[index - 1] ?? '') && source[index - 2] !== '\\') {
       throw unsupportedSyntax('強欲な量指定子（*+ など）');
     }
-    if (inClass === 0 && char === '+' && /\{\d+(?:,\d*)?\}$/.test(source.slice(0, index))) {
-      const atom = /(\\.|\[[^\]]+\]|\([^()]*\)|.)\{\d+(?:,\d*)?\}$/u.exec(out);
-      if (!atom) throw unsupportedSyntax('量指定子の連続');
-      out = `${out.slice(0, -atom[0].length)}(?:${atom[0]})+`;
+    if (inClass === 0 && char === '+' && source[index - 1] === '}' && intervalAtomStart !== undefined) {
+      out = `${out.slice(0, intervalAtomStart)}(?:${out.slice(intervalAtomStart)})+`;
+      atomStart = intervalAtomStart;
+      intervalAtomStart = undefined;
       continue;
+    }
+    if (inClass === 0 && !'*+?)}|'.includes(char)) {
+      atomStart = out.length;
+      intervalAtomStart = undefined;
     }
     out += char;
   }

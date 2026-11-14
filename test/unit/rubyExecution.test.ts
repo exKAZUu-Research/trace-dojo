@@ -5478,10 +5478,10 @@ test('numbered block parameters reject nested, explicit and assigned misuse', ()
 test('Regexp handles quantified properties and Ruby escaping', () => {
   expect(
     run(
-      String.raw`p "日本語abc".scan(/\p{Han}+/);p "aaa" =~ /a{2}+/;p Regexp.escape("a/b#c d-e\r\f\v");p Regexp.union("a/b","c#").source`
+      String.raw`p "日本語abc".scan(/\p{Han}+/);p "aaa" =~ /a{2}+/;p "日本日本!".scan(/\p{Han}{2}+/);p Regexp.escape("a/b#c d-e\r\f\v");p Regexp.union("a/b","c#").source`
     )
   ).toMatchObject({
-    stdout: '["日本語"]\n0\n"a/b\\\\#c\\\\ d\\\\-e\\\\r\\\\f\\\\v"\n"a/b|c\\\\#"\n',
+    stdout: '["日本語"]\n0\n["日本日本"]\n"a/b\\\\#c\\\\ d\\\\-e\\\\r\\\\f\\\\v"\n"a/b|c\\\\#"\n',
   });
 });
 
