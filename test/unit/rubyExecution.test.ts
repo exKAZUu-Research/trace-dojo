@@ -5406,6 +5406,11 @@ test('Time retains fractional offset values and formats rounded zones', () => {
   expect(run('p Time.at(0,0.0009)>Time.at(0),Time.at(0,0.0009)==Time.at(0),Time.at(0.3).nsec')).toMatchObject({
     stdout: 'true\nfalse\n299999999\n',
   });
+  expect(
+    run(
+      'p Time.at(Rational(1,3000000000)).round(10)==Time.at(Rational(3,10000000000));p Time.at(Rational(1,3000000000)).strftime("%12N");p Time.at(0.3).strftime("%15N")'
+    )
+  ).toMatchObject({ stdout: 'true\n"000000000333"\n"299999999999999"\n' });
 });
 
 test('Rational Numeric methods and fdiv follow Ruby results', () => {
@@ -5462,6 +5467,10 @@ test('END blocks capture surrounding locals and accept next', () => {
     stdout: 'before\n',
     uncaughtException: expect.stringContaining("undefined local variable or method '_1'"),
   });
+  expect(run('END { END { y=3;p y };p y };p y')).toMatchObject({ stdout: 'nil\nnil\n3\n' });
+  expect(run('f=proc{END {p it}};f.call(3)')).toMatchObject({ stdout: '3\n' });
+  expect(run('f=proc{END {p _1}};f.call(3)')).toMatchObject({ stdout: '3\n' });
+  expect(run('f=proc{|v|END{p it}};f.call(3)')).toMatchObject({ kind: 'compileError' });
 });
 
 test('percent literals unescape words and their delimiters', () => {
@@ -5481,6 +5490,7 @@ test('pattern validation rejects duplicate captures, alternative binds and unkno
   ])
     expect(run(source)).toMatchObject({ kind: 'compileError' });
   expect(run('a=1;p(case [1];in [^a]|[2];true;else;false;end)')).toMatchObject({ stdout: 'true\n' });
+  expect(run('p(case true;in ^(([1] in [x])) | false;true;else;false;end)')).toMatchObject({ stdout: 'true\n' });
 });
 
 test('numbered block parameters reject nested, explicit and assigned misuse', () => {

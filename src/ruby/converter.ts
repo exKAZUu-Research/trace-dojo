@@ -86,8 +86,7 @@ class LocalScope {
     const depth = this.depthOf(name);
     if (depth >= 0) return depth;
     if (this.kind === 'end') {
-      this.parent!.declare(name);
-      return 1;
+      return this.parent!.declare(name) + 1;
     }
     this.declareOwn(name);
     return 0;
@@ -501,7 +500,7 @@ export class Converter {
       case 'end_block': {
         const outer = this.ctx;
         const scope = new LocalScope('end', outer.scope);
-        this.ctx = { ...outer, scope, inBlock: true, inLoop: false, implicit: undefined };
+        this.ctx = { ...outer, scope, inBlock: true, inLoop: false };
         try {
           const block: BlockDef = {
             params: undefined,
@@ -530,6 +529,10 @@ export class Converter {
   private identifier(node: Node, use: Use): Expr {
     const name = node.text;
     const depth = this.ctx.scope.depthOf(name);
+    if (this.ctx.scope.kind === 'end') {
+      const resolved = this.endImplicitIdentifier(node, name, depth);
+      if (resolved) return resolved;
+    }
     if (/^_[1-9]$/.test(name) && this.ctx.inBlock && this.ctx.scope.kind !== 'end') {
       if (this.ctx.scope.innerNumberedUsed) this.fail(node, '内側のブロックで番号付き引数が既に使われています。');
       for (let parent = this.ctx.scope.parent; parent?.kind === 'block'; parent = parent.parent)
@@ -564,6 +567,25 @@ export class Converter {
       used: use,
       row: node.startPosition.row,
     };
+  }
+
+  private endImplicitIdentifier(node: Node, name: string, depth: number): Expr | undefined {
+    if (name !== 'it' && !/^_[1-9]$/.test(name)) return undefined;
+    if (!this.ctx.implicit) {
+      if (depth < 0)
+        for (let parent = this.ctx.scope.parent; parent; parent = parent.parent)
+          if (parent.kind === 'block') this.fail(node, '明示的な引数と暗黙の引数は一緒に使えません。');
+      return undefined;
+    }
+    if (depth >= 0) return { k: 'lvar', name, depth };
+    this.ctx.implicit.add(name);
+    const bindingDepth = this.ctx.scope.declare(name);
+    for (let parent = this.ctx.scope.parent; parent; parent = parent.parent)
+      if (parent.kind === 'block') {
+        parent.implicitNames.add(name);
+        break;
+      }
+    return { k: 'lvar', name, depth: bindingDepth };
   }
 
   private scopeResolution(node: Node): Expr {
@@ -1467,6 +1489,22 @@ export class Converter {
   private patternDepth = 0;
   private alternativeDepth = 0;
 
+  private pinExpr(node: Node): Expr {
+    const depth = this.patternDepth;
+    const alternativeDepth = this.alternativeDepth;
+    const bindings = [...this.patternBindings];
+    this.patternDepth = 0;
+    this.alternativeDepth = 0;
+    try {
+      return this.expr(node);
+    } finally {
+      this.patternDepth = depth;
+      this.alternativeDepth = alternativeDepth;
+      this.patternBindings.clear();
+      for (const name of bindings) this.patternBindings.add(name);
+    }
+  }
+
   private pattern(node: Node): Pattern {
     if (this.patternDepth++ === 0) this.patternBindings.clear();
     try {
@@ -1506,10 +1544,10 @@ export class Converter {
         const name = required(node.childForFieldName('name'));
         if (name.type === 'identifier' && this.ctx.scope.depthOf(name.text) < 0)
           this.fail(name, `変数「${name.text}」は定義されていません。`);
-        return { k: 'pin', e: this.expr(name) };
+        return { k: 'pin', e: this.pinExpr(name) };
       }
       case 'expression_reference_pattern': {
-        return { k: 'pin', e: this.expr(required(node.childForFieldName('value'))) };
+        return { k: 'pin', e: this.pinExpr(required(node.childForFieldName('value'))) };
       }
       case 'array_pattern': {
         return this.arrayPattern(node);

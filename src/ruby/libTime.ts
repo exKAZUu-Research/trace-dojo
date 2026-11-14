@@ -281,8 +281,7 @@ function strftime(data: TimeData, format: string): string {
       if (rendered === undefined) throw new UnsupportedFeatureError(`Time#strftime(${whole})`);
       const width = widthText ? Number(widthText) : undefined;
       if ((directive === 'N' || directive === 'L') && width !== undefined) {
-        const digits = clockDirective(data, date, 'N', flag, '', whole) as string;
-        return width <= 9 ? digits.slice(0, width) : digits.padEnd(width, '0');
+        return fractionDigits(data, width);
       }
       let result = caseText(rendered, directive, flags);
       if (directive === 'z') return padOffset(result, width, flag);
@@ -291,6 +290,13 @@ function strftime(data: TimeData, format: string): string {
       return result;
     }
   );
+}
+
+function fractionDigits(data: TimeData, width: number): string {
+  const denominator = data.remainderDenominator * 1_000_000_000n;
+  const numerator = data.exactNumerator();
+  const remainder = ((numerator % denominator) + denominator) % denominator;
+  return ((remainder * 10n ** BigInt(width)) / denominator).toString().padStart(width, '0');
 }
 
 function caseText(rendered: string, directive: string, flags: string): string {
@@ -582,19 +588,16 @@ def('Time', 'to_a', 0, (self: RObject) => {
 });
 def('Time', 'round', [0, 1], function* (self: RObject, args) {
   const digits = args.length > 0 ? Number(yield* toInt(args[0])) : 0;
+  const data = dataOf(self);
   if (digits > 9) {
-    const data = dataOf(self);
-    return makeTime(
-      data.nanoseconds,
-      data.offset,
-      data.zone,
-      data.exactOffset,
-      data.remainderNumerator,
-      data.remainderDenominator
+    const scale = 10n ** BigInt(digits - 9);
+    const rounded = floorDivide(
+      2n * data.exactNumerator() * scale + data.remainderDenominator,
+      2n * data.remainderDenominator
     );
+    return makeExactTime(rounded, scale, data.offset, data.zone, data.exactOffset);
   }
   const unit = 10n ** BigInt(9 - digits);
-  const data = dataOf(self);
   const rounded =
     floorDivide(2n * data.exactNumerator() + unit * data.remainderDenominator, 2n * unit * data.remainderDenominator) *
     unit;
