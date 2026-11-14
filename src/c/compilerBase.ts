@@ -333,6 +333,8 @@ export abstract class CompilerBase {
     const { type, name } = this.declaredType(base, declarator.declarator);
     const memberRow = declarator.row;
     if (name !== undefined) this.claimMemberName(names, name, memberRow);
+    if (align !== undefined && align !== 0 && align < alignOf(type))
+      this.error(memberRow, '_Alignas の大きさは、型のアラインメントより小さくできません。');
     const isFlexible = type.kind === 'array' && type.length === undefined;
     if (isFlexible) this.checkFlexibleMember(info, isLast, name, memberRow);
     else this.checkMemberType(info, type, name, memberRow);

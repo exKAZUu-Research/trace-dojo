@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 717 -- Declaration and initializer compilation share symbol and type state.
+// code-gauge-allow-file fileNcss 737 -- Declaration and initializer compilation share symbol and type state.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type { Value } from './arith';
 import type {
@@ -12,6 +12,7 @@ import type {
   InitDeclarator,
   Initializer,
   Parameter,
+  Specifiers,
   StorageClass,
   TranslationUnit,
 } from './ast';
@@ -33,6 +34,7 @@ import {
 } from './runtime';
 import { type Compiled, StatementCompiler } from './statementCompiler';
 import {
+  alignOf,
   compatible,
   composite,
   type CType,
@@ -209,10 +211,10 @@ export class Compiler extends StatementCompiler {
       this.error(declaration.row, `関数の外の宣言には ${specifiers.storage} を付けられません。`);
     }
     const base = this.baseType(specifiers);
-    if (specifiers.alignas) this.requestedAlignment(specifiers.alignas);
     for (const declarator of declaration.declarators) {
       const { type, name, row } = this.declaredType(base, declarator.declarator);
       if (name === undefined) this.error(row, '宣言する名前を書いてください。');
+      const alignment = this.objectAlignment(specifiers, type);
       if (specifiers.storage === 'typedef') {
         this.declareTypedef(name, type, row);
         continue;
@@ -223,8 +225,19 @@ export class Compiler extends StatementCompiler {
         if (!specifiers.isInline || specifiers.storage === 'extern') fn.hasExternalDeclaration = true;
         continue;
       }
-      this.declareGlobal(name, type, row, specifiers.storage, declarator.init, declaration.fromHeader);
+      const global = this.declareGlobal(name, type, row, specifiers.storage, declarator.init, declaration.fromHeader);
+      global.alignment = Math.max(global.alignment ?? 0, alignment ?? 0);
     }
+  }
+
+  private objectAlignment(specifiers: Specifiers, type: CType): number | undefined {
+    if (!specifiers.alignas) return undefined;
+    if (specifiers.storage === 'typedef' || specifiers.storage === 'register' || type.kind === 'function')
+      this.error(specifiers.row, '_Alignas は、typedef・register・関数には指定できません。');
+    const alignment = this.requestedAlignment(specifiers.alignas);
+    if (alignment !== 0 && alignment < alignOf(type))
+      this.error(specifiers.row, '_Alignas の大きさは、型のアラインメントより小さくできません。');
+    return alignment;
   }
 
   private declareTypedef(name: string, type: CType, row: number): void {
@@ -478,10 +491,10 @@ export class Compiler extends StatementCompiler {
     const { specifiers, row } = declaration;
     this.declareStandaloneTag(declaration);
     const base = this.baseType(specifiers);
-    if (specifiers.alignas) this.requestedAlignment(specifiers.alignas);
     const parts: LocalPart[] = [];
     for (const declarator of declaration.declarators) {
       const part = this.localDeclarator(specifiers.storage, base, declarator, declaration.fromHeader);
+      this.alignLocal(specifiers, declarator);
       if (part) parts.push(part);
     }
     const step = parts.some((part) => part.initializes) ? this.stepRow(row) : undefined;
@@ -499,6 +512,19 @@ export class Compiler extends StatementCompiler {
             return Completion.Normal;
           };
     return this.withVisibility({ exec, labels: new Set() });
+  }
+
+  private alignLocal(specifiers: Specifiers, declarator: InitDeclarator): void {
+    const name = declaredName(declarator.declarator);
+    const entity = name === undefined ? undefined : this.scope.ordinary.get(name);
+    if (entity) {
+      const alignment = this.objectAlignment(specifiers, entity.type);
+      if (entity.kind === 'local') {
+        entity.local.alignment = alignment;
+        if (entity.local.staticGlobal) entity.local.staticGlobal.alignment = alignment;
+      } else if (entity.kind === 'global')
+        entity.global.alignment = Math.max(entity.global.alignment ?? 0, alignment ?? 0);
+    }
   }
 
   // code-gauge-allow functionCognitiveComplexity 23 -- Storage class and variably modified types determine one local declaration.
@@ -598,7 +624,11 @@ export class Compiler extends StatementCompiler {
     return {
       run: (frame) => {
         lengths?.(frame);
-        const block = frame.runtime.allocate(sizeIn(type, frame.vla), 'stack');
+        const block = frame.runtime.allocate(
+          sizeIn(type, frame.vla),
+          'stack',
+          Math.max(alignOf(type), local.alignment ?? 0)
+        );
         block.type = type;
         block.name = name;
         frame.bases[index] = block.base;

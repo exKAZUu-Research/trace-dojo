@@ -1674,3 +1674,34 @@ test.each([
     });
   }
 });
+
+test('object alignment is honored across storage durations and array bounds', () => {
+  expect(
+    executeProgram(
+      'c',
+      `#include <stdio.h>
+#include <stdint.h>
+int a; _Alignas(64) int x;
+struct record { _Alignas(64) int value; } global;
+int main(void) {
+  _Alignas(128) int local = 3;
+  _Alignas(256) static int persistent;
+  struct record automatic;
+  int n = 3; _Alignas(64) int vla[n];
+  printf("%d %d %d %d %d %d %d\\n", (int)((uintptr_t)&x % 64), (int)((uintptr_t)&global % 64), (int)((uintptr_t)&local % 128), (int)((uintptr_t)&persistent % 256), (int)((uintptr_t)&automatic % 64), (int)((uintptr_t)vla % 64), local);
+}
+`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '0 0 0 0 0 0 3\n', uncaughtException: undefined });
+});
+
+test.each([
+  '_Alignas(1) int x;',
+  'void f(void) { _Alignas(1) int x; }',
+  'struct S { _Alignas(1) int x; };',
+  '_Alignas(64) typedef int T;',
+  'void f(void) { _Alignas(64) register int x; }',
+  '_Alignas(64) int f(void);',
+])('invalid alignment declarations are compile errors: %s', (source) => {
+  expect(executeProgram('c', `${source}\nint main(void) {}`)).toMatchObject({ kind: 'compileError' });
+});

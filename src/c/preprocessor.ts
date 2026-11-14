@@ -481,6 +481,7 @@ class Preprocessor {
   }
 
   // code-gauge-allow functionNcss 33 -- Stringification, variadic substitution and token pasting form one ordered pass.
+  // code-gauge-allow functionCognitiveComplexity 28 -- Token pasting, variadic comma removal and argument expansion share replacement state.
   private substitute(macro: Macro, args: PPToken[][], hide: ReadonlySet<string>, call: PPToken): PPToken[] {
     const params = macro.variadic ? [...(macro.params ?? []), '__VA_ARGS__'] : (macro.params ?? []);
     const argumentOf = (token: PPToken | undefined): PPToken[] | undefined => {

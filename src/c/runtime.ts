@@ -17,7 +17,7 @@ import {
   slicePointerBytes,
   storedPointerBytes,
 } from './pointerBounds';
-import { type CType, type FunctionType, sizeOf } from './types';
+import { alignOf, type CType, type FunctionType, sizeOf } from './types';
 
 /** A block-scope variable of a function, in the order the function declares it. */
 export interface LocalInfo {
@@ -33,10 +33,12 @@ export interface LocalInfo {
   isVla?: boolean;
   /** The global that holds a `static` local. */
   staticGlobal?: GlobalInfo;
+  alignment?: number;
   isParameter: boolean;
 }
 
 export interface GlobalInfo {
+  alignment?: number;
   header?: string;
   referencedAt?: number;
   index: number;
@@ -139,7 +141,7 @@ export class Frame implements TracedFrame {
   enterScope(locals: readonly LocalInfo[]): void {
     for (const local of locals) {
       if (!local.inMemory || local.staticGlobal || local.isVla) continue;
-      const block = this.runtime.allocate(local.size, 'stack');
+      const block = this.runtime.allocate(local.size, 'stack', Math.max(alignOf(local.type), local.alignment ?? 0));
       block.type = local.type;
       block.name = local.name;
       this.bases[local.index] = block.base;
@@ -234,9 +236,9 @@ export class Runtime implements TracedRuntime<Frame> {
     return true;
   }
 
-  allocate(size: number, region: 'data' | 'heap' | 'stack' | 'text'): Allocation {
+  allocate(size: number, region: 'data' | 'heap' | 'stack' | 'text', alignment?: number): Allocation {
     if (!this.reserve(size)) throw new CRuntimeError('custom', 'メモリを確保しすぎました。');
-    return this.memory.allocate(size, region);
+    return this.memory.allocate(size, region, alignment);
   }
 
   fullExpression<T>(run: () => T): T {

@@ -10,7 +10,7 @@ import { libraryEntry } from './library';
 import { cString } from './library/support';
 import { parseC } from './parse';
 import { type Frame, Runtime, storeValue } from './runtime';
-import { CHAR_POINTER, INT, pointerTo, sizeOf } from './types';
+import { alignOf, CHAR_POINTER, INT, pointerTo, sizeOf } from './types';
 
 // code-gauge-allow duplicateLines 15 -- Each language's runner wraps its own parser and runtime.
 export function executeCProgram(source: string, input?: ProgramInput): ProgramExecution {
@@ -77,7 +77,11 @@ function setUp(runtime: Runtime, program: CompiledProgram): void {
   runtime.literals = program.strings.map((bytes) => runtime.stringLiteral(bytes));
   runtime.globals = program.globals.map((global) => {
     const hasStorage = global.isDefined || global.header !== undefined;
-    const block = runtime.allocate(hasStorage ? Math.max(sizeOf(global.type), 1) : 0, 'data');
+    const block = runtime.allocate(
+      hasStorage ? Math.max(sizeOf(global.type), 1) : 0,
+      'data',
+      Math.max(alignOf(global.type), global.alignment ?? 0)
+    );
     block.initialized.fill(255);
     block.type = global.type;
     block.name = global.name;
