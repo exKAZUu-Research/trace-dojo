@@ -1166,3 +1166,43 @@ test('written type arguments stay fixed during function value inference', () => 
     )
   ).toMatchObject({ kind: 'compileError' });
 });
+
+test('spread append shares backing writes and allocation 1', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";func main(){s:="abc";b:=[]byte(s);fmt.Println(cap(b));b=append(b,"d"...);fmt.Println(string(b),cap(b));b[0]=120;fmt.Println(s,string(b))}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '32\nabcd 32\nabc xbcd\n', uncaughtException: undefined });
+});
+
+test('spread append shares backing writes and allocation 2', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";func main(){s:="abc";b:=[]byte(s);fmt.Println(cap(b));b=append(b,[]byte{100}...);fmt.Println(string(b),cap(b));b[0]=120;fmt.Println(s,string(b))}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '32\nabcd 32\nabc xbcd\n', uncaughtException: undefined });
+});
+
+test('spread append shares backing writes and allocation 3', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";func main(){s:=make([]int,3,8);copy(s,[]int{1,2,3});s=append(s,s...);fmt.Println(s,cap(s));var z []int;z=append(z,[]int{}...);fmt.Println(z==nil);a:=[]struct{N int}{{1}};b:=append(a,a...);b[1].N=2;fmt.Println(a,b)}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '[1 2 3 1 2 3] 8\ntrue\n[{1}] [{1} {2}]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('spread append shares backing writes and allocation 4', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";func build()[]int{var s []int;for i:=0;i<3;i++{s=append(s,[]int{i}...)};return s};func main(){s:=build();fmt.Println(s,cap(s));var d []int;d=append(d,1);d=append(d,[]int{2,3}...);fmt.Println(d,cap(d))}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '[0 1 2] 4\n[1 2 3] 3\n', uncaughtException: undefined });
+});

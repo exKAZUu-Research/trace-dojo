@@ -1232,15 +1232,19 @@ export abstract class CallCompiler extends CompositeCompiler {
       return this.invalid(expression);
     }
     const element = sliceType.element;
-    if (expression.spread) return this.appendSpread(expression, slice, sliceType);
-    const values = rest.map((arg) => this.assign(this.expression(arg), element, '要素'));
+    const added = expression.spread
+      ? this.appendSpread(expression, element)
+      : this.evaluatedAppendElements(rest, element);
+    if (!added) return this.invalid(expression);
     this.writeOperand(slice);
     const read = slice.eval;
     const zero = this.zeroOf(element);
     // The array that appending to a slice no variable holds allocates escapes where the append's result goes.
     const nonEscaping: Temporary | undefined =
       slice.nonEscaping ?? (slice.backingVars ? undefined : { escapes: false, written: false });
-    const stackBuffer = this.appendStackBuffer(first, { ...slice, nonEscaping }, this.inPlaceAppends.get(expression));
+    const stackBuffer = expression.spread
+      ? undefined
+      : this.appendStackBuffer(first, { ...slice, nonEscaping }, this.inPlaceAppends.get(expression));
     return {
       mode: 'value',
       type: slice.type,
@@ -1249,10 +1253,10 @@ export abstract class CallCompiler extends CompositeCompiler {
       nonEscaping,
       eval: (frame) => {
         const target = read(frame) as Slice | undefined;
-        const added = evaluateAll(frame, values);
-        const stack = stackBuffer(frame);
-        const result = appendValues(target, added, element, zero, (count) => frame.runtime.allocate(count), stack);
-        if (stack === 'static' && result?.array !== target?.array && inStackBuffer(result)) {
+        const values = added(frame);
+        const stack = stackBuffer?.(frame);
+        const result = appendValues(target, values, element, zero, (count) => frame.runtime.allocate(count), stack);
+        if (stackBuffer && stack === 'static' && result?.array !== target?.array && inStackBuffer(result)) {
           frame.useStackBuffer(stackBuffer);
         }
         return result;
@@ -1260,46 +1264,26 @@ export abstract class CallCompiler extends CompositeCompiler {
     };
   }
 
-  /** `append(s, t...)`: the elements of a slice of the same type, or the bytes of a string for a []byte. */
-  private appendSpread(
-    expression: Extract<Expression, { kind: 'call' }>,
-    slice: Operand,
-    sliceType: Extract<Type, { kind: 'slice' }>
-  ): Operand {
-    const { element } = sliceType;
+  private evaluatedAppendElements(expressions: Expression[], element: Type): ListEval {
+    const values = expressions.map((arg) => this.assign(this.expression(arg), element, '要素'));
+    return (frame) => evaluateAll(frame, values);
+  }
+
+  private appendSpread(expression: Extract<Expression, { kind: 'call' }>, element: Type): ListEval | undefined {
     if (expression.args.length !== 2) {
       for (const arg of expression.args.slice(1)) this.expression(arg);
       this.error(expression, '... で渡すときの append の引数は、スライスと、... を付けた値の2つにしてください。');
-      return this.invalid(expression);
+      return undefined;
     }
     const added = this.value(expression.args[1]);
-    if (this.isInvalid(added)) return added;
+    if (this.isInvalid(added)) return undefined;
     const fromString = isByteString(added.type) && identical(element, BASIC.uint8);
     const source = fromString ? this.defaulted(added).eval : this.assign(added, { kind: 'slice', element }, '引数');
-    const read = slice.eval;
-    const zero = this.zeroOf(element);
-    const local = slice.variable?.entity;
-    const onStack = (): boolean => local?.owner !== undefined && !local.escapes;
-    return {
-      mode: 'value',
-      type: slice.type,
-      span: expression,
-      eval: (frame) => {
-        const target = read(frame) as Slice | undefined;
-        const value = source(frame);
-        const values =
-          typeof value === 'string'
-            ? Array.from(value, (byte) => BigInt(byte.charCodeAt(0)))
-            : ((value as Slice | undefined)?.values() ?? []);
-        return appendValues(
-          target,
-          values,
-          element,
-          zero,
-          (count) => frame.runtime.allocate(count),
-          onStack() ? 'static' : undefined
-        );
-      },
+    return (frame) => {
+      const value = source(frame);
+      return typeof value === 'string'
+        ? Array.from(value, (byte) => BigInt(byte.charCodeAt(0)))
+        : ((value as Slice | undefined)?.values() ?? []);
     };
   }
 
