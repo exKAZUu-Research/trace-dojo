@@ -1,5 +1,6 @@
 import type { Span } from './ast';
 import type { CalleeSummary } from './entities';
+import type { StackBuffers } from './runtime';
 
 export type BasicKind =
   | 'bool'
@@ -139,7 +140,13 @@ export interface Method {
 
 /** The runtime half of a method, filled in once the method's body compiles. */
 export interface MethodCode {
-  call?: (receiver: unknown, args: unknown[], callRow?: number, deferredFor?: unknown) => unknown;
+  call?: (
+    receiver: unknown,
+    args: unknown[],
+    callRow?: number,
+    deferredFor?: unknown,
+    stackBuffers?: StackBuffers
+  ) => unknown;
   /** What calls learn from the body of a method the program declares. */
   summary?: CalleeSummary;
   /** Runs the method as `call` does, yielding when its goroutine blocks; absent when it never blocks. */
@@ -147,7 +154,8 @@ export interface MethodCode {
     receiver: unknown,
     args: unknown[],
     callRow?: number,
-    deferredFor?: unknown
+    deferredFor?: unknown,
+    stackBuffers?: StackBuffers
   ) => Generator<{ reason: string }, unknown, unknown>;
 }
 

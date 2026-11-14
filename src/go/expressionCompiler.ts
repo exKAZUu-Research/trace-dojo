@@ -871,9 +871,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   // Operators ------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- One case per unary operator, as the specification lists them.
   /** Compiles a channel that a receive uses, which a send-only channel cannot be. */
-  protected receivableChannel(expression: Expression): Eval | undefined {
+  protected receivableChannel(expression: Expression): { eval: Eval; element: Type } | undefined {
     const operand = this.value(expression);
     if (this.isInvalid(operand)) return undefined;
     const type = coreType(operand.type);
@@ -885,7 +884,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(expression, '送信専用のチャネルからは受信できません。');
       return undefined;
     }
-    return operand.eval;
+    return { eval: operand.eval, element: type.element };
   }
 
   /**
@@ -896,9 +895,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
     this.runtimeCallCount++;
     const channel = this.receivableChannel(expression.operand);
     if (!channel) return this.invalid(expression);
-    const type = (coreType(this.withoutHoists(() => this.value(expression.operand)).type) as { element: Type }).element;
+    const type = channel.element;
     const run = function* (frame: Frame): Suspending<Value> {
-      const [value, ok] = yield* receive(channel(frame) as Channel | undefined);
+      const [value, ok] = yield* receive(channel.eval(frame) as Channel | undefined);
       return (commaOk ? [value, ok] : value) as Value;
     };
     const evaluate = this.suspending(run, (frame) => runToEnd(run(frame)));
@@ -968,9 +967,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
       name: entity.name,
       type,
       value: () => instance,
-      direct: (values, row) => instance.call(values, row),
+      direct: (values, row, stackBuffers) => instance.call(values, row, undefined, stackBuffers),
       directResume:
-        instance.resume && ((values, row) => (instance.resume as NonNullable<GoFunc['resume']>)(values, row)),
+        instance.resume &&
+        ((values, row, stackBuffers) =>
+          (instance.resume as NonNullable<GoFunc['resume']>)(values, row, undefined, stackBuffers)),
     };
     return { mode: 'value', type, span: expression, eval: () => instance, func };
   }
@@ -2861,7 +2862,10 @@ export { RUNE };
 /** The value of an imaginary literal's number, whose digits alone are decimal even after a leading 0, as Go keeps. */
 function imaginaryPart(text: string): Rational {
   if (/^[\d_]+$/.test(text)) return { num: BigInt(text.replaceAll('_', '')), den: 1n };
-  return /^0[xX][\da-fA-F]+$/.test(text) ? { num: BigInt(text), den: 1n } : parseFloatLiteral(text);
+  const digits = text.replaceAll('_', '');
+  return /^0(?:[xX][\da-fA-F]+|[bB][01]+|[oO][0-7]+)$/.test(digits)
+    ? { num: BigInt(digits), den: 1n }
+    : parseFloatLiteral(text);
 }
 
 /** The type that an expression names, such as a type argument `[]int` or `Pair[int, string]`, if it names one. */

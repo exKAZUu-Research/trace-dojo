@@ -1,9 +1,12 @@
+import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
+import { rationalToFloat } from '../constants';
 import type { Entity } from '../entities';
 import { newError } from '../errorValues';
 import { formatFloat } from '../floatFormat';
 import { type BoundCall, dynamicMethod } from '../methods';
 import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
 import { GoPanic } from '../runtime';
+import { nilPointerPanic } from '../runtimeErrors';
 import { BASIC, pointerTo, RUNE, type Type } from '../types';
 import { Cell, GoStruct, Iface, Pointer, type Value } from '../values';
 import { STATE } from './fmt';
@@ -17,32 +20,35 @@ const RAT_POINTER = pointerTo(RAT_TYPE);
 const INT64 = BASIC.int64;
 const UINT64 = BASIC.uint64;
 
-const nilDereference = (): never => {
-  throw new GoPanic(newError('invalid memory address or nil pointer dereference'));
-};
-
 function structOf(pointer: Value): GoStruct {
-  if (!(pointer instanceof Pointer)) nilDereference();
+  if (!(pointer instanceof Pointer)) nilPointerPanic();
   return (pointer as Pointer).load() as GoStruct;
 }
 
 const intOf = (pointer: Value): bigint => (structOf(pointer).native?.int as bigint | undefined) ?? 0n;
 
 function setInt(pointer: Value, value: bigint): Value {
+  chargeBits(BigInt(bitLength(value)));
   const struct = structOf(pointer);
-  struct.native = { ...struct.native, int: value };
+  struct.native ??= {};
+  struct.native.int = value;
   return pointer;
 }
 
-const newInt = (value: bigint): Pointer => new Pointer(new Cell(new GoStruct([], { int: value })), 'v');
+const newInt = (value: bigint): Pointer => {
+  chargeBits(BigInt(bitLength(value)));
+  return new Pointer(new Cell(new GoStruct([], { int: value })), 'v');
+};
 
 const DIGITS = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
 function text(value: bigint, base: number): string {
   if (base <= 36) return value.toString(base);
+  chargeBits(BigInt(bitLength(value)));
   let rest = value < 0n ? -value : value;
   let result = '';
   do {
+    chargeBits(BigInt(bitLength(rest)));
     result = DIGITS[Number(rest % BigInt(base))] + result;
     rest /= BigInt(base);
   } while (rest > 0n);
@@ -72,7 +78,7 @@ function parseInt(source: string, base: number): bigint | undefined {
   if (rest === '') return undefined;
   let value = 0n;
   for (const char of rest) {
-    currentRuntime().spend();
+    chargeBits(BigInt(bitLength(value)) + 6n);
     const digit = radix <= 36 ? DIGITS.indexOf(char.toLowerCase()) : DIGITS.indexOf(char);
     if (digit < 0 || digit >= radix) return undefined;
     value = value * BigInt(radix) + BigInt(digit);
@@ -95,6 +101,8 @@ function divMod(x: bigint, y: bigint): [bigint, bigint] {
 
 function power(base: bigint, exponent: bigint, modulus: bigint | undefined): bigint {
   if (exponent <= 0n) return modulus !== undefined && modulus !== 0n && (modulus === 1n || modulus === -1n) ? 0n : 1n;
+  if ((modulus === undefined || modulus === 0n) && (base > 1n || base < -1n))
+    chargeBits(BigInt(bitLength(base)) * exponent);
   let result = 1n;
   let b = base;
   let e = exponent;
@@ -106,9 +114,10 @@ function power(base: bigint, exponent: bigint, modulus: bigint | undefined): big
   b = reduce(b);
   while (e > 0n) {
     currentRuntime().spend();
+    chargeBits(BigInt(Math.max(bitLength(result), bitLength(b))));
     if (e & 1n) result = reduce(result * b);
-    b = reduce(b * b);
     e >>= 1n;
+    if (e > 0n) b = reduce(b * b);
   }
   return reduce(result);
 }
@@ -116,7 +125,10 @@ function power(base: bigint, exponent: bigint, modulus: bigint | undefined): big
 function gcd(a: bigint, b: bigint): bigint {
   let x = a < 0n ? -a : a;
   let y = b < 0n ? -b : b;
-  while (y !== 0n) [x, y] = [y, x % y];
+  while (y !== 0n) {
+    chargeBits(BigInt(Math.max(bitLength(x), bitLength(y))));
+    [x, y] = [y, x % y];
+  }
   return x;
 }
 
@@ -271,7 +283,10 @@ const methods: [string, Type[], Type[], (z: Value, args: Value[]) => Value | Val
       if (low > high) return setInt(z, 1n);
       if (low <= 0n && high >= 0n) return setInt(z, 0n);
       let product = 1n;
-      for (let factor = low; factor <= high; factor++) product *= factor;
+      for (let factor = low; factor <= high; factor++) {
+        chargeBits(BigInt(bitLength(product) + bitLength(factor)));
+        product *= factor;
+      }
       return setInt(z, product);
     },
   ],
@@ -282,10 +297,11 @@ const methods: [string, Type[], Type[], (z: Value, args: Value[]) => Value | Val
     (z, [n, k]) => {
       let top = n as bigint;
       let count = k as bigint;
-      if (count > top) return setInt(z, 0n);
+      if (count < 0n || count > top) return setInt(z, 0n);
       if (count > top - count) count = top - count;
       let result = 1n;
       for (let index = 1n; index <= count; index++) {
+        chargeBits(BigInt(bitLength(result) + bitLength(top)));
         result = (result * top) / index;
         top--;
       }
@@ -317,7 +333,16 @@ const methods: [string, Type[], Type[], (z: Value, args: Value[]) => Value | Val
       return setInt(z, ((s % modulus) + modulus) % modulus);
     },
   ],
-  ['Lsh', [INT_POINTER, BASIC.uint], [INT_POINTER], (z, [x, n]) => setInt(z, intOf(x) << (n as bigint))],
+  [
+    'Lsh',
+    [INT_POINTER, BASIC.uint],
+    [INT_POINTER],
+    (z, [x, n]) => {
+      const value = intOf(x);
+      if (value !== 0n) chargeBits(BigInt(bitLength(value)) + (n as bigint));
+      return setInt(z, value << (n as bigint));
+    },
+  ],
   ['Rsh', [INT_POINTER, BASIC.uint], [INT_POINTER], (z, [x, n]) => setInt(z, intOf(x) >> (n as bigint))],
   ['Cmp', [INT_POINTER], [INT], (x, [y]) => BigInt(compare(intOf(x), intOf(y)))],
   [
@@ -332,7 +357,7 @@ const methods: [string, Type[], Type[], (z: Value, args: Value[]) => Value | Val
   ],
   ['Sign', [], [INT], (x) => BigInt(compare(intOf(x), 0n))],
   ['Int64', [], [INT64], (x) => BigInt.asIntN(64, intOf(x))],
-  ['Uint64', [], [UINT64], (x) => BigInt.asUintN(64, intOf(x))],
+  ['Uint64', [], [UINT64], (x) => BigInt.asUintN(64, intOf(x) < 0n ? -intOf(x) : intOf(x))],
   ['IsInt64', [], [BOOL], (x) => BigInt.asIntN(64, intOf(x)) === intOf(x)],
   ['IsUint64', [], [BOOL], (x) => intOf(x) >= 0n && BigInt.asUintN(64, intOf(x)) === intOf(x)],
   ['BitLen', [], [INT], (x) => BigInt(bitLength(intOf(x)))],
@@ -364,7 +389,18 @@ const methods: [string, Type[], Type[], (z: Value, args: Value[]) => Value | Val
   ['Text', [INT], [STRING], (x, [base]) => (x === undefined ? '<nil>' : text(intOf(x), Number(base as bigint)))],
   ['String', [], [STRING], (x) => (x === undefined ? '<nil>' : text(intOf(x), 10))],
 ];
-for (const [name, params, results, impl] of methods) addMethod(INT_TYPE, name, fn(params, results), impl, true);
+for (const [name, params, results, impl] of methods)
+  addMethod(
+    INT_TYPE,
+    name,
+    fn(params, results),
+    (receiver, args) => {
+      chargeValue(receiver);
+      for (const arg of args) chargeValue(arg);
+      return impl(receiver, args);
+    },
+    true
+  );
 
 function compare(a: bigint, b: bigint): number {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -417,6 +453,7 @@ function formatInt(x: Value, state: Value, verb: number): void {
     else if (stateFlag(state, '0') && !precisionSet) zeros = pad;
     else left = pad;
   }
+  currentRuntime().checkStringLength(left + zeros + right + sign.length + prefix.length + digits.length);
   write(' '.repeat(left) + sign + prefix + '0'.repeat(zeros) + digits + ' '.repeat(right));
 }
 
@@ -450,7 +487,8 @@ function normalize(num: bigint, den: bigint): Fraction {
 
 function setRat(pointer: Value, value: Fraction): Value {
   const struct = structOf(pointer);
-  struct.native = { ...struct.native, rat: value };
+  chargeBits(BigInt(Math.max(bitLength(value.num), bitLength(value.den))));
+  struct.native = { ...struct.native, rat: { num: value.num, den: value.den } };
   return pointer;
 }
 
@@ -460,6 +498,7 @@ const ratString = (value: Fraction): string => `${value.num}/${value.den}`;
 
 /** Rat.FloatString: the decimal with the digits after the point, rounded half away from zero. */
 function floatString(value: Fraction, digits: number): string {
+  chargeBits(BigInt(Math.max(0, digits)) * 4n);
   const negative = value.num < 0n;
   const absolute = negative ? -value.num : value.num;
   const scale = 10n ** BigInt(Math.max(digits, 0));
@@ -479,17 +518,8 @@ function floatString(value: Fraction, digits: number): string {
 }
 
 function ratFloat64(value: Fraction): [number, boolean] {
-  const result = Number(value.num) / Number(value.den);
-  const precise = Number.isFinite(result) ? result : divideExact(value);
-  return [precise, normalizeExact(precise, value)];
-}
-
-function divideExact(value: Fraction): number {
-  return Number(formatDecimal(value, 40));
-}
-
-function formatDecimal(value: Fraction, digits: number): string {
-  return floatString(value, digits);
+  const result = rationalToFloat(value);
+  return [result, normalizeExact(result, value)];
 }
 
 function normalizeExact(result: number, value: Fraction): boolean {
@@ -550,6 +580,7 @@ const ratMethods: [string, Type[], Type[], (z: Value, args: Value[]) => Value | 
       let num = BigInt(`${whole}${fraction}` || '0');
       let den = 10n ** BigInt(fraction.length);
       const exponent = Number(exponentText);
+      chargeBits(BigInt(Math.abs(exponent)) * 4n + BigInt(bitLength(num)));
       if (exponent >= 0) num *= 10n ** BigInt(exponent);
       else den *= 10n ** BigInt(-exponent);
       return [setRat(z, normalize(sign === '-' ? -num : num, den)), true];
@@ -574,14 +605,25 @@ const ratMethods: [string, Type[], Type[], (z: Value, args: Value[]) => Value | 
   ['Cmp', [RAT_POINTER], [INT], (x, [y]) => BigInt(compare(ratOf(x).num * ratOf(y).den, ratOf(y).num * ratOf(x).den))],
   ['Sign', [], [INT], (x) => BigInt(compare(ratOf(x).num, 0n))],
   ['IsInt', [], [BOOL], (x) => ratOf(x).den === 1n],
-  ['Num', [], [INT_POINTER], (x) => newInt(ratOf(x).num)],
-  ['Denom', [], [INT_POINTER], (x) => newInt(ratOf(x).den)],
+  ['Num', [], [INT_POINTER], (x) => component(x, 'num')],
+  ['Denom', [], [INT_POINTER], (x) => component(x, 'den')],
   ['String', [], [STRING], (x) => (x === undefined ? '<nil>' : ratString(ratOf(x)))],
   ['RatString', [], [STRING], (x) => (ratOf(x).den === 1n ? String(ratOf(x).num) : ratString(ratOf(x)))],
   ['FloatString', [INT], [STRING], (x, [n]) => floatString(ratOf(x), Number(n as bigint))],
   ['Float64', [], [BASIC.float64, BOOL], (x) => ratFloat64(ratOf(x))],
 ];
-for (const [name, params, results, impl] of ratMethods) addMethod(RAT_TYPE, name, fn(params, results), impl, true);
+for (const [name, params, results, impl] of ratMethods)
+  addMethod(
+    RAT_TYPE,
+    name,
+    fn(params, results),
+    (receiver, args) => {
+      chargeValue(receiver);
+      for (const arg of args) chargeValue(arg);
+      return impl(receiver, args);
+    },
+    true
+  );
 
 const members: Record<string, Entity> = {
   Int: typeEntity(INT_TYPE),
@@ -622,3 +664,42 @@ export const BIG_PACKAGE = definePackage('math/big', members, [
   'MinExp',
   'MaxPrec',
 ]);
+
+function component(receiver: Value, part: 'num' | 'den'): Pointer {
+  const struct = structOf(receiver);
+  struct.native ??= {};
+  const key = `${part}Pointer`;
+  let pointer = struct.native[key] as Pointer | undefined;
+  if (!pointer) {
+    const state = {
+      get int(): bigint {
+        return ratOf(receiver)[part];
+      },
+      set int(value: bigint) {
+        struct.native ??= {};
+        const fraction = (struct.native.rat ??= { num: 0n, den: 1n }) as Fraction;
+        fraction[part] = value;
+      },
+    };
+    pointer = new Pointer(new Cell(new GoStruct([], state)), 'v');
+    struct.native[key] = pointer;
+  }
+  return pointer;
+}
+
+function chargeValue(value: Value): void {
+  if (typeof value === 'string') {
+    currentRuntime().spend(value.length);
+    return;
+  }
+  if (!(value instanceof Pointer)) return;
+  const native = (value.load() as GoStruct | undefined)?.native;
+  if (typeof native?.int === 'bigint') chargeBits(BigInt(bitLength(native.int)));
+  const fraction = native?.rat as Fraction | undefined;
+  if (fraction) chargeBits(BigInt(Math.max(bitLength(fraction.num), bitLength(fraction.den))));
+}
+
+function chargeBits(bits: bigint): void {
+  if (bits > BigInt(LIMITS.maxStringLength)) throw new ExecutionLimitError('storage');
+  currentRuntime().spend(Math.max(1, Number((bits + 63n) / 64n)));
+}

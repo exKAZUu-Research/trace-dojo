@@ -89,7 +89,8 @@ export class SliceArrayPointer extends Pointer {
 
   override store(value: Value): void {
     const array = this.base as Value[];
-    for (const [index, element] of (value as GoArray).elements.entries()) array[(this.key as number) + index] = element;
+    for (const [index, element] of (value as GoArray).elements.entries())
+      array[(this.key as number) + index] = writeInPlace(array[(this.key as number) + index], element);
   }
 }
 
@@ -105,6 +106,7 @@ export class GoStruct {
 export interface NativeState {
   turtle?: TurtleState;
   clone?(): NativeState;
+  roots?(): unknown[];
   /** The values of the type's declared fields, for a library type that keeps them in this state instead. */
   fieldValues?(): Value[];
   [key: string]: unknown;
@@ -162,7 +164,8 @@ export class GoFunc {
     readonly resume?: (
       args: Value[],
       callRow?: number,
-      deferredFor?: unknown
+      deferredFor?: unknown,
+      stackBuffers?: StackBuffers
     ) => Generator<{ reason: string }, Value | Value[], unknown>
   ) {}
 }
@@ -181,7 +184,8 @@ export class Channel {
     /** The zero value of the element type, which a receive from a closed channel gives. */
     readonly zero: () => Value,
     /** Numbers channels in the order the program makes them, for printing them as addresses. */
-    readonly id: number
+    readonly id: number,
+    readonly timer = false
   ) {}
 }
 
@@ -199,13 +203,7 @@ export const CONSTANT_IFACES = new WeakSet<Iface>();
 /** Copies a value as assignment does: structs and arrays are values, everything else is shared. */
 export function copyValue(value: Value): Value {
   if (value instanceof GoStruct) {
-    const native = value.native;
-    const copied = native?.clone
-      ? native.clone()
-      : typeof native?.copy === 'function'
-        ? (native.copy as () => NativeState)()
-        : native;
-    return new GoStruct(value.fields.map(copyValue), copied);
+    return new GoStruct(value.fields.map(copyValue), value.native?.clone ? value.native.clone() : value.native);
   }
   if (value instanceof GoArray) return new GoArray(value.elements.map(copyValue));
   return value;

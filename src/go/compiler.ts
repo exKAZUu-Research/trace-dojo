@@ -670,28 +670,28 @@ export class ProgramCompiler extends StatementCompiler {
         if ((params.length > 0 && args === undefined) || (methodParams.length > 0 && !methodInstance)) return;
         const { info } = fn;
         const code = methodInstance?.code ?? (method.code as NonNullable<typeof method.code>);
-        code.call = (receiverValue: unknown, argValues: unknown[], callRow?: number, deferredFor?: unknown) =>
-          currentRuntime().call(info, [], [receiverValue, ...argValues] as Value[], callRow, deferredFor as never);
-        code.resume = (receiverValue: unknown, argValues: unknown[], callRow?: number, deferredFor?: unknown) =>
-          currentRuntime().resume(info, [], [receiverValue, ...argValues] as Value[], callRow, deferredFor as never);
-        const summary = method.code?.summary;
-        if (summary) this.completeSummary(summary, method, fn);
-        (method.code as { call?: unknown }).call = (
-          receiverValue: Value,
-          argValues: Value[],
-          callRow?: number,
-          deferredFor?: unknown,
-          stackBuffers?: StackBuffers
-        ) =>
+        code.call = (receiverValue, argValues, callRow, deferredFor, stackBuffers) =>
           currentRuntime().call(
             info,
             [],
-            [receiverValue, ...argValues],
+            [receiverValue, ...argValues] as Value[],
             callRow,
             deferredFor as never,
             undefined,
             stackBuffers
           );
+        code.resume = (receiverValue, argValues, callRow, deferredFor, stackBuffers) =>
+          currentRuntime().resume(
+            info,
+            [],
+            [receiverValue, ...argValues] as Value[],
+            callRow,
+            deferredFor as never,
+            undefined,
+            stackBuffers
+          );
+        const summary = code.summary;
+        if (summary) this.completeSummary(summary, method, fn);
       });
     } finally {
       this.reporting = outerReporting;
@@ -732,8 +732,21 @@ export class ProgramCompiler extends StatementCompiler {
         undefined,
         stackBuffers
       );
-    const resume = (args: Value[], callRow?: number, deferredFor?: unknown): Suspending<Value | Value[]> =>
-      currentRuntime().resume(state.info as FunctionInfo, [], args, callRow, deferredFor as never);
+    const resume = (
+      args: Value[],
+      callRow?: number,
+      deferredFor?: unknown,
+      stackBuffers?: StackBuffers
+    ): Suspending<Value | Value[]> =>
+      currentRuntime().resume(
+        state.info as FunctionInfo,
+        [],
+        args,
+        callRow,
+        deferredFor as never,
+        undefined,
+        stackBuffers
+      );
     const entity = {
       kind: 'func' as const,
       name,
@@ -744,7 +757,8 @@ export class ProgramCompiler extends StatementCompiler {
       value: () => (value ??= new GoFunc(call, [], resume)),
       direct: (args: Value[], callRow: number | undefined, stackBuffers?: StackBuffers) =>
         call(args, callRow, undefined, stackBuffers),
-      directResume: (args: Value[], callRow: number | undefined) => resume(args, callRow),
+      directResume: (args: Value[], callRow: number | undefined, stackBuffers?: StackBuffers) =>
+        resume(args, callRow, undefined, stackBuffers),
     };
     this.declarePackageName(name, entity, declaration.nameSpan);
     this.pendingSignatures.push(() => {

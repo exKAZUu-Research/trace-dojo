@@ -21,7 +21,7 @@ export interface Rational {
 const MAX_CONSTANT_BITS = 512n;
 const MAX_RAT_BITS = 4096n;
 const FLOAT_PREC = 512;
-const MAX_FLOAT_EXP = 1_000_000_000;
+const MAX_FLOAT_EXP = 2_147_483_000;
 
 export class ConstantOverflow extends Error {}
 export class ConstantDivisionByZero extends Error {}
@@ -103,6 +103,8 @@ export function parseFloatLiteral(text: string): Rational {
     if (!hex) throw new Error(`Invalid float literal ${text}`);
     const digits = BigInt(`0x${hex[1]}${hex[2] ?? ''}`);
     const exponent = Number(hex[3]) - 4 * (hex[2]?.length ?? 0);
+    if (Math.abs(exponent) > MAX_FLOAT_EXP + FLOAT_PREC) throw new ConstantOverflow();
+    if (Math.abs(exponent) > 4000) return approxFraction(digits, 1n, exponent);
     return exponent >= 0 ? rational(digits << BigInt(exponent)) : rational(digits, 1n << BigInt(-exponent));
   }
   const match = /^(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/.exec(text);

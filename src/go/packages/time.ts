@@ -371,7 +371,7 @@ function clockOf(runtime: Runtime): Clock {
 
 /** The monotonic clock, counted from 1 when the program first reads it, as Go counts from its start. */
 function monotonic(): bigint {
-  return BigInt(scheduler().now) + 1n;
+  return BigInt(currentRuntime().scheduler?.now ?? 0) + 1n;
 }
 
 export function now(): goTime.Time {
@@ -427,21 +427,25 @@ function arm(state: TimerState, delay: bigint): void {
       state.pending = undefined;
       if (state.task !== undefined) {
         const task = state.task as GoFunc;
-        running.spawn(function* () {
-          return task.resume ? yield* task.resume([]) : task.call([]);
-        });
+        running.spawn(
+          function* () {
+            return task.resume ? yield* task.resume([]) : task.call([]);
+          },
+          [task]
+        );
         return;
       }
       deliver(state.channel as Channel);
       if (state.period !== undefined) arm(state, state.period);
     },
-    state.channel
+    state.channel,
+    [state.task]
   );
 }
 
 function newTimer(delay: bigint, period?: bigint, task?: Value): Pointer {
   const channel =
-    task === undefined ? makeChannel(1, () => timeValue({ wall: 0n, ext: 0n, loc: undefined })) : undefined;
+    task === undefined ? makeChannel(0, () => timeValue({ wall: 0n, ext: 0n, loc: undefined }), true) : undefined;
   const state: TimerState = { channel, period, task };
   arm(state, delay);
   return new Pointer({ v: new GoStruct([channel], { timer: state }) } as never, 'v');
@@ -452,7 +456,8 @@ const timerStateOf = (receiver: Value): TimerState =>
 
 /** Stops a timer, discarding a time it sent that no one took, as Go 1.23 does; tells whether it was pending. */
 function stopTimer(state: TimerState): boolean {
-  const wasPending = state.pending !== undefined && scheduler().removeTimer(state.pending);
+  const pending = state.pending !== undefined && scheduler().removeTimer(state.pending);
+  const wasPending = pending || (state.task === undefined && (state.channel?.buffer.length ?? 0) > 0);
   state.pending = undefined;
   if (state.channel) state.channel.buffer.length = 0;
   return wasPending;

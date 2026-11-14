@@ -404,10 +404,12 @@ export abstract class CallCompiler extends CompositeCompiler {
         const argValues = withTemporary(frame, fn, () => args(frame));
         if (direct)
           return callee.func?.directResume
-            ? yield* callee.func.directResume(argValues, row)
+            ? yield* callee.func.directResume(argValues, row, buffers(frame))
             : direct(argValues, row, buffers(frame));
         if (!(fn instanceof GoFunc)) nilPointerPanic();
-        return fn.resume ? yield* fn.resume(argValues, row) : fn.call(argValues, row, undefined, buffers(frame));
+        return fn.resume
+          ? yield* fn.resume(argValues, row, undefined, buffers(frame))
+          : fn.call(argValues, row, undefined, buffers(frame));
       }
     );
     return call
@@ -491,6 +493,14 @@ export abstract class CallCompiler extends CompositeCompiler {
     spread: boolean
   ): Substitution | undefined {
     const { typeParams, type } = generic;
+    if (written.length > typeParams.length) {
+      this.error(span, `型引数は ${typeParams.length} 個ですが、${written.length} 個書かれています。`);
+      return undefined;
+    }
+    if (spread && !type.variadic) {
+      this.error(span, '可変個の引数を取らない関数には、... で引数を渡せません。');
+      return undefined;
+    }
     const mapping: Substitution = new Map(written.map((arg, index) => [typeParams[index].id, arg]));
     const params = type.params;
     if ((!type.variadic || spread) && operands.length !== params.length) {
@@ -625,7 +635,7 @@ export abstract class CallCompiler extends CompositeCompiler {
       method.code?.resume || !method.code?.call
         ? function* (frame) {
             const value = readReceiver(frame);
-            return yield* resumeMethod(method, value, args(frame), row);
+            return yield* resumeMethod(method, value, args(frame), row, undefined, buffers(frame));
           }
         : undefined
     );
@@ -651,10 +661,11 @@ export abstract class CallCompiler extends CompositeCompiler {
           const iface = readReceiver(frame) as Iface | undefined;
           if (!iface) nilPointerPanic();
           return new GoFunc(
-            (args, row, deferredFor) =>
-              (dynamicMethod(iface.type, name) as BoundCall)(iface.value, args, row, deferredFor),
+            (args, row, deferredFor, stackBuffers) =>
+              (dynamicMethod(iface.type, name) as BoundCall)(iface.value, args, row, deferredFor, stackBuffers),
             [iface],
-            (args, row) => resumeDynamicMethod(iface.type, name, iface.value, args, row)
+            (args, row, deferredFor, stackBuffers) =>
+              resumeDynamicMethod(iface.type, name, iface.value, args, row, deferredFor, stackBuffers)
           );
         },
       };
@@ -675,9 +686,25 @@ export abstract class CallCompiler extends CompositeCompiler {
       eval: (frame) => {
         const value = bound(frame);
         return new GoFunc(
-          (args, row, deferredFor) => invokeMethod(method, value, args, row, deferredFor),
+          (args, row, deferredFor, stackBuffers) =>
+            invokeMethod(
+              method,
+              method.pointerReceiver ? value : copyValue(value),
+              args,
+              row,
+              deferredFor,
+              stackBuffers
+            ),
           [value],
-          (args, row) => resumeMethod(method, value, args, row)
+          (args, row, deferredFor, stackBuffers) =>
+            resumeMethod(
+              method,
+              method.pointerReceiver ? value : copyValue(value),
+              args,
+              row,
+              deferredFor,
+              stackBuffers
+            )
         );
       },
     };
@@ -710,32 +737,41 @@ export abstract class CallCompiler extends CompositeCompiler {
     };
     const call =
       selection.kind === 'method'
-        ? (args: Value[], row?: number, deferredFor?: unknown): Value | Value[] =>
+        ? (args: Value[], row?: number, deferredFor?: unknown, stackBuffers?: StackBuffers): Value | Value[] =>
             invokeMethod(
               selection.method,
               receiverFor(args[0], selection.path, selection.method, underlying(type).kind === 'pointer'),
               args.slice(1),
               row,
-              deferredFor
+              deferredFor,
+              stackBuffers
             )
-        : (args: Value[], row?: number, deferredFor?: unknown): Value | Value[] => {
+        : (args: Value[], row?: number, deferredFor?: unknown, stackBuffers?: StackBuffers): Value | Value[] => {
             const iface = args[0] as Iface | undefined;
             if (!iface) nilPointerPanic();
-            return (dynamicMethod(iface.type, name) as BoundCall)(iface.value, args.slice(1), row, deferredFor);
+            return (dynamicMethod(iface.type, name) as BoundCall)(
+              iface.value,
+              args.slice(1),
+              row,
+              deferredFor,
+              stackBuffers
+            );
           };
     const resume =
       selection.kind === 'method'
-        ? (args: Value[], row?: number) =>
+        ? (args: Value[], row?: number, deferredFor?: unknown, stackBuffers?: StackBuffers) =>
             resumeMethod(
               selection.method,
               receiverFor(args[0], selection.path, selection.method, underlying(type).kind === 'pointer'),
               args.slice(1),
-              row
+              row,
+              deferredFor,
+              stackBuffers
             )
-        : (args: Value[], row?: number) => {
+        : (args: Value[], row?: number, deferredFor?: unknown, stackBuffers?: StackBuffers) => {
             const iface = args[0] as Iface | undefined;
             if (!iface) nilPointerPanic();
-            return resumeDynamicMethod(iface.type, name, iface.value, args.slice(1), row);
+            return resumeDynamicMethod(iface.type, name, iface.value, args.slice(1), row, deferredFor, stackBuffers);
           };
     const value = new GoFunc(call, [], resume);
     return { mode: 'value', type: signature, span, eval: () => value };
@@ -783,13 +819,14 @@ export abstract class CallCompiler extends CompositeCompiler {
           instantiate: (types) => {
             const code = method.instantiate?.(types);
             return new GoFunc(
-              ([value, ...args], row, deferredFor) => code?.call?.(value, args, row, deferredFor) as Value | Value[],
+              ([value, ...args], row, deferredFor, stackBuffers) =>
+                code?.call?.(value, args, row, deferredFor, stackBuffers) as Value | Value[],
               [],
-              function* ([value, ...args], row, deferredFor) {
+              function* ([value, ...args], row, deferredFor, stackBuffers) {
                 return (
                   code?.resume
-                    ? yield* code.resume(value, args, row, deferredFor)
-                    : code?.call?.(value, args, row, deferredFor)
+                    ? yield* code.resume(value, args, row, deferredFor, stackBuffers)
+                    : code?.call?.(value, args, row, deferredFor, stackBuffers)
                 ) as Value | Value[];
               }
             );
@@ -1064,7 +1101,9 @@ export abstract class CallCompiler extends CompositeCompiler {
         span: expression,
         eval: (frame) => {
           const channel = read(frame) as Channel | undefined;
-          return BigInt(channel ? (name === 'len' ? channel.buffer.length : channel.capacity) : 0);
+          return BigInt(
+            channel ? (name === 'len' ? (channel.timer ? 0 : channel.buffer.length) : channel.capacity) : 0
+          );
         },
       };
     }

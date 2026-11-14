@@ -12,19 +12,20 @@ import { BOOL, INT } from './support';
  * The state of a sync type, kept outside Go's view of its fields. Copying the struct copies the state, as copying a
  * WaitGroup or a Mutex in Go copies its counter or lock, while the goroutines waiting on it stay with the original.
  */
-function stateOf<T extends object>(receiver: Value, key: string, make: () => T): T {
+interface CloneableState<T> {
+  clone(): T;
+  roots?(): unknown[];
+}
+
+function nativeState<T extends CloneableState<T>>(key: string, state: T): NativeState {
+  return { [key]: state, clone: () => nativeState(key, state.clone()), roots: () => state.roots?.() ?? [] };
+}
+
+function stateOf<T extends CloneableState<T>>(receiver: Value, key: string, make: () => T): T {
   const struct = (receiver as Pointer | undefined)?.load() as GoStruct | undefined;
   if (!struct) nilPointerPanic();
-  struct.native ??= {};
-  const native = struct.native as NativeState & { copy?: () => NativeState };
-  if (!(key in native)) {
-    native[key] = make();
-    native.copy = () => {
-      const state = native[key] as { clone(): T };
-      return { [key]: state.clone(), copy: undefined } as NativeState;
-    };
-  }
-  return native[key] as T;
+  if (!struct.native || !(key in struct.native)) struct.native = nativeState(key, make());
+  return struct.native[key] as T;
 }
 
 /** Calls a function value from a library function that may block, such as `sync.Once.Do`. */
@@ -321,6 +322,10 @@ addBlockingMethod(ONCE, 'Do', fn([fn([], [])], []), function* (receiver, [task])
 // Map -----------------------------------------------------------------------------------------------------------------
 
 class MapState {
+  roots(): unknown[] {
+    return this.entries.flatMap(({ key, value }) => [key, value]);
+  }
+
   entries: { key: Value; value: Value }[] = [];
 
   clone(): MapState {

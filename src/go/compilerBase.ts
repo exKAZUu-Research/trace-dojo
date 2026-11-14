@@ -467,17 +467,7 @@ export abstract class CompilerBase {
     if (syntax.typeArguments.length > 0) return this.error(syntax, `${syntax.name} は型引数を持たない型です。`);
     const type = entity.type;
     void direct;
-    this.checkConstraintUse(type, syntax);
     return type;
-  }
-
-  /** An interface with a type set, such as `comparable`, may only be a constraint, as Go reports elsewhere. */
-  private checkConstraintUse(type: Type, span: Span): void {
-    if (this.inConstraint) return;
-    const under = underlying(type);
-    if (under.kind === 'interface' && under.typeSet && type !== BASIC.invalid) {
-      this.error(span, `${describeType(type)} は型の集合を持つインターフェースなので、型の制約にしか使えません。`);
-    }
   }
 
   /** Resolves a constraint, where interfaces with type sets may appear. */
@@ -650,6 +640,7 @@ export abstract class CompilerBase {
       const constraint = this.resolveConstraint(parameter.constraint);
       const under = underlying(constraint);
       if (constraint === BASIC.invalid) continue;
+      if (constraint.kind === 'named') declared[index].constraintName = constraint;
       // A constraint that is not an interface, `[T int]`, stands for the interface of that single type.
       declared[index].constraint =
         under.kind === 'interface'

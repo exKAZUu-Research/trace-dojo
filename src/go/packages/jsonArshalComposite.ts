@@ -1,6 +1,7 @@
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { mapKeyOf } from '../equality';
-import { currentRuntime } from '../native';
+import { currentRuntime, fn, namedType } from '../native';
+import { quote } from '../quote';
 import { grownCapacity } from '../sliceOps';
 import {
   ANY,
@@ -11,6 +12,7 @@ import {
   sliceOf,
   type Type,
   typeIdentityKey,
+  typeString,
   underlying,
 } from '../types';
 import { type GoArray, GoMap, type GoStruct, Iface, Pointer, Slice, type Value } from '../values';
@@ -30,17 +32,27 @@ import {
   newRef,
   newUnmarshalErrorAfter,
   newUnmarshalErrorAfterWithSkipping,
+  newUnmarshalErrorAfterWithValue,
   newUnmarshalErrorBefore,
   newUnmarshalErrorBeforeWithSkipping,
   NUMBER,
   Ref,
+  SemanticError,
   TEXT_MARSHALER,
   type UnmarshalOptions,
   visiting,
 } from './jsonArshalCore';
-import { type DecoderState, type EncoderState, ERR_NON_STRING_NAME, SyntacticError } from './jsonText';
+import { DecoderState, EncoderState, ERR_NON_STRING_NAME, SyntacticError } from './jsonText';
 import { type LibError, TextError, unquoteMayCopy } from './jsonWire';
-import { callValueMethod, fieldName, implementsVia, newVariable, structOf, zeroValue } from './reflection';
+import {
+  callPointerMethod,
+  callValueMethod,
+  fieldName,
+  implementsVia,
+  newVariable,
+  structOf,
+  zeroValue,
+} from './reflection';
 import { equalFold } from './strings';
 import { bytesOf } from './support';
 import { typeKind } from './templateReflect';
@@ -203,6 +215,8 @@ interface StructField {
   name: string;
   quotedName: string;
   omitEmpty: boolean;
+  omitZero: boolean;
+  stringify: boolean;
   tagged: boolean;
 }
 
@@ -258,6 +272,8 @@ function collectFields(entry: QueueEntry, queue: QueueEntry[], seen: Set<string>
         name,
         quotedName: JSON.stringify(name),
         omitEmpty: options.includes('omitempty'),
+        omitZero: options.includes('omitzero'),
+        stringify: options.includes('string') && stringTagType(field.type),
         tagged,
       });
     }
@@ -298,11 +314,16 @@ export function makeStructArshaler(type: Type, lookup: Lookup): Arshaler {
       if (err) return err;
       for (const field of fields.flattened) {
         const value = walkField(ref, type, field, false);
-        if (!value || (field.omitEmpty && emptyJsonValue(value.get(), field.type))) continue;
+        if (
+          !value ||
+          (field.omitEmpty && emptyJsonValue(value.get(), field.type)) ||
+          (field.omitZero && zeroJsonValue(value.get(), field.type))
+        )
+          continue;
         enc.buf += (enc.tokens.last.length > 0 ? ',' : '') + field.quotedName;
         enc.names[enc.names.length - 1] = field.name;
         enc.tokens.last.length++;
-        err = lookup(field.type).marshal(enc, value, mo);
+        err = marshalField(enc, value, field, mo, lookup);
         if (err) return err;
       }
       return enc.writeToken('}');
@@ -334,7 +355,7 @@ function unmarshalStruct(
       if (uo.rejectUnknownMembers) errors.first ??= newUnmarshalErrorAfter(dec, type, ERR_UNKNOWN_NAME);
       fieldErr = dec.skipValue();
     } else if (value) {
-      fieldErr = lookup(field.type).unmarshal(dec, value, uo);
+      fieldErr = unmarshalField(dec, value, field, uo, lookup);
     } else {
       errors.first ??= newUnmarshalErrorBefore(dec, type, ERR_NIL_FIELD);
       fieldErr = dec.skipValue();
@@ -613,4 +634,95 @@ function emptyJsonValue(value: Value, type: Type): boolean {
   if (under.kind === 'slice') return ((value as Slice | undefined)?.length ?? 0) === 0;
   if (under.kind === 'map') return ((value as GoMap | undefined)?.entries.size ?? 0) === 0;
   return value === undefined;
+}
+
+const IS_ZERO = namedType('json', 'isZeroer', {
+  kind: 'interface',
+  methods: [{ name: 'IsZero', type: fn([], [BASIC.bool]) }],
+});
+
+function stringTagType(type: Type): boolean {
+  const under = underlying(type);
+  if (under.kind === 'pointer') return stringTagType(under.element);
+  return under.kind === 'basic' && !['complex64', 'complex128', 'unsafe.Pointer'].includes(under.name);
+}
+
+function marshalField(
+  enc: EncoderState,
+  value: Ref,
+  field: StructField,
+  mo: MarshalOptions,
+  lookup: Lookup
+): LibError | undefined {
+  const arshaler = lookup(field.type);
+  if (!field.stringify || arshaler.nonDefault || value.get() === undefined) return arshaler.marshal(enc, value, mo);
+  const inner = new EncoderState(enc.options);
+  const err = arshaler.marshal(inner, value, mo);
+  return err ?? enc.writeToken('"', inner.buf);
+}
+
+function unmarshalField(
+  dec: DecoderState,
+  value: Ref,
+  field: StructField,
+  uo: UnmarshalOptions,
+  lookup: Lookup
+): LibError | undefined {
+  const arshaler = lookup(field.type);
+  if (!field.stringify || arshaler.nonDefault || dec.peekKind() === 'n') return arshaler.unmarshal(dec, value, uo);
+  const [raw, err] = dec.readValue({ nonVerbatim: false });
+  if (err) return err;
+  if (!raw.startsWith('"'))
+    return new TextError(
+      'json: invalid use of ,string struct tag, trying to unmarshal unquoted value into ' + typeString(field.type)
+    );
+  const text = unquoteMayCopy(raw, false);
+  const invalid = (): LibError =>
+    new TextError(
+      `json: invalid use of ,string struct tag, trying to unmarshal ${quote(text)} into ${typeString(field.type)}`
+    );
+  let target = underlying(field.type);
+  if (target.kind === 'pointer') target = underlying(target.element);
+  const kind = typeKind(target);
+  if (
+    text !== 'null' &&
+    ((kind === 'bool' && text !== 'true' && text !== 'false') ||
+      (kind === 'string' && !text.startsWith('"')) ||
+      (!['bool', 'string'].includes(kind) && !/^[-0-9"]/.test(text)))
+  )
+    return invalid();
+  const inner = new DecoderState(text);
+  const error = arshaler.unmarshal(inner, value, uo);
+  if (error instanceof SyntacticError) return invalid();
+  if (error instanceof SemanticError) {
+    const outer = newUnmarshalErrorAfterWithValue(dec, error.goType ?? field.type, error.err);
+    return new SemanticError(
+      outer.action,
+      outer.offset,
+      outer.pointer,
+      error.kind,
+      error.value,
+      error.goType,
+      error.err
+    );
+  }
+  return error;
+}
+
+function zeroJsonValue(value: Value, type: Type): boolean {
+  if (value === undefined) return true;
+  const method = implementsVia(type, IS_ZERO);
+  if (method === 'value') return callValueMethod(type, value, 'IsZero', []) as boolean;
+  if (method === 'pointer') {
+    const variable = newVariable(type);
+    variable.store(value);
+    return callPointerMethod(type, variable, 'IsZero', []) as boolean;
+  }
+  const under = underlying(type);
+  if (under.kind === 'struct')
+    return under.fields.every((field, index) => zeroJsonValue((value as GoStruct).fields[index], field.type));
+  if (under.kind === 'array')
+    return (value as GoArray).elements.every((element) => zeroJsonValue(element, under.element));
+  if (under.kind !== 'basic') return false;
+  return value === false || value === 0n || value === 0 || value === '';
 }

@@ -1204,9 +1204,12 @@ export abstract class StatementCompiler extends CallCompiler {
     if (type.kind === 'slice') return { read, keyType: BASIC.int, valueType: type.element, iterate: iterateSlice };
     if (type.kind === 'map') return { read, keyType: type.key, valueType: type.value, iterate: iterateMap };
     if (isInteger(type) || (range.mode === 'constant' && isUntyped(range.type))) {
-      // An untyped constant gives the loop variable type int.
-      const keyType = isUntyped(range.type) ? BASIC.int : range.type;
-      const count = isUntyped(range.type) ? this.assign(range, BASIC.int, 'range の値') : read;
+      const target =
+        !statement.define && statement.key
+          ? this.part(() => this.hoistingCalls(() => this.assignmentTarget(statement.key as Expression))).value.result
+          : undefined;
+      const keyType = isUntyped(range.type) ? (target?.type ?? BASIC.int) : range.type;
+      const count = isUntyped(range.type) ? this.assign(range, keyType, 'range の値') : read;
       if (statement.value) this.error(statement.value, '整数の range で受け取れる値は1つだけです。');
       return { read: count, keyType, valueType: BASIC.invalid, iterate: iterateInteger };
     }
@@ -1725,8 +1728,15 @@ export abstract class StatementCompiler extends CallCompiler {
       const fn = readFunction(frame);
       const argValues = withTemporary(frame, fn, () => args(frame));
       if (!(fn instanceof GoFunc)) {
-        if (keyword === 'go') plainPanic('go of nil func value');
-        launch(frame, () => nilPointerPanic(), undefined, []);
+        launch(
+          frame,
+          () => {
+            if (keyword === 'go') plainPanic('go of nil func value');
+            else nilPointerPanic();
+          },
+          undefined,
+          []
+        );
         return;
       }
       launch(
@@ -1980,52 +1990,67 @@ export abstract class StatementCompiler extends CallCompiler {
     if (defaults.length > 1) this.error(defaults[1], 'select 文に default が2つあります。');
     const fn = this.fn as FunctionContext;
     const row = this.stepRow(statement);
-    const { value: ops, hoists } = this.part(() =>
-      statement.cases.map((selectCase): ((frame: Frame) => SelectOp) | undefined => {
-        const { comm } = selectCase;
-        if (!comm) return undefined;
-        if (comm.kind === 'send') {
-          const parts = this.sendParts(comm);
-          if (!parts) return () => ({ kind: 'receive', channel: undefined });
-          const { channel, value } = parts;
-          return (frame) => ({ kind: 'send', channel: channel(frame) as Channel | undefined, value: value(frame) });
-        }
-        const channel = this.receivableChannel(comm.channel);
-        return (frame) => ({ kind: 'receive', channel: channel?.(frame) as Channel | undefined });
-      })
-    );
+    const receiveTypes = new Map<Expression, Type>();
+    const ops = statement.cases.map((selectCase): ((frame: Frame) => Suspending<SelectOp>) | undefined => {
+      const { comm } = selectCase;
+      if (!comm) return undefined;
+      if (comm.kind === 'send') {
+        const channel = this.part(() => this.sendableChannel(comm.channel, 'send'));
+        const element = channel.value?.element ?? BASIC.invalid;
+        const value = this.part(() => this.assign(this.expression(comm.value), element, '送信する値'));
+        const readChannel: Part = { value: channel.value?.eval ?? (() => {}), hoists: channel.hoists };
+        return function* (frame) {
+          const destination = readChannel.hoists ? yield* evaluatePart(frame, readChannel) : readChannel.value(frame);
+          frame.temporaries.push(destination);
+          try {
+            const sent = value.hoists ? yield* evaluatePart(frame, value) : value.value(frame);
+            return { kind: 'send', channel: destination as Channel | undefined, value: sent };
+          } finally {
+            frame.temporaries.pop();
+          }
+        };
+      }
+      const channel = this.part(() => this.receivableChannel(comm.channel));
+      receiveTypes.set(comm.channel, channel.value?.element ?? BASIC.invalid);
+      const read: Part = { value: channel.value?.eval ?? (() => {}), hoists: channel.hoists };
+      return function* (frame) {
+        const received = read.hoists ? yield* evaluatePart(frame, read) : read.value(frame);
+        return { kind: 'receive', channel: received as Channel | undefined };
+      };
+    });
     const bodies = statement.cases.map((selectCase) => {
       fn.breakDepth++;
       try {
-        return this.breakable(label, 'select', () => this.scoped(() => this.selectCaseBody(selectCase)));
+        return this.breakable(label, 'select', () => this.scoped(() => this.selectCaseBody(selectCase, receiveTypes)));
       } finally {
         fn.breakDepth--;
       }
     });
     const defaultIndex = statement.cases.findIndex((selectCase) => !selectCase.comm);
     const caseIndexes = ops.flatMap((op, index) => (op ? [index] : []));
-    const evaluators = caseIndexes.map((index) => ops[index] as (frame: Frame) => SelectOp);
+    const evaluators = caseIndexes.map((index) => ops[index] as (frame: Frame) => Suspending<SelectOp>);
     return function* (frame) {
-      if (hoists) yield* runHoists(frame, hoists);
-      let evaluated: SelectOp[];
-      try {
-        evaluated = evaluators.map((evaluate) => evaluate(frame));
-      } finally {
-        if (hoists) clearHoists(frame, hoists);
-      }
-      frame.temporaries.push(evaluated);
+      const evaluated: SelectOp[] = [];
+      const roots: Value[] = [];
+      frame.temporaries.push(roots);
       let chosen: { index: number; value: Value; ok: boolean };
       try {
+        for (const evaluate of evaluators) {
+          const op = yield* evaluate(frame);
+          evaluated.push(op);
+          roots.push(op.channel, op.kind === 'send' ? op.value : undefined);
+        }
         chosen = yield* select(evaluated, defaultIndex !== -1);
       } finally {
         frame.temporaries.pop();
       }
       const index = chosen.index < 0 ? defaultIndex : (caseIndexes[chosen.index] as number);
-      frame.temporaries.push(chosen);
+      frame.temporaries.push([chosen.value], chosen);
       let completion: Completion | void;
       try {
         completion = yield* bodies[index](frame);
       } finally {
+        frame.temporaries.pop();
         frame.temporaries.pop();
       }
       void row;
@@ -2034,12 +2059,41 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** A select case's statements, after the variables its receive declares or assigns. */
-  private selectCaseBody(selectCase: Extract<Statement, { kind: 'select' }>['cases'][number]): Exec {
-    const { comm } = selectCase;
+  private selectCaseBody(
+    selectCase: Extract<Statement, { kind: 'select' }>['cases'][number],
+    receiveTypes: Map<Expression, Type>
+  ): Exec {
+    const { value: binding, hoists } = this.part(() =>
+      this.hoistingCalls(() => this.selectCaseBinding(selectCase.comm, receiveTypes))
+    );
+    const { bind, answered } = binding.result;
+    const row = this.stepRow(selectCase);
+    const body = this.statements(selectCase.body);
+    if (!bind) return body;
+    return function* (frame) {
+      if (hoists) yield* runHoists(frame, hoists);
+      try {
+        const chosen = frame.temporaries.at(-1) as { value: Value; ok: boolean };
+        binding.run(frame, () => bind(frame, chosen.value, chosen.ok));
+      } finally {
+        if (hoists) clearHoists(frame, hoists);
+      }
+      frame.runtime.steps.stepBinding(row, answered);
+      return yield* body(frame);
+    };
+  }
+
+  private selectCaseBinding(
+    comm: Extract<Statement, { kind: 'select' }>['cases'][number]['comm'],
+    receiveTypes: Map<Expression, Type>
+  ): {
+    bind: ((frame: Frame, value: Value, ok: boolean) => void) | undefined;
+    answered: boolean;
+  } {
     let bind: ((frame: Frame, value: Value, ok: boolean) => void) | undefined;
     let answered = false;
     if (comm?.kind === 'receive' && comm.left.length > 0) {
-      const element = this.receiveElement(comm.channel);
+      const element = receiveTypes.get(comm.channel) ?? BASIC.invalid;
       const types = [element, BASIC.bool];
       if (comm.left.length > 2) this.error(comm, 'select の case で受け取れる値は2つまでです。');
       if (comm.define) {
@@ -2086,22 +2140,7 @@ export abstract class StatementCompiler extends CallCompiler {
         };
       }
     }
-    const row = this.stepRow(selectCase);
-    const body = this.statements(selectCase.body);
-    if (!bind) return body;
-    const assign = bind;
-    return function* (frame) {
-      const chosen = frame.temporaries.at(-1) as { value: Value; ok: boolean };
-      assign(frame, chosen.value, chosen.ok);
-      frame.runtime.steps.stepBinding(row, answered);
-      return yield* body(frame);
-    };
-  }
-
-  /** The element type of a channel that a receive uses, or the invalid type after reporting why it cannot. */
-  private receiveElement(expression: Expression): Type {
-    const type = coreType(this.withoutHoists(() => this.value(expression)).type);
-    return type?.kind === 'chan' ? type.element : BASIC.invalid;
+    return { bind, answered };
   }
 
   /** `for v := range ch`: receives until the channel is closed and empty. */
@@ -2253,7 +2292,8 @@ export abstract class StatementCompiler extends CallCompiler {
           (args, callRow, deferredFor, stackBuffers) =>
             runtime.call(info, cells, args, callRow, deferredFor as Frame | undefined, undefined, stackBuffers),
           cells,
-          (args, callRow, deferredFor) => runtime.resume(info, cells, args, callRow, deferredFor as Frame | undefined)
+          (args, callRow, deferredFor, stackBuffers) =>
+            runtime.resume(info, cells, args, callRow, deferredFor as Frame | undefined, undefined, stackBuffers)
         );
       },
     };
@@ -2551,13 +2591,13 @@ type Launch = (
 const deferLaunch: Launch = (frame, run, resume, values) => frame.runtime.defer(frame, run, values, resume);
 
 const goLaunch: Launch = (_frame, run, resume, values) => {
-  void values;
   scheduler().spawn(
     resume ??
       function* () {
         run();
         return;
-      }
+      },
+    values
   );
 };
 

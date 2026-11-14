@@ -1,7 +1,6 @@
 import { LIMITS } from '../../interpreter/limits';
 import type { Entity } from '../entities';
 import { equalityOf, mapKeyOf } from '../equality';
-import { newError } from '../errorValues';
 import {
   addMethod,
   currentRuntime,
@@ -13,8 +12,7 @@ import {
   typeEntity,
   typeParam,
 } from '../native';
-import { GoPanic } from '../runtime';
-import { boundsPanic, runtimeErrorPanic } from '../runtimeErrors';
+import { boundsPanic, plainPanic, runtimeErrorPanic } from '../runtimeErrors';
 import { appendValues, grownCapacity } from '../sliceOps';
 import {
   ANY,
@@ -757,16 +755,19 @@ function deleteRange(slice: Value, from: number, to: number, types: Type[]): Val
 
 const SEQ2 = (key: Type, value: Type): Type => seq2Of(key, value);
 
-/** Collects the pairs an iterator of pairs yields. */
-function collectPairs(seq: Value): [Value, Value][] {
-  const pairs: [Value, Value][] = [];
+function insertPairs(map: GoMap | undefined, seq: Value): void {
   callFunction(seq, [
-    new GoFunc(([key, value]) => {
-      pairs.push([key, value]);
-      return true;
-    }),
+    new GoFunc(
+      ([key, value]) => {
+        if (!map) plainPanic('assignment to entry in nil map');
+        const hash = map.keyOf(key);
+        if (!map.entries.has(hash)) allocate(2);
+        map.entries.set(hash, { key: copyValue(key), value: copyValue(value) });
+        return true;
+      },
+      [map]
+    ),
   ]);
-  return pairs;
 }
 
 /** An iterator over pairs, which stops when the yield function returns false, as range-over-func requires. */
@@ -964,7 +965,7 @@ Object.assign(slicesMembers, {
     () =>
       ([slice, size]) => {
         const n = Number(size as bigint);
-        if (n < 1) throw new GoPanic(newError('cannot be less than 1'));
+        if (n < 1) stringPanic('cannot be less than 1');
         return iteratorOf(
           function* () {
             const current = slice as Slice | undefined;
@@ -1096,7 +1097,7 @@ const mapsMembers: Record<string, Entity> = {
         ([seq]) => {
           const keyOf = mapKeyOf(types[0]);
           const map = new GoMap(keyOf);
-          for (const [key, value] of collectPairs(seq)) map.entries.set(keyOf(key), { key, value });
+          insertPairs(map, seq);
           return map;
         }
     );
@@ -1104,14 +1105,7 @@ const mapsMembers: Record<string, Entity> = {
   Insert: (() => {
     const [m, k, v] = mapParams();
     return genericFunction('Insert', [m, k, v], funcType([m, SEQ2(k, v)], []), () => ([map, seq]) => {
-      for (const [key, value] of collectPairs(seq)) {
-        if (!map) throw new GoPanic(newError('assignment to entry in nil map'));
-        const target = map as GoMap;
-        const existing = target.entries.get(target.keyOf(key));
-        if (existing) existing.value = value;
-        else target.entries.set(target.keyOf(key), { key, value });
-      }
-      return;
+      insertPairs(map as GoMap | undefined, seq);
     });
   })(),
 

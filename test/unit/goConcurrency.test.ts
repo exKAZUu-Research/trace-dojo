@@ -196,3 +196,19 @@ func main() {
     stdout: 'true\ntrue\ntrue\ntrue\n',
   });
 });
+
+test('queued arguments and sync maps retain turtles until their owners release them', () => {
+  for (const source of [
+    `package main
+import("fmt";"runtime")
+func main(){go func(t *Turtle){t.Forward()}(NewTurtle(0,1));probe:=NewTurtle(0,0);fmt.Println(probe.CanMoveForward());runtime.Gosched()}`,
+    `package main
+import("fmt";"sync")
+func main(){var m sync.Map;m.Store("t",NewTurtle(0,1));probe:=NewTurtle(0,0);fmt.Println(probe.CanMoveForward());v,_:=m.Load("t");v.(*Turtle).Forward()}`,
+  ])
+    expect(executeProgram('go', source)).toMatchObject({
+      kind: 'executed',
+      stdout: 'false\n',
+      uncaughtException: undefined,
+    });
+});

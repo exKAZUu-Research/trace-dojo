@@ -1,6 +1,6 @@
 import type { Entity } from '../entities';
 import { addMethod, definePackage, fn, namedType } from '../native';
-import { GoPanic } from '../runtime';
+import { indexPanic } from '../runtimeErrors';
 import { BASIC, type Type } from '../types';
 import { GoStruct, Iface, type Slice, type Value } from '../values';
 import { BYTES, STRING } from './support';
@@ -26,9 +26,7 @@ const UINT64 = BASIC.uint64;
 function readBytes(slice: Value, count: number): bigint[] {
   const values = (slice as Slice | undefined)?.values() ?? [];
   if (values.length < count) {
-    throw new GoPanic(
-      new Iface(STRING, `runtime error: index out of range [${count - 1}] with length ${values.length}`)
-    );
+    indexPanic(count - 1, values.length);
   }
   return values.slice(0, count) as bigint[];
 }
@@ -36,15 +34,14 @@ function readBytes(slice: Value, count: number): bigint[] {
 function writeBytes(slice: Value, bytes: bigint[]): void {
   const target = slice as Slice | undefined;
   if ((target?.length ?? 0) < bytes.length) {
-    throw new GoPanic(
-      new Iface(STRING, `runtime error: index out of range [${bytes.length - 1}] with length ${target?.length ?? 0}`)
-    );
+    indexPanic(bytes.length - 1, target?.length ?? 0);
   }
   for (const [index, byte] of bytes.entries()) (target as Slice).set(index, byte);
 }
 
 function byteOrder(name: string, littleEndian: boolean): Value {
   const type = namedType('binary', name, { kind: 'struct', fields: [] });
+  type.unsupported = new Set(['AppendUint16', 'AppendUint32', 'AppendUint64']);
   for (const [bits, type2] of [
     [16, UINT16],
     [32, UINT32],

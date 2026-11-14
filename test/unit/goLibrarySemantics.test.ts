@@ -131,3 +131,110 @@ func main() {
       '4 0\n4 0\n4 0\n8 0\n12 0\n0 0\n3 3\n3 3\n<nil> 77\n255 true\n5 true\n63 true\n63 true\n<nil> false\n<nil> false\n<nil> false\n',
   });
 });
+
+test('timer channels discard unreceived firings when stopped or reset', () => {
+  const source =
+    'package main;import("fmt";"time");func main(){t:=time.NewTimer(time.Second);fmt.Println(len(t.C),cap(t.C));time.Sleep(2*time.Second);fmt.Println(t.Stop());select{case <-t.C:fmt.Println("stale");default:fmt.Println("empty")};fmt.Println(t.Reset(time.Second));time.Sleep(2*time.Second);fmt.Println(t.Reset(time.Second));<-t.C;fmt.Println(t.Stop())}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '0 0\ntrue\nempty\nfalse\ntrue\nfalse\n',
+  });
+});
+
+test('rational components remain aliases across assignments and large ratios round correctly', () => {
+  const source =
+    'package main;import("fmt";"math/big");func main(){r:=big.NewRat(1,2);n:=r.Num();d:=r.Denom();n.SetInt64(3);fmt.Println(r);r.SetFrac64(5,7);fmt.Println(n,d,n==r.Num());n.SetInt64(8);fmt.Println(r);x:=new(big.Int).Lsh(big.NewInt(1),2000);r.SetFrac(x,new(big.Int).Add(x,big.NewInt(1)));f,exact:=r.Float64();fmt.Println(f,exact);fmt.Println(big.NewInt(-1).Uint64())}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '3/2\n5 7 true\n8/7\n1 false\n1\n',
+  });
+});
+
+test('JSON string tags round trip and omitzero consults zero methods', () => {
+  const source =
+    'package main;import("fmt";"encoding/json";"time");type Z int;func(z Z)IsZero()bool{return z==42};type S struct{N int `json:"n,string"`; B bool `json:"b,string"`;T string `json:"t,string"`;Z Z `json:"z,omitzero"`;D time.Time `json:"d,omitzero"`};func main(){s:=S{N:12,B:true,T:"x",Z:42};b,e:=json.Marshal(s);fmt.Println(string(b),e);var t S;e=json.Unmarshal(b,&t);fmt.Println(t.N,t.B,t.T,e)}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '{"n":"12","b":"true","t":"\\"x\\""} <nil>\n12 true x <nil>\n',
+  });
+});
+
+test('map insertion runs at each yield and chunk panics with a string', () => {
+  const source = String.raw`package main;import("fmt";"maps";"slices");func main(){m:=map[int]int{};maps.Insert(m,func(yield func(int,int)bool){yield(1,2);fmt.Println(m[1]);yield(2,3)});fmt.Println(m[2]);func(){defer func(){fmt.Printf("%T %v\n",recover(),"panic")}();_=slices.Chunk([]int{},0)}()}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '2\n3\nstring panic\n',
+  });
+});
+
+test('receive and select compile channel factories exactly once', () => {
+  const source =
+    'package main;import "fmt";func factory()chan int{fmt.Println("made");c:=make(chan int,1);c<-7;return c};func main(){fmt.Println(<-factory());select{case x:=<-factory():fmt.Println(x)}}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: 'made\n7\nmade\n7\n',
+  });
+});
+
+test('select evaluates communication operands in order and suspends destination evaluation', () => {
+  const source =
+    'package main;import "fmt";func c(n int)chan int{fmt.Print(n);return make(chan int,1)};func v(n int)int{fmt.Print(n);return n};func target(c chan int)int{return <-c};func main(){select{case c(1)<-v(2):case c(3)<-v(4):};fmt.Println();data:=make(chan int,1);data<-8;idx:=make(chan int);go func(){idx<-0}();a:=[]int{0};select{case a[target(idx)]=<-data:};fmt.Println(a);var n uint8;for n=range 3{fmt.Print(n)};fmt.Println()}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '1234\n[8]\n012\n',
+  });
+});
+
+test('large native operations stop at interpreter limits before allocating or traversing', () => {
+  for (const source of [
+    'package main; import "math/big"; func main(){new(big.Int).Lsh(big.NewInt(1),1000000000000)}',
+    'package main; import "math/big"; func main(){new(big.Int).Exp(big.NewInt(2),big.NewInt(1000000000000),nil)}',
+    'package main; import "container/ring"; func main(){ring.New(1).Move(1000000000000)}',
+  ])
+    expect(executeProgram('go', source)).toMatchObject({ kind: 'limitExceeded' });
+});
+
+test('extreme hexadecimal float exponents cancel without allocating their magnitude', () => {
+  const source = `package main
+import "fmt"
+const x=0x1p2000000000
+const y=0x1p-2000000000
+func main(){fmt.Println(x/x,y/y)}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1 1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('composite storage and copied method receivers preserve independent Go values', () => {
+  const source = `package main
+import("fmt";"sync")
+type S struct{N int}
+func(s S)Next()int{s.N++;return s.N}
+type Box struct{mu sync.Mutex}
+func main(){s:=[]S{{1}};p:=(*[1]S)(s);field:=&s[0].N;*p=[1]S{{2}};fmt.Println(*field,s);f:=s[0].Next;fmt.Println(f(),f());var a Box;a.mu.Lock();a.mu.Unlock();b:=a;c:=b;c.mu.Lock();b.mu.Lock();fmt.Println("both locked")}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '2 [{2}]\n3 3\nboth locked\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('suspendable direct calls retain stack allocation capacity and generic binomial boundaries', () => {
+  const source = `package main
+import("fmt";"runtime";"math/big")
+func grow(s []int)[]int{return append(s,1)}
+func main(){s:=[]int{};s=grow(s);fmt.Println(cap(s));runtime.Gosched();fmt.Println(new(big.Int).Binomial(5,-1),new(big.Int).Binomial(5,2))}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '4\n0 10\n',
+    uncaughtException: undefined,
+  });
+});

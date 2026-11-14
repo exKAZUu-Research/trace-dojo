@@ -222,7 +222,7 @@ export class Runtime implements TracedRuntime<Frame> {
   /** The frames of the running goroutine. */
   frames: Frame[] = [];
   /** Runs the goroutines when the program uses them. */
-  scheduler: { roots(): unknown[] } | undefined;
+  scheduler: { roots(): unknown[]; now: number } | undefined;
   /** The package-level variables, which pointers may refer to. */
   globals: Cell[] = [];
   private allocated = 0;
@@ -412,6 +412,7 @@ function pushChildren(item: object, stack: unknown[], turtles: Set<unknown>): vo
     const native = item.native;
     if (native?.turtle) turtles.add(native.turtle);
     else if (native) {
+      if (native.roots) stack.push(...native.roots());
       for (const value of Object.values(native)) stack.push(value);
     }
   } else if (item instanceof GoArray) stack.push(item.elements);

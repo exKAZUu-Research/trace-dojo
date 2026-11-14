@@ -106,7 +106,8 @@ export interface FuncEntity {
   /** Calls the function directly as `direct` does, yielding when its goroutine blocks; absent when it never blocks. */
   directResume?: (
     args: Value[],
-    callRow: number | undefined
+    callRow: number | undefined,
+    stackBuffers?: StackBuffers
   ) => Generator<{ reason: string }, Value | Value[], unknown>;
   generic?: GenericFunc;
   declaration?: FunctionDeclaration;

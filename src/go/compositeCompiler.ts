@@ -87,10 +87,6 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
     };
   }
 
-  /**
-   * An element of a composite literal, whose own literal may elide its type; `holder` stands for the literal, or is
-   * absent for an element that escapes, as a map's does.
-   */
   private implicitLengthArray(expression: CompositeLiteral, elementSyntax: CompositeLiteral['type'] & object): Type {
     const element = this.resolveType(elementSyntax);
     let length = 0;
@@ -108,7 +104,10 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
     return { kind: 'array', element, length };
   }
 
-  /** An element of a composite literal, whose own literal may elide its type. */
+  /**
+   * An element of a composite literal, whose own literal may elide its type; `holder` stands for the literal, or is
+   * absent for an element that escapes, as a map's does.
+   */
   private element(
     expression: Expression,
     type: Type,

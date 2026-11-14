@@ -47,11 +47,12 @@ export function* resumeMethod(
   receiver: Value,
   args: Value[],
   callRow?: number,
-  deferredFor?: unknown
+  deferredFor?: unknown,
+  stackBuffers?: StackBuffers
 ): Generator<{ reason: string }, Value | Value[], unknown> {
   const resume = method.code?.resume;
-  if (!resume) return invokeMethod(method, receiver, args, callRow, deferredFor);
-  return (yield* resume(receiver, args, callRow, deferredFor)) as Value | Value[];
+  if (!resume) return invokeMethod(method, receiver, args, callRow, deferredFor, stackBuffers);
+  return (yield* resume(receiver, args, callRow, deferredFor, stackBuffers)) as Value | Value[];
 }
 
 /** Calls the method that a dynamic type provides as {@link dynamicMethod} does, yielding when its goroutine blocks. */
@@ -61,7 +62,8 @@ export function* resumeDynamicMethod(
   receiver: Value,
   args: Value[],
   callRow?: number,
-  deferredFor?: unknown
+  deferredFor?: unknown,
+  stackBuffers?: StackBuffers
 ): Generator<{ reason: string }, Value | Value[], unknown> {
   const selection = lookupFieldOrMethod(type, name);
   if (selection.kind === 'method') {
@@ -71,13 +73,14 @@ export function* resumeDynamicMethod(
       receiverFor(receiver, path, method, underlying(type).kind === 'pointer'),
       args,
       callRow,
-      deferredFor
+      deferredFor,
+      stackBuffers
     );
   }
   if (selection.kind !== 'interfaceMethod') throw new Error(`Missing method ${name}`);
   const inner = walk(receiver, selection.path) as Iface | undefined;
   if (!inner) nilPointerPanic();
-  return yield* resumeDynamicMethod(inner.type, name, inner.value, args, callRow, deferredFor);
+  return yield* resumeDynamicMethod(inner.type, name, inner.value, args, callRow, deferredFor, stackBuffers);
 }
 
 const dispatchCache = new WeakMap<Type, Map<string, BoundCall | undefined>>();
@@ -94,22 +97,23 @@ export function dynamicMethod(type: Type, name: string): BoundCall | undefined {
   let call: BoundCall | undefined;
   if (selection.kind === 'method') {
     const { method, path } = selection;
-    call = (receiver, args, callRow, deferredFor) =>
+    call = (receiver, args, callRow, deferredFor, stackBuffers) =>
       invokeMethod(
         method,
         receiverFor(receiver, path, method, underlying(type).kind === 'pointer'),
         args,
         callRow,
-        deferredFor
+        deferredFor,
+        stackBuffers
       );
   } else if (selection.kind === 'interfaceMethod') {
     const { path } = selection;
-    call = (receiver, args, callRow, deferredFor) => {
+    call = (receiver, args, callRow, deferredFor, stackBuffers) => {
       const inner = walk(receiver, path) as Iface | undefined;
       if (!inner) nilPointerPanic();
       const target = dynamicMethod(inner.type, name);
       if (!target) throw new Error(`Missing method ${name}`);
-      return target(inner.value, args, callRow, deferredFor);
+      return target(inner.value, args, callRow, deferredFor, stackBuffers);
     };
   }
   methods.set(name, call);

@@ -4,7 +4,7 @@ import { type Frame, runToEnd, type Suspending } from '../runtime';
 import { nilPointerPanic } from '../runtimeErrors';
 import { BASIC, EMPTY_INTERFACE, funcType, type NamedType, type Type } from '../types';
 import { GoFunc, type Value } from '../values';
-import { zeroValueOf } from '../zero';
+import { zeroValue } from './reflection';
 
 /** `iter.Seq[V]`: `func(yield func(V) bool)`. */
 const SEQ = genericNamedType('iter', 'Seq', [typeParam('V', EMPTY_INTERFACE)], ([value]) =>
@@ -124,7 +124,7 @@ const members: Record<string, Entity> = {
     funcType([seqOf(V)], [funcType([], [V, BASIC.bool]), funcType([], [])]),
     ([value]) =>
       ([sequence]) =>
-        pull(sequence, [zeroValueOf(value)])
+        pull(sequence, [() => zeroValue(value)])
   ),
   Pull2: genericFunction(
     'Pull2',
@@ -132,7 +132,7 @@ const members: Record<string, Entity> = {
     funcType([seq2Of(K2, V2)], [funcType([], [K2, V2, BASIC.bool]), funcType([], [])]),
     ([key, value]) =>
       ([sequence]) =>
-        pull(sequence, [zeroValueOf(key), zeroValueOf(value)])
+        pull(sequence, [() => zeroValue(key), () => zeroValue(value)])
   ),
 };
 

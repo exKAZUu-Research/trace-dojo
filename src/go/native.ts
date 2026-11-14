@@ -9,8 +9,8 @@ import {
   type Method,
   type NamedType,
   type Type,
+  typeIdentityKey,
   type TypeParamType,
-  typeString,
 } from './types';
 import { Cell, GoFunc, type Value } from './values';
 
@@ -182,7 +182,7 @@ export function genericNamedType(
     });
     // Instances over type parameters stay apart, as parameters of the same name may differ.
     if (args.some((arg) => containsTypeParam(arg))) return make();
-    const key = args.map((arg) => typeString(arg)).join(',');
+    const key = args.map((arg) => typeIdentityKey(arg)).join(',');
     let found = cache.get(key);
     if (!found) {
       found = make();

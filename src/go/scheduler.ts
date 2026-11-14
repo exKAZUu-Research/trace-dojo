@@ -32,9 +32,10 @@ export class Scheduler {
   }
 
   /** Starts a goroutine that runs `body` with frames of its own. */
-  spawn(body: (goroutine: Goroutine) => Suspending<unknown>): Goroutine {
+  spawn(body: (goroutine: Goroutine) => Suspending<unknown>, roots: unknown[] = []): Goroutine {
     const goroutine = new Goroutine(this.nextGoroutineId++);
     goroutine.body = body(goroutine);
+    goroutine.holding = roots;
     this.live.add(goroutine);
     this.runQueue.push(goroutine);
     return goroutine;
@@ -61,6 +62,7 @@ export class Scheduler {
       runtime.frames = goroutine.frames;
       const value = goroutine.resumeWith;
       goroutine.resumeWith = undefined;
+      goroutine.holding = [];
       const next = (goroutine.body as Suspending<unknown>).next(value);
       if (next.done) {
         this.live.delete(goroutine);
@@ -78,15 +80,15 @@ export class Scheduler {
       pushFrameRoots(goroutine.frames, stack);
       stack.push(...goroutine.holding);
     }
-    for (const timer of this.timers) stack.push(timer.channel);
+    for (const timer of this.timers) stack.push(timer.channel, ...timer.roots);
     return stack;
   }
 
   // Timers ----------------------------------------------------------------------------------------------------------
 
   /** Calls `fire` when the virtual time reaches `delay` nanoseconds from now. */
-  addTimer(delay: number, fire: () => void, channel?: Channel): Timer {
-    const timer: Timer = { when: this.now + Math.max(delay, 0), seq: this.nextTimerSeq++, fire, channel };
+  addTimer(delay: number, fire: () => void, channel?: Channel, roots: unknown[] = []): Timer {
+    const timer: Timer = { when: this.now + Math.max(delay, 0), seq: this.nextTimerSeq++, fire, channel, roots };
     this.timers.push(timer);
     return timer;
   }
@@ -158,6 +160,7 @@ interface Timer {
   fire: () => void;
   /** The channel that the timer sends to, which garbage collection must follow while the timer is pending. */
   channel?: Channel;
+  roots: unknown[];
 }
 
 /** The scheduler of the running program, which only programs that use goroutines have. */
@@ -191,8 +194,8 @@ interface Completed {
 
 let nextChannelId = 0;
 
-export function makeChannel(capacity: number, zero: () => Value): Channel {
-  return new Channel(capacity, zero, nextChannelId++);
+export function makeChannel(capacity: number, zero: () => Value, timer = false): Channel {
+  return new Channel(capacity, zero, nextChannelId++, timer);
 }
 
 function takeWaiter(queue: unknown[]): Waiter | undefined {
@@ -316,11 +319,22 @@ export function* select(
     else op.channel.receivers.push({ goroutine, select: state, index } satisfies Waiter);
   }
   const reason = ops.every((op) => !op.channel) ? 'select (no cases)' : 'select';
-  const completed = (yield* running.park(
-    reason,
-    ops.map((op) => (op.kind === 'send' ? op.value : undefined))
-  )) as Completed;
-  // The other cases stay in their channels' queues, marked done, until a send or receive passes them by.
+  let completed: Completed;
+  try {
+    completed = (yield* running.park(
+      reason,
+      ops.map((op) => (op.kind === 'send' ? op.value : undefined))
+    )) as Completed;
+  } finally {
+    for (const op of ops) {
+      if (!op.channel) continue;
+      for (const queue of [op.channel.senders, op.channel.receivers]) {
+        for (let index = queue.length - 1; index >= 0; index--) {
+          if ((queue[index] as Waiter).select === state) queue.splice(index, 1);
+        }
+      }
+    }
+  }
   if (completed.closed) plainPanic('send on closed channel');
   return { index: completed.index, value: completed.value, ok: completed.ok };
 }

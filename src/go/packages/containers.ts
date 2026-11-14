@@ -1,3 +1,4 @@
+import { LIMITS } from '../../interpreter/limits';
 import type { Entity } from '../entities';
 import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
 import { nilPointerPanic } from '../runtimeErrors';
@@ -315,7 +316,11 @@ RING.underlying = {
 
 const VALUE_OF_RING = 2;
 
-const newRingPointer = (): Pointer => new Pointer(new Cell(new GoStruct([undefined, undefined, undefined])), 'v');
+const newRingPointer = (): Pointer => {
+  currentRuntime().allocate(3);
+  spendFor(1);
+  return new Pointer(new Cell(new GoStruct([undefined, undefined, undefined])), 'v');
+};
 const ringOf = (pointer: Value): GoStruct => {
   if (!(pointer instanceof Pointer)) nilPointerPanic();
   return pointer.load() as GoStruct;
@@ -340,6 +345,7 @@ function ringPrev(r: Pointer): Pointer {
 
 function ringMove(r: Pointer, steps: number): Pointer {
   if (ringOf(r).fields[NEXT] === undefined) return initRing(r);
+  spendFor(Math.abs(steps));
   let current = r;
   if (steps < 0) for (let n = steps; n < 0; n++) current = ringOf(current).fields[PREV] as Pointer;
   else for (let n = steps; n > 0; n--) current = ringOf(current).fields[NEXT] as Pointer;
@@ -361,7 +367,10 @@ function ringLink(r: Pointer, s: Value): Pointer {
 function ringLength(r: Value): number {
   if (!(r instanceof Pointer)) return 0;
   let count = 1;
-  for (let p = ringNext(r); !p.equals(r); p = ringOf(p).fields[NEXT] as Pointer) count++;
+  for (let p = ringNext(r); !p.equals(r); p = ringOf(p).fields[NEXT] as Pointer) {
+    spendFor(1);
+    count++;
+  }
   return count;
 }
 
@@ -389,6 +398,7 @@ addMethod(
     if (!(r instanceof Pointer)) return;
     callFunction(visit, [ringOf(r).fields[VALUE_OF_RING]]);
     for (let p = ringNext(r); !p.equals(r); p = ringOf(p).fields[NEXT] as Pointer) {
+      spendFor(1);
       callFunction(visit, [ringOf(p).fields[VALUE_OF_RING]]);
     }
     return;
@@ -401,6 +411,7 @@ const ringMembers: Record<string, Entity> = {
   New: nativeFunction('New', fn([INT], [RING_POINTER]), ([count]) => {
     const n = Number(count as bigint);
     if (n <= 0) return;
+    if (n > LIMITS.maxSlots / 3) currentRuntime().allocate(n * 3);
     const r = initRing(newRingPointer());
     let p = r;
     for (let index = 1; index < n; index++) {
