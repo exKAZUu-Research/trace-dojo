@@ -173,6 +173,15 @@ def('Set', ['-', 'difference'], 1, function* (self: RObject, [value]) {
   });
 });
 def('Set', '^', 1, function* (self: RObject, [value]) {
+  if (self.cls !== rt().c.Set) {
+    const result = (yield* callMethod(self.cls, 'new', [value])) as RObject;
+    return yield* whileHeld(result, function* () {
+      yield* eachEntry(membersOf(self), function* (entry) {
+        if (!truthy(yield* callMethod(result, 'delete?', [entry.key]))) yield* callMethod(result, 'add', [entry.key]);
+      });
+      return result;
+    });
+  }
   const result = new RObject(self.cls);
   result.data = (self.data as SetData).copy();
   return yield* whileHeld(result, function* () {

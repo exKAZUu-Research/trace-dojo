@@ -1984,6 +1984,26 @@ test('Set intersection initializes subclasses without arguments and keeps initia
   });
 });
 
+test('Set symmetric difference invokes subclass initialization with its operand', () => {
+  expect(
+    run('class S<Set;def initialize(x,y);super(x);end;end;s=S.new([1],2);begin;s ^ Set[2];rescue=>e;p e.message;end')
+  ).toMatchObject({
+    stdout: '"wrong number of arguments (given 1, expected 2)"\n',
+  });
+  expect(
+    run('class S<Set;def initialize(x=nil);super([9]);merge(x) if x;end;end;s=S.new([1,2]);p (s^Set[2]).to_a')
+  ).toMatchObject({
+    stdout: '[1]\n',
+  });
+});
+
+test('finite Array flatten depth permits recursive references', () => {
+  expect(run('a=[];a<<a;x=a.flatten(1);p x.size,x[0].equal?(a);p a.flatten!(2).equal?(a)')).toMatchObject({
+    stdout: '1\ntrue\ntrue\n',
+  });
+  expect(run('a=[];a<<a;begin;a.flatten;rescue=>e;p e.class;end')).toMatchObject({ stdout: 'ArgumentError\n' });
+});
+
 test('Set union and difference duplicate subclasses while flatten initializes them', () => {
   expect(
     run('class S<Set;def initialize(x,y);super(x);end;end;s=S.new([1],2);p (s|Set[2]).to_a,(s-Set[]).to_a')

@@ -505,7 +505,7 @@ function* flatten(source: RArray, depth: number, seen: Set<RArray>, expanded?: {
         continue;
       }
       if (expanded) expanded.value = true;
-      if (seen.has(nested)) throw argumentError('tried to flatten recursive array');
+      if (frame.depth < 0 && seen.has(nested)) throw argumentError('tried to flatten recursive array');
       seen.add(nested);
       rt().held.push(nested);
       stack.push({ source: nested, index: 0, depth: frame.depth - 1, owner: nested });
