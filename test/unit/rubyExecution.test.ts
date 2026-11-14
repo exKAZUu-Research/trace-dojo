@@ -6067,3 +6067,12 @@ test('large Rational exponents and named memberless Struct classes remain suppor
   });
   expect(run('p Struct.new("x")')).toMatchObject({ uncaughtException: expect.stringContaining('NameError') });
 });
+
+test('POSIX word classes compose with outer negation and join controls', () => {
+  expect(run(String.raw`p /[^x[:^word:]]/.match?("x");p /[^[:^digit:]]/.match?("2")`)).toMatchObject({
+    stdout: 'false\ntrue\n',
+  });
+  expect(run('p /[^[:word:]]/.match?("‌"),/[[:word:]]/.match?("‍")')).toMatchObject({
+    stdout: 'false\ntrue\n',
+  });
+});

@@ -41,7 +41,7 @@ const POSIX_CLASSES: Record<string, string> = {
   space: String.raw` \t\r\n\f\v`,
   punct: String.raw`\p{P}`,
   xdigit: '0-9A-Fa-f',
-  word: String.raw`\p{L}\p{M}\p{Nd}\p{Nl}\p{Pc}`,
+  word: String.raw`\p{L}\p{M}\p{Nd}\p{Nl}\p{Pc}\u200C\u200D`,
   cntrl: String.raw`\p{Cc}`,
   print: String.raw`\P{C}`,
   graph: String.raw`\p{L}\p{M}\p{N}\p{P}\p{S}`,
@@ -157,19 +157,21 @@ export function translate(source: string, extended: boolean, multiline = false):
       continue;
     }
     if (char === ']' && inClass > 0) {
-      if (out.slice(classStart + 1) === '^') {
+      if (out.slice(classStart + 1) === '^' && negatedClassBodies.length === 0) {
         out += String.raw`\]`;
         continue;
       }
       inClass--;
       if (negatedClassBodies.length > 0) {
         const regularBody = out.slice(classStart + 1);
+        const outerNegated = regularBody.startsWith('^');
+        const literalBody = outerNegated ? regularBody.slice(1) : regularBody;
         const alternatives = [
-          ...(regularBody && regularBody !== '^' ? [`[${regularBody}]`] : []),
+          ...(literalBody ? [`[${literalBody}]`] : []),
           ...negatedClassBodies.map((body) => `(?:(?![${body}])[\\s\\S])`),
         ];
-        out =
-          out.slice(0, classStart) + (alternatives.length === 1 ? alternatives[0] : `(?:${alternatives.join('|')})`);
+        const union = alternatives.length === 1 ? alternatives[0] : `(?:${alternatives.join('|')})`;
+        out = out.slice(0, classStart) + (outerNegated ? `(?!(?:${union}))[\\s\\S]` : union);
       } else out += char;
       continue;
     }
