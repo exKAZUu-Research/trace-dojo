@@ -316,7 +316,8 @@ export class Converter {
       case 'yield': {
         if (!this.ctx.inDef) this.fail(node, 'yield は、メソッドの中でしか使えません。');
         const list = namedChildren(node).find((child) => child.type === 'argument_list');
-        const { args } = list ? this.argumentList(list) : { args: [] };
+        const { args, blockArg } = list ? this.argumentList(list) : { args: [], blockArg: undefined };
+        if (list && blockArg) this.fail(list, 'yield にブロック引数を渡せません。');
         return { k: 'yield', args, used: use, row: node.startPosition.row };
       }
       case 'super': {
@@ -892,7 +893,8 @@ export class Converter {
   private jumpValue(node: Node): Expr | undefined {
     const list = namedChildren(node).find((child) => child.type === 'argument_list');
     if (!list) return undefined;
-    const { args } = this.argumentList(list);
+    const { args, blockArg } = this.argumentList(list);
+    if (blockArg) this.fail(list, `${node.type} にブロック引数を渡せません。`);
     if (args.length === 1 && args[0].k !== 'splat') return args[0];
     return { k: 'array', items: args };
   }
