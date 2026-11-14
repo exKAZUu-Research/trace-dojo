@@ -836,3 +836,8 @@ test('exhausted Enumerator retains its StopIteration result', () => {
     'e=Enumerator.new do |y|\n t=Turtle.new\n y << 1\n t\nend\ne.next\nbegin\n e.next\nrescue StopIteration\nend\nx=1\nbegin\n e.next\nrescue StopIteration => ex\n ex.result.forward\nend\n';
   expect(traceProgram('ruby', program, program).finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
 });
+
+test('match globals retain their instance variables during trace collection', () => {
+  const program = '/a/ =~ "a"\n$~.instance_variable_set(:@t,Turtle.new)\nx=1\n$~.instance_variable_get(:@t).forward\n';
+  expect(traceProgram('ruby', program, program).finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
+});

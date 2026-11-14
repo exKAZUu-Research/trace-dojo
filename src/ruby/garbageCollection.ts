@@ -36,6 +36,7 @@ export function pushFrameReferences(frame: Frame, pending: Value[]): void {
   if (extra.args) for (const arg of extra.args) pending.push(arg);
   if (extra.keywords) pending.push(extra.keywords);
   if (extra.proc) pending.push(extra.proc);
+  if (extra.lastMatch) pending.push(extra.lastMatch);
 }
 
 /** Pushes the values an object refers to. */
