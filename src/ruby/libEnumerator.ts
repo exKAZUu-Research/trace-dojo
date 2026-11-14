@@ -1,6 +1,7 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   addressOf,
+  caseEquals,
   comparisonFailed,
   inspect,
   numericCompare,
@@ -14,6 +15,7 @@ import { def, sdef } from './define';
 import { argumentCountError, argumentError, floatDomainError, rangeError, rubyError, typeError } from './errors';
 import { floatStepCount } from './floatMath';
 import { pushFrameReferences } from './garbageCollection';
+import { hashGet, hashSet } from './hashes';
 import {
   callMethod,
   callProc,
@@ -25,7 +27,7 @@ import {
   respondsTo,
   runToEnd,
 } from './interp';
-import { iterate, STOP } from './libEnumerable';
+import { iterate, STOP, zipCollections } from './libEnumerable';
 import { rangeSize } from './libRange';
 import { setSize } from './libSet';
 import {
@@ -42,7 +44,7 @@ import {
   type Value,
 } from './objects';
 import { type Frame, rt, RubyError } from './runtime';
-import { arr, realClassOf, str, stringBytes, stringCharacterCount, truthy } from './values';
+import { arr, newHash, realClassOf, str, stringBytes, stringCharacterCount, truthy } from './values';
 
 /** What an enumerator iterates: a method of a receiver, called with the block it is given. */
 export interface EnumeratorSource {
@@ -842,7 +844,10 @@ type LazyStep =
   | { kind: 'map' | 'select' | 'reject' | 'take_while' | 'drop_while' | 'filter_map' | 'flat_map'; block: RProc }
   | { kind: 'take' | 'drop'; count: number }
   | { kind: 'compact' }
-  | { kind: 'with_index'; offset: bigint; block?: RProc };
+  | { kind: 'with_index'; offset: bigint; block?: RProc }
+  | { kind: 'grep' | 'grep_v'; pattern: Value; block?: RProc }
+  | { kind: 'uniq'; block?: RProc }
+  | { kind: 'zip'; others: Value[] };
 
 interface LazyData {
   source: Value;
@@ -883,6 +888,7 @@ function makeLazy(source: Value, steps: LazyStep[]): RObject {
       return [
         this.source,
         ...this.steps.flatMap((step) => ('block' in step && step.block ? [step.block] : [])),
+        ...this.steps.flatMap((step) => ('pattern' in step ? [step.pattern] : 'others' in step ? step.others : [])),
         ...cursorRoots(this.enumerator?.cursor),
       ];
     },
@@ -904,13 +910,40 @@ for (const kind of [
   'drop_while',
   'filter_map',
   'flat_map',
+  'collect_concat',
+  'find_all',
 ] as const) {
   def('Enumerator::Lazy', kind, 0, (self: RObject, _args, block) => {
     const data = self.data as LazyData;
-    const normalized = kind === 'collect' ? 'map' : kind === 'filter' ? 'select' : kind;
+    const normalized =
+      kind === 'collect'
+        ? 'map'
+        : kind === 'filter' || kind === 'find_all'
+          ? 'select'
+          : kind === 'collect_concat'
+            ? 'flat_map'
+            : kind;
     return makeLazy(data.source, [...data.steps, { kind: normalized, block: requireBlock(block) }]);
   });
 }
+for (const kind of ['grep', 'grep_v'] as const) {
+  def('Enumerator::Lazy', kind, 1, (self: RObject, [pattern], block) => {
+    const data = self.data as LazyData;
+    return makeLazy(data.source, [...data.steps, { kind, pattern, block }]);
+  });
+}
+def('Enumerator::Lazy', 'uniq', 0, (self: RObject, _args, block) => {
+  const data = self.data as LazyData;
+  return makeLazy(data.source, [...data.steps, { kind: 'uniq', block }]);
+});
+def('Enumerator::Lazy', 'zip', [0, -1], function* (self: RObject, others, block) {
+  if (block) return yield* zipCollections(self, others, block);
+  for (const other of others)
+    if (!(other instanceof RArray) && !respondsTo(other, 'each', true))
+      throw typeError(`wrong argument type ${realClassOf(other).name} (must respond to :each)`);
+  const data = self.data as LazyData;
+  return makeLazy(data.source, [...data.steps, { kind: 'zip', others }]);
+});
 for (const kind of ['take', 'drop'] as const) {
   def('Enumerator::Lazy', kind, 1, function* (self: RObject, [count]) {
     const data = self.data as LazyData;
@@ -937,17 +970,29 @@ def('Enumerator::Lazy', 'each_with_index', 0, function* (self: RObject, _args, b
 /** Runs a lazy chain: each element of the source passes the steps in turn, and `take` ends the iteration. */
 function* runLazy(self: RObject, visit: (value: Value) => Gen<unknown>): Gen {
   const data = self.data as LazyData;
-  const states = data.steps.map((step) => ({ seen: 0, dropping: true, index: 'offset' in step ? step.offset : 0n }));
+  const states: LazyState[] = data.steps.map((step) => ({
+    seen: 0,
+    dropping: true,
+    index: 'offset' in step ? step.offset : 0n,
+  }));
   const takeZero = data.steps.some((step) => step.kind === 'take' && step.count === 0);
   if (takeZero) return NIL;
-  const result = yield* iterate(data.source, (value) => streamLazyStep(data.steps, states, 0, value, visit));
-  return data.steps.length === 0 ? result : NIL;
+  const held = rt().held.length;
+  try {
+    const result = yield* iterate(data.source, (value) => streamLazyStep(data.steps, states, 0, value, visit));
+    return data.steps.length === 0 ? result : NIL;
+  } finally {
+    for (const state of states) for (const iterator of state.iterators ?? []) iterator?.return();
+    rt().held.length = held;
+  }
 }
 
 interface LazyState {
   seen: number;
   dropping: boolean;
   index: bigint;
+  keys?: RHash;
+  iterators?: (Generator<unknown, void, unknown> | undefined)[];
 }
 
 function* streamLazyStep(
@@ -1000,6 +1045,49 @@ function* streamLazyStep(
       const index = state.index++;
       if (step.block) yield* callProc(step.block, [item, index]);
       return yield* next(step.block ? item : arr([item, index]));
+    }
+    case 'grep':
+    case 'grep_v': {
+      if (truthy(yield* caseEquals(step.pattern, item)) !== (step.kind === 'grep')) return;
+      return yield* next(step.block ? yield* callProc(step.block, [item]) : item);
+    }
+    case 'uniq': {
+      const key = step.block ? yield* callProc(step.block, [item]) : item;
+      if (!state.keys) {
+        state.keys = newHash();
+        rt().held.push(state.keys);
+      }
+      if (yield* hashGet(state.keys, key)) return;
+      yield* hashSet(state.keys, key, true);
+      return yield* next(item);
+    }
+    case 'zip': {
+      state.iterators ??= step.others.map((other) =>
+        other instanceof RArray
+          ? undefined
+          : flattenGenerator(
+              (function* (): Gen<void> {
+                yield* iterate(other, function* (value) {
+                  yield value;
+                });
+              })()
+            )
+      );
+      const tuple: Value[] = [item];
+      const index = state.seen++;
+      for (const [position, other] of step.others.entries()) {
+        const result = state.iterators[position]?.next();
+        tuple.push(
+          other instanceof RArray ? (other.items[index] ?? NIL) : result?.done ? NIL : (result?.value as Value)
+        );
+      }
+      const arrays = rt().heldArrays;
+      arrays.push(tuple);
+      try {
+        return yield* next(arr(tuple));
+      } finally {
+        arrays.pop();
+      }
     }
   }
 }

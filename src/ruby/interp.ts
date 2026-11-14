@@ -1693,7 +1693,15 @@ function* callMethodMissing(
 ): Gen {
   const handler = classOf(recv).findMethod('method_missing');
   if (handler && handler.body.kind !== 'native') {
-    return yield* invoke(handler, recv, [RSymbol.of(name), ...args], keywords, block, options.used ?? true);
+    return yield* invoke(
+      handler,
+      recv,
+      [RSymbol.of(name), ...args],
+      keywords,
+      block,
+      options.used ?? true,
+      options.vcall
+    );
   }
   if (visibility)
     throw noMethodError(`${visibility} method '${name}' called for ${receiverDescription(recv)}`, recv, name);
@@ -1716,7 +1724,8 @@ export function* invoke(
   args: Value[],
   keywords: RHash | undefined,
   block: RProc | undefined,
-  used: boolean
+  used: boolean,
+  missingCallVcall?: boolean
 ): Gen {
   const runtime = rt();
   const { body } = method;
@@ -1761,7 +1770,7 @@ export function* invoke(
       return value as Value;
     }
     case 'user': {
-      return yield* invokeUser(method, body.def, body.cref, recv, args, keywords, block, used);
+      return yield* invokeUser(method, body.def, body.cref, recv, args, keywords, block, used, missingCallVcall);
     }
     case 'proc': {
       return yield* callProc(body.proc, args, { keywords, block, self: recv, used, method, lambdaArgs: true });
@@ -1784,12 +1793,14 @@ function* invokeUser(
   args: Value[],
   keywords: RHash | undefined,
   block: RProc | undefined,
-  used: boolean
+  used: boolean,
+  missingCallVcall?: boolean
 ): Gen {
   const runtime = rt();
   runtime.userCallVersion++;
   const frame = new Frame('method', recv, new Scope(), cref, runtime.currentRow, def.isAtomic, used, {
     method,
+    missingCallVcall,
     def,
     block,
     args,

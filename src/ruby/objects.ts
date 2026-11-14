@@ -288,13 +288,44 @@ export class RClass extends RBasic {
     const active = new Set<RClass>();
     const superAncestors = this.superclass ? this.superclass.ancestors() : [];
     const inSuper = new Set(superAncestors);
+    const prependChain = (module: RClass, visited = new Set<RClass>()): RClass[] => {
+      if (visited.has(module)) return [];
+      visited.add(module);
+      return [
+        ...module.prepends.flatMap((item) => prependChain(item, visited)),
+        module,
+        ...module.includes.flatMap((item) => prependChain(item, visited)),
+      ];
+    };
+    const mergedPrepends = (modules: RClass[]): RClass[] => {
+      const merged: RClass[] = [];
+      for (const module of modules) {
+        let pending: RClass[] = [];
+        for (const item of prependChain(module)) {
+          const position = merged.indexOf(item);
+          if (position === -1) {
+            pending.push(item);
+          } else {
+            merged.splice(position, 0, ...pending);
+            pending = [];
+          }
+        }
+        merged.push(...pending);
+      }
+      return merged;
+    };
     const addModule = (module: RClass, placement: 'prepend' | 'body' = 'body'): void => {
       const visited = placement === 'prepend' ? seenPrepended : seen;
       if (visited.has(module) || active.has(module) || (placement !== 'prepend' && inSuper.has(module))) return;
       visited.add(module);
       active.add(module);
       rt().spend();
-      for (const prepended of module.prepends) addModule(prepended, 'prepend');
+      for (const prepended of mergedPrepends(module.prepends))
+        if (!seenPrepended.has(prepended) && !active.has(prepended)) {
+          seenPrepended.add(prepended);
+          rt().spend();
+          list.push(prepended);
+        }
       list.push(module);
       for (const included of module.includes) addModule(included, placement);
       active.delete(module);

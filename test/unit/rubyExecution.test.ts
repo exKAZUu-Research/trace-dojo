@@ -5238,6 +5238,14 @@ test('Lazy size follows source size and filtering steps', () => {
   });
 });
 
+test('Lazy Enumerable transforms stop after the requested prefix', () => {
+  expect(
+    run(
+      'p (1..Float::INFINITY).lazy.uniq.first(2),(1..Float::INFINITY).lazy.grep(2..4).first(2),(1..Float::INFINITY).lazy.find_all(&:odd?).first(2),(1..Float::INFINITY).lazy.collect_concat{[_1]}.first(2),(1..Float::INFINITY).lazy.zip(1..Float::INFINITY).first(2)'
+    )
+  ).toMatchObject({ stdout: '[1, 2]\n[2, 3]\n[1, 3]\n[1, 2]\n[[1, 1], [2, 2]]\n' });
+});
+
 test('Lazy each returns its source result and each_with_index runs with a block', () => {
   expect(
     run(
@@ -5560,6 +5568,15 @@ test('String substitution patterns update the current match', () => {
   });
 });
 
+test('method_missing super keeps the original bare-name error kind', () => {
+  expect(run('class Foo;def method_missing(n,*a,&b) = super;def t = zork;end;Foo.new.t')).toMatchObject({
+    uncaughtException: expect.stringContaining('(NameError)'),
+  });
+  expect(run('class Foo;def method_missing(n,*a,&b) = super;end;Foo.new.zork')).toMatchObject({
+    uncaughtException: expect.stringContaining('(NoMethodError)'),
+  });
+});
+
 test('Regexp capture names follow comments, Unicode and duplicate alternatives', () => {
   expect(run('/(a) # (?<fake>b)\n/x =~ "a";p $1')).toMatchObject({ stdout: '"a"\n' });
   const name = String.fromCodePoint(21_517, 21_069);
@@ -5599,6 +5616,14 @@ test('prepended modules retain their included ancestors', () => {
   ).toMatchObject({
     stdout: '[M, N, B, A, M, N, Object]\n"MNA"\n',
   });
+});
+
+test('prepended module chains merge shared descendants before super dispatch', () => {
+  expect(
+    run(
+      'module N;def x;"N"+super;end;end;module O;def x;"O"+super;end;end;module M;include N,O;def x;"M"+super;end;end;module P;include N;def x;"P"+super;end;end;class A;include M;def x;"A";end;end;class B<A;prepend M,P;end;p B.ancestors.take(9);p B.new.x'
+    )
+  ).toMatchObject({ stdout: '[M, P, N, O, B, A, M, N, O]\n"MPNOA"\n' });
 });
 
 test('frozen classes reject no-op prepend and named Struct registration', () => {
