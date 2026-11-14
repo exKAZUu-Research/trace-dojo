@@ -5167,6 +5167,20 @@ test('singleton method descriptions identify the attached object', () => {
   expect(result.stdout).toContain('#<UnboundMethod: #<Class:#<Object:');
 });
 
+test('Rational division methods preserve exact remainders', () => {
+  expect(
+    run('r=Rational(7,3);s=Rational(2,3);p r % s,r.divmod(s),r.remainder(s),r.div(s),r.fdiv(s),r.finite?,5 % s')
+  ).toMatchObject({
+    stdout: '(1/3)\n[3, (1/3)]\n(1/3)\n3\n3.5\ntrue\n(1/3)\n',
+  });
+});
+
+test('Rational methods accept boxed Float values', () => {
+  expect(run('p Rational(-0.0),Rational(1e-100) == 1e-100.to_r')).toMatchObject({
+    stdout: '(0/1)\ntrue\n',
+  });
+});
+
 test('Data copies remain frozen and Rational copies preserve identity', () => {
   expect(
     run(

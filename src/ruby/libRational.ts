@@ -3,7 +3,7 @@ import { def } from './define';
 import { argumentError, floatDomainError, typeError, zeroDivisionError } from './errors';
 import { exactDecimal } from './floatFormat';
 import { callMethod, type Gen } from './interp';
-import { NIL, RArray, RObject, RString, type Value } from './objects';
+import { isRubyFloat, NIL, RArray, RObject, RString, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { arr, realClassOf, str } from './values';
 
@@ -65,7 +65,7 @@ function toNumber(fraction: { numerator: bigint; denominator: bigint }): number 
 
 function* arithmetic(self: RObject, other: Value, op: string): Gen {
   const a = fractionOf(self);
-  if (typeof other === 'number') return yield* callMethod(toNumber(a), op, [other]);
+  if (isRubyFloat(other)) return yield* callMethod(toNumber(a), op, [other]);
   const b = asFraction(other);
   if (!b) {
     if (other === NIL || other instanceof RString)
@@ -94,6 +94,39 @@ function* arithmetic(self: RObject, other: Value, op: string): Gen {
 for (const op of ['+', '-', '*', '/', 'quo']) {
   def('Rational', op, 1, (self: RObject, [other]) => arithmetic(self, other, op === 'quo' ? '/' : op));
 }
+for (const op of ['%', 'modulo', 'remainder', 'div', 'divmod', 'fdiv'] as const) {
+  def('Rational', op, 1, (self: RObject, [other]) => rationalDivision(self, other, op));
+}
+def('Rational', 'finite?', 0, () => true);
+def('Rational', 'step', [0, -1], () => {
+  throw new UnsupportedFeatureError('Rational#step');
+});
+
+function* rationalDivision(
+  self: RObject,
+  other: Value,
+  op: '%' | 'modulo' | 'remainder' | 'div' | 'divmod' | 'fdiv'
+): Gen {
+  const left = fractionOf(self);
+  if (isRubyFloat(other)) return yield* callMethod(toNumber(left), op, [other]);
+  const right = asFraction(other);
+  if (!right) {
+    const pair = yield* callMethod(other, 'coerce', [self]);
+    if (!(pair instanceof RArray) || pair.items.length !== 2) throw typeError('coerce must return [x, y]');
+    return yield* callMethod(pair.items[0], op, [pair.items[1]]);
+  }
+  if (right.numerator === 0n) throw zeroDivisionError();
+  const numerator = left.numerator * right.denominator;
+  const denominator = left.denominator * right.numerator;
+  if (op === 'fdiv') return Number(numerator) / Number(denominator);
+  const quotient = op === 'remainder' ? numerator / denominator : floorDivide(numerator, denominator);
+  if (op === 'div') return quotient;
+  const remainder = makeRational(
+    left.numerator * right.denominator - quotient * right.numerator * left.denominator,
+    left.denominator * right.denominator
+  );
+  return op === 'divmod' ? arr([quotient, remainder]) : remainder;
+}
 def('Rational', '**', 1, function* (self: RObject, [exponent]) {
   const { numerator, denominator } = fractionOf(self);
   if (typeof exponent === 'bigint') {
@@ -121,9 +154,9 @@ def('Rational', '**', 1, function* (self: RObject, [exponent]) {
 def('Rational', '-@', 0, (self: RObject) => makeRational(-fractionOf(self).numerator, fractionOf(self).denominator));
 def('Rational', '<=>', 1, (self: RObject, [other]) => {
   const a = fractionOf(self);
-  if (typeof other === 'number') {
+  if (isRubyFloat(other)) {
     const x = toNumber(a);
-    return x < other ? -1n : x > other ? 1n : 0n;
+    return x < Number(other) ? -1n : x > Number(other) ? 1n : 0n;
   }
   const b = asFraction(other);
   if (!b) return NIL;
@@ -131,7 +164,7 @@ def('Rational', '<=>', 1, (self: RObject, [other]) => {
   return difference < 0n ? -1n : difference > 0n ? 1n : 0n;
 });
 def('Rational', '==', 1, (self: RObject, [other]) => {
-  if (typeof other === 'number') return toNumber(fractionOf(self)) === other;
+  if (isRubyFloat(other)) return toNumber(fractionOf(self)) === Number(other);
   const b = asFraction(other);
   return (
     b !== undefined && b.numerator === fractionOf(self).numerator && b.denominator === fractionOf(self).denominator
@@ -139,7 +172,7 @@ def('Rational', '==', 1, (self: RObject, [other]) => {
 });
 def('Rational', 'coerce', 1, (self: RObject, [other]) => {
   if (typeof other === 'bigint') return arr([makeRational(other, 1n), self]);
-  if (typeof other === 'number') return arr([other, toNumber(fractionOf(self))]);
+  if (isRubyFloat(other)) return arr([other, toNumber(fractionOf(self))]);
   throw typeError(`${realClassOf(other).name} can't be coerced into Rational`);
 });
 def('Rational', 'numerator', 0, (self: RObject) => fractionOf(self).numerator);
@@ -199,14 +232,23 @@ function* roundTo(self: RObject, args: Value[], mode: 'floor' | 'ceil' | 'round'
 
 def('Rational', 'floor', [0, 1], (self: RObject, args) => roundTo(self, args, 'floor'));
 def('Rational', 'ceil', [0, 1], (self: RObject, args) => roundTo(self, args, 'ceil'));
-def('Rational', 'round', [0, 1], (self: RObject, args) => roundTo(self, args, 'round'));
+def(
+  'Rational',
+  'round',
+  [0, 1],
+  (self: RObject, args, _block, keywords) => {
+    if (keywords) throw new UnsupportedFeatureError('Rational#round(half:)');
+    return roundTo(self, args, 'round');
+  },
+  { keywords: true }
+);
 
 def('Integer', 'to_r', 0, (self: bigint) => makeRational(self, 1n));
 def('Integer', 'rationalize', [0, 1], (self: bigint) => makeRational(self, 1n));
 def('Integer', 'numerator', 0, (self) => self);
 def('Integer', 'denominator', 0, () => 1n);
 def('Integer', 'quo', 1, function* (self: bigint, [other]) {
-  if (typeof other === 'number') return Number(self) / other;
+  if (isRubyFloat(other)) return Number(self) / Number(other);
   return yield* arithmetic(makeRational(self, 1n), other, '/');
 });
 def('Float', 'to_r', 0, (self: number) => floatToRational(self));
@@ -217,7 +259,7 @@ def('Float', 'rationalize', [0, 1], () => {
 /** `Rational(...)`, which reads Integers, Rationals, Floats, and strings such as `"1/3"`. */
 function* rationalOf(value: Value): Gen<RObject> {
   if (typeof value === 'bigint') return makeRational(value, 1n);
-  if (typeof value === 'number') return floatToRational(value);
+  if (isRubyFloat(value)) return floatToRational(Number(value));
   if (isRational(value)) return value;
   const text = (yield* toStr(value)).trim().replaceAll('_', '');
   const match = /^([+-]?\d+)(?:\.(\d+))?(?:\/(\d+))?$/.exec(text);
