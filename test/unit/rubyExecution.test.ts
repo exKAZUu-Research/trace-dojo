@@ -5275,6 +5275,31 @@ test('anonymous forwarding parameters reach implicit super', () => {
   });
 });
 
+test('Time fields and fractional microseconds retain Ruby calendar values', () => {
+  expect(
+    run('p Time.utc(0,3,1).yday,Time.utc(99,3,1).yday,Time.at(0,0.0009).nsec,Time.at(0,-0.0005).nsec')
+  ).toMatchObject({
+    stdout: '61\n60\n0\n999999999\n',
+  });
+  expect(run('p Time.utc(2000,"Feb",3),Time.utc("2000","3","4","5","6","7")')).toMatchObject({
+    stdout: '2000-02-03 00:00:00 UTC\n2000-03-04 05:06:07 UTC\n',
+  });
+});
+
+test('Time localtime rejects frozen explicit offset conversions', () => {
+  expect(
+    run('t=Time.utc(2024).getlocal("+02:00").freeze;begin;t.localtime("+02:00");rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'FrozenError\n',
+  });
+});
+
+test('Time strftime applies widths, flags and week directives', () => {
+  expect(run('t=Time.new(2024,2,29,13,5,9);p t.strftime("%3N|%^a|%10A|%U|%W|%V|%G|%g|%r|%v|%:z|%::z")')).toMatchObject({
+    stdout: '"000|THU|  Thursday|08|09|09|2024|24|01:05:09 PM|29-FEB-2024|+09:00|+09:00:00"\n',
+  });
+});
+
 test('Data copies remain frozen and Rational copies preserve identity', () => {
   expect(
     run(
