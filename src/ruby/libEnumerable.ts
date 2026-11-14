@@ -52,26 +52,26 @@ type Visit = (value: Value) => Gen<unknown>;
  * `[key, value]` pairs, a Range's members, or whatever `each` yields (several values packed into an array). The
  * visitor returns {@link STOP} to end the iteration.
  */
-export function* iterate(collection: Value, visit: Visit, args: Value[] = []): Gen<void> {
+export function* iterate(collection: Value, visit: Visit, args: Value[] = []): Gen {
   const runtime = rt();
   if (args.length === 0 && collection instanceof RArray && !isOverridden(collection)) {
     for (let index = 0; index < collection.items.length; index++) {
       runtime.spend();
-      if ((yield* visit(collection.items[index])) === STOP) return;
+      if ((yield* visit(collection.items[index])) === STOP) return NIL;
     }
-    return;
+    return collection;
   }
   if (args.length === 0 && collection instanceof RHash && !isOverridden(collection)) {
     yield* eachEntryUntil(collection, function* (entry) {
       runtime.spend();
       return (yield* visit(arr([entry.key, entry.value]))) === STOP;
     });
-    return;
+    return collection;
   }
   if (args.length === 0 && collection instanceof RRange && !isOverridden(collection)) {
     const { iterateRange } = rangeHelpers;
     yield* iterateRange(collection, visit);
-    return;
+    return collection;
   }
   const signal = new StopSignal();
   const block = nativeProc(-1, function* (args) {
@@ -81,7 +81,7 @@ export function* iterate(collection: Value, visit: Visit, args: Value[] = []): G
     return NIL;
   });
   try {
-    yield* args.length === 0 &&
+    return yield* args.length === 0 &&
     collection instanceof RObject &&
     collection.cls.isSubclassOf(runtime.c.Enumerator) &&
     collection.cls !== runtime.c['Enumerator::Lazy']
@@ -93,6 +93,7 @@ export function* iterate(collection: Value, visit: Visit, args: Value[] = []): G
       : callMethod(collection, 'each', args, undefined, block, { fcall: true });
   } catch (error) {
     if (error !== signal) throw error;
+    return NIL;
   }
 }
 

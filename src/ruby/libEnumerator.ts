@@ -42,7 +42,7 @@ import {
   type Value,
 } from './objects';
 import { type Frame, rt, RubyError } from './runtime';
-import { arr, str, stringBytes, stringCharacterCount, truthy } from './values';
+import { arr, realClassOf, str, stringBytes, stringCharacterCount, truthy } from './values';
 
 /** What an enumerator iterates: a method of a receiver, called with the block it is given. */
 export interface EnumeratorSource {
@@ -310,7 +310,7 @@ function sourceOf(self: RObject): EnumeratorSource {
       recv: self,
       method: 'each',
       args: [],
-      size: () => NIL,
+      size: () => lazySize(self),
       iterate: (block) => callMethod(self, 'each', [], undefined, block),
       held: () => [self, ...data.held()],
     };
@@ -846,6 +846,29 @@ interface LazyData {
   held(): Value[];
 }
 
+function* lazySize(self: RObject): Gen {
+  const { source, steps } = self.data as LazyData;
+  if (!respondsTo(source, 'size')) return NIL;
+  let size = yield* callMethod(source, 'size', []);
+  for (const step of steps) {
+    if (size === NIL) return NIL;
+    if (step.kind === 'take' || step.kind === 'drop') {
+      if (typeof size === 'bigint')
+        size =
+          step.kind === 'take'
+            ? size < BigInt(step.count)
+              ? size
+              : BigInt(step.count)
+            : size > BigInt(step.count)
+              ? size - BigInt(step.count)
+              : 0n;
+      else if (isRubyFloat(size))
+        size = step.kind === 'take' ? Math.min(Number(size), step.count) : Math.max(0, Number(size) - step.count);
+    } else if (!['map', 'with_index'].includes(step.kind)) return NIL;
+  }
+  return size;
+}
+
 function makeLazy(source: Value, steps: LazyStep[]): RObject {
   const lazy = new RObject(rt().c['Enumerator::Lazy']);
   const data: LazyData = {
@@ -895,95 +918,114 @@ def('Enumerator::Lazy', 'compact', 0, (self: RObject) => {
   const data = self.data as LazyData;
   return makeLazy(data.source, [...data.steps, { kind: 'compact' }]);
 });
-def('Enumerator::Lazy', ['with_index', 'each_with_index'], [0, 1], function* (self: RObject, args, block) {
+def('Enumerator::Lazy', 'with_index', [0, 1], function* (self: RObject, args, block) {
   const data = self.data as LazyData;
   const offset = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : 0n;
   return makeLazy(data.source, [...data.steps, { kind: 'with_index', offset, block }]);
 });
+def('Enumerator::Lazy', 'each_with_index', [0, 1], function* (self: RObject, args, block) {
+  if (!block) return yield* callMethod(self, 'with_index', args);
+  const offset = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : 0n;
+  let index = offset;
+  return yield* runLazy(self, (value) => callProc(block, [value, index++], { used: false }));
+});
 
 /** Runs a lazy chain: each element of the source passes the steps in turn, and `take` ends the iteration. */
-function* runLazy(self: RObject, visit: (value: Value) => Gen<unknown>): Gen<void> {
+function* runLazy(self: RObject, visit: (value: Value) => Gen<unknown>): Gen {
   const data = self.data as LazyData;
   const states = data.steps.map((step) => ({ seen: 0, dropping: true, index: 'offset' in step ? step.offset : 0n }));
   const takeZero = data.steps.some((step) => step.kind === 'take' && step.count === 0);
-  if (takeZero) return;
-  yield* iterate(data.source, function* (value) {
-    let values: Value[] = [value];
-    for (const [index, step] of data.steps.entries()) {
-      const state = states[index];
-      const next: Value[] = [];
-      for (const item of values) {
-        switch (step.kind) {
-          case 'map': {
-            next.push(yield* callProc(step.block, [item]));
-            break;
-          }
-          case 'select':
-          case 'reject': {
-            if (truthy(yield* callProc(step.block, [item])) === (step.kind === 'select')) next.push(item);
-            break;
-          }
-          case 'filter_map': {
-            const mapped = yield* callProc(step.block, [item]);
-            if (truthy(mapped)) next.push(mapped);
-            break;
-          }
-          case 'flat_map': {
-            const mapped = yield* callProc(step.block, [item]);
-            if (mapped instanceof RArray) next.push(...mapped.items);
-            else next.push(mapped);
-            break;
-          }
-          case 'take_while': {
-            if (!truthy(yield* callProc(step.block, [item]))) return STOP;
-            next.push(item);
-            break;
-          }
-          case 'drop_while': {
-            if (state.dropping && truthy(yield* callProc(step.block, [item]))) break;
-            state.dropping = false;
-            next.push(item);
-            break;
-          }
-          case 'take': {
-            if (state.seen < step.count) {
-              next.push(item);
-              state.seen++;
-            }
-            break;
-          }
-          case 'drop': {
-            if (state.seen++ >= step.count) next.push(item);
-            break;
-          }
-          case 'compact': {
-            if (item !== NIL) next.push(item);
-            break;
-          }
-          case 'with_index': {
-            const pair = arr([item, state.index++]);
-            next.push(step.block ? yield* callProc(step.block, [item, state.index - 1n]) : pair);
-            if (step.block) next[next.length - 1] = item;
-            break;
-          }
-        }
-      }
-      values = next;
-      if (values.length === 0)
-        return data.steps.some((step, position) => step.kind === 'take' && states[position].seen >= step.count)
-          ? STOP
-          : undefined;
+  if (takeZero) return NIL;
+  const result = yield* iterate(data.source, (value) => streamLazyStep(data.steps, states, 0, value, visit));
+  return data.steps.length === 0 ? result : NIL;
+}
+
+interface LazyState {
+  seen: number;
+  dropping: boolean;
+  index: bigint;
+}
+
+function* streamLazyStep(
+  steps: LazyStep[],
+  states: LazyState[],
+  position: number,
+  item: Value,
+  visit: (value: Value) => Gen<unknown>
+): Gen<unknown> {
+  const step = steps[position];
+  if (!step) return yield* visit(item);
+  const state = states[position];
+  const next = (value: Value): Gen<unknown> => streamLazyStep(steps, states, position + 1, value, visit);
+  switch (step.kind) {
+    case 'map': {
+      return yield* next(yield* callProc(step.block, [item]));
     }
-    for (const item of values) if ((yield* visit(item)) === STOP) return STOP;
-    const finished = data.steps.some((step, index) => step.kind === 'take' && states[index].seen >= step.count);
-    return finished ? STOP : undefined;
-  });
+    case 'select':
+    case 'reject': {
+      return truthy(yield* callProc(step.block, [item])) === (step.kind === 'select') ? yield* next(item) : undefined;
+    }
+    case 'filter_map': {
+      const mapped = yield* callProc(step.block, [item]);
+      return truthy(mapped) ? yield* next(mapped) : undefined;
+    }
+    case 'flat_map': {
+      return yield* streamFlattened(yield* callProc(step.block, [item]), next);
+    }
+    case 'take_while': {
+      return truthy(yield* callProc(step.block, [item])) ? yield* next(item) : STOP;
+    }
+    case 'drop_while': {
+      if (state.dropping && truthy(yield* callProc(step.block, [item]))) return undefined;
+      state.dropping = false;
+      return yield* next(item);
+    }
+    case 'take': {
+      if (state.seen >= step.count) return STOP;
+      state.seen++;
+      const result = yield* next(item);
+      return result === STOP || state.seen >= step.count ? STOP : undefined;
+    }
+    case 'drop': {
+      return state.seen++ >= step.count ? yield* next(item) : undefined;
+    }
+    case 'compact': {
+      return item === NIL ? undefined : yield* next(item);
+    }
+    case 'with_index': {
+      const index = state.index++;
+      if (step.block) yield* callProc(step.block, [item, index]);
+      return yield* next(step.block ? item : arr([item, index]));
+    }
+  }
+}
+
+function* streamFlattened(mapped: Value, next: (value: Value) => Gen<unknown>): Gen<unknown> {
+  if (mapped instanceof RArray) {
+    for (const item of mapped.items) if ((yield* next(item)) === STOP) return STOP;
+    return;
+  }
+  if (mapped instanceof RObject && respondsTo(mapped, 'force') && respondsTo(mapped, 'each')) {
+    let stopped = false;
+    yield* iterate(mapped, function* (item) {
+      if ((yield* next(item)) === STOP) {
+        stopped = true;
+        return STOP;
+      }
+    });
+    return stopped ? STOP : undefined;
+  }
+  if (respondsTo(mapped, 'to_ary', true)) {
+    const array = yield* callMethod(mapped, 'to_ary', [], undefined, undefined, { fcall: true });
+    if (array instanceof RArray) return yield* streamFlattened(array, next);
+    if (array !== NIL) throw typeError(`can't convert ${realClassOf(mapped).name} to Array`);
+  }
+  return yield* next(mapped);
 }
 
 def('Enumerator::Lazy', 'each', 0, function* (self: RObject, _args, block) {
   if (!block) return self;
-  yield* runLazy(self, (value) => callProc(block, [value], { used: false }));
-  return self;
+  return yield* runLazy(self, (value) => callProc(block, [value], { used: false }));
 });
 def('Enumerator::Lazy', ['force', 'to_a'], [0, -1], function* (self: RObject) {
   const items: Value[] = [];
@@ -996,6 +1038,7 @@ def('Enumerator::Lazy', ['force', 'to_a'], [0, -1], function* (self: RObject) {
 def('Enumerator::Lazy', 'first', [0, 1], function* (self: RObject, args) {
   const items: Value[] = [];
   const count = args.length > 0 ? Number(yield* toInt(args[0])) : 1;
+  if (count < 0) throw argumentError('attempt to take negative size');
   if (count > 0) {
     yield* runLazy(self, function* (value) {
       items.push(value);

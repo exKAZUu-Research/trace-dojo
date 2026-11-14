@@ -5227,6 +5227,38 @@ test('defined? describes literals and match globals', () => {
   });
 });
 
+test('Lazy size follows source size and filtering steps', () => {
+  expect(
+    run('p [1,2,3].lazy.size,[1,2,3].lazy.map{_1}.size,[1,2,3].lazy.take(2).size,[1,2,3].lazy.select{true}.size')
+  ).toMatchObject({
+    stdout: '3\n3\n2\nnil\n',
+  });
+});
+
+test('Lazy each returns its source result and each_with_index runs with a block', () => {
+  expect(
+    run(
+      'p [1,2].lazy.each{|x|x};p [1,2].lazy.map{|x|x}.each{|x|x};a=[];p [1,2].lazy.each_with_index{|x,i|a << [x,i]};p a'
+    )
+  ).toMatchObject({
+    stdout: '[1, 2]\nnil\n[1, 2]\n[[1, 0], [2, 1]]\n',
+  });
+  expect(run('[1,2].lazy.first(-1)')).toMatchObject({
+    uncaughtException: expect.stringContaining('attempt to take negative size'),
+  });
+  expect(run('p Enumerator.new{|y|y << 1;:done}.lazy.each{|x|x}')).toMatchObject({ stdout: ':done\n' });
+});
+
+test('Lazy flat_map streams nested values and stops at take', () => {
+  expect(run('a=[];p [1].lazy.flat_map{|x|[x,x]}.map{|x|a<<x;x}.take(1).force,a')).toMatchObject({
+    stdout: '[1]\n[1]\n',
+  });
+  expect(run('class A;def to_ary = [1,2];end;p [A.new].lazy.flat_map{|x|x}.force')).toMatchObject({
+    stdout: '[1, 2]\n',
+  });
+  expect(run('p [1].lazy.flat_map{|x|[x,x+1].lazy}.force')).toMatchObject({ stdout: '[1, 2]\n' });
+});
+
 test('Data copies remain frozen and Rational copies preserve identity', () => {
   expect(
     run(
