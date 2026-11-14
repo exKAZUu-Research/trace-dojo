@@ -1647,6 +1647,18 @@ test('Array conversion callbacks cannot mutate frozen receivers', () => {
   });
 });
 
+test('Array reads current contents after conversion callbacks', () => {
+  expect(run('class X;def to_ary;$a.clear;[9];end;end;$a=[1,2];b=$a+X.new;p b,$a')).toMatchObject({
+    stdout: '[9]\n[]\n',
+  });
+  expect(run('class I;def to_int;$a.replace([8,9]);1;end;end;$a=[1,2,3];p $a.rotate(I.new),$a')).toMatchObject({
+    stdout: '[9, 8]\n[8, 9]\n',
+  });
+  expect(run('class X;def to_ary;$a.replace([8]);[9];end;end;$a=[X.new,2,3];p $a.flatten,$a')).toMatchObject({
+    stdout: '[9]\n[8]\n',
+  });
+});
+
 test('Array delete retains contents when an equality callback raises', () => {
   expect(
     run(

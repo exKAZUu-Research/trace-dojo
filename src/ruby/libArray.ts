@@ -240,21 +240,26 @@ def('Array', 'last', [0, 1], function* (self: RArray, args) {
 // code-gauge-allow functionCognitiveComplexity 20 -- values_at processes Integer and Range selectors, including out-of-bounds and beginless ranges.
 def('Array', 'values_at', [0, -1], function* (self: RArray, args) {
   const values: Value[] = [];
-  for (const arg of args) {
-    if (arg instanceof RRange) {
-      let start = arg.begin === NIL ? 0 : yield* toIndex(arg.begin);
-      if (start < 0) start += self.items.length;
-      if (start < 0) throw rangeError(`${yield* inspect(arg)} out of range`);
-      let end = arg.end === NIL ? self.items.length : Number(yield* toIndex(arg.end));
-      if (end < 0) end += self.items.length;
-      if (!arg.exclusive && arg.end !== NIL) end++;
-      grow(values.length + Math.max(0, end - start));
-      for (let index = start; index < end; index++) values.push(self.items[index] ?? NIL);
-    } else {
-      values.push(yield* elementAt(self, arg));
+  rt().heldArrays.push(values);
+  try {
+    for (const arg of args) {
+      if (arg instanceof RRange) {
+        let start = arg.begin === NIL ? 0 : yield* toIndex(arg.begin);
+        if (start < 0) start += self.items.length;
+        if (start < 0) throw rangeError(`${yield* inspect(arg)} out of range`);
+        let end = arg.end === NIL ? self.items.length : Number(yield* toIndex(arg.end));
+        if (end < 0) end += self.items.length;
+        if (!arg.exclusive && arg.end !== NIL) end++;
+        grow(values.length + Math.max(0, end - start));
+        for (let index = start; index < end; index++) values.push(self.items[index] ?? NIL);
+      } else {
+        values.push(yield* elementAt(self, arg));
+      }
     }
+    return arr(values);
+  } finally {
+    rt().heldArrays.pop();
   }
-  return arr(values);
 });
 def('Array', ['length', 'size'], 0, (self: RArray) => BigInt(self.items.length));
 def('Array', 'empty?', 0, (self: RArray) => self.items.length === 0);
@@ -442,15 +447,15 @@ def('Array', 'compact!', 0, function* (self: RArray) {
   return self;
 });
 
-function* flatten(items: Value[], depth: number, seen: Set<RArray>): Gen<Value[]> {
+function* flatten(source: RArray, depth: number, seen: Set<RArray>): Gen<Value[]> {
   const result: Value[] = [];
   rt().heldArrays.push(result);
-  const stack: { items: Value[]; index: number; depth: number; owner?: RArray }[] = [{ items, index: 0, depth }];
+  const stack: { source: RArray; index: number; depth: number; owner?: RArray }[] = [{ source, index: 0, depth }];
   try {
     while (stack.length > 0) {
       rt().spend();
       const frame = stack.at(-1) as (typeof stack)[number];
-      if (frame.index >= frame.items.length) {
+      if (frame.index >= frame.source.items.length) {
         stack.pop();
         if (frame.owner) {
           seen.delete(frame.owner);
@@ -458,7 +463,7 @@ function* flatten(items: Value[], depth: number, seen: Set<RArray>): Gen<Value[]
         }
         continue;
       }
-      const item = frame.items[frame.index++];
+      const item = frame.source.items[frame.index++];
       const nested = frame.depth !== 0 ? yield* tryAry(item) : undefined;
       if (!nested) {
         result.push(item);
@@ -468,7 +473,7 @@ function* flatten(items: Value[], depth: number, seen: Set<RArray>): Gen<Value[]
       if (seen.has(nested)) throw argumentError('tried to flatten recursive array');
       seen.add(nested);
       rt().held.push(nested);
-      stack.push({ items: nested.items, index: 0, depth: frame.depth - 1, owner: nested });
+      stack.push({ source: nested, index: 0, depth: frame.depth - 1, owner: nested });
     }
   } finally {
     for (const frame of stack) if (frame.owner) seen.delete(frame.owner);
@@ -480,12 +485,12 @@ function* flatten(items: Value[], depth: number, seen: Set<RArray>): Gen<Value[]
 
 def('Array', 'flatten', [0, 1], function* (self: RArray, args) {
   const depth = args.length > 0 && args[0] !== NIL ? yield* toIndex(args[0]) : -1;
-  return arr(yield* flatten(self.items, depth, new Set([self])));
+  return arr(yield* flatten(self, depth, new Set([self])));
 });
 def('Array', 'flatten!', [0, 1], function* (self: RArray, args) {
   yield* modify(self);
   const depth = args.length > 0 && args[0] !== NIL ? yield* toIndex(args[0]) : -1;
-  const flattened = yield* flatten(self.items, depth, new Set([self]));
+  const flattened = yield* flatten(self, depth, new Set([self]));
   const changed = flattened.length !== self.items.length || flattened.some((item, index) => item !== self.items[index]);
   grow(flattened.length, self);
   self.items = flattened;
@@ -516,11 +521,14 @@ function rotated(items: Value[], count: bigint): Value[] {
 }
 
 def('Array', 'rotate', [0, 1], function* (self: RArray, args) {
-  return arr(rotated(self.items, args.length > 0 ? (yield* toIndexExact(args[0])).integer : 1n));
+  const count = args.length > 0 ? (yield* toIndexExact(args[0])).integer : 1n;
+  return arr(rotated(self.items, count));
 });
 def('Array', 'rotate!', [0, 1], function* (self: RArray, args) {
   yield* modify(self);
-  self.items = rotated(self.items, args.length > 0 ? (yield* toIndexExact(args[0])).integer : 1n);
+  const count = args.length > 0 ? (yield* toIndexExact(args[0])).integer : 1n;
+  yield* modify(self);
+  self.items = rotated(self.items, count);
   return self;
 });
 def('Array', 'sort', 0, function* (self: RArray, _args, block) {
@@ -575,7 +583,8 @@ def('Array', 'fill', [0, 3], function* (self: RArray, args, block) {
 // Combination ---------------------------------------------------------------------------------------------------------
 
 def('Array', '+', 1, function* (self: RArray, [other]) {
-  const items = [...self.items, ...(yield* toAry(other)).items];
+  const right = yield* toAry(other);
+  const items = [...self.items, ...right.items];
   grow(items.length);
   return arr(items);
 });

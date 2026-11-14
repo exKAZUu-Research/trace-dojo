@@ -28,6 +28,11 @@ test('allocated Float values remain visible in traces', () => {
   });
 });
 
+test('values_at keeps earlier Turtle selections reachable through later conversions', () => {
+  const program = 'class I;def to_int;$a.clear;x=1;0;end;end;$a=[Turtle.new];b=$a.values_at(0,I.new)';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
 test('pending expression values remain visible in Turtle traces', () => {
   const programs = [
     'def v;x=1;42;end;h={Turtle.new=>v}',
