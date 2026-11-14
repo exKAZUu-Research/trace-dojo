@@ -1286,12 +1286,12 @@ function* randomOption(keywords: RHash | undefined): Gen<Value | undefined> {
 
 function* shuffle(items: Value[], randomizer: Value | undefined, owner?: RArray): Gen<void> {
   let index = items.length;
-  const version = owner?.version;
   while (index > 1) {
     const other = yield* randomIndex(randomizer, index);
-    if (owner && (owner.version !== version || owner.items !== items)) throw runtimeError('modified during shuffle');
+    const current = owner?.items ?? items;
+    if (current.length !== items.length) throw runtimeError('modified during shuffle');
     index--;
-    [items[index], items[other]] = [items[other], items[index]];
+    [current[index], current[other]] = [current[other], current[index]];
   }
 }
 

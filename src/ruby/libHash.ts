@@ -1,4 +1,4 @@
-import { inspect, inspectHash, rEql, rEquals } from './conversions';
+import { inspect, inspectHash, rEql, rEquals, toIndexExact } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, implicitConversionError, rubyError, runtimeError, typeError } from './errors';
 import { eachEntry, hashDefault, hashDelete, hashFetch, hashGet, hashSet, rehash, structuralHashValue } from './hashes';
@@ -35,13 +35,17 @@ def(
   'initialize',
   [0, 1],
   function* (self: RHash, args, block, keywords) {
+    let capacity: Value | undefined;
     if (keywords) {
       for (const entry of keywords.map.values()) {
         if (!(entry.key instanceof RSymbol) || entry.key.name !== 'capacity') {
           throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
         }
+        capacity = entry.value;
       }
     }
+    yield* modify(self);
+    if (capacity !== undefined) yield* toIndexExact(capacity);
     if (block) {
       if (args.length > 0) throw argumentError('wrong number of arguments (given 1, expected 0)');
       self.defaultProc = block;

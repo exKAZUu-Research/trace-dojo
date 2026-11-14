@@ -1739,6 +1739,33 @@ test('Array mutation and selection follow callback boundaries', () => {
   expect(run('begin;[1,2].shuffle(3);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'ArgumentError\n' });
 });
 
+test('shuffle permits same-length receiver edits and rejects size changes', () => {
+  expect(
+    run('class R;def rand(n);$a.replace([8,9,10]);0;end;end;$a=[1,2,3];p $a.shuffle!(random:R.new),$a')
+  ).toMatchObject({
+    stdout: '[9, 8, 10]\n[9, 8, 10]\n',
+  });
+  expect(
+    run('class R;def rand(n);$a.clear;0;end;end;$a=[1,2,3];begin;$a.shuffle!(random:R.new);rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'RuntimeError\n',
+  });
+});
+
+test('Hash initialization validates frozen state and capacity conversion', () => {
+  expect(
+    run(
+      'class H<Hash;def reset(v);initialize(v);end;end;h=H.new(1);h.freeze;begin;h.reset(9);rescue=>e;p e.class;end;p h[:x]'
+    )
+  ).toMatchObject({
+    stdout: 'FrozenError\n1\n',
+  });
+  expect(run('class I;private;def to_int;puts :convert;2;end;end;p Hash.new(capacity:I.new)')).toMatchObject({
+    stdout: 'convert\n{}\n',
+  });
+  expect(run('begin;Hash.new(capacity:10**30);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'RangeError\n' });
+});
+
 test('Array reads current contents after conversion callbacks', () => {
   expect(run('class X;def to_ary;$a.clear;[9];end;end;$a=[1,2];b=$a+X.new;p b,$a')).toMatchObject({
     stdout: '[9]\n[]\n',
