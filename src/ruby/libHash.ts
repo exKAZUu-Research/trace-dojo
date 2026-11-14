@@ -11,6 +11,7 @@ import {
 } from './errors';
 import {
   eachEntry,
+  eachEntryUntil,
   hashDefault,
   hashDelete,
   hashFetch,
@@ -547,18 +548,15 @@ def('Hash', 'dig', [1, -1], function* (self: RHash, args) {
   return yield* callMethod(value, 'dig', args.slice(1));
 });
 def('Hash', 'any?', [0, 1], function* (self: RHash, args, block) {
-  let found = false;
   if (args.length > 0) {
-    yield* eachEntry(self, function* (entry) {
-      if (!found && truthy(yield* callMethod(args[0], '===', [arr([entry.key, entry.value])]))) found = true;
+    return yield* eachEntryUntil(self, function* (entry) {
+      return truthy(yield* callMethod(args[0], '===', [arr([entry.key, entry.value])]));
     });
-    return found;
   }
   if (!block) return self.map.size > 0;
-  yield* eachEntry(self, function* (entry) {
-    if (!found && truthy(yield* pair(block, entry.key, entry.value))) found = true;
+  return yield* eachEntryUntil(self, function* (entry) {
+    return truthy(yield* pair(block, entry.key, entry.value));
   });
-  return found;
 });
 def('Hash', 'count', [0, 1], function* (self: RHash, args, block) {
   if (args.length === 0 && !block) return BigInt(self.map.size);

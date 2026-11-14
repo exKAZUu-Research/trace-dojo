@@ -2352,10 +2352,18 @@ test('Hash invert rejects source insertion during value hashing', () => {
   ).toMatchObject({ stdout: 'RuntimeError\n[:a]\n' });
 });
 
+test('Hash any? stops at first match and guards callback insertion', () => {
+  expect(run('h={a:1,b:2};n=0;p h.any?{|k,v|n+=1;true},n')).toMatchObject({ stdout: 'true\n1\n' });
+  expect(run('h={a:1};begin;h.any?{|k,v|h[:b]=2;false};rescue=>e;p e.class;end;p h.keys')).toMatchObject({
+    stdout: 'RuntimeError\n[:a]\n',
+  });
+});
+
 test('Math.log handles large Integer bases', () => {
   expect(run('p Math.log(10**400,10**400),Math.log(10**500,10**400)')).toMatchObject({
-    stdout: '1.0\n1.25\n',
+    stdout: '1.0\n7.294959571961455\n',
   });
+  expect(run('p Math.log(100,10**400)')).toMatchObject({ stdout: '3.4956057103414976e+17\n' });
 });
 
 test('to_set forwards mapping blocks and target Set classes', () => {

@@ -1054,7 +1054,16 @@ sdef('Math', 'log', [1, 2], function* (_self, args) {
   if (args.length === 1) return mathLog(args[0], x);
   const base = yield* toFloat(args[1]);
   domainCheck('log', base >= 0 || Number.isNaN(base));
-  return mathLog(args[0], x) / mathLog(args[1], base);
+  const input = mathLogSplit(args[0], x);
+  const radix = mathLogSplit(args[1], base);
+  if (input.mantissa === 0) return radix.mantissa ? Number.NEGATIVE_INFINITY : Number.NaN;
+  if (radix.mantissa === 0) return -0;
+  const denominator = Math.log2(radix.mantissa);
+  // Ruby's size_t subtraction wraps when the base has more shifted bits than the input.
+  return (
+    Math.log2(input.mantissa) / denominator +
+    Number(BigInt.asUintN(64, BigInt(input.shift) - BigInt(radix.shift))) / denominator
+  );
 });
 sdef('Math', 'frexp', 1, function* (_self, [value]) {
   const number = yield* toFloat(value);
@@ -1093,6 +1102,17 @@ function mathLog(value: Value, x: number): number {
     return Math.log(Number(value >> BigInt(digits - 53))) + (digits - 53) * Math.LN2;
   }
   return Math.log(x);
+}
+
+function mathLogSplit(value: Value, converted: number): { mantissa: number; shift: number } {
+  if (typeof value === 'bigint' && value > 0n) {
+    const bits = integerBits(value);
+    if (bits >= 1024) {
+      const shift = bits - 53;
+      return { mantissa: Number(value >> BigInt(shift)), shift };
+    }
+  }
+  return { mantissa: converted, shift: 0 };
 }
 
 function largeIntegerLog(value: bigint, base: 'log2' | 'log10'): number {

@@ -290,6 +290,21 @@ export function* eachEntry(hash: RHash, visit: (entry: HashEntry, slot: string) 
   }
 }
 
+export function* eachEntryUntil(
+  hash: RHash,
+  predicate: (entry: HashEntry, slot: string) => Gen<boolean>
+): Gen<boolean> {
+  hash.iterating++;
+  try {
+    for (const [slot, entry] of hash.map) {
+      if (hash.map.get(slot) === entry && (yield* predicate(entry, slot))) return true;
+    }
+    return false;
+  } finally {
+    hash.iterating--;
+  }
+}
+
 /** Rebuilds the slots after keys may have changed, as `rehash` does. */
 export function rehash(hash: RHash): void {
   if (hash.iterating > 0) throw runtimeError('rehash during iteration');
