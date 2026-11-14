@@ -2380,6 +2380,33 @@ test('character formatting uses implicit String and Integer conversions', () => 
   expect(run('class A;private;def to_int;65;end;end;p format("%c",A.new)')).toMatchObject({ stdout: '"A"\n' });
 });
 
+test('Random Float zero bounds draw from the default range', () => {
+  expect(run('p Random.new(1).rand(0.0),Random.new(1).rand(-0.0)')).toMatchObject({
+    stdout: '0.417022004702574\n0.417022004702574\n',
+  });
+});
+
+test('Array equality follows live lengths after matching callbacks', () => {
+  expect(run('class X;def ==(x);$a<<3;$b<<3;true;end;end;$a=[X.new,1];$b=[0,1];p $a==$b')).toMatchObject({
+    stdout: 'true\n',
+  });
+  expect(run('class X;def ==(x);$a.clear;$b.clear;true;end;end;$a=[X.new,1];$b=[0,1];p $a==$b')).toMatchObject({
+    stdout: 'true\n',
+  });
+});
+
+test('Array spaceship continues only for Integer zero', () => {
+  expect(run('class X;def <=>(x);0.0;end;end;p [X.new,1]<=>[0,2]')).toMatchObject({ stdout: '0.0\n' });
+});
+
+test('Random draws from custom arithmetic ranges', () => {
+  expect(
+    run(
+      'class A;attr_reader :n;def initialize(n);@n=n;end;def <=>(o);n<=>o.n;end;def -(o);n-o.n;end;def +(x);n+x;end;end;p Random.new(1).rand(A.new(1)..A.new(3))'
+    )
+  ).toMatchObject({ stdout: '2\n' });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(

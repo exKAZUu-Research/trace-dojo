@@ -1,10 +1,10 @@
-import { inspectRange, toFloat, toInt } from './conversions';
+import { inspectRange, toFloat, toInt, toStepFloat } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, rangeError, rubyError } from './errors';
-import { callMethod, type Gen, invoke } from './interp';
+import { callMethod, type Gen, invoke, respondsTo } from './interp';
 import { NIL, RObject, RRange, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
-import { classOf, realClassOf } from './values';
+import { classOf } from './values';
 
 /** Ruby's Mersenne Twister (MT19937), seeded and drawn from as `random.c` does. */
 export class MersenneTwister {
@@ -210,7 +210,25 @@ function* randomRange(generator: MersenneTwister, range: RRange): Gen<Value | un
     if (max === 0 && !exclusive) return 0 + low;
     return NIL;
   }
-  throw argumentError(`invalid argument - ${realClassOf(begin).name}`);
+  return yield* randomArithmeticRange(generator, begin, end, exclusive);
+}
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Ruby's custom range path selects Integer or Float offsets after conversion.
+function* randomArithmeticRange(generator: MersenneTwister, begin: Value, end: Value, exclusive: boolean): Gen<Value> {
+  let distance = yield* callMethod(end, '-', [begin]);
+  if (typeof distance !== 'bigint' && typeof distance !== 'number') {
+    if (respondsTo(distance, 'to_int', true)) distance = yield* toInt(distance);
+    else if (respondsTo(distance, 'to_f', true)) distance = yield* toStepFloat(distance);
+    else return NIL;
+  }
+  if (typeof distance === 'bigint') {
+    const max = distance - (exclusive ? 1n : 0n);
+    return max < 0n ? NIL : yield* callMethod(begin, '+', [generator.limited(max)]);
+  }
+  if (!Number.isFinite(distance)) domainError();
+  if (distance < 0 || (distance === 0 && exclusive)) return NIL;
+  const offset = distance === 0 ? 0 : generator.real(exclusive) * distance;
+  return yield* callMethod(begin, '+', [offset]);
 }
 
 /** `Random#rand` and `Random.rand`: a Float below 1 or below a Float, an Integer below an Integer, or one in a range. */
@@ -225,7 +243,8 @@ function* randomValue(generator: MersenneTwister, args: Value[]): Gen {
   }
   if (typeof max === 'number') {
     if (!Number.isFinite(max)) domainError();
-    if (max <= 0) throw argumentError(`invalid argument - ${max}`);
+    if (max === 0) return generator.real();
+    if (max < 0) throw argumentError(`invalid argument - ${max}`);
     return generator.real() * max;
   }
   const limit = yield* toInt(max);

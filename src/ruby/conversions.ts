@@ -482,11 +482,14 @@ export function* rEquals(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = n
 function* equalsArrays(a: RArray, b: RArray, pairs: Map<RBasic, Set<RBasic>>): Gen<boolean> {
   if (a.items.length !== b.items.length) return false;
   return yield* eqlContainer(a, b, pairs, function* () {
-    const length = a.items.length;
+    let length = a.items.length;
     for (let index = 0; index < length; index++) {
-      if (a.items.length !== length || b.items.length !== length) return false;
-      if (!(yield* rEquals(a.items[index], b.items[index], pairs))) return false;
-      if (a.items.length !== length || b.items.length !== length) return false;
+      const left = a.items[index];
+      const right = b.items[index];
+      if (left === right) continue;
+      if (!(yield* rEquals(left, right, pairs))) return false;
+      length = a.items.length;
+      if (length !== b.items.length) return false;
     }
     return true;
   });

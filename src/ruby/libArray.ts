@@ -2,7 +2,6 @@
 import {
   combinedStringEncoding,
   compareValues,
-  comparisonSign,
   inspect,
   inspectArray,
   rEql,
@@ -274,9 +273,7 @@ def('Array', '<=>', 1, function* (self: RArray, [other]) {
   const length = Math.min(self.items.length, compared.items.length);
   for (let index = 0; index < length; index++) {
     const result = yield* callMethod(self.items[index] ?? NIL, '<=>', [compared.items[index] ?? NIL]);
-    const order = yield* comparisonSign(result);
-    if (order === undefined) return NIL;
-    if (order !== 0) return result;
+    if (result !== 0n) return result;
   }
   return BigInt(Math.sign(self.items.length - compared.items.length));
 });
