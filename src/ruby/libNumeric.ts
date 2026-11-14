@@ -12,7 +12,6 @@ import {
   toRubyInt,
   toStepFloat,
   toStr,
-  toStrValue,
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, floatDomainError, rangeError, rubyError, typeError, zeroDivisionError } from './errors';
@@ -372,10 +371,10 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
       } else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
     }
   }
-  if (!isNum(step) && !respondsTo(step, 'coerce', true))
-    throw typeError(`no implicit conversion of ${realClassOf(step).name} into Integer`);
   if (step === 0n || step === 0 || (!isNum(step) && truthy(yield* callMethod(step, '==', [0n]))))
     throw argumentError("step can't be 0");
+  if (!isNum(step) && !respondsTo(step, 'coerce', true))
+    throw typeError(`no implicit conversion of ${realClassOf(step).name} into Integer`);
   if (!block) return makeEnumerator(self, 'step', args, keywords);
   if (!isNum(step)) return yield* stepCustomNumeric(self, limit, step, block);
   const useFloat = typeof self === 'number' || typeof limit === 'number' || typeof step === 'number';
@@ -620,7 +619,12 @@ function* roundingMode(keywords: RHash | undefined): Gen<'up' | 'even' | 'down'>
 function* roundingName(mode: Value): Gen<string | undefined> {
   if (mode instanceof RSymbol) return mode.name;
   if (mode instanceof RString) return mode.s;
-  return respondsTo(mode, 'to_str', true) ? (yield* toStrValue(mode)).s : undefined;
+  if (!respondsTo(mode, 'to_str', true)) return undefined;
+  const converted = yield* callMethod(mode, 'to_str', [], undefined, undefined, { fcall: true });
+  if (converted === NIL) return undefined;
+  if (converted instanceof RString) return converted.s;
+  const name = realClassOf(mode).name;
+  throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- Integer rounding applies floor, ceil, truncate, and three half-tie policies to signed values.

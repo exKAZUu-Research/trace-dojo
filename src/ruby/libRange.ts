@@ -39,21 +39,21 @@ function* iterateRange(range: RRange, visit: Visit): Gen<void> {
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Integer Range bounds use exact primitive comparison or Ruby numeric coercion.
 function* iterateIntegers(range: RRange, begin: bigint, visit: Visit): Gen<void> {
   const runtime = rt();
   const { end, exclusive } = range;
-  if (end !== NIL && typeof end !== 'bigint' && typeof end !== 'number') {
-    throw typeError(`can't iterate from ${realClassOf(begin).name}`);
-  }
-  const inRange = (value: bigint): boolean => {
+  const inRange = function* (value: bigint): Gen<boolean> {
     if (end === NIL) return true;
     if (typeof end === 'number') {
       const order = numericCompare(value, end);
       return order !== undefined && (exclusive ? order < 0 : order <= 0);
     }
-    return exclusive ? value < (end as bigint) : value <= (end as bigint);
+    if (typeof end === 'bigint') return exclusive ? value < end : value <= end;
+    const order = yield* spaceship(value, end);
+    return order !== undefined && (exclusive ? order < 0 : order <= 0);
   };
-  for (let value = begin; inRange(value); value++) {
+  for (let value = begin; yield* inRange(value); value++) {
     runtime.spend();
     if ((yield* visit(value)) === STOP) return;
   }

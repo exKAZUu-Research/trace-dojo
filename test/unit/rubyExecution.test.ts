@@ -2745,6 +2745,11 @@ test('rounding accepts mixed-case implicit String modes', () => {
   expect(run('class A;private;def to_str;"EvEn";end;end;p 2.5.round(half:A.new)')).toMatchObject({
     stdout: '2\n',
   });
+  expect(
+    run('class A;private;def to_str;nil;end;end;begin;2.5.round(half:A.new);rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'ArgumentError\n',
+  });
 });
 
 test('Numeric step validates custom zero increments', () => {
@@ -2753,6 +2758,19 @@ test('Numeric step validates custom zero increments', () => {
       'class N;def coerce(x);[x,0];end;def >(x);false;end;def ==(x);true;end;end;begin;1.step(3,N.new).first(3);rescue=>e;p e.class;end'
     )
   ).toMatchObject({ stdout: 'ArgumentError\n' });
+  expect(run('class N;def ==(x);puts :eq;true;end;end;begin;1.step(3,N.new);rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'eq\nArgumentError\n',
+  });
+});
+
+test('Integer Range compares numeric-like ends', () => {
+  expect(run('class A;private;def coerce(x);[x,3];end;end;p (1..A.new).to_a')).toMatchObject({
+    stdout: '[1, 2, 3]\n',
+  });
+});
+
+test('uncaught exception description falls back for non-String messages', () => {
+  expect(run('class E<StandardError;def message;7;end;end;raise E')).toMatchObject({ uncaughtException: 'E' });
 });
 
 test('allocated Floats preserve separate object identities', () => {
