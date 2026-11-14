@@ -2467,6 +2467,25 @@ test('custom Numeric step limits use a generic Enumerator', () => {
   ).toMatchObject({ stdout: 'Enumerator\nNoMethodError\n' });
 });
 
+test('Range construction invokes String subclass comparison', () => {
+  expect(
+    run('class S<String;def <=>(x);puts :cmp;nil;end;end;begin;p (S.new("a")..S.new("b"));rescue=>e;p e.class;end')
+  ).toMatchObject({ stdout: 'cmp\nArgumentError\n' });
+});
+
+test('custom Range endpoints receive arbitrary step values', () => {
+  expect(
+    run(
+      'class A;attr_reader :n;def initialize(n);@n=n;end;def <=>(x);n<=>x.n;end;def +(x);A.new(n+1);end;end;(A.new(0)..A.new(2)).step(Object.new){|x|p x.n}'
+    )
+  ).toMatchObject({ stdout: '0\n1\n2\n' });
+});
+
+test('Integer Range sum uses Float conversion for String and nil initial values', () => {
+  expect(run('p (1..3).sum("2.5")')).toMatchObject({ stdout: '8.5\n' });
+  expect(run('begin;p (1..3).sum(nil);rescue=>e;p e.class;end')).toMatchObject({ stdout: 'TypeError\n' });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(

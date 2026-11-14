@@ -10,7 +10,6 @@ import {
   rEquals,
   spaceship,
   toIndex,
-  toStepFloat,
   toSValue,
 } from './conversions';
 import { def, sdef } from './define';
@@ -20,6 +19,7 @@ import { structuralHashValue } from './hashes';
 import { callBlock, callMethod, type Gen, invoke, makeRange, nativeProc, respondsTo, truthyValue } from './interp';
 import { rangeHelpers, STOP, sum, toArray } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
+import { kernelFloat } from './libNumeric';
 import { NIL, type RProc, RRange, RString, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { successorBytes } from './stringTransforms';
@@ -213,7 +213,7 @@ def('Range', 'sum', [0, 1], function* (self: RRange, args, block) {
     if (last < self.begin) return initial;
     const total = ((self.begin + last) * (last - self.begin + 1n)) / 2n;
     if (typeof initial !== 'bigint' && typeof initial !== 'number')
-      return (yield* toStepFloat(initial)) + Number(total);
+      return Number(yield* kernelFloat(initial, undefined)) + Number(total);
     return yield* callMethod(initial, '+', [total]);
   }
   return yield* sum(self, args, block);
@@ -441,7 +441,12 @@ def('Range', 'hash', 0, function* (self: RRange) {
 for (const method of ['step', '%'])
   def('Range', method, [0, 1], function* (self: RRange, args, block) {
     const step = args.length > 0 ? args[0] : 1n;
-    if (typeof step !== 'bigint' && typeof step !== 'number' && !respondsTo(step, 'coerce', true))
+    const customBegin =
+      self.begin !== NIL &&
+      typeof self.begin !== 'bigint' &&
+      typeof self.begin !== 'number' &&
+      !(self.begin instanceof RString);
+    if (typeof step !== 'bigint' && typeof step !== 'number' && !customBegin && !respondsTo(step, 'coerce', true))
       throw typeError('no implicit conversion of String into Integer');
     if (typeof step === 'bigint' || typeof step === 'number') {
       if (Number(step) < 0) throw argumentError("step can't be negative");

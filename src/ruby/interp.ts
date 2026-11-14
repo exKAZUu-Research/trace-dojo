@@ -483,7 +483,13 @@ export function* makeRange(from: Value, to: Value, exclusive: boolean): Gen {
       (typeof from === 'bigint' || typeof from === 'number') && (typeof to === 'bigint' || typeof to === 'number');
     if (comparable && numericCompare(from as bigint | number, to as bigint | number) === undefined)
       throw argumentError('bad value for range');
-    if (!comparable && !(from instanceof RString && to instanceof RString)) {
+    const nativeStrings =
+      from instanceof RString &&
+      to instanceof RString &&
+      from.cls === rt().c.String &&
+      to.cls === rt().c.String &&
+      classOf(from).findMethod('<=>')?.body.kind === 'native';
+    if (!comparable && !nativeStrings) {
       const order = respondsTo(from, '<=>') ? yield* callMethod(from, '<=>', [to]) : NIL;
       if (order === NIL) throw argumentError('bad value for range');
     }
