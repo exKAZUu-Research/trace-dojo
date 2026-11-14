@@ -50,7 +50,7 @@ class Snapshotter {
   }
 
   /** The variables a frame shows: its own in scope, then the file-scope variables when `withContext`. */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Lexical locals, receiver fields, and globals must obey one shadowing order.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Lexical locals, receiver fields, and globals must obey one shadowing order.
   variablesOf(frame: Frame, withContext: boolean): TraceVariables {
     this.vla = frame.vla;
     const variables: TraceVariables = { vars: {}, referenceVars: {} };
@@ -59,7 +59,7 @@ class Snapshotter {
       frame.visibleLocals ?? frame.finalVisibleLocals ?? frame.fn.locals.filter((local) => frame.live[local.index]);
     for (const local of locals) {
       // main's parameters only receive the launcher's arguments, which these programs never use.
-      if (hidesArgs && local.isParameter) continue;
+      if ((hidesArgs && local.isParameter) || local.name.startsWith('\0')) continue;
       if (!local.inMemory) {
         const value = frame.slots[local.index];
         if (value !== undefined) this.addVariable(variables, local.name, local.type, { value });
@@ -257,6 +257,8 @@ class Snapshotter {
   }
 
   private recordNode(type: Extract<CType, { kind: 'record' }>, address: number, seen: Set<number>): DisplayNode {
+    const alreadySeen = seen.has(address);
+    seen.add(address);
     const entries: Record<string, DisplayNode> = {};
     for (const field of type.info.fields ?? []) {
       if (field.isAnonymous) {
@@ -272,6 +274,7 @@ class Snapshotter {
           : this.bitFieldNode(type, field.name, address);
       entries[field.name] = node ?? NULL_NODE;
     }
+    if (!alreadySeen) seen.delete(address);
     return { kind: 'object', entries };
   }
 

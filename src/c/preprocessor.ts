@@ -419,7 +419,7 @@ class Preprocessor {
         output.push(builtin);
         continue;
       }
-      if (skipIgnored(queue, token)) continue;
+      if (skipIgnored(queue, token, (tokens) => this.expand(tokens))) continue;
       if (!macro || token.hide?.has(macro.name)) {
         output.push(token);
         continue;
@@ -490,7 +490,9 @@ class Preprocessor {
       return position === -1 ? undefined : args[position];
     };
     const result: (PPToken | undefined)[] = [];
-    const body = macro.variadic ? withVaOpt(macro.body, (args.at(-1) ?? []).length > 0, call.row) : macro.body;
+    const body = macro.variadic
+      ? withVaOpt(macro.body, this.expand(args.at(-1) ?? []).length > 0, call.row)
+      : macro.body;
     for (let index = 0; index < body.length; index++) {
       const token = body[index];
       this.budget.spend(1 + hide.size);
@@ -527,7 +529,7 @@ class Preprocessor {
 
 const GNU_ATTRIBUTE_KEYWORDS = new Set(['__attribute__', '__attribute']);
 
-function skipIgnored(queue: TokenStream, token: PPToken): boolean {
+function skipIgnored(queue: TokenStream, token: PPToken, expand: (tokens: PPToken[]) => PPToken[]): boolean {
   if (
     token.kind !== 'identifier' ||
     queue.peek()?.text !== '(' ||
@@ -546,7 +548,7 @@ function skipIgnored(queue: TokenStream, token: PPToken): boolean {
   if (token.text === '_Pragma') {
     if (tokens.length !== 3 || tokens[1].kind !== 'string')
       throw new CompileError([{ row: token.row, message: '_Pragma の後には ( と文字列と ) を書いてください。' }]);
-  } else skipGnuAttribute(tokens, 0, token.row);
+  } else skipGnuAttribute(expand(tokens), 0, token.row);
   return true;
 }
 

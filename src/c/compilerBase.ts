@@ -22,6 +22,7 @@ import {
   type EnumInfo,
   INT,
   isComplete,
+  isVariablyModified,
   layoutRecord,
   LONG,
   RecordInfo,
@@ -106,13 +107,21 @@ export interface LValue {
   isStatic?: boolean;
 }
 
+export interface LabelInfo {
+  id: number;
+  row: number;
+  defined: boolean;
+  declarations?: Set<Entity>;
+  jumps: { row: number; declarations: Set<Entity> }[];
+}
+
 /** The state of the function being compiled. */
 export interface FunctionContext {
   /** The number of the function's variable-length arrays, each of which has a slot for its length. */
   vlaCount: number;
   info: FunctionInfo;
   returnType: CType;
-  labels: Map<string, { id: number; row: number; defined: boolean }>;
+  labels: Map<string, LabelInfo>;
   nextLabel: number;
   loopDepth: number;
   /** The switch statements around the statement being compiled, innermost last. */
@@ -123,6 +132,7 @@ export interface FunctionContext {
 }
 
 export interface SwitchContext {
+  declarations: Set<Entity>;
   type: CType;
   cases: Map<string, number>;
   ranges: { low: Scalar; high: Scalar; label: number; row: number }[];
@@ -332,6 +342,8 @@ export abstract class CompilerBase {
   ): RecordMember {
     const { type, name } = this.declaredType(base, declarator.declarator);
     const memberRow = declarator.row;
+    if (isVariablyModified(type))
+      this.error(memberRow, '構造体・共用体のメンバの配列には、定数の大きさを書いてください。');
     if (name !== undefined) this.claimMemberName(names, name, memberRow);
     if (align !== undefined && align !== 0 && align < alignOf(type))
       this.error(memberRow, '_Alignas の大きさは、型のアラインメントより小さくできません。');

@@ -117,7 +117,7 @@ function pad(value: number, width: number, filler = '0'): string {
 }
 
 function asctimeText(fields: BrokenDown): string {
-  return `${WEEKDAYS[fields.weekday].slice(0, 3)} ${MONTHS[fields.month].slice(0, 3)} ${pad(fields.day, 2, ' ')} ${pad(fields.hour, 2)}:${pad(fields.minute, 2)}:${pad(fields.second, 2)} ${fields.year + 1900}\n`;
+  return `${WEEKDAYS[fields.weekday]?.slice(0, 3) ?? '???'} ${MONTHS[fields.month]?.slice(0, 3) ?? '???'} ${pad(fields.day, 2, ' ')} ${pad(fields.hour, 2)}:${pad(fields.minute, 2)}:${pad(fields.second, 2)} ${fields.year + 1900}\n`;
 }
 
 /** The ISO 8601 week-based year and week of a date, which `%G`, `%g`, and `%V` show. */
@@ -136,11 +136,11 @@ function isoWeek(fields: BrokenDown): { year: number; week: number } {
 
 /** The `strftime` conversions in the C locale; this interpreter leaves any other one as it is. */
 const CONVERSIONS: Record<string, (fields: BrokenDown) => string> = {
-  a: (fields) => WEEKDAYS[fields.weekday].slice(0, 3),
-  A: (fields) => WEEKDAYS[fields.weekday],
-  b: (fields) => MONTHS[fields.month].slice(0, 3),
-  h: (fields) => MONTHS[fields.month].slice(0, 3),
-  B: (fields) => MONTHS[fields.month],
+  a: (fields) => WEEKDAYS[fields.weekday]?.slice(0, 3) ?? '?',
+  A: (fields) => WEEKDAYS[fields.weekday] ?? '?',
+  b: (fields) => MONTHS[fields.month]?.slice(0, 3) ?? '?',
+  h: (fields) => MONTHS[fields.month]?.slice(0, 3) ?? '?',
+  B: (fields) => MONTHS[fields.month] ?? '?',
   c: (fields) => asctimeText(fields).trimEnd(),
   C: (fields) => pad(Math.floor((fields.year + 1900) / 100), 2),
   d: (fields) => pad(fields.day, 2),

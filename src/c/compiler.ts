@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 737 -- Declaration and initializer compilation share symbol and type state.
+// code-gauge-allow-file fileNcss 781 -- Declaration and initializer compilation share symbol and type state.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type { Value } from './arith';
 import type {
@@ -18,7 +18,7 @@ import type {
 } from './ast';
 import type { CompileOptions, Entity, FunctionContext, LValue, Operand } from './compilerBase';
 import { declaredName, findFunctionDeclarator } from './convert';
-import { isNullConstant, type SpecialCall, writeBits } from './expressionCompiler';
+import { isNullConstant, readBits, type SpecialCall, writeBits } from './expressionCompiler';
 import { decodeStringLiteral } from './literals';
 import { TURTLE_HEADER_NAME } from './parse';
 import { evaluate, type Evaluator, replacePointerBytes } from './pointerBounds';
@@ -28,8 +28,10 @@ import {
   Frame,
   type FunctionInfo,
   type GlobalInfo,
+  loadRecord,
   type LocalInfo,
   type Runtime,
+  storeRecord,
   storeValue,
 } from './runtime';
 import { type Compiled, StatementCompiler } from './statementCompiler';
@@ -72,6 +74,7 @@ type Writer = (frame: Frame, address: number) => void;
 /** A value an initializer writes at an offset in the object. */
 interface Write {
   offset: number;
+  size: number;
   write: Writer;
 }
 
@@ -126,6 +129,12 @@ function zeroedWriter(size: number, writes: Write[]): Writer {
     block.initialized.fill(255, offset, offset + size);
     for (const { offset: at, write } of writes) write(frame, address + at);
   };
+}
+
+function replaceWrites(writes: Write[], offset: number, size: number): void {
+  for (let index = writes.length - 1; index >= 0; index--)
+    if (writes[index].offset >= offset && writes[index].offset + writes[index].size <= offset + size)
+      writes.splice(index, 1);
 }
 
 interface LocalPart {
@@ -710,7 +719,7 @@ export class Compiler extends StatementCompiler {
     if (type.kind === 'function' || type.kind === 'void' || !isComplete(type)) {
       this.error(row, `複合リテラルの型（${typeName(type)}）の中身が決まっていません。`);
     }
-    const name = `\0literal${row}:${this.globals.length}`;
+    const name = `\0literal${row}:${this.fn ? this.fn.info.locals.length : this.globals.length}`;
     if (!this.fn) {
       // At file scope, the object is static, so its address is a constant.
       const global = this.declareGlobal(name, type, row, 'static', init, undefined);
@@ -724,22 +733,11 @@ export class Compiler extends StatementCompiler {
     local.size = sizeOf(type);
     const writer = this.initializer(type, init, false);
     const index = local.index;
-    const operand = this.memoryOperand(type, (frame) => frame.bases[index]);
-    const value = operand.value;
-    return {
-      ...operand,
-      value: (frame) => {
-        writer(frame, frame.bases[index]);
-        return value(frame);
-      },
-      lvalue: {
-        ...(operand.lvalue as LValue),
-        address: (frame) => {
-          writer(frame, frame.bases[index]);
-          return frame.bases[index];
-        },
-      },
-    };
+    return this.memoryOperand(type, (frame) => {
+      const address = frame.bases[index];
+      writer(frame, address);
+      return address;
+    });
   }
 
   // Initializers ------------------------------------------------------------------------------------------------------
@@ -835,56 +833,93 @@ export class Compiler extends StatementCompiler {
       this.stringInto(type, literal, offset, writes);
       return decodeStringLiteral(literal.parts, literal.row).length;
     }
-    const stack: Cursor[] = [{ type, index: 0, offset }];
+    let stack: Cursor[] = [{ type, index: 0, offset }];
     let length = 0;
     for (const item of items) {
-      let value = item;
       if (item.kind === 'designated') {
-        const target = this.designate(stack, item);
-        value = item.value;
-        if (target.end !== undefined) {
-          // GNU's [low ... high] = v gives every element of the range the same value.
-          for (let index = target.index; index <= target.end; index++) {
-            (stack.at(-1) as Cursor).index = index;
-            this.place(stack, value, writes, isStatic);
-          }
-          length = Math.max(length, filledLength(stack));
-          continue;
-        }
-      }
-      this.place(stack, value, writes, isStatic);
+        const targets = this.designate(stack[0], item);
+        if (targets.length === 1) this.place(targets[0], item.value, writes, isStatic);
+        else this.placeRange(targets, item.value, writes, isStatic);
+        stack = targets.at(-1) as Cursor[];
+      } else this.place(stack, item, writes, isStatic);
       length = Math.max(length, filledLength(stack));
     }
     return length;
   }
 
-  /** Moves the cursor to the subobject that a designation names. */
-  private designate(
-    stack: Cursor[],
-    item: Extract<Initializer, { kind: 'designated' }>
-  ): { index: number; end?: number } {
-    stack.length = 1;
-    let result: { index: number; end?: number } = { index: 0 };
+  private designate(root: Cursor, item: Extract<Initializer, { kind: 'designated' }>): Cursor[][] {
+    let targets: Cursor[][] = [[{ ...root, index: 0 }]];
     for (const [position, designator] of item.designators.entries()) {
-      let cursor = stack.at(-1) as Cursor;
-      // A member of an unnamed member is reached through that member, as if the designation named it too.
-      for (const index of this.anonymousPath(cursor.type, designator)) {
-        cursor.index = index;
-        const member = memberAt(cursor) as Member;
-        stack.push({ type: member.type, index: 0, offset: member.offset });
-        cursor = stack.at(-1) as Cursor;
-      }
-      result = this.designatorIndex(cursor.type, designator);
-      cursor.index = result.index;
-      if (position < item.designators.length - 1) {
-        const member = memberAt(cursor);
-        if (!member || (member.type.kind !== 'array' && member.type.kind !== 'record')) {
-          this.error(designator.row, '初期化の指定で、配列でも構造体でもないものの中を指定しています。');
-        }
-        stack.push({ type: member.type, index: 0, offset: member.offset });
-      }
+      targets = targets.flatMap((stack) =>
+        this.designateStep(stack, designator, position < item.designators.length - 1)
+      );
     }
-    return result;
+    return targets;
+  }
+
+  private designateStep(stack: Cursor[], designator: Designator, descend: boolean): Cursor[][] {
+    let cursor = stack.at(-1) as Cursor;
+    for (const index of this.anonymousPath(cursor.type, designator)) {
+      cursor.index = index;
+      const member = memberAt(cursor) as Member;
+      stack.push({ type: member.type, index: 0, offset: member.offset });
+      cursor = stack.at(-1) as Cursor;
+    }
+    const { index, end = index } = this.designatorIndex(cursor.type, designator);
+    const targets: Cursor[][] = [];
+    for (let at = index; at <= end; at++) {
+      const target = stack.map((entry) => ({ ...entry }));
+      (target.at(-1) as Cursor).index = at;
+      if (descend) {
+        const member = memberAt(target.at(-1) as Cursor);
+        if (!member || (member.type.kind !== 'array' && member.type.kind !== 'record'))
+          this.error(designator.row, '初期化の指定で、配列でも構造体でもないものの中を指定しています。');
+        target.push({ type: member.type, index: 0, offset: member.offset });
+      }
+      targets.push(target);
+    }
+    return targets;
+  }
+
+  private placeRange(targets: Cursor[][], item: Initializer, writes: Write[], isStatic: boolean): void {
+    const members = targets.map((target) => memberAt(target.at(-1) as Cursor) as Member);
+    const first = members[0];
+    const size = sizeOf(first.type);
+    const initial: Write[] = [];
+    this.place(targets[0], item, initial, isStatic);
+    for (const member of members) replaceWrites(writes, member.offset, size);
+    const final = targets.at(-1) as Cursor[];
+    if (targets.length > 1) advance(final.at(-1) as Cursor);
+    writes.push({
+      offset: first.offset,
+      size: members.at(-1)!.offset - first.offset + size,
+      write: (frame, address) => {
+        const runtime = frame.runtime;
+        const temporary = runtime.allocate(size, 'stack', alignOf(first.type));
+        try {
+          temporary.initialized.fill(255);
+          for (const part of initial) part.write(frame, temporary.base + part.offset - first.offset);
+          const value = loadRecord(runtime, temporary.base, size);
+          for (const member of members) {
+            const destination = address + member.offset - first.offset;
+            if (member.field?.bitWidth !== undefined) {
+              const field = member.field;
+              const bits = readBits(
+                temporary,
+                0,
+                field.bitOffset ?? 0,
+                field.bitWidth as number,
+                field.type as Extract<CType, { kind: 'int' }>
+              );
+              const block = runtime.memory.locate(destination, size);
+              writeBits(block, destination - block.base, field.bitOffset ?? 0, field.bitWidth as number, bits);
+            } else storeRecord(runtime, destination, value);
+          }
+        } finally {
+          runtime.memory.release(temporary);
+        }
+      },
+    });
   }
 
   /** The indexes of the unnamed members leading to a member that a `.name` designator names, outermost first. */
@@ -942,7 +977,12 @@ export class Compiler extends StatementCompiler {
       }
       if (item.kind === 'list') {
         if (isScalar(member.type)) this.scalarInto(member, this.singleExpression(member.type, item), writes, isStatic);
-        else this.braced(member.type, item.items, member.offset, writes, isStatic);
+        else {
+          const size = sizeOf(member.type);
+          replaceWrites(writes, member.offset, size);
+          writes.push({ offset: member.offset, size, write: zeroedWriter(size, []) });
+          this.braced(member.type, item.items, member.offset, writes, isStatic);
+        }
         advance(cursor);
         return;
       }
@@ -972,8 +1012,10 @@ export class Compiler extends StatementCompiler {
     if (operand.type.kind !== 'record' || operand.type.info !== type.info) return false;
     this.checkStatic(operand, expression, isStatic);
     const value = operand.value;
+    replaceWrites(writes, member.offset, sizeOf(type));
     writes.push({
       offset: member.offset,
+      size: sizeOf(type),
       write: (frame, address) => storeValue(frame.runtime, address, type, value(frame)),
     });
     return true;
@@ -986,11 +1028,17 @@ export class Compiler extends StatementCompiler {
     const value = this.convertForAssignment(operand, target, 'initialization', expression.row);
     if (member.field?.bitWidth !== undefined) {
       const store = this.bitFieldStore(member.field);
-      writes.push({ offset: member.offset, write: (frame, address) => store(frame, address, value(frame)) });
+      writes.push({
+        offset: member.offset,
+        size: sizeOf(target),
+        write: (frame, address) => store(frame, address, value(frame)),
+      });
       return;
     }
+    replaceWrites(writes, member.offset, sizeOf(target));
     writes.push({
       offset: member.offset,
+      size: sizeOf(target),
       write: (frame, address) => {
         const result = evaluate(value, frame);
         storeValue(frame.runtime, address, target, result.value, result.range, result.bytes);
@@ -1007,9 +1055,14 @@ export class Compiler extends StatementCompiler {
     const bytes = decodeStringLiteral(literal.parts, literal.row);
     // clang warns when the literal is longer than the array and copies only what fits.
     const copied = bytes.slice(0, type.length ?? bytes.length);
+    const size = type.length ?? bytes.length;
+    replaceWrites(writes, offset, size);
+    const clear = zeroedWriter(size, []);
     writes.push({
       offset,
+      size,
       write: (frame, address) => {
+        clear(frame, address);
         const block = frame.runtime.memory.locate(address, copied.length);
         replacePointerBytes(block.pointerBytes, address - block.base, copied.length);
         block.bytes.set(copied, address - block.base);

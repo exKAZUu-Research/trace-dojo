@@ -572,6 +572,12 @@ export function hasVla(type: CType): boolean {
   return false;
 }
 
+export function isVariablyModified(type: CType): boolean {
+  if (type.kind === 'pointer') return isVariablyModified(type.to);
+  if (type.kind === 'array') return type.vla !== undefined || isVariablyModified(type.of);
+  return false;
+}
+
 /** The size of a type, reading the lengths of its variable-length arrays from the frame that declared them. */
 export function sizeIn(type: CType, vla: readonly number[]): number {
   if (type.kind !== 'array') return sizeOf(type);

@@ -1,11 +1,11 @@
 import type { Scalar, Value } from './arith';
 import { convertScalar } from './arith';
 import type { Compound, Declaration, Expression, Statement, StaticAssert } from './ast';
-import type { FunctionContext, SwitchContext } from './compilerBase';
+import type { Entity, FunctionContext, LabelInfo, SwitchContext } from './compilerBase';
 import { ExpressionCompiler } from './expressionCompiler';
 import { evaluate } from './pointerBounds';
 import { Completion, type Exec, type Frame, type LocalInfo } from './runtime';
-import { type CType, isInteger, promote, typeName, unqualified } from './types';
+import { type CType, isInteger, isVariablyModified, promote, typeName, unqualified } from './types';
 
 /** A compiled statement and the labels inside it, where a `goto` or `switch` may enter it. */
 export interface Compiled {
@@ -123,7 +123,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss 43 -- One case per C statement kind; helpers already isolate control-flow construction.
+  // code-gauge-allow functionNcss 50 -- One case per C statement kind; helpers already isolate control-flow construction.
   private compileStatement(statement: Statement): Compiled {
     const { row } = statement;
     switch (statement.kind) {
@@ -166,6 +166,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       }
       case 'goto': {
         const label = this.label(statement.label, row);
+        const declarations = this.variablyModifiedDeclarations();
+        if (label.declarations) this.checkJump(declarations, label.declarations, row);
+        label.jumps.push({ row, declarations });
         const id = label.id;
         return {
           exec: (frame) => {
@@ -181,6 +184,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         if (label.defined) this.error(row, `ラベル「${statement.label}」が2つあります。`);
         label.defined = true;
         label.row = row;
+        label.declarations = this.variablyModifiedDeclarations();
+        for (const jump of label.jumps) this.checkJump(jump.declarations, label.declarations, jump.row);
         return this.labeled(label.id, this.statementOrDeclaration(statement.body));
       }
     }
@@ -190,14 +195,27 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return item.kind === 'declaration' ? this.localDeclaration(item) : this.statement(item);
   }
 
-  private label(name: string, row: number): { id: number; row: number; defined: boolean } {
+  private label(name: string, row: number): LabelInfo {
     const labels = this.context.labels;
     let label = labels.get(name);
     if (!label) {
-      label = { id: this.context.nextLabel++, row, defined: false };
+      label = { id: this.context.nextLabel++, row, defined: false, jumps: [] };
       labels.set(name, label);
     }
     return label;
+  }
+
+  private variablyModifiedDeclarations(): Set<Entity> {
+    const declarations = new Set<Entity>();
+    for (let scope: typeof this.scope | undefined = this.scope; scope; scope = scope.parent)
+      for (const entity of scope.ordinary.values()) if (isVariablyModified(entity.type)) declarations.add(entity);
+    return declarations;
+  }
+
+  private checkJump(source: Set<Entity>, target: Set<Entity>, row: number): void {
+    for (const declaration of target)
+      if (!source.has(declaration))
+        this.error(row, '可変長配列の型を持つ名前の宣言を飛び越して、その有効範囲の中へジャンプできません。');
   }
 
   /** A statement with a label, which a `goto` to the label enters at its start, even from inside it. */
@@ -374,7 +392,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       this.error(row, `switch 文の値には整数を書いてください（${typeName(operand.type)}）。`);
     const type = promote(operand.type);
     const value = this.converted(operand, type);
-    const context: SwitchContext = { type, cases: new Map(), ranges: [] };
+    const context: SwitchContext = {
+      type,
+      cases: new Map(),
+      ranges: [],
+      declarations: this.variablyModifiedDeclarations(),
+    };
     this.context.switches.push(context);
     let body: Compiled;
     try {
@@ -402,7 +425,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return { exec, labels: new Set([...body.labels].filter((label) => !ownLabels.has(label))) };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Case ranges and individual labels share duplicate detection.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Case ranges and individual labels share duplicate detection.
   private caseStatement(statement: Extract<Statement, { kind: 'case' }>): Compiled {
     const { row } = statement;
     const context = this.context.switches.at(-1);
@@ -413,9 +436,16 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         statement.value ? 'case は、switch 文の中にしか書けません。' : 'default は、switch 文の中にしか書けません。'
       );
     }
+    this.checkJump(context.declarations, this.variablyModifiedDeclarations(), row);
     if (statement.value) {
       const value = this.caseValue(statement.value, context.type, row);
       const end = statement.endValue ? this.caseValue(statement.endValue, context.type, row) : value;
+      if (statement.endValue && BigInt(end) < BigInt(value))
+        return this.labeled(id, this.statementOrDeclaration(statement.body));
+      const singleOverlap = [...context.cases.keys()].find(
+        (key) => BigInt(value) <= BigInt(key) && BigInt(key) <= BigInt(end)
+      );
+      if (singleOverlap !== undefined) this.error(row, `case の値「${singleOverlap}」が2つあります。`);
       const overlapping = context.ranges.find(
         (range) => BigInt(range.low) <= BigInt(end) && BigInt(value) <= BigInt(range.high)
       );
@@ -425,10 +455,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
           overlapping.row,
           `case の値「${String(BigInt(value) > BigInt(overlapping.low) ? value : overlapping.low)}」が2つあります。`
         );
-      if (context.cases.has(String(value))) this.error(row, `case の値「${String(value)}」が2つあります。`);
-      // An empty range (5 ... 3) is only a warning in clang, and no value selects it.
-      if (statement.endValue && BigInt(end) >= BigInt(value))
-        context.ranges.push({ low: value, high: end, label: id, row });
+      if (statement.endValue) context.ranges.push({ low: value, high: end, label: id, row });
       else context.cases.set(String(value), id);
     } else {
       // clang reports a second default at the first one.
