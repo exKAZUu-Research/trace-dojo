@@ -1996,6 +1996,27 @@ test('Set intersection avoids rehashing unrelated receiver members', () => {
   expect(run(source)).toMatchObject({ stdout: '0\n0\n' });
 });
 
+test('Set subclasses use overridden insertion and deletion methods', () => {
+  expect(
+    run(
+      'class S<Set;def add(x);super(x*2);end;end;p S.new([1]).to_a,S.new([1]){|x|x+1}.to_a,S[1].to_a,S.new(Set[1]).to_a'
+    )
+  ).toMatchObject({
+    stdout: '[2]\n[4]\n[2]\n[2]\n',
+  });
+  expect(
+    run('class S<Set;def delete(x);puts :deleted;self;end;end;s=S.new([1]);puts :start;p (s^Set[1]).to_a')
+  ).toMatchObject({
+    stdout: 'start\ndeleted\n[1]\n',
+  });
+});
+
+test('Set intersection processes Enumerable members as yielded', () => {
+  const source =
+    'class K;def hash;puts :hash;0;end;end;class E;include Enumerable;def each;puts :before;yield K.new;puts :after;end;end;Set[] & E.new';
+  expect(run(source)).toMatchObject({ stdout: 'before\nhash\nafter\n' });
+});
+
 test('Set symmetric difference invokes subclass initialization with its operand', () => {
   expect(
     run('class S<Set;def initialize(x,y);super(x);end;end;s=S.new([1],2);begin;s ^ Set[2];rescue=>e;p e.message;end')

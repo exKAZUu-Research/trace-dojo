@@ -85,8 +85,19 @@ def(
   function* (self: RObject, args, block) {
     self.data = new SetData(newHash());
     if (args.length > 0 && args[0] !== NIL) {
-      if (!block && args[0] instanceof RObject && args[0].data instanceof SetData) {
+      if (
+        !block &&
+        args[0] instanceof RObject &&
+        args[0].data instanceof SetData &&
+        (self.cls === rt().c.Set || args[0].cls === self.cls)
+      ) {
         self.data = (args[0].data as SetData).copy();
+        return NIL;
+      }
+      if (self.cls !== rt().c.Set) {
+        yield* iterate(args[0], function* (value) {
+          yield* callMethod(self, 'add', [block ? yield* callBlock(block, [value]) : value]);
+        });
         return NIL;
       }
       yield* iterate(args[0], function* (value) {
@@ -122,6 +133,8 @@ def('Set', 'delete', 1, function* (self: RObject, [value]) {
   return self;
 });
 def('Set', 'delete?', 1, function* (self: RObject, [value]) {
+  if (self.cls !== rt().c.Set)
+    return truthy(yield* callMethod(self, 'include?', [value])) ? yield* callMethod(self, 'delete', [value]) : NIL;
   yield* modify(self);
   return (yield* hashDelete(membersOf(self), value)) ? self : NIL;
 });
