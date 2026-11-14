@@ -2015,6 +2015,23 @@ test('Set subclasses use overridden insertion and deletion methods', () => {
   ).toMatchObject({
     stdout: 'start\ndeleted\n[1]\n',
   });
+  expect(
+    run(
+      'class S<Set;def add(x);puts :add;super(x*2);end;def delete(x);puts :del;super;end;end;s=S.new;puts :start;s.merge([1]);s.subtract([2]);p s.to_a'
+    )
+  ).toMatchObject({
+    stdout: 'start\nadd\ndel\n[]\n',
+  });
+});
+
+test('Set reinitialization preserves existing members and frozen contents', () => {
+  expect(
+    run(
+      'class S<Set;def reset(x);initialize(x);end;end;s=S[1];s.reset([2]);p s.to_a;s.freeze;begin;s.reset([9]);rescue=>e;p e.class;end;p s.to_a'
+    )
+  ).toMatchObject({
+    stdout: '[1, 2]\nFrozenError\n[1, 2]\n',
+  });
 });
 
 test('Set intersection processes Enumerable members as yielded', () => {

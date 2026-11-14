@@ -83,7 +83,8 @@ def(
   'initialize',
   [0, 1],
   function* (self: RObject, args, block) {
-    self.data = new SetData(newHash());
+    const fresh = !(self.data instanceof SetData);
+    if (fresh) self.data = new SetData(newHash());
     if (args.length > 0 && args[0] !== NIL) {
       if (
         !block &&
@@ -91,7 +92,11 @@ def(
         args[0].data instanceof SetData &&
         (self.cls === rt().c.Set || args[0].cls === self.cls)
       ) {
-        self.data = (args[0].data as SetData).copy();
+        if (fresh) self.data = (args[0].data as SetData).copy();
+        else {
+          yield* modify(self);
+          for (const entry of membersOf(args[0]).map.values()) yield* hashSet(membersOf(self), entry.key, true);
+        }
         return NIL;
       }
       if (self.cls !== rt().c.Set) {
