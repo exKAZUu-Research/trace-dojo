@@ -178,6 +178,11 @@ test('Enumerable group_by roots pending values while hashing keys', () => {
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
+test('Hash group_by roots pending entry pairs while hashing group keys', () => {
+  const program = 'class K;def hash;q=1;0;end;end;h={Turtle.new=>1};groups=h.group_by{|x|h.clear;K.new}';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
 test('Set classify roots pending members while hashing keys', () => {
   const program = 'class K;def hash;q=1;0;end;end;s=Set[Turtle.new,2];h=s.classify{|x|s.clear;K.new}';
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);

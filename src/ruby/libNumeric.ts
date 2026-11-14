@@ -1054,7 +1054,7 @@ sdef('Math', 'log', [1, 2], function* (_self, args) {
   if (args.length === 1) return mathLog(args[0], x);
   const base = yield* toFloat(args[1]);
   domainCheck('log', base >= 0 || Number.isNaN(base));
-  return mathLog(args[0], x) / Math.log(base);
+  return mathLog(args[0], x) / mathLog(args[1], base);
 });
 sdef('Math', 'frexp', 1, function* (_self, [value]) {
   const number = yield* toFloat(value);

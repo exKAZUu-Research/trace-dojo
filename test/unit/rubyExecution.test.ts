@@ -2340,6 +2340,18 @@ test('Enumerable grouping and tally hash each new key once', () => {
   });
 });
 
+test('Hash group_by hashes each new grouping key once', () => {
+  expect(run('class K;def hash;puts :hash;0;end;end;k=K.new;{a:1}.group_by{|x|k};p :done')).toMatchObject({
+    stdout: 'hash\n:done\n',
+  });
+});
+
+test('Math.log handles large Integer bases', () => {
+  expect(run('p Math.log(10**400,10**400),Math.log(10**500,10**400)')).toMatchObject({
+    stdout: '1.0\n1.25\n',
+  });
+});
+
 test('to_set forwards mapping blocks and target Set classes', () => {
   expect(
     run(

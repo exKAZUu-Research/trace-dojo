@@ -9,7 +9,17 @@ import {
   runtimeError,
   typeError,
 } from './errors';
-import { eachEntry, hashDefault, hashDelete, hashFetch, hashGet, hashSet, rehash, structuralHashValue } from './hashes';
+import {
+  eachEntry,
+  hashDefault,
+  hashDelete,
+  hashFetch,
+  hashGet,
+  hashGetOrInsert,
+  hashSet,
+  rehash,
+  structuralHashValue,
+} from './hashes';
 import { callBlock, callMethod, callProc, type Gen, nativeProc, respondsTo } from './interp';
 import { tryAry } from './libArray';
 import { sum } from './libEnumerable';
@@ -602,12 +612,12 @@ def('Hash', 'group_by', 0, function* (self: RHash, _args, block) {
   yield* whileHeld(groups, () =>
     eachEntry(self, function* (entry) {
       const item = arr([entry.key, entry.value]);
-      const key = yield* callBlock(block, [item]);
-      const existing = yield* hashGet(groups, key);
-      if (existing) {
+      yield* whileHeld(item, function* () {
+        const key = yield* callBlock(block, [item]);
+        const group = yield* hashGetOrInsert(groups, key, () => arr([]));
         rt().chargeSlots(1);
-        (existing.value as RArray).items.push(item);
-      } else yield* hashSet(groups, key, arr([item]));
+        (group.value as RArray).items.push(item);
+      });
     })
   );
   return groups;
