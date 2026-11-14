@@ -2769,6 +2769,20 @@ test('Integer Range compares numeric-like ends', () => {
   });
 });
 
+test('binary search accepts Numeric comparison values', () => {
+  expect(run('class N<Numeric;def <=>(x);0;end;end;p (1..5).bsearch{N.new},[1,2,3].bsearch{N.new}')).toMatchObject({
+    stdout: '3\n2\n',
+  });
+});
+
+test('boxed Float endpoints preserve Range and arithmetic sequence behavior', () => {
+  expect(
+    run('p (1..Float::INFINITY).first(2),(1..3).step(Float::INFINITY).class,(1..3).step(Float::INFINITY).size')
+  ).toMatchObject({
+    stdout: '[1, 2]\nEnumerator::ArithmeticSequence\n1\n',
+  });
+});
+
 test('uncaught exception description falls back for non-String messages', () => {
   expect(run('class E<StandardError;def message;7;end;end;raise E')).toMatchObject({ uncaughtException: 'E' });
 });

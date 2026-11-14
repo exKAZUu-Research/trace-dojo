@@ -2,11 +2,11 @@
 import {
   combinedStringEncoding,
   compareValues,
-  comparisonFailed,
   inspect,
   inspectArray,
   rEql,
   rEquals,
+  searchNumericSign,
   toIndex,
   toIndexExact,
   toInt,
@@ -32,9 +32,9 @@ import {
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { randomIndex } from './libRandom';
 import { rangeBounds } from './libString';
-import { NIL, RArray, RFloat, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
+import { NIL, RArray, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
-import { arr, newHash, realClassOf, str, stringBytes, stringFromBytes, truthy } from './values';
+import { arr, isA, newHash, realClassOf, str, stringBytes, stringFromBytes, truthy } from './values';
 
 function* modify(self: RArray): Gen<void> {
   if (self.frozen) throw frozenError(self, yield* inspectArray(self));
@@ -1024,11 +1024,10 @@ function* arrayBsearch(self: RArray, block: RProc, indexOnly: boolean): Gen {
       high = middle;
     } else if (result === false || result === NIL) {
       low = middle + 1;
-    } else if (typeof result === 'bigint' || typeof result === 'number' || result instanceof RFloat) {
-      if (Number.isNaN(Number(result))) throw comparisonFailed(result, 0n);
-      if (Number(result) === 0)
-        return middle >= self.items.length ? NIL : indexOnly ? BigInt(middle) : self.items[middle];
-      if (Number(result) < 0) high = middle;
+    } else if (isA(result, rt().c.Numeric)) {
+      const sign = yield* searchNumericSign(result);
+      if (sign === 0) return middle >= self.items.length ? NIL : indexOnly ? BigInt(middle) : self.items[middle];
+      if (sign < 0) high = middle;
       else low = middle + 1;
     } else {
       throw typeError(`wrong argument type ${yield* inspect(result)} (must be numeric, true, false or nil)`);

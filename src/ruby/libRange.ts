@@ -1,13 +1,13 @@
 import {
   combinedStringEncoding,
   compareValues,
-  comparisonFailed,
   inspect,
   inspectRange,
   numericCompare,
   rangeCovers,
   rEql,
   rEquals,
+  searchNumericSign,
   spaceship,
   toIndex,
   toSValue,
@@ -20,10 +20,10 @@ import { callBlock, callMethod, type Gen, invoke, makeRange, nativeProc, respond
 import { rangeHelpers, STOP, sum, toArray } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { kernelFloat } from './libNumeric';
-import { NIL, RFloat, type RProc, RRange, RString, type Value } from './objects';
+import { isRubyFloat, isRubyNumber, NIL, type RProc, RRange, RString, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { successorBytes } from './stringTransforms';
-import { arr, realClassOf, str, stringBytes, stringFromBytes } from './values';
+import { arr, isA, realClassOf, str, stringBytes, stringFromBytes } from './values';
 
 type Visit = (value: Value) => Gen<unknown>;
 
@@ -32,7 +32,7 @@ function* iterateRange(range: RRange, visit: Visit): Gen<void> {
   const { begin } = range;
   if (typeof begin === 'bigint') yield* iterateIntegers(range, begin, visit);
   else if (begin instanceof RString) yield* iterateStrings(range, begin, visit);
-  else if (begin === NIL || typeof begin === 'number' || !respondsToSucc(begin)) {
+  else if (begin === NIL || isRubyFloat(begin) || !respondsToSucc(begin)) {
     throw typeError(`can't iterate from ${realClassOf(begin).name}`);
   } else {
     yield* iterateSuccessors(range, visit);
@@ -45,8 +45,8 @@ function* iterateIntegers(range: RRange, begin: bigint, visit: Visit): Gen<void>
   const { end, exclusive } = range;
   const inRange = function* (value: bigint): Gen<boolean> {
     if (end === NIL) return true;
-    if (typeof end === 'number') {
-      const order = numericCompare(value, end);
+    if (isRubyFloat(end)) {
+      const order = numericCompare(value, Number(end));
       return order !== undefined && (exclusive ? order < 0 : order <= 0);
     }
     if (typeof end === 'bigint') return exclusive ? value < end : value <= end;
@@ -185,7 +185,7 @@ def('Range', 'max', [0, 1], function* (self: RRange, args, block) {
     if (self.end === NIL) throw rangeError('cannot get the maximum of endless range');
     if (!self.exclusive) return self.end;
     if (typeof self.end === 'bigint') return self.end - 1n;
-    if (typeof self.end === 'number') throw typeError('cannot exclude non Integer end value');
+    if (isRubyFloat(self.end)) throw typeError('cannot exclude non Integer end value');
     throw rangeError('cannot get the maximum of beginless range with custom comparison method');
   }
   if (block || args.length > 0) return yield* callEnumerable(self, 'max', args, block);
@@ -194,7 +194,7 @@ def('Range', 'max', [0, 1], function* (self: RRange, args, block) {
   if (order === undefined || order > 0 || (order === 0 && self.exclusive)) return NIL;
   if (self.exclusive) {
     if (typeof self.end === 'bigint' && typeof self.begin === 'bigint') return self.end - 1n;
-    if (typeof self.end === 'number') throw typeError('cannot exclude non Integer end value');
+    if (isRubyFloat(self.end)) throw typeError('cannot exclude non Integer end value');
     throw typeError('cannot exclude end value with non Integer begin value');
   }
   return self.end;
@@ -228,7 +228,7 @@ export function rangeSize(range: RRange): Value {
       const size = end - begin + (exclusive ? 0n : 1n);
       return size > 0n ? size : 0n;
     }
-    if (typeof end === 'number' || end instanceof RFloat) {
+    if (isRubyFloat(end)) {
       const limit = Number(end);
       if (limit === Number.POSITIVE_INFINITY) return end;
       if (limit === Number.NEGATIVE_INFINITY) return 0n;
@@ -238,7 +238,7 @@ export function rangeSize(range: RRange): Value {
       return size > 0n ? size : 0n;
     }
   }
-  if (typeof begin === 'number') throw typeError(`can't iterate from Float`);
+  if (isRubyFloat(begin)) throw typeError(`can't iterate from Float`);
   return NIL;
 }
 
@@ -253,8 +253,7 @@ def('Range', 'count', [0, 1], function* (self: RRange, args, block) {
 def('Range', 'exclude_end?', 0, (self: RRange) => self.exclusive);
 def('Range', ['include?', 'member?'], 1, function* (self: RRange, [value]) {
   if (value instanceof RRange) return false;
-  if (typeof self.begin === 'bigint' || typeof self.begin === 'number' || self.begin === NIL)
-    return yield* rangeCovers(self, value);
+  if (isRubyNumber(self.begin) || self.begin === NIL) return yield* rangeCovers(self, value);
   let found = false;
   yield* iterateRange(self, function* (item) {
     if (yield* rEquals(item, value)) {
@@ -312,12 +311,9 @@ def('Range', 'to_s', 0, function* (self: RRange) {
 });
 def('Range', 'bsearch', 0, function* (self: RRange, _args, block) {
   if (!block) return makeEnumerator(self, 'bsearch', []);
-  if (
-    (self.begin !== NIL && typeof self.begin !== 'bigint' && typeof self.begin !== 'number') ||
-    (self.end !== NIL && typeof self.end !== 'bigint' && typeof self.end !== 'number')
-  )
+  if ((self.begin !== NIL && !isRubyNumber(self.begin)) || (self.end !== NIL && !isRubyNumber(self.end)))
     throw typeError(`can't do binary search for ${realClassOf(self.begin).name}`);
-  if (typeof self.begin === 'number' || typeof self.end === 'number') {
+  if (isRubyFloat(self.begin) || isRubyFloat(self.end)) {
     if (self.begin === NIL || self.end === NIL) throw new UnsupportedFeatureError('無限の浮動小数点範囲の二分探索');
     return yield* bsearchFloat(Number(self.begin), Number(self.end), self.exclusive, block);
   }
@@ -422,10 +418,10 @@ function* bsearchDecision(block: RProc, value: Value): Gen<'left' | 'right' | 'f
   const result = yield* callBlock(block, [value]);
   if (result === true) return 'left';
   if (result === false || result === NIL) return 'right';
-  if ((typeof result === 'number' || result instanceof RFloat) && Number.isNaN(Number(result)))
-    throw comparisonFailed(result, 0n);
-  if (typeof result === 'bigint' || typeof result === 'number' || result instanceof RFloat)
-    return Number(result) === 0 ? 'found' : Number(result) < 0 ? 'left' : 'right';
+  if (isA(result, rt().c.Numeric)) {
+    const sign = yield* searchNumericSign(result);
+    return sign === 0 ? 'found' : sign < 0 ? 'left' : 'right';
+  }
   throw typeError(`wrong argument type ${yield* inspect(result)} (must be numeric, true, false or nil)`);
 }
 def('Range', '==', 1, (self: RRange, [other]) => rEquals(self, other));
@@ -446,17 +442,11 @@ for (const method of ['step', '%'])
     const customBegin =
       self.begin !== NIL &&
       typeof self.begin !== 'bigint' &&
-      typeof self.begin !== 'number' &&
+      !isRubyFloat(self.begin) &&
       !(self.begin instanceof RString);
-    if (
-      typeof step !== 'bigint' &&
-      typeof step !== 'number' &&
-      !(step instanceof RFloat) &&
-      !customBegin &&
-      !respondsTo(step, 'coerce', true)
-    )
+    if (typeof step !== 'bigint' && !isRubyFloat(step) && !customBegin && !respondsTo(step, 'coerce', true))
       throw typeError('no implicit conversion of String into Integer');
-    if (typeof step === 'bigint' || typeof step === 'number' || step instanceof RFloat) {
+    if (isRubyNumber(step)) {
       if (Number(step) < 0) throw argumentError("step can't be negative");
       if (Number(step) === 0) throw argumentError("step can't be 0");
     }
@@ -469,11 +459,7 @@ function* stepRange(self: RRange, step: Value, block: RProc): Gen {
   if (typeof begin === 'bigint' && typeof step === 'bigint' && (typeof end === 'bigint' || end === NIL)) {
     return yield* stepIntegerRange(self, begin, step, block);
   }
-  if (
-    (typeof begin === 'bigint' || typeof begin === 'number') &&
-    (typeof step === 'bigint' || typeof step === 'number' || step instanceof RFloat) &&
-    (typeof end === 'bigint' || typeof end === 'number' || end === NIL)
-  ) {
+  if (isRubyNumber(begin) && isRubyNumber(step) && (isRubyNumber(end) || end === NIL)) {
     return yield* stepNumericRange(self, Number(begin), Number(step), block);
   }
   if (begin !== NIL && !(begin instanceof RString)) return yield* stepCustomRange(self, step, block);

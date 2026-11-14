@@ -5,7 +5,20 @@ import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { formatFloat, strInspect, symInspect } from './conversions';
-import { NIL, RArray, RBasic, RClass, RHash, RObject, RProc, RRange, RString, RSymbol, type Value } from './objects';
+import {
+  NIL,
+  RArray,
+  RBasic,
+  RClass,
+  RFloat,
+  RHash,
+  RObject,
+  RProc,
+  RRange,
+  RString,
+  RSymbol,
+  type Value,
+} from './objects';
 import { parseRuby } from './parse';
 import { runProgram } from './run';
 import { type Frame, rt, Runtime, type Scope } from './runtime';
@@ -118,6 +131,7 @@ function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }
   }
   // oxlint-disable-next-line unicorn/no-null -- The trace format shows nil as null.
   if (value === NIL) return null;
+  if (value instanceof RFloat) return value.value;
   if (value instanceof RString) return value.s;
   if (value instanceof RSymbol) return symInspect(value.name);
   if (!(value instanceof RArray) || seen.has(value)) return NOT_SCALAR;
@@ -148,6 +162,7 @@ function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: num
   if (typeof value === 'bigint') return { kind: 'value', value: traceIntOf(value) };
   if (typeof value !== 'object') return { kind: 'value', value };
   if (value === NIL) return NULL_NODE;
+  if (value instanceof RFloat) return { kind: 'value', value: value.value };
   if (value instanceof RString) return { kind: 'value', value: value.s };
   if (value instanceof RSymbol) return { kind: 'value', value: symInspect(value.name) };
   if (!isVariableValue(value) || seen.has(value)) return undefined;
@@ -258,7 +273,7 @@ function keyText(key: Value, quoted: boolean, seen = new Set<RArray>(), memo = n
   if (key instanceof RString) return boundedKeyText(quoted ? strInspect(key.s) : key.s);
   if (key instanceof RSymbol) return quoted ? symInspect(key.name) : key.name;
   if (typeof key === 'boolean' || typeof key === 'bigint') return String(key);
-  if (typeof key === 'number') return formatFloat(key);
+  if (typeof key === 'number' || key instanceof RFloat) return formatFloat(Number(key));
   if (key === NIL) return 'nil';
   if (key instanceof RArray) {
     if (seen.has(key)) return '[...]';

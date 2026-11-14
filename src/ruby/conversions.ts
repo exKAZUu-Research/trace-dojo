@@ -626,6 +626,12 @@ export function* comparisonSign(result: Value): Gen<number | undefined> {
   return truthy(yield* callMethod(result, '<', [0n])) ? -1 : 0;
 }
 
+export function* searchNumericSign(value: Value): Gen<number> {
+  const sign = yield* spaceship(value, 0n);
+  if (sign === undefined) throw comparisonFailed(value, 0n);
+  return sign;
+}
+
 // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of value Ruby converts or compares.
 export function numericCompare(a: bigint | number, b: bigint | number): number | undefined {
   if (typeof a === 'bigint' && typeof b === 'bigint') return a < b ? -1 : a > b ? 1 : 0;

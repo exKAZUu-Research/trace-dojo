@@ -67,6 +67,14 @@ export function boxFloat(value: number): number | RFloat {
   return new RFloat(rt().c.Float, value);
 }
 
+export function isRubyFloat(value: Value): value is number | RFloat {
+  return typeof value === 'number' || value instanceof RFloat;
+}
+
+export function isRubyNumber(value: Value): value is bigint | number | RFloat {
+  return typeof value === 'bigint' || isRubyFloat(value);
+}
+
 export class RObject extends RBasic {
   turtle?: TurtleState;
   exception?: ExceptionState;

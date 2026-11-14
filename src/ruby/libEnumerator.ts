@@ -15,7 +15,19 @@ import { floatStepCount } from './floatMath';
 import { callMethod, callProc, type Gen, isGenerator, nativeProc, runToEnd } from './interp';
 import { rangeSize } from './libRange';
 import { setSize } from './libSet';
-import { NIL, RArray, RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
+import {
+  isRubyFloat,
+  isRubyNumber,
+  NIL,
+  RArray,
+  RHash,
+  RObject,
+  type RProc,
+  RRange,
+  RString,
+  RSymbol,
+  type Value,
+} from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { arr, str, stringBytes, stringCharacterCount } from './values';
 
@@ -36,11 +48,9 @@ export function makeEnumerator(recv: Value, method: string, args: Value[], keywo
   const spec = method === 'step' || method === '%' ? arithmeticSpec(recv, args, keywords) : undefined;
   const arithmetic =
     spec !== undefined &&
-    (spec.end === NIL || typeof spec.end === 'bigint' || typeof spec.end === 'number') &&
-    (typeof spec.step === 'bigint' || typeof spec.step === 'number') &&
-    (typeof recv === 'bigint' ||
-      typeof recv === 'number' ||
-      (recv instanceof RRange && (typeof recv.begin === 'bigint' || typeof recv.begin === 'number')));
+    (spec.end === NIL || isRubyNumber(spec.end)) &&
+    isRubyNumber(spec.step) &&
+    (isRubyNumber(recv) || (recv instanceof RRange && isRubyNumber(recv.begin)));
   const enumerator = new RObject(arithmetic ? rt().c['Enumerator::ArithmeticSequence'] : rt().c.Enumerator);
   const source: EnumeratorSource = {
     recv,
@@ -67,10 +77,11 @@ function* enumeratorSize(recv: Value, method: string, args: Value[], keywords?: 
     if (method === 'times') return recv > 0n ? recv : 0n;
     if (typeof limit === 'bigint' && method === 'upto') return limit >= recv ? limit - recv + 1n : 0n;
     if (typeof limit === 'bigint' && method === 'downto') return limit <= recv ? recv - limit + 1n : 0n;
-    if (typeof limit === 'number' && (method === 'upto' || method === 'downto')) {
-      if (Number.isNaN(limit)) throw floatDomainError('NaN');
-      if (!Number.isFinite(limit)) return (method === 'upto') === limit > 0 ? Number.POSITIVE_INFINITY : 0n;
-      const end = BigInt(method === 'upto' ? Math.floor(limit) : Math.ceil(limit));
+    if (isRubyFloat(limit) && (method === 'upto' || method === 'downto')) {
+      const boundary = Number(limit);
+      if (Number.isNaN(boundary)) throw floatDomainError('NaN');
+      if (!Number.isFinite(boundary)) return (method === 'upto') === boundary > 0 ? Number.POSITIVE_INFINITY : 0n;
+      const end = BigInt(method === 'upto' ? Math.floor(boundary) : Math.ceil(boundary));
       const distance = method === 'upto' ? end - recv : recv - end;
       return distance < 0n ? 0n : distance + 1n;
     }
@@ -149,16 +160,11 @@ function* stepSize(recv: Value, args: Value[], keywords?: RHash): Gen<Value> {
   const end =
     originalEnd !== NIL &&
     typeof originalEnd !== 'bigint' &&
-    typeof originalEnd !== 'number' &&
-    (typeof start === 'number' || typeof step === 'number')
+    !isRubyFloat(originalEnd) &&
+    (isRubyFloat(start) || isRubyFloat(step))
       ? yield* toStepFloat(originalEnd)
       : originalEnd;
-  if (
-    (typeof start !== 'bigint' && typeof start !== 'number') ||
-    (typeof end !== 'bigint' && typeof end !== 'number' && end !== NIL) ||
-    (typeof step !== 'bigint' && typeof step !== 'number')
-  )
-    return NIL;
+  if (!isRubyNumber(start) || (!isRubyNumber(end) && end !== NIL) || !isRubyNumber(step)) return NIL;
   if (end === NIL) return Number.POSITIVE_INFINITY;
   if (typeof start === 'bigint' && typeof end === 'bigint' && typeof step === 'bigint') {
     const distance = step > 0n ? end - start : start - end;
@@ -324,24 +330,24 @@ def('Enumerator::ArithmeticSequence', 'exclude_end?', 0, (self: RObject) => {
 def('Enumerator::ArithmeticSequence', 'first', [0, 1], function* (self: RObject, args) {
   const source = sourceOf(self);
   const { start, end, step } = arithmeticSpec(source.recv, source.args, source.keywords);
-  const floatSequence = typeof start === 'number' || typeof end === 'number' || typeof step === 'number';
+  const floatSequence = isRubyFloat(start) || isRubyFloat(end) || isRubyFloat(step);
   const first = floatSequence ? Number(start) : start;
   const order = yield* arithmeticFirstOrder(start, end, floatSequence, args.length === 0);
   const empty = order !== undefined && ((Number(step) > 0 && order > 0) || (Number(step) < 0 && order < 0));
   if (args.length === 0) {
-    if (typeof step === 'number' && Number.isNaN(step)) throw comparisonFailed(step, 0n);
+    if (isRubyFloat(step) && Number.isNaN(Number(step))) throw comparisonFailed(step, 0n);
     return empty ? NIL : start;
   }
   const count = yield* toIndex(args[0]);
   if (count < 0) throw argumentError('attempt to take negative size');
   if (empty) return arr([]);
-  if (typeof step === 'number' && Number.isNaN(step)) {
+  if (isRubyFloat(step) && Number.isNaN(Number(step))) {
     rt().chargeSlots(count);
     rt().spend(count);
     return arr(Array.from({ length: count }, () => Number.NaN));
   }
-  if (typeof step === 'number' && !Number.isFinite(step)) return arr(count === 0 ? [] : [first]);
-  if ((typeof end === 'number' && Number.isNaN(end)) || (typeof start === 'number' && Number.isNaN(start))) {
+  if (isRubyFloat(step) && !Number.isFinite(Number(step))) return arr(count === 0 ? [] : [first]);
+  if ((isRubyFloat(end) && Number.isNaN(Number(end))) || (isRubyFloat(start) && Number.isNaN(Number(start)))) {
     const values: Value[] = [];
     for (let index = 0; index < count; index++) {
       rt().spend();
@@ -359,7 +365,7 @@ function* arithmeticFirstOrder(
   uncounted: boolean
 ): Gen<number | undefined> {
   if (end === NIL) return undefined;
-  const customFloatEnd = floatSequence && typeof end !== 'bigint' && typeof end !== 'number';
+  const customFloatEnd = floatSequence && !isRubyNumber(end);
   if (customFloatEnd && !uncounted) return undefined;
   return yield* spaceship(start, customFloatEnd ? yield* toStepFloat(end) : end);
 }
@@ -368,7 +374,7 @@ def('Enumerator::ArithmeticSequence', 'last', [0, 1], function* (self: RObject, 
   const source = sourceOf(self);
   const { start, step, end, exclusive } = arithmeticSpec(source.recv, source.args, source.keywords);
   if (end === NIL) throw rangeError('cannot get the last element of endless arithmetic sequence');
-  if (typeof step === 'number' && Number.isNaN(step)) throw floatDomainError('NaN');
+  if (isRubyFloat(step) && Number.isNaN(Number(step))) throw floatDomainError('NaN');
   const index = arithmeticLastIndex(
     start as bigint | number,
     end as bigint | number,
@@ -469,7 +475,7 @@ function arithmeticLastValue(
 
 function canonicalNumber(value: Value): string {
   if (typeof value === 'bigint') return `i${value}`;
-  return `f${typeof value === 'number' && value === 0 ? 0 : value}`;
+  return `f${Number(value) === 0 ? 0 : Number(value)}`;
 }
 for (const name of ['==', '===', 'eql?'])
   def('Enumerator::ArithmeticSequence', name, 1, (self: RObject, [other]) => {

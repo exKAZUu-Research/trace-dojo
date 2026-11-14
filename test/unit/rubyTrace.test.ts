@@ -17,6 +17,17 @@ const withoutLines = (items: TraceItem[]): unknown[] =>
 
 const rubyTrace = (program: string): TraceItem[] => traceProgram('ruby', program, program).traceItems;
 
+test('allocated Float values remain visible in traces', () => {
+  const program = 'a=Float::MAX;b=[Float::INFINITY]';
+  const trace = traceProgram('ruby', program, program);
+  expect(trace.finalVars.a).toBe(Number.MAX_VALUE);
+  expect(trace.finalVars.b).toEqual([Number.POSITIVE_INFINITY]);
+  expect(trace.traceItems.at(-1)?.referenceVars.b).toMatchObject({
+    kind: 'array',
+    entries: { 0: { kind: 'value', value: Number.POSITIVE_INFINITY } },
+  });
+});
+
 test('pending expression values remain visible in Turtle traces', () => {
   const programs = [
     'def v;x=1;42;end;h={Turtle.new=>v}',
