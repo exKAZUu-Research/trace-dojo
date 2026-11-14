@@ -2272,6 +2272,9 @@ test('String codepoint iteration yields a valid prefix before invalid bytes', ()
   expect(run('s="bba";s.each_codepoint{|x|p x;s[0,2]="é" if x==98}')).toMatchObject({
     stdout: '98\n169\n97\n',
   });
+  expect(run(String.raw`s="ab";s.each_codepoint{|x|p x;s[1]="\xFF" if x==97}`)).toMatchObject({
+    stdout: '97\n255\n',
+  });
 });
 
 test('String character and byte iterators use their Ruby mutation boundaries', () => {
@@ -2305,6 +2308,34 @@ test('Set reinitialization preserves existing members and frozen contents', () =
   ).toMatchObject({
     stdout: '[1, 2]\nFrozenError\n[1, 2]\n',
   });
+});
+
+test('Set subset comparisons stop before impossible member lookups', () => {
+  const source =
+    'class K;def hash;puts :hash;0;end;end;s=Set[K.new,1];t=Set[];puts :start;p s.subset?(t),t.superset?(s)';
+  expect(run(source)).toMatchObject({ stdout: 'hash\nstart\nfalse\nfalse\n' });
+});
+
+test('Set replacement reflects yielded members before a source error', () => {
+  const source =
+    'class E;include Enumerable;def each;yield 2;raise "bad";end;end;s=Set[1];begin;s.replace(E.new);rescue;end;p s.to_a';
+  expect(run(source)).toMatchObject({ stdout: '[2]\n' });
+});
+
+test('Set classification hashes a new group key once', () => {
+  expect(run('class K;def hash;puts :hash;0;end;end;Set[1].classify{|x|K.new}')).toMatchObject({
+    stdout: 'hash\n',
+  });
+});
+
+test('recursive Sets inspect with a cycle marker', () => {
+  expect(run('s=Set[];s.add(s);p s')).toMatchObject({ stdout: 'Set[Set[...]]\n' });
+  expect(run('a=Set[];b=Set[a];a.add(b);p a')).toMatchObject({ stdout: 'Set[Set[Set[...]]]\n' });
+});
+
+test('empty RuntimeError descriptions match Ruby reporting', () => {
+  expect(run('raise RuntimeError.new("")')).toMatchObject({ uncaughtException: 'unhandled exception' });
+  expect(run('raise ArgumentError.new("")')).toMatchObject({ uncaughtException: 'ArgumentError' });
 });
 
 test('Set intersection processes Enumerable members as yielded', () => {

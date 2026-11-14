@@ -1,9 +1,10 @@
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { inspect, rEquals } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, runtimeError, typeError } from './errors';
-import { eachEntry, hashDelete, hashDeleteEntry, hashGet, hashKeyOf, hashSet, rehash } from './hashes';
+import { eachEntry, hashDelete, hashDeleteEntry, hashGet, hashGetOrInsert, hashKeyOf, hashSet, rehash } from './hashes';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
-import { iterate, STOP, toArray } from './libEnumerable';
+import { iterate, STOP } from './libEnumerable';
 import { makeEnumerator } from './libEnumerator';
 import { NIL, type RHash, RObject, type Value } from './objects';
 import { rt, whileHeld } from './runtime';
@@ -12,6 +13,7 @@ import { arr, newHash, str, truthy } from './values';
 /** A Set keeps its members as the keys of a Hash, which gives it the Hash's insertion order and equality. */
 class SetData {
   hashing = false;
+  inspecting = false;
   constructor(readonly members: RHash) {
     members.iterationError = "can't add a new item into set during iteration";
   }
@@ -49,6 +51,12 @@ function* modify(self: RObject): Gen<void> {
 }
 
 function* inspectSet(self: RObject): Gen<string> {
+  const data = self.data as SetData;
+  if (data.inspecting) return 'Set[...]';
+  const runtime = rt();
+  if (runtime.setInspectDepth >= LIMITS.maxCallDepth / 4) throw new ExecutionLimitError('output');
+  data.inspecting = true;
+  runtime.setInspectDepth++;
   const parts: string[] = [];
   const members = membersOf(self);
   members.iterating++;
@@ -57,14 +65,9 @@ function* inspectSet(self: RObject): Gen<string> {
     return `Set[${parts.join(', ')}]`;
   } finally {
     members.iterating--;
+    runtime.setInspectDepth--;
+    data.inspecting = false;
   }
-}
-
-function* other(value: Value): Gen<Value[]> {
-  if (value instanceof RObject && value.data instanceof SetData)
-    return [...membersOf(value).map.values()].map((e) => e.key);
-  if (!respondsTo(value, 'each')) throw typeError('value must be enumerable');
-  return yield* toArray(value);
 }
 
 function* eachOther(value: Value, visit: (item: Value) => Gen<void>): Gen<void> {
@@ -235,6 +238,7 @@ function* setFromEnumerable(value: Value): Gen<RObject> {
 
 function* subset(small: RObject, large: RObject): Gen<boolean> {
   const members = membersOf(small);
+  if (members.map.size > membersOf(large).map.size) return false;
   members.iterating++;
   try {
     for (const entry of members.map.values()) if (!(yield* hashGet(membersOf(large), entry.key))) return false;
@@ -331,9 +335,12 @@ def('Set', 'subtract', 1, function* (self: RObject, [value]) {
 def('Set', 'replace', 1, function* (self: RObject, [value]) {
   yield* modify(self);
   if (membersOf(self).iterating > 0) throw runtimeError('cannot replace set during iteration');
-  const items = yield* other(value);
+  if (value === self) return self;
+  if (!respondsTo(value, 'each')) throw typeError('value must be enumerable');
   membersOf(self).map.clear();
-  for (const item of items) yield* hashSet(membersOf(self), item, true);
+  yield* eachOther(value, function* (item) {
+    yield* self.cls === rt().c.Set ? hashSet(membersOf(self), item, true) : callMethod(self, 'add', [item]);
+  });
   return self;
 });
 def('Set', 'reset', 0, function* (self: RObject) {
@@ -366,7 +373,13 @@ def('Set', ['map!', 'collect!'], 0, function* (self: RObject, _args, block) {
 def('Set', 'flatten', 0, function* (self: RObject) {
   const result = (yield* callMethod(self.cls, 'new', [])) as RObject;
   return yield* whileHeld(result, function* () {
-    for (const item of yield* flattenMembers(self, new Set())) yield* callMethod(result, 'add', [item]);
+    const values = yield* flattenMembers(self, new Set());
+    rt().heldArrays.push(values);
+    try {
+      for (const item of values) yield* callMethod(result, 'add', [item]);
+    } finally {
+      rt().heldArrays.pop();
+    }
     return result;
   });
 });
@@ -395,10 +408,8 @@ def('Set', 'classify', 0, function* (self: RObject, _args, block) {
   return yield* whileHeld(groups, function* () {
     yield* eachEntry(membersOf(self), function* (entry) {
       const key = yield* callBlock(block, [entry.key]);
-      const group = yield* hashGet(groups, key);
-      const values = group ? (group.value as RObject) : yield* newSet([]);
-      yield* hashSet(membersOf(values), entry.key, true);
-      if (!group) yield* hashSet(groups, key, values);
+      const group = yield* hashGetOrInsert(groups, key, () => callMethod(self.cls, 'new', []));
+      yield* callMethod(group.value, 'add', [entry.key]);
     });
     return groups;
   });

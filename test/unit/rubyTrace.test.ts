@@ -167,6 +167,12 @@ test('Array delete roots its last match during later comparisons', () => {
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
+test('Set flatten roots pending members through subclass insertion callbacks', () => {
+  const program =
+    'class S<Set;def add(x);if $go;$s.clear;q=1;end;super;end;end;$s=S[1,Turtle.new];$go=true;x=$s.flatten';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
 test('Array concat roots early conversion results', () => {
   const program =
     'class A;def to_ary;[Turtle.new];end;end;class B;def to_ary;q=1;[];end;end;a=[];a.concat(A.new,B.new)';

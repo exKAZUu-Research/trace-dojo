@@ -161,6 +161,23 @@ export function* hashGet(hash: RHash, key: Value): Gen<HashEntry | undefined> {
   return (yield* findEntry(hash, key)).entry;
 }
 
+export function* hashGetOrInsert(hash: RHash, key: Value, create: () => Gen): Gen<HashEntry> {
+  const held = rt().held.length;
+  rt().held.push(hash, key);
+  try {
+    if (hash.frozen) throw frozenError(hash, yield* inspect(hash));
+    const { base, slot, entry } = yield* findEntry(hash, key);
+    if (entry) return entry;
+    const value = yield* create();
+    rt().held.push(value);
+    if (hash.frozen) throw frozenError(hash, yield* inspect(hash));
+    const stored = key instanceof RString && key.cls === rt().c.String && !key.frozen ? frozenCopy(key) : key;
+    return insertHashEntry(hash, base, slot, stored, value);
+  } finally {
+    rt().held.length = held;
+  }
+}
+
 /** The value for `key`, or the hash's default (calling its default block) when it has none. */
 export function* hashFetch(hash: RHash, key: Value): Gen {
   const entry = yield* hashGet(hash, key);
@@ -202,18 +219,24 @@ function* hashPut(
       rt().containerVersion++;
       return true;
     }
-    if (hash.iterating > 0) throw runtimeError(hash.iterationError ?? "can't add a new key into hash during iteration");
-    rt().chargeSlots(1);
-    rt().spend();
-    hash.map.set(slot, { key: storedKey(), value });
-    const bucket = hash.buckets.get(base) ?? [];
-    bucket.push(slot);
-    hash.buckets.set(base, bucket);
-    hash.bucketVersion = hash.map.version;
+    insertHashEntry(hash, base, slot, storedKey(), value);
     return false;
   } finally {
     rt().held.length = held;
   }
+}
+
+function insertHashEntry(hash: RHash, base: string, slot: string, key: Value, value: Value): HashEntry {
+  if (hash.iterating > 0) throw runtimeError(hash.iterationError ?? "can't add a new key into hash during iteration");
+  rt().chargeSlots(1);
+  rt().spend();
+  const entry = { key, value };
+  hash.map.set(slot, entry);
+  const bucket = hash.buckets.get(base) ?? [];
+  bucket.push(slot);
+  hash.buckets.set(base, bucket);
+  hash.bucketVersion = hash.map.version;
+  return entry;
 }
 
 function frozenCopy(key: RString): RString {

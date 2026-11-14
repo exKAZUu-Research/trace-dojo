@@ -18,7 +18,7 @@ export function describeException(exception: RObject): string {
     if (error instanceof RubyError) return name;
     throw error;
   }
-  if (message === '') return name;
+  if (message === '') return name === 'RuntimeError' ? 'unhandled exception' : name;
   const [first, ...rest] = message.split('\n');
   return [`${first} (${name})`, ...rest].join('\n');
 }

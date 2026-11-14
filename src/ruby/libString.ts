@@ -577,11 +577,12 @@ def('String', 'each_char', 0, function* (self: RString, _args, block) {
 def('String', 'each_codepoint', 0, function* (self: RString, _args, block) {
   if (!block) return makeEnumerator(self, 'each_codepoint', []);
   const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+  const allowEditedInvalid = !self.rawBytes || self.binary;
   const cursor: StringByteCursor = { bytes: new Uint8Array() };
   for (let offset = 0; ;) {
     const bytes = currentStringBytes(self, cursor);
     if (offset >= bytes.length) break;
-    const { point, width } = codepointAtByte(bytes, offset, self.binary, decoder);
+    const { point, width } = codepointAtByte(bytes, offset, self.binary, decoder, allowEditedInvalid);
     offset += width;
     yield* callBlock(block, [BigInt(point)], false);
   }
@@ -592,7 +593,8 @@ function codepointAtByte(
   bytes: Uint8Array,
   offset: number,
   binary: boolean,
-  decoder: TextDecoder
+  decoder: TextDecoder,
+  allowEditedInvalid: boolean
 ): { point: number; width: number } {
   const first = bytes[offset];
   if (binary || first < 0x80) return { point: first, width: 1 };
@@ -608,6 +610,7 @@ function codepointAtByte(
   }
   if (first >= 0x80 && first < 0xc0 && insideCurrentCodepoint(bytes, offset, decoder))
     return { point: first, width: 1 };
+  if (allowEditedInvalid) return { point: first, width: 1 };
   throw argumentError('invalid byte sequence in UTF-8');
 }
 
