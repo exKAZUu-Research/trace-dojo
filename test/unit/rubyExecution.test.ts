@@ -5408,6 +5408,49 @@ test('reflection errors identify the requested constant path and method class', 
   });
 });
 
+test('regexp slice removes only a participating requested capture', () => {
+  expect(run('s="ab";p s.slice!(/(a)(b)/,2),s;s="ab";p s.slice!(/(z)?ab/,1),s')).toMatchObject({
+    stdout: '"b"\n"a"\nnil\n"ab"\n',
+  });
+});
+
+test('failed regexp prefixes clear match globals', () => {
+  expect(run('/a/=~"a";p "x".start_with?("z",/z/),$~')).toMatchObject({ stdout: 'false\nnil\n' });
+});
+
+test('defined? recursively checks splatted operands', () => {
+  expect(run('p defined?(puts(*missing_method)),defined?([*missing_method])')).toMatchObject({ stdout: 'nil\nnil\n' });
+});
+
+test('Lazy each_with_index rejects offset arguments', () => {
+  expect(run('begin;[1,2].lazy.each_with_index(10){|x,i|p x,i};rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  });
+});
+
+test('nested pattern errors identify their failing matchee', () => {
+  expect(run('begin;{a:{b:1}}=>{a:{c:}};rescue NoMatchingPatternKeyError=>e;p e.key,e.matchee;end')).toMatchObject({
+    stdout: ':c\n{b: 1}\n',
+  });
+});
+
+test('case-in cache applies only to the subject', () => {
+  expect(
+    run(
+      'class A;def initialize = @n=0;def deconstruct;@n+=1;p @n;[@n];end;end;case [A.new];in [[0]];p :zero;in [[2]];p :two;else;p :no;end'
+    )
+  ).toMatchObject({
+    stdout: '1\n2\n:two\n',
+  });
+});
+
+test('pattern matching honors Hash overrides and missing Array protocols', () => {
+  expect(run('class Hash;def deconstruct_keys(keys) = {a:2};end;p(({a:1} in {a:2}))')).toMatchObject({
+    stdout: 'true\n',
+  });
+  expect(run('class A<Array;undef deconstruct;end;p((A.new in []))')).toMatchObject({ stdout: 'false\n' });
+});
+
 test('inherited singleton Method inspect names receiver and original owner', () => {
   expect(run('class A;def self.s = 1;end;class B<A;end;p B.method(:s)')).toMatchObject({
     stdout: '#<Method: B(A).s() main.rb:1>\n',

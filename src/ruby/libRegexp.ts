@@ -774,21 +774,35 @@ for (const name of ['[]', 'slice'] as const) {
 wrapFirst('slice!', function* (self, args) {
   if (self.frozen) throw frozenError(self, strInspect(self.s));
   const state = execAt(args[0] as RObject, self.s, 0);
-  const match = setLastMatch(state);
+  setLastMatch(state);
   if (!state) return NIL;
-  const [from, to] = state.groups[0] as readonly [number, number];
-  const removed = args.length > 1 ? yield* matchIndex(match as RObject, args[1]) : groupText(state, 0);
+  const range = args.length > 1 ? yield* sliceCaptureRange(state, args[1]) : state.groups[0];
+  if (!range) return NIL;
+  const [from, to] = range;
+  const removed = str(self.s.slice(from, to));
   setText(self, self.s.slice(0, from) + self.s.slice(to));
   return removed;
 });
+function* sliceCaptureRange(state: MatchState, key: Value): Gen<readonly [number, number] | undefined> {
+  if (key instanceof RString || key instanceof RSymbol) {
+    const name = key instanceof RString ? key.s : key.name;
+    const group = state.namedGroups[name];
+    if (group === undefined) throw indexError(`undefined group name reference: ${name}`);
+    return state.groups[group];
+  }
+  let group = yield* toIndex(key);
+  if (group < 0) group += state.groups.length;
+  return state.groups[group];
+}
 wrapFirst(
   'start_with?',
   function* (self, args, block, previous) {
     for (const arg of args) {
       if (isRegexp(arg)) {
         const state = execAt(arg, self.s, 0);
-        if (state && (state.groups[0] as readonly [number, number])[0] === 0) {
-          setLastMatch(state);
+        const prefix = state && (state.groups[0] as readonly [number, number])[0] === 0 ? state : undefined;
+        setLastMatch(prefix);
+        if (prefix) {
           return true;
         }
       } else if (truthy((yield* asGen(previous(self, [arg], block, undefined))) as Value)) {

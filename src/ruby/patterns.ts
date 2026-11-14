@@ -11,12 +11,18 @@ import { arr, classOf, newHash, sym, truthy } from './values';
 interface Failure {
   message: string;
   missingKey?: Value;
+  matchee?: Value;
+}
+
+interface DeconstructionCache {
+  subject: Value;
+  items?: Value[];
 }
 
 let lastFailure: Failure | undefined;
 
-function* fail(describe: () => Gen<string>, missingKey?: Value): Gen<boolean> {
-  lastFailure = { message: yield* describe(), missingKey };
+function* fail(describe: () => Gen<string>, missingKey?: Value, matchee?: Value): Gen<boolean> {
+  lastFailure = { message: yield* describe(), missingKey, matchee };
   return false;
 }
 
@@ -36,12 +42,8 @@ export function guardFailed(): void {
 }
 
 /** Whether a value matches a pattern, binding the pattern's variables in the frame as it goes, as Ruby does. */
-export function* matchPattern(
-  pattern: Pattern,
-  value: Value,
-  frame: Frame,
-  cache = new Map<Value, Value[]>()
-): Gen<boolean> {
+export function* matchPattern(pattern: Pattern, value: Value, frame: Frame, cache?: DeconstructionCache): Gen<boolean> {
+  cache ??= { subject: value };
   rt().spend();
   switch (pattern.k) {
     case 'value':
@@ -68,7 +70,7 @@ export function* matchPattern(
       return yield* matchFind(pattern, value, frame, cache);
     }
     case 'hash': {
-      return yield* matchHash(pattern, value, frame, cache);
+      return yield* matchHash(pattern, value, frame);
     }
   }
 }
@@ -82,10 +84,9 @@ function* classMatches(cls: Expr | undefined, value: Value, frame: Frame): Gen<b
   return yield* checked(yield* ev(cls, frame), value);
 }
 
-function* deconstruct(value: Value, cache: Map<Value, Value[]>): Gen<Value[] | undefined> {
-  const previous = cache.get(value);
-  if (previous) return previous;
-  if (!(value instanceof RArray) && !truthy(yield* callMethod(value, 'respond_to?', [sym('deconstruct')]))) {
+function* deconstruct(value: Value, cache: DeconstructionCache): Gen<Value[] | undefined> {
+  if (value === cache.subject && cache.items !== undefined) return cache.items;
+  if (!truthy(yield* callMethod(value, 'respond_to?', [sym('deconstruct')]))) {
     yield* fail(function* () {
       return `${yield* inspect(value)} does not respond to #deconstruct`;
     });
@@ -93,7 +94,7 @@ function* deconstruct(value: Value, cache: Map<Value, Value[]>): Gen<Value[] | u
   }
   const result = yield* callMethod(value, 'deconstruct', []);
   if (!(result instanceof RArray)) throw typeError('deconstruct must return Array');
-  cache.set(value, result.items);
+  if (value === cache.subject) cache.items = result.items;
   return result.items;
 }
 
@@ -101,7 +102,7 @@ function* matchArray(
   pattern: Extract<Pattern, { k: 'array' }>,
   value: Value,
   frame: Frame,
-  cache: Map<Value, Value[]>
+  cache: DeconstructionCache
 ): Gen<boolean> {
   if (!(yield* classMatches(pattern.cls, value, frame))) return false;
   const items = yield* deconstruct(value, cache);
@@ -113,12 +114,12 @@ function* matchArray(
     });
   }
   for (const [index, item] of pattern.pre.entries())
-    if (!(yield* matchPattern(item, items[index], frame, cache))) return false;
+    if (!(yield* matchPattern(item, items[index], frame))) return false;
   if (pattern.rest)
     bind(pattern.rest.target, arr(items.slice(pattern.pre.length, items.length - pattern.post.length)), frame);
   const offset = items.length - pattern.post.length;
   for (const [index, item] of pattern.post.entries())
-    if (!(yield* matchPattern(item, items[offset + index], frame, cache))) return false;
+    if (!(yield* matchPattern(item, items[offset + index], frame))) return false;
   return true;
 }
 
@@ -126,7 +127,7 @@ function* matchFind(
   pattern: Extract<Pattern, { k: 'find' }>,
   value: Value,
   frame: Frame,
-  cache: Map<Value, Value[]>
+  cache: DeconstructionCache
 ): Gen<boolean> {
   if (!(yield* classMatches(pattern.cls, value, frame))) return false;
   const items = yield* deconstruct(value, cache);
@@ -135,7 +136,7 @@ function* matchFind(
   for (let start = 0; start + width <= items.length; start++) {
     let matched = true;
     for (const [index, item] of pattern.middle.entries()) {
-      if (!(yield* matchPattern(item, items[start + index], frame, cache))) {
+      if (!(yield* matchPattern(item, items[start + index], frame))) {
         matched = false;
         break;
       }
@@ -152,15 +153,11 @@ function* matchFind(
 
 // code-gauge-allow functionNcss 38 -- One case per kind of pattern.
 // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of pattern.
-function* matchHash(
-  pattern: Extract<Pattern, { k: 'hash' }>,
-  value: Value,
-  frame: Frame,
-  cache: Map<Value, Value[]>
-): Gen<boolean> {
+function* matchHash(pattern: Extract<Pattern, { k: 'hash' }>, value: Value, frame: Frame): Gen<boolean> {
   if (!(yield* classMatches(pattern.cls, value, frame))) return false;
   let hash: RHash;
-  if (value instanceof RHash && classOf(value).findMethod('deconstruct_keys')?.owner === rt().c.Hash) hash = value;
+  const protocol = classOf(value).findMethod('deconstruct_keys');
+  if (value instanceof RHash && protocol?.owner === rt().c.Hash && protocol.body.kind === 'native') hash = value;
   else if (truthy(yield* callMethod(value, 'respond_to?', [sym('deconstruct_keys')]))) {
     const keys = pattern.rest === undefined ? arr(pattern.pairs.map((pair) => sym(pair.key))) : NIL;
     const result = yield* callMethod(value, 'deconstruct_keys', [keys]);
@@ -175,12 +172,16 @@ function* matchHash(
     const entry = yield* hashGet(hash, sym(pair.key));
     if (!entry) {
       const key = sym(pair.key);
-      return yield* fail(function* () {
-        return `key not found: ${yield* inspect(key)}`;
-      }, key);
+      return yield* fail(
+        function* () {
+          return `key not found: ${yield* inspect(key)}`;
+        },
+        key,
+        value
+      );
     }
     if (pair.pattern) {
-      if (!(yield* matchPattern(pair.pattern, entry.value, frame, cache))) return false;
+      if (!(yield* matchPattern(pair.pattern, entry.value, frame))) return false;
     } else if (pair.target) {
       bind(pair.target, entry.value, frame);
     }
@@ -226,7 +227,7 @@ export function* noMatchingPattern(value: Value, single: boolean): Gen<unknown> 
   if (failure.missingKey !== undefined)
     error.exception.ivars = new Map([
       ['@__key', failure.missingKey],
-      ['@__matchee', value],
+      ['@__matchee', failure.matchee ?? value],
     ]);
   return error;
 }

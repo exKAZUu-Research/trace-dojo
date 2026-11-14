@@ -928,10 +928,9 @@ def('Enumerator::Lazy', 'with_index', [0, 1], function* (self: RObject, args, bl
   const offset = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : 0n;
   return makeLazy(data.source, [...data.steps, { kind: 'with_index', offset, block }]);
 });
-def('Enumerator::Lazy', 'each_with_index', [0, 1], function* (self: RObject, args, block) {
-  if (!block) return yield* callMethod(self, 'with_index', args);
-  const offset = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : 0n;
-  let index = offset;
+def('Enumerator::Lazy', 'each_with_index', 0, function* (self: RObject, _args, block) {
+  if (!block) return yield* callMethod(self, 'with_index', []);
+  let index = 0n;
   return yield* runLazy(self, (value) => callProc(block, [value, index++], { used: false }));
 });
 

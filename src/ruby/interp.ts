@@ -393,7 +393,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
     }
     case 'caseIn': {
       const subject = yield* ev(e.subject, frame);
-      const cache = new Map<Value, Value[]>();
+      const cache = { subject };
       for (const clause of e.clauses) {
         rt().currentRow = clause.row;
         if (!(yield* matchPattern(clause.pattern, subject, frame, cache))) continue;
@@ -1205,6 +1205,10 @@ function* definedText(e: Expr, frame: Frame): Gen {
     case 'array': {
       for (const item of e.items) if ((yield* definedText(item, frame)) === NIL) return NIL;
       return text('expression');
+    }
+    case 'splat':
+    case 'blockpass': {
+      return e.e ? yield* definedText(e.e, frame) : text('expression');
     }
     case 'hash': {
       for (const item of e.items) {
