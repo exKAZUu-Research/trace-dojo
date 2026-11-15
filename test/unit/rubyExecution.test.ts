@@ -9158,6 +9158,27 @@ test('encoded Symbols order separately and Method hashes include their receivers
   expect(run('h={};1500.times{|i|h[i.to_s.to_sym.method(:to_s)]=i};p h.size')).toMatchObject({ stdout: '1500\n' });
 });
 
+test('encoded String ordering returns a normalized comparison sign', () => {
+  expect(run('a=255.chr;b=String.new(a,encoding:"US-ASCII");p a<=>b,b<=>a,a.to_sym<=>b.to_sym')).toMatchObject({
+    stdout: '-1\n1\n-1\n',
+  });
+});
+
+test('literal MatchData inspection retains matched binary bytes', () => {
+  expect(run('255.chr.sub(255.chr,"");p $~.inspect.bytes.last(3),$~.inspect.encoding')).toMatchObject({
+    stdout: '[32, 255, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  });
+});
+
+test('Lazy zip preserves callback packing for multi-yield sources', () => {
+  expect(
+    run(
+      'e=Enumerator.new{|y|y.yield 1,2};p e.lazy.zip([3]).map(&->(pair,other){pair.sum+other}).force,e.lazy.zip([3]).flat_map{|x|x}.force'
+    )
+  ).toMatchObject({ stdout: '[6]\n[1, 2]\n' });
+  expect(run('p [1].lazy.zip([3]).map{|x|x}.force')).toMatchObject({ stdout: '[[1, 3]]\n' });
+});
+
 test('invalid US-ASCII strings remain distinct Hash keys from UTF-8', () => {
   expect(run('a="é";b=String.new(a,encoding:"US-ASCII");p [a==b,a.eql?(b),{a=>1}[b],{a=>1,b=>2}.size]')).toMatchObject({
     stdout: '[false, false, nil, 2]\n',

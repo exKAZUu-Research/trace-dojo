@@ -1335,7 +1335,8 @@ function* streamLazyStep(
               tuple.push(NIL);
             }
           }
-          return yield* next(arr(tuple));
+          const packed = arr(tuple);
+          return yield* next(packed, yielded.length > 1 ? tuple : [packed]);
         } finally {
           const root = arrays.lastIndexOf(tuple);
           if (root !== -1) arrays.splice(root, 1);

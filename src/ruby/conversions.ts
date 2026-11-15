@@ -860,7 +860,7 @@ export function compareRubyStrings(a: RString, b: RString): number {
   const bytes = stringBytes(a);
   const order = compareBytes(bytes, stringBytes(b));
   if (order !== 0 || bytes.every((byte) => byte < 0x80)) return order;
-  return stringEncodingRank(a) - stringEncodingRank(b);
+  return Math.sign(stringEncodingRank(a) - stringEncodingRank(b));
 }
 
 function stringEncodingRank(value: RString): number {

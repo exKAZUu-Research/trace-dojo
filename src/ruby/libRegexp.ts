@@ -1368,7 +1368,19 @@ def('MatchData', 'values_at', [0, -1], function* (self: RObject, args) {
 });
 def('MatchData', 'string', 0, (self: RObject) => stateOf(self).snapshot as RString);
 def('MatchData', 'regexp', 0, (self: RObject) => stateOf(self).regexp);
-def('MatchData', 'inspect', 0, (self: RObject) => str(matchDataInspect(self)));
+def('MatchData', 'inspect', 0, (self: RObject) => {
+  const state = stateOf(self);
+  if (!state.literal) return str(matchDataInspect(self));
+  const range = state.groups[0] as readonly [number, number];
+  const matched = sliceStringEncoding(state.snapshot ?? str(state.text), range[0], range[1]);
+  const prefix = new TextEncoder().encode('#<MatchData: ');
+  const body = stringBytes(matched);
+  const bytes = new Uint8Array(prefix.length + body.length + 1);
+  bytes.set(prefix);
+  bytes.set(body, prefix.length);
+  bytes[bytes.length - 1] = 62;
+  return stringFromBytes(bytes, matched.binary, matched.usAscii);
+});
 
 function matchDataInspect(match: RObject): string {
   const state = stateOf(match);
