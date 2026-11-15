@@ -267,6 +267,7 @@ def(
       if (args.length > 0) throw argumentError(`wrong number of arguments (given ${args.length}, expected 0)`);
       const unknown: Uint8Array[] = [];
       let nonAsciiEncoding: string | undefined;
+      let incompatibleEncodings: [string, string] | undefined;
       for (const entry of keywords?.map.values() ?? []) {
         const index = entry.key instanceof RSymbol ? memberSymbols.indexOf(entry.key) : -1;
         if (index !== -1) {
@@ -278,17 +279,21 @@ def(
             ? (entry.key.bytes ?? new TextEncoder().encode(entry.key.name))
             : new TextEncoder().encode(yield* inspect(entry.key));
         if (bytes.some((byte) => byte >= 0x80)) {
-          const encoding = rubyEncodingName(entry.key instanceof RSymbol && (entry.key.binary || entry.key.usAscii));
-          if (nonAsciiEncoding && nonAsciiEncoding !== encoding)
-            throw rubyError(
-              rt().c['Encoding::CompatibilityError'],
-              `incompatible character encodings: ${nonAsciiEncoding} and ${encoding}`
-            );
-          nonAsciiEncoding = encoding;
+          const encoding =
+            entry.key instanceof RSymbol && entry.key.usAscii
+              ? 'US-ASCII'
+              : rubyEncodingName(entry.key instanceof RSymbol && entry.key.binary);
+          if (nonAsciiEncoding && nonAsciiEncoding !== encoding) incompatibleEncodings ??= [nonAsciiEncoding, encoding];
+          nonAsciiEncoding ??= encoding;
         }
         unknown.push(bytes);
       }
       values.splice(0, values.length, ...next);
+      if (incompatibleEncodings)
+        throw rubyError(
+          rt().c['Encoding::CompatibilityError'],
+          `incompatible character encodings: ${incompatibleEncodings[0]} and ${incompatibleEncodings[1]}`
+        );
       if (unknown.length > 0) {
         const prefix = new TextEncoder().encode('unknown keywords: ');
         const length =

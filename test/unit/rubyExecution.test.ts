@@ -8888,6 +8888,18 @@ test('Struct unknown keyword errors retain encoded name bytes', () => {
   ).toMatchObject({
     stdout: 'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n',
   });
+  expect(
+    run(
+      's=Struct.new(:x,keyword_init:true).new(x:1);begin;s.send(:initialize,x:2,**{:é=>1,233.chr.to_sym=>2});rescue=>e;p e.class;end;p s'
+    )
+  ).toMatchObject({ stdout: 'Encoding::CompatibilityError\n#<struct x=2>\n' });
+  expect(
+    run(
+      'a=String.new(255.chr,encoding:"US-ASCII").to_sym;b=233.chr.to_sym;begin;Struct.new(:x,keyword_init:true).new(**{a=>1,b=>2});rescue=>e;p e.class,e.message;end'
+    )
+  ).toMatchObject({
+    stdout: 'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n',
+  });
 });
 
 test('anonymous class instances have Ruby class names in method errors', () => {
