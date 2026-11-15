@@ -124,7 +124,7 @@ function advance(runtime: Runtime, state: AsyncGeneratorState, resume: Resume): 
     resumeNext(runtime, state);
     return;
   }
-  if (result.value instanceof DelegatedResult) throw new Error('A sync yield* ran in an async generator');
+  if (result.value instanceof DelegatedResult) throw new TypeError('A sync yield* ran in an async generator');
   if (result.value instanceof Awaiting) {
     awaitValue(runtime, result.value.value, roots, (next) => advance(runtime, state, next));
     return;
