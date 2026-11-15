@@ -1232,6 +1232,7 @@ function* definedText(e: Expr, frame: Frame): Gen {
       return text(frame.home.extra.block ? 'yield' : undefined);
     }
     case 'super': {
+      if (e.block) return text('expression');
       const method = frame.home.extra.method;
       return text(
         method &&

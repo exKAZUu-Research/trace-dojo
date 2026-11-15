@@ -8598,6 +8598,7 @@ test('defined? classifies literal block calls before probing methods', () => {
   expect(run('p defined?([].nope {}),defined?(nope {}),defined?([].first(nope) {})')).toMatchObject({
     stdout: '"expression"\n"expression"\n"expression"\n',
   });
+  expect(run('p defined?(super {})')).toMatchObject({ stdout: '"expression"\n' });
 });
 
 test('String initialization does not mutate on option conversion error', () => {
