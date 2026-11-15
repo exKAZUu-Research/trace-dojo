@@ -835,8 +835,8 @@ function* setVisibility(self: RClass, args: Value[], visibility: Visibility): Ge
       }
       if (method.owner === self) (self.methods.get(name) as RMethod).visibility = visibility;
       else addMethod(self, { name, owner: self, visibility, body: { kind: 'visibility' } });
+      invalidateMethodCaches();
     }
-  invalidateMethodCaches();
   return args.length === 1 ? args[0] : arr(args);
 }
 

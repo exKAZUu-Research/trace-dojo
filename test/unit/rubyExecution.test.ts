@@ -7991,6 +7991,21 @@ test('remove_method invalidates each successful removal before later errors', ()
   ).toMatchObject({ stdout: 'NoMethodError\n' });
 });
 
+test('visibility batches invalidate successful changes before later errors', () => {
+  expect(
+    run(
+      'class C;def a;1;end;end;c=C.new;c.a;begin;C.send(:private,:a,:absent);rescue NameError;p c.respond_to?(:a);begin;p c.a;rescue=>e;p e.class;end;end'
+    )
+  ).toMatchObject({ stdout: 'false\nNoMethodError\n' });
+});
+
+test('Lazy index inspection records normalized offset and method name', () => {
+  expect(run('p [1].lazy.with_index,[1].lazy.each_with_index,[1].lazy.with_index(nil)')).toMatchObject({
+    stdout:
+      '#<Enumerator::Lazy: #<Enumerator::Lazy: [1]>:with_index(0)>\n#<Enumerator::Lazy: #<Enumerator::Lazy: [1]>:each_with_index>\n#<Enumerator::Lazy: #<Enumerator::Lazy: [1]>:with_index(0)>\n',
+  });
+});
+
 test('UTC identity affects unpadded zone directives', () => {
   expect(run('p Time.utc(2024).strftime("%-z"),Time.at(0).getlocal(0).strftime("%-z")')).toMatchObject({
     stdout: '"-0000"\n"+0000"\n',
