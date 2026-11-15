@@ -412,31 +412,32 @@ def('Struct', ['inspect', 'to_s'], 0, (self: RObject) => inspectMembers(self, 's
 function* sameValues(self: RObject, other: Value, equal: (a: Value, b: Value) => Gen<boolean>): Gen<boolean> {
   if (self === other) return true;
   if (!(other instanceof RObject) || realClassOf(other) !== realClassOf(self)) return false;
-  const runtime = rt();
-  const active = runtime.structComparisonPairs.get(self) ?? new Set<RObject>();
+  const state = contextState();
+  const active = state.comparisonPairs.get(self) ?? new Set<RObject>();
   if (active.has(other)) return true;
-  if (runtime.structComparisonDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
-  runtime.structComparisonDepth++;
+  if (state.comparisonDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
+  state.comparisonDepth++;
   active.add(other);
-  runtime.structComparisonPairs.set(self, active);
+  state.comparisonPairs.set(self, active);
   try {
     const left = valuesOf(self);
     const right = valuesOf(other);
     for (let index = 0; index < left.length; index++) if (!(yield* equal(left[index], right[index]))) return false;
     return true;
   } finally {
-    runtime.structComparisonDepth--;
+    state.comparisonDepth--;
     active.delete(other);
-    if (active.size === 0) runtime.structComparisonPairs.delete(self);
+    if (active.size === 0) state.comparisonPairs.delete(self);
   }
 }
 
 function* structuralHash(self: RObject): Gen<bigint> {
   const runtime = rt();
-  if (runtime.structHashing.has(self)) return 0n;
-  if (runtime.structHashDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
-  runtime.structHashDepth++;
-  runtime.structHashing.add(self);
+  const state = contextState();
+  if (state.hashing.has(self)) return 0n;
+  if (state.hashDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
+  state.hashDepth++;
+  state.hashing.add(self);
   try {
     let classId = runtime.structClassHashIds.get(self.cls);
     if (classId === undefined) {
@@ -447,25 +448,39 @@ function* structuralHash(self: RObject): Gen<bigint> {
     for (const value of valuesOf(self)) parts.push(yield* hashKeyOf(value));
     return BigInt(`0x${digest(JSON.stringify(parts))}`);
   } finally {
-    runtime.structHashDepth--;
-    runtime.structHashing.delete(self);
+    state.hashDepth--;
+    state.hashing.delete(self);
   }
 }
 
-const inspectingContexts = new WeakMap<object, Set<RObject>>();
+interface StructContextState {
+  inspecting: Set<RObject>;
+  comparisonPairs: Map<RObject, Set<RObject>>;
+  comparisonDepth: number;
+  hashing: Set<RObject>;
+  hashDepth: number;
+}
 
-function inspectingForContext(): Set<RObject> {
+const structContexts = new WeakMap<object, StructContextState>();
+
+function contextState(): StructContextState {
   const context = rt().activeCursor ?? rt();
-  let inspecting = inspectingContexts.get(context);
-  if (!inspecting) {
-    inspecting = new Set<RObject>();
-    inspectingContexts.set(context, inspecting);
+  let state = structContexts.get(context);
+  if (!state) {
+    state = {
+      inspecting: new Set<RObject>(),
+      comparisonPairs: new Map<RObject, Set<RObject>>(),
+      comparisonDepth: 0,
+      hashing: new Set<RObject>(),
+      hashDepth: 0,
+    };
+    structContexts.set(context, state);
   }
-  return inspecting;
+  return state;
 }
 
 function* inspectMembers(self: RObject, kind: 'struct' | 'data'): Gen {
-  const inspecting = inspectingForContext();
+  const inspecting = contextState().inspecting;
   const name = realClassOf(self).name;
   const head = name === undefined ? `#<${kind} ` : `#<${kind} ${name} `;
   if (inspecting.has(self)) return str(`${head.trimEnd()}:...>`);

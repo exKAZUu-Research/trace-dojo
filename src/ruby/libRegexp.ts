@@ -459,7 +459,10 @@ function translateEscape(
       const key = rawName.toLowerCase();
       skip(property[0].length);
       const negated = (next === 'P') !== (property[1] === '^');
-      const body = key === 'punct' || key === 'upper' || key === 'lower' ? undefined : classes[key];
+      const body =
+        classes !== ASCII_POSIX_CLASSES && (key === 'punct' || key === 'upper' || key === 'lower')
+          ? undefined
+          : classes[key];
       if (body !== undefined) {
         if (inClass && negated) {
           addNegatedClass(body);
@@ -550,6 +553,11 @@ export function makeRegexp(
 function hasNonAsciiRegexpEscape(source: string, extended: boolean): boolean {
   let inClass = false;
   for (let index = 0; index < source.length; index++) {
+    const posixLength = inClass ? (/^\[:\^?\w+:\]/.exec(source.slice(index))?.[0].length ?? 0) : 0;
+    if (posixLength > 0) {
+      index += posixLength - 1;
+      continue;
+    }
     if (source[index] === '[') inClass = true;
     if (source[index] === ']') inClass = false;
     if (extended && !inClass && source[index] === '#') {
@@ -567,10 +575,8 @@ function hasNonAsciiRegexpEscape(source: string, extended: boolean): boolean {
       if (unicode?.points.some((point) => Number.parseInt(point, 16) > 127)) return true;
     }
     if ((escape === 'p' || escape === 'P') && /^\{\^?\w+\}/.test(source.slice(index + 2))) return true;
-    if (escape === 'x') {
-      const digits = /^[\da-fA-F]{2}/.exec(source.slice(index + 2));
-      if (digits && Number.parseInt(digits[0], 16) > 127) return true;
-    }
+    const digits = escape === 'x' ? /^[\da-fA-F]{2}/.exec(source.slice(index + 2)) : undefined;
+    if (digits && Number.parseInt(digits[0], 16) > 127) return true;
     index++;
   }
   return false;
@@ -1347,10 +1353,12 @@ def('MatchData', 'deconstruct_keys', 1, function* (self: RObject, [keys]) {
   const state = stateOf(self);
   const hash = newHash();
   if (keys instanceof RArray && keys.items.length > state.names.length) return hash;
-  const requested = keys instanceof RArray ? keys.items : state.names.map((name) => sym(name));
+  const requested =
+    keys instanceof RArray ? keys.items : state.names.map((name) => captureNameSymbol(state.regexp, name));
   for (const key of requested) {
     if (!(key instanceof RSymbol)) throw typeError(`wrong argument type ${realClassOf(key).name} (expected Symbol)`);
-    const group = state.namedGroups[key.name];
+    const name = state.names.find((candidate) => captureNameSymbol(state.regexp, candidate) === key);
+    const group = name === undefined ? undefined : state.namedGroups[name];
     if (group === undefined) break;
     yield* hashSet(hash, key, groupText(state, group));
   }

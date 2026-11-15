@@ -8950,6 +8950,11 @@ test('named capture names retain their regexp encoding', () => {
       'r=Regexp.new("(?<"+233.chr+">a)");m=r.match("a");p r.names[0].bytes,m.names[0].bytes,m.named_captures(symbolize_names:true).keys[0].to_s.bytes'
     )
   ).toMatchObject({ stdout: '[233]\n[233]\n[233]\n' });
+  expect(
+    run(
+      'r=Regexp.new("(?<"+233.chr+">a)");m=r.match("a");p m.deconstruct_keys(nil).keys[0].to_s.bytes,m.deconstruct_keys([:é])'
+    )
+  ).toMatchObject({ stdout: '[233]\n{}\n' });
 });
 
 test('encoding-neutral regexp classes use binary byte semantics on binary strings', () => {
@@ -8976,6 +8981,20 @@ test('Unicode property escapes fix regexp encoding to UTF-8', () => {
   });
 });
 
+test('POSIX brackets and literal hash keep following properties active', () => {
+  expect(
+    run(String.raw`r=/[[:alpha:]#\p{Digit}]/x;p r.encoding;begin;233.chr.match?(r);rescue=>e;p e.class;end`)
+  ).toMatchObject({ stdout: '#<Encoding:UTF-8>\nEncoding::CompatibilityError\n' });
+});
+
+test('binary regexp property classes use ASCII membership', () => {
+  expect(
+    run(
+      String.raw`r=Regexp.new(String.new('\p{Lower}',encoding:'ASCII-8BIT'));p r.encoding,233.chr.match?(r);r=Regexp.new(String.new('\P{Lower}',encoding:'ASCII-8BIT'));p 233.chr.match?(r)`
+    )
+  ).toMatchObject({ stdout: '#<Encoding:BINARY (ASCII-8BIT)>\nfalse\ntrue\n' });
+});
+
 test('invalid US-ASCII Symbol size counts bytes', () => {
   expect(run('s=String.new("é",encoding:"US-ASCII").to_sym;p s.size')).toMatchObject({ stdout: '2\n' });
 });
@@ -9000,6 +9019,19 @@ test('suspended enumerator inspections do not mark caller Structs recursive', ()
       'class X;def inspect;if !$once;$once=true;$y << :pause;end;"X";end;end;s=Struct.new(:v).new(X.new);e=Enumerator.new{|y|$y=y;p s.inspect};p e.next;p s.inspect;begin;e.next;rescue StopIteration;end'
     )
   ).toMatchObject({ stdout: ':pause\n"#<struct v=X>"\n"#<struct v=X>"\n' });
+});
+
+test('suspended enumerator comparisons and hashes keep caller Struct state independent', () => {
+  expect(
+    run(
+      'class X;def ==(other);unless $once;$once=true;$y << :pause;end;false;end;end;S=Struct.new(:x);a=S.new(X.new);b=S.new(X.new);e=Enumerator.new{|y|$y=y;p(a==b)};p e.next;p(a==b);begin;e.next;rescue StopIteration;end'
+    )
+  ).toMatchObject({ stdout: ':pause\nfalse\nfalse\n' });
+  expect(
+    run(
+      'class X;def hash;unless $once;$once=true;$y << :pause;end;3;end;end;s=Struct.new(:x).new(X.new);e=Enumerator.new{|y|$y=y;$h=s.hash};e.next;x=s.hash;begin;e.next;rescue StopIteration;end;p x==$h'
+    )
+  ).toMatchObject({ stdout: 'true\n' });
 });
 
 test('anonymous instance singleton names use the anonymous class name', () => {
