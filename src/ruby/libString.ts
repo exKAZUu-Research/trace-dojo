@@ -264,16 +264,16 @@ export function sliceStringEncoding(self: RString, from: number, to = self.s.len
 export function textByteLengthOf(value: RString, text: string): number {
   return textByteLength(text, stringTextMode(value));
 }
-export function inspectStringEncoding(self: RString): string {
+export function inspectStringEncoding(self: RString, dump = false): string {
   return self.binary
     ? binaryInspect(stringBytes(self))
     : self.rawBytes
       ? inspectRawBytes(self.rawBytes)
-      : strInspect(self.s);
+      : strInspect(self.s, self.usAscii || dump ? 'hex' : 'unicode');
 }
 def('String', 'inspect', 0, (self: RString) => str(inspectStringEncoding(self)));
 def('String', 'dump', 0, (self: RString) => {
-  const quoted = inspectStringEncoding(self);
+  const quoted = inspectStringEncoding(self, true);
   return str(
     quoted.replaceAll(/[\u0080-\u{10FFFF}]/gu, (char) => {
       const point = char.codePointAt(0) as number;

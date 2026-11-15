@@ -317,7 +317,8 @@ export function* inspectValue(value: Value): Gen<RString> {
 
 function fastInspect(value: Value): string | undefined {
   if (value === NIL) return 'nil';
-  if (value instanceof RString && !value.binary && !value.rawBytes) return strInspect(value.s);
+  if (value instanceof RString && !value.binary && !value.rawBytes)
+    return strInspect(value.s, value.usAscii ? 'hex' : 'unicode');
   if (value instanceof RSymbol) return symInspect(value.name);
   if (typeof value === 'object') return undefined;
   return fastToS(value);
@@ -488,7 +489,7 @@ export function className(cls: RClass): string {
 /** A String's inspect: double-quoted, escaping quotes, backslashes, `#{`, and characters that do not print. */
 // code-gauge-allow functionCognitiveComplexity 23 -- Ruby String inspection has distinct escapes for control, Unicode, and interpolation bytes.
 // code-gauge-allow functionNcss 59 -- Ruby String inspection keeps its escape cases in one pass.
-export function strInspect(text: string): string {
+export function strInspect(text: string, controlEscape: 'unicode' | 'hex' = 'unicode'): string {
   let result = '"';
   for (let index = 0; index < text.length; index++) {
     if (index % 256 === 0) {
@@ -550,7 +551,8 @@ export function strInspect(text: string): string {
       }
       default: {
         if (isPrintable(code)) result += char;
-        else if (code < 0x80) result += `\\u${code.toString(16).toUpperCase().padStart(4, '0')}`;
+        else if (controlEscape === 'hex' && (code < 0x20 || code === 0x7f))
+          result += `\\x${code.toString(16).toUpperCase().padStart(2, '0')}`;
         else result += `\\u${code.toString(16).toUpperCase().padStart(4, '0')}`;
       }
     }

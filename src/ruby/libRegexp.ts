@@ -101,7 +101,7 @@ const SYNTAX = String.raw`^$\.*+?()[]{}|/-`;
 
 /** Translates a Ruby (Onigmo) expression into JavaScript's syntax, rejecting what has no counterpart. */
 export function translate(source: string, extended: boolean, multiline = false): string {
-  for (const name of captureNamesForValidation(source))
+  for (const name of captureNamesForValidation(source, extended))
     if ((/^[\p{ID_Start}_]/u.test(name) || /^\\u(?:[\dA-Fa-f]{4}|\{[\dA-Fa-f]+\})/.test(name)) && /[-\\]/.test(name))
       throw unsupportedSyntax('特殊なキャプチャ名');
   if (/\\(?:[1-9]|k<)/.test(source) && /(?<!\\)\((?!\?:|\?=|\?!|\?<=|\?<!)[^()]*\)(?:[?*]|\{0,)/.test(source))
@@ -306,17 +306,33 @@ export function translate(source: string, extended: boolean, multiline = false):
   return out;
 }
 
-function* captureNamesForValidation(source: string): Generator<string> {
+function* captureNamesForValidation(source: string, extended: boolean): Generator<string> {
   let start = -1;
+  let inClass = false;
   for (let index = 0; index < source.length; index++) {
     if (start >= 0) {
       if (source[index] === '>') {
         if (index > start) yield source.slice(start, index);
         start = -1;
       }
-    } else if (source.startsWith('(?<', index) && source[index - 1] !== '\\') {
-      start = index + 3;
+      continue;
     }
+    if (source[index] === '\\') {
+      index++;
+      continue;
+    }
+    if (!inClass && source.startsWith('(?#', index)) {
+      index = regexpCommentEnd(source, index + 3);
+      if (index < 0) break;
+      continue;
+    }
+    if (extended && !inClass && source[index] === '#') {
+      index = regexpLineCommentEnd(source, index);
+      continue;
+    }
+    if (source[index] === '[') inClass = true;
+    else if (source[index] === ']') inClass = false;
+    else if (!inClass && source.startsWith('(?<', index)) start = index + 3;
   }
 }
 

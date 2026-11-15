@@ -509,8 +509,8 @@ def('Module', 'remove_method', [0, -1], function* (self: RClass, names) {
     }
     assertNoDefinitionHook(self, 'removed');
     self.methods.delete(name);
+    invalidateMethodCaches();
   }
-  invalidateMethodCaches();
   return self;
 });
 def('Module', 'undef_method', [0, -1], function* (self: RClass, names) {

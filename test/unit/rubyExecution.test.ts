@@ -7972,6 +7972,25 @@ test('binary String inspect escapes valid UTF-8 byte sequences', () => {
   });
 });
 
+test('US-ASCII inspect and String dump use hex control escapes', () => {
+  expect(run(String.raw`p 0.chr,1.chr,127.chr;puts "a\0b".dump`)).toMatchObject({
+    stdout: '"\\x00"\n"\\x01"\n"\\x7F"\n"a\\x00b"\n',
+  });
+});
+
+test('regexp capture validation ignores comments', () => {
+  expect(run('p "a".match?(Regexp.new("a # (?<foo-bar>",Regexp::EXTENDED))')).toMatchObject({ stdout: 'true\n' });
+  expect(run('p "a".match?(Regexp.new("a(?#(?<foo-bar>)"))')).toMatchObject({ stdout: 'true\n' });
+});
+
+test('remove_method invalidates each successful removal before later errors', () => {
+  expect(
+    run(
+      'class C;def a;1;end;end;c=C.new;c.a;begin;C.send(:remove_method,:a,:absent);rescue NameError;begin;p c.a;rescue=>e;p e.class;end;end'
+    )
+  ).toMatchObject({ stdout: 'NoMethodError\n' });
+});
+
 test('UTC identity affects unpadded zone directives', () => {
   expect(run('p Time.utc(2024).strftime("%-z"),Time.at(0).getlocal(0).strftime("%-z")')).toMatchObject({
     stdout: '"-0000"\n"+0000"\n',
