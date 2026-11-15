@@ -1207,6 +1207,7 @@ function* definedText(e: Expr, frame: Frame): Gen {
       }
     }
     case 'call': {
+      if (e.block) return text('expression');
       for (const arg of e.args) if ((yield* definedText(arg, frame)) === NIL) return NIL;
       let recv: Value = frame.self;
       if (e.recv) {

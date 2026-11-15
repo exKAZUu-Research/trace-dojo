@@ -8511,12 +8511,21 @@ test('Regexp.new rejects invalid pattern encoding', () => {
   expect(run('begin;Regexp.new(String.new("é",encoding:"US-ASCII"));rescue=>e;p e.class;end')).toMatchObject({
     stdout: 'RegexpError\n',
   });
+  expect(run('begin;Regexp.new(String.new("é",encoding:"US-ASCII"));rescue=>e;p e.message;end')).toMatchObject({
+    stdout: '"invalid multibyte character: /\\\\xC3\\\\xA9/"\n',
+  });
 });
 
 test('braced Unicode regexp escapes accept codepoint lists', () => {
   expect(run(String.raw`p /\u{41 42}/.match("AB").to_a,/\u{3042 3044}/.match("あい").to_a`)).toMatchObject({
     stdout: '["AB"]\n["あい"]\n',
   });
+  expect(
+    run(String.raw`p /\u{41 E9}/.encoding;begin;p /\u{41 E9}/.match?("A"+233.chr);rescue=>e;p e.class;end`)
+  ).toMatchObject({
+    stdout: '#<Encoding:UTF-8>\nEncoding::CompatibilityError\n',
+  });
+  expect(run(String.raw`p "AAAA"[/[\u{41}]{2}+/]`)).toMatchObject({ stdout: '"AAAA"\n' });
 });
 
 test('Regexp case equality retains ASCII Symbol capture encoding', () => {
@@ -8565,6 +8574,22 @@ test('lazy zip probes private respond_to? and iterates to_enum', () => {
   });
   expect(run('class A;def each;yield 2;end;def to_enum;[5].each;end;end;p [1].lazy.zip(A.new).force')).toMatchObject({
     stdout: '[[1, 5]]\n',
+  });
+});
+
+test('prepend merges shared included child chains', () => {
+  expect(
+    run(
+      'module A;end;module B;include A;end;module C;include A;end;module D;include B,C;end;class X;prepend D;end;p X.ancestors.take(5)'
+    )
+  ).toMatchObject({
+    stdout: '[D, B, C, A, X]\n',
+  });
+});
+
+test('defined? classifies literal block calls before probing methods', () => {
+  expect(run('p defined?([].nope {}),defined?(nope {}),defined?([].first(nope) {})')).toMatchObject({
+    stdout: '"expression"\n"expression"\n"expression"\n',
   });
 });
 

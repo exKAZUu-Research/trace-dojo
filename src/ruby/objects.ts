@@ -319,11 +319,7 @@ export class RClass extends RBasic {
       if (cached) return cached;
       rt().spend();
       active.add(module);
-      const members = [
-        ...mergedPrepends(module.prepends, active),
-        module,
-        ...module.includes.flatMap((item) => fullPrependChain(item, active)),
-      ];
+      const members = [...mergedPrepends(module.prepends, active), module, ...mergedPrepends(module.includes, active)];
       active.delete(module);
       const seenInChain = new Set<RClass>();
       const chain = members.filter((item) => !seenInChain.has(item) && !!seenInChain.add(item));
