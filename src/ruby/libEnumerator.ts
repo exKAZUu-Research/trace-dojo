@@ -781,7 +781,7 @@ function nextValues(self: RObject): Value[] {
     cursor.catchTags = [];
     throw stopIteration(step.value);
   }
-  if (!(step.value instanceof Suspension)) throw new Error('An enumerator suspended for another reason');
+  if (!(step.value instanceof Suspension)) throw new TypeError('An enumerator suspended for another reason');
   return step.value.args;
 }
 
