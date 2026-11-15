@@ -7688,6 +7688,10 @@ test('DATA retains read-only IO queries and flushing', () => {
   ).toMatchObject({ stdout: 'true\n0\nfalse\ntrue\nfalse\nfalse\n"a\\n"\n' });
 });
 
+test('standard streams expose Ruby default sync modes', () => {
+  expect(run('p $stdout.sync,$stderr.sync,STDOUT.sync')).toMatchObject({ stdout: 'false\ntrue\nfalse\n' });
+});
+
 test('frozen DATA reports FrozenError before read-only write errors', () => {
   expect(
     run(

@@ -366,7 +366,7 @@ def('IO', 'fsync', 0, (self: RObject) => {
 });
 def('IO', 'sync', 0, (self: RObject) => {
   checkFrozenIo(self);
-  return self.ivars?.get('@__sync') ?? (self.data === 'stdout' || self.data === 'stderr');
+  return self.ivars?.get('@__sync') ?? self.data === 'stderr';
 });
 def('IO', 'sync=', 1, (self: RObject, [value]) => {
   checkFrozenIo(self);
