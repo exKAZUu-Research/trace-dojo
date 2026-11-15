@@ -150,13 +150,7 @@ export class Converter {
   readonly claimedAtomicRows = new Set<number>();
 
   convertProgram(root: Node): Program {
-    if (
-      this.source
-        .split(/\r?\n/, 3)
-        .slice(0, 2)
-        .some((line) => /^\s*#\s*frozen_string_literal:\s*true\b/i.test(line))
-    )
-      this.unsupported(root, 'frozen_string_literal: true');
+    if (hasFrozenStringLiteralDirective(this.source)) this.unsupported(root, 'frozen_string_literal: true');
     this.collectHeredocs(root);
     const children = namedChildren(root);
     const data = children.find((child) => child.type === 'uninterpreted');
@@ -2124,6 +2118,23 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   complex: '虚数のリテラル（2i）',
   subshell: '外部コマンドの実行（`...`）',
 };
+
+function hasFrozenStringLiteralDirective(source: string): boolean {
+  let offset = 0;
+  while (offset < source.length) {
+    const end = source.indexOf('\n', offset);
+    const line = source.slice(offset, end === -1 ? undefined : end).replace(/\r$/, '');
+    offset = end === -1 ? source.length : end + 1;
+    if (line.trim().length === 0) continue;
+    if (!/^\s*#/.test(line)) return false;
+    const body = line
+      .replace(/^\s*#\s*/, '')
+      .replace(/^-\*-\s*/, '')
+      .replace(/\s*-\*-\s*$/, '');
+    if (body.split(';').some((part) => /^\s*frozen[-_]string[-_]literal\s*:\s*true\b/i.test(part))) return true;
+  }
+  return false;
+}
 
 function namedChildren(node: Node): Node[] {
   return node.namedChildren.filter((child): child is Node => child !== null);

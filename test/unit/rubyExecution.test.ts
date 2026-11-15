@@ -8015,6 +8015,19 @@ test('regexp constructors reject trailing escapes', () => {
 
 test('frozen string literal header fails explicitly while unavailable', () => {
   expect(run('# frozen_string_literal: true\np "abc".frozen?')).toMatchObject({ kind: 'compileError' });
+  expect(run('# license\n# note\n# -*- coding: utf-8; frozen_string_literal: true -*-\np "abc".frozen?')).toMatchObject(
+    {
+      kind: 'compileError',
+    }
+  );
+  expect(run('\n\n# frozen-string-literal: true\np "abc".frozen?')).toMatchObject({ kind: 'compileError' });
+  expect(run('x=1\n# frozen_string_literal: true\np "abc".frozen?')).toMatchObject({ stdout: 'false\n' });
+});
+
+test('Hash inspection quotes ASCII control symbol keys consistently', () => {
+  expect(run(String.raw`h={:"a\x01"=>1};p h;pp h`)).toMatchObject({
+    stdout: '{"a\\x01": 1}\n{"a\\x01": 1}\n',
+  });
 });
 
 test('Enumerator Chain leaves external cursor methods undefined', () => {

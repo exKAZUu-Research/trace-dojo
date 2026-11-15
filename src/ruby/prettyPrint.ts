@@ -1,5 +1,5 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { addressOf, anonymousClassName, inspect, strInspect, symInspect } from './conversions';
+import { addressOf, anonymousClassName, inspect, quotedSymbolName, symInspect } from './conversions';
 import type { Gen } from './interp';
 import { type HashEntry, RArray, RBasic, RClass, RHash, RObject, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
@@ -373,7 +373,7 @@ function stringLines(value: RString): RString[] {
 function* pair(key: Value, value: Value, seen: Set<object>, budget: BuildBudget, defer = false): Gen<Doc[]> {
   const parts: Doc[] = [];
   if (key instanceof RSymbol) {
-    parts.push(text(`${isSimplePrettySymbol(key) ? key.name : strInspect(key.name)}:`, budget));
+    parts.push(text(`${isSimplePrettySymbol(key) ? key.name : quotedSymbolName(key.name)}:`, budget));
   } else {
     parts.push(yield* build(key, seen, budget, defer), text(' ', budget), text('=>', budget));
   }

@@ -359,7 +359,7 @@ export function* inspectHash(hash: RHash): Gen<RString> {
           ? /^[\u0000-\u007F]*$/.test(key.name)
             ? asciiString(key.name)
             : str(key.name)
-          : ((yield inspectValue(str(key.name))) as RString);
+          : str(quotedSymbolName(key.name));
         const shownValue = (yield inspectValue(value)) as RString;
         length = pushInspectionPart(parts, name, length);
         length = pushInspectionPart(parts, asciiString(': '), length);
@@ -603,7 +603,11 @@ export function symInspect(name: string): string {
   if (OPERATOR_SYMBOLS.has(name)) return `:${name}`;
   if (/^(?:\$|@@?)?[A-Za-z_\u0080-￿][\w\u0080-￿]*$/u.test(name)) return `:${name}`;
   if (/^[A-Za-z_\u0080-￿][\w\u0080-￿]*[?!=]$/u.test(name)) return `:${name}`;
-  return `:${strInspect(name, /^[\u0000-\u007F]*$/.test(name) ? 'hex' : 'unicode')}`;
+  return `:${quotedSymbolName(name)}`;
+}
+
+export function quotedSymbolName(name: string): string {
+  return strInspect(name, /^[\u0000-\u007F]*$/.test(name) ? 'hex' : 'unicode');
 }
 
 // Comparisons ---------------------------------------------------------------------------------------------------------
