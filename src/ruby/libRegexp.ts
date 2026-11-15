@@ -634,7 +634,6 @@ function matchData(state: MatchState): RObject {
     snapshot.binary = original.binary;
     snapshot.usAscii = original.usAscii;
     snapshot.rawBytes = original.rawBytes;
-    snapshot.ivars = original.ivars && new Map(original.ivars);
     snapshot.frozen = true;
     state.snapshot = snapshot;
   }
@@ -650,7 +649,6 @@ function matchSnapshot(source: RString): RString {
   if (source.frozen) return source;
   const snapshot = copyStringEncoding(source);
   snapshot.cls = source.cls;
-  snapshot.ivars = source.ivars && new Map(source.ivars);
   return snapshot;
 }
 
@@ -1260,7 +1258,8 @@ function* substituteRegexp(
       self.s !== text ||
       self.rawBytes !== sourceRawBytes ||
       self.binary !== snapshot.binary ||
-      self.usAscii !== snapshot.usAscii
+      self.usAscii !== snapshot.usAscii ||
+      self.frozen !== snapshot.frozen
     ) {
       if (stringBytes(self).length !== sourceLength) throw rubyError(rt().c.RuntimeError, 'string modified');
       text = self.s;
@@ -1364,7 +1363,8 @@ wrapFirst('scan', function* (self, args, block) {
       self.s !== text ||
       self.rawBytes !== sourceRawBytes ||
       self.binary !== snapshot.binary ||
-      self.usAscii !== snapshot.usAscii
+      self.usAscii !== snapshot.usAscii ||
+      self.frozen !== snapshot.frozen
     ) {
       if (stringBytes(self).length !== sourceLength) throw rubyError(rt().c.RuntimeError, 'string modified');
       text = self.s;

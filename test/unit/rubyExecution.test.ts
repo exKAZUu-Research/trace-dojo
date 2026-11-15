@@ -7670,6 +7670,22 @@ test('FrozenError describes the frozen object', () => {
   });
 });
 
+test('mutable MatchData snapshots omit source instance variables', () => {
+  expect(
+    run(
+      'class S<String;end;s=S.new("a");s.instance_variable_set(:@x,42);m=/a/.match(s);p m.string.class,m.string.instance_variables,m.string.instance_variable_get(:@x)'
+    )
+  ).toMatchObject({
+    stdout: 'S\n[]\nnil\n',
+  });
+});
+
+test('scan adopts a subject frozen by its block for later matches', () => {
+  expect(run('s="aa";a=[];s.scan(/a/){a << $~.string.equal?(s);s.freeze};p a')).toMatchObject({
+    stdout: '[false, true]\n',
+  });
+});
+
 test('Regexp constructor rejects literal-only option letters', () => {
   expect(run('begin;Regexp.new("a","n");rescue=>e;p e.class,e.message;end')).toMatchObject({
     stdout: 'ArgumentError\n"unknown regexp option: n"\n',
