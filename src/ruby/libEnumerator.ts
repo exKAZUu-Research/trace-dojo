@@ -398,7 +398,7 @@ function* withIndex(self: RObject, args: Value[], block: RProc | undefined, name
   const userBlock = block;
   const source = sourceOf(self);
   const proc = nativeProc(-1, (yielded, _block, used) => {
-    const value = yielded.length === 1 ? yielded[0] : arr(yielded);
+    const value = yielded.length === 0 ? NIL : yielded.length === 1 ? yielded[0] : arr(yielded);
     return callProc(userBlock, [value, index++], { used });
   });
   return yield* runSource(source, proc);
@@ -408,7 +408,7 @@ def('Enumerator', ['with_object', 'each_with_object'], 1, function* (self: RObje
   const userBlock = block;
   const source = sourceOf(self);
   const proc = nativeProc(-1, (yielded, _block, used) => {
-    const value = yielded.length === 1 ? yielded[0] : arr(yielded);
+    const value = yielded.length === 0 ? NIL : yielded.length === 1 ? yielded[0] : arr(yielded);
     return callProc(userBlock, [value, memo], { used });
   });
   yield* runSource(source, proc);

@@ -67,7 +67,7 @@ export function* symbolNameOf(value: Value): Gen<RSymbol> {
 
 function* ivarName(value: Value): Gen<string> {
   const name = yield* nameOf(value);
-  if (!/^@[A-Za-z_\u0080-￿][\w\u0080-￿]*$/u.test(name)) {
+  if (!/^@[A-Za-z_\u0080-\u{10FFFF}][\w\u0080-\u{10FFFF}]*$/u.test(name)) {
     throw nameError(`'${name}' is not allowed as an instance variable name`, NIL, name);
   }
   return name;
@@ -75,7 +75,7 @@ function* ivarName(value: Value): Gen<string> {
 
 function* classVariableName(value: Value): Gen<string> {
   const name = yield* nameOf(value);
-  if (!/^@@[A-Za-z_\u0080-￿][\w\u0080-￿]*$/u.test(name))
+  if (!/^@@[A-Za-z_\u0080-\u{10FFFF}][\w\u0080-\u{10FFFF}]*$/u.test(name))
     throw nameError(`'${name}' is not allowed as a class variable name`, NIL, name);
   return name;
 }
@@ -335,9 +335,11 @@ for (const owner of ['Method', 'UnboundMethod']) {
     const receiver =
       recv instanceof RBasic
         ? `o${methodIdentity(recv)}`
-        : typeof recv === 'bigint' || typeof recv === 'number' || typeof recv === 'boolean'
-          ? `${typeof recv}:${recv}`
-          : 'nil';
+        : recv instanceof RSymbol
+          ? `s${recv.id}`
+          : typeof recv === 'bigint' || typeof recv === 'number' || typeof recv === 'boolean'
+            ? `${typeof recv}:${recv}`
+            : 'nil';
     return BigInt(
       `0x${digest(`${receiver}:${methodIdentity(method.owner)}:${methodIdentity(methodBodyIdentity(method.body))}`)}`
     );

@@ -9008,12 +9008,34 @@ test('binary regexp construction rejects Unicode-only property names', () => {
   ).toMatchObject({ stdout: 'RegexpError\n'.repeat(6) });
 });
 
+test('binary regexp ASCII property matches only ASCII bytes', () => {
+  expect(
+    run(
+      String.raw`r=Regexp.new(String.new('\p{ASCII}',encoding:'ASCII-8BIT'));s=Regexp.new(String.new('\P{ASCII}',encoding:'ASCII-8BIT'));p [r.match?('a'),r.match?(233.chr)],[s.match?('a'),s.match?(233.chr)]`
+    )
+  ).toMatchObject({ stdout: '[true, false]\n[false, true]\n' });
+});
+
 test('binary regexp classes retain ASCII semantics on compatible UTF-8 subjects', () => {
   expect(
     run(
       String.raw`r=Regexp.new(String.new('\P{Lower}',encoding:'ASCII-8BIT'),Regexp::IGNORECASE);p r.match?('a'),r.match?('A'),r.match?(String.new('a',encoding:'ASCII-8BIT'))`
     )
   ).toMatchObject({ stdout: 'false\nfalse\nfalse\n' });
+});
+
+test('bracketed binary negated properties retain casefold membership', () => {
+  expect(
+    run(
+      String.raw`r=Regexp.new(String.new('[\P{Lower}]',encoding:'ASCII-8BIT'),Regexp::IGNORECASE);p r.match?('a'),r.match?('A'),r.match?(233.chr)`
+    )
+  ).toMatchObject({ stdout: 'true\ntrue\ntrue\n' });
+});
+
+test('word escapes stay ASCII under Unicode case folding', () => {
+  expect(run(String.raw`p "K".match?(/\w/i),"K".match?(/\W/i),"ſ".match?(/\w/i)`)).toMatchObject({
+    stdout: 'false\ntrue\nfalse\n',
+  });
 });
 
 test('invalid US-ASCII Symbol size counts bytes', () => {
@@ -9067,6 +9089,33 @@ test('Enumerator with_index converts its offset when iterated once', () => {
   expect(
     run('x=Object.new;def x.to_int;puts :convert;2;end;e=[1].each.with_index(x);puts :made;p e.to_a')
   ).toMatchObject({ stdout: 'made\nconvert\n[[1, 2]]\n' });
+});
+
+test('Enumerator adapters pack zero-argument yields as nil', () => {
+  expect(run('e=Enumerator.new{|y|y.yield};p e.with_index.to_a,e.with_object(:m).to_a')).toMatchObject({
+    stdout: '[[nil, 0]]\n[[nil, :m]]\n',
+  });
+});
+
+test('reflected variable names accept supplementary Unicode characters', () => {
+  expect(
+    run(
+      'o=Object.new;o.instance_variable_set("@𠮷",7);p o.instance_variable_get("@𠮷");class C;end;C.class_variable_set("@@𠮷",8);p C.class_variable_get("@@𠮷")'
+    )
+  ).toMatchObject({ stdout: '7\n8\n' });
+});
+
+test('encoded Symbols order separately and Method hashes include their receivers', () => {
+  expect(run('a="é".to_sym;b=String.new("é",encoding:"US-ASCII").to_sym;p [a==b,a<=>b,b<=>a]')).toMatchObject({
+    stdout: '[false, -1, 1]\n',
+  });
+  expect(run('h={};1500.times{|i|h[i.to_s.to_sym.method(:to_s)]=i};p h.size')).toMatchObject({ stdout: '1500\n' });
+});
+
+test('invalid US-ASCII strings remain distinct Hash keys from UTF-8', () => {
+  expect(run('a="é";b=String.new(a,encoding:"US-ASCII");p [a==b,a.eql?(b),{a=>1}[b],{a=>1,b=>2}.size]')).toMatchObject({
+    stdout: '[false, false, nil, 2]\n',
+  });
 });
 
 test('anonymous instance singleton names use the anonymous class name', () => {

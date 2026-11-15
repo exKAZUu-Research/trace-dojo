@@ -98,10 +98,15 @@ export function stringKeyHash(value: RString): bigint {
 
 export function stringKeyEquals(left: RString, other: Value): boolean {
   if (!(other instanceof RString)) return false;
-  if (!left.binary && !other.binary && !left.rawBytes && !other.rawBytes) return left.s === other.s;
+  if (!left.binary && !other.binary && !left.usAscii && !other.usAscii && !left.rawBytes && !other.rawBytes)
+    return left.s === other.s;
   const leftBytes = stringBytes(left);
   const rightBytes = stringBytes(other);
-  if (left.binary !== other.binary && leftBytes.some((byte) => byte >= 0x80)) return false;
+  if (
+    (left.binary !== other.binary || left.usAscii !== other.usAscii) &&
+    (leftBytes.some((byte) => byte >= 0x80) || rightBytes.some((byte) => byte >= 0x80))
+  )
+    return false;
   return leftBytes.length === rightBytes.length && leftBytes.every((byte, index) => byte === rightBytes[index]);
 }
 

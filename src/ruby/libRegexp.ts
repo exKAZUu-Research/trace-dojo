@@ -86,6 +86,7 @@ const POSIX_CLASSES: Record<string, string> = {
 };
 
 const ASCII_POSIX_CLASSES: Record<string, string> = {
+  ascii: String.raw`\x00-\x7F`,
   alpha: 'A-Za-z',
   digit: '0-9',
   alnum: 'A-Za-z0-9',
@@ -145,7 +146,8 @@ export function translate(
   extended: boolean,
   multiline = false,
   dynamic = false,
-  ascii = false
+  ascii = false,
+  ignoreCase = false
 ): string {
   const classes = ascii ? ASCII_POSIX_CLASSES : POSIX_CLASSES;
   for (const name of captureNamesForValidation(source, extended))
@@ -160,7 +162,9 @@ export function translate(
   let atomStart = 0;
   const groupStarts: number[] = [];
   const dotallStack: boolean[] = [];
+  const casefoldStack: boolean[] = [];
   let dotall = multiline;
+  let casefold = ignoreCase;
   const namedCaptures = regexpCaptureNames(source, extended).length > 0;
   for (let index = 0; index < source.length; index++) {
     const char = source[index];
@@ -225,7 +229,8 @@ export function translate(
           index += count;
         },
         (body) => negatedClassBodies.push(body),
-        classes
+        classes,
+        casefold
       );
       continue;
     }
@@ -290,8 +295,11 @@ export function translate(
         const off = disabled.replaceAll('m', 's').replaceAll('x', '');
         groupStarts.push(out.length);
         dotallStack.push(dotall);
+        casefoldStack.push(casefold);
         if (enabled.includes('m')) dotall = true;
         if (disabled.includes('m')) dotall = false;
+        if (enabled.includes('i')) casefold = true;
+        if (disabled.includes('i')) casefold = false;
         out += on || off ? `(?${on}${off ? `-${off}` : ''}:` : '(?:';
         index += scoped[0].length + 1;
         continue;
@@ -307,16 +315,19 @@ export function translate(
     if (inClass === 0 && char === '(' && source[index + 1] !== '?' && namedCaptures) {
       groupStarts.push(out.length);
       dotallStack.push(dotall);
+      casefoldStack.push(casefold);
       out += '(?:';
       continue;
     }
     if (inClass === 0 && char === '(') {
       groupStarts.push(out.length);
       dotallStack.push(dotall);
+      casefoldStack.push(casefold);
     }
     if (inClass === 0 && char === ')') {
       atomStart = groupStarts.pop() ?? out.length;
       dotall = dotallStack.pop() ?? multiline;
+      casefold = casefoldStack.pop() ?? ignoreCase;
     }
     if (inClass === 0 && char === '{') {
       const interval = /^\{(?:\d+(?:,\d*)?|,\d+)\}/.exec(source.slice(index));
@@ -402,7 +413,8 @@ function translateEscape(
   inClass: boolean,
   skip: (count: number) => void,
   addNegatedClass: (body: string) => void,
-  classes: Record<string, string>
+  classes: Record<string, string>,
+  casefold: boolean
 ): string {
   if (inClass && 'AzZR'.includes(next)) return next;
   switch (next) {
@@ -421,6 +433,18 @@ function translateEscape(
     case 'H': {
       if (inClass) throw unsupportedClassEscape(String.raw`\H`);
       return '[^0-9a-fA-F]';
+    }
+    case 'w': {
+      if (inClass && casefold) throw unsupportedClassEscape(String.raw`\w`);
+      return inClass ? 'A-Za-z0-9_' : casefold ? '(?-i:[A-Za-z0-9_])' : '[A-Za-z0-9_]';
+    }
+    case 'W': {
+      if (inClass && casefold) throw unsupportedClassEscape(String.raw`\W`);
+      if (inClass) {
+        addNegatedClass('A-Za-z0-9_');
+        return '';
+      }
+      return casefold ? String.raw`(?:(?!(?-i:[A-Za-z0-9_]))[\s\S])` : '[^A-Za-z0-9_]';
     }
     case 'G': {
       throw unsupportedSyntax(String.raw`\G`);
@@ -467,6 +491,8 @@ function translateEscape(
         throw rubyError(rt().c.RegexpError, `invalid character property name {${rawName}}: /${source}/`);
       if (body !== undefined) {
         if (inClass && negated) {
+          if (classes === ASCII_POSIX_CLASSES && casefold && (key === 'lower' || key === 'upper'))
+            return `\\P{${PROPERTY_NAMES[key]}}`;
           addNegatedClass(body);
           return '';
         }
@@ -522,7 +548,14 @@ export function makeRegexp(
   let translated: string;
   let encoding: RegexpData['encoding'];
   try {
-    translated = translate(source, options.extended ?? false, options.multiline ?? false, true);
+    translated = translate(
+      source,
+      options.extended ?? false,
+      options.multiline ?? false,
+      true,
+      false,
+      options.ignoreCase
+    );
     encoding =
       /[^\u0000-\u007F]/.test(source) || hasNonAsciiRegexpEscape(source, options.extended ?? false)
         ? options.sourceBinary
@@ -530,7 +563,14 @@ export function makeRegexp(
           : RUBY_UTF8
         : 'US-ASCII';
     if (encoding === 'BINARY (ASCII-8BIT)')
-      translated = translate(source, options.extended ?? false, options.multiline ?? false, true, true);
+      translated = translate(
+        source,
+        options.extended ?? false,
+        options.multiline ?? false,
+        true,
+        true,
+        options.ignoreCase
+      );
   } catch (error) {
     if (error instanceof SyntaxError) throw rubyError(rt().c.RegexpError, `invalid pattern: /${source}/`);
     throw error;
@@ -753,7 +793,7 @@ export function execAt(
 function regexpForMatch(data: RegexpData, source?: RString): RegExp {
   if (!source?.binary || data.encoding !== 'US-ASCII') return data.js;
   return (data.binaryJs ??= new RegExp(
-    translate(data.source, data.extended, data.multiline, true, true),
+    translate(data.source, data.extended, data.multiline, true, true, data.ignoreCase),
     data.js.flags
   ));
 }

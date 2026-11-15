@@ -859,8 +859,12 @@ export function compareStrings(a: string, b: string): number {
 export function compareRubyStrings(a: RString, b: RString): number {
   const bytes = stringBytes(a);
   const order = compareBytes(bytes, stringBytes(b));
-  if (order !== 0 || a.binary === b.binary || bytes.every((byte) => byte < 0x80)) return order;
-  return a.binary ? -1 : 1;
+  if (order !== 0 || bytes.every((byte) => byte < 0x80)) return order;
+  return stringEncodingRank(a) - stringEncodingRank(b);
+}
+
+function stringEncodingRank(value: RString): number {
+  return value.binary ? 0 : value.usAscii ? 2 : 1;
 }
 
 export function compareBytes(a: Uint8Array, b: Uint8Array): number {
