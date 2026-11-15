@@ -7939,6 +7939,12 @@ test('Hash replace adopts the source identity comparison mode', () => {
   ).toMatchObject({ stdout: 'false\n1\ntrue\n{"k" => 1}\n1\n{"k" => 2}\n' });
 });
 
+test('regexp preprocessing bounds repeated incomplete lookbehind openers', () => {
+  expect(run('begin;Regexp.new("(?<="*50000);rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'RegexpError\n',
+  });
+});
+
 test('UTC identity affects unpadded zone directives', () => {
   expect(run('p Time.utc(2024).strftime("%-z"),Time.at(0).getlocal(0).strftime("%-z")')).toMatchObject({
     stdout: '"-0000"\n"+0000"\n',

@@ -101,11 +101,8 @@ const SYNTAX = String.raw`^$\.*+?()[]{}|/-`;
 
 /** Translates a Ruby (Onigmo) expression into JavaScript's syntax, rejecting what has no counterpart. */
 export function translate(source: string, extended: boolean, multiline = false): string {
-  for (const capture of source.matchAll(/(?<!\\)\(\?<([^>]+)>/g))
-    if (
-      (/^[\p{ID_Start}_]/u.test(capture[1]) || /^\\u(?:[\dA-Fa-f]{4}|\{[\dA-Fa-f]+\})/.test(capture[1])) &&
-      /[-\\]/.test(capture[1])
-    )
+  for (const name of captureNamesForValidation(source))
+    if ((/^[\p{ID_Start}_]/u.test(name) || /^\\u(?:[\dA-Fa-f]{4}|\{[\dA-Fa-f]+\})/.test(name)) && /[-\\]/.test(name))
       throw unsupportedSyntax('特殊なキャプチャ名');
   if (/\\(?:[1-9]|k<)/.test(source) && /(?<!\\)\((?!\?:|\?=|\?!|\?<=|\?<!)[^()]*\)(?:[?*]|\{0,)/.test(source))
     throw unsupportedSyntax('省略可能なキャプチャへの後方参照');
@@ -309,6 +306,20 @@ export function translate(source: string, extended: boolean, multiline = false):
   return out;
 }
 
+function* captureNamesForValidation(source: string): Generator<string> {
+  let start = -1;
+  for (let index = 0; index < source.length; index++) {
+    if (start >= 0) {
+      if (source[index] === '>') {
+        if (index > start) yield source.slice(start, index);
+        start = -1;
+      }
+    } else if (source.startsWith('(?<', index) && source[index - 1] !== '\\') {
+      start = index + 3;
+    }
+  }
+}
+
 // code-gauge-allow functionNcss 35 -- Ruby's method takes these argument forms, which the branches mirror.
 function translateEscape(
   next: string,
@@ -420,6 +431,7 @@ export function makeRegexp(
   source: string,
   options: { ignoreCase?: boolean; multiline?: boolean; extended?: boolean; sourceBinary?: boolean }
 ): RObject {
+  rt().spend(Math.ceil(source.length / 64));
   if (hasVariableLengthLookbehind(source)) throw rubyError(rt().c.RegexpError, `invalid pattern: /${source}/`);
   if (regexpCaptureNames(source, options.extended).length > 0 && regexpHasNumberedBackref(source, options.extended))
     throw rubyError(rt().c.RegexpError, `numbered backref/call is not allowed. (use name): /${source}/`);
@@ -473,9 +485,18 @@ function hasNonAsciiRegexpEscape(source: string): boolean {
 }
 
 export function hasVariableLengthLookbehind(source: string): boolean {
-  for (const match of source.matchAll(/\(\?<([=!])((?:\\.|[^)])*)\)/g)) {
-    const body = match[2].replaceAll(/\[(?:\\.|[^\]])*\]/g, '');
+  for (let index = 0; index < source.length; index++) {
+    if (!source.startsWith('(?<=', index) && !source.startsWith('(?<!', index)) continue;
+    const start = index + 4;
+    let end = start;
+    while (end < source.length && source[end] !== ')') {
+      if (source[end] === '\\') end++;
+      end++;
+    }
+    if (end >= source.length) return false;
+    const body = source.slice(start, end).replaceAll(/\[(?:\\.|[^\]])*\]/g, '');
     if (/(?<!\\)[*+?]/.test(body) || /\{\d+,\d*\}/.test(body)) return true;
+    index = end;
   }
   return false;
 }
