@@ -13,7 +13,7 @@ import {
   tryImplicitConversion,
 } from './conversions';
 import { def, iundef, sdef } from './define';
-import { cycleSize, windowSize } from './enumeratorSize';
+import { customReceiverSize, cycleSize, windowSize } from './enumeratorSize';
 import { argumentCountError, argumentError, floatDomainError, rangeError, rubyError, typeError } from './errors';
 import { floatStepCount } from './floatMath';
 import { pushFrameReferences } from './garbageCollection';
@@ -48,7 +48,7 @@ import {
   type Value,
 } from './objects';
 import { type Frame, rt, RubyError, UnsupportedFeatureError } from './runtime';
-import { arr, classOf, isA, newHash, realClassOf, str, stringBytes, stringCharacterCount, sym, truthy } from './values';
+import { arr, isA, newHash, realClassOf, str, stringBytes, stringCharacterCount, sym, truthy } from './values';
 
 /** What an enumerator iterates: a method of a receiver, called with the block it is given. */
 export interface EnumeratorSource {
@@ -159,13 +159,7 @@ export function* receiverSize(recv: Value): Gen<Value> {
     const size = sourceOf(recv).size?.() ?? NIL;
     return isGenerator(size) ? yield* size : size;
   }
-  if (recv instanceof RObject) {
-    const missing = classOf(recv).findMethod('method_missing');
-    const available = respondsTo(recv, 'respond_to?', true)
-      ? truthy(yield* callMethod(recv, 'respond_to?', [sym('size'), true], undefined, undefined, { fcall: true }))
-      : respondsTo(recv, 'size', true) || (missing !== undefined && missing.body.kind !== 'native');
-    if (available) return yield* callMethod(recv, 'size', [], undefined, undefined, { fcall: true });
-  }
+  if (recv instanceof RObject) return yield* customReceiverSize(recv);
   return NIL;
 }
 

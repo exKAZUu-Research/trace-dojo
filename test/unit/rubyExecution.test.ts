@@ -9130,6 +9130,11 @@ test('Enumerable size callbacks respect method shape and visibility', () => {
       'class C<BasicObject;include ::Enumerable;def each;yield 1;end;def method_missing(n,*a);return 3 if n==:size;super;end;end;::Kernel.p C.new.map.size,C.new.each_cons(2).size'
     )
   ).toMatchObject({ stdout: '3\n2\n' });
+  expect(
+    run(
+      'class C<BasicObject;include ::Enumerable;def each;yield 1;end;def method_missing(n,*a);super;end;end;::Kernel.p C.new.map.size,C.new.each_cons(2).size'
+    )
+  ).toMatchObject({ stdout: 'nil\nnil\n' });
 });
 
 test('Enumerable window sizes use custom numeric size values', () => {
