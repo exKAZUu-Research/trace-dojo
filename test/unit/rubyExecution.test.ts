@@ -7284,6 +7284,15 @@ test('Class inherited hooks can call their default with super', () => {
   });
 });
 
+test('nested blocks share their lexical definition visibility', () => {
+  expect(run('C=Class.new;C.class_eval{1.times{private};def x;1;end};p C.private_method_defined?(:x)')).toMatchObject({
+    stdout: 'true\n',
+  });
+  expect(run('C=Class.new{1.times{private};define_method(:x){1}};p C.private_method_defined?(:x)')).toMatchObject({
+    stdout: 'true\n',
+  });
+});
+
 test('regexp split yields fields and captures to a block', () => {
   expect(run('r=[];p "aXbXc".split(/(X)/){|part|r<<part},r')).toMatchObject({
     stdout: '"aXbXc"\n["a", "X", "b", "X", "c"]\n',

@@ -2134,7 +2134,7 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
         (options.definee || options.definitionTarget ? false : outer.extra.forbidSingletonDefinition),
     }
   );
-  frame.defaultVisibility = options.definee || options.definitionTarget ? 'public' : outer.defaultVisibility;
+  if (!options.definee && !options.definitionTarget) frame.shareDefinitionMode(outer);
   if (options.block) frame.extra.block = options.block;
   runtime.pushFrame(frame);
   const savedRow = runtime.currentRow;

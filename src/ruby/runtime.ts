@@ -46,12 +46,32 @@ export type FrameKind = 'main' | 'method' | 'block' | 'class';
 export class Frame implements TracedFrame {
   /** Values that only native code holds, which garbage collection must keep. */
   readonly temporaries: Value[] = [];
-  /** The visibility that `def` gives in a class body after `private` or `public` without arguments. */
-  defaultVisibility: Visibility = 'public';
-  /** Whether `module_function` without arguments is in effect in a module body. */
-  moduleFunction = false;
+  private definitionMode: { visibility: Visibility; moduleFunction: boolean } = {
+    visibility: 'public',
+    moduleFunction: false,
+  };
   /** The exception being handled by a `rescue` of this frame, which a bare `raise` re-raises. */
   handling: RObject[] = [];
+
+  get defaultVisibility(): Visibility {
+    return this.definitionMode.visibility;
+  }
+
+  set defaultVisibility(value: Visibility) {
+    this.definitionMode.visibility = value;
+  }
+
+  get moduleFunction(): boolean {
+    return this.definitionMode.moduleFunction;
+  }
+
+  set moduleFunction(value: boolean) {
+    this.definitionMode.moduleFunction = value;
+  }
+
+  shareDefinitionMode(outer: Frame): void {
+    this.definitionMode = outer.definitionMode;
+  }
 
   // code-gauge-allow functionParameterCount 8 -- A frame carries the call context needed by Ruby method, block, and class execution.
   constructor(
