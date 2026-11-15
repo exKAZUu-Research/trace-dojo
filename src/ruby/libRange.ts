@@ -260,8 +260,7 @@ export function* rangeSize(range: RRange): Gen<Value> {
       return rationalRangeSize(begin, end, exclusive);
     }
   }
-  if (begin !== NIL && !(yield* hasDynamicSuccessor(begin)))
-    throw typeError(`can't iterate from ${realClassOf(begin).name}`);
+  if (!(yield* hasDynamicSuccessor(begin))) throw typeError(`can't iterate from ${realClassOf(begin).name}`);
   return NIL;
 }
 

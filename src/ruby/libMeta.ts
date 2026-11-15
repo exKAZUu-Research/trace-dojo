@@ -293,6 +293,10 @@ def(
   'parameters',
   0,
   function* (self: RProc, _args, _block, keywords) {
+    if (keywords)
+      for (const entry of keywords.map.values())
+        if (!(entry.key instanceof RSymbol && entry.key.name === 'lambda'))
+          throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
     const asLambda = keywords ? (yield* hashGet(keywords, sym('lambda')))?.value : undefined;
     const isLambda = asLambda === undefined || asLambda === NIL ? self.isLambda : truthy(asLambda);
     if (self.reflectedMethod) return methodParameterList(self.reflectedMethod, isLambda);

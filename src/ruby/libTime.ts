@@ -429,14 +429,14 @@ function caseText(rendered: string, directive: string, flags: string): string {
 }
 
 function defaultSpacePad(directive: string): boolean {
-  return 'eklaAbBh pPZcvrn t'.includes(directive);
+  return 'eklaAbBh pPZcvrn tTXRDxF'.includes(directive);
 }
 
 function padOffset(value: string, width: number | undefined, flag: string): string {
   if (flag === '-') return value;
   const target = width ?? value.length;
   if (flag === '_') {
-    const body = value.slice(1).replace(/^0+/, '') || '0';
+    const body = value.slice(1).replace(/^0/, '');
     const compact = `${value[0]}${body}`;
     return compact.padStart(width ?? value.length, ' ');
   }

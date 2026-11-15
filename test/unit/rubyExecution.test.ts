@@ -7820,6 +7820,24 @@ test('Range size consults dynamic successor responders', () => {
   ).toMatchObject({ stdout: 'TypeError\n' });
 });
 
+test('beginless Range size rejects a non-discrete begin', () => {
+  expect(run('begin;p (..1).size;rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'TypeError\n"can\'t iterate from NilClass"\n',
+  });
+});
+
+test('Proc parameters rejects unknown keyword options', () => {
+  expect(run('begin;p proc{|x|}.parameters(lamda:true);rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'ArgumentError\n',
+  });
+});
+
+test('strftime composite directives and zones use Ruby space padding', () => {
+  expect(run('p Time.utc(2024,2,29,13,5,9).strftime("%10T"),Time.at(0).getlocal(60).strftime("%_z")')).toMatchObject({
+    stdout: '"  13:05:09"\n" +001"\n',
+  });
+});
+
 test('Lazy select and reject predicates receive packed entries', () => {
   expect(run('p [nil,1,1,2].lazy.with_index.select{|x|x}.force')).toMatchObject({
     stdout: '[[nil, 0], [1, 1], [1, 2], [2, 3]]\n',
