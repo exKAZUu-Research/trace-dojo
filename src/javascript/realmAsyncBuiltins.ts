@@ -44,7 +44,7 @@ export function defineAsyncBuiltins(builder: RealmBuilder): void {
 
 function globalFunction(builder: RealmBuilder, name: string): JsFunction {
   const fn = builder.realm.globals.bindings.get(name)?.value;
-  if (!(fn instanceof JsFunction)) throw new Error(`${name} must be defined first`);
+  if (!(fn instanceof JsFunction)) throw new TypeError(`${name} must be defined first`);
   return fn;
 }
 

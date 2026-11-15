@@ -44,7 +44,7 @@ Widget 道具;
   expect(within(code).getByRole('button', { name: 'int の説明' })).toBeVisible();
   expect(within(code).getByRole('button', { name: '+= の説明' })).toBeVisible();
   for (const line of [...code.children].slice(2)) {
-    if (!(line instanceof HTMLElement)) throw new Error('Source line must be rendered');
+    if (!(line instanceof HTMLElement)) throw new TypeError('Source line must be rendered');
     expect.soft(within(line).queryAllByRole('button')).toHaveLength(0);
   }
   expect(within(code).queryByRole('button', { name: '個数 の説明' })).not.toBeInTheDocument();
@@ -110,7 +110,7 @@ test('preserves exact Java source and lexical boundaries around compound operato
   expect(query.getAllByRole('button', { name: '++ の説明' })).toHaveLength(1);
   expect(query.queryByRole('button', { name: '+ の説明' })).not.toBeInTheDocument();
   const shiftLine = code.children[3];
-  if (!(shiftLine instanceof HTMLElement)) throw new Error('Shift line must be rendered');
+  if (!(shiftLine instanceof HTMLElement)) throw new TypeError('Shift line must be rendered');
   expect(within(shiftLine).queryByRole('button', { name: '> の説明' })).not.toBeInTheDocument();
   expect(query.queryByRole('button', { name: '>> の説明' })).not.toBeInTheDocument();
   expect(query.queryByRole('button', { name: '>= の説明' })).not.toBeInTheDocument();
@@ -322,13 +322,13 @@ const expectSource = (code: HTMLElement, source: string): void => {
     source.split('\n').map((_, index) => String(index + 1))
   );
   const copy = code.cloneNode(true);
-  if (!(copy instanceof HTMLElement)) throw new Error('Code clone must be an element');
+  if (!(copy instanceof HTMLElement)) throw new TypeError('Code clone must be an element');
   for (const line of copy.querySelectorAll('.linenumber')) line.remove();
   expect(copy.textContent).toBe(source);
 };
 
 const expectHighlightedSnippet = (snippet: Element | undefined, source: string, tokens: string[]): void => {
-  if (!(snippet instanceof HTMLElement)) throw new Error('Hint snippet must be rendered');
+  if (!(snippet instanceof HTMLElement)) throw new TypeError('Hint snippet must be rendered');
   expect(snippet.textContent).toBe(source);
   expect(snippet.querySelector('button, [role="button"], [tabindex], a[href], input, select, textarea')).toBeNull();
   for (const token of tokens) {

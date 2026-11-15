@@ -397,7 +397,7 @@ export function startAsyncFunction(runtime: Runtime, frame: Frame, body: Steps<B
       return;
     }
     // An async function's body suspends only at an `await`.
-    if (!(result.value instanceof Awaiting)) throw new Error('An async function body suspended without an await');
+    if (!(result.value instanceof Awaiting)) throw new TypeError('An async function body suspended without an await');
     const awaited = result.value.value;
     awaitValue(runtime, awaited, [promise, frameRoots(frame)], (next) => inFrame(runtime, frame, () => advance(next)));
   };

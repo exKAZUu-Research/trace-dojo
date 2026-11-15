@@ -113,7 +113,7 @@ export function resumeGenerator(runtime: Runtime, object: JsObject, resume: Resu
     return { value: result.value?.kind === 'return' ? result.value.value : undefined, done: true };
   }
   state.status = 'suspendedYield';
-  if (result.value instanceof Awaiting) throw new Error('An await ran in a generator that is not async');
+  if (result.value instanceof Awaiting) throw new TypeError('An await ran in a generator that is not async');
   if (result.value instanceof DelegatedResult) return { delegated: result.value.result };
   return { value: result.value, done: false };
 }
