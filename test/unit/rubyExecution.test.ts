@@ -7732,6 +7732,12 @@ test('replacement Hash callbacks retain their own last regexp match', () => {
   ).toMatchObject({ stdout: '"b"\n"b"\n"b"\n' });
 });
 
+test('extended regexps retain non-ASCII whitespace and vertical tabs', () => {
+  expect(run('p(/a b/x.match?("ab"),/a b/x.match?("a b"),/a\vb/x.match?("a\vb"),/a b/x.match?("ab"))')).toMatchObject({
+    stdout: 'false\ntrue\ntrue\ntrue\n',
+  });
+});
+
 test('implicit conversion respects a negative respond_to_missing? answer', () => {
   expect(
     run(

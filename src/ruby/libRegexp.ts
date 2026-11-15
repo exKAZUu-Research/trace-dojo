@@ -121,7 +121,7 @@ export function translate(source: string, extended: boolean, multiline = false):
   for (let index = 0; index < source.length; index++) {
     const char = source[index];
     if (extended && inClass === 0) {
-      if (/\s/.test(char)) continue;
+      if (/[ \t\n\r\f]/.test(char)) continue;
       if (char === '#') {
         index = regexpLineCommentEnd(source, index);
         continue;
