@@ -8819,6 +8819,21 @@ test('Struct class names honor to_str', () => {
   expect(run('x=Object.new;def x.to_str;"A";end;p Struct.new(x,:a)')).toMatchObject({ stdout: 'Struct::A\n' });
 });
 
+test('Struct and Data retain encoded member Symbol identities', () => {
+  expect(
+    run(
+      'name=255.chr.to_sym;s=Struct.new(name);d=Data.define(name);p s.members[0].equal?(name),d.members[0].equal?(name),s.members[0].encoding'
+    )
+  ).toMatchObject({
+    stdout: 'true\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  });
+  expect(
+    run('name=255.chr.to_sym;s=Struct.new(name).new(1);p s.each_pair.first[0].equal?(name),s.to_h.keys[0].equal?(name)')
+  ).toMatchObject({
+    stdout: 'true\ntrue\n',
+  });
+});
+
 test('frozen DATA rejects reads and cursor operations', () => {
   expect(
     run(

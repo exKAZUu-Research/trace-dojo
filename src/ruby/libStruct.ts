@@ -18,14 +18,14 @@ import { digest, hashKeyOf, hashSet } from './hashes';
 import { addMethod, assertMutableClass, callBlock, callMethod, callProc, type Gen, invoke } from './interp';
 import { tryAry } from './libArray';
 import { sizedEnumerator } from './libEnumerator';
-import { nameOf } from './libMeta';
 import { NIL, RArray, RClass, type RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
-import { arr, newHash, range, realClassOf, singletonClassOf, str, sym, truthy } from './values';
+import { arr, newHash, range, realClassOf, singletonClassOf, str, stringBytes, truthy } from './values';
 
 /** The members of a Struct or Data class, and whether its `new` takes keywords only. */
 interface Layout {
   members: string[];
+  memberSymbols: RSymbol[];
   keywordInit: boolean | undefined;
   kind: 'struct' | 'data';
 }
@@ -34,7 +34,7 @@ const layouts = new WeakMap<RClass, Layout>();
 
 export function copyStructLayout(source: RClass, copy: RClass): void {
   const layout = layouts.get(source);
-  if (layout) layouts.set(copy, { ...layout, members: [...layout.members] });
+  if (layout) layouts.set(copy, { ...layout, members: [...layout.members], memberSymbols: [...layout.memberSymbols] });
 }
 
 function layoutOf(cls: RClass): Layout {
@@ -79,10 +79,11 @@ export function structEntriesOf(value: RObject): [string, Value][] | undefined {
 }
 
 function* memberIndex(self: RObject, key: Value): Gen<number> {
-  const { members } = layoutOf(self.cls);
+  const { members, memberSymbols } = layoutOf(self.cls);
   if (key instanceof RSymbol || key instanceof RString) {
     const name = key instanceof RSymbol ? key.name : key.s;
-    const index = members.indexOf(name);
+    const symbol = key instanceof RSymbol ? key : RSymbol.of(key.s, key.binary, key.usAscii, stringBytes(key));
+    const index = memberSymbols.indexOf(symbol);
     if (index === -1) {
       throw nameError(`no member '${name}' in struct`, self, name);
     }
@@ -97,13 +98,19 @@ function* memberIndex(self: RObject, key: Value): Gen<number> {
   return index;
 }
 
-function* membersFrom(args: Value[], kind: 'struct' | 'data'): Gen<string[]> {
-  const members: string[] = [];
+function* membersFrom(args: Value[], kind: 'struct' | 'data'): Gen<RSymbol[]> {
+  const members: RSymbol[] = [];
   for (const arg of args) {
-    const name = yield* nameOf(arg);
+    let member: RSymbol;
+    if (arg instanceof RSymbol) member = arg;
+    else {
+      const converted = yield* toStrValue(arg);
+      member = RSymbol.of(converted.s, converted.binary, converted.usAscii, stringBytes(converted));
+    }
+    const name = member.name;
     if (name.endsWith('=')) throw argumentError(`invalid ${kind} member: ${name}`);
-    if (members.includes(name)) throw argumentError(`duplicate member: ${name}`);
-    members.push(name);
+    if (members.some((member) => member.name === name)) throw argumentError(`duplicate member: ${name}`);
+    members.push(member);
   }
   return members;
 }
@@ -136,10 +143,15 @@ function defineAccessors(cls: RClass, members: string[], writable: boolean): voi
   }
 }
 
-function* newStructClass(superclass: RClass, members: string[], layout: Omit<Layout, 'members'>): Gen<RClass> {
+function* newStructClass(
+  superclass: RClass,
+  memberSymbols: RSymbol[],
+  layout: Omit<Layout, 'members' | 'memberSymbols'>
+): Gen<RClass> {
+  const members = memberSymbols.map((member) => member.name);
   const cls = new RClass(rt().c.Class, undefined, superclass, false);
   cls.isUserDefined = true;
-  layouts.set(cls, { ...layout, members });
+  layouts.set(cls, { ...layout, members, memberSymbols });
   defineAccessors(cls, members, layout.kind === 'struct');
   const singleton = singletonClassOf(cls);
   if (layout.kind === 'data')
@@ -264,12 +276,12 @@ def(
   },
   { visibility: 'private', keywords: true }
 );
-sdef('Struct', 'members', 0, (self: RClass) => arr(layoutOf(self).members.map((name) => sym(name))));
+sdef('Struct', 'members', 0, (self: RClass) => arr([...layoutOf(self).memberSymbols]));
 sdef('Struct', 'keyword_init?', 0, (self: RClass) => layoutOf(self).keywordInit ?? NIL);
 sdef('Struct', 'inspect', 0, (self: RClass) =>
   str(`${className(self)}${layoutFor(self)?.keywordInit === true ? '(keyword_init: true)' : ''}`)
 );
-def('Struct', 'members', 0, (self: RObject) => arr(layoutOf(self.cls).members.map((name) => sym(name))));
+def('Struct', 'members', 0, (self: RObject) => arr([...layoutOf(self.cls).memberSymbols]));
 def('Struct', ['to_a', 'deconstruct', 'values'], 0, (self: RObject) => arr([...valuesOf(self)]));
 def('Struct', 'values_at', [0, -1], function* (self: RObject, args) {
   const values = valuesOf(self);
@@ -316,18 +328,20 @@ def('Struct', ['each'], 0, function* (self: RObject, _args, block) {
 });
 def('Struct', 'each_pair', 0, function* (self: RObject, _args, block) {
   if (!block) return sizedEnumerator(self, 'each_pair', [], () => BigInt(layoutOf(self.cls).members.length));
-  for (const [index, name] of layoutOf(self.cls).members.entries()) {
-    yield* callBlock(block, [arr([sym(name), valuesOf(self)[index]])], false);
+  for (const [index, name] of layoutOf(self.cls).memberSymbols.entries()) {
+    yield* callBlock(block, [arr([name, valuesOf(self)[index]])], false);
   }
   return self;
 });
 def('Struct', ['size', 'length'], 0, (self: RObject) => BigInt(valuesOf(self).length));
 def('Struct', 'dig', [1, -1], function* (self: RObject, args) {
-  const members = layoutOf(self.cls).members;
+  const { members, memberSymbols } = layoutOf(self.cls);
   const key = args[0];
   let index: number;
   if (key instanceof RSymbol || key instanceof RString)
-    index = members.indexOf(key instanceof RSymbol ? key.name : key.s);
+    index = memberSymbols.indexOf(
+      key instanceof RSymbol ? key : RSymbol.of(key.s, key.binary, key.usAscii, stringBytes(key))
+    );
   else {
     index = yield* toIndex(key);
     if (index < 0) index += members.length;
@@ -423,7 +437,7 @@ sdef('Data', 'define', [0, -1], function* (self: RClass, args, block) {
 sundef('Data', ['new', '[]']);
 
 function* constructData(self: RClass, args: Value[], block: RProc | undefined, keywords?: RHash): Gen<RObject> {
-  const { members } = layoutOf(self);
+  const { members, memberSymbols } = layoutOf(self);
   if (args.length > 0 && keywords && keywords.map.size > 0)
     throw argumentError(`wrong number of arguments (given ${args.length + 1}, expected 0)`);
   if (args.length > members.length) {
@@ -432,7 +446,7 @@ function* constructData(self: RClass, args: Value[], block: RProc | undefined, k
     );
   }
   const hash: RHash = keywords ?? newHash();
-  for (const [index, value] of args.entries()) yield* hashSet(hash, sym(members[index]), value);
+  for (const [index, value] of args.entries()) yield* hashSet(hash, memberSymbols[index], value);
   const object = allocateStruct(self);
   const initialize = self.findMethod('initialize');
   if (initialize) yield* invoke(initialize, object, [], hash.map.size > 0 ? hash : undefined, block, false);
@@ -468,17 +482,17 @@ def(
   },
   { visibility: 'private', keywords: true }
 );
-sdef('Data', 'members', 0, (self: RClass) => arr(layoutOf(self).members.map((name) => sym(name))));
-def('Data', 'members', 0, (self: RObject) => arr(layoutOf(self.cls).members.map((name) => sym(name))));
+sdef('Data', 'members', 0, (self: RClass) => arr([...layoutOf(self).memberSymbols]));
+def('Data', 'members', 0, (self: RObject) => arr([...layoutOf(self.cls).memberSymbols]));
 def('Data', 'to_h', 0, (self: RObject, _args, block) => structToHash(self, block));
 
 function* deconstructKeys(self: RObject, keys: Value): Gen<RHash> {
   const hash = newHash();
-  const { members, kind } = layoutOf(self.cls);
+  const { members, memberSymbols, kind } = layoutOf(self.cls);
   if (keys !== NIL && !(keys instanceof RArray))
     throw typeError(`wrong argument type ${realClassOf(keys).name} (expected Array)`);
   if (keys instanceof RArray && keys.items.length > members.length) return hash;
-  const names = keys === NIL ? members.map((name) => sym(name)) : (keys as RArray).items;
+  const names = keys === NIL ? memberSymbols : (keys as RArray).items;
   const mark = rt().held.length;
   rt().held.push(hash);
   try {
@@ -497,9 +511,9 @@ function* deconstructKeys(self: RObject, keys: Value): Gen<RHash> {
       const named = resolved instanceof RSymbol || resolved instanceof RString;
       const index =
         resolved instanceof RSymbol
-          ? members.indexOf(resolved.name)
+          ? memberSymbols.indexOf(resolved)
           : resolved instanceof RString
-            ? members.indexOf(resolved.s)
+            ? memberSymbols.indexOf(RSymbol.of(resolved.s, resolved.binary, resolved.usAscii, stringBytes(resolved)))
             : yield* toIndex(resolved);
       if (named && index < 0) break;
       const normalized = index < 0 ? index + members.length : index;
@@ -516,13 +530,13 @@ function* structToHash(self: RObject, block: RProc | undefined): Gen<RHash> {
   const hash = newHash();
   rt().held.push(hash);
   try {
-    for (const [index, name] of layoutOf(self.cls).members.entries()) {
+    for (const [index, name] of layoutOf(self.cls).memberSymbols.entries()) {
       const value = valuesOf(self)[index];
       if (!block) {
-        yield* hashSet(hash, sym(name), value);
+        yield* hashSet(hash, name, value);
         continue;
       }
-      const converted = yield* callBlock(block, [sym(name), value]);
+      const converted = yield* callBlock(block, [name, value]);
       const pair = converted instanceof RArray ? converted : yield* tryAry(converted);
       if (!pair) throw typeError(`wrong element type ${realClassOf(converted).name} (expected array)`);
       if (pair.items.length !== 2)
@@ -541,8 +555,8 @@ def(
   function* (self: RObject, _args, _block, keywords) {
     if (!keywords) return self;
     const hash = newHash();
-    for (const [index, name] of layoutOf(self.cls).members.entries())
-      yield* hashSet(hash, sym(name), valuesOf(self)[index]);
+    for (const [index, name] of layoutOf(self.cls).memberSymbols.entries())
+      yield* hashSet(hash, name, valuesOf(self)[index]);
     for (const entry of keywords.map.values()) yield* hashSet(hash, entry.key, entry.value);
     return yield* constructData(self.cls, [], undefined, hash);
   },
