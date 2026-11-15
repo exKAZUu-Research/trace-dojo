@@ -8921,6 +8921,15 @@ test('Encoding names are canonical frozen US-ASCII strings', () => {
   });
 });
 
+test('named capture names retain their regexp encoding', () => {
+  expect(
+    run('r=/(?<word>a)/;m=r.match("a");p [r.names[0].encoding,m.names[0].encoding,m.named_captures.keys[0].encoding]')
+  ).toMatchObject({
+    stdout: '[#<Encoding:US-ASCII>, #<Encoding:US-ASCII>, #<Encoding:US-ASCII>]\n',
+  });
+  expect(run('p /(?<word>é)/.names[0].encoding')).toMatchObject({ stdout: '#<Encoding:UTF-8>\n' });
+});
+
 test('remove_method leaves undefined inherited methods hidden', () => {
   expect(
     run(

@@ -46,7 +46,7 @@ import {
   regexpLineCommentEnd,
 } from './regexpCaptureNames';
 import { type Frame, rt, UnsupportedFeatureError } from './runtime';
-import { arr, newHash, realClassOf, str, stringBytes, stringFromBytes, sym, truthy } from './values';
+import { arr, asciiString, newHash, realClassOf, str, stringBytes, stringFromBytes, sym, truthy } from './values';
 
 // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby exposes the canonical name with a hyphen and uppercase letters.
 const RUBY_UTF8 = 'UTF-8';
@@ -1048,8 +1048,15 @@ def('Regexp', 'hash', 0, (self: RObject) =>
   )
 );
 def('Regexp', 'names', 0, (self: RObject) =>
-  arr([...new Set(regexpCaptureNames(dataOf(self).js.source))].map((name) => str(name)))
+  arr([...new Set(regexpCaptureNames(dataOf(self).js.source))].map((name) => captureNameString(self, name)))
 );
+
+function captureNameString(regexp: RObject, name: string): RString {
+  const encoding = dataOf(regexp).encoding;
+  if (encoding === 'US-ASCII') return asciiString(name);
+  if (encoding === 'BINARY (ASCII-8BIT)') return stringFromBytes(new TextEncoder().encode(name), true);
+  return str(name);
+}
 
 function* subjectText(value: Value): Gen<RString | undefined> {
   if (value === NIL) return undefined;
@@ -1186,13 +1193,20 @@ def(
     const hash = newHash();
     const state = stateOf(self);
     for (const name of state.names)
-      yield* hashSet(hash, symbolize ? sym(name) : str(name), groupText(state, state.namedGroups[name]));
+      yield* hashSet(
+        hash,
+        symbolize ? sym(name) : captureNameString(state.regexp, name),
+        groupText(state, state.namedGroups[name])
+      );
     return hash;
   },
   { keywords: true }
 );
 
-def('MatchData', 'names', 0, (self: RObject) => arr(stateOf(self).names.map((name) => str(name))));
+def('MatchData', 'names', 0, (self: RObject) => {
+  const state = stateOf(self);
+  return arr(state.names.map((name) => captureNameString(state.regexp, name)));
+});
 def('MatchData', ['to_s'], 0, (self: RObject) => groupText(stateOf(self), 0));
 def('MatchData', 'pre_match', 0, (self: RObject) => {
   const state = stateOf(self);
