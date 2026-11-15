@@ -150,6 +150,9 @@ def('Kernel', '===', 1, function* (self, [other]) {
 def('Kernel', 'eql?', 1, function* (self, [other]) {
   return yield* rEql(self, other);
 });
+def('Kernel', '!~', 1, function* (self, [other]) {
+  return !truthy(yield* callMethod(self, '=~', [other]));
+});
 def('Kernel', 'hash', 0, (self) => BigInt(hashString(String(objectId(self)))));
 def('Kernel', '<=>', 1, function* (self, [other]) {
   if (classOf(self).findMethod('==')?.owner === rt().c.Comparable) return self === other ? 0n : NIL;

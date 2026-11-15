@@ -466,6 +466,7 @@ def('Module', 'alias_method', 2, function* (self: RClass, [newName, oldName]) {
   if (!method) throw nameError(`undefined method '${old}' for class '${className(self)}'`, self, old);
   assertMutableClass(self);
   // An alias keeps the original method, whose owner and name `super` in it continues from.
+  assertNoDefinitionHook(self, 'added');
   self.methods.set(name, { ...method });
   invalidateMethodCaches();
   return sym(name);

@@ -380,6 +380,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
         throw nameError(`undefined method '${e.oldName}' for class '${owner.name}'`, owner, e.oldName);
       }
       assertMutableClass(owner);
+      assertNoDefinitionHook(owner, 'added');
       owner.methods.set(e.newName, { ...method });
       invalidateMethodCaches();
       return NIL;
@@ -613,7 +614,9 @@ function* copyHashSplat(hash: RHash, value: Value, frame: Frame, literal: boolea
   value.iterating++;
   try {
     for (const [slot, entry] of value.map)
-      yield* literal ? hashSet(hash, entry.key, entry.value) : hashSetStored(hash, slot, entry);
+      yield* literal || value.byIdentity !== hash.byIdentity
+        ? hashSet(hash, entry.key, entry.value)
+        : hashSetStored(hash, slot, entry);
   } finally {
     value.iterating--;
     frame.temporaries.length = sourceMark;
@@ -1175,7 +1178,9 @@ function* definedText(e: Expr, frame: Frame): Gen {
     case 'gvar': {
       const matchVariable = /^\$(?:[~&`'+]|[1-9]\d*)$/.test(e.name);
       return text(
-        rt().globals.has(e.name) || (matchVariable && (e.name === '$~' || matchGlobal(e.name) !== NIL))
+        rt().globals.has(e.name) ||
+          e.name === '$_' ||
+          (matchVariable && (e.name === '$~' || matchGlobal(e.name) !== NIL))
           ? 'global-variable'
           : undefined
       );

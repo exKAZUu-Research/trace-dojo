@@ -7353,6 +7353,36 @@ test('Struct values_at converts each selector once', () => {
   });
 });
 
+test('aliases reject unsupported method-added hooks', () => {
+  expect(
+    run('module H;def method_added(n);p n;end;end;class C;def x;end;extend H;alias_method :y,:x;end')
+  ).toMatchObject({
+    uncaughtException: expect.stringContaining('メソッド・定数フック'),
+  });
+});
+
+test('custom not-match operators dispatch to their receiver', () => {
+  expect(run('class M;def !~(other);:custom;end;end;p M.new !~ "x", "a" !~ /b/')).toMatchObject({
+    stdout: ':custom\ntrue\n',
+  });
+});
+
+test('defined recognizes the special last-line global', () => {
+  expect(run('p defined?($_);$_="x";p defined?($_)')).toMatchObject({
+    stdout: '"global-variable"\n"global-variable"\n',
+  });
+});
+
+test('literal searches inspect MatchData with quoted captures', () => {
+  expect(run('"abc".sub("b","x");p $~')).toMatchObject({ stdout: '#<MatchData "b">\n' });
+});
+
+test('keyword expansion rehashes keys across identity modes', () => {
+  expect(run('def f(**k);p k,k[:a],k.key?(:a);end;h={a:42}.compare_by_identity;f(**h)')).toMatchObject({
+    stdout: '{a: 42}\n42\ntrue\n',
+  });
+});
+
 test('regexp split yields fields and captures to a block', () => {
   expect(run('r=[];p "aXbXc".split(/(X)/){|part|r<<part},r')).toMatchObject({
     stdout: '"aXbXc"\n["a", "X", "b", "X", "c"]\n',

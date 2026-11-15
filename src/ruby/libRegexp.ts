@@ -1055,10 +1055,6 @@ def('MatchData', 'inspect', 0, (self: RObject) => str(matchDataInspect(self)));
 
 function matchDataInspect(match: RObject): string {
   const state = stateOf(match);
-  if (state.literal) {
-    const range = state.groups[0] as readonly [number, number];
-    return `#<MatchData: ${state.text.slice(range[0], range[1])}>`;
-  }
   const parts = state.groups.map((range, group) => {
     const shown = range
       ? inspectStringEncoding(sliceStringEncoding(state.snapshot ?? str(state.text), range[0], range[1]))

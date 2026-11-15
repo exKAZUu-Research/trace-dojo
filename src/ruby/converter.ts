@@ -1122,7 +1122,7 @@ export class Converter {
         return { k: 'or', l: left, r: right };
       }
       case '!~': {
-        return { k: 'not', e: this.operatorCall(node, left, '=~', [right]), row: node.startPosition.row };
+        return this.operatorCall(node, left, '!~', [right]);
       }
     }
     if (operator === '!=') {
