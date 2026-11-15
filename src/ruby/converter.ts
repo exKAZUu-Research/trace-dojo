@@ -150,6 +150,13 @@ export class Converter {
   readonly claimedAtomicRows = new Set<number>();
 
   convertProgram(root: Node): Program {
+    if (
+      this.source
+        .split(/\r?\n/, 3)
+        .slice(0, 2)
+        .some((line) => /^\s*#\s*frozen_string_literal:\s*true\b/i.test(line))
+    )
+      this.unsupported(root, 'frozen_string_literal: true');
     this.collectHeredocs(root);
     const children = namedChildren(root);
     const data = children.find((child) => child.type === 'uninterpreted');

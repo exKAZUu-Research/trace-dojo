@@ -12,7 +12,7 @@ import {
   toStepFloat,
   tryImplicitConversion,
 } from './conversions';
-import { def, sdef } from './define';
+import { def, iundef, sdef } from './define';
 import { argumentCountError, argumentError, floatDomainError, rangeError, rubyError, typeError } from './errors';
 import { floatStepCount } from './floatMath';
 import { pushFrameReferences } from './garbageCollection';
@@ -824,6 +824,7 @@ def('Enumerator', 'feed', 1, (self: RObject, [value]) => {
   source.cursor.feedSet = true;
   return NIL;
 });
+iundef('Enumerator::Chain', ['next', 'peek', 'next_values', 'peek_values', 'feed']);
 
 // Enumerator.new and its yielder --------------------------------------------------------------------------------------
 

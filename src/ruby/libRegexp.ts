@@ -125,6 +125,7 @@ export function translate(source: string, extended: boolean, multiline = false):
       }
     }
     if (char === '\\') {
+      if (index === source.length - 1) throw new SyntaxError('trailing regexp escape');
       if (inClass === 0) atomStart = out.length;
       const next = source[++index] ?? '\\';
       if (inClass > 0 && /^[0-7]$/.test(next)) {
@@ -449,6 +450,8 @@ export function makeRegexp(
   options: { ignoreCase?: boolean; multiline?: boolean; extended?: boolean; sourceBinary?: boolean }
 ): RObject {
   rt().spend(Math.ceil(source.length / 64));
+  if (((/\\+$/.exec(source)?.[0].length ?? 0) & 1) === 1)
+    throw rubyError(rt().c.RegexpError, `too short escape sequence: /${source}/`);
   if (hasVariableLengthLookbehind(source)) throw rubyError(rt().c.RegexpError, `invalid pattern: /${source}/`);
   if (regexpCaptureNames(source, options.extended).length > 0 && regexpHasNumberedBackref(source, options.extended))
     throw rubyError(rt().c.RegexpError, `numbered backref/call is not allowed. (use name): /${source}/`);

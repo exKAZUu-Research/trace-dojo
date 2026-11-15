@@ -51,13 +51,21 @@ export function sdef(
 }
 
 export function sundef(owner: string, names: string | string[]): void {
+  registerUndefined(owner, names, true);
+}
+
+export function iundef(owner: string, names: string | string[]): void {
+  registerUndefined(owner, names, false);
+}
+
+function registerUndefined(owner: string, names: string | string[], singleton: boolean): void {
   specs.push({
     owner,
     names: typeof names === 'string' ? [names] : names,
     min: 0,
     max: -1,
     fn: () => undefined as never,
-    singleton: true,
+    singleton,
     visibility: 'public',
     takesKeywords: false,
     undefined: true,

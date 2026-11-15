@@ -223,10 +223,13 @@ def(
           if (normalizedEncoding === 'ASCII-8BIT' || normalizedEncoding === 'BINARY')
             setBytes(self, sourceBytes ?? stringBytes(self), true);
           // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby spells the encoding name UTF-8.
-          else if (['UTF-8', 'UTF8', 'CP65001', 'US-ASCII', 'ASCII'].includes(normalizedEncoding)) {
+          else if (['UTF-8', 'CP65001', 'US-ASCII', 'ASCII', 'ANSI_X3.4-1968', '646'].includes(normalizedEncoding)) {
             setBytes(self, sourceBytes ?? stringBytes(self), false);
             // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby's ASCII alias is uppercase after normalization.
-            self.usAscii = normalizedEncoding === 'US-ASCII' || normalizedEncoding === 'ASCII';
+            self.usAscii = ['US-ASCII', 'ASCII', 'ANSI_X3.4-1968', '646'].includes(normalizedEncoding);
+            // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Reject Ruby's invalid UTF8 spelling after uppercase normalization.
+          } else if (normalizedEncoding === 'UTF8') {
+            throw argumentError(`unknown encoding name - ${encoding}`);
           } else throw new UnsupportedFeatureError(`String.new の文字コード ${encoding}`);
         } else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
       }
@@ -269,7 +272,7 @@ export function inspectStringEncoding(self: RString, dump = false): string {
   return self.binary
     ? binaryInspect(stringBytes(self))
     : self.rawBytes
-      ? inspectRawBytes(self.rawBytes)
+      ? inspectRawBytes(self.rawBytes, dump)
       : strInspect(self.s, self.usAscii || dump ? 'hex' : 'unicode');
 }
 def('String', 'inspect', 0, (self: RString) => str(inspectStringEncoding(self)));
@@ -283,12 +286,12 @@ def('String', 'dump', 0, (self: RString) => {
   return stringFromBytes(new TextEncoder().encode(dumped), self.binary, self.usAscii);
 });
 
-function inspectRawBytes(bytes: Uint8Array): string {
+function inspectRawBytes(bytes: Uint8Array, dump = false): string {
   const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   let text = '';
   let result = '"';
   const flush = (): void => {
-    if (text) result += strInspect(text).slice(1, -1);
+    if (text) result += strInspect(text, dump ? 'hex' : 'unicode').slice(1, -1);
     text = '';
   };
   for (let index = 0; index < bytes.length;) {

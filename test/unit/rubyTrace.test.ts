@@ -760,7 +760,7 @@ test('suspended external iterators and installed method blocks retain reachable 
 
 test('chained external iterators retain Turtles in suspended frames', () => {
   const program =
-    'class C\ninclude Enumerable\ndef each\nt=Turtle.new\nyield nil\nt.forward\nyield nil\nend\nend\ne=C.new.chain([])\ne.next\nx=1\ne.next\nx=2';
+    'class C\ninclude Enumerable\ndef each\nt=Turtle.new\nyield nil\nt.forward\nyield nil\nend\nend\ne=C.new.chain([]).to_enum\ne.next\nx=1\ne.next\nx=2';
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
@@ -862,7 +862,7 @@ test('lazy zip conversion and copied cursors retain turtles across callbacks', (
     'class A;def to_ary;[Turtle.new];end;end;class B;def to_ary;x=1;[];end;end;z=[1].lazy.zip(A.new,B.new);x=1;z.force[0][1].forward';
   expect(traceProgram('ruby', zip, zip).finalTurtles).toHaveLength(1);
   const copy =
-    'class C;include Enumerable;def each;t=Turtle.new;yield nil;t.forward;yield nil;end;end;e=C.new.chain([]);f=e.dup;f.next;x=1;f.next;x=2';
+    'class C;include Enumerable;def each;t=Turtle.new;yield nil;t.forward;yield nil;end;end;e=C.new.chain([]).to_enum;f=e.dup;f.next;x=1;f.next;x=2';
   expect(traceProgram('ruby', copy, copy).finalTurtles).toHaveLength(1);
 });
 

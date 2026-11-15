@@ -7983,6 +7983,9 @@ test('US-ASCII inspect and String dump use hex control escapes', () => {
   expect(run(String.raw`p 0.chr,1.chr,127.chr;puts "a\0b".dump`)).toMatchObject({
     stdout: '"\\x00"\n"\\x01"\n"\\x7F"\n"a\\x00b"\n',
   });
+  expect(run(String.raw`p 5.chr.to_sym;puts ("é\x01\xff").dump`)).toMatchObject({
+    stdout: ':"\\x05"\n"\\u00E9\\x01\\xFF"\n',
+  });
 });
 
 test('String dump retains its supported encoding', () => {
@@ -7994,6 +7997,29 @@ test('String dump retains its supported encoding', () => {
 test('String.new recognizes supported encoding aliases', () => {
   expect(run('p String.new("x",encoding:"ASCII").encoding,String.new("x",encoding:"CP65001").encoding')).toMatchObject({
     stdout: '#<Encoding:US-ASCII>\n#<Encoding:UTF-8>\n',
+  });
+  expect(
+    run(
+      'p String.new("x",encoding:"ANSI_X3.4-1968").encoding,String.new("x",encoding:"646").encoding;begin;String.new("x",encoding:"UTF8");rescue=>e;p e.class,e.message;end'
+    )
+  ).toMatchObject({
+    stdout: '#<Encoding:US-ASCII>\n#<Encoding:US-ASCII>\nArgumentError\n"unknown encoding name - UTF8"\n',
+  });
+});
+
+test('regexp constructors reject trailing escapes', () => {
+  expect(run(String.raw`begin;Regexp.new("a\\");rescue=>e;p e.class,e.message;end`)).toMatchObject({
+    stdout: 'RegexpError\n"too short escape sequence: /a\\\\/"\n',
+  });
+});
+
+test('frozen string literal header fails explicitly while unavailable', () => {
+  expect(run('# frozen_string_literal: true\np "abc".frozen?')).toMatchObject({ kind: 'compileError' });
+});
+
+test('Enumerator Chain leaves external cursor methods undefined', () => {
+  expect(run('c=[1].chain([2]);p c.respond_to?(:next),c.respond_to?(:peek),c.respond_to?(:feed)')).toMatchObject({
+    stdout: 'false\nfalse\nfalse\n',
   });
 });
 
