@@ -14,8 +14,8 @@ import { bigintRatio } from './floatMath';
 import { callMethod, type Gen } from './interp';
 import { floatToRational, isRational } from './libRational';
 import { isRubyFloat, NIL, RObject, RString, type Value } from './objects';
-import { rt, RubyError, UnsupportedFeatureError } from './runtime';
-import { arr, realClassOf, str, stringBytes, stringFromBytes } from './values';
+import { rt, UnsupportedFeatureError } from './runtime';
+import { arr, isA, realClassOf, str, stringBytes, stringFromBytes } from './values';
 
 /** The local time zone, which the grader fixes to Japan's (no daylight saving time). */
 const LOCAL_OFFSET = 9 * 3600;
@@ -169,31 +169,26 @@ function* secondsValue(arg: Value): Gen<number> {
 }
 
 function* exactNumber(value: Value): Gen<number | bigint | RObject> {
-  try {
-    return yield* toFloat(value);
-  } catch (error) {
-    if (error instanceof RubyError && error.exception.cls === rt().c.TypeError) {
-      const message = error.exception.exception?.message;
-      if (message instanceof RString && message.s.endsWith('into Float')) {
-        if (value instanceof RString) throw typeError("can't convert String into an exact number");
-        const rational = yield* tryImplicitConversion(value, 'to_r');
-        if (!(yield* supportsImplicitConversion(value, 'to_int')))
-          throw typeError(`can't convert ${realClassOf(value).name} into an exact number`);
-        if (rational !== undefined) {
-          if (typeof rational !== 'bigint' && !isRational(rational))
-            throw typeError(`can't convert ${realClassOf(value).name} into an exact number`);
-          return rational;
-        }
-        const integer = yield* callMethod(value, 'to_int', [], undefined, undefined, { fcall: true });
-        if (typeof integer !== 'bigint')
-          throw typeError(
-            `can't convert ${realClassOf(value).name} to Integer (${realClassOf(value).name}#to_int gives ${realClassOf(integer).name})`
-          );
-        return integer;
-      }
-    }
-    throw error;
-  }
+  if (value instanceof RString) throw typeError("can't convert String into an exact number");
+  if (isRubyFloat(value)) return Number(value);
+  const rational = yield* exactRational(value);
+  if (isA(value, rt().c.Numeric)) return rational ?? (yield* toFloat(value));
+  if (!(yield* supportsImplicitConversion(value, 'to_int')))
+    throw typeError(`can't convert ${realClassOf(value).name} into an exact number`);
+  if (rational !== undefined) return rational;
+  const integer = yield* callMethod(value, 'to_int', [], undefined, undefined, { fcall: true });
+  if (typeof integer !== 'bigint')
+    throw typeError(
+      `can't convert ${realClassOf(value).name} to Integer (${realClassOf(value).name}#to_int gives ${realClassOf(integer).name})`
+    );
+  return integer;
+}
+
+function* exactRational(value: Value): Gen<bigint | RObject | undefined> {
+  const rational = yield* tryImplicitConversion(value, 'to_r');
+  if (rational !== undefined && typeof rational !== 'bigint' && !isRational(rational))
+    throw typeError(`can't convert ${realClassOf(value).name} into an exact number`);
+  return rational;
 }
 
 function* parseOffset(value: Value): Gen<number> {

@@ -239,8 +239,11 @@ export function translate(
       if (inClass > 0 && posix) {
         const body = classes[posix[2]];
         if (!body) throw unsupportedSyntax(`[:${posix[2]}:]`);
-        if (posix[1]) negatedClassBodies.push(body);
-        else out += body;
+        if (posix[1]) {
+          if (casefold && (posix[2] === 'lower' || posix[2] === 'upper'))
+            out += classes === ASCII_POSIX_CLASSES ? String.raw`\x00-\xFF` : String.raw`\s\S`;
+          else negatedClassBodies.push(body);
+        } else out += body;
         index += posix[0].length - 1;
         continue;
       }

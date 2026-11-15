@@ -9037,6 +9037,14 @@ test('bracketed binary negated properties retain casefold membership', () => {
   ).toMatchObject({ stdout: '[true, true, true]\n' });
 });
 
+test('binary negated POSIX classes fold their complemented byte sets', () => {
+  expect(
+    run(
+      String.raw`r=Regexp.new(String.new('[[:^lower:]]',encoding:'ASCII-8BIT'),Regexp::IGNORECASE);p r.match?('a'),r.match?('A'),r.match?(233.chr)`
+    )
+  ).toMatchObject({ stdout: 'true\ntrue\ntrue\n' });
+});
+
 test('word escapes stay ASCII under Unicode case folding', () => {
   expect(run(String.raw`p "K".match?(/\w/i),"K".match?(/\W/i),"ſ".match?(/\w/i)`)).toMatchObject({
     stdout: 'false\ntrue\nfalse\n',
@@ -9230,6 +9238,11 @@ test('Lazy zip preserves callback packing for multi-yield sources', () => {
   expect(
     run('e=Enumerator.new{|y|y.yield 1,2};e.lazy.zip([3]).each{|*args|p args};p e.lazy.zip([3]).next_values')
   ).toMatchObject({ stdout: '[[[1, 2], 3]]\n[[[1, 2], 3]]\n' });
+  expect(
+    run(
+      'e=Enumerator.new{|y|y.yield 1,2};l=e.lazy.zip([3]).with_index;l.each{|*a|p a};p l.next_values;p [1].lazy.with_index.next_values'
+    )
+  ).toMatchObject({ stdout: '[[[[1, 2], 3], 0]]\n[[[[1, 2], 3], 0]]\n[[1, 0]]\n' });
 });
 
 test('define_method blocks retain lexical definition visibility', () => {
@@ -9292,6 +9305,14 @@ test('Time exact wrappers accept integer to_r results', () => {
   expect(run('class N;def to_r;2;end;def to_int;99;end;end;p (Time.at(0)+N.new).to_i')).toMatchObject({
     stdout: '2\n',
   });
+});
+
+test('Numeric Time wrappers prefer exact rational conversion to Float', () => {
+  expect(
+    run(
+      'class N<Numeric;def to_f;puts :float;10.0;end;def to_r;puts :rational;Rational(1,3);end;def to_int;0;end;end;p Time.at(N.new)==Time.at(Rational(1,3))'
+    )
+  ).toMatchObject({ stdout: 'rational\ntrue\n' });
 });
 
 test('fixed format rounds Rational and Integer values exactly', () => {

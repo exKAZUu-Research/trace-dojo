@@ -28,6 +28,7 @@ import {
   requireBlock,
   respondsTo,
 } from './interp';
+import { lazySourceDescription, setLazyDisplaySource } from './lazyDisplay';
 import { iterate, iterateYielded, STOP, zipCollections } from './libEnumerable';
 import { respondsToName } from './libMeta';
 import { rangeSize } from './libRange';
@@ -993,16 +994,11 @@ interface LazyData {
   copy(): LazyData;
 }
 
-const lazyDisplaySources = new WeakMap<RObject, { source: Value; args: Value[] }>();
-const zippedYieldArgs = new WeakSet<Value[]>();
+const packedTerminalYields = new WeakSet<Value[]>();
 
 function lazyIterationSource(source: Value, args: Value[], displayArgs: Value[]): RObject {
   const enumerator = makeEnumerator(source, 'each', args);
-  const previous = source instanceof RObject ? lazyDisplaySources.get(source) : undefined;
-  lazyDisplaySources.set(enumerator, {
-    source: previous?.source ?? source,
-    args: [...(previous?.args ?? []), ...displayArgs],
-  });
+  setLazyDisplaySource(enumerator, source, displayArgs);
   return enumerator;
 }
 
@@ -1252,7 +1248,7 @@ function* streamLazyStep(
   const rootIndex = held.push(item) - 1;
   try {
     const step = steps[position];
-    if (!step) return yield* visit(item, zippedYieldArgs.has(yielded) ? [item] : yielded);
+    if (!step) return yield* visit(item, packedTerminalYields.has(yielded) ? [item] : yielded);
     const state = states[position];
     const next = (value: Value, args: Value[] = [value]): Gen<unknown> =>
       streamLazyStep(steps, states, position + 1, value, visit, args);
@@ -1296,7 +1292,11 @@ function* streamLazyStep(
       case 'with_index': {
         const index = state.index++;
         if (step.block) yield* callProc(step.block, [item, index]);
-        return step.block ? yield* next(item) : yield* next(arr([item, index]), [item, index]);
+        if (step.block) return yield* next(item);
+        const pair = [item, index];
+        const packed = arr(pair);
+        packedTerminalYields.add(pair);
+        return yield* next(packed, pair);
       }
       case 'grep':
       case 'grep_v': {
@@ -1343,7 +1343,7 @@ function* streamLazyStep(
             }
           }
           const packed = arr(tuple);
-          zippedYieldArgs.add(tuple);
+          packedTerminalYields.add(tuple);
           return yield* next(packed, yielded.length > 1 ? tuple : [packed]);
         } finally {
           const root = arrays.lastIndexOf(tuple);
@@ -1461,10 +1461,7 @@ def('Enumerator::Lazy', 'eager', 0, function* (self: RObject) {
 });
 def('Enumerator::Lazy', ['inspect', 'to_s'], 0, function* (self: RObject) {
   const data = self.data as LazyData;
-  const displayed = data.source instanceof RObject ? lazyDisplaySources.get(data.source) : undefined;
-  const sourceArgs: string[] = [];
-  for (const arg of displayed?.args ?? []) sourceArgs.push(yield* inspect(arg));
-  let text = `#<Enumerator::Lazy: ${yield* inspect(displayed?.source ?? data.source)}${sourceArgs.length > 0 ? `(${sourceArgs.join(', ')})` : ''}>`;
+  let text = `#<Enumerator::Lazy: ${yield* lazySourceDescription(data.source)}>`;
   for (const step of data.steps) {
     const argumentsText: string[] = [];
     for (const argument of step.args ?? []) argumentsText.push(yield* inspect(argument));
