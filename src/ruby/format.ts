@@ -15,7 +15,8 @@ import { rubyDtoa } from './floatFormat';
 import { hashGet } from './hashes';
 import { callMethod, type Gen } from './interp';
 import { kernelFloat, kernelInteger } from './libNumeric';
-import { NIL, RFloat, RHash, RString, RSymbol, type Value } from './objects';
+import { fractionOf, isRational } from './libRational';
+import { NIL, RFloat, RHash, type RObject, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
 import { realClassOf, stringBytes, stringFromBytes } from './values';
 
@@ -245,7 +246,12 @@ function* directive(type: string, spec: Spec, arg: () => Value): Gen<string | RS
       const text = formatInteger(value, 16, spec, spec.sharp && value !== 0n ? `0${type}` : '');
       return type === 'X' ? text.toUpperCase() : text;
     }
-    case 'f':
+    case 'f': {
+      const value = arg();
+      return typeof value === 'bigint' || isRational(value)
+        ? formatExactFixed(value, spec)
+        : formatFloatDirective(type, yield* floatArg(value), spec);
+    }
     case 'e':
     case 'E':
     case 'g':
@@ -493,6 +499,26 @@ function formatFloatDirective(type: string, value: number, spec: Spec): string {
   if (spec.zero && !spec.minus && sign.length + body.length < width) {
     return sign + body.padStart(width - sign.length, '0');
   }
+  return pad(sign + body, spec, false);
+}
+
+function formatExactFixed(value: bigint | RObject, spec: Spec): string {
+  const { numerator, denominator } =
+    typeof value === 'bigint' ? { numerator: value, denominator: 1n } : fractionOf(value);
+  const precision = spec.precision ?? 6;
+  rt().checkStringLength(precision + numerator.toString().length + 2);
+  rt().spend(Math.ceil(precision / 64));
+  const scaled = (numerator < 0n ? -numerator : numerator) * 10n ** BigInt(precision);
+  let rounded = scaled / denominator;
+  if ((scaled % denominator) * 2n >= denominator) rounded++;
+  const digits = rounded.toString().padStart(precision + 1, '0');
+  const integer = precision === 0 ? digits : digits.slice(0, -precision);
+  const fraction = precision === 0 ? '' : `.${digits.slice(-precision)}`;
+  const body = `${integer}${fraction}${spec.sharp && precision === 0 ? '.' : ''}`;
+  const sign = signOf(numerator < 0n, spec);
+  const width = spec.width ?? 0;
+  if (spec.zero && !spec.minus && sign.length + body.length < width)
+    return sign + body.padStart(width - sign.length, '0');
   return pad(sign + body, spec, false);
 }
 

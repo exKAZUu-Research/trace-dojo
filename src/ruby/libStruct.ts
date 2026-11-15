@@ -18,6 +18,7 @@ import { digest, hashKeyOf, hashSet } from './hashes';
 import { addMethod, assertMutableClass, callBlock, callMethod, callProc, type Gen, invoke } from './interp';
 import { tryAry } from './libArray';
 import { sizedEnumerator } from './libEnumerator';
+import { symbolNameOf } from './libMeta';
 import { NIL, RArray, RClass, type RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
 import { arr, newHash, range, realClassOf, singletonClassOf, str, stringBytes, truthy } from './values';
@@ -101,12 +102,7 @@ function* memberIndex(self: RObject, key: Value): Gen<number> {
 function* membersFrom(args: Value[], kind: 'struct' | 'data'): Gen<RSymbol[]> {
   const members: RSymbol[] = [];
   for (const arg of args) {
-    let member: RSymbol;
-    if (arg instanceof RSymbol) member = arg;
-    else {
-      const converted = yield* toStrValue(arg);
-      member = RSymbol.of(converted.s, converted.binary, converted.usAscii, stringBytes(converted));
-    }
+    const member = yield* symbolNameOf(arg);
     const name = member.name;
     if (name.endsWith('=')) throw argumentError(`invalid ${kind} member: ${name}`);
     if (members.some((member) => member.name === name)) throw argumentError(`duplicate member: ${name}`);
@@ -252,7 +248,7 @@ def(
   // code-gauge-allow functionCognitiveComplexity 19 -- Ruby's method takes these argument forms, which the branches mirror.
   function* (self: RObject, args, _block, keywords) {
     if (self.frozen) throw frozenError(self, yield* inspect(self));
-    const { members, keywordInit } = layoutOf(self.cls);
+    const { members, memberSymbols, keywordInit } = layoutOf(self.cls);
     const values = valuesOf(self);
     const next: Value[] = members.map(() => NIL);
     if (keywordInit || (keywordInit === undefined && args.length === 0 && keywords)) {
@@ -260,7 +256,7 @@ def(
       const unknown: string[] = [];
       for (const entry of keywords?.map.values() ?? []) {
         const name = entry.key instanceof RSymbol ? entry.key.name : yield* inspect(entry.key);
-        const index = members.indexOf(name);
+        const index = entry.key instanceof RSymbol ? memberSymbols.indexOf(entry.key) : -1;
         if (index === -1) unknown.push(name);
         else next[index] = entry.value;
       }
@@ -459,20 +455,20 @@ def(
   [0, 0],
   function* (self: RObject, _args, _block, keywords) {
     if (self.frozen) throw frozenError(self, yield* inspect(self));
-    const { members } = layoutOf(self.cls);
+    const { memberSymbols } = layoutOf(self.cls);
     const values = valuesOf(self);
-    const given = new Set<string>();
+    const given = new Set<RSymbol>();
     const unknown: string[] = [];
     for (const entry of keywords?.map.values() ?? []) {
       const name = entry.key instanceof RSymbol ? entry.key.name : yield* inspect(entry.key);
-      const index = members.indexOf(name);
+      const index = entry.key instanceof RSymbol ? memberSymbols.indexOf(entry.key) : -1;
       if (index === -1) unknown.push(`:${name}`);
       else {
         values[index] = entry.value;
-        given.add(name);
+        given.add(memberSymbols[index]);
       }
     }
-    const missing = members.filter((name) => !given.has(name)).map((name) => `:${name}`);
+    const missing = memberSymbols.filter((member) => !given.has(member)).map((member) => `:${member.name}`);
     if (missing.length > 0)
       throw argumentError(`missing keyword${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`);
     if (unknown.length > 0)

@@ -38,7 +38,7 @@ import {
   type Visibility,
 } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
-import { arr, classOf, isA, realClassOf, singletonClassOf, str, sym, truthy } from './values';
+import { arr, classOf, isA, realClassOf, singletonClassOf, str, stringBytes, sym, truthy } from './values';
 
 for (const owner of ['Method', 'UnboundMethod']) {
   sundef(owner, 'new');
@@ -49,10 +49,15 @@ for (const owner of ['Method', 'UnboundMethod']) {
 
 /** The name a method takes as a Symbol or a String, raising as Ruby does for anything else. */
 export function* nameOf(value: Value): Gen<string> {
-  if (value instanceof RSymbol) return value.name;
-  if (value instanceof RString) return value.s;
+  return (yield* symbolNameOf(value)).name;
+}
+
+export function* symbolNameOf(value: Value): Gen<RSymbol> {
+  if (value instanceof RSymbol) return value;
+  if (value instanceof RString) return RSymbol.of(value.s, value.binary, value.usAscii, stringBytes(value));
   const converted = yield* tryImplicitConversion(value, 'to_str');
-  if (converted instanceof RString) return converted.s;
+  if (converted instanceof RString)
+    return RSymbol.of(converted.s, converted.binary, converted.usAscii, stringBytes(converted));
   if (converted !== undefined) {
     const name = realClassOf(value).name;
     throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);

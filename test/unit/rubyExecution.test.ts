@@ -8834,6 +8834,16 @@ test('Struct and Data retain encoded member Symbol identities', () => {
   });
 });
 
+test('Struct and Data keyword initialization matches encoded members by identity', () => {
+  expect(
+    run(
+      'a=233.chr.to_sym;b=:é;[Struct,Data].each{|k|c=k==Struct ? k.new(a,keyword_init:true) : k.define(a);begin;c.new(**{b=>1});rescue=>e;p e.class;end}'
+    )
+  ).toMatchObject({
+    stdout: 'ArgumentError\nArgumentError\n',
+  });
+});
+
 test('singleton class errors include their actual class name', () => {
   expect(
     run(
@@ -8851,6 +8861,32 @@ test('Time calendar microseconds replace fractions and respect field bounds', ()
   expect(run('begin;Time.utc(1970,1,1,0,0,0,1000000);rescue=>e;p e.class,e.message;end')).toMatchObject({
     stdout: 'ArgumentError\n"subsecx out of range"\n',
   });
+});
+
+test('fixed format rounds Rational and Integer values exactly', () => {
+  expect(
+    run('p format("%.2f",Rational(1,8)),format("%.0f",Rational(5,2)),format("%.20f",Rational(1,3))')
+  ).toMatchObject({
+    stdout: '"0.13"\n"3"\n"0.33333333333333333333"\n',
+  });
+  expect(run('p format("%f",10**30)')).toMatchObject({
+    stdout: '"1000000000000000000000000000000.000000"\n',
+  });
+});
+
+test('Struct and Data reject wrong member types with Ruby wording', () => {
+  expect(
+    run('begin;Struct.new(:a,nil);rescue=>e;p e.message;end;begin;Data.define(1);rescue=>e;p e.message;end')
+  ).toMatchObject({
+    stdout: '"nil is not a symbol nor a string"\n"1 is not a symbol nor a string"\n',
+  });
+});
+
+test('END registration returns nil as an expression', () => {
+  expect(run('x=(END {});p x.nil?')).toMatchObject({ stdout: 'true\n' });
+  expect(run('puts :before;if END {puts :after};puts :body;end')).toMatchObject({ kind: 'compileError' });
+  expect(run('puts :before;p defined?(END {})')).toMatchObject({ kind: 'compileError' });
+  expect(run('p defined?((END {}))')).toMatchObject({ stdout: '"expression"\n' });
 });
 
 test('frozen DATA rejects reads and cursor operations', () => {

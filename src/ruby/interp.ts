@@ -441,7 +441,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
       rt().registeredEndBlocks.add(e.block);
       const proc = makeBlock(e.block, frame);
       rt().atExit.push(proc);
-      return proc;
+      return NIL;
     }
     case 'encoding': {
       return constInModule(rt().c.Encoding, 'UTF_8');

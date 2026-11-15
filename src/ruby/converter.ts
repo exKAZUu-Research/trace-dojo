@@ -191,7 +191,7 @@ export class Converter {
   }
 
   private statement(node: Node, use: Use): Stmt {
-    const e = this.expr(node, use);
+    const e = this.expr(node, use, true);
     let step = stepKindOf(e);
     if (e.k === 'call' && e.fcall && DECLARATION_METHODS.has(e.name)) step = 'none';
     if (this.ctx.inClassBody && !this.ctx.inDef && !this.ctx.inBlock) step = classBodyStepKind(e, step);
@@ -246,7 +246,7 @@ export class Converter {
 
   // Expressions -------------------------------------------------------------------------------------------------------
 
-  private expr(node: Node, use: Use = 1): Expr {
+  private expr(node: Node, use: Use = 1, statement = false): Expr {
     switch (node.type) {
       case 'integer': {
         return { k: 'int', v: this.integerValue(node) };
@@ -526,6 +526,7 @@ export class Converter {
         return { k: 'encoding' };
       }
       case 'end_block': {
+        if (!statement) this.fail(node, 'END は文としてのみ書けます。');
         const outer = this.ctx;
         const scope = new LocalScope('end', outer.scope);
         this.ctx = { ...outer, scope, inBlock: true, inLoop: false };
@@ -1198,6 +1199,11 @@ export class Converter {
     const operator = required(node.childForFieldName('operator')).text;
     const operandNode = required(node.childForFieldName('operand'));
     if (operator === 'defined?') {
+      if (
+        operandNode.type === 'parenthesized_statements' &&
+        namedChildren(operandNode).some((child) => child.type === 'end_block')
+      )
+        this.fail(operandNode, 'END は文としてのみ書けます。');
       const context = this.ctx;
       this.ctx = { ...context, inDef: true, inLoop: true, inRescue: true, inClassBody: false };
       try {
