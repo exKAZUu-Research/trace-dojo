@@ -1221,9 +1221,15 @@ function* definedText(e: Expr, frame: Frame): Gen {
       const method = classOf(recv).findMethod(e.name);
       if (!method) {
         const hook = classOf(recv).findMethod('respond_to_missing?');
-        return hook && truthy(yield* invoke(hook, recv, [RSymbol.of(e.name), false], undefined, undefined, false))
-          ? text('method')
-          : NIL;
+        if (!hook) return NIL;
+        try {
+          return truthy(yield* invoke(hook, recv, [RSymbol.of(e.name), false], undefined, undefined, false))
+            ? text('method')
+            : NIL;
+        } catch (error) {
+          if (error instanceof RubyError) return NIL;
+          throw error;
+        }
       }
       if (method.visibility === 'private' && !e.fcall) return NIL;
       if (method.visibility === 'protected' && !e.fcall && !isA(frame.self, method.owner)) return NIL;

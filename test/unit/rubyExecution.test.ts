@@ -7929,6 +7929,12 @@ test('defined? evaluates chained negation receivers once', () => {
   });
 });
 
+test('defined? suppresses Ruby errors raised by dynamic responders', () => {
+  expect(run('class C;def respond_to_missing?(n,*);raise "probe";end;end;p defined?(C.new.optional)')).toMatchObject({
+    stdout: 'nil\n',
+  });
+});
+
 test('Struct hashing does not consume displayed object addresses', () => {
   expect(run('Struct.new(:x).new(1).hash;p Object.new')).toMatchObject({
     stdout: '#<Object:0x00007f1a2b3c0000>\n',
