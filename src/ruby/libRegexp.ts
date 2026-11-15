@@ -13,10 +13,10 @@ import {
   toSValue,
   tryImplicitConversion,
 } from './conversions';
-import { def, extend, sdef, sundef } from './define';
+import { coreMethod, def, extend, sdef, sundef } from './define';
 import { argumentError, frozenError, indexError, rubyError, typeError } from './errors';
 import { digest, hashDefault, hashGet, hashSet, stringKeyEquals, stringKeyHash } from './hashes';
-import { callBlock, callMethod, type Gen } from './interp';
+import { callBlock, callMethod, type Gen, invoke } from './interp';
 import { validStringEncoding } from './libEncoding';
 import { makeEnumerator } from './libEnumerator';
 import {
@@ -24,6 +24,7 @@ import {
   inspectStringEncoding,
   setBytes,
   sliceStringEncoding,
+  symbolString,
   textByteLengthOf,
 } from './libString';
 import {
@@ -948,7 +949,7 @@ def('Regexp', 'names', 0, (self: RObject) =>
 
 function* subjectText(value: Value): Gen<RString | undefined> {
   if (value === NIL) return undefined;
-  if (value instanceof RSymbol) return str(value.name);
+  if (value instanceof RSymbol) return symbolString(value);
   return yield* toStrValue(value);
 }
 
@@ -1621,10 +1622,6 @@ def('String', '=~', 1, function* (self: RString, [pattern]) {
   return state ? BigInt(charIndex(self.s, (state.groups[0] as readonly [number, number])[0])) : NIL;
 });
 def('NilClass', '=~', 1, () => NIL);
-def('Symbol', '=~', 1, function* (self: RSymbol, [pattern]) {
-  return yield* callMethod(str(self.name), '=~', [pattern]);
-});
-
 function* asRegexp(pattern: Value): Gen<RObject> {
   if (isRegexp(pattern)) return pattern;
   return makeRegexp(yield* toStr(pattern), {});
@@ -1643,7 +1640,9 @@ def('String', 'match?', [1, 2], function* (self: RString, args) {
   return execAt(regexp, self.s, start < 0 ? start + charIndex(self.s, self.s.length) : start, self) !== undefined;
 });
 for (const name of ['=~', 'match', 'match?']) {
-  def('Symbol', name, [1, 2], (self: RSymbol, args, block) => callMethod(str(self.name), name, args, undefined, block));
+  def('Symbol', name, [1, 2], (self: RSymbol, args, block) =>
+    invoke(coreMethod(rt().c.String, name), symbolString(self), args, undefined, block, false)
+  );
 }
 
 export { inspect, rEquals, sym };

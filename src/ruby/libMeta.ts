@@ -593,7 +593,8 @@ def(
     if (!(target instanceof RClass)) throw typeError('wrong argument type');
     assertMutableClass(target);
     if (moduleDependsOn(self, target)) throw argumentError('cyclic prepend detected');
-    if (!target.prepends.includes(self)) {
+    const beforeTarget = target.ancestors().slice(0, target.ancestors().indexOf(target));
+    if (!beforeTarget.includes(self)) {
       target.prepends.unshift(self);
       invalidateMethodCaches();
     }

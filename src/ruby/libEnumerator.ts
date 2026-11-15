@@ -45,7 +45,7 @@ import {
   type Value,
 } from './objects';
 import { type Frame, rt, RubyError, UnsupportedFeatureError } from './runtime';
-import { arr, isA, newHash, realClassOf, str, stringBytes, stringCharacterCount, truthy } from './values';
+import { arr, isA, newHash, realClassOf, str, stringBytes, stringCharacterCount, sym, truthy } from './values';
 
 /** What an enumerator iterates: a method of a receiver, called with the block it is given. */
 export interface EnumeratorSource {
@@ -1126,7 +1126,7 @@ def('Enumerator::Lazy', 'zip', [0, -1], function* (self: RObject, others, block)
         throw typeError(
           `can't convert ${realClassOf(other).name} to Array (${realClassOf(other).name}#to_ary gives ${realClassOf(array).name})`
         );
-      else if (respondsTo(other, 'each', true)) converted.push(other);
+      else if (truthy(yield* callMethod(other, 'respond_to?', [sym('each')]))) converted.push(other);
       else throw typeError(`wrong argument type ${realClassOf(other).name} (must respond to :each)`);
     }
     const data = self.data as LazyData;

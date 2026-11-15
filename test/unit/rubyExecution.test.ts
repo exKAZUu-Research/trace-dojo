@@ -8419,3 +8419,48 @@ test('zero-padded floats and fractional rationals fail before execution', () => 
   expect(run('p 01e3')).toMatchObject({ kind: 'compileError' });
   expect(run('p 01.5r')).toMatchObject({ kind: 'compileError' });
 });
+
+test('lazy zip accepts dynamic public each and rejects private each', () => {
+  expect(
+    run(
+      'class A;def respond_to_missing?(n,*)=n==:each;def method_missing(n,*);n==:each ? yield(2) : super;end;end;p [1].lazy.zip(A.new).force'
+    )
+  ).toMatchObject({
+    stdout: '[[1, 2]]\n',
+  });
+  expect(
+    run('class A;private;def each;yield 2;end;end;begin;p [1].lazy.zip(A.new).force;rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'TypeError\n',
+  });
+});
+
+test('Symbol operations retain native behavior and ASCII encoding', () => {
+  expect(
+    run(
+      'class String;def [](*);:changed;end;def start_with?(*);false;end;def match(*);:changed;end;end;p :abc[0],:abc.start_with?("a"),:abc.match(/a/)[0]'
+    )
+  ).toMatchObject({
+    stdout: '"a"\ntrue\n"a"\n',
+  });
+  expect(run('p /a/.match(:abc).string.encoding,/a/.match(:abc)[0].encoding,:abc[/a/].encoding')).toMatchObject({
+    stdout: '#<Encoding:US-ASCII>\n#<Encoding:US-ASCII>\n#<Encoding:US-ASCII>\n',
+  });
+});
+
+test('prepend preserves direct and nested module order', () => {
+  expect(
+    run(
+      'module A;def f;"A"+super;end;end;module B;def f;"B"+super;end;end;module C;prepend A;def f;"C"+super;end;end;class X;def f;"X";end;prepend B,C;prepend A;end;p X.ancestors.take(4),X.new.f'
+    )
+  ).toMatchObject({
+    stdout: '[B, A, C, X]\n"BACX"\n',
+  });
+  expect(
+    run(
+      'module A;def f;"A"+super;end;end;module B;include A;def f;"B"+super;end;end;module C;def f;"C"+super;end;end;class X;def f;"X";end;prepend B,C,A;end;p X.ancestors.take(4),X.new.f'
+    )
+  ).toMatchObject({
+    stdout: '[B, C, A, X]\n"BCAX"\n',
+  });
+});

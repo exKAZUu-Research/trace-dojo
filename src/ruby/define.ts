@@ -1,4 +1,4 @@
-import type { NativeFn, RClass, Visibility } from './objects';
+import type { NativeFn, RClass, RMethod, Visibility } from './objects';
 import type { Runtime } from './runtime';
 
 interface NativeSpec {
@@ -17,6 +17,13 @@ interface NativeSpec {
 }
 
 const specs: NativeSpec[] = [];
+const coreMethods = new WeakMap<RClass, Map<string, RMethod>>();
+
+export function coreMethod(owner: RClass, name: string): RMethod {
+  const method = coreMethods.get(owner)?.get(name);
+  if (!method) throw new Error(`Missing core method ${owner.name}#${name}`);
+  return method;
+}
 
 export interface DefineOptions {
   visibility?: Visibility;
@@ -155,4 +162,9 @@ export function installNatives(runtime: Runtime): void {
     if (method.visibility === 'private')
       singleton.methods.set(name, { ...method, owner: singleton, visibility: 'public' });
   }
+  for (const owner of Object.values(runtime.c))
+    coreMethods.set(
+      owner,
+      new Map([...owner.methods].map(([name, method]) => [name, { ...method, body: { ...method.body } }]))
+    );
 }

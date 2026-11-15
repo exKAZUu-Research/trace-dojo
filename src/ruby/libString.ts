@@ -19,7 +19,7 @@ import {
   toStrValue,
   toSValue,
 } from './conversions';
-import { def, sdef } from './define';
+import { coreMethod, def, sdef } from './define';
 import {
   argumentError,
   frozenError,
@@ -1877,8 +1877,12 @@ for (const [name, transform] of [
 ] as const) {
   def('Symbol', name, 0, (self: RSymbol) => sym(transform(self.name)));
 }
-def('Symbol', ['[]', 'slice'], [1, 2], (self: RSymbol, args) => callMethod(str(self.name), '[]', args));
-def('Symbol', 'start_with?', [0, -1], (self: RSymbol, args) => callMethod(str(self.name), 'start_with?', args));
+def('Symbol', ['[]', 'slice'], [1, 2], (self: RSymbol, args) =>
+  invoke(coreMethod(rt().c.String, '[]'), symbolString(self), args, undefined, undefined, false)
+);
+def('Symbol', 'start_with?', [0, -1], (self: RSymbol, args) =>
+  invoke(coreMethod(rt().c.String, 'start_with?'), symbolString(self), args, undefined, undefined, false)
+);
 def('Symbol', 'end_with?', [0, -1], function* (self: RSymbol, args) {
   for (const arg of args) if (self.name.endsWith(yield* stringArg(arg))) return true;
   return false;
@@ -1897,6 +1901,10 @@ export function symbolProc(name: string): Value {
   );
   proc.nativeRequired = 1;
   return proc;
+}
+
+export function symbolString(self: RSymbol): RString {
+  return /^[\u0000-\u007F]*$/.test(self.name) ? asciiString(self.name) : str(self.name);
 }
 
 export { requireBlock, rangeCovers, typeError };
