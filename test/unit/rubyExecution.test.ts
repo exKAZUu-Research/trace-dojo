@@ -7683,6 +7683,12 @@ test('infinite Time offsets raise FloatDomainError', () => {
   });
 });
 
+test('finite exact Time offsets report range errors before Float overflow', () => {
+  expect(run('begin;Time.at(0).getlocal(10**400);rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'ArgumentError\n"utc_offset out of range"\n',
+  });
+});
+
 test('Encoding singleton values are frozen', () => {
   expect(run('p Encoding::UTF_8.frozen?,Encoding::ASCII_8BIT.frozen?')).toMatchObject({ stdout: 'true\ntrue\n' });
 });

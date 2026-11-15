@@ -151,6 +151,10 @@ function* exactNumber(value: Value): Gen<number> {
 function* parseOffset(value: Value): Gen<number> {
   if (value === NIL) return LOCAL_OFFSET;
   if (typeof value === 'bigint' || isRubyFloat(value) || isRational(value)) {
+    if (typeof value === 'bigint' || isRational(value)) {
+      const integral = yield* toInt(value);
+      if (integral <= -86_400n || integral >= 86_400n) throw argumentError('utc_offset out of range');
+    }
     const offset = yield* toFloat(value);
     if (!Number.isFinite(offset))
       throw floatDomainError(Number.isNaN(offset) ? 'NaN' : offset > 0 ? 'Infinity' : '-Infinity');
