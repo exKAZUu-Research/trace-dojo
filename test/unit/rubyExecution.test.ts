@@ -3523,13 +3523,15 @@ test('multiple assignment snapshots values before setter callbacks', () => {
   });
 });
 
-test('shared container equality stays within the execution budget', () => {
-  for (const comparison of ['a==b', 'a.eql?(b)']) {
+test.each(['a==b', 'a.eql?(b)'])(
+  'shared container equality through %s stays within the execution budget',
+  (comparison) => {
     expect(run(`a=[1]; b=[1]; 24.times { a=[a,a]; b=[b,b] }; p ${comparison}`)).toMatchObject({
       kind: 'limitExceeded',
+      limit: 'operations',
     });
   }
-});
+);
 
 test('Hash equality permits mutation of the lookup operand', () => {
   expect(run('class V; def ==(v); $b[:x]=3; false; end; end; $a={k:V.new}; $b={k:0}; p $a==$b,$b.size')).toMatchObject({
@@ -4367,7 +4369,7 @@ test('Numeric step accepts numeric-like custom increments', () => {
 
 test('Integer gcd charges large Euclidean divisions to the execution budget', () => {
   const program =
-    'a=0;b=1;1000000.to_s(2).each_char{|c|x=a*(2*b-a);y=a*a+b*b;if c=="0";a=x;b=y;else;a=y;b=x+y;end};p a.gcd(b)';
+    'a=0;b=1;100000.to_s(2).each_char{|c|x=a*(2*b-a);y=a*a+b*b;if c=="0";a=x;b=y;else;a=y;b=x+y;end};p a.gcd(b)';
   expect(run(program)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
 });
 

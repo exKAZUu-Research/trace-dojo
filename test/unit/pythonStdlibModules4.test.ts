@@ -1,6 +1,9 @@
 import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
+import { useStillExecutionClock } from '../helpers/executionClock';
+
+useStillExecutionClock();
 
 /** Runs a program whose list `actual` must equal `expected`, the list CPython 3.14.10 computes. */
 function expectSameAsCPython(program: string): void {
