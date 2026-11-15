@@ -737,6 +737,8 @@ function* optionsOf(value: Value | undefined): Gen<{ ignoreCase: boolean; multil
     return { ignoreCase: (value & 1n) !== 0n, extended: (value & 2n) !== 0n, multiline: (value & 4n) !== 0n };
   }
   if (value instanceof RString) {
+    if (/[^imxnesu]/.test(value.s)) throw argumentError(`unknown regexp option: ${value.s}`);
+    if (/[nesu]/.test(value.s)) throw new UnsupportedFeatureError(`Regexp.new のオプション ${value.s}`);
     return { ignoreCase: value.s.includes('i'), multiline: value.s.includes('m'), extended: value.s.includes('x') };
   }
   yield* [];
@@ -1168,7 +1170,7 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
           break;
         }
         default: {
-          const value = groupText(state, Number(code));
+          const value = state.names.length > 0 ? NIL : groupText(state, Number(code));
           part = value === NIL ? str('') : (value as RString);
         }
       }
@@ -1198,7 +1200,10 @@ function* substituteRegexp(
     replacement === undefined || replacement instanceof RHash ? undefined : yield* toStrValue(replacement);
   let text = self.s;
   const sourceLength = stringBytes(self).length;
-  const chunks: RString[] = [];
+  let sourceRawBytes = self.rawBytes;
+  let snapshot = copyStringEncoding(self);
+  validateRegexpSubject(regexp, self);
+  const chunks: RString[] = [sliceStringEncoding(self, 0, 0)];
   let length = 0;
   const append = (part: RString): void => {
     length += stringBytes(part).length;
@@ -1207,7 +1212,7 @@ function* substituteRegexp(
     chunks.push(part);
   };
   let position = 0;
-  let state = execAt(regexp, text, 0, self);
+  let state = execAt(regexp, text, 0, self, snapshot, true);
   let last: MatchState | undefined;
   while (state) {
     const [from, to] = state.groups[0] as readonly [number, number];
@@ -1222,13 +1227,25 @@ function* substituteRegexp(
     } else {
       piece = yield* toSValue(yield* callBlock(block as RProc, [sliceStringEncoding(self, from, to)]));
     }
-    if (stringBytes(self).length !== sourceLength) throw rubyError(rt().c.RuntimeError, 'string modified');
-    text = self.s;
-    append(sliceStringEncoding(self, position, from));
+    if (
+      self.s !== text ||
+      self.rawBytes !== sourceRawBytes ||
+      self.binary !== snapshot.binary ||
+      self.usAscii !== snapshot.usAscii
+    ) {
+      if (stringBytes(self).length !== sourceLength) throw rubyError(rt().c.RuntimeError, 'string modified');
+      text = self.s;
+      sourceRawBytes = self.rawBytes;
+      snapshot = copyStringEncoding(self);
+      validateRegexpSubject(regexp, self);
+    }
+    if (position < from) append(sliceStringEncoding(self, position, from));
     append(piece);
     position = to;
     last = state;
-    state = global ? execAt(regexp, text, charIndex(text, to) + (from === to ? 1 : 0), self) : undefined;
+    state = global
+      ? execAt(regexp, text, charIndex(text, to) + (from === to ? 1 : 0), self, snapshot, true)
+      : undefined;
   }
   setLastMatch(last);
   append(sliceStringEncoding(self, position));
@@ -1305,16 +1322,29 @@ wrapFirst('scan', function* (self, args, block) {
   }
   const sourceLength = stringBytes(self).length;
   let text = self.s;
-  let state = execAt(regexp, text, 0, self);
+  let sourceRawBytes = self.rawBytes;
+  let snapshot = copyStringEncoding(self);
+  validateRegexpSubject(regexp, self);
+  let state = execAt(regexp, text, 0, self, snapshot, true);
   let last: MatchState | undefined;
   while (state) {
     const [from, to] = state.groups[0] as readonly [number, number];
     setLastMatch(state);
     yield* callBlock(block, [scanValue(state)], false);
-    if (stringBytes(self).length !== sourceLength) throw rubyError(rt().c.RuntimeError, 'string modified');
-    text = self.s;
+    if (
+      self.s !== text ||
+      self.rawBytes !== sourceRawBytes ||
+      self.binary !== snapshot.binary ||
+      self.usAscii !== snapshot.usAscii
+    ) {
+      if (stringBytes(self).length !== sourceLength) throw rubyError(rt().c.RuntimeError, 'string modified');
+      text = self.s;
+      sourceRawBytes = self.rawBytes;
+      snapshot = copyStringEncoding(self);
+      validateRegexpSubject(regexp, self);
+    }
     last = state;
-    state = execAt(regexp, text, charIndex(text, to) + (from === to ? 1 : 0), self);
+    state = execAt(regexp, text, charIndex(text, to) + (from === to ? 1 : 0), self, snapshot, true);
   }
   setLastMatch(last);
   return self;

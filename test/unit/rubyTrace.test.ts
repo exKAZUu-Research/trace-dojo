@@ -886,6 +886,19 @@ test('MatchData roots its retained regexp', () => {
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
+test('define_method steps retain their call line', () => {
+  const program = 'C=Class.new\nC.define_method(:x){|n|\ny=n+1\ny\n}\nc=C.new\nc.x(1)';
+  const steps = traceProgram('ruby', program, program).traceItems.filter((item) => item.line === 3 || item.line === 4);
+  expect(steps.map((item) => item.callLines)).toEqual([[7], [7]]);
+});
+
+test('standalone pattern bindings do not record a separate step', () => {
+  for (const operator of ['=>', 'in']) {
+    const program = `[1] ${operator} [x]\ny=2`;
+    expect(traceProgram('ruby', program, program).traceItems.map((item) => item.line)).toEqual([0, 2]);
+  }
+});
+
 test('saved Method implementations retain their captured turtles', () => {
   const program =
     'def make;t=Turtle.new;c=Class.new;c.define_method(:go){t.forward};c.new.method(:go);end;m=make;m.receiver.class.remove_method(:go);x=1;m.call';

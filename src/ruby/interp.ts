@@ -1859,6 +1859,7 @@ export function* invoke(
         self: recv,
         used,
         method,
+        callRow: rt().currentRow,
         lambdaArgs: true,
         missingReason,
       });

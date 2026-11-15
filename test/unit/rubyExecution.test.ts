@@ -7510,6 +7510,45 @@ test('Rational coerce accepts Rational operands', () => {
   expect(run('p Rational(1,2).coerce(Rational(1,3))')).toMatchObject({ stdout: '[(1/3), (1/2)]\n' });
 });
 
+test('named regexp replacement ignores numeric capture references', () => {
+  expect(run(String.raw`p "abc".gsub(/(?<x>a)/,%q{\1})`)).toMatchObject({ stdout: '"bc"\n' });
+});
+
+test('default method_missing leaves advertised conversions absent', () => {
+  expect(
+    run('class C;def respond_to_missing?(n,*);n==:to_ary||super;end;end;begin;[1]+C.new;rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'TypeError\n',
+  });
+});
+
+test('hash pattern remainder copying avoids key hash callbacks', () => {
+  expect(run('class K;def hash;$n+=1;1;end;end;$n=0;h={K.new=>1};$n=0;h=>{**r};p $n,r.size')).toMatchObject({
+    stdout: '0\n1\n',
+  });
+});
+
+test('repeated regexp matches reuse unchanged source snapshots', () => {
+  expect(run('n=0;("a"*20000).scan(/./){|x|n+=1};p n')).toMatchObject({ stdout: '20000\n' });
+  expect(run('p ("a"*20000).gsub(/./,"b").size')).toMatchObject({ stdout: '20000\n' });
+});
+
+test('Rational arithmetic uses private coerce methods', () => {
+  expect(run('class A;private;def coerce(v);[v,1];end;end;p 1r+A.new')).toMatchObject({ stdout: '(2/1)\n' });
+});
+
+test('Regexp.new rejects unknown option letters', () => {
+  expect(run('begin;Regexp.new("a","bad");rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'ArgumentError\n"unknown regexp option: bad"\n',
+  });
+});
+
+test('Struct rejects member names ending in equals', () => {
+  expect(run('begin;Struct.new(:"a=");rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'ArgumentError\n"invalid struct member: a="\n',
+  });
+});
+
 test('regexp split yields fields and captures to a block', () => {
   expect(run('r=[];p "aXbXc".split(/(X)/){|part|r<<part},r')).toMatchObject({
     stdout: '"aXbXc"\n["a", "X", "b", "X", "c"]\n',

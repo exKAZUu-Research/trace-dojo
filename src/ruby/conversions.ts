@@ -123,7 +123,7 @@ export function* tryImplicitConversion(value: Value, name: string, args: Value[]
   } catch (error) {
     if (
       !resolved &&
-      !availability.advertised &&
+      (!availability.advertised || classOf(value).findMethod('method_missing')?.body.kind === 'native') &&
       error instanceof RubyError &&
       isA(error.exception, rt().c.NoMethodError)
     )

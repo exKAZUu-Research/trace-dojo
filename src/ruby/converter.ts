@@ -1889,6 +1889,7 @@ function stepKindOf(e: Expr): StepKind {
     case 'undef':
     case 'redo':
     case 'caseIn':
+    case 'matchPattern':
     case 'atExit': {
       return 'none';
     }

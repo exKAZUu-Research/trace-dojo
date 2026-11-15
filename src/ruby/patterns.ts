@@ -1,7 +1,7 @@
 import type { Expr, LocalRef, Pattern } from './ast';
 import { caseEquals, inspect, rEquals, toSValue } from './conversions';
 import { rubyError, typeError } from './errors';
-import { hashGet, hashSet } from './hashes';
+import { hashGet } from './hashes';
 import { callMethod, ev, type Gen } from './interp';
 import { NIL, RArray, RHash, RSymbol, type Value } from './objects';
 import { type Frame, rt } from './runtime';
@@ -230,9 +230,9 @@ function* restOf(hash: RHash, pairs: { key: string }[]): Gen<RHash> {
   rest.byIdentity = hash.byIdentity;
   rest.defaultValue = hash.defaultValue;
   rest.defaultProc = hash.defaultProc;
-  for (const entry of hash.map.values()) {
+  for (const [slot, entry] of hash.map) {
     if (entry.key instanceof RSymbol && pairs.some((pair) => pair.key === (entry.key as RSymbol).name)) continue;
-    yield* hashSet(rest, entry.key, entry.value);
+    rest.map.set(slot, { ...entry });
   }
   return rest;
 }

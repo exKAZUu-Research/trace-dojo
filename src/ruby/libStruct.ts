@@ -118,6 +118,8 @@ function defineAccessors(cls: RClass, members: string[], writable: boolean): voi
 }
 
 function* newStructClass(superclass: RClass, members: string[], layout: Omit<Layout, 'members'>): Gen<RClass> {
+  for (const member of members)
+    if (member.endsWith('=')) throw argumentError(`invalid ${layout.kind} member: ${member}`);
   const cls = new RClass(rt().c.Class, undefined, superclass, false);
   cls.isUserDefined = true;
   layouts.set(cls, { ...layout, members });
