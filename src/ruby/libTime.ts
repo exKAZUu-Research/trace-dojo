@@ -216,10 +216,10 @@ function* buildTime(args: Value[], offset: number, zone: TimeData['zone'], micro
   const microsecondsValue = !hasMicroseconds
     ? 0n
     : microseconds instanceof RString
-      ? yield* fieldValue(microseconds, 1)
+      ? yield* fieldValue(microseconds, 5)
       : typeof microseconds === 'bigint' || typeof microseconds === 'number' || isRational(microseconds)
         ? microseconds
-        : yield* toFloat(microseconds);
+        : yield* toInt(microseconds);
   const micros = offsetFraction(microsecondsValue, 0);
   if (micros.numerator < 0n || micros.numerator >= 1_000_000n * micros.denominator)
     throw argumentError('subsecx out of range');

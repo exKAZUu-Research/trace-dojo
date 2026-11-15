@@ -8905,6 +8905,22 @@ test('END registration returns nil as an expression', () => {
   expect(run('puts :before;if END {puts :after};puts :body;end')).toMatchObject({ kind: 'compileError' });
   expect(run('puts :before;p defined?(END {})')).toMatchObject({ kind: 'compileError' });
   expect(run('p defined?((END {}))')).toMatchObject({ stdout: '"expression"\n' });
+  expect(run('puts :before;p(END {puts :exit})')).toMatchObject({ kind: 'compileError' });
+  expect(run('puts :before;false || END {puts :exit}')).toMatchObject({ kind: 'compileError' });
+  expect(run('puts :before;END {puts :exit} rescue puts(:error)')).toMatchObject({
+    stdout: 'before\nexit\n',
+  });
+});
+
+test('calendar microseconds parse numeric strings and to_int values', () => {
+  expect(run('begin;Time.utc(2024,1,1,0,0,1.5,"Jan");rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'ArgumentError\n"invalid value for Integer(): \\"Jan\\""\n',
+  });
+  expect(
+    run('class Usec;def to_int;puts :converted;250000;end;end;p Time.utc(1970,1,1,0,0,1.5,Usec.new).to_f')
+  ).toMatchObject({
+    stdout: 'converted\n1.25\n',
+  });
 });
 
 test('frozen DATA rejects reads and cursor operations', () => {

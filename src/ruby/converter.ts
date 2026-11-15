@@ -398,7 +398,7 @@ export class Converter {
       case 'rescue_modifier': {
         const bodyNode = required(node.childForFieldName('body'));
         const handlerNode = required(node.childForFieldName('handler'));
-        const body = this.expr(bodyNode);
+        const body = this.expr(bodyNode, use, statement);
         if (
           body.k === 'asgn' &&
           bodyNode.type === 'assignment' &&
@@ -1002,6 +1002,7 @@ export class Converter {
   private call(node: Node, use: Use): Expr {
     const receiverNode = node.childForFieldName('receiver');
     const methodNode = node.childForFieldName('method');
+    if (!receiverNode && methodNode?.text === 'END') this.fail(node, 'END は文としてのみ書けます。');
     const argumentsNode = node.childForFieldName('arguments');
     const blockNode = node.childForFieldName('block');
     const localParts = this.localCommandParts(node);
