@@ -319,8 +319,12 @@ def('Kernel', 'display', [0, 1], function* (self, args) {
 def('Kernel', ['to_enum', 'enum_for'], [0, -1], function* (self, args, block) {
   const [method = sym('each'), ...rest] = args;
   if (method instanceof RSymbol) return makeEnumerator(self, method.name, rest, undefined, { sizeBlock: block });
-  if (method instanceof RString || respondsTo(method, 'to_str', true))
-    return makeEnumerator(self, (yield* toStrValue(method)).s, rest, undefined, { sizeBlock: block });
+  const converted = method instanceof RString ? method : yield* tryImplicitConversion(method, 'to_str');
+  if (converted instanceof RString) return makeEnumerator(self, converted.s, rest, undefined, { sizeBlock: block });
+  if (converted !== undefined && converted !== NIL)
+    throw typeError(
+      `can't convert ${realClassOf(method).name} to String (${realClassOf(method).name}#to_str gives ${realClassOf(converted).name})`
+    );
   throw typeError(`${yield* inspect(method)} is not a symbol nor a string`);
 });
 
@@ -767,7 +771,12 @@ function* symbolNames(args: Value[], expandArrays = false): Gen<string[]> {
 function* symbolName(value: Value): Gen<string> {
   if (value instanceof RSymbol) return value.name;
   if (value instanceof RString) return value.s;
-  if (respondsTo(value, 'to_str', true)) return (yield* toStrValue(value)).s;
+  const converted = yield* tryImplicitConversion(value, 'to_str');
+  if (converted instanceof RString) return converted.s;
+  if (converted !== undefined && converted !== NIL)
+    throw typeError(
+      `can't convert ${realClassOf(value).name} to String (${realClassOf(value).name}#to_str gives ${realClassOf(converted).name})`
+    );
   throw typeError(`${yield* inspect(value)} is not a symbol nor a string`);
 }
 
@@ -1146,8 +1155,8 @@ function* systemExitStatus(value: Value): Gen<bigint | undefined> {
   if (value === true) return 0n;
   if (value === false) return 1n;
   if (typeof value === 'bigint' || typeof value === 'number' || value instanceof RFloat) return yield* toInt(value);
-  if (value !== NIL && respondsTo(value, 'to_int', true)) {
-    const converted = yield* callMethod(value, 'to_int', [], undefined, undefined, { fcall: true });
+  if (value !== NIL) {
+    const converted = yield* tryImplicitConversion(value, 'to_int');
     if (typeof converted === 'bigint') return converted;
   }
   return undefined;

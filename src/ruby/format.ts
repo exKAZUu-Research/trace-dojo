@@ -8,11 +8,12 @@ import {
   toRubyInt,
   toStrValue,
   toSValue,
+  tryImplicitConversion,
 } from './conversions';
 import { argumentError, floatDomainError, rangeError, rubyError, typeError } from './errors';
 import { rubyDtoa } from './floatFormat';
 import { hashGet } from './hashes';
-import { callMethod, type Gen, respondsTo } from './interp';
+import { callMethod, type Gen } from './interp';
 import { kernelFloat, kernelInteger } from './libNumeric';
 import { NIL, RFloat, RHash, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
@@ -275,10 +276,10 @@ function* directive(type: string, spec: Spec, arg: () => Value): Gen<string | RS
 
 function* characterDirective(value: Value, spec: Spec): Gen<string | RString> {
   let string = value instanceof RString ? value : undefined;
-  if (!string && respondsTo(value, 'to_str', true)) {
-    const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
+  if (!string) {
+    const converted = yield* tryImplicitConversion(value, 'to_str');
     if (converted instanceof RString) string = converted;
-    else if (converted !== NIL) {
+    else if (converted !== undefined && converted !== NIL) {
       const name = realClassOf(value).name;
       throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
     }

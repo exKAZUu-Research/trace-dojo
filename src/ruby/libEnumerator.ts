@@ -724,6 +724,10 @@ function nextValues(self: RObject): Value[] {
   }
   if (step.done) {
     cursor.result = step.value;
+    cursor.frames = [];
+    cursor.held = [];
+    cursor.heldArrays = [];
+    cursor.catchTags = [];
     throw stopIteration(step.value);
   }
   if (!(step.value instanceof Suspension)) throw new Error('An enumerator suspended for another reason');

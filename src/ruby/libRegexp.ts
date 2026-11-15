@@ -79,8 +79,8 @@ const PROPERTY_NAMES: Record<string, string> = {
   cyrillic: 'Script=Cyrillic',
   alpha: 'Alphabetic',
   digit: 'Nd',
-  upper: 'Lu',
-  lower: 'Ll',
+  upper: 'Uppercase',
+  lower: 'Lowercase',
   space: 'White_Space',
   word: 'Word',
   punct: 'P',
@@ -363,7 +363,7 @@ function translateEscape(
       const key = rawName.toLowerCase();
       skip(property[0].length);
       const negated = (next === 'P') !== (property[1] === '^');
-      const body = POSIX_CLASSES[key];
+      const body = key === 'punct' || key === 'upper' || key === 'lower' ? undefined : POSIX_CLASSES[key];
       if (body !== undefined) {
         if (inClass && negated) {
           addNegatedClass(body);
@@ -632,10 +632,10 @@ export function matchGlobal(name: string): Value {
       return groupText(state, 0);
     }
     case '$`': {
-      return str(state.text.slice(0, whole[0]));
+      return sliceStringEncoding(state.snapshot ?? str(state.text), 0, whole[0]);
     }
     case "$'": {
-      return str(state.text.slice(whole[1]));
+      return sliceStringEncoding(state.snapshot ?? str(state.text), whole[1]);
     }
     case '$+': {
       for (let group = state.groups.length - 1; group > 0; group--)
@@ -998,9 +998,16 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
   const whole = state.groups[0] as readonly [number, number];
   const source = state.snapshot ?? str(state.text);
   const parts: RString[] = [];
+  let length = 0;
+  const append = (part: RString): void => {
+    length += stringBytes(part).length;
+    if (length > limit) throw new ExecutionLimitError('storage');
+    rt().spend(Math.ceil(stringBytes(part).length / 256));
+    parts.push(part);
+  };
   let position = 0;
   for (const match of replacement.s.matchAll(/\\(k<([\p{ID_Start}_][\p{ID_Continue}_]*)>|[0-9&+\\`'])/gu)) {
-    parts.push(sliceStringEncoding(replacement, position, match.index));
+    append(sliceStringEncoding(replacement, position, match.index));
     const [, code, name] = match;
     let part: RString;
     if (name !== undefined) {
@@ -1038,10 +1045,10 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
         }
       }
     }
-    parts.push(part);
+    append(part);
     position = match.index + match[0].length;
   }
-  parts.push(sliceStringEncoding(replacement, position));
+  append(sliceStringEncoding(replacement, position));
   return concatRegexpPieces(parts, limit);
 }
 
@@ -1250,7 +1257,7 @@ wrapFirst('slice!', function* (self, args) {
   setLastMatch(state);
   if (!state) return NIL;
   const range = args.length > 1 ? yield* sliceCaptureRange(state, args[1]) : state.groups[0];
-  if (range === 'unmatched') return str('');
+  if (range === 'unmatched') return sliceStringEncoding(self, 0, 0);
   if (!range) return NIL;
   const [from, to] = range;
   const removed = sliceStringEncoding(self, from, to);
@@ -1327,8 +1334,8 @@ for (const [name, last] of [
     setLastMatch(state);
     if (!state)
       return last
-        ? arr([str(''), str(''), copyStringEncoding(self)])
-        : arr([copyStringEncoding(self), str(''), str('')]);
+        ? arr([sliceStringEncoding(self, 0, 0), sliceStringEncoding(self, 0, 0), copyStringEncoding(self)])
+        : arr([copyStringEncoding(self), sliceStringEncoding(self, 0, 0), sliceStringEncoding(self, 0, 0)]);
     const [from, to] = state.groups[0] as readonly [number, number];
     yield* [];
     return arr([

@@ -9,7 +9,7 @@ import {
   spaceship,
   toIndex,
   toIndexExact,
-  toStrValue,
+  tryImplicitConversion,
 } from './conversions';
 import { def } from './define';
 import { argumentCountError, argumentError, runtimeError, typeError } from './errors';
@@ -330,7 +330,12 @@ export function* inject(self: Value, args: Value[], block: RProc | undefined): G
 function* operatorName(value: Value): Gen<string> {
   if (value instanceof RSymbol) return value.name;
   if (value instanceof RString) return value.s;
-  if (respondsTo(value, 'to_str', true)) return (yield* toStrValue(value)).s;
+  const converted = yield* tryImplicitConversion(value, 'to_str');
+  if (converted instanceof RString) return converted.s;
+  if (converted !== undefined && converted !== NIL)
+    throw typeError(
+      `can't convert ${realClassOf(value).name} to String (${realClassOf(value).name}#to_str gives ${realClassOf(converted).name})`
+    );
   throw typeError(`${yield* inspect(value)} is not a symbol nor a string`);
 }
 
@@ -1072,14 +1077,15 @@ def('Enumerable', 'tally', [0, 1], function* (self, args) {
   let counts: RHash;
   if (args.length === 0) counts = newHash();
   else if (args[0] instanceof RHash) counts = args[0];
-  else if (respondsTo(args[0], 'to_hash', true)) {
-    const converted = yield* callMethod(args[0], 'to_hash', [], undefined, undefined, { fcall: true });
+  else {
+    const converted = yield* tryImplicitConversion(args[0], 'to_hash');
+    if (converted === undefined) throw typeError(`no implicit conversion of ${realClassOf(args[0]).name} into Hash`);
     if (!(converted instanceof RHash)) {
       const name = realClassOf(args[0]).name;
       throw typeError(`can't convert ${name} to Hash (${name}#to_hash gives ${realClassOf(converted).name})`);
     }
     counts = converted;
-  } else throw typeError(`no implicit conversion of ${realClassOf(args[0]).name} into Hash`);
+  }
   return yield* whileHeld(counts, function* () {
     yield* iterate(self, function* (value) {
       const { entry } = yield* hashGetOrInsert(counts, value, () => 0n, false);

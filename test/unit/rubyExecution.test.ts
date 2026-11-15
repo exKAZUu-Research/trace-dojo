@@ -3685,12 +3685,10 @@ test('multiple assignment snapshots values before setter callbacks', () => {
   });
 });
 
-test('shared container equality stays within the execution budget', () => {
-  for (const comparison of ['a==b', 'a.eql?(b)']) {
-    expect(run(`a=[1]; b=[1]; 24.times { a=[a,a]; b=[b,b] }; p ${comparison}`)).toMatchObject({
-      kind: 'limitExceeded',
-    });
-  }
+test.each(['a==b', 'a.eql?(b)'])('shared container equality %s stays within the execution budget', (comparison) => {
+  expect(run(`a=[1]; b=[1]; 24.times { a=[a,a]; b=[b,b] }; p ${comparison}`)).toMatchObject({
+    kind: 'limitExceeded',
+  });
 });
 
 test('Hash equality permits mutation of the lookup operand', () => {
@@ -5354,6 +5352,24 @@ test('one-argument respond_to? and dynamic conversion hooks work in containers',
   expect(run('class G;def method_missing(n,*a)="ghost #{n}";end;puts [G.new,1].join(",")')).toMatchObject({
     stdout: 'ghost to_str,1\n',
   });
+  expect(
+    run('class G1;define_method(:respond_to?){|name|name==:to_ary ? false : super(name)};end;p [G1.new].flatten.size')
+  ).toMatchObject({ stdout: '1\n' });
+  expect(
+    run(
+      'class P;def respond_to_missing?(n,p=false)=n==:to_proc;def method_missing(n,*)=n==:to_proc ? :upcase.to_proc : super;end;p %w[a b].map(&P.new)'
+    )
+  ).toMatchObject({ stdout: '["A", "B"]\n' });
+  expect(
+    run(
+      'class H;def respond_to_missing?(n,p=false)=n==:to_hash;def method_missing(n,*)=n==:to_hash ? {1=>2} : super;end;p [1,1].tally(H.new)'
+    )
+  ).toMatchObject({ stdout: '{1 => 4}\n' });
+  expect(
+    run(
+      'class S;def respond_to_missing?(n,p=false)=n==:to_str;def method_missing(n,*)=n==:to_str ? "z" : super;end;p format("%c",S.new)'
+    )
+  ).toMatchObject({ stdout: '"z"\n' });
 });
 
 test('Hash.[] rehashes keys when dropping identity comparison', () => {
@@ -5726,6 +5742,9 @@ test('Regexp line boundaries and character classes follow Ruby semantics', () =>
   ).toMatchObject({ stdout: 'false\nnil\n0\n["a"]\ntrue\n' });
   expect(run(String.raw`p "ab1" =~ /\p{Alnum}+/, "x" =~ /\p{Arabic}/, " ".match?(/\p{Blank}/)`)).toMatchObject({
     stdout: '0\nnil\ntrue\n',
+  });
+  expect(run(String.raw`p "price: $5 + 3 = 8!".scan(/\p{Punct}/),"1+2" =~ /\p{Punct}/`)).toMatchObject({
+    stdout: '[":", "!"]\nnil\n',
   });
 });
 
@@ -6908,6 +6927,17 @@ test('MatchData source snapshots preserve binary bytes and freezing', () => {
   });
   expect(run('s=255.chr;p s.split(/x/).first.bytes,s.partition(/x/).first.bytes,s[/./].bytes')).toMatchObject({
     stdout: '[255]\n[255]\n[255]\n',
+  });
+  expect(run('s=255.chr+"a"+254.chr;/a/.match(s);p $`.bytes,$\'.bytes')).toMatchObject({
+    stdout: '[255]\n[254]\n',
+  });
+  expect(run('s=String.new("x",encoding:Encoding::ASCII_8BIT);p s.slice!(/(a)?x/,1).encoding')).toMatchObject({
+    stdout: '#<Encoding:BINARY (ASCII-8BIT)>\n',
+  });
+  expect(run('s=255.chr;p s.partition(/x/).map(&:encoding),s.rpartition(/x/).map(&:encoding)')).toMatchObject({
+    stdout: expect.stringContaining(
+      '[#<Encoding:BINARY (ASCII-8BIT)>, #<Encoding:BINARY (ASCII-8BIT)>, #<Encoding:BINARY (ASCII-8BIT)>]'
+    ),
   });
   expect(run('p 233.chr.gsub(/x/, "").bytes,233.chr.gsub(/x/, "").encoding')).toMatchObject({
     stdout: '[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',

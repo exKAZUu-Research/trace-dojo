@@ -29,7 +29,7 @@ import {
   rehash,
   structuralHashValue,
 } from './hashes';
-import { callBlock, callMethod, callProc, type Gen, nativeProc, respondsTo } from './interp';
+import { callBlock, callMethod, callProc, type Gen, nativeProc } from './interp';
 import { nativeFlatten, tryAry } from './libArray';
 import { sum } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
@@ -606,12 +606,7 @@ def('Hash', 'default_proc=', 1, function* (self: RHash, [proc]) {
     self.defaultValue = NIL;
     return proc;
   }
-  const converted =
-    proc instanceof RProc
-      ? proc
-      : respondsTo(proc, 'to_proc', true)
-        ? yield* callMethod(proc, 'to_proc', [], undefined, undefined, { fcall: true })
-        : proc;
+  const converted = proc instanceof RProc ? proc : ((yield* tryImplicitConversion(proc, 'to_proc')) ?? proc);
   if (!(converted instanceof RProc))
     throw typeError(`wrong default_proc type ${realClassOf(proc).name} (expected Proc)`);
   validateDefaultProc(converted);

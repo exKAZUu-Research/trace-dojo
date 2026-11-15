@@ -11,6 +11,7 @@ import {
   toRubyInt,
   toStepFloat,
   toStr,
+  tryImplicitConversion,
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, floatDomainError, rangeError, rubyError, typeError, zeroDivisionError } from './errors';
@@ -634,9 +635,8 @@ function* roundingMode(keywords: RHash | undefined): Gen<'up' | 'even' | 'down'>
 function* roundingName(mode: Value): Gen<string | undefined> {
   if (mode instanceof RSymbol) return mode.name;
   if (mode instanceof RString) return mode.s;
-  if (!respondsTo(mode, 'to_str', true)) return undefined;
-  const converted = yield* callMethod(mode, 'to_str', [], undefined, undefined, { fcall: true });
-  if (converted === NIL) return undefined;
+  const converted = yield* tryImplicitConversion(mode, 'to_str');
+  if (converted === undefined || converted === NIL) return undefined;
   if (converted instanceof RString) return converted.s;
   const name = realClassOf(mode).name;
   throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
@@ -827,13 +827,13 @@ export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen 
     if (baseValue === undefined && typeof value === 'bigint') return value;
     if (baseValue === undefined && typeof value === 'number') return floatToInt(value);
     if (value === NIL && baseValue === undefined) throw typeError("can't convert nil into Integer");
-    if (baseValue === undefined && respondsTo(value, 'to_int', true)) {
-      const converted = yield* callMethod(value, 'to_int', [], undefined, undefined, { fcall: true });
+    if (baseValue === undefined) {
+      const converted = yield* tryImplicitConversion(value, 'to_int');
       if (typeof converted === 'bigint') return converted;
     }
     let convertedString: Value = NIL;
-    if (respondsTo(value, 'to_str', true)) {
-      convertedString = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
+    {
+      convertedString = (yield* tryImplicitConversion(value, 'to_str')) ?? NIL;
       if (convertedString instanceof RString) {
         parsedString = true;
         if (invalidBase) throw argumentError(`invalid radix ${base}`);

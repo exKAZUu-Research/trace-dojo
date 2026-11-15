@@ -845,6 +845,9 @@ test('match globals retain their instance variables during trace collection', ()
 test('suspended Lazy buffers leave the board when their enumerator is released', () => {
   const program = 'e=(1..3).lazy.map{Turtle.new}.each_cons(2);e.next;e=nil;x=1';
   expect(traceProgram('ruby', program, program).finalTurtles).toEqual([]);
+  const nested =
+    'e=nil;[1,2].lazy.each_cons(2).each{e=(1..3).lazy.map{Turtle.new}.each_cons(2);e.next};loop{e.next};x=1';
+  expect(traceProgram('ruby', nested, nested).finalTurtles).toEqual([]);
 });
 
 test('saved Method implementations retain their captured turtles', () => {

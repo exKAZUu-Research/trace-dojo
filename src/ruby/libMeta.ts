@@ -334,7 +334,7 @@ for (const owner of ['Method', 'UnboundMethod']) {
   });
 }
 
-function methodArity(method: RMethod): number {
+export function methodArity(method: RMethod): number {
   const { body } = method;
   switch (body.kind) {
     case 'user': {

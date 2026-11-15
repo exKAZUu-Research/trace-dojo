@@ -1688,11 +1688,13 @@ function* evalCall(e: Call, frame: Frame): Gen {
 export function* toBlock(value: Value): Gen<RProc | undefined> {
   if (value === NIL) return undefined;
   if (value instanceof RProc) return value;
-  if (respondsTo(value, 'to_proc', true)) {
-    const converted = yield* callMethod(value, 'to_proc', [], undefined, undefined, { fcall: true });
+  {
+    const converted = yield* tryImplicitConversion(value, 'to_proc');
     if (converted instanceof RProc) return converted;
-    const name = realClassOf(value).name;
-    throw typeError(`can't convert ${name} to Proc (${name}#to_proc gives ${realClassOf(converted).name})`);
+    if (converted !== undefined) {
+      const name = realClassOf(value).name;
+      throw typeError(`can't convert ${name} to Proc (${name}#to_proc gives ${realClassOf(converted).name})`);
+    }
   }
   throw typeError(`wrong argument type ${realClassOf(value).name} (expected Proc)`);
 }

@@ -3,6 +3,7 @@ import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { argumentError, implicitConversionError, rangeError, rubyError, typeError } from './errors';
 import { hashGet } from './hashes';
 import { callMethod, callProc, type Gen, runToEnd } from './interp';
+import { methodArity } from './libMeta';
 import {
   isRubyFloat,
   NIL,
@@ -87,11 +88,7 @@ function* respondsToConversion(value: Value, name: string, resolved: boolean): G
     const missing = classOf(value).findMethod('method_missing');
     return resolved || (missing !== undefined && missing.body.kind !== 'native');
   }
-  const params = responder.body.kind === 'user' ? responder.body.def.params : undefined;
-  const onePositional =
-    params !== undefined &&
-    params.required.length + params.optional.length + params.post.length === 1 &&
-    params.rest === undefined;
+  const onePositional = methodArity(responder) === 1;
   const advertised = truthy(
     yield* callMethod(
       value,
