@@ -8643,6 +8643,38 @@ test('Regexp Unicode lists reject non-ASCII separators', () => {
   });
 });
 
+test('dynamic regexp classes can start with a closing bracket', () => {
+  expect(run('p Regexp.new("[]]").match?("]"),Regexp.new("[]a]").match?("]")')).toMatchObject({
+    stdout: 'true\ntrue\n',
+  });
+});
+
+test('Regexp validates options before invalid pattern encoding', () => {
+  expect(run(String.raw`begin;Regexp.new("\xFF","bad");rescue=>e;p e.class,e.message;end`)).toMatchObject({
+    stdout: 'ArgumentError\n"unknown regexp option: bad"\n',
+  });
+});
+
+test('Regexp errors render valid Unicode beside invalid bytes', () => {
+  expect(run(String.raw`begin;Regexp.new("é\xFF");rescue=>e;p e.message;end`)).toMatchObject({
+    stdout: '"invalid multibyte character: /\\\\u00E9\\\\xFF/"\n',
+  });
+});
+
+test('Unicode regexp lists allow ASCII edge whitespace and reject surrogate values', () => {
+  expect(run(String.raw`p /\u{ 41 42 }/.match("AB").to_a`)).toMatchObject({ stdout: '["AB"]\n' });
+  expect(run(String.raw`p /\u{41 D800}/`)).toMatchObject({ kind: 'compileError' });
+  expect(run(String.raw`begin;Regexp.new("\\u{D800}");rescue=>e;p e.class;end`)).toMatchObject({
+    stdout: 'RegexpError\n',
+  });
+});
+
+test('binary Symbol case conversion keeps byte encoding', () => {
+  expect(run('s=233.chr.to_sym;p [s.upcase.encoding,s.upcase.to_s.bytes,s.downcase.encoding]')).toMatchObject({
+    stdout: '[#<Encoding:BINARY (ASCII-8BIT)>, [233], #<Encoding:BINARY (ASCII-8BIT)>]\n',
+  });
+});
+
 test('prepend merges shared included child chains', () => {
   expect(
     run(

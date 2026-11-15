@@ -21,7 +21,6 @@ import { validStringEncoding } from './libEncoding';
 import { makeEnumerator } from './libEnumerator';
 import {
   copyStringEncoding,
-  inspectRawBytes,
   inspectStringEncoding,
   setBytes,
   sliceStringEncoding,
@@ -102,14 +101,24 @@ const PROPERTY_NAMES: Record<string, string> = {
 const SYNTAX = String.raw`^$\.*+?()[]{}|/-`;
 
 function unicodeRegexpEscape(source: string): { points: string[]; length: number } | undefined {
-  const braced = /^\{([0-9a-fA-F]{1,6}(?:[ \t\n\r\v\f]+[0-9a-fA-F]{1,6})*)\}/.exec(source);
-  if (braced) return { points: braced[1].split(/[ \t\n\r\v\f]+/), length: braced[0].length };
+  const braced = /^\{[ \t\n\r\v\f]*([0-9a-fA-F]{1,6}(?:[ \t\n\r\v\f]+[0-9a-fA-F]{1,6})*)[ \t\n\r\v\f]*\}/.exec(source);
+  if (braced) {
+    const points = braced[1].split(/[ \t\n\r\v\f]+/);
+    if (
+      points.some((point) => {
+        const value = Number.parseInt(point, 16);
+        return value > 0x10_ff_ff || (value >= 0xd8_00 && value <= 0xdf_ff);
+      })
+    )
+      throw new SyntaxError('invalid Unicode codepoint');
+    return { points, length: braced[0].length };
+  }
   const fixed = /^[0-9a-fA-F]{4}/.exec(source);
   return fixed ? { points: [fixed[0]], length: fixed[0].length } : undefined;
 }
 
 /** Translates a Ruby (Onigmo) expression into JavaScript's syntax, rejecting what has no counterpart. */
-export function translate(source: string, extended: boolean, multiline = false): string {
+export function translate(source: string, extended: boolean, multiline = false, dynamic = false): string {
   for (const name of captureNamesForValidation(source, extended))
     if ((/^[\p{ID_Start}_]/u.test(name) || /^\\u(?:[\dA-Fa-f]{4}|\{[\dA-Fa-f]+\})/.test(name)) && /[-\\]/.test(name))
       throw unsupportedSyntax('特殊なキャプチャ名');
@@ -158,7 +167,6 @@ export function translate(source: string, extended: boolean, multiline = false):
         const escape = unicodeRegexpEscape(source.slice(index + 1));
         if (escape) {
           for (const [position, point] of escape.points.entries()) {
-            if (Number.parseInt(point, 16) > 0x10_ff_ff) throw new SyntaxError('invalid Unicode codepoint');
             if (inClass === 0 && position === escape.points.length - 1) atomStart = out.length;
             out += `\\u{${point}}`;
           }
@@ -212,7 +220,13 @@ export function translate(source: string, extended: boolean, multiline = false):
       continue;
     }
     if (char === ']' && inClass > 0) {
-      if (out.length === classStart + 1 && negatedClassBodies.length === 0) throw new SyntaxError('empty char-class');
+      if (out.length === classStart + 1 && negatedClassBodies.length === 0) {
+        if (dynamic && source.includes(']', index + 1)) {
+          out += String.raw`\]`;
+          continue;
+        }
+        throw new SyntaxError('empty char-class');
+      }
       if (out.slice(classStart + 1) === '^' && negatedClassBodies.length === 0) {
         out += String.raw`\]`;
         continue;
@@ -471,7 +485,7 @@ export function makeRegexp(
   const regexp = new RObject(rt().c.Regexp);
   let translated: string;
   try {
-    translated = translate(source, options.extended ?? false, options.multiline ?? false);
+    translated = translate(source, options.extended ?? false, options.multiline ?? false, true);
   } catch (error) {
     if (error instanceof SyntaxError) throw rubyError(rt().c.RegexpError, `invalid pattern: /${source}/`);
     throw error;
@@ -836,22 +850,54 @@ function* optionsOf(value: Value | undefined): Gen<{ ignoreCase: boolean; multil
   return { ignoreCase: true, multiline: false, extended: false };
 }
 
+function invalidPatternSource(pattern: RString): string {
+  const bytes = stringBytes(pattern);
+  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+  rt().spend(Math.ceil(bytes.length / 256));
+  let displayed = '';
+  const append = (piece: string): void => {
+    rt().checkStringLength(displayed.length + piece.length);
+    displayed += piece;
+  };
+  for (let index = 0; index < bytes.length;) {
+    const first = bytes[index];
+    if (first < 0x80) {
+      append(String.fromCodePoint(first));
+      index++;
+      continue;
+    }
+    if (!pattern.usAscii) {
+      const width = first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
+      try {
+        const character = decoder.decode(bytes.subarray(index, index + width));
+        const point = character.codePointAt(0);
+        if (point !== undefined) {
+          append(
+            point <= 0xff_ff
+              ? `\\u${point.toString(16).toUpperCase().padStart(4, '0')}`
+              : `\\u{${point.toString(16).toUpperCase()}}`
+          );
+          index += width;
+          continue;
+        }
+      } catch {}
+    }
+    append(`\\x${first.toString(16).toUpperCase().padStart(2, '0')}`);
+    index++;
+  }
+  return displayed;
+}
+
 sdef('Regexp', ['new', 'compile'], [1, 2], function* (_self, [source, options]) {
   if (isRegexp(source)) {
     const data = dataOf(source);
     return makeRegexp(data.source, { ...data, sourceBinary: data.encoding === 'BINARY (ASCII-8BIT)' });
   }
   const pattern = yield* toStrValue(source);
-  if (!validStringEncoding(pattern)) {
-    const bytes = stringBytes(pattern);
-    const displayed = pattern.usAscii
-      ? Array.from(bytes, (byte) =>
-          byte < 0x80 ? String.fromCodePoint(byte) : `\\x${byte.toString(16).toUpperCase().padStart(2, '0')}`
-        ).join('')
-      : inspectRawBytes(bytes).slice(1, -1);
-    throw rubyError(rt().c.RegexpError, `invalid multibyte character: /${displayed}/`);
-  }
-  return makeRegexp(pattern.s, { ...(yield* optionsOf(options)), sourceBinary: pattern.binary });
+  const parsedOptions = yield* optionsOf(options);
+  if (!validStringEncoding(pattern))
+    throw rubyError(rt().c.RegexpError, `invalid multibyte character: /${invalidPatternSource(pattern)}/`);
+  return makeRegexp(pattern.s, { ...parsedOptions, sourceBinary: pattern.binary });
 });
 sdef('Regexp', ['escape', 'quote'], 1, function* (_self, [value]) {
   const text = value instanceof RSymbol ? value.name : yield* toStr(value);

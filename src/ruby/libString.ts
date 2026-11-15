@@ -50,7 +50,6 @@ import {
   stringCharacterCount,
   stringCharacters,
   stringFromBytes,
-  sym,
   truthy,
 } from './values';
 
@@ -1864,15 +1863,12 @@ def('Symbol', '<=>', 1, (self: RSymbol, [other]) => {
   if (!(other instanceof RSymbol)) return NIL;
   return BigInt(compareStrings(self.name, other.name));
 });
-for (const [name, transform] of [
-  ['upcase', (text: string) => text.toUpperCase()],
-  ['downcase', (text: string) => text.toLowerCase()],
-  ['capitalize', capitalize],
-  ['swapcase', swapcase],
-  ['succ', succ],
-  ['next', succ],
-] as const) {
-  def('Symbol', name, 0, (self: RSymbol) => sym(transform(self.name)));
+for (const name of ['upcase', 'downcase', 'capitalize', 'swapcase', 'succ', 'next']) {
+  def('Symbol', name, 0, function* (self: RSymbol) {
+    const result = yield* invoke(coreMethod(rt().c.String, name), symbolString(self), [], undefined, undefined, false);
+    if (!(result instanceof RString)) throw new TypeError(`Invalid String#${name} result`);
+    return RSymbol.of(result.s, result.binary);
+  });
 }
 def('Symbol', ['[]', 'slice'], [1, 2], (self: RSymbol, args) =>
   invoke(coreMethod(rt().c.String, '[]'), symbolString(self), args, undefined, undefined, false)
