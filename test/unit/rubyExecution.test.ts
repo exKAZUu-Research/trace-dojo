@@ -5595,6 +5595,15 @@ test('Time localtime validates offset before frozen state', () => {
   });
 });
 
+test('frozen UTC Time accepts UTC localtime no-ops', () => {
+  expect(run('t=Time.utc(2024).freeze;p t.localtime("UTC").equal?(t),t.localtime("Z").equal?(t)')).toMatchObject({
+    stdout: 'true\ntrue\n',
+  });
+  expect(run('Time.utc(2024).freeze.localtime(0)')).toMatchObject({
+    uncaughtException: expect.stringContaining('FrozenError'),
+  });
+});
+
 test('Time retains fractional offset values and formats rounded zones', () => {
   expect(
     run(

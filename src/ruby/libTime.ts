@@ -741,8 +741,11 @@ def('Time', 'getlocal', [0, 1], function* (self: RObject, args) {
 def('Time', 'localtime', [0, 1], function* (self: RObject, args) {
   if (args.length === 0 || args[0] === NIL) return changeZone(self, LOCAL_OFFSET, 'local');
   const offset = yield* parseOffset(args[0]);
-  if (self.frozen) throw frozenError(self, timeText(dataOf(self), true));
-  return changeZone(self, offset, zoneFromOffset(args[0]), exactOffset(args[0]));
+  const zone = zoneFromOffset(args[0]);
+  const exact = exactOffset(args[0]);
+  if (self.frozen && !(dataOf(self).zone === 'utc' && zone === 'utc' && offset === 0 && exact === undefined))
+    throw frozenError(self, timeText(dataOf(self), true));
+  return changeZone(self, offset, zone, exact);
 });
 
 function changeZone(self: RObject, offset: number, zone: TimeData['zone'], exact?: Value): RObject {
