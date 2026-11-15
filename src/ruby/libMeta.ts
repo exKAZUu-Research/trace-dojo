@@ -514,7 +514,8 @@ def('Module', 'remove_method', [0, -1], function* (self: RClass, names) {
   assertMutableClass(self);
   for (const value of names) {
     const name = yield* nameOf(value);
-    if (!self.methods.has(name)) {
+    const method = self.methods.get(name);
+    if (!method || method.body.kind === 'undefined') {
       throw nameError(`method '${name}' not defined in ${className(self)}`, self, name);
     }
     assertNoDefinitionHook(self, 'removed');

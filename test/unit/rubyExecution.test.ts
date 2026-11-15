@@ -8921,6 +8921,14 @@ test('Encoding names are canonical frozen US-ASCII strings', () => {
   });
 });
 
+test('remove_method leaves undefined inherited methods hidden', () => {
+  expect(
+    run(
+      'class A;def f;1;end;end;class B<A;undef_method :f;begin;remove_method :f;rescue=>e;p e.class,e.message;end;end;p B.new.respond_to?(:f)'
+    )
+  ).toMatchObject({ stdout: 'NameError\n"method \'f\' not defined in B"\nfalse\n' });
+});
+
 test('anonymous instance singleton names use the anonymous class name', () => {
   expect(
     run('k=Class.new;o=k.new;class << o;def g = Nope;end;begin;o.g;rescue NameError=>e;puts e.message;end')
