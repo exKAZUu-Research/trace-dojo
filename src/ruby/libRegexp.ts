@@ -463,6 +463,8 @@ function translateEscape(
         classes !== ASCII_POSIX_CLASSES && (key === 'punct' || key === 'upper' || key === 'lower')
           ? undefined
           : classes[key];
+      if (classes === ASCII_POSIX_CLASSES && body === undefined)
+        throw rubyError(rt().c.RegexpError, `invalid character property name {${rawName}}: /${source}/`);
       if (body !== undefined) {
         if (inClass && negated) {
           addNegatedClass(body);
@@ -518,8 +520,17 @@ export function makeRegexp(
     throw rubyError(rt().c.RegexpError, `numbered backref/call is not allowed. (use name): /${source}/`);
   const regexp = new RObject(rt().c.Regexp);
   let translated: string;
+  let encoding: RegexpData['encoding'];
   try {
     translated = translate(source, options.extended ?? false, options.multiline ?? false, true);
+    encoding =
+      /[^\u0000-\u007F]/.test(source) || hasNonAsciiRegexpEscape(source, options.extended ?? false)
+        ? options.sourceBinary
+          ? 'BINARY (ASCII-8BIT)'
+          : RUBY_UTF8
+        : 'US-ASCII';
+    if (encoding === 'BINARY (ASCII-8BIT)')
+      translated = translate(source, options.extended ?? false, options.multiline ?? false, true, true);
   } catch (error) {
     if (error instanceof SyntaxError) throw rubyError(rt().c.RegexpError, `invalid pattern: /${source}/`);
     throw error;
@@ -534,12 +545,7 @@ export function makeRegexp(
   }
   const data: RegexpData = {
     source,
-    encoding:
-      /[^\u0000-\u007F]/.test(source) || hasNonAsciiRegexpEscape(source, options.extended ?? false)
-        ? options.sourceBinary
-          ? 'BINARY (ASCII-8BIT)'
-          : RUBY_UTF8
-        : 'US-ASCII',
+    encoding,
     ignoreCase: options.ignoreCase ?? false,
     multiline: options.multiline ?? false,
     extended: options.extended ?? false,
@@ -703,7 +709,7 @@ export function execAt(
   if (source && !validated) validateRegexpSubject(regexp, source);
   if (data.ignoreCase && requiresMultiCharacterFold(data.source, text))
     throw new UnsupportedFeatureError('Unicode の複数文字 casefold');
-  const binaryMatch = source?.binary === true && data.encoding !== RUBY_UTF8;
+  const binaryMatch = source?.binary === true && data.encoding === 'US-ASCII';
   const js = regexpForMatch(data, source);
   rt().spend();
   const startUnit = unitIndex(text, start);
@@ -745,7 +751,7 @@ export function execAt(
 }
 
 function regexpForMatch(data: RegexpData, source?: RString): RegExp {
-  if (!source?.binary || data.encoding === RUBY_UTF8) return data.js;
+  if (!source?.binary || data.encoding !== 'US-ASCII') return data.js;
   return (data.binaryJs ??= new RegExp(
     translate(data.source, data.extended, data.multiline, true, true),
     data.js.flags

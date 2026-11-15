@@ -9000,6 +9000,22 @@ test('binary regexp property classes use ASCII membership', () => {
   ).toMatchObject({ stdout: '#<Encoding:BINARY (ASCII-8BIT)>\nfalse\ntrue\n' });
 });
 
+test('binary regexp construction rejects Unicode-only property names', () => {
+  expect(
+    run(
+      String.raw`%w[Lowercase Uppercase Punctuation Ll Lu P].each{|name|begin;Regexp.new(String.new('\p{'+name+'}',encoding:'ASCII-8BIT'));rescue=>e;p e.class;end}`
+    )
+  ).toMatchObject({ stdout: 'RegexpError\n'.repeat(6) });
+});
+
+test('binary regexp classes retain ASCII semantics on compatible UTF-8 subjects', () => {
+  expect(
+    run(
+      String.raw`r=Regexp.new(String.new('\P{Lower}',encoding:'ASCII-8BIT'),Regexp::IGNORECASE);p r.match?('a'),r.match?('A'),r.match?(String.new('a',encoding:'ASCII-8BIT'))`
+    )
+  ).toMatchObject({ stdout: 'false\nfalse\nfalse\n' });
+});
+
 test('invalid US-ASCII Symbol size counts bytes', () => {
   expect(run('s=String.new("é",encoding:"US-ASCII").to_sym;p s.size')).toMatchObject({ stdout: '2\n' });
 });
