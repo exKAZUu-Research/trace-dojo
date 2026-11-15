@@ -77,7 +77,7 @@ const POSIX_CLASSES: Record<string, string> = {
   space: String.raw`\p{White_Space}`,
   punct: String.raw`\p{P}\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E`,
   xdigit: '0-9A-Fa-f',
-  word: String.raw`\p{L}\p{M}\p{Nd}\p{Nl}\p{Pc}\u200C\u200D`,
+  word: String.raw`\p{Alphabetic}\p{M}\p{Nd}\p{Pc}\u200C\u200D`,
   cntrl: String.raw`\p{Cc}`,
   print: String.raw`\p{L}\p{M}\p{N}\p{P}\p{S}\p{Cf}\p{Co}\p{Zs}`,
   graph: String.raw`\p{L}\p{M}\p{N}\p{P}\p{S}\p{Cf}\p{Co}`,

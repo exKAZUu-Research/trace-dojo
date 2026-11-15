@@ -8930,6 +8930,14 @@ test('Encoding names are canonical frozen US-ASCII strings', () => {
   });
 });
 
+test('Encoding objects reject copying with a Ruby TypeError', () => {
+  expect(
+    run('[:dup,:clone].each{|method|begin;Encoding::UTF_8.send(method);rescue=>e;p e.class,e.message;end}')
+  ).toMatchObject({
+    stdout: 'TypeError\n"allocator undefined for Encoding"\nTypeError\n"allocator undefined for Encoding"\n',
+  });
+});
+
 test('named capture names retain their regexp encoding', () => {
   expect(
     run('r=/(?<word>a)/;m=r.match("a");p [r.names[0].encoding,m.names[0].encoding,m.named_captures.keys[0].encoding]')
@@ -8950,6 +8958,12 @@ test('encoding-neutral regexp classes use binary byte semantics on binary string
       String.raw`p 233.chr.match?(/[[:alpha:]]/),233.chr.match?(/[[:word:]]/),"é".match?(/[[:alpha:]]/),178.chr.match?(/[[:alnum:]]/),233.chr.match?(/[[:^alpha:]]/),(233.chr+"a").match?(/\ba/)`
     )
   ).toMatchObject({ stdout: 'false\nfalse\ntrue\nfalse\ntrue\ntrue\n' });
+});
+
+test('Unicode Word classes include Alphabetic circled letters', () => {
+  expect(run(String.raw`p "Ⓐ".match?(/[[:word:]]/),"ⓐ".match?(/\p{Word}/),"Ⓐ".match?(/[[:alpha:]]/)`)).toMatchObject({
+    stdout: 'true\ntrue\ntrue\n',
+  });
 });
 
 test('remove_method leaves undefined inherited methods hidden', () => {

@@ -201,6 +201,7 @@ function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
     if (clone && freezeOption === false) throw argumentError("can't unfreeze Rational");
     return self;
   }
+  if (self instanceof RObject && self.cls === rt().c.Encoding) throw typeError('allocator undefined for Encoding');
   let copy: RBasic;
   if (self instanceof RClass) copy = copyClass(self);
   else if (self instanceof RString) {
