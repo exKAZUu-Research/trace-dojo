@@ -7219,3 +7219,14 @@ test('quoted pattern shorthand requires a literal local name', () => {
 test('Lazy size calculations retain exact accepted counts', () => {
   expect(run('p (1..).lazy.take(2**63-1).size')).toMatchObject({ stdout: '9223372036854775807\n' });
 });
+
+test('negated and combined flip-flops fail before execution', () => {
+  expect(run('(1..10).each{|k|puts k if !((k==3)..(k==5))}')).toMatchObject({ kind: 'compileError' });
+  expect(run('(1..10).each{|k|puts k if true && ((k==3)..(k==5))}')).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test('strftime pads composite dates before their negative year', () => {
+  expect(run('p Time.utc(-1).strftime("%015F")')).toMatchObject({ stdout: '"0000-0001-01-01"\n' });
+});

@@ -861,6 +861,11 @@ export class Converter {
   }
 
   private conditionExpr(node: Node): Expr {
+    this.checkFlipFlopCondition(node);
+    return this.valueExpr(node);
+  }
+
+  private checkFlipFlopCondition(node: Node): void {
     let form = node;
     while (form.type === 'parenthesized_statements' && namedChildren(form).length === 1) form = namedChildren(form)[0];
     if (form.type === 'range') {
@@ -874,7 +879,12 @@ export class Converter {
       )
         this.unsupported(form, 'フリップフロップ');
     }
-    return this.valueExpr(node);
+    if (form.type === 'unary' && ['!', 'not'].includes(form.childForFieldName('operator')?.text ?? ''))
+      this.checkFlipFlopCondition(required(form.childForFieldName('operand')));
+    if (form.type === 'binary' && LOGICAL_OPERATORS.has(form.childForFieldName('operator')?.text ?? '')) {
+      this.checkFlipFlopCondition(required(form.childForFieldName('left')));
+      this.checkFlipFlopCondition(required(form.childForFieldName('right')));
+    }
   }
 
   /**

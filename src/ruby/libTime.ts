@@ -388,7 +388,7 @@ function strftime(data: TimeData, format: string): string {
       if (width !== undefined && flag !== '-') {
         const pad = flag === '_' || (flag !== '0' && defaultSpacePad(directive)) ? ' ' : '0';
         result =
-          pad === '0' && result.startsWith('-')
+          pad === '0' && result.startsWith('-') && ['Y', 'C', 'G', 's'].includes(directive)
             ? `-${result.slice(1).padStart(width - 1, '0')}`
             : result.padStart(width, pad);
       }
