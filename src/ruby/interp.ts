@@ -1615,8 +1615,7 @@ function checkCoreName(name: string, kind: 'class' | 'module'): void {
 }
 
 function* callHook(target: RClass, name: string, args: Value[]): Gen<void> {
-  const method = classOf(target).findMethod(name);
-  if (method) yield* invoke(method, target, args, undefined, undefined, false);
+  yield* callMethod(target, name, args, undefined, undefined, { fcall: true });
 }
 
 function* defineModule(e: Extract<Expr, { k: 'module' }>, frame: Frame): Gen {

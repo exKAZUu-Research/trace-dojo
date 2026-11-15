@@ -8110,6 +8110,20 @@ test('inherited hooks copied from native methods run for new subclasses', () => 
   ).toMatchObject({ stdout: 'Child\n' });
 });
 
+test('inherited hook dispatch reaches method_missing', () => {
+  expect(
+    run(
+      'class Base;class<<self;undef inherited;def method_missing(n,*);puts n;end;end;end;class Child<Base;end;Class.new(Base){puts :body}'
+    )
+  ).toMatchObject({ stdout: 'inherited\ninherited\nbody\n' });
+});
+
+test('defined? accepts jump probes outside their execution contexts', () => {
+  expect(run('p defined?(yield),defined?(redo),defined?(next),defined?(break),defined?(retry)')).toMatchObject({
+    stdout: 'nil\n"expression"\n"expression"\n"expression"\n"expression"\n',
+  });
+});
+
 test('Time keeps colon-qualified non-zone directives literal', () => {
   expect(run('t=Time.at(0).getlocal(0);p t.strftime("%:Z|%::Z|%:::Z")')).toMatchObject({
     stdout: '"%:Z|%::Z|%:::Z"\n',

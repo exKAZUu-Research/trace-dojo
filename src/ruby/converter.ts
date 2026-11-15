@@ -1193,7 +1193,15 @@ export class Converter {
   private unary(node: Node): Expr {
     const operator = required(node.childForFieldName('operator')).text;
     const operandNode = required(node.childForFieldName('operand'));
-    if (operator === 'defined?') return { k: 'defined', e: this.expr(operandNode) };
+    if (operator === 'defined?') {
+      const context = this.ctx;
+      this.ctx = { ...context, inDef: true, inLoop: true, inBlock: true, inRescue: true, inClassBody: false };
+      try {
+        return { k: 'defined', e: this.expr(operandNode) };
+      } finally {
+        this.ctx = context;
+      }
+    }
     if ((operator === '-' || operator === '+') && (operandNode.type === 'integer' || operandNode.type === 'float')) {
       const operand = this.valueExpr(operandNode);
       const sign = operator === '-' && !/^\s/.test(this.source.slice(node.startIndex + 1, operandNode.startIndex));

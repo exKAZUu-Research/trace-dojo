@@ -912,8 +912,7 @@ sdef('Class', 'new', [0, 1], function* (_self, [superclass], block) {
   if (parent.isSingleton) throw typeError("can't make subclass of singleton class");
   const cls = new RClass(runtime.c.Class, undefined, parent, false);
   cls.isUserDefined = true;
-  const inherited = classOf(parent).findMethod('inherited');
-  if (inherited) yield* invoke(inherited, parent, [cls], undefined, undefined, false);
+  yield* callMethod(parent, 'inherited', [cls], undefined, undefined, { fcall: true });
   if (block) yield* callProc(block, [cls], { self: cls, definitionTarget: cls });
   return cls;
 });
