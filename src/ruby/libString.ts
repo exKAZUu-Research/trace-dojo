@@ -307,12 +307,35 @@ function inspectRawBytes(bytes: Uint8Array): string {
   return `${result}"`;
 }
 
-/** A binary string's inspect, which shows the bytes from 128 on as `\xFF`. */
+const BINARY_SHORT_ESCAPES: Record<number, string> = {
+  7: String.raw`\a`,
+  8: String.raw`\b`,
+  9: String.raw`\t`,
+  10: String.raw`\n`,
+  11: String.raw`\v`,
+  12: String.raw`\f`,
+  13: String.raw`\r`,
+  27: String.raw`\e`,
+  34: String.raw`\"`,
+  92: String.raw`\\`,
+};
+
 function binaryInspect(bytes: Uint8Array): string {
-  return strInspect(Buffer.from(bytes).toString('latin1')).replaceAll(
-    /[\u0080-\u00FF]/g,
-    (char) => `\\x${(char.codePointAt(0) as number).toString(16).toUpperCase()}`
-  );
+  let result = '"';
+  for (let index = 0; index < bytes.length; index++) {
+    if (index % 256 === 0) {
+      rt().spend();
+      if (result.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+    }
+    const byte = bytes[index];
+    const short = BINARY_SHORT_ESCAPES[byte];
+    if (short) result += short;
+    else if (byte === 35 && [36, 64, 123].includes(bytes[index + 1])) result += String.raw`\#`;
+    else if (byte >= 0x20 && byte <= 0x7e) result += String.fromCodePoint(byte);
+    else result += `\\x${byte.toString(16).toUpperCase().padStart(2, '0')}`;
+  }
+  if (result.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+  return `${result}"`;
 }
 def('String', ['to_sym', 'intern'], 0, (self: RString) => {
   if (self.rawBytes && !self.binary)

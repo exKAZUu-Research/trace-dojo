@@ -7959,6 +7959,11 @@ test('binary String inspect escapes valid UTF-8 byte sequences', () => {
   ).toMatchObject({
     stdout: '"\\xC3\\xA9"\n#<Encoding:BINARY (ASCII-8BIT)>\n"\\xC3\\xA9"\n"\\xC3\\xA9"\n',
   });
+  expect(
+    run('p String.new("日本語",encoding:"ASCII-8BIT"),128.chr,159.chr;c=String.new;c<<1<<127<<0;p c')
+  ).toMatchObject({
+    stdout: '"\\xE6\\x97\\xA5\\xE6\\x9C\\xAC\\xE8\\xAA\\x9E"\n"\\x80"\n"\\x9F"\n"\\x01\\x7F\\x00"\n',
+  });
 });
 
 test('UTC identity affects unpadded zone directives', () => {
