@@ -7818,6 +7818,17 @@ test('Range size consults dynamic successor responders', () => {
       'class C;def <=>(x);0;end;def succ;self;end;def respond_to?(n,*);false;end;end;begin;p (C.new..C.new).size;rescue=>e;p e.class;end'
     )
   ).toMatchObject({ stdout: 'TypeError\n' });
+  expect(
+    run('class C;def <=>(x);0;end;def succ;self;end;private;def respond_to?(*);true;end;end;p (C.new..C.new).size')
+  ).toMatchObject({ stdout: 'nil\n' });
+});
+
+test('frozen Struct assignment resolves the index before checking freeze', () => {
+  expect(
+    run(
+      's=Struct.new(:x).new.freeze;i=Object.new;def i.to_int;puts :converted;0;end;begin;s[i]=1;rescue=>e;p e.class;end;begin;s[:missing]=1;rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({ stdout: 'converted\nFrozenError\nNameError\n' });
 });
 
 test('beginless Range size rejects a non-discrete begin', () => {

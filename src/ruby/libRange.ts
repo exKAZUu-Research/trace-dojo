@@ -267,7 +267,7 @@ export function* rangeSize(range: RRange): Gen<Value> {
 function* hasDynamicSuccessor(value: Value): Gen<boolean> {
   const responder = classOf(value).findMethod('respond_to?');
   return responder
-    ? truthy(yield* callMethod(value, 'respond_to?', [sym('succ')]))
+    ? truthy(yield* callMethod(value, 'respond_to?', [sym('succ')], undefined, undefined, { fcall: true }))
     : yield* respondsToName(value, 'succ', false);
 }
 

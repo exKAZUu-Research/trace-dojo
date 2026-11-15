@@ -295,8 +295,9 @@ def('Struct', '[]', 1, function* (self: RObject, [key]) {
   return valuesOf(self)[yield* memberIndex(self, key)];
 });
 def('Struct', '[]=', 2, function* (self: RObject, [key, value]) {
+  const index = yield* memberIndex(self, key);
   if (self.frozen) throw frozenError(self, yield* inspect(self));
-  valuesOf(self)[yield* memberIndex(self, key)] = value;
+  valuesOf(self)[index] = value;
   return value;
 });
 def('Struct', ['each'], 0, function* (self: RObject, _args, block) {
