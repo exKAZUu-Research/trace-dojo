@@ -7685,6 +7685,16 @@ test('frozen DATA reports FrozenError before read-only write errors', () => {
   ).toMatchObject({ stdout: 'FrozenError\nFrozenError\nFrozenError\nFrozenError\nFrozenError\nFrozenError\n' });
 });
 
+test('single IO writes convert before validation and allow empty output', () => {
+  expect(
+    run(
+      'DATA.freeze;p DATA.write(""),DATA.write(nil),DATA.print(""),DATA.print(nil),DATA.printf(""),DATA << "",DATA.putc("");class O;def to_s;puts :converted;raise "conversion";end;end;begin;DATA.write(O.new);rescue=>e;p e.class;end;begin;DATA.write("","");rescue=>e;p e.class;end\n__END__\na\n'
+    )
+  ).toMatchObject({
+    stdout: '0\n0\nnil\nnil\nnil\n#<File:main.rb>\n""\nconverted\nRuntimeError\nFrozenError\n',
+  });
+});
+
 test('anonymous pattern rest avoids materializing discarded arrays', () => {
   expect(run('items=(1..20000).to_a;sum=0;100.times{items=>[head,*];sum+=head;items.shift};p sum')).toMatchObject({
     stdout: '5050\n',

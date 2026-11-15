@@ -79,8 +79,8 @@ function* writePrint(target: Value, args: Value[]): Gen<void> {
 function* write(target: Value, value: string | Value): Gen<void> {
   const text = typeof value === 'string' ? str(value) : value;
   if (target instanceof RObject && (target.data === 'stdout' || target.data === 'stderr')) {
-    checkWritable(target);
     const rendered = text instanceof RString ? text : yield* toSValue(text);
+    if (stringBytes(rendered).length === 0) return;
     checkWritable(target);
     channel(target.data).write(rendered.s);
     return;
@@ -326,6 +326,14 @@ def('IO', 'print', [0, -1], function* (self: RObject, args) {
   return NIL;
 });
 def('IO', 'write', [0, -1], function* (self: RObject, args) {
+  if (args.length === 1) {
+    const value = yield* toSValue(args[0]);
+    const length = stringBytes(value).length;
+    if (length === 0) return 0n;
+    checkWritable(self);
+    channel(self.data as 'stdout' | 'stderr').write(value.s);
+    return BigInt(length);
+  }
   checkWritable(self);
   let bytes = 0n;
   for (const arg of args) {
