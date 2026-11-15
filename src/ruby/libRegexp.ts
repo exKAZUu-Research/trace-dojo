@@ -62,6 +62,7 @@ export interface RegexpData {
   binaryJs?: RegExp;
   safeNative: boolean;
   reverseSticky?: RegExp;
+  binaryReverseSticky?: RegExp;
   context?: vm.Context;
   binaryContext?: vm.Context;
 }
@@ -531,7 +532,7 @@ export function makeRegexp(
   const data: RegexpData = {
     source,
     encoding:
-      /[^\u0000-\u007F]/.test(source) || hasNonAsciiRegexpEscape(source)
+      /[^\u0000-\u007F]/.test(source) || hasNonAsciiRegexpEscape(source, options.extended ?? false)
         ? options.sourceBinary
           ? 'BINARY (ASCII-8BIT)'
           : RUBY_UTF8
@@ -546,8 +547,15 @@ export function makeRegexp(
   return regexp;
 }
 
-function hasNonAsciiRegexpEscape(source: string): boolean {
+function hasNonAsciiRegexpEscape(source: string, extended: boolean): boolean {
+  let inClass = false;
   for (let index = 0; index < source.length; index++) {
+    if (source[index] === '[') inClass = true;
+    if (source[index] === ']') inClass = false;
+    if (extended && !inClass && source[index] === '#') {
+      index = regexpLineCommentEnd(source, index);
+      continue;
+    }
     if (source[index] !== '\\') continue;
     const escape = source[index + 1];
     if (escape === '\\') {
@@ -558,6 +566,7 @@ function hasNonAsciiRegexpEscape(source: string): boolean {
       const unicode = unicodeRegexpEscape(source.slice(index + 2));
       if (unicode?.points.some((point) => Number.parseInt(point, 16) > 127)) return true;
     }
+    if ((escape === 'p' || escape === 'P') && /^\{\^?\w+\}/.test(source.slice(index + 2))) return true;
     if (escape === 'x') {
       const digits = /^[\da-fA-F]{2}/.exec(source.slice(index + 2));
       if (digits && Number.parseInt(digits[0], 16) > 127) return true;
@@ -689,9 +698,7 @@ export function execAt(
   if (data.ignoreCase && requiresMultiCharacterFold(data.source, text))
     throw new UnsupportedFeatureError('Unicode の複数文字 casefold');
   const binaryMatch = source?.binary === true && data.encoding !== RUBY_UTF8;
-  const js = binaryMatch
-    ? (data.binaryJs ??= new RegExp(translate(data.source, data.extended, data.multiline, true, true), data.js.flags))
-    : data.js;
+  const js = regexpForMatch(data, source);
   rt().spend();
   const startUnit = unitIndex(text, start);
   js.lastIndex = startUnit;
@@ -729,6 +736,14 @@ export function execAt(
     namedGroups,
     regexp,
   };
+}
+
+function regexpForMatch(data: RegexpData, source?: RString): RegExp {
+  if (!source?.binary || data.encoding === RUBY_UTF8) return data.js;
+  return (data.binaryJs ??= new RegExp(
+    translate(data.source, data.extended, data.multiline, true, true),
+    data.js.flags
+  ));
 }
 
 function validateRegexpSubject(regexp: RObject, source: RString): void {
@@ -1732,7 +1747,11 @@ for (const [name, last] of [
         state = index === -1 ? undefined : execAt(regexp, self.s, charIndex(self.s, index), self);
       } else if (dataOf(regexp).safeNative && !/^(?:\^|\\A)/.test(dataOf(regexp).source)) {
         const data = dataOf(regexp);
-        const sticky = (data.reverseSticky ??= new RegExp(data.js.source, data.js.flags.replace('g', 'y')));
+        const matchRegexp = regexpForMatch(data, self);
+        const sticky =
+          matchRegexp === data.js
+            ? (data.reverseSticky ??= new RegExp(matchRegexp.source, matchRegexp.flags.replace('g', 'y')))
+            : (data.binaryReverseSticky ??= new RegExp(matchRegexp.source, matchRegexp.flags.replace('g', 'y')));
         for (let position = charIndex(self.s, self.s.length); position >= 0; position--) {
           if (position % 64 === 0) rt().spend();
           sticky.lastIndex = unitIndex(self.s, position);

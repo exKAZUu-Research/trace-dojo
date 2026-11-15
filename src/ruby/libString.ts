@@ -1864,7 +1864,9 @@ def('Symbol', 'inspect', 0, (self: RSymbol) => {
   const text = symInspect(self);
   return /^[\u0000-\u007F]*$/.test(text) ? asciiString(text) : str(text);
 });
-def('Symbol', ['length', 'size'], 0, (self: RSymbol) => BigInt(charLength(self.name)));
+def('Symbol', ['length', 'size'], 0, (self: RSymbol) =>
+  BigInt(self.binary || self.usAscii ? (self.bytes as Uint8Array).length : charLength(self.name))
+);
 def('Symbol', 'empty?', 0, (self: RSymbol) => self.name.length === 0);
 def('Symbol', ['==', '===', 'eql?', 'equal?'], 1, (self, [other]) => self === other);
 def('Symbol', 'hash', 0, (self: RSymbol) => BigInt(self.name.length * 31 + (self.name.codePointAt(0) ?? 0)));

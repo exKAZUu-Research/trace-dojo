@@ -8960,6 +8960,26 @@ test('encoding-neutral regexp classes use binary byte semantics on binary string
   ).toMatchObject({ stdout: 'false\nfalse\ntrue\nfalse\ntrue\ntrue\n' });
 });
 
+test('binary rpartition probes with the same regexp classes as the match', () => {
+  expect(run('p ("a"+233.chr).rpartition(/[[:alpha:]]/).map(&:bytes)')).toMatchObject({
+    stdout: '[[], [97], [233]]\n',
+  });
+});
+
+test('Unicode property escapes fix regexp encoding to UTF-8', () => {
+  expect(
+    run(
+      String.raw`p /\p{Alpha}/.encoding;begin;233.chr.match?(/\p{Alpha}/);rescue=>e;p e.class;end;p /[[:alpha:]]/.encoding`
+    )
+  ).toMatchObject({
+    stdout: '#<Encoding:UTF-8>\nEncoding::CompatibilityError\n#<Encoding:US-ASCII>\n',
+  });
+});
+
+test('invalid US-ASCII Symbol size counts bytes', () => {
+  expect(run('s=String.new("é",encoding:"US-ASCII").to_sym;p s.size')).toMatchObject({ stdout: '2\n' });
+});
+
 test('Unicode Word classes include Alphabetic circled letters', () => {
   expect(run(String.raw`p "Ⓐ".match?(/[[:word:]]/),"ⓐ".match?(/\p{Word}/),"Ⓐ".match?(/[[:alpha:]]/)`)).toMatchObject({
     stdout: 'true\ntrue\ntrue\n',
