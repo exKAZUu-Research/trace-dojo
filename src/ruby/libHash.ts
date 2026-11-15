@@ -367,6 +367,7 @@ def('Hash', 'replace', 1, function* (self: RHash, [other]) {
   self.map = replacement.map;
   self.buckets = replacement.buckets;
   self.bucketVersion = replacement.bucketVersion;
+  self.byIdentity = replacement.byIdentity;
   self.defaultValue = source.defaultValue;
   self.defaultProc = source.defaultProc;
   return self;
