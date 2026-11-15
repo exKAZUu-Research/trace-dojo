@@ -5,6 +5,7 @@ import {
   inspect,
   rEql,
   rEquals,
+  rubyEncodingName,
   supportsImplicitConversion,
   symInspect,
   toIndex,
@@ -265,15 +266,27 @@ def(
     if (keywordInit || (keywordInit === undefined && args.length === 0 && keywords)) {
       if (args.length > 0) throw argumentError(`wrong number of arguments (given ${args.length}, expected 0)`);
       const unknown: Uint8Array[] = [];
+      let nonAsciiEncoding: string | undefined;
       for (const entry of keywords?.map.values() ?? []) {
         const index = entry.key instanceof RSymbol ? memberSymbols.indexOf(entry.key) : -1;
-        if (index === -1)
-          unknown.push(
-            entry.key instanceof RSymbol
-              ? (entry.key.bytes ?? new TextEncoder().encode(entry.key.name))
-              : new TextEncoder().encode(yield* inspect(entry.key))
-          );
-        else next[index] = entry.value;
+        if (index !== -1) {
+          next[index] = entry.value;
+          continue;
+        }
+        const bytes =
+          entry.key instanceof RSymbol
+            ? (entry.key.bytes ?? new TextEncoder().encode(entry.key.name))
+            : new TextEncoder().encode(yield* inspect(entry.key));
+        if (bytes.some((byte) => byte >= 0x80)) {
+          const encoding = rubyEncodingName(entry.key instanceof RSymbol && (entry.key.binary || entry.key.usAscii));
+          if (nonAsciiEncoding && nonAsciiEncoding !== encoding)
+            throw rubyError(
+              rt().c['Encoding::CompatibilityError'],
+              `incompatible character encodings: ${nonAsciiEncoding} and ${encoding}`
+            );
+          nonAsciiEncoding = encoding;
+        }
+        unknown.push(bytes);
       }
       values.splice(0, values.length, ...next);
       if (unknown.length > 0) {
@@ -292,7 +305,7 @@ def(
           message.set(bytes, offset);
           offset += bytes.length;
         }
-        throw rubyError(rt().c.ArgumentError, stringFromBytes(message));
+        throw rubyError(rt().c.ArgumentError, stringFromBytes(message, true));
       }
       return NIL;
     }

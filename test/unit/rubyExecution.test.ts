@@ -8878,6 +8878,22 @@ test('Struct unknown keyword errors retain encoded name bytes', () => {
   ).toMatchObject({
     stdout: '233\n',
   });
+  expect(
+    run(
+      'a=233.chr.to_sym;begin;Struct.new(:x,keyword_init:true).new(**{a=>1});rescue=>e;p e.message.encoding,e.message.valid_encoding?;end'
+    )
+  ).toMatchObject({ stdout: '#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n' });
+  expect(
+    run('a=233.chr.to_sym;begin;Struct.new(:x,keyword_init:true).new(**{a=>1,:é=>2});rescue=>e;p e.class,e.message;end')
+  ).toMatchObject({
+    stdout: 'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n',
+  });
+});
+
+test('anonymous class instances have Ruby class names in method errors', () => {
+  expect(run('k=Class.new;begin;k.new.zork;rescue NoMethodError=>e;puts e.message;end')).toMatchObject({
+    stdout: expect.stringMatching(/^undefined method 'zork' for an instance of #<Class:0x[\da-f]+>\n$/),
+  });
 });
 
 test('anonymous instance singleton names use the anonymous class name', () => {

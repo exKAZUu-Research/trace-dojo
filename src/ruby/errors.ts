@@ -80,13 +80,13 @@ export function receiverDescription(value: Value): string {
   if (value === false) return 'false';
   if (value === runtime.mainObject) return 'main';
   if (value instanceof RObject || value instanceof RString || !(typeof value === 'object')) {
-    return `an instance of ${realClassOf(value).name}`;
+    return `an instance of ${className(realClassOf(value))}`;
   }
   const cls = value as RClass;
   if ('isModule' in cls && cls.constants !== undefined) {
     return `${cls.isModule ? 'module' : 'class'} ${className(cls)}`;
   }
-  return `an instance of ${realClassOf(value).name}`;
+  return `an instance of ${className(realClassOf(value))}`;
 }
 
 /** How "no implicit conversion of X into Y" names a value: `nil`, `true`, `false`, or its class. */
