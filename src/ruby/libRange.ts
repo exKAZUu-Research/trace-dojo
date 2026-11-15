@@ -9,6 +9,7 @@ import {
   rEquals,
   searchNumericSign,
   spaceship,
+  supportsImplicitConversion,
   toIndex,
   toSValue,
 } from './conversions';
@@ -16,7 +17,7 @@ import { def, sdef } from './define';
 import { argumentError, rangeError, typeError } from './errors';
 import { floatStepCount, fusedMultiplyAdd } from './floatMath';
 import { structuralHashValue } from './hashes';
-import { callBlock, callMethod, type Gen, invoke, makeRange, nativeProc, respondsTo, truthyValue } from './interp';
+import { callBlock, callMethod, type Gen, invoke, makeRange, nativeProc, truthyValue } from './interp';
 import { rangeHelpers, STOP, sum, toArray } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { respondsToName } from './libMeta';
@@ -34,7 +35,7 @@ function* iterateRange(range: RRange, visit: Visit): Gen<void> {
   const { begin } = range;
   if (typeof begin === 'bigint') yield* iterateIntegers(range, begin, visit);
   else if (begin instanceof RString) yield* iterateStrings(range, begin, visit);
-  else if (begin === NIL || isRubyFloat(begin) || !respondsToSucc(begin)) {
+  else if (begin === NIL || isRubyFloat(begin) || !(yield* hasDynamicSuccessor(begin))) {
     throw typeError(`can't iterate from ${realClassOf(begin).name}`);
   } else {
     yield* iterateSuccessors(range, visit);
@@ -101,10 +102,6 @@ function* iterateSuccessors(range: RRange, visit: Visit): Gen<void> {
     if (atEnd) return;
     current = yield* callMethod(current, 'succ', []);
   }
-}
-
-function respondsToSucc(value: Value): boolean {
-  return respondsTo(value, 'succ');
 }
 
 rangeHelpers.iterateRange = iterateRange;
@@ -498,7 +495,12 @@ for (const method of ['step', '%'])
       typeof self.begin !== 'bigint' &&
       !isRubyFloat(self.begin) &&
       !(self.begin instanceof RString);
-    if (typeof step !== 'bigint' && !isRubyFloat(step) && !customBegin && !respondsTo(step, 'coerce', true))
+    if (
+      typeof step !== 'bigint' &&
+      !isRubyFloat(step) &&
+      !customBegin &&
+      !(yield* supportsImplicitConversion(step, 'coerce'))
+    )
       throw typeError('no implicit conversion of String into Integer');
     if (isRubyNumber(step)) {
       if (Number(step) < 0 && !isRubyNumber(self.begin)) throw argumentError("step can't be negative");

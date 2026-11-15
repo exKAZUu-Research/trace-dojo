@@ -564,7 +564,8 @@ function clockDirective(
       return hour < 12 ? 'am' : 'pm';
     }
     case 'z': {
-      const value = offsetText(data.offset, colons.length > 0);
+      const offset = offsetText(data.offset, colons.length > 0);
+      const value = data.zone === 'utc' && flag === '-' ? `-${offset.slice(1)}` : offset;
       const magnitude = Math.round(Math.abs(data.offset));
       if (colons.length === 2) return `${value}:${String(magnitude % 60).padStart(2, '0')}`;
       if (colons.length === 3)

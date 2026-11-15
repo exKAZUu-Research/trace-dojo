@@ -7896,6 +7896,39 @@ test('defined? probes negation receiver methods and visibility', () => {
   ).toMatchObject({ stdout: 'operand\n"method"\nraising\nnil\nnil\nnil\n' });
 });
 
+test('defined? keeps unavailable negation operands unavailable', () => {
+  expect(run('p defined?(!@unset),defined?(not @unset),defined?(!$unset)')).toMatchObject({
+    stdout: 'nil\nnil\nnil\n',
+  });
+});
+
+test('UTC identity affects unpadded zone directives', () => {
+  expect(run('p Time.utc(2024).strftime("%-z"),Time.at(0).getlocal(0).strftime("%-z")')).toMatchObject({
+    stdout: '"-0000"\n"+0000"\n',
+  });
+});
+
+test('Range iteration consults dynamic successor responders', () => {
+  expect(
+    run(
+      'class C;include Comparable;attr_reader :n;def initialize(n);@n=n;end;def <=>(o);n<=>o.n;end;def respond_to_missing?(m,*);m==:succ;end;def method_missing(m,*);m==:succ ? C.new(n+1) : super;end;end;p (C.new(1)..C.new(2)).map(&:n)'
+    )
+  ).toMatchObject({ stdout: '[1, 2]\n' });
+});
+
+test('raise and Range step accept advertised dynamic conversions', () => {
+  expect(
+    run(
+      'class E;def respond_to_missing?(n,*);n==:exception;end;def method_missing(n,*);n==:exception ? RuntimeError.new("dynamic") : super;end;end;begin;raise E.new;rescue=>e;p e.class,e.message;end'
+    )
+  ).toMatchObject({ stdout: 'RuntimeError\n"dynamic"\n' });
+  expect(
+    run(
+      'class S;def respond_to_missing?(m,*);m==:coerce;end;def method_missing(m,x);m==:coerce ? [x,2] : super;end;end;p (1..5).step(S.new).to_a'
+    )
+  ).toMatchObject({ stdout: '[1, 3, 5]\n' });
+});
+
 test('Proc parameters rejects unknown keyword options', () => {
   expect(run('begin;p proc{|x|}.parameters(lamda:true);rescue=>e;p e.class;end')).toMatchObject({
     stdout: 'ArgumentError\n',

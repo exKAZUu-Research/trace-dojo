@@ -11,6 +11,7 @@ import {
   inspectProc,
   rEql,
   rEquals,
+  supportsImplicitConversion,
   toInt,
   toRubyInt,
   toStrValue,
@@ -19,18 +20,7 @@ import {
 import { def, sdef } from './define';
 import { argumentCountError, argumentError, frozenError, nameError, rubyError, typeError } from './errors';
 import { hashSet } from './hashes';
-import {
-  addMethod,
-  callMethod,
-  callProc,
-  type Gen,
-  invoke,
-  ivarGet,
-  ivarSet,
-  makeBlock,
-  requireBlock,
-  respondsTo,
-} from './interp';
+import { addMethod, callMethod, callProc, type Gen, invoke, ivarGet, ivarSet, makeBlock, requireBlock } from './interp';
 import { curry, makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { writeStderrLine } from './libIo';
 import { kernelFloat, kernelInteger } from './libNumeric';
@@ -408,7 +398,7 @@ export function* makeRaise(args: Value[], keywords?: RHash): Gen<RubyError> {
     exception = yield* callMethod(runtime.c.RuntimeError, 'new', [args[0]]);
   } else {
     const [target, message] = args;
-    if (!respondsTo(target, 'exception', true)) throw typeError('exception class/object expected');
+    if (!(yield* supportsImplicitConversion(target, 'exception'))) throw typeError('exception class/object expected');
     exception = yield* callMethod(target, 'exception', message === undefined ? [] : [message], undefined, undefined, {
       fcall: true,
     });
