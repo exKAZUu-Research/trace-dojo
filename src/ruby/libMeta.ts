@@ -699,7 +699,7 @@ def('Module', 'const_defined?', [1, 2], function* (self: RClass, args) {
     if (!(module instanceof RClass)) throw typeError(`${requested} does not refer to class/module`);
     const constant = yield* constantName(str(part));
     const value = reflectedConstant(module, constant, inherit, index > 0);
-    module = value ?? (inherit && index === 0 ? rt().c.Object.constants.get(constant) : undefined);
+    module = value ?? (inherit && index === 0 && module.isModule ? rt().c.Object.constants.get(constant) : undefined);
     if (module === undefined) return false;
   }
   return true;

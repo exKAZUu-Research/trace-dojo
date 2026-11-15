@@ -393,7 +393,7 @@ function strftime(data: TimeData, format: string): string {
       }
       let result = caseText(rendered, directive, flags);
       if (directive === 'z') return finish(padOffset(result, width, flag));
-      if (width !== undefined && flag !== '-') {
+      if (width !== undefined && (flag !== '-' || 'TXRDxFcrv'.includes(directive))) {
         const pad = flag === '_' || (flag !== '0' && defaultSpacePad(directive)) ? ' ' : '0';
         result =
           pad === '0' && result.startsWith('-') && ['Y', 'C', 'G', 's'].includes(directive)
@@ -433,7 +433,7 @@ function defaultSpacePad(directive: string): boolean {
 }
 
 function padOffset(value: string, width: number | undefined, flag: string): string {
-  if (flag === '-') return value;
+  if (flag === '-') return width === undefined ? value : `${value[0]}${value.slice(1).padStart(width - 1, '0')}`;
   const target = width ?? value.length;
   if (flag === '_') {
     const body = value.slice(1).replace(/^0/, '');

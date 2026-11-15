@@ -11,7 +11,6 @@ import {
   inspectProc,
   rEql,
   rEquals,
-  supportsImplicitConversion,
   toInt,
   toRubyInt,
   toStrValue,
@@ -398,10 +397,9 @@ export function* makeRaise(args: Value[], keywords?: RHash): Gen<RubyError> {
     exception = yield* callMethod(runtime.c.RuntimeError, 'new', [args[0]]);
   } else {
     const [target, message] = args;
-    if (!(yield* supportsImplicitConversion(target, 'exception'))) throw typeError('exception class/object expected');
-    exception = yield* callMethod(target, 'exception', message === undefined ? [] : [message], undefined, undefined, {
-      fcall: true,
-    });
+    const converted = yield* tryImplicitConversion(target, 'exception', message === undefined ? [] : [message]);
+    if (converted === undefined) throw typeError('exception class/object expected');
+    exception = converted;
     if (!(exception instanceof RObject) || !exception.exception) throw typeError('exception object expected');
   }
   const object = exception as RObject;

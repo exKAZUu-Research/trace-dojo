@@ -7958,6 +7958,24 @@ test('raise and Range step accept advertised dynamic conversions', () => {
   ).toMatchObject({ stdout: '[1, 3, 5]\n' });
 });
 
+test('raise falls back when an unadvertised exception conversion misses', () => {
+  expect(
+    run('class E;def method_missing(n,*);super;end;end;begin;raise E.new;rescue=>e;p e.class,e.message;end')
+  ).toMatchObject({ stdout: 'TypeError\n"exception class/object expected"\n' });
+});
+
+test('Time composite and zone widths honor explicit minus flags', () => {
+  expect(
+    run('t=Time.utc(2024,2,29,13,5,9);p t.strftime("%-10T|%-10D|%-10R"),t.strftime("%-10z|%-10:z")')
+  ).toMatchObject({ stdout: '"  13:05:09|  02/29/24|     13:05"\n"-000000000|-000000:00"\n' });
+});
+
+test('const_defined? does not fall back to Object for BasicObject classes', () => {
+  expect(run('X=1;class C<BasicObject;end;p C.const_defined?(:X),C.const_defined?(:String)')).toMatchObject({
+    stdout: 'false\nfalse\n',
+  });
+});
+
 test('Proc parameters rejects unknown keyword options', () => {
   expect(run('begin;p proc{|x|}.parameters(lamda:true);rescue=>e;p e.class;end')).toMatchObject({
     stdout: 'ArgumentError\n',
