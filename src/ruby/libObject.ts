@@ -238,6 +238,7 @@ function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
     const proc = new RProc(self.cls, self.body, self.self, self.outer);
     proc.isLambda = self.isLambda;
     proc.captured = self.captured ? [...self.captured] : undefined;
+    proc.reflectedMethod = self.reflectedMethod;
     proc.breakTag = self.breakTag;
     proc.callSiteState = self.callSiteState;
     copy = proc;

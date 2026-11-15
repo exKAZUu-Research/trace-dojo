@@ -10,7 +10,6 @@ import {
   callMethod,
   callProc,
   constInModule,
-  findConstInAncestors,
   type Gen,
   invoke,
   ivarGet,
@@ -296,20 +295,20 @@ def(
   function* (self: RProc, _args, _block, keywords) {
     const asLambda = keywords ? (yield* hashGet(keywords, sym('lambda')))?.value : undefined;
     const isLambda = asLambda === undefined || asLambda === NIL ? self.isLambda : truthy(asLambda);
-    if (self.reflectedMethod) return methodParameterList(self.reflectedMethod);
+    if (self.reflectedMethod) return methodParameterList(self.reflectedMethod, isLambda);
     if (self.body.kind === 'native') return nativeParameterList(self.body.arity);
     return self.body.def.params ? parameterList(self.body.def.params, isLambda) : arr([]);
   },
   { keywords: true }
 );
-function callParameters(proc: RProc): Value {
+function callParameters(proc: RProc, isLambda = true): Value {
   if (proc.body.kind === 'native') return nativeParameterList(proc.body.arity);
-  return proc.body.def.params ? parameterList(proc.body.def.params, true) : arr([]);
+  return proc.body.def.params ? parameterList(proc.body.def.params, isLambda) : arr([]);
 }
 
-function methodParameterList(method: RMethod): Value {
-  if (method.body.kind === 'user') return parameterList(method.body.def.params, true);
-  if (method.body.kind === 'proc') return callParameters(method.body.proc);
+function methodParameterList(method: RMethod, isLambda = true): Value {
+  if (method.body.kind === 'user') return parameterList(method.body.def.params, isLambda);
+  if (method.body.kind === 'proc') return callParameters(method.body.proc, isLambda);
   return nativeParameterList(methodArity(method));
 }
 
@@ -639,6 +638,17 @@ function* constantName(value: Value): Gen<string> {
   return name;
 }
 
+function reflectedConstant(module: RClass, name: string, inherit: boolean, nested: boolean): Value | undefined {
+  const ancestors = inherit ? module.ancestors() : [module];
+  const objectIndex = nested && module !== rt().c.Object ? ancestors.indexOf(rt().c.Object) : -1;
+  const holders = objectIndex < 0 ? ancestors : ancestors.slice(0, objectIndex);
+  for (const holder of holders) {
+    const value = holder.constants.get(name);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
 def('Module', 'const_get', [1, 2], function* (self: RClass, args) {
   const inherit = args.length < 2 || truthy(args[1]);
   const requested = yield* nameOf(args[0]);
@@ -649,10 +659,9 @@ def('Module', 'const_get', [1, 2], function* (self: RClass, args) {
   for (const [index, part] of parts.entries()) {
     if (!(module instanceof RClass)) throw typeError(`${requested} does not refer to class/module`);
     const constant = yield* constantName(str(part));
-    const value: Value | undefined = inherit
-      ? (findConstInAncestors(module, constant) ??
-        (index === 0 && module.isModule ? rt().c.Object.constants.get(constant) : undefined))
-      : module.constants.get(constant);
+    const value: Value | undefined =
+      reflectedConstant(module, constant, inherit, index > 0) ??
+      (inherit && index === 0 && module.isModule ? rt().c.Object.constants.get(constant) : undefined);
     if (value === undefined && inherit) constInModule(module, constant);
     if (value === undefined)
       throw nameError(
@@ -685,12 +694,7 @@ def('Module', 'const_defined?', [1, 2], function* (self: RClass, args) {
   for (const [index, part] of parts.entries()) {
     if (!(module instanceof RClass)) throw typeError(`${requested} does not refer to class/module`);
     const constant = yield* constantName(str(part));
-    const ancestors = inherit ? module.ancestors() : [module];
-    const objectIndex = index > 0 && module !== rt().c.Object ? ancestors.indexOf(rt().c.Object) : -1;
-    const holders: RClass[] = objectIndex < 0 ? ancestors : ancestors.slice(0, objectIndex);
-    const value: Value | undefined = holders
-      .map((holder: RClass) => holder.constants.get(constant))
-      .find((candidate: Value | undefined) => candidate !== undefined);
+    const value = reflectedConstant(module, constant, inherit, index > 0);
     module = value ?? (inherit && index === 0 ? rt().c.Object.constants.get(constant) : undefined);
     if (module === undefined) return false;
   }

@@ -7776,6 +7776,35 @@ test('Method to_proc retains reflected parameter names and kinds', () => {
   ).toMatchObject({
     stdout: '[[:req, :x], [:key, :y]]\n[[:req, :x], [:key, :y]]\n',
   });
+  expect(run('def reflected(x,y:1);end;p method(:reflected).to_proc.parameters(lambda:false)')).toMatchObject({
+    stdout: '[[:opt, :x], [:key, :y]]\n',
+  });
+  expect(
+    run(
+      'def reflected(x,y:1);end;p method(:reflected).to_proc.dup.parameters,method(:reflected).to_proc.clone.parameters'
+    )
+  ).toMatchObject({
+    stdout: '[[:req, :x], [:key, :y]]\n[[:req, :x], [:key, :y]]\n',
+  });
+});
+
+test('qualified constant reflection excludes Object ancestors in nested paths', () => {
+  expect(
+    run(
+      'class N;end;X=7;module M;N=::N;end;begin;p M.const_get("N::X");rescue=>e;p e.class;end;p M.const_defined?("N::X")'
+    )
+  ).toMatchObject({ stdout: 'NameError\nfalse\n' });
+});
+
+test('Range size handles Rational ends and rejects non-successor begins', () => {
+  expect(run('p (1..3r).size,(1...7/2r).size,(1..3r).each_slice(2).size')).toMatchObject({
+    stdout: '3\n3\n2\n',
+  });
+  expect(
+    run(
+      'begin;p (1r..3r).size;rescue=>e;p e.class,e.message;end;begin;p (Time.at(0)..Time.at(5)).size;rescue=>e;p e.class,e.message;end'
+    )
+  ).toMatchObject({ stdout: 'TypeError\n"can\'t iterate from Rational"\nTypeError\n"can\'t iterate from Time"\n' });
 });
 
 test('MatchData reuses frozen subject identity', () => {

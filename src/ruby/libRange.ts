@@ -20,7 +20,8 @@ import { callBlock, callMethod, type Gen, invoke, makeRange, nativeProc, respond
 import { rangeHelpers, STOP, sum, toArray } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { kernelFloat } from './libNumeric';
-import { isRubyFloat, isRubyNumber, NIL, type RProc, RRange, RString, type Value } from './objects';
+import { fractionOf, isRational } from './libRational';
+import { isRubyFloat, isRubyNumber, NIL, type RObject, type RProc, RRange, RString, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { successorBytes } from './stringTransforms';
 import { arr, asciiString, isA, realClassOf, str, stringBytes, stringFromBytes } from './values';
@@ -254,9 +255,20 @@ export function rangeSize(range: RRange): Value {
       if (exclusive && last === limit) size -= 1n;
       return size > 0n ? size : 0n;
     }
+    if (isRational(end)) {
+      return rationalRangeSize(begin, end, exclusive);
+    }
   }
-  if (isRubyFloat(begin)) throw typeError(`can't iterate from Float`);
+  if (begin !== NIL && !respondsToSucc(begin)) throw typeError(`can't iterate from ${realClassOf(begin).name}`);
   return NIL;
+}
+
+function rationalRangeSize(begin: bigint, end: RObject, exclusive: boolean): bigint {
+  const { numerator, denominator } = fractionOf(end);
+  const quotient = numerator / denominator;
+  const last = numerator < 0n && numerator % denominator !== 0n ? quotient - 1n : quotient;
+  const size = last - begin + (exclusive && numerator % denominator === 0n ? 0n : 1n);
+  return size > 0n ? size : 0n;
 }
 
 def('Range', 'size', 0, (self: RRange) => rangeSize(self));

@@ -62,7 +62,7 @@ export function isRational(value: Value): value is RObject {
   return value instanceof RObject && value.cls === rt().c.Rational;
 }
 
-function fractionOf(value: RObject): Fraction {
+export function fractionOf(value: RObject): Fraction {
   return value.data as Fraction;
 }
 
