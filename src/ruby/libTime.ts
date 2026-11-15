@@ -123,7 +123,8 @@ function* fieldValue(arg: Value, index: number): Gen<number> {
       ? MONTHS.findIndex((name) => name.slice(0, 3).toLowerCase() === arg.s.toLowerCase())
       : -1;
   if (month >= 0) return month + 1;
-  if (/^\s*[+-]?\d(?:_?\d)*\s*$/.test(arg.s)) return Number(BigInt(arg.s.trim().replaceAll('_', '')));
+  if (/^[ \t\n\r\v\f]*[+-]?\d(?:_?\d)*[ \t\n\r\v\f]*$/.test(arg.s))
+    return Number(BigInt(arg.s.replaceAll(/^[ \t\n\r\v\f]+|[ \t\n\r\v\f]+$/g, '').replaceAll('_', '')));
   throw argumentError(
     index === 0 ? `can't parse: ${JSON.stringify(arg.s)}` : `invalid value for Integer(): ${JSON.stringify(arg.s)}`
   );
@@ -217,8 +218,10 @@ function* buildTime(args: Value[], offset: number, zone: TimeData['zone'], micro
     ? 0n
     : microseconds instanceof RString
       ? yield* fieldValue(microseconds, 5)
-      : typeof microseconds === 'bigint' || typeof microseconds === 'number' || isRational(microseconds)
-        ? microseconds
+      : typeof microseconds === 'bigint' || isRubyFloat(microseconds) || isRational(microseconds)
+        ? isRubyFloat(microseconds)
+          ? Number(microseconds)
+          : microseconds
         : yield* toInt(microseconds);
   const micros = offsetFraction(microsecondsValue, 0);
   if (micros.numerator < 0n || micros.numerator >= 1_000_000n * micros.denominator)

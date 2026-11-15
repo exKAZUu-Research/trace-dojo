@@ -8939,6 +8939,24 @@ test('calendar microseconds parse numeric strings and to_int values', () => {
   });
 });
 
+test('calendar microseconds preserve tiny Floats and reject non-ASCII numeric whitespace', () => {
+  expect(run('p Time.utc(1970,1,1,0,0,0,1e-100).to_f')).toMatchObject({
+    stdout: '1.0000000000000001e-106\n',
+  });
+  expect(run('Time.utc(1970,1,1,0,0,0,-1e-100)')).toMatchObject({
+    uncaughtException: 'subsecx out of range (ArgumentError)',
+  });
+  expect(run('Time.utc(1970,1,1,0,0,0,"\u00A02")')).toMatchObject({
+    uncaughtException: expect.stringContaining('invalid value for Integer()'),
+  });
+});
+
+test('defined? rejects END through statement modifiers', () => {
+  for (const modifier of ['rescue nil', 'if true', 'unless false', 'while false'])
+    expect(run(`puts :before;defined?(END {} ${modifier})`)).toMatchObject({ kind: 'compileError' });
+  expect(run('p defined?((END {} rescue nil))')).toMatchObject({ stdout: '"expression"\n' });
+});
+
 test('frozen DATA rejects reads and cursor operations', () => {
   expect(
     run(

@@ -1202,7 +1202,7 @@ export class Converter {
     if (operator === 'defined?') {
       if (
         operandNode.type === 'parenthesized_statements' &&
-        namedChildren(operandNode).some((child) => child.type === 'end_block')
+        namedChildren(operandNode).some((child) => this.directEndBlock(child))
       )
         this.fail(operandNode, 'END は文としてのみ書けます。');
       const context = this.ctx;
@@ -1239,6 +1239,19 @@ export class Converter {
       }
     }
     this.unsupportedNode(node);
+  }
+
+  private directEndBlock(node: Node): boolean {
+    if (node.type === 'end_block') return true;
+    if (
+      node.type === 'rescue_modifier' ||
+      node.type === 'if_modifier' ||
+      node.type === 'unless_modifier' ||
+      node.type === 'while_modifier' ||
+      node.type === 'until_modifier'
+    )
+      return this.directEndBlock(required(node.childForFieldName('body')));
+    return false;
   }
 
   // Control structures ------------------------------------------------------------------------------------------------
