@@ -913,7 +913,8 @@ sdef('Class', 'new', [0, 1], function* (_self, [superclass], block) {
   const cls = new RClass(runtime.c.Class, undefined, parent, false);
   cls.isUserDefined = true;
   const inherited = classOf(parent).findMethod('inherited');
-  if (inherited?.body.kind === 'user') yield* invoke(inherited, parent, [cls], undefined, undefined, false);
+  if (inherited && (inherited.body.kind === 'user' || inherited.body.kind === 'proc'))
+    yield* invoke(inherited, parent, [cls], undefined, undefined, false);
   if (block) yield* callProc(block, [cls], { self: cls, definitionTarget: cls });
   return cls;
 });

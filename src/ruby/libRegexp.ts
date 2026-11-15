@@ -345,6 +345,7 @@ function translateEscape(
   skip: (count: number) => void,
   addNegatedClass: (body: string) => void
 ): string {
+  if (inClass && 'AzZR'.includes(next)) return next;
   switch (next) {
     case 'A': {
       return String.raw`(?<![\s\S])`;
@@ -376,7 +377,7 @@ function translateEscape(
       return `(?:(?<=${word})(?=${word})|(?<!${word})(?!${word}))`;
     }
     case 'R': {
-      return String.raw`(?:\r\n|[\n\v\f\r\u0085  ])`;
+      return String.raw`(?:\r\n|\r(?!\n)|[\n\v\f\u0085  ])`;
     }
     case 'e': {
       return String.raw`\x1B`;

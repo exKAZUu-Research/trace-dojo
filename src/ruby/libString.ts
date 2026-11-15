@@ -223,9 +223,10 @@ def(
           if (normalizedEncoding === 'ASCII-8BIT' || normalizedEncoding === 'BINARY')
             setBytes(self, sourceBytes ?? stringBytes(self), true);
           // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby spells the encoding name UTF-8.
-          else if (normalizedEncoding === 'UTF-8' || normalizedEncoding === 'US-ASCII') {
+          else if (['UTF-8', 'UTF8', 'CP65001', 'US-ASCII', 'ASCII'].includes(normalizedEncoding)) {
             setBytes(self, sourceBytes ?? stringBytes(self), false);
-            self.usAscii = normalizedEncoding === 'US-ASCII';
+            // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby's ASCII alias is uppercase after normalization.
+            self.usAscii = normalizedEncoding === 'US-ASCII' || normalizedEncoding === 'ASCII';
           } else throw new UnsupportedFeatureError(`String.new の文字コード ${encoding}`);
         } else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
       }
@@ -274,13 +275,12 @@ export function inspectStringEncoding(self: RString, dump = false): string {
 def('String', 'inspect', 0, (self: RString) => str(inspectStringEncoding(self)));
 def('String', 'dump', 0, (self: RString) => {
   const quoted = inspectStringEncoding(self, true);
-  return str(
-    quoted.replaceAll(/[\u0080-\u{10FFFF}]/gu, (char) => {
-      const point = char.codePointAt(0) as number;
-      const hex = point.toString(16).toUpperCase();
-      return point > 0xff_ff ? `\\u{${hex}}` : `\\u${hex.padStart(4, '0')}`;
-    })
-  );
+  const dumped = quoted.replaceAll(/[\u0080-\u{10FFFF}]/gu, (char) => {
+    const point = char.codePointAt(0) as number;
+    const hex = point.toString(16).toUpperCase();
+    return point > 0xff_ff ? `\\u{${hex}}` : `\\u${hex.padStart(4, '0')}`;
+  });
+  return stringFromBytes(new TextEncoder().encode(dumped), self.binary, self.usAscii);
 });
 
 function inspectRawBytes(bytes: Uint8Array): string {

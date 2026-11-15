@@ -1521,7 +1521,7 @@ function* defineMethod(def: MethodDef, singleton: Expr | undefined, frame: Frame
   return RSymbol.of(def.name);
 }
 
-const PRIVATE_METHOD_NAMES = new Set(['initialize', 'initialize_copy', 'initialize_clone', 'initialize_dup']);
+export const PRIVATE_METHOD_NAMES = new Set(['initialize', 'initialize_copy', 'initialize_clone', 'initialize_dup']);
 const CLASS_METHOD_HOOKS = new Set([
   'method_added',
   'method_removed',
@@ -1616,7 +1616,8 @@ function checkCoreName(name: string, kind: 'class' | 'module'): void {
 
 function* callHook(target: RClass, name: string, args: Value[]): Gen<void> {
   const method = classOf(target).findMethod(name);
-  if (method && method.body.kind === 'user') yield* invoke(method, target, args, undefined, undefined, false);
+  if (method && (method.body.kind === 'user' || method.body.kind === 'proc'))
+    yield* invoke(method, target, args, undefined, undefined, false);
 }
 
 function* defineModule(e: Extract<Expr, { k: 'module' }>, frame: Frame): Gen {

@@ -386,6 +386,7 @@ function strftime(data: TimeData, format: string): string {
       const rendered =
         calendarDirective(data, date, directive, flag) ?? clockDirective(data, date, directive, flag, colons, whole);
       if (rendered === undefined) return finish(whole);
+      if (directive === 'Z' && zoneName(data) === NIL) return finish('');
       if (colons && directive !== 'z') throw new UnsupportedFeatureError(`Time#strftime(${whole})`);
       if ((directive === 'N' || directive === 'L') && width !== undefined) {
         chargePrecision(width);

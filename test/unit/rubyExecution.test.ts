@@ -6979,6 +6979,13 @@ test('condition flip-flops fail explicitly when unavailable', () => {
   });
 });
 
+test('pattern guard flip-flops fail explicitly before execution', () => {
+  expect(run('3.times{|i|case i;in x if (x==1)..(x==2);p x;else;p :off;end}')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: 'フリップフロップは、この採点環境では使えません。' }],
+  });
+});
+
 test('pattern guards reject void expressions before execution', () => {
   expect(run('def f;case 1;in a if return;1;end;end;p f')).toMatchObject({ kind: 'compileError' });
 });
@@ -7978,6 +7985,36 @@ test('US-ASCII inspect and String dump use hex control escapes', () => {
   });
 });
 
+test('String dump retains its supported encoding', () => {
+  expect(run('p 65.chr.dump.encoding,255.chr.dump.encoding')).toMatchObject({
+    stdout: '#<Encoding:US-ASCII>\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  });
+});
+
+test('String.new recognizes supported encoding aliases', () => {
+  expect(run('p String.new("x",encoding:"ASCII").encoding,String.new("x",encoding:"CP65001").encoding')).toMatchObject({
+    stdout: '#<Encoding:US-ASCII>\n#<Encoding:UTF-8>\n',
+  });
+});
+
+test('regexp linebreak escape keeps CRLF indivisible', () => {
+  expect(run(String.raw`p /\R{2}/.match?("\r\n"),/\R\n/.match?("\r\n")`)).toMatchObject({
+    stdout: 'false\nfalse\n',
+  });
+});
+
+test('regexp character classes keep escaped anchor letters literal', () => {
+  expect(run(String.raw`p /[\A]/.match?("A"),/[\Z]/.match?("Z"),/[\R]/.match?("R")`)).toMatchObject({
+    stdout: 'true\ntrue\ntrue\n',
+  });
+});
+
+test('Time strftime omits padding for absent zone names', () => {
+  expect(run('t=Time.at(0).getlocal("+09:00");p t.strftime("%5Z|%_5Z|%05Z|%-5Z")')).toMatchObject({
+    stdout: '"|||"\n',
+  });
+});
+
 test('regexp capture validation ignores comments', () => {
   expect(run('p "a".match?(Regexp.new("a # (?<foo-bar>",Regexp::EXTENDED))')).toMatchObject({ stdout: 'true\n' });
   expect(run('p "a".match?(Regexp.new("a(?#(?<foo-bar>)"))')).toMatchObject({ stdout: 'true\n' });
@@ -7986,7 +8023,7 @@ test('regexp capture validation ignores comments', () => {
 test('remove_method invalidates each successful removal before later errors', () => {
   expect(
     run(
-      'class C;def a;1;end;end;c=C.new;c.a;begin;C.send(:remove_method,:a,:absent);rescue NameError;begin;p c.a;rescue=>e;p e.class;end;end'
+      'class C;def a;1;end;end;begin;Object.const_get(:Missing);rescue NameError;end;C.respond_to?(:new);c=C.new;c.a;begin;C.send(:remove_method,:a,:absent);rescue NameError;begin;p c.a;rescue=>e;p e.class;end;end'
     )
   ).toMatchObject({ stdout: 'NoMethodError\n' });
 });
@@ -7994,9 +8031,23 @@ test('remove_method invalidates each successful removal before later errors', ()
 test('visibility batches invalidate successful changes before later errors', () => {
   expect(
     run(
-      'class C;def a;1;end;end;c=C.new;c.a;begin;C.send(:private,:a,:absent);rescue NameError;p c.respond_to?(:a);begin;p c.a;rescue=>e;p e.class;end;end'
+      'class C;def a;1;end;end;begin;Object.const_get(:Missing);rescue NameError;end;C.respond_to?(:new);c=C.new;c.a;begin;C.send(:private,:a,:absent);rescue NameError;p c.respond_to?(:a);begin;p c.a;rescue=>e;p e.class;end;end'
     )
   ).toMatchObject({ stdout: 'false\nNoMethodError\n' });
+});
+
+test('define_method keeps lifecycle methods private', () => {
+  expect(
+    run(
+      'class C;define_method(:initialize){puts :init};end;p C.private_method_defined?(:initialize);begin;C.new.initialize;rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({ stdout: 'true\ninit\nNoMethodError\n' });
+});
+
+test('inherited hooks installed from blocks run for new subclasses', () => {
+  expect(
+    run('class Base;define_singleton_method(:inherited){|sub|puts :child};end;Class.new(Base);class Child<Base;end')
+  ).toMatchObject({ stdout: 'child\nchild\n' });
 });
 
 test('Lazy index inspection records normalized offset and method name', () => {
