@@ -2139,7 +2139,7 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
   const { body } = proc;
   if (body.kind === 'native') {
     const count = args.length + Number(options.keywords !== undefined);
-    if (body.lambda && body.arity >= 0 && count !== body.arity) {
+    if (body.lambda && body.arity >= 0 && count !== body.arity && !proc.reflectedMethod) {
       throw argumentCountError(count, body.arity, body.arity);
     }
     const result = body.call(args, options.block, options.used ?? true, options.keywords);

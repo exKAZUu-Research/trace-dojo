@@ -8613,6 +8613,19 @@ test('prepend merges shared included child chains', () => {
   ).toMatchObject({
     stdout: '[D, B, C, A, X]\n',
   });
+  expect(
+    run(
+      'module A;end;module B;end;module P;prepend A,B;end;module Q;include B,A;end;module R;prepend Q;end;class C;prepend P,R;end;p C.ancestors.take(6)'
+    )
+  ).toMatchObject({
+    stdout: '[Q, B, A, P, R, C]\n',
+  });
+});
+
+test('Method Proc calls defer keyword validation to the reflected method', () => {
+  expect(run('def f(x:);x;end;begin;method(:f).to_proc.call;rescue=>e;p e.message;end')).toMatchObject({
+    stdout: '"missing keyword: :x"\n',
+  });
 });
 
 test('defined? classifies literal block calls before probing methods', () => {

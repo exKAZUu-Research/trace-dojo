@@ -868,8 +868,10 @@ sdef('Enumerator', 'new', [0, 1], function* (self: RClass, args, block) {
     const source = enumerator.data as EnumeratorSource;
     if (size instanceof RProc || respondsTo(size, 'call')) {
       source.size = () => callMethod(size, 'call', []);
-      const previousHeld = source.held?.bind(source);
-      source.held = () => [...(previousHeld?.() ?? []), size];
+      const previousHeld = source.held;
+      source.held = function () {
+        return [...previousHeld.call(this), size];
+      };
     } else {
       const normalized = size === NIL || (isRubyFloat(size) && Number(size) === Infinity) ? size : yield* toInt(size);
       source.size = () => normalized;

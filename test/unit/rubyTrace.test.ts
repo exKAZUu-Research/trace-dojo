@@ -66,6 +66,14 @@ test('cursor resumption roots the caller exception', () => {
   expect(result.finalTurtles[0]?.y).toBe(1);
 });
 
+test('copies of sized enumerators retain suspended cursor roots', () => {
+  for (const copy of ['dup', 'clone']) {
+    const source = `e=Enumerator.new(-> {2}) do |y|\n t=Turtle.new\n y<<1\n t.forward\n y<<2\nend\nf=e.${copy}\nf.next\nx=1\nf.next\nx=2`;
+    const result = traceProgram('ruby', source, source);
+    expect(result.finalTurtles[0]?.y, copy).toBe(1);
+  }
+});
+
 test('Struct, Data and value objects remain visible in the variable trace', () => {
   const program =
     'S=Struct.new(:a)\nD=Data.define(:x)\ns=S.new(1)\nd=D.new(2)\nr=1/3r\nt=Time.utc(2024)\nre=/a/\nm=/a(b)/.match("ab")\np s.a\n';

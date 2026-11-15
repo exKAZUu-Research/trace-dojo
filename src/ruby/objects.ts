@@ -307,7 +307,7 @@ export class RClass extends RBasic {
           rt().spend();
           if (inherited.has(item)) continue;
           const existing = result.indexOf(item);
-          if (existing !== -1) insertion = existing + 1;
+          if (existing !== -1) insertion = Math.max(insertion, existing + 1);
           else result.splice(insertion++, 0, item);
         }
       }
