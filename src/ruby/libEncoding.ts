@@ -23,6 +23,7 @@ export function installEncodings(runtime: Runtime): void {
     }
     const object = new RObject(encoding);
     object.data = name;
+    object.frozen = true;
     encoding.constants.set(constant, object);
   }
 }

@@ -152,6 +152,8 @@ function* parseOffset(value: Value): Gen<number> {
   if (value === NIL) return LOCAL_OFFSET;
   if (typeof value === 'bigint' || isRubyFloat(value) || isRational(value)) {
     const offset = yield* toFloat(value);
+    if (!Number.isFinite(offset))
+      throw floatDomainError(Number.isNaN(offset) ? 'NaN' : offset > 0 ? 'Infinity' : '-Infinity');
     if (Math.abs(offset) >= 86_400) throw argumentError('utc_offset out of range');
     return offset;
   }

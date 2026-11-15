@@ -422,16 +422,28 @@ def('BasicObject', 'instance_eval', [0, -1], function* (self, args, block) {
   const definee = self instanceof RBasic && !isRubyFloat(self) ? singletonClassOf(self) : undefined;
   return yield* callProc(body, [self], { self, definee, forbidSingletonDefinition: !definee });
 });
-def('BasicObject', 'instance_exec', [0, -1], function* (self, args, block) {
-  const definee = self instanceof RBasic && !isRubyFloat(self) ? singletonClassOf(self) : undefined;
-  return yield* callProc(requireBlock(block), args, { self, definee, forbidSingletonDefinition: !definee });
-});
+def(
+  'BasicObject',
+  'instance_exec',
+  [0, -1],
+  function* (self, args, block, keywords) {
+    const definee = self instanceof RBasic && !isRubyFloat(self) ? singletonClassOf(self) : undefined;
+    return yield* callProc(requireBlock(block), args, { self, definee, keywords, forbidSingletonDefinition: !definee });
+  },
+  { keywords: true }
+);
 def('Module', ['class_eval', 'module_eval'], [0, -1], function* (self: RClass, args, block) {
   return yield* callProc(refuseStringEval('class_eval', args, block), [self], { self, definee: self });
 });
-def('Module', ['class_exec', 'module_exec'], [0, -1], function* (self: RClass, args, block) {
-  return yield* callProc(requireBlock(block), args, { self, definee: self });
-});
+def(
+  'Module',
+  ['class_exec', 'module_exec'],
+  [0, -1],
+  function* (self: RClass, args, block, keywords) {
+    return yield* callProc(requireBlock(block), args, { self, definee: self, keywords });
+  },
+  { keywords: true }
+);
 def('Kernel', 'define_singleton_method', [1, 2], function* (self, args, block) {
   if (!(self instanceof RBasic)) throw typeError("can't define singleton");
   return yield* defineMethodFrom(singletonClassOf(self), args, block, 'public');

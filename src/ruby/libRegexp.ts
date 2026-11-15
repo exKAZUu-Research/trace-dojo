@@ -1275,7 +1275,7 @@ function* substituteRegexp(
       ? execAt(regexp, text, charIndex(text, to) + (from === to ? 1 : 0), self, snapshot, true)
       : undefined;
   }
-  setLastMatch(last);
+  if (global || !block || !last) setLastMatch(last);
   append(sliceStringEncoding(self, position));
   return { value: concatRegexpPieces(chunks, LIMITS.maxStringLength), matched: last !== undefined };
 }

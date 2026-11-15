@@ -9,7 +9,7 @@ import {
   tryImplicitConversion,
 } from './conversions';
 import { def } from './define';
-import { argumentError, frozenError, typeError } from './errors';
+import { argumentError, frozenError, rubyError, typeError } from './errors';
 import { exportBinaryInspect, formatString } from './format';
 import { callMethod, type Gen, respondsTo } from './interp';
 import { firstStringCharacter } from './libString';
@@ -95,6 +95,7 @@ export function* writeStderrLine(message: RString): Gen<void> {
 }
 
 function checkWritable(self: RObject): void {
+  if (self.data !== 'stdout' && self.data !== 'stderr') throw rubyError(rt().c.IOError, 'not opened for writing');
   if (self.frozen) throw frozenError(self, `#<IO:<${self.data === 'stdout' ? 'STDOUT' : 'STDERR'}>>`);
 }
 

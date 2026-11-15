@@ -7665,6 +7665,33 @@ test('local variables followed by operator-like syntax stay local reads', () => 
   expect(run('x=[1,2];p x [0]')).toMatchObject({ stdout: '1\n' });
 });
 
+test('DATA rejects inherited write methods with Ruby IOError', () => {
+  expect(run('begin;DATA.write("x");rescue=>e;p e.class,e.message;end\n__END__\na\n')).toMatchObject({
+    stdout: 'IOError\n"not opened for writing"\n',
+  });
+});
+
+test('infinite Time offsets raise FloatDomainError', () => {
+  expect(run('begin;Time.at(0).getlocal(Float::INFINITY);rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'FloatDomainError\n"Infinity"\n',
+  });
+});
+
+test('Encoding singleton values are frozen', () => {
+  expect(run('p Encoding::UTF_8.frozen?,Encoding::ASCII_8BIT.frozen?')).toMatchObject({ stdout: 'true\ntrue\n' });
+});
+
+test('instance_exec and class_exec forward keyword arguments', () => {
+  expect(run('Object.new.instance_exec(x:1){|x:|p x};Class.new.class_exec(x:2){|x:|p x}')).toMatchObject({
+    stdout: '1\n2\n',
+  });
+});
+
+test('substitution blocks retain their own last regexp match', () => {
+  expect(run('"a".sub(/a/){/b/=~"b";"x"};p $&')).toMatchObject({ stdout: '"b"\n' });
+  expect(run('"a".sub("a"){/b/=~"b";"x"};p $&')).toMatchObject({ stdout: '"b"\n' });
+});
+
 test('MatchData reuses frozen subject identity', () => {
   expect(
     run('s="aa".freeze;a=[];s.scan(/a/){a<<$~};p a[0].string.equal?(s),a[0].string.equal?(a[1].string)')
