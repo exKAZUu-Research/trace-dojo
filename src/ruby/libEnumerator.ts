@@ -158,11 +158,12 @@ export function* receiverSize(recv: Value): Gen<Value> {
     const size = sourceOf(recv).size?.() ?? NIL;
     return isGenerator(size) ? yield* size : size;
   }
-  if (
-    recv instanceof RObject &&
-    truthy(yield* callMethod(recv, 'respond_to?', [sym('size'), true], undefined, undefined, { fcall: true }))
-  )
-    return yield* callMethod(recv, 'size', [], undefined, undefined, { fcall: true });
+  if (recv instanceof RObject) {
+    const available = respondsTo(recv, 'respond_to?', true)
+      ? truthy(yield* callMethod(recv, 'respond_to?', [sym('size'), true], undefined, undefined, { fcall: true }))
+      : respondsTo(recv, 'size', true);
+    if (available) return yield* callMethod(recv, 'size', [], undefined, undefined, { fcall: true });
+  }
   return NIL;
 }
 

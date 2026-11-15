@@ -9107,6 +9107,11 @@ test('Enumerable size callbacks respect method shape and visibility', () => {
       'class C;include Enumerable;def each;yield 1;end;def size;3;end;def respond_to?(*a);puts :respond;false;end;end;p C.new.map.size'
     )
   ).toMatchObject({ stdout: 'respond\nnil\n' });
+  expect(
+    run(
+      'class C<BasicObject;include ::Enumerable;def each;yield 1;end;def size;3;end;end;::Kernel.p C.new.map.size,C.new.each_slice(2).size'
+    )
+  ).toMatchObject({ stdout: '3\n2\n' });
 });
 
 test('Enumerable window sizes use custom numeric size values', () => {
