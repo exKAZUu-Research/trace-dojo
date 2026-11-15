@@ -7855,6 +7855,24 @@ test('Rational text conversion skips only Ruby numeric whitespace', () => {
   });
 });
 
+test('blockless regexp gsub! returns a mutable substitution Enumerator', () => {
+  expect(run('s="abc";e=s.gsub!(/./);p e.class,e.each{|x|x.upcase},s')).toMatchObject({
+    stdout: 'Enumerator\n"ABC"\n"ABC"\n',
+  });
+});
+
+test('Enumerator.produce exposes infinite size', () => {
+  expect(run('p Enumerator.produce(0){_1+1}.size,Enumerator.produce(0){_1+1}.lazy.take(3).size')).toMatchObject({
+    stdout: 'Infinity\n3\n',
+  });
+});
+
+test('Enumerator.new preserves the receiving subclass', () => {
+  expect(run('class E<Enumerator;def twice;[self.next,self.next];end;end;p E.new{|y|y<<1<<2}.twice')).toMatchObject({
+    stdout: '[1, 2]\n',
+  });
+});
+
 test('Proc parameters rejects unknown keyword options', () => {
   expect(run('begin;p proc{|x|}.parameters(lamda:true);rescue=>e;p e.class;end')).toMatchObject({
     stdout: 'ArgumentError\n',

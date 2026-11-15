@@ -1326,7 +1326,7 @@ for (const [name, global, bang] of [
   wrapFirst(name, function* (self, args, block) {
     if (bang && self.frozen) throw frozenError(self, strInspect(self.s));
     if (args.length === 1 && !block) {
-      if (global && !bang) return makeEnumerator(self, name, args);
+      if (global) return makeEnumerator(self, name, args);
       throw argumentError('wrong number of arguments (given 1, expected 2)');
     }
     const result = yield* substituteRegexp(self, args[0] as RObject, args[1], block, global);

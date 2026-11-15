@@ -30,7 +30,7 @@ import {
 import { iterate, iterateYielded, STOP, zipCollections } from './libEnumerable';
 import { rangeSize } from './libRange';
 import { setSize } from './libSet';
-import {
+import { type RClass,
   isRubyFloat,
   isRubyNumber,
   NIL,
@@ -41,8 +41,7 @@ import {
   RRange,
   RString,
   RSymbol,
-  type Value,
-} from './objects';
+  type Value } from './objects';
 import { type Frame, rt, RubyError, UnsupportedFeatureError } from './runtime';
 import { arr, isA, newHash, realClassOf, str, stringBytes, stringCharacterCount, truthy } from './values';
 
@@ -832,7 +831,7 @@ interface GeneratorData {
   held(): Value[];
 }
 
-sdef('Enumerator', 'new', [0, 1], function* (_self, args, block) {
+sdef('Enumerator', 'new', [0, 1], function* (self: RClass, args, block) {
   const runtime = rt();
   const generator = new RObject(runtime.c['Enumerator::Generator']);
   const data: GeneratorData = {
@@ -843,6 +842,7 @@ sdef('Enumerator', 'new', [0, 1], function* (_self, args, block) {
   };
   generator.data = data;
   const enumerator = makeEnumerator(generator, 'each', []);
+  enumerator.cls = self;
   const [size] = args;
   if (size !== undefined) {
     const source = enumerator.data as EnumeratorSource;
@@ -937,7 +937,9 @@ sdef('Enumerator', 'produce', [0, 1], function* (_self, args, block) {
       return [step, ...args];
     },
   };
-  return makeEnumerator(generator, 'each', []);
+  const enumerator = makeEnumerator(generator, 'each', []);
+  (enumerator.data as EnumeratorSource).size = () => Number.POSITIVE_INFINITY;
+  return enumerator;
 });
 
 // Lazy -----------------------------------------------------------------------------------------------------------------
