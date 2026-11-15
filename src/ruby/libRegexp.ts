@@ -13,10 +13,11 @@ import {
   toSValue,
   tryImplicitConversion,
 } from './conversions';
-import { def, extend, sdef } from './define';
+import { def, extend, sdef, sundef } from './define';
 import { argumentError, frozenError, indexError, rubyError, typeError } from './errors';
-import { digest, hashDefault, hashGet, hashSet } from './hashes';
+import { digest, hashDefault, hashGet, hashSet, stringKeyEquals, stringKeyHash } from './hashes';
 import { callBlock, callMethod, type Gen } from './interp';
+import { validStringEncoding } from './libEncoding';
 import { makeEnumerator } from './libEnumerator';
 import { copyStringEncoding, inspectStringEncoding, setBytes, sliceStringEncoding } from './libString';
 import {
@@ -42,6 +43,7 @@ import { arr, newHash, realClassOf, str, stringBytes, stringFromBytes, sym, trut
 
 export interface RegexpData {
   source: string;
+  encoding: 'US-ASCII' | 'utf8' | 'BINARY (ASCII-8BIT)';
   ignoreCase: boolean;
   multiline: boolean;
   extended: boolean;
@@ -409,7 +411,7 @@ function unsupportedClassEscape(escape: string): unknown {
 
 export function makeRegexp(
   source: string,
-  options: { ignoreCase?: boolean; multiline?: boolean; extended?: boolean }
+  options: { ignoreCase?: boolean; multiline?: boolean; extended?: boolean; sourceBinary?: boolean }
 ): RObject {
   if (hasVariableLengthLookbehind(source)) throw rubyError(rt().c.RegexpError, `invalid pattern: /${source}/`);
   if (regexpCaptureNames(source, options.extended).length > 0 && regexpHasNumberedBackref(source, options.extended))
@@ -426,6 +428,7 @@ export function makeRegexp(
   }
   const data: RegexpData = {
     source,
+    encoding: /[^\u0000-\u007F]/.test(source) ? (options.sourceBinary ? 'BINARY (ASCII-8BIT)' : 'utf8') : 'US-ASCII',
     ignoreCase: options.ignoreCase ?? false,
     multiline: options.multiline ?? false,
     extended: options.extended ?? false,
@@ -525,6 +528,16 @@ export function execAt(
 ): MatchState | undefined {
   if (start < 0 || start > charIndex(text, text.length)) return undefined;
   const data = dataOf(regexp);
+  if (source && !validStringEncoding(source))
+    throw argumentError(`invalid byte sequence in ${source.usAscii ? 'US-ASCII' : 'utf8'}`);
+  if (source && data.encoding !== 'US-ASCII' && stringBytes(source).some((byte) => byte >= 0x80)) {
+    const subjectEncoding = source.binary ? 'BINARY (ASCII-8BIT)' : source.usAscii ? 'US-ASCII' : 'utf8';
+    if (data.encoding !== subjectEncoding)
+      throw rubyError(
+        rt().c['Encoding::CompatibilityError'],
+        `incompatible encoding regexp match (${data.encoding} regexp with ${subjectEncoding} string)`
+      );
+  }
   if (data.ignoreCase && requiresMultiCharacterFold(data.source, text))
     throw new UnsupportedFeatureError('Unicode の複数文字 casefold');
   const { js } = data;
@@ -689,9 +702,10 @@ function* optionsOf(value: Value | undefined): Gen<{ ignoreCase: boolean; multil
 sdef('Regexp', ['new', 'compile'], [1, 2], function* (_self, [source, options]) {
   if (isRegexp(source)) {
     const data = dataOf(source);
-    return makeRegexp(data.source, data);
+    return makeRegexp(data.source, { ...data, sourceBinary: data.encoding === 'BINARY (ASCII-8BIT)' });
   }
-  return makeRegexp(yield* toStr(source), yield* optionsOf(options));
+  const pattern = yield* toStrValue(source);
+  return makeRegexp(pattern.s, { ...(yield* optionsOf(options)), sourceBinary: pattern.binary });
 });
 sdef('Regexp', ['escape', 'quote'], 1, function* (_self, [value]) {
   const text = value instanceof RSymbol ? value.name : yield* toStr(value);
@@ -779,6 +793,19 @@ def('Regexp', 'options', 0, (self: RObject) => {
   const data = dataOf(self);
   return BigInt((data.ignoreCase ? 1 : 0) | (data.extended ? 2 : 0) | (data.multiline ? 4 : 0));
 });
+def(
+  'Regexp',
+  'encoding',
+  0,
+  (self: RObject) =>
+    rt().c.Encoding.constants.get(
+      dataOf(self).encoding === 'BINARY (ASCII-8BIT)'
+        ? 'ASCII_8BIT'
+        : dataOf(self).encoding === 'utf8'
+          ? 'UTF_8'
+          : 'US_ASCII'
+    ) as Value
+);
 def('Regexp', 'casefold?', 0, (self: RObject) => dataOf(self).ignoreCase);
 def('Regexp', ['==', 'eql?'], 1, (self: RObject, [other]) => {
   if (!isRegexp(other)) return false;
@@ -813,7 +840,7 @@ def('Regexp', 'match?', [1, 2], function* (self: RObject, args) {
   if (subject === undefined) return false;
   const text = subject.s;
   const start = args.length > 1 ? yield* toIndex(args[1]) : 0;
-  return execAt(self, text, start < 0 ? start + charIndex(text, text.length) : start) !== undefined;
+  return execAt(self, text, start < 0 ? start + charIndex(text, text.length) : start, subject) !== undefined;
 });
 def('Regexp', '=~', 1, function* (self: RObject, [value]) {
   const subject = yield* subjectText(value);
@@ -842,6 +869,8 @@ def('Regexp', '===', 1, function* (self: RObject, [value]) {
 });
 
 // MatchData ------------------------------------------------------------------------------------------------------------
+
+sundef('MatchData', ['new', 'allocate']);
 
 function* matchIndex(match: RObject, key: Value): Gen {
   const state = stateOf(match);
@@ -879,8 +908,10 @@ def('MatchData', ['==', 'eql?'], 1, (self: RObject, [other]) => {
   const right = stateOf(other);
   const leftRegexp = dataOf(left.regexp);
   const rightRegexp = dataOf(right.regexp);
+  const leftSource = left.snapshot ?? str(left.text);
+  const rightSource = right.snapshot ?? str(right.text);
   return (
-    left.text === right.text &&
+    stringKeyEquals(leftSource, rightSource) &&
     leftRegexp.source === rightRegexp.source &&
     leftRegexp.ignoreCase === rightRegexp.ignoreCase &&
     leftRegexp.multiline === rightRegexp.multiline &&
@@ -896,8 +927,10 @@ def('MatchData', ['==', 'eql?'], 1, (self: RObject, [other]) => {
 def('MatchData', 'hash', 0, (self: RObject) => {
   const state = stateOf(self);
   const regexp = dataOf(state.regexp);
+  const source = state.snapshot ?? str(state.text);
+  const encoding = source.binary && stringBytes(source).some((byte) => byte >= 0x80) ? 'binary' : 'ascii-compatible';
   return BigInt(
-    `0x${digest(JSON.stringify([state.text, regexp.source, regexp.ignoreCase, regexp.multiline, regexp.extended, state.groups]))}`
+    `0x${digest(JSON.stringify([String(stringKeyHash(source)), encoding, regexp.source, regexp.ignoreCase, regexp.multiline, regexp.extended, state.groups]))}`
   );
 });
 def('MatchData', 'named_captures', 0, function* (self: RObject) {
@@ -1236,6 +1269,7 @@ for (const name of ['index', 'rindex'] as const) {
     const length = charIndex(self.s, self.s.length);
     let start = args.length > 1 ? yield* toIndex(args[1]) : name === 'index' ? 0 : length;
     if (start < 0) start += length;
+    if (name === 'rindex' && start > length) start = length;
     if (start < 0 || start > length) return setLastMatch(undefined) && NIL;
     if (name === 'index') {
       const state = execAt(regexp, self.s, start, self);
@@ -1392,7 +1426,7 @@ def('String', 'match', [1, 2], function* (self: RString, args, block) {
 def('String', 'match?', [1, 2], function* (self: RString, args) {
   const regexp = yield* asRegexp(args[0]);
   const start = args.length > 1 ? yield* toIndex(args[1]) : 0;
-  return execAt(regexp, self.s, start < 0 ? start + charIndex(self.s, self.s.length) : start) !== undefined;
+  return execAt(regexp, self.s, start < 0 ? start + charIndex(self.s, self.s.length) : start, self) !== undefined;
 });
 for (const name of ['=~', 'match', 'match?']) {
   def('Symbol', name, [1, 2], (self: RSymbol, args, block) => callMethod(str(self.name), name, args, undefined, block));

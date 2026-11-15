@@ -1447,12 +1447,6 @@ function textIndexAtByte(text: string, offset: number, mode: StringTextMode): nu
   }
   return text.length;
 }
-for (const name of ['match', 'match?', '=~']) {
-  def('String', name, [1, 2], () => {
-    throw new UnsupportedFeatureError('正規表現');
-  });
-}
-
 // Case and whitespace -------------------------------------------------------------------------------------------------
 
 function capitalize(text: string): string {

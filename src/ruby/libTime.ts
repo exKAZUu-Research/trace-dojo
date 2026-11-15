@@ -118,8 +118,11 @@ function* fieldArgs(args: Value[]): Gen<{ fields: number[]; seconds: number }> {
 function* fieldValue(arg: Value, index: number): Gen<number> {
   if (arg === NIL) return index === 0 ? Number(yield* toInt(arg)) : index < 3 ? 1 : 0;
   if (!(arg instanceof RString)) return Number(yield* toInt(arg));
-  const month = index === 1 ? MONTHS.findIndex((name) => name.toLowerCase().startsWith(arg.s.toLowerCase())) : -1;
-  if (month >= 0 && arg.s.length >= 3) return month + 1;
+  const month =
+    index === 1 && arg.s.length === 3
+      ? MONTHS.findIndex((name) => name.slice(0, 3).toLowerCase() === arg.s.toLowerCase())
+      : -1;
+  if (month >= 0) return month + 1;
   if (/^\s*[+-]?\d+\s*$/.test(arg.s)) return Number(BigInt(arg.s.trim()));
   throw argumentError(
     index === 0 ? `can't parse: ${JSON.stringify(arg.s)}` : `invalid value for Integer(): ${JSON.stringify(arg.s)}`
@@ -174,7 +177,9 @@ function exactOffset(value: Value): Value | undefined {
 }
 
 function zoneFromOffset(value: Value): TimeData['zone'] {
-  return value instanceof RString && (value.s === 'UTC' || value.s === 'Z') ? 'utc' : 'fixed';
+  return value instanceof RString && (value.s === 'UTC' || value.s === 'Z' || /^-00:?00(?::00)?$/.test(value.s))
+    ? 'utc'
+    : 'fixed';
 }
 
 function calendarArgs(args: Value[]): Value[] {

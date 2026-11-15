@@ -5155,6 +5155,10 @@ test('Rational String conversion remains available and unsupported reflection re
   });
 });
 
+test('integral Rational exponents keep exact Rational results', () => {
+  expect(run('p Rational(2,3)**2r,Rational(-1,3)**(-2r)')).toMatchObject({ stdout: '(4/9)\n(9/1)\n' });
+});
+
 test('Lazy Enumerable methods and external next share its source correctly', () => {
   expect(run('p [1,2,3].lazy.map{|x|x*2}.sum,[1,2,3].lazy.map{|x|x*2}.next')).toMatchObject({
     stdout: '12\n2\n',
@@ -6706,6 +6710,12 @@ test('Struct and Data allocate nil-filled member storage', () => {
   });
 });
 
+test('Data subclasses do not inherit the define factory', () => {
+  expect(run('D=Data.define(:a);p D.respond_to?(:define);begin;D.define(:x);rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'false\nNoMethodError\n',
+  });
+});
+
 test('Struct and Data initializers enforce their freeze lifecycle', () => {
   expect(
     run('S=Struct.new(:x);s=S.new(1).freeze;begin;s.send(:initialize,2);rescue=>e;p e.class;end;p s')
@@ -6784,6 +6794,23 @@ test('allocated Regexp and Time reject native operations as Ruby errors', () => 
       'begin;Regexp.allocate.match("a");rescue=>e;p e.class,e.message;end;begin;Time.allocate.year;rescue=>e;p e.class,e.message;end'
     )
   ).toMatchObject({ stdout: 'TypeError\n"uninitialized Regexp"\nTypeError\n"uninitialized Time"\n' });
+});
+
+test('Method and MatchData reject public construction', () => {
+  expect(
+    run(
+      'begin;Method.new;rescue=>e;p e.class;end;begin;Method.allocate;rescue=>e;p e.class;end;begin;MatchData.new;rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({ stdout: 'NoMethodError\nTypeError\nNoMethodError\n' });
+});
+
+test('unsupported Proc composition and Hash subset operators fail explicitly', () => {
+  expect(run('proc{|x|x} >> proc{|x|x}')).toMatchObject({
+    uncaughtException: expect.stringContaining('Proc#>> は、この採点環境では使えません。'),
+  });
+  expect(run('{a:1} <= {a:1,b:2}')).toMatchObject({
+    uncaughtException: expect.stringContaining('Hash#<= は、この採点環境では使えません。'),
+  });
 });
 
 test('regexp replacement Hash uses its default callback', () => {
@@ -6875,6 +6902,10 @@ test('exclusive Range max follows successor iteration for Symbols', () => {
   });
 });
 
+test('regexp rindex clamps offsets beyond the string end', () => {
+  expect(run('p "abc".rindex(/a/,100),"abc".index(/a/,100)')).toMatchObject({ stdout: '0\nnil\n' });
+});
+
 test('non-leading unparenthesized command arguments fail before execution', () => {
   for (const source of ['x=[1,2]; p x, x.join ","', 'def f1;1;end;def f2(a);a;end;p f1, f2 2'])
     expect(run(source)).toMatchObject({ kind: 'compileError' });
@@ -6962,6 +6993,22 @@ test('MatchData source snapshots preserve binary bytes and freezing', () => {
   expect(run('m=/./.match(255.chr);p m[0].bytes,m.string.bytes,m[0].encoding')).toMatchObject({
     stdout: '[255]\n[255]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
   });
+  expect(run('a=/./.match("é");b=/./.match(233.chr);p a==b,a.eql?(b),{a=>1}[b]')).toMatchObject({
+    stdout: 'false\nfalse\nnil\n',
+  });
+  expect(
+    run(
+      'begin;/é/.match?(233.chr);rescue=>e;p e.class,e.message;end;begin;Regexp.new(233.chr).match?("é");rescue=>e;p e.class,e.message;end'
+    )
+  ).toMatchObject({
+    stdout:
+      'Encoding::CompatibilityError\n"incompatible encoding regexp match (UTF-8 regexp with BINARY (ASCII-8BIT) string)"\nEncoding::CompatibilityError\n"incompatible encoding regexp match (BINARY (ASCII-8BIT) regexp with UTF-8 string)"\n',
+  });
+  expect(
+    run('s=String.new("é",encoding:"US-ASCII");begin;s.match?(/x/);rescue=>e;p e.class,e.message;end')
+  ).toMatchObject({
+    stdout: 'ArgumentError\n"invalid byte sequence in US-ASCII"\n',
+  });
   expect(run('p /./.match(233.chr)')).toMatchObject({ stdout: '#<MatchData "\\xE9">\n' });
   expect(run('s=255.chr;p s.split(/x/).first.bytes,s.partition(/x/).first.bytes,s[/./].bytes')).toMatchObject({
     stdout: '[255]\n[255]\n[255]\n',
@@ -7007,6 +7054,10 @@ test('Time constructor validates field widths before calendar bounds', () => {
   ).toMatchObject({ stdout: 'FloatDomainError\n"NaN"\nFloatDomainError\n"Infinity"\n' });
   expect(run('begin;Time.utc(2024,1,1,0,0,0,0,1,2);rescue=>e;p e.class,e.message;end')).toMatchObject({
     stdout: 'ArgumentError\n"wrong number of arguments (given 9, expected 1..8)"\n',
+  });
+  expect(run('begin;Time.utc(2024,"February");rescue=>e;p e.class;end')).toMatchObject({ stdout: 'ArgumentError\n' });
+  expect(run('p Time.at(0).getlocal("-00:00").utc?,Time.at(0).getlocal("-0000").zone')).toMatchObject({
+    stdout: 'true\n"UTC"\n',
   });
 });
 

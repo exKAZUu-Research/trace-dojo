@@ -38,7 +38,7 @@ def(
   (self: RString) =>
     rt().c.Encoding.constants.get(self.binary ? 'ASCII_8BIT' : self.usAscii ? 'US_ASCII' : 'UTF_8') as Value
 );
-def('String', 'valid_encoding?', 0, (self: RString) => {
+export function validStringEncoding(self: RString): boolean {
   if (self.usAscii) return stringBytes(self).every((byte) => byte < 0x80);
   if (self.binary || !self.rawBytes) return true;
   try {
@@ -47,7 +47,8 @@ def('String', 'valid_encoding?', 0, (self: RString) => {
   } catch {
     return false;
   }
-});
+}
+def('String', 'valid_encoding?', 0, (self: RString) => validStringEncoding(self));
 
 def(
   'Kernel',

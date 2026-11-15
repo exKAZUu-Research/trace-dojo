@@ -21,7 +21,8 @@ for (const [owner, methods] of Object.entries({
   Set: ['compare_by_identity', 'compare_by_identity?', 'divide'],
   Symbol: ['encoding', 'match', 'match?'],
   NilClass: ['rationalize', 'to_c', 'to_r'],
-  Proc: ['binding', 'ruby2_keywords', 'source_location'],
+  Proc: ['binding', 'ruby2_keywords', 'source_location', '>>', '<<'],
+  Hash: ['<', '<=', '>', '>='],
   Module: [
     'autoload',
     'autoload?',

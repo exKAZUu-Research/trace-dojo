@@ -1,6 +1,6 @@
 import type { Params } from './ast';
 import { className, inspect, tryImplicitConversion } from './conversions';
-import { def } from './define';
+import { def, sdef, sundef } from './define';
 import { argumentError, frozenError, nameError, typeError } from './errors';
 import { digest, hashGet } from './hashes';
 import {
@@ -35,6 +35,13 @@ import {
 } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { arr, classOf, isA, realClassOf, singletonClassOf, str, sym, truthy } from './values';
+
+for (const owner of ['Method', 'UnboundMethod']) {
+  sundef(owner, 'new');
+  sdef(owner, 'allocate', 0, () => {
+    throw typeError(`allocator undefined for ${owner}`);
+  });
+}
 
 /** The name a method takes as a Symbol or a String, raising as Ruby does for anything else. */
 export function* nameOf(value: Value): Gen<string> {

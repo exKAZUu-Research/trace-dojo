@@ -118,6 +118,8 @@ function* newStructClass(superclass: RClass, members: string[], layout: Omit<Lay
   layouts.set(cls, { ...layout, members });
   defineAccessors(cls, members, layout.kind === 'struct');
   const singleton = singletonClassOf(cls);
+  if (layout.kind === 'data')
+    addMethod(singleton, { name: 'define', owner: singleton, visibility: 'public', body: { kind: 'undefined' } });
   for (const name of ['new', '[]']) {
     addMethod(singleton, {
       name,

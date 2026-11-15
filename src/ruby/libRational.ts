@@ -176,6 +176,7 @@ function* rationalDivision(
 }
 def('Rational', '**', 1, function* (self: RObject, [exponent]) {
   const { numerator, denominator } = fractionOf(self);
+  if (isRational(exponent) && fractionOf(exponent).denominator === 1n) exponent = fractionOf(exponent).numerator;
   if (typeof exponent === 'bigint') {
     if (exponent === 0n) return makeRational(1n, 1n);
     if (numerator === 0n) {
