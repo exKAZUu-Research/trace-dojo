@@ -558,16 +558,7 @@ export function execAt(
 ): MatchState | undefined {
   if (start < 0 || start > charIndex(text, text.length)) return undefined;
   const data = dataOf(regexp);
-  if (source && !validated && !validStringEncoding(source))
-    throw argumentError(`invalid byte sequence in ${source.usAscii ? 'US-ASCII' : RUBY_UTF8}`);
-  if (source && data.encoding !== 'US-ASCII' && stringBytes(source).some((byte) => byte >= 0x80)) {
-    const subjectEncoding = source.binary ? 'BINARY (ASCII-8BIT)' : source.usAscii ? 'US-ASCII' : RUBY_UTF8;
-    if (data.encoding !== subjectEncoding)
-      throw rubyError(
-        rt().c['Encoding::CompatibilityError'],
-        `incompatible encoding regexp match (${data.encoding} regexp with ${subjectEncoding} string)`
-      );
-  }
+  if (source && !validated) validateRegexpSubject(regexp, source);
   if (data.ignoreCase && requiresMultiCharacterFold(data.source, text))
     throw new UnsupportedFeatureError('Unicode の複数文字 casefold');
   const { js } = data;
@@ -606,6 +597,19 @@ export function execAt(
     namedGroups,
     regexp,
   };
+}
+
+function validateRegexpSubject(regexp: RObject, source: RString): void {
+  if (!validStringEncoding(source))
+    throw argumentError(`invalid byte sequence in ${source.usAscii ? 'US-ASCII' : RUBY_UTF8}`);
+  const data = dataOf(regexp);
+  if (data.encoding === 'US-ASCII' || !stringBytes(source).some((byte) => byte >= 0x80)) return;
+  const subjectEncoding = source.binary ? 'BINARY (ASCII-8BIT)' : source.usAscii ? 'US-ASCII' : RUBY_UTF8;
+  if (data.encoding !== subjectEncoding)
+    throw rubyError(
+      rt().c['Encoding::CompatibilityError'],
+      `incompatible encoding regexp match (${data.encoding} regexp with ${subjectEncoding} string)`
+    );
 }
 
 function requiresMultiCharacterFold(source: string, text: string): boolean {
@@ -701,8 +705,7 @@ export function matchGlobal(name: string): Value {
 function allMatches(regexp: RObject, source: RString): MatchState[] {
   const matches: MatchState[] = [];
   const snapshot = copyStringEncoding(source);
-  if (!validStringEncoding(source))
-    throw argumentError(`invalid byte sequence in ${source.usAscii ? 'US-ASCII' : RUBY_UTF8}`);
+  validateRegexpSubject(regexp, source);
   let start = 0;
   const text = source.s;
   const length = charIndex(text, text.length);
@@ -870,8 +873,7 @@ function matchAt(regexp: RObject, subject: RString, offset: number): MatchState 
   const text = subject.s;
   const start = offset < 0 ? offset + charIndex(text, text.length) : offset;
   if (start < 0) return undefined;
-  if (!validStringEncoding(subject))
-    throw argumentError(`invalid byte sequence in ${subject.usAscii ? 'US-ASCII' : RUBY_UTF8}`);
+  validateRegexpSubject(regexp, subject);
   return execAt(regexp, text, start, subject, undefined, true);
 }
 
@@ -1101,7 +1103,7 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
   let position = 0;
   for (const match of replacement.s.matchAll(/\\(k<([\p{ID_Start}_][\p{ID_Continue}_]*)>|[0-9&+\\`'])/gu)) {
     rt().spend(1);
-    append(sliceStringEncoding(replacement, position, match.index));
+    if (match.index > position) append(sliceStringEncoding(replacement, position, match.index));
     const [, code, name] = match;
     let part: RString;
     if (name !== undefined) {
@@ -1142,7 +1144,7 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
     append(part);
     position = match.index + match[0].length;
   }
-  append(sliceStringEncoding(replacement, position));
+  if (position < replacement.s.length) append(sliceStringEncoding(replacement, position));
   return concatRegexpPieces(parts, limit);
 }
 

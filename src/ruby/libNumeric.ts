@@ -6,6 +6,7 @@ import {
   inspect,
   numericCompare,
   numericEquals,
+  supportsImplicitConversion,
   toFloat,
   toInt,
   toRubyInt,
@@ -27,7 +28,7 @@ import {
 } from './floatMath';
 import { exactFloatPower } from './floatPower';
 import { chargeIntegerResult, integerBits } from './integerBudget';
-import { callBlock, callMethod, type Gen, respondsTo } from './interp';
+import { callBlock, callMethod, type Gen } from './interp';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { makeRational } from './libRational';
 import { boxFloat, NIL, RArray, RFloat, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
@@ -53,8 +54,8 @@ function coerceError(value: Value, into: string): unknown {
 
 /** Applies an operator to a number and a value that is not one, through the value's `coerce`. */
 function* coerceBinary(self: Num, other: Value, op: string, target?: string): Gen {
-  if (respondsTo(other, 'coerce', true)) {
-    const pair = yield* callMethod(other, 'coerce', [callbackReceiver(self)], undefined, undefined, { fcall: true });
+  const pair = yield* tryImplicitConversion(other, 'coerce', [callbackReceiver(self)]);
+  if (pair !== undefined) {
     if (!(pair instanceof RArray) || pair.items.length !== 2) throw typeError('coerce must return [x, y]');
     return yield* callMethod(pair.items[0], op, [pair.items[1]]);
   }
@@ -62,10 +63,8 @@ function* coerceBinary(self: Num, other: Value, op: string, target?: string): Ge
 }
 
 function* coerceCompare(self: Num, other: Value, op: string): Gen {
-  if (respondsTo(other, 'coerce', true)) {
-    const pair = yield* callMethod(other, 'coerce', [callbackReceiver(self)], undefined, undefined, { fcall: true });
-    if (pair instanceof RArray && pair.items.length === 2) return yield* callMethod(pair.items[0], op, [pair.items[1]]);
-  }
+  const pair = yield* tryImplicitConversion(other, 'coerce', [callbackReceiver(self)]);
+  if (pair instanceof RArray && pair.items.length === 2) return yield* callMethod(pair.items[0], op, [pair.items[1]]);
   throw comparisonFailed(self, other);
 }
 
@@ -213,11 +212,9 @@ for (const owner of ['Integer', 'Float']) {
       const order = numericCompare(self, other);
       return order === undefined ? NIL : BigInt(order);
     }
-    if (respondsTo(other, 'coerce', true)) {
-      const pair = yield* callMethod(other, 'coerce', [callbackReceiver(self)], undefined, undefined, { fcall: true });
-      if (pair instanceof RArray && pair.items.length === 2)
-        return yield* callMethod(pair.items[0], '<=>', pair.items.slice(1));
-    }
+    const pair = yield* tryImplicitConversion(other, 'coerce', [callbackReceiver(self)]);
+    if (pair instanceof RArray && pair.items.length === 2)
+      return yield* callMethod(pair.items[0], '<=>', pair.items.slice(1));
     return NIL;
   });
   for (const op of ['<', '<=', '>', '>=']) {
@@ -387,7 +384,7 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
   }
   if (step === 0n || step === 0 || (!isNum(step) && truthy(yield* callMethod(step, '==', [0n]))))
     throw argumentError("step can't be 0");
-  if (!isNum(step) && !respondsTo(step, 'coerce', true))
+  if (!isNum(step) && !(yield* supportsImplicitConversion(step, 'coerce')))
     throw typeError(`no implicit conversion of ${realClassOf(step).name} into Integer`);
   if (!block) return makeEnumerator(self, 'step', args, keywords);
   if (!isNum(step)) return yield* stepCustomNumeric(self, limit, step, block);
@@ -845,8 +842,8 @@ export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen 
       throw argumentError('base specified for non string value');
     }
     if (convertedString !== NIL) throw integerStringConversionError(value, convertedString);
-    if (respondsTo(value, 'to_i', true)) {
-      const converted = yield* callMethod(value, 'to_i', [], undefined, undefined, { fcall: true });
+    const converted = yield* tryImplicitConversion(value, 'to_i');
+    if (converted !== undefined) {
       if (typeof converted === 'bigint') return converted;
       throw typeError(
         `can't convert ${realClassOf(value).name} to Integer (${realClassOf(value).name}#to_i gives ${realClassOf(converted).name})`
@@ -921,8 +918,8 @@ export function* kernelFloat(value: Value, keywords: RHash | undefined): Gen {
       return parsed;
     }
     if (value === NIL) throw typeError("can't convert nil into Float");
-    if (respondsTo(value, 'to_f', true)) {
-      const converted = yield* callMethod(value, 'to_f', [], undefined, undefined, { fcall: true });
+    const converted = yield* tryImplicitConversion(value, 'to_f');
+    if (converted !== undefined) {
       if (typeof converted === 'number' || converted instanceof RFloat) return converted;
       throw typeError(
         `can't convert ${realClassOf(value).name} to Float (${realClassOf(value).name}#to_f gives ${realClassOf(converted).name})`

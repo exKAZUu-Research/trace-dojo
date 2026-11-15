@@ -7180,8 +7180,15 @@ test('Regexp encoding and matching respect escaped characters and binary subject
     stdout: 'nil\nArgumentError\n',
   });
   expect(run('p String.new("a"*20000,encoding:"US-ASCII").scan(/./).size')).toMatchObject({ stdout: '20000\n' });
+  expect(run('p ("a"*20000).scan(/é|a/).size')).toMatchObject({ stdout: '20000\n' });
 });
 
 test('BasicObject receives block instance evaluation', () => {
   expect(run('class B < BasicObject;def run;instance_eval{1};end;end;p B.new.run')).toMatchObject({ stdout: '1\n' });
+});
+
+test('numeric conversions call dynamic responders', () => {
+  const source =
+    'class D;def method_missing(m,*a);return 5 if m==:to_i;return 2.5 if m==:to_f;return [a[0],11] if m==:coerce;super;end;end;p Integer(D.new),Float(D.new),1+D.new';
+  expect(run(source)).toMatchObject({ stdout: '5\n2.5\n12\n' });
 });

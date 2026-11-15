@@ -82,6 +82,10 @@ export function* toInt(value: Value): Gen<bigint> {
   throw implicitConversionError(value, 'Integer');
 }
 
+export function* supportsImplicitConversion(value: Value, name: string): Gen<boolean> {
+  return yield* respondsToConversion(value, name, classOf(value).findMethod(name) !== undefined);
+}
+
 function* respondsToConversion(value: Value, name: string, resolved: boolean): Gen<boolean> {
   const responder = classOf(value).findMethod('respond_to?');
   if (!responder) {
@@ -105,11 +109,11 @@ function* respondsToConversion(value: Value, name: string, resolved: boolean): G
   return missing !== undefined && missing.body.kind !== 'native';
 }
 
-export function* tryImplicitConversion(value: Value, name: string): Gen<Value | undefined> {
+export function* tryImplicitConversion(value: Value, name: string, args: Value[] = []): Gen<Value | undefined> {
   const resolved = classOf(value).findMethod(name);
   if (!(yield* respondsToConversion(value, name, resolved !== undefined))) return undefined;
   try {
-    return yield* callMethod(value, name, [], undefined, undefined, { fcall: true });
+    return yield* callMethod(value, name, args, undefined, undefined, { fcall: true });
   } catch (error) {
     if (!resolved && error instanceof RubyError && isA(error.exception, rt().c.NoMethodError)) return undefined;
     throw error;
