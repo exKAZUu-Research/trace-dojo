@@ -128,16 +128,29 @@ function* fieldValue(arg: Value, index: number): Gen<number> {
   const inspected = yield* inspectValue(arg);
   const bytes = stringBytes(inspected);
   const binary = inspected.binary || inspected.usAscii || bytes.every((byte) => byte < 0x80);
+  const escapeBytes = binary && bytes.some((byte) => byte >= 0x80);
   const shown = binary
-    ? Array.from(bytes, (byte) =>
-        byte >= 0x80 ? `\\x${byte.toString(16).toUpperCase().padStart(2, '0')}` : String.fromCodePoint(byte)
-      ).join('')
+    ? Array.from(bytes, (byte) => (escapeBytes ? escapedCalendarByte(byte) : String.fromCodePoint(byte))).join('')
     : inspected.s;
   const message = `${index === 0 ? "can't parse: " : 'invalid value for Integer(): '}${shown}`;
   throw rubyError(
     rt().c.ArgumentError,
     binary ? stringFromBytes(new TextEncoder().encode(message), true) : str(message)
   );
+}
+
+function escapedCalendarByte(byte: number): string {
+  if (byte === 0) return String.raw`\0`;
+  if (byte === 7) return String.raw`\a`;
+  if (byte === 8) return String.raw`\b`;
+  if (byte === 9) return String.raw`\t`;
+  if (byte === 10) return String.raw`\n`;
+  if (byte === 11) return String.raw`\v`;
+  if (byte === 12) return String.raw`\f`;
+  if (byte === 13) return String.raw`\r`;
+  if (byte === 27) return String.raw`\e`;
+  if (byte < 32 || byte >= 127) return `\\x${byte.toString(16).toUpperCase().padStart(2, '0')}`;
+  return String.fromCodePoint(byte);
 }
 
 function* secondsValue(arg: Value): Gen<number> {

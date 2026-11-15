@@ -9010,6 +9010,11 @@ test('calendar microseconds preserve tiny Floats and reject non-ASCII numeric wh
   });
   expect(
     run(
+      String.raw`class S<String;def inspect;255.chr+"\n";end;end;begin;Time.utc(2024,1,1,0,0,0,S.new("bad"));rescue=>e;p e.message.bytes.last(4);end`
+    )
+  ).toMatchObject({ stdout: '[70, 70, 92, 110]\n' });
+  expect(
+    run(
       'class S<String;def inspect;"é";end;end;begin;Time.utc(2024,1,1,0,0,0,S.new("bad"));rescue=>e;p e.message.encoding;end'
     )
   ).toMatchObject({ stdout: '#<Encoding:UTF-8>\n' });
