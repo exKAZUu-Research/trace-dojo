@@ -7695,6 +7695,14 @@ test('finite exact Time offsets report range errors before Float overflow', () =
   });
 });
 
+test('exact fractional Time offsets stay in range near the limit', () => {
+  expect(
+    run('x=Rational(86400*10**15-1,10**15);p Time.at(0).getlocal(x).utc_offset,Time.at(0).getlocal(-x).utc_offset')
+  ).toMatchObject({
+    stdout: '(86399999999999999999/1000000000000000)\n(-86399999999999999999/1000000000000000)\n',
+  });
+});
+
 test('Encoding singleton values are frozen', () => {
   expect(run('p Encoding::UTF_8.frozen?,Encoding::ASCII_8BIT.frozen?')).toMatchObject({ stdout: 'true\ntrue\n' });
 });

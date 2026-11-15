@@ -158,7 +158,7 @@ function* parseOffset(value: Value): Gen<number> {
     const offset = yield* toFloat(value);
     if (!Number.isFinite(offset))
       throw floatDomainError(Number.isNaN(offset) ? 'NaN' : offset > 0 ? 'Infinity' : '-Infinity');
-    if (Math.abs(offset) >= 86_400) throw argumentError('utc_offset out of range');
+    if (isRubyFloat(value) && Math.abs(offset) >= 86_400) throw argumentError('utc_offset out of range');
     return offset;
   }
   const text = yield* toStr(value);
