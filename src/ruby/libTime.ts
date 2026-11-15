@@ -11,7 +11,7 @@ import {
 import { def, sdef } from './define';
 import { argumentError, floatDomainError, frozenError, rangeError, rubyError, typeError } from './errors';
 import { bigintRatio } from './floatMath';
-import type { Gen } from './interp';
+import { callMethod, type Gen } from './interp';
 import { floatToRational, isRational } from './libRational';
 import { isRubyFloat, NIL, RObject, RString, type Value } from './objects';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
@@ -177,12 +177,18 @@ function* exactNumber(value: Value): Gen<number | bigint | RObject> {
       if (message instanceof RString && message.s.endsWith('into Float')) {
         if (value instanceof RString) throw typeError("can't convert String into an exact number");
         const rational = yield* tryImplicitConversion(value, 'to_r');
+        if (!(yield* supportsImplicitConversion(value, 'to_int')))
+          throw typeError(`can't convert ${realClassOf(value).name} into an exact number`);
         if (rational !== undefined) {
           if (!isRational(rational)) throw typeError(`can't convert ${realClassOf(value).name} into an exact number`);
           return rational;
         }
-        if (yield* supportsImplicitConversion(value, 'to_int')) return yield* toInt(value);
-        throw typeError(`can't convert ${realClassOf(value).name} into an exact number`);
+        const integer = yield* callMethod(value, 'to_int', [], undefined, undefined, { fcall: true });
+        if (typeof integer !== 'bigint')
+          throw typeError(
+            `can't convert ${realClassOf(value).name} to Integer (${realClassOf(value).name}#to_int gives ${realClassOf(integer).name})`
+          );
+        return integer;
       }
     }
     throw error;

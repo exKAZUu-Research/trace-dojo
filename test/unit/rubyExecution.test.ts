@@ -9251,6 +9251,17 @@ test('Time exact arguments prefer fractional to_r hooks', () => {
   ).toMatchObject({ stdout: 'true\n0.3333333333333333\n' });
 });
 
+test('Time exact wrappers require to_int availability without probing twice', () => {
+  expect(
+    run('class N;def to_r;Rational(1,3);end;end;begin;p Time.at(N.new).to_f;rescue=>e;p e.class,e.message;end')
+  ).toMatchObject({ stdout: 'TypeError\n"can\'t convert N into an exact number"\n' });
+  expect(
+    run(
+      'class N;def respond_to?(n,*);return super if n!=:to_int;@n=(@n||0)+1;@n==1;end;def to_int;3;end;end;p Time.at(N.new).to_i'
+    )
+  ).toMatchObject({ stdout: '3\n' });
+});
+
 test('fixed format rounds Rational and Integer values exactly', () => {
   expect(
     run('p format("%.2f",Rational(1,8)),format("%.0f",Rational(5,2)),format("%.20f",Rational(1,3))')
