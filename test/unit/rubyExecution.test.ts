@@ -8391,6 +8391,11 @@ test('main delegates define_method and has no protected method', () => {
   expect(run('define_method(:bar){|x=2|x};p bar;begin;protected :bar;rescue=>e;p e.class;end')).toMatchObject({
     stdout: '2\nNoMethodError\n',
   });
+  expect(
+    run('p respond_to?(:define_method,true),respond_to?(:using,true),respond_to?(:ruby2_keywords,true)')
+  ).toMatchObject({
+    stdout: 'true\ntrue\ntrue\n',
+  });
 });
 
 test('alias and undef decode quoted symbol names', () => {

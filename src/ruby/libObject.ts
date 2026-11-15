@@ -1286,7 +1286,8 @@ export function defineMainObject(main: RObject): void {
         kind: 'native',
         fn: (_self, args, block) => {
           if (name === 'include') return callMethod(object, 'include', args);
-          if (name === 'define_method') return callMethod(object, name, args, undefined, block);
+          if (name === 'define_method' || name === 'using') return callMethod(object, name, args, undefined, block);
+          if (name === 'ruby2_keywords') throw new UnsupportedFeatureError(name);
           return setVisibility(object, args, visibility);
         },
         min: 0,
@@ -1297,6 +1298,8 @@ export function defineMainObject(main: RObject): void {
   };
   delegate('include', 'public');
   delegate('define_method', 'public');
+  delegate('using', 'public');
+  delegate('ruby2_keywords', 'public');
   delegate('public', 'public');
   delegate('private', 'private');
   for (const name of ['to_s', 'inspect']) {
