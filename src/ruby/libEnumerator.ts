@@ -341,7 +341,9 @@ function sourceOf(self: RObject): EnumeratorSource {
 
 /** Runs the enumerator's method, passing each yielded value (several packed into an array) to `visit`. */
 export function* iterateEnumerator(self: RObject, visit: (value: Value) => Gen): Gen {
-  return yield* iterateEnumeratorArgs(self, (args) => visit(args.length === 1 ? args[0] : arr(args)));
+  return yield* iterateEnumeratorArgs(self, (args) =>
+    visit(args.length === 0 ? NIL : args.length === 1 ? args[0] : arr(args))
+  );
 }
 
 function* iterateEnumeratorArgs(self: RObject, visit: (args: Value[]) => Gen): Gen {

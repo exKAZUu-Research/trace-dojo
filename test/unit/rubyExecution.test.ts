@@ -8695,6 +8695,21 @@ test('Regexp errors preserve escaped invalid source bytes', () => {
   expect(run(String.raw`begin;Regexp.new("\\\xFF");rescue=>e;p e.message.bytes.last(4);end`)).toMatchObject({
     stdout: '[47, 92, 255, 47]\n',
   });
+  expect(run(String.raw`begin;Regexp.new("\\\\\xFF");rescue=>e;p e.message.bytes.last(8);end`)).toMatchObject({
+    stdout: '[47, 92, 92, 92, 120, 70, 70, 47]\n',
+  });
+});
+
+test('Regexp case matching rejects non-String to_str results', () => {
+  expect(run('o=Object.new;def o.to_str;:abc;end;begin;p(/a/===o);rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'TypeError\n"can\'t convert Object to String (Object#to_str gives Symbol)"\n',
+  });
+});
+
+test('Enumerator yields without arguments become nil entries', () => {
+  expect(run('e=Enumerator.new{|y|y.yield};p [e.to_a,e.first]')).toMatchObject({
+    stdout: '[[nil], nil]\n',
+  });
 });
 
 test('Struct bracket constructor ignores an overridden new method', () => {

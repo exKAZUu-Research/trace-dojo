@@ -869,18 +869,27 @@ function invalidPatternMessage(pattern: RString): RString {
   rt().spend(Math.ceil(source.length / 256));
   for (let index = 0; index < source.length;) {
     const first = source[index];
-    if (first === 92 && (source[index + 1] ?? 0) >= 0x80) {
+    if (first === 92) {
       appendByte(first);
-      const next = source[index + 1];
-      const width = next < 0xe0 ? 2 : next < 0xf0 ? 3 : 4;
+      index++;
+      if (source[index] === 92) {
+        appendByte(92);
+        index++;
+        continue;
+      }
+      if ((source[index] ?? 0) < 0x80) continue;
+      const escaped = source[index];
       let count = 1;
-      if (index + 1 + width <= source.length)
-        try {
-          decoder.decode(source.subarray(index + 1, index + 1 + width));
-          count = width;
-        } catch {}
-      for (let offset = 0; offset < count; offset++) appendByte(source[index + 1 + offset]);
-      index += 1 + count;
+      if (!pattern.usAscii) {
+        const width = escaped < 0xe0 ? 2 : escaped < 0xf0 ? 3 : 4;
+        if (index + width <= source.length)
+          try {
+            decoder.decode(source.subarray(index, index + width));
+            count = width;
+          } catch {}
+      }
+      for (let offset = 0; offset < count; offset++) appendByte(source[index + offset]);
+      index += count;
       continue;
     }
     if (first < 0x80) {
@@ -1086,7 +1095,7 @@ def('Regexp', '===', 1, function* (self: RObject, [value]) {
     setLastMatch(undefined);
     return false;
   }
-  if (!(converted instanceof RString) && !(converted instanceof RSymbol)) {
+  if (!(converted instanceof RString) && (converted !== value || !(converted instanceof RSymbol))) {
     const name = realClassOf(value).name;
     throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
   }
