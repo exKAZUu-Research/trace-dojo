@@ -8493,3 +8493,18 @@ test('empty regexp classes fail before program execution', () => {
   expect(run('puts "before"; p /[]/')).toMatchObject({ kind: 'compileError' });
   expect(run('begin;Regexp.new("[]");rescue=>e;p e.class;end')).toMatchObject({ stdout: 'RegexpError\n' });
 });
+
+test('Regexp.new rejects invalid pattern encoding', () => {
+  expect(run(String.raw`begin;Regexp.new("\xFF");rescue=>e;p e.class,e.message;end`)).toMatchObject({
+    stdout: 'RegexpError\n"invalid multibyte character: /\\\\xFF/"\n',
+  });
+  expect(run('begin;Regexp.new(String.new("é",encoding:"US-ASCII"));rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'RegexpError\n',
+  });
+});
+
+test('braced Unicode regexp escapes accept codepoint lists', () => {
+  expect(run(String.raw`p /\u{41 42}/.match("AB").to_a,/\u{3042 3044}/.match("あい").to_a`)).toMatchObject({
+    stdout: '["AB"]\n["あい"]\n',
+  });
+});

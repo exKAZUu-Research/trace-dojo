@@ -21,6 +21,7 @@ import { validStringEncoding } from './libEncoding';
 import { makeEnumerator } from './libEnumerator';
 import {
   copyStringEncoding,
+  inspectRawBytes,
   inspectStringEncoding,
   setBytes,
   sliceStringEncoding,
@@ -147,11 +148,21 @@ export function translate(source: string, extended: boolean, multiline = false):
         continue;
       }
       if (next === 'u') {
-        const braced = /^\{[0-9a-fA-F]{1,6}\}/.exec(source.slice(index + 1));
+        const braced = /^\{([0-9a-fA-F]{1,6}(?:\s+[0-9a-fA-F]{1,6})*)\}/.exec(source.slice(index + 1));
         const fixed = /^[0-9a-fA-F]{4}/.exec(source.slice(index + 1));
-        if (braced || fixed) {
-          out += `\\u${braced?.[0] ?? fixed?.[0]}`;
-          index += (braced?.[0] ?? fixed?.[0])!.length;
+        if (braced) {
+          const points = braced[1].split(/\s+/);
+          for (const [position, point] of points.entries()) {
+            if (Number.parseInt(point, 16) > 0x10_ff_ff) throw new SyntaxError('invalid Unicode codepoint');
+            if (position === points.length - 1) atomStart = out.length;
+            out += `\\u{${point}}`;
+          }
+          index += braced[0].length;
+          continue;
+        }
+        if (fixed) {
+          out += `\\u${fixed[0]}`;
+          index += fixed[0].length;
           continue;
         }
       }
@@ -831,6 +842,11 @@ sdef('Regexp', ['new', 'compile'], [1, 2], function* (_self, [source, options]) 
     return makeRegexp(data.source, { ...data, sourceBinary: data.encoding === 'BINARY (ASCII-8BIT)' });
   }
   const pattern = yield* toStrValue(source);
+  if (!validStringEncoding(pattern))
+    throw rubyError(
+      rt().c.RegexpError,
+      `invalid multibyte character: /${pattern.rawBytes ? inspectRawBytes(pattern.rawBytes).slice(1, -1) : pattern.s}/`
+    );
   return makeRegexp(pattern.s, { ...(yield* optionsOf(options)), sourceBinary: pattern.binary });
 });
 sdef('Regexp', ['escape', 'quote'], 1, function* (_self, [value]) {

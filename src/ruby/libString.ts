@@ -296,7 +296,7 @@ def('String', 'dump', 0, (self: RString) => {
   return stringFromBytes(new TextEncoder().encode(dumped), self.binary, self.usAscii);
 });
 
-function inspectRawBytes(bytes: Uint8Array, dump = false): string {
+export function inspectRawBytes(bytes: Uint8Array, dump = false): string {
   const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   let text = '';
   let result = '"';
