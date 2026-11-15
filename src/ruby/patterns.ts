@@ -1,5 +1,5 @@
 import type { Expr, LocalRef, Pattern } from './ast';
-import { caseEquals, inspect, rEquals } from './conversions';
+import { caseEquals, inspect, rEquals, toSValue } from './conversions';
 import { rubyError, typeError } from './errors';
 import { hashGet, hashSet } from './hashes';
 import { callMethod, ev, type Gen } from './interp';
@@ -228,6 +228,8 @@ function* matchHash(pattern: Extract<Pattern, { k: 'hash' }>, value: Value, fram
 function* restOf(hash: RHash, pairs: { key: string }[]): Gen<RHash> {
   const rest = newHash();
   rest.byIdentity = hash.byIdentity;
+  rest.defaultValue = hash.defaultValue;
+  rest.defaultProc = hash.defaultProc;
   for (const entry of hash.map.values()) {
     if (entry.key instanceof RSymbol && pairs.some((pair) => pair.key === (entry.key as RSymbol).name)) continue;
     yield* hashSet(rest, entry.key, entry.value);
@@ -246,8 +248,8 @@ export function* noMatchingPattern(value: Value, single: boolean): Gen<unknown> 
   if (failure?.missingKey !== undefined) rt().held.push(failure.missingKey);
   if (failure?.matchee !== undefined) rt().held.push(failure.matchee);
   try {
+    if (!single || !failure) return rubyError(rt().c.NoMatchingPatternError, (yield* toSValue(value)).s);
     const subject = yield* inspect(value);
-    if (!single || !failure) return rubyError(rt().c.NoMatchingPatternError, subject);
     const error = rubyError(
       failure.missingKey === undefined ? rt().c.NoMatchingPatternError : rt().c.NoMatchingPatternKeyError,
       `${subject}: ${typeof failure.description === 'string' ? failure.description : yield* failure.description()}`

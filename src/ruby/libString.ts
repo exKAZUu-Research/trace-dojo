@@ -200,7 +200,6 @@ def(
   [0, 1],
   function* (self: RString, args, _block, keywords) {
     let sourceBytes: Uint8Array | undefined;
-    if (args.length === 0) self.binary = true;
     if (args.length > 0) {
       const source = yield* toStrValue(args[0]);
       sourceBytes = stringBytes(source);
@@ -240,6 +239,7 @@ sdef(
   [0, -1],
   function* (self, args, _block, keywords) {
     const value = new RString(self, '');
+    value.binary = true;
     const initialize = classOf(value).findMethod('initialize');
     if (initialize) yield* invoke(initialize, value, args, keywords, _block, false);
     return value;

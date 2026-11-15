@@ -193,7 +193,7 @@ function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: num
     if (!members) return undefined;
     seen.add(value);
     try {
-      const entries: Record<string, DisplayNode> = {};
+      const entries: Record<string, DisplayNode> = Object.create(null);
       for (const [name, member] of members) {
         entries[name] = displayNodeOf(member, seen, budget) ?? NULL_NODE;
         if (budget.remaining <= 0) break;

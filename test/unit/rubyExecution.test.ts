@@ -6093,7 +6093,7 @@ test('Regexp retains scoped lines, Unicode words and literal match metadata', ()
   expect(run('p(/[[:word:]]/.match?("‿"));p(/[[:word:]]/.match?("²"))')).toMatchObject({
     stdout: 'true\nfalse\n',
   });
-  expect(run('"hello".sub("ell","x");p $~')).toMatchObject({ stdout: '#<MatchData: ell>\n' });
+  expect(run('"hello".sub("ell","x");p $~')).toMatchObject({ stdout: '#<MatchData "ell">\n' });
   expect(run('m=/(?<constructor>a)/.match("a");p m.names,m[:constructor],/(?<x>a)|(?<x>b)/.names')).toMatchObject({
     stdout: '["constructor"]\n"a"\n["x"]\n',
   });
@@ -7381,6 +7381,55 @@ test('keyword expansion rehashes keys across identity modes', () => {
   expect(run('def f(**k);p k,k[:a],k.key?(:a);end;h={a:42}.compare_by_identity;f(**h)')).toMatchObject({
     stdout: '{a: 42}\n42\ntrue\n',
   });
+});
+
+test('unsupported const_missing definitions fail before lookup', () => {
+  expect(run('class C;def self.const_missing(n);1;end;end;p C::X')).toMatchObject({
+    uncaughtException: expect.stringContaining('メソッド・定数フック'),
+  });
+});
+
+test('define_method follows module_function mode', () => {
+  expect(run('module M;module_function;define_method(:x){1};end;p M.x,M.private_method_defined?(:x)')).toMatchObject({
+    stdout: '1\ntrue\n',
+  });
+});
+
+test('hash pattern remainders retain their default', () => {
+  expect(run('h=Hash.new(7);h[:x]=1;h=>{**r};p r.default,r[:z]')).toMatchObject({ stdout: '7\n7\n' });
+});
+
+test('Class.new establishes its own definition target inside eval', () => {
+  expect(
+    run('c=Class.new;d=c.class_eval{Class.new{def x;1;end}};p d.method_defined?(:x),c.method_defined?(:x)')
+  ).toMatchObject({
+    stdout: 'true\nfalse\n',
+  });
+});
+
+test('multiple unmatched patterns use the subject string as their message', () => {
+  expect(run('begin;case "str";in 1;in 2;end;rescue=>e;p e.message;end')).toMatchObject({ stdout: '"str"\n' });
+});
+
+test('empty String initialization preserves existing bytes and encoding', () => {
+  expect(run('s="é".freeze;s.send(:initialize);p s.encoding,s.bytes')).toMatchObject({
+    stdout: '#<Encoding:UTF-8>\n[195, 169]\n',
+  });
+  expect(run('p String.new.encoding,String.allocate.encoding')).toMatchObject({
+    stdout: '#<Encoding:BINARY (ASCII-8BIT)>\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  });
+});
+
+test('Struct values_at reads fields before later selector conversions', () => {
+  expect(
+    run('S=Struct.new(:x,:y);s=S.new(1,2);i=Object.new;i.define_singleton_method(:to_int){s.x=9;1};p s.values_at(0,i)')
+  ).toMatchObject({
+    stdout: '[1, 2]\n',
+  });
+});
+
+test('Struct.new defines an empty anonymous Struct class', () => {
+  expect(run('S=Struct.new;p S.new.members,S.new.inspect')).toMatchObject({ stdout: '[]\n"#<struct S>"\n' });
 });
 
 test('regexp split yields fields and captures to a block', () => {

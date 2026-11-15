@@ -935,7 +935,9 @@ export function allocate(cls: RClass): Value {
   if (cls.isSingleton) throw typeError("can't create instance of singleton class");
   switch (cls.instanceKind) {
     case 'string': {
-      return new RString(cls, '');
+      const value = new RString(cls, '');
+      value.binary = true;
+      return value;
     }
     case 'array': {
       return new RArray(cls, []);

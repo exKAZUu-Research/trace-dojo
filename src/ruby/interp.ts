@@ -1498,7 +1498,13 @@ function* defineMethod(def: MethodDef, singleton: Expr | undefined, frame: Frame
 }
 
 const PRIVATE_METHOD_NAMES = new Set(['initialize', 'initialize_copy', 'initialize_clone', 'initialize_dup']);
-const CLASS_METHOD_HOOKS = new Set(['method_added', 'method_removed', 'method_undefined', 'const_added']);
+const CLASS_METHOD_HOOKS = new Set([
+  'method_added',
+  'method_removed',
+  'method_undefined',
+  'const_added',
+  'const_missing',
+]);
 const SINGLETON_METHOD_HOOKS = new Set([
   'singleton_method_added',
   'singleton_method_removed',
@@ -2126,8 +2132,8 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
       method: options.method ?? outer.home.extra.method,
       missingReason: options.missingReason,
       def: outer.home.extra.def,
-      definee: options.definee ?? outer.extra.definee,
-      definitionTarget: options.definitionTarget ?? outer.extra.definitionTarget,
+      definee: options.definitionTarget ? undefined : (options.definee ?? outer.extra.definee),
+      definitionTarget: options.definee ? undefined : (options.definitionTarget ?? outer.extra.definitionTarget),
       forbidSingletonDefinition:
         options.forbidSingletonDefinition ??
         (options.definee || options.definitionTarget ? false : outer.extra.forbidSingletonDefinition),

@@ -457,7 +457,14 @@ function* defineMethodFrom(owner: RClass, args: Value[], block: RProc | undefine
 def('Module', 'define_method', [1, 2], function* (self: RClass, args, block) {
   const frame = rt().frame;
   const visibility = frame.definitionOwner === self ? frame.defaultVisibility : 'public';
-  return yield* defineMethodFrom(self, args, block, visibility);
+  const result = yield* defineMethodFrom(self, args, block, visibility);
+  if (frame.definitionOwner === self && frame.moduleFunction && result instanceof RSymbol) {
+    const method = self.methods.get(result.name) as RMethod;
+    const owner = singletonClassOf(self);
+    addMethod(owner, { ...method, owner, visibility: 'public' });
+    method.visibility = 'private';
+  }
+  return result;
 });
 def('Module', 'alias_method', 2, function* (self: RClass, [newName, oldName]) {
   const name = yield* nameOf(newName);

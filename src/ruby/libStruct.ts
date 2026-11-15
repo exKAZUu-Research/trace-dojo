@@ -199,8 +199,6 @@ sdef(
         throw nameError(`identifier ${name} needs to be constant`);
       assertMutableClass(self);
     }
-    if (names.length === 0 && !keywordInit && first !== NIL && name === undefined)
-      throw argumentError('wrong number of arguments (given 0, expected 1+)');
     const cls = yield* newStructClass(self, yield* membersFrom(names), { keywordInit, kind: 'struct' });
     if (name !== undefined) {
       cls.baseName = name;
@@ -247,18 +245,26 @@ def('Struct', 'members', 0, (self: RObject) => arr(layoutOf(self.cls).members.ma
 def('Struct', ['to_a', 'deconstruct', 'values'], 0, (self: RObject) => arr([...valuesOf(self)]));
 def('Struct', 'values_at', [0, -1], function* (self: RObject, args) {
   const values = valuesOf(self);
-  const selectors: Value[] = [];
-  for (const argument of args) {
-    if (argument instanceof RRange) {
-      selectors.push(argument);
-      continue;
+  const selected: Value[] = [];
+  rt().heldArrays.push(selected);
+  try {
+    for (const argument of args) {
+      if (argument instanceof RRange) {
+        const expanded = (yield* callMethod(arr([...values]), 'values_at', [argument])) as RArray;
+        selected.push(...expanded.items);
+        continue;
+      }
+      const index = yield* toInt(argument);
+      if (index < -BigInt(values.length))
+        throw indexError(`offset ${index} too small for struct(size:${values.length})`);
+      if (index >= BigInt(values.length))
+        throw indexError(`offset ${index} too large for struct(size:${values.length})`);
+      selected.push(values[Number(index < 0n ? index + BigInt(values.length) : index)]);
     }
-    const index = yield* toInt(argument);
-    if (index < -BigInt(values.length)) throw indexError(`offset ${index} too small for struct(size:${values.length})`);
-    if (index >= BigInt(values.length)) throw indexError(`offset ${index} too large for struct(size:${values.length})`);
-    selectors.push(index);
+    return arr(selected);
+  } finally {
+    rt().heldArrays.pop();
   }
-  return yield* callMethod(arr([...values]), 'values_at', selectors);
 });
 def('Struct', 'to_h', 0, (self: RObject, _args, block) => structToHash(self, block));
 def('Struct', 'deconstruct_keys', 1, (self: RObject, [keys]) => deconstructKeys(self, keys));

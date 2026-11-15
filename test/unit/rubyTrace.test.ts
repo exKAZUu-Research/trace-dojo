@@ -872,6 +872,14 @@ test('nested cursor cleanup keeps caller turtles rooted during resumption', () =
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(4);
 });
 
+test('Struct trace entries retain prototype-named members', () => {
+  const program = 'S=Struct.new(:__proto__,:a)\ns=S.new(1,2)\np s.a';
+  const final = traceProgram('ruby', program, program).traceItems.at(-1);
+  const node = final?.referenceVars?.s;
+  expect(node?.kind).toBe('object');
+  if (node?.kind === 'object') expect(Object.hasOwn(node.entries, '__proto__')).toBe(true);
+});
+
 test('saved Method implementations retain their captured turtles', () => {
   const program =
     'def make;t=Turtle.new;c=Class.new;c.define_method(:go){t.forward};c.new.method(:go);end;m=make;m.receiver.class.remove_method(:go);x=1;m.call';
