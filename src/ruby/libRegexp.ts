@@ -494,11 +494,30 @@ export function hasVariableLengthLookbehind(source: string): boolean {
       end++;
     }
     if (end >= source.length) return false;
-    const body = source.slice(start, end).replaceAll(/\[(?:\\.|[^\]])*\]/g, '');
+    const body = withoutRegexpClasses(source.slice(start, end));
     if (/(?<!\\)[*+?]/.test(body) || /\{\d+,\d*\}/.test(body)) return true;
     index = end;
   }
   return false;
+}
+
+function withoutRegexpClasses(body: string): string {
+  const parts: string[] = [];
+  let outside = 0;
+  for (let index = 0; index < body.length; index++) {
+    if (body[index] !== '[') continue;
+    let end = index + 1;
+    while (end < body.length && body[end] !== ']') {
+      if (body[end] === '\\') end++;
+      end++;
+    }
+    if (end >= body.length) break;
+    parts.push(body.slice(outside, index));
+    index = end;
+    outside = end + 1;
+  }
+  parts.push(body.slice(outside));
+  return parts.join('');
 }
 
 export function normalizeSlashLiteralSource(source: string): string {

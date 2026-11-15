@@ -7949,6 +7949,10 @@ test('regexp preprocessing bounds repeated incomplete lookbehind openers', () =>
   });
 });
 
+test('regexp preprocessing bounds unmatched character classes in lookbehind', () => {
+  expect(run('begin;Regexp.new("(?<="+"["*100000+")");rescue=>e;p e.class;end')).toMatchObject({ kind: 'executed' });
+});
+
 test('binary String inspect escapes valid UTF-8 byte sequences', () => {
   expect(
     run('s=String.new;s<<195<<169;p s,s.encoding;puts s.dump;u=String.new("é",encoding:Encoding::BINARY);p u')
