@@ -790,7 +790,9 @@ export function findConstInAncestors(module: RClass, name: string): Value | unde
 function missingConstant(module: RClass, name: string, scoped = false): never {
   const feature = UNSUPPORTED_CONSTANTS[name];
   if (feature && (module === rt().c.Object || !scoped)) throw new UnsupportedFeatureError(feature);
-  const prefix = module === rt().c.Object ? '' : `${className(module)}::`;
+  const plainObjectSingleton =
+    module.isSingleton && module.attached instanceof RObject && realClassOf(module.attached) === rt().c.Object;
+  const prefix = module === rt().c.Object || plainObjectSingleton ? '' : `${className(module)}::`;
   throw nameError(`uninitialized constant ${prefix}${name}`, module, name);
 }
 

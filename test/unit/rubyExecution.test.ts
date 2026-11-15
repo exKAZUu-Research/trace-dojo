@@ -8852,6 +8852,24 @@ test('singleton class errors include their actual class name', () => {
   ).toMatchObject({
     stdout: 'uninitialized constant #<Class:Foo>::Bar\n',
   });
+  expect(
+    run(
+      'class Foo\n def inspect\n  puts :called\n  "I"\n end\nend\nf=Foo.new\nclass << f\n def g = Nope\nend\nbegin\n f.g\nrescue NameError=>e\n puts e.message\nend'
+    )
+  ).toMatchObject({
+    stdout: expect.stringMatching(/^uninitialized constant #<Class:#<Foo:0x[\da-f]+>>::Nope\n$/),
+  });
+  expect(
+    run('o=Object.new\nclass << o\n def f = Nope\nend\nbegin\n o.f\nrescue NameError=>e\n puts e.message\nend')
+  ).toMatchObject({
+    stdout: 'uninitialized constant Nope\n',
+  });
+});
+
+test('Data keyword errors preserve encoded Symbol names', () => {
+  expect(run('a=233.chr.to_sym;b=:é;begin;Data.define(a).new(**{b=>1});rescue=>e;puts e.message;end')).toMatchObject({
+    stdout: 'missing keyword: :"\\xE9"\n',
+  });
 });
 
 test('Time calendar microseconds replace fractions and respect field bounds', () => {

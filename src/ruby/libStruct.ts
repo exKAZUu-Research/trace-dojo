@@ -6,6 +6,7 @@ import {
   rEql,
   rEquals,
   supportsImplicitConversion,
+  symInspect,
   toIndex,
   toIndexExact,
   toInt,
@@ -255,7 +256,12 @@ def(
       if (args.length > 0) throw argumentError(`wrong number of arguments (given ${args.length}, expected 0)`);
       const unknown: string[] = [];
       for (const entry of keywords?.map.values() ?? []) {
-        const name = entry.key instanceof RSymbol ? entry.key.name : yield* inspect(entry.key);
+        const name =
+          entry.key instanceof RSymbol
+            ? entry.key.binary || entry.key.usAscii
+              ? symInspect(entry.key)
+              : entry.key.name
+            : yield* inspect(entry.key);
         const index = entry.key instanceof RSymbol ? memberSymbols.indexOf(entry.key) : -1;
         if (index === -1) unknown.push(name);
         else next[index] = entry.value;
@@ -460,15 +466,15 @@ def(
     const given = new Set<RSymbol>();
     const unknown: string[] = [];
     for (const entry of keywords?.map.values() ?? []) {
-      const name = entry.key instanceof RSymbol ? entry.key.name : yield* inspect(entry.key);
+      const name = entry.key instanceof RSymbol ? symInspect(entry.key) : `:${yield* inspect(entry.key)}`;
       const index = entry.key instanceof RSymbol ? memberSymbols.indexOf(entry.key) : -1;
-      if (index === -1) unknown.push(`:${name}`);
+      if (index === -1) unknown.push(name);
       else {
         values[index] = entry.value;
         given.add(memberSymbols[index]);
       }
     }
-    const missing = memberSymbols.filter((member) => !given.has(member)).map((member) => `:${member.name}`);
+    const missing = memberSymbols.filter((member) => !given.has(member)).map((member) => symInspect(member));
     if (missing.length > 0)
       throw argumentError(`missing keyword${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`);
     if (unknown.length > 0)
