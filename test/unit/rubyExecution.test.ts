@@ -7754,6 +7754,20 @@ test('BasicObject implicit conversion respects respond_to_missing?', () => {
   ).toMatchObject({ stdout: '1\n' });
 });
 
+test('Struct index conversion occurs once on an out-of-range access', () => {
+  expect(
+    run('class Index;def to_int;puts :called;4;end;end;begin;Struct.new(:a).new[Index.new];rescue=>e;p e.message;end')
+  ).toMatchObject({ stdout: 'called\n"offset 4 too large for struct(size:1)"\n' });
+});
+
+test('Method to_proc retains reflected parameter names and kinds', () => {
+  expect(
+    run('def reflected(x,y:1);end;p method(:reflected).to_proc.parameters,method(:reflected).parameters')
+  ).toMatchObject({
+    stdout: '[[:req, :x], [:key, :y]]\n[[:req, :x], [:key, :y]]\n',
+  });
+});
+
 test('MatchData reuses frozen subject identity', () => {
   expect(
     run('s="aa".freeze;a=[];s.scan(/a/){a<<$~};p a[0].string.equal?(s),a[0].string.equal?(a[1].string)')

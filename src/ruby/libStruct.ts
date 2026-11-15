@@ -80,10 +80,10 @@ function* memberIndex(self: RObject, key: Value): Gen<number> {
     }
     return index;
   }
-  let index = yield* toIndex(key);
+  const raw = yield* toIndex(key);
+  let index = raw;
   if (index < 0) index += members.length;
   if (index < 0 || index >= members.length) {
-    const raw = yield* toIndex(key);
     throw indexError(`offset ${raw} too ${raw < 0 ? 'small' : 'large'} for struct(size:${members.length})`);
   }
   return index;

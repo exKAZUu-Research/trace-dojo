@@ -207,6 +207,7 @@ def('Method', 'to_proc', 0, (self: RObject) => {
     true
   );
   proc.captured = [recv, method.owner, ...(method.body.kind === 'proc' ? [method.body.proc] : [])];
+  proc.reflectedMethod = method;
   return proc;
 });
 def('Method', 'receiver', 0, (self: RObject) => (self.data as MethodData).recv);
@@ -295,6 +296,7 @@ def(
   function* (self: RProc, _args, _block, keywords) {
     const asLambda = keywords ? (yield* hashGet(keywords, sym('lambda')))?.value : undefined;
     const isLambda = asLambda === undefined || asLambda === NIL ? self.isLambda : truthy(asLambda);
+    if (self.reflectedMethod) return methodParameterList(self.reflectedMethod);
     if (self.body.kind === 'native') return nativeParameterList(self.body.arity);
     return self.body.def.params ? parameterList(self.body.def.params, isLambda) : arr([]);
   },
@@ -303,6 +305,12 @@ def(
 function callParameters(proc: RProc): Value {
   if (proc.body.kind === 'native') return nativeParameterList(proc.body.arity);
   return proc.body.def.params ? parameterList(proc.body.def.params, true) : arr([]);
+}
+
+function methodParameterList(method: RMethod): Value {
+  if (method.body.kind === 'user') return parameterList(method.body.def.params, true);
+  if (method.body.kind === 'proc') return callParameters(method.body.proc);
+  return nativeParameterList(methodArity(method));
 }
 
 for (const owner of ['Method', 'UnboundMethod']) {
@@ -330,10 +338,7 @@ for (const owner of ['Method', 'UnboundMethod']) {
   });
   def(owner, 'arity', 0, (self: RObject) => BigInt(methodArity((self.data as MethodData).method)));
   def(owner, 'parameters', 0, (self: RObject) => {
-    const { method } = self.data as MethodData;
-    if (method.body.kind === 'user') return parameterList(method.body.def.params, true);
-    if (method.body.kind === 'proc') return callParameters(method.body.proc);
-    return nativeParameterList(methodArity(method));
+    return methodParameterList((self.data as MethodData).method);
   });
   def(owner, 'name', 0, (self: RObject) => sym((self.data as MethodData).name));
   def(owner, 'owner', 0, (self: RObject) => (self.data as MethodData).method.owner);

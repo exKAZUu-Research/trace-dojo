@@ -174,6 +174,7 @@ export class RRange extends RBasic {
 export class RProc extends RBasic {
   isLambda = false;
   captured?: Value[];
+  reflectedMethod?: RMethod;
   /** The call that received this block as its block literal, which a `break` in it leaves. */
   breakTag?: object;
 
