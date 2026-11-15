@@ -7908,6 +7908,12 @@ test('defined? checks call receivers before resolving their methods', () => {
   });
 });
 
+test('defined? evaluates chained negation receivers once', () => {
+  expect(run('def value;puts :value;Object.new;end;p defined?(!value.to_s)')).toMatchObject({
+    stdout: 'value\n"method"\n',
+  });
+});
+
 test('Struct hashing does not consume displayed object addresses', () => {
   expect(run('Struct.new(:x).new(1).hash;p Object.new')).toMatchObject({
     stdout: '#<Object:0x00007f1a2b3c0000>\n',
