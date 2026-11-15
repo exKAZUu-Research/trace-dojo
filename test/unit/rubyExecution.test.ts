@@ -8993,6 +8993,18 @@ test('calendar microseconds preserve tiny Floats and reject non-ASCII numeric wh
       'class S<String;def inspect;puts :seen;"custom";end;end;begin;Time.utc(2024,1,1,0,0,0,S.new("bad"));rescue=>e;p e.message;end'
     )
   ).toMatchObject({ stdout: 'seen\n"invalid value for Integer(): custom"\n' });
+  expect(
+    run(
+      'class S<String;def inspect;255.chr;end;end;begin;Time.utc(2024,1,1,0,0,0,S.new("bad"));rescue=>e;p e.message,e.message.encoding;end'
+    )
+  ).toMatchObject({
+    stdout: '"invalid value for Integer(): \\\\xFF"\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  });
+  expect(
+    run(
+      'class S<String;def inspect;"é";end;end;begin;Time.utc(2024,1,1,0,0,0,S.new("bad"));rescue=>e;p e.message.encoding;end'
+    )
+  ).toMatchObject({ stdout: '#<Encoding:UTF-8>\n' });
 });
 
 test('defined? rejects END through statement modifiers', () => {

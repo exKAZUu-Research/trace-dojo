@@ -1,13 +1,13 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { compareValues, inspect, toFloat, toInt, toStr } from './conversions';
+import { compareValues, inspectValue, toFloat, toInt, toStr } from './conversions';
 import { def, sdef } from './define';
-import { argumentError, floatDomainError, frozenError, rangeError, typeError } from './errors';
+import { argumentError, floatDomainError, frozenError, rangeError, rubyError, typeError } from './errors';
 import { bigintRatio } from './floatMath';
 import type { Gen } from './interp';
 import { floatToRational, isRational } from './libRational';
 import { isRubyFloat, NIL, RObject, RString, type Value } from './objects';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
-import { arr, realClassOf, str } from './values';
+import { arr, realClassOf, str, stringBytes, stringFromBytes } from './values';
 
 /** The local time zone, which the grader fixes to Japan's (no daylight saving time). */
 const LOCAL_OFFSET = 9 * 3600;
@@ -125,8 +125,19 @@ function* fieldValue(arg: Value, index: number): Gen<number> {
   if (month >= 0) return month + 1;
   if (/^[ \t\n\r\v\f]*[+-]?\d(?:_?\d)*[ \t\n\r\v\f]*$/.test(arg.s))
     return Number(BigInt(arg.s.replaceAll(/^[ \t\n\r\v\f]+|[ \t\n\r\v\f]+$/g, '').replaceAll('_', '')));
-  const shown = yield* inspect(arg);
-  throw argumentError(index === 0 ? `can't parse: ${shown}` : `invalid value for Integer(): ${shown}`);
+  const inspected = yield* inspectValue(arg);
+  const bytes = stringBytes(inspected);
+  const binary = inspected.binary || inspected.usAscii || bytes.every((byte) => byte < 0x80);
+  const shown = binary
+    ? Array.from(bytes, (byte) =>
+        byte >= 0x80 ? `\\x${byte.toString(16).toUpperCase().padStart(2, '0')}` : String.fromCodePoint(byte)
+      ).join('')
+    : inspected.s;
+  const message = `${index === 0 ? "can't parse: " : 'invalid value for Integer(): '}${shown}`;
+  throw rubyError(
+    rt().c.ArgumentError,
+    binary ? stringFromBytes(new TextEncoder().encode(message), true) : str(message)
+  );
 }
 
 function* secondsValue(arg: Value): Gen<number> {
