@@ -96,7 +96,17 @@ export function* writeStderrLine(message: RString): Gen<void> {
 
 function checkWritable(self: RObject): void {
   if (self.data !== 'stdout' && self.data !== 'stderr') throw rubyError(rt().c.IOError, 'not opened for writing');
-  if (self.frozen) throw frozenError(self, `#<IO:<${self.data === 'stdout' ? 'STDOUT' : 'STDERR'}>>`);
+  checkFrozenIo(self);
+}
+
+function checkFrozenIo(self: RObject): void {
+  if (self.frozen)
+    throw frozenError(
+      self,
+      self.data === 'stdout' || self.data === 'stderr'
+        ? `#<IO:<${self.data === 'stdout' ? 'STDOUT' : 'STDERR'}>>`
+        : '#<File:main.rb>'
+    );
 }
 
 function channel(stream: 'stdout' | 'stderr'): OutputChannel {
@@ -338,22 +348,26 @@ def('IO', 'putc', 1, function* (self: RObject, [value]) {
   yield* write(self, yield* charOf(value));
   return value;
 });
-def('IO', ['flush', 'fsync'], 0, (self: RObject) => {
-  checkWritable(self);
+def('IO', 'flush', 0, (self: RObject) => {
+  checkFrozenIo(self);
   return self;
 });
+def('IO', 'fsync', 0, (self: RObject) => {
+  checkFrozenIo(self);
+  return 0n;
+});
 def('IO', 'sync', 0, (self: RObject) => {
-  checkWritable(self);
-  return self.ivars?.get('@__sync') ?? true;
+  checkFrozenIo(self);
+  return self.ivars?.get('@__sync') ?? (self.data === 'stdout' || self.data === 'stderr');
 });
 def('IO', 'sync=', 1, (self: RObject, [value]) => {
-  checkWritable(self);
+  checkFrozenIo(self);
   self.ivars ??= new Map();
   self.ivars.set('@__sync', truthy(value));
   return value;
 });
 def('IO', ['tty?', 'isatty'], 0, (self: RObject) => {
-  checkWritable(self);
+  checkFrozenIo(self);
   return false;
 });
 def('IO', 'fileno', 0, (self: RObject) => (self.data === 'stdout' ? 1n : 2n));

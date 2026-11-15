@@ -7671,6 +7671,12 @@ test('DATA rejects inherited write methods with Ruby IOError', () => {
   });
 });
 
+test('DATA retains read-only IO queries and flushing', () => {
+  expect(
+    run('p DATA.flush.equal?(DATA),DATA.fsync,DATA.sync,DATA.sync=true,DATA.tty?,DATA.isatty,DATA.read\n__END__\na\n')
+  ).toMatchObject({ stdout: 'true\n0\nfalse\ntrue\nfalse\nfalse\n"a\\n"\n' });
+});
+
 test('anonymous pattern rest avoids materializing discarded arrays', () => {
   expect(run('items=(1..20000).to_a;sum=0;100.times{items=>[head,*];sum+=head;items.shift};p sum')).toMatchObject({
     stdout: '5050\n',
@@ -7702,6 +7708,20 @@ test('instance_exec and class_exec forward keyword arguments', () => {
 test('substitution blocks retain their own last regexp match', () => {
   expect(run('"a".sub(/a/){/b/=~"b";"x"};p $&')).toMatchObject({ stdout: '"b"\n' });
   expect(run('"a".sub("a"){/b/=~"b";"x"};p $&')).toMatchObject({ stdout: '"b"\n' });
+});
+
+test('replacement Hash callbacks retain their own last regexp match', () => {
+  expect(
+    run('h=Hash.new{|_,k|/b/=~"b";"x"};"a".sub(/a/,h);p $&;"a".sub("a",h);p $&;s="a";s.sub!(/a/,h);p $&')
+  ).toMatchObject({ stdout: '"b"\n"b"\n"b"\n' });
+});
+
+test('implicit conversion respects a negative respond_to_missing? answer', () => {
+  expect(
+    run(
+      String.raw`class Ghost;def method_missing(name,*);puts "missing: #{name}";super;end;def respond_to_missing?(name,ip=false);false;end;def to_s;"Ghost";end;end;g=Ghost.new;puts g;p [g,g].flatten.size;print g,"\n"`
+    )
+  ).toMatchObject({ stdout: 'Ghost\n2\nGhost\n' });
 });
 
 test('MatchData reuses frozen subject identity', () => {

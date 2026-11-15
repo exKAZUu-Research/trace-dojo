@@ -110,6 +110,8 @@ function* respondsToConversion(
   if (responder.body.kind !== 'native' || !('builtinResponder' in responder.body.fn))
     return { callable: advertised, advertised };
   if (advertised) return { callable: true, advertised: true };
+  const missingResponder = classOf(value).findMethod('respond_to_missing?');
+  if (missingResponder?.body.kind !== 'native') return { callable: false, advertised: false };
   const missing = classOf(value).findMethod('method_missing');
   return { callable: missing !== undefined && missing.body.kind !== 'native', advertised: false };
 }

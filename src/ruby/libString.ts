@@ -1282,7 +1282,7 @@ function* substitute(
       target,
       lastFound < 0 ? -1 : text.indexOf(target, textIndexAtByte(text, lastSearchStartByte, stringTextMode(self)))
     );
-  else if (!block || !lastState) setLastMatch(lastState);
+  else if ((!block && !(replacement instanceof RHash)) || !lastState) setLastMatch(lastState);
   if (positionByte <= sourceLength) append(active.slice(positionByte));
   return { value: stringFromBytes(joinChunks(chunks, length), resultBinary), matched };
 }
