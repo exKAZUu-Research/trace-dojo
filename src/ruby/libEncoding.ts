@@ -2,6 +2,7 @@ import { def, sdef } from './define';
 import { rubyError } from './errors';
 import { callProc, type Gen, requireBlock } from './interp';
 import { makeEnumerator } from './libEnumerator';
+import { checkFrozenIo } from './libIo';
 import { NIL, RObject, type RProc, type RString, type RSymbol, type Value } from './objects';
 import { ExitSignal, ReturnSignal, rt, RubyError, type Runtime, UnsupportedFeatureError } from './runtime';
 import { arr, str, stringBytes } from './values';
@@ -114,8 +115,14 @@ function dataState(self: RObject): DataState {
   return self.data as DataState;
 }
 
-function remaining(self: RObject): string {
+function mutableDataState(self: RObject): DataState {
   const state = dataState(self);
+  checkFrozenIo(self);
+  return state;
+}
+
+function remaining(self: RObject): string {
+  const state = mutableDataState(self);
   return state.text.slice(state.position);
 }
 
@@ -139,7 +146,7 @@ def('File', 'gets', 0, (self: RObject) => {
 });
 
 function readLine(self: RObject): Value {
-  const state = dataState(self);
+  const state = mutableDataState(self);
   if (state.position >= state.text.length) return NIL;
   const end = state.text.indexOf('\n', state.position);
   const line = state.text.slice(state.position, end === -1 ? undefined : end + 1);
@@ -161,7 +168,7 @@ def('File', 'each_line', 0, function* (self: RObject, _args, block) {
   return self;
 });
 def('File', 'rewind', 0, (self: RObject) => {
-  dataState(self).position = 0;
+  mutableDataState(self).position = 0;
   return 0n;
 });
 def('File', 'eof?', 0, (self: RObject) => remaining(self).length === 0);

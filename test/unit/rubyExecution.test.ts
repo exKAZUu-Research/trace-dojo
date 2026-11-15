@@ -8603,6 +8603,13 @@ test('lazy zip probes private respond_to? and iterates to_enum', () => {
   ).toMatchObject({
     stdout: '[[1, 2]]\n',
   });
+  expect(
+    run(
+      'class A;def each;yield 2;end;def to_enum;puts :convert;[2].each;end;end;p [].lazy.zip(A.new).force;p [1].lazy.select{false}.zip(A.new).force'
+    )
+  ).toMatchObject({
+    stdout: '[]\n[]\n',
+  });
 });
 
 test('prepend merges shared included child chains', () => {
@@ -8619,6 +8626,26 @@ test('prepend merges shared included child chains', () => {
     )
   ).toMatchObject({
     stdout: '[Q, B, A, P, R, C]\n',
+  });
+});
+
+test('included modules share nested prepends without duplicate ancestors', () => {
+  expect(
+    run(
+      'module Log;def run;"L"+super;end;end;module Auth;prepend Log;def run;"A"+super;end;end;class Base;def run;"B";end;end;class Svc<Base;include Auth,Log;end;p Svc.ancestors.take(4),Svc.new.run'
+    )
+  ).toMatchObject({
+    stdout: '[Svc, Log, Auth, Base]\n"LAB"\n',
+  });
+});
+
+test('frozen DATA rejects reads and cursor operations', () => {
+  expect(
+    run(
+      'DATA.freeze;[:read,:gets,:readlines,:rewind,:eof?,:each_line].each{|m|begin;DATA.send(m){|line|line};rescue=>e;p e.class;end}\n__END__\na\n'
+    )
+  ).toMatchObject({
+    stdout: 'FrozenError\n'.repeat(6),
   });
 });
 

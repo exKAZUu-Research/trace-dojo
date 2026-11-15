@@ -74,6 +74,12 @@ test('copies of sized enumerators retain suspended cursor roots', () => {
   }
 });
 
+test('lazy zip roots earlier tuple values while later cursors run', () => {
+  const source = `class C1\n def next\n  Turtle.new\n end\nend\nclass C2\n def next\n  x=1\n  0\n end\nend\nclass A\n def initialize(c);@c=c;end\n def each;end\n def to_enum;@c;end\nend\na=[1].lazy.zip(A.new(C1.new),A.new(C2.new)).force\na[0][1].forward`;
+  const result = traceProgram('ruby', source, source);
+  expect(result.finalTurtles[0]?.y).toBe(1);
+});
+
 test('Struct, Data and value objects remain visible in the variable trace', () => {
   const program =
     'S=Struct.new(:a)\nD=Data.define(:x)\ns=S.new(1)\nd=D.new(2)\nr=1/3r\nt=Time.utc(2024)\nre=/a/\nm=/a(b)/.match("ab")\np s.a\n';

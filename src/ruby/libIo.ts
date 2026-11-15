@@ -99,7 +99,7 @@ function checkWritable(self: RObject): void {
   if (self.data !== 'stdout' && self.data !== 'stderr') throw rubyError(rt().c.IOError, 'not opened for writing');
 }
 
-function checkFrozenIo(self: RObject): void {
+export function checkFrozenIo(self: RObject): void {
   if (self.frozen)
     throw frozenError(
       self,

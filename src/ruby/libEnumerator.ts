@@ -1189,16 +1189,6 @@ function* runLazy(self: RObject, visit: (value: Value, yielded?: Value[]) => Gen
     return outcome;
   };
   try {
-    for (const [position, step] of data.steps.entries()) {
-      if (step.kind !== 'zip') continue;
-      const cursors: Value[] = [];
-      for (const other of step.others) {
-        const cursor = other instanceof RArray ? other : yield* callMethod(other, 'to_enum', []);
-        cursors.push(cursor);
-        rt().held.push(cursor);
-      }
-      states[position].cursors = cursors;
-    }
     const result = yield* iterateYielded(
       data.source,
       function* (yielded) {
@@ -1308,31 +1298,40 @@ function* streamLazyStep(
         return yield* next(item, yielded);
       }
       case 'zip': {
+        if (!state.cursors) {
+          const cursors: Value[] = [];
+          for (const other of step.others) {
+            const cursor = other instanceof RArray ? other : yield* callMethod(other, 'to_enum', []);
+            cursors.push(cursor);
+            rt().held.push(cursor);
+          }
+          state.cursors = cursors;
+        }
         state.cursorDone ??= step.others.map(() => false);
         const tuple: Value[] = [item];
-        const index = state.seen++;
-        for (const [position, other] of step.others.entries()) {
-          if (other instanceof RArray) {
-            tuple.push(other.items[index] ?? NIL);
-            continue;
-          }
-          if (state.cursorDone[position]) {
-            tuple.push(NIL);
-            continue;
-          }
-          const cursor = state.cursors?.[position];
-          if (cursor === undefined) throw new Error('Missing lazy zip cursor');
-          try {
-            tuple.push(yield* callMethod(cursor, 'next', []));
-          } catch (error) {
-            if (!(error instanceof RubyError) || !isA(error.exception, rt().c.StopIteration)) throw error;
-            state.cursorDone[position] = true;
-            tuple.push(NIL);
-          }
-        }
         const arrays = rt().heldArrays;
         arrays.push(tuple);
+        const index = state.seen++;
         try {
+          for (const [position, other] of step.others.entries()) {
+            if (other instanceof RArray) {
+              tuple.push(other.items[index] ?? NIL);
+              continue;
+            }
+            if (state.cursorDone[position]) {
+              tuple.push(NIL);
+              continue;
+            }
+            const cursor = state.cursors?.[position];
+            if (cursor === undefined) throw new Error('Missing lazy zip cursor');
+            try {
+              tuple.push(yield* callMethod(cursor, 'next', []));
+            } catch (error) {
+              if (!(error instanceof RubyError) || !isA(error.exception, rt().c.StopIteration)) throw error;
+              state.cursorDone[position] = true;
+              tuple.push(NIL);
+            }
+          }
           return yield* next(arr(tuple));
         } finally {
           arrays.pop();

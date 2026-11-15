@@ -295,6 +295,7 @@ export class RClass extends RBasic {
     const list: RClass[] = [];
     const seen = new Set<RClass>();
     const seenPrepended = new Set<RClass>();
+    const seenInBody = new Set<RClass>();
     const active = new Set<RClass>();
     const superAncestors = this.superclass ? this.superclass.ancestors() : [];
     const inSuper = new Set(superAncestors);
@@ -328,13 +329,19 @@ export class RClass extends RBasic {
     };
     const addModule = (module: RClass, placement: 'prepend' | 'body' = 'body'): void => {
       const visited = placement === 'prepend' ? seenPrepended : seen;
-      if (visited.has(module) || active.has(module) || (placement !== 'prepend' && inSuper.has(module))) return;
+      if (
+        visited.has(module) ||
+        active.has(module) ||
+        (placement !== 'prepend' && (inSuper.has(module) || seenInBody.has(module)))
+      )
+        return;
       visited.add(module);
       active.add(module);
       rt().spend();
       for (const prepended of mergedPrepends(module.prepends))
         if (!seenPrepended.has(prepended) && !active.has(prepended)) {
           seenPrepended.add(prepended);
+          if (placement === 'body' && module !== this) seenInBody.add(prepended);
           rt().spend();
           list.push(prepended);
         }
