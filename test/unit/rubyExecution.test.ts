@@ -8913,6 +8913,14 @@ test('anonymous class instances have Ruby class names in method errors', () => {
   });
 });
 
+test('Encoding names are canonical frozen US-ASCII strings', () => {
+  expect(
+    run('e=Encoding::UTF_8;p [e.name.frozen?,e.to_s.frozen?,e.name.equal?(e.name),e.inspect.encoding]')
+  ).toMatchObject({
+    stdout: '[true, true, true, #<Encoding:US-ASCII>]\n',
+  });
+});
+
 test('anonymous instance singleton names use the anonymous class name', () => {
   expect(
     run('k=Class.new;o=k.new;class << o;def g = Nope;end;begin;o.g;rescue NameError=>e;puts e.message;end')

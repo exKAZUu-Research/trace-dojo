@@ -5,7 +5,9 @@ import { makeEnumerator } from './libEnumerator';
 import { checkFrozenIo } from './libIo';
 import { NIL, RObject, type RProc, type RString, type RSymbol, type Value } from './objects';
 import { ExitSignal, ReturnSignal, rt, RubyError, type Runtime, UnsupportedFeatureError } from './runtime';
-import { arr, str, stringBytes } from './values';
+import { arr, asciiString, str, stringBytes } from './values';
+
+const encodingNames = new WeakMap<RObject, RString>();
 
 /** Creates the encodings a program can name: strings here are UTF-8, or ASCII-8BIT when they hold bytes. */
 export function installEncodings(runtime: Runtime): void {
@@ -25,13 +27,16 @@ export function installEncodings(runtime: Runtime): void {
     const object = new RObject(encoding);
     object.data = name;
     object.frozen = true;
+    const nameString = asciiString(name);
+    nameString.frozen = true;
+    encodingNames.set(object, nameString);
     encoding.constants.set(constant, object);
   }
 }
 
-def('Encoding', ['to_s', 'name'], 0, (self: RObject) => str(self.data as string));
+def('Encoding', ['to_s', 'name'], 0, (self: RObject) => encodingNames.get(self) as RString);
 def('Encoding', 'inspect', 0, (self: RObject) =>
-  str(self.data === 'ASCII-8BIT' ? '#<Encoding:BINARY (ASCII-8BIT)>' : `#<Encoding:${self.data as string}>`)
+  asciiString(self.data === 'ASCII-8BIT' ? '#<Encoding:BINARY (ASCII-8BIT)>' : `#<Encoding:${self.data as string}>`)
 );
 def(
   'String',
