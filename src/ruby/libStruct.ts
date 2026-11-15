@@ -8,6 +8,7 @@ import {
   toIndex,
   toIndexExact,
   toInt,
+  tryImplicitConversion,
 } from './conversions';
 import { def, sdef, sundef } from './define';
 import { argumentError, frozenError, indexError, nameError, typeError } from './errors';
@@ -464,14 +465,23 @@ function* deconstructKeys(self: RObject, keys: Value): Gen<RHash> {
   if (keys instanceof RArray && keys.items.length > members.length) return hash;
   const names = keys === NIL ? members.map((name) => sym(name)) : (keys as RArray).items;
   for (const key of names) {
-    if (kind === 'data' && !(key instanceof RSymbol) && !(key instanceof RString))
-      throw typeError(`${yield* inspect(key)} is not a symbol nor a string`);
-    const named = key instanceof RSymbol || key instanceof RString;
-    const index = named ? members.indexOf(key instanceof RSymbol ? key.name : key.s) : yield* toIndex(key);
+    let resolved = key;
+    if (kind === 'data' && !(key instanceof RSymbol) && !(key instanceof RString)) {
+      const converted = yield* tryImplicitConversion(key, 'to_str');
+      if (!(converted instanceof RString)) throw typeError(`${yield* inspect(key)} is not a symbol nor a string`);
+      resolved = converted;
+    }
+    const named = resolved instanceof RSymbol || resolved instanceof RString;
+    const index =
+      resolved instanceof RSymbol
+        ? members.indexOf(resolved.name)
+        : resolved instanceof RString
+          ? members.indexOf(resolved.s)
+          : yield* toIndex(resolved);
     if (named && index < 0) break;
     const normalized = index < 0 ? index + members.length : index;
     if (normalized < 0 || normalized >= members.length) break;
-    yield* hashSet(hash, key, valuesOf(self)[normalized]);
+    yield* hashSet(hash, resolved, valuesOf(self)[normalized]);
   }
   return hash;
 }

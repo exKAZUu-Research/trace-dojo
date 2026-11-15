@@ -7630,6 +7630,14 @@ test('Data deconstruct_keys rejects positional keys', () => {
   });
 });
 
+test('Data deconstruct_keys converts string-like keys', () => {
+  expect(
+    run('d=Data.define(:a).new(1);o=Object.new;def o.to_str;puts :converted;"a";end;p d.deconstruct_keys([o])')
+  ).toMatchObject({
+    stdout: 'converted\n{"a" => 1}\n',
+  });
+});
+
 test('Regexp constructor rejects literal-only option letters', () => {
   expect(run('begin;Regexp.new("a","n");rescue=>e;p e.class,e.message;end')).toMatchObject({
     stdout: 'ArgumentError\n"unknown regexp option: n"\n',
