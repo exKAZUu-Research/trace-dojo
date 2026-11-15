@@ -1226,8 +1226,8 @@ def(
   'Proc',
   ['call', '()', 'yield', '===', '[]'],
   [0, -1],
-  function* (self: RProc, args, block, keywords) {
-    return yield* callProc(self, args, { keywords, block, callRow: rt().currentRow });
+  function* (self: RProc, args, block, keywords, used) {
+    return yield* callProc(self, args, { keywords, block, callRow: rt().currentRow, used });
   },
   { keywords: true }
 );

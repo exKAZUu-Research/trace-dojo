@@ -23,6 +23,13 @@ test('named regexp captures create only valid Ruby local variables', () => {
   expect(items.some(({ vars }) => vars.year === '7')).toBe(true);
 });
 
+test('regexp pseudo-keyword captures do not create trace locals', () => {
+  const items = rubyTrace('/(?<__FILE__>a)(?<__LINE__>a)(?<__ENCODING__>a)/ =~ "aaa"\nx=1');
+  expect(
+    items.some(({ vars }) => ['__FILE__', '__LINE__', '__ENCODING__'].some((name) => Object.hasOwn(vars, name)))
+  ).toBe(false);
+});
+
 test('reflective calls preserve discarded statement trace steps', () => {
   const prefix = '$t=Turtle.new\ndef walk(x=nil)\n $t.forward\nend\n';
   for (const call of ['walk', 'send(:walk)', 'method(:walk).call', '[1].each(&method(:walk))']) {
@@ -41,6 +48,17 @@ test('dynamic and unbound method adapters preserve discarded trace steps', () =>
     const items = rubyTrace(prefix + call);
     expect(
       items.some(({ line, turtles }) => line === 5 && turtles[0]?.y === 1),
+      call
+    ).toBe(true);
+  }
+});
+
+test('Method Proc invocation preserves discarded trace steps', () => {
+  const prefix = '$t=Turtle.new\ndef walk\n $t.forward\nend\n';
+  for (const call of ['method(:walk).to_proc.call', 'method(:walk).to_proc[]', 'method(:walk).to_proc.yield']) {
+    const items = rubyTrace(prefix + call);
+    expect(
+      items.some(({ line, turtles }) => line === 3 && turtles[0]?.y === 1),
       call
     ).toBe(true);
   }

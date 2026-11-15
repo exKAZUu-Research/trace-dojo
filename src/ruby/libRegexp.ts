@@ -102,8 +102,8 @@ const PROPERTY_NAMES: Record<string, string> = {
 const SYNTAX = String.raw`^$\.*+?()[]{}|/-`;
 
 function unicodeRegexpEscape(source: string): { points: string[]; length: number } | undefined {
-  const braced = /^\{([0-9a-fA-F]{1,6}(?:\s+[0-9a-fA-F]{1,6})*)\}/.exec(source);
-  if (braced) return { points: braced[1].split(/\s+/), length: braced[0].length };
+  const braced = /^\{([0-9a-fA-F]{1,6}(?:[ \t\n\r\v\f]+[0-9a-fA-F]{1,6})*)\}/.exec(source);
+  if (braced) return { points: braced[1].split(/[ \t\n\r\v\f]+/), length: braced[0].length };
   const fixed = /^[0-9a-fA-F]{4}/.exec(source);
   return fixed ? { points: [fixed[0]], length: fixed[0].length } : undefined;
 }

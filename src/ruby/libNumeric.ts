@@ -30,7 +30,7 @@ import { exactFloatPower } from './floatPower';
 import { chargeIntegerResult, integerBits } from './integerBudget';
 import { callBlock, callMethod, type Gen } from './interp';
 import { type EnumeratorSource, makeEnumerator, sizedEnumerator } from './libEnumerator';
-import { makeRational } from './libRational';
+import { isRational, makeRational } from './libRational';
 import { boxFloat, NIL, RArray, RFloat, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { platformGamma, platformLog2, platformLog10, platformLogGamma } from './platformMath';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
@@ -227,7 +227,7 @@ for (const owner of ['Integer', 'Float']) {
   }
   def(owner, 'coerce', 1, function* (self: Num, [other]) {
     if (typeof self === 'bigint' && typeof other === 'bigint') return arr([other, self]);
-    if (isNum(other)) return arr([Number(other), Number(self)]);
+    if (isNum(other) || isRational(other)) return arr([yield* toFloat(other), Number(self)]);
     if (other instanceof RString) {
       return arr([yield* kernelFloat(other, undefined), Number(self)]);
     }

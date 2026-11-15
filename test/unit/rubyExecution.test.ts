@@ -8625,6 +8625,24 @@ test('Float sum retains compensation across Rational values', () => {
   });
 });
 
+test('Range step converts Rational values when a Float participates', () => {
+  expect(run('p((1..2.5).step(1/2r).to_a);p(((1/2r)..2.5).step(1/2r).to_a)')).toMatchObject({
+    stdout: '[1.0, 1.5, 2.0, 2.5]\n[0.5, 1.0, 1.5, 2.0, 2.5]\n',
+  });
+});
+
+test('Numeric coerce accepts Rational values', () => {
+  expect(run('p 1.5.coerce(1/2r),1.coerce(1/2r)')).toMatchObject({
+    stdout: '[0.5, 1.5]\n[0.5, 1.0]\n',
+  });
+});
+
+test('Regexp Unicode lists reject non-ASCII separators', () => {
+  expect(run(String.raw`begin;Regexp.new("\\u{41 42}");rescue=>e;p e.class;end`)).toMatchObject({
+    stdout: 'RegexpError\n',
+  });
+});
+
 test('prepend merges shared included child chains', () => {
   expect(
     run(

@@ -10,6 +10,7 @@ import {
   searchNumericSign,
   spaceship,
   supportsImplicitConversion,
+  toFloat,
   toIndex,
   toSValue,
 } from './conversions';
@@ -510,10 +511,28 @@ for (const method of ['step', '%'])
     return yield* stepRange(self, step, block);
   });
 
+function isNumericRangeOperand(value: Value): boolean {
+  return isRubyNumber(value) || isRational(value);
+}
+
 function* stepRange(self: RRange, step: Value, block: RProc): Gen {
   const { begin, end } = self;
   if (typeof begin === 'bigint' && typeof step === 'bigint' && (typeof end === 'bigint' || end === NIL)) {
     return yield* stepIntegerRange(self, begin, step, block);
+  }
+  if (
+    isNumericRangeOperand(begin) &&
+    isNumericRangeOperand(step) &&
+    (isNumericRangeOperand(end) || end === NIL) &&
+    [begin, end, step].some(isRubyFloat)
+  ) {
+    return yield* stepNumericRange(
+      self,
+      yield* toFloat(begin),
+      yield* toFloat(step),
+      block,
+      end === NIL ? undefined : yield* toFloat(end)
+    );
   }
   if (isRubyNumber(begin) && isRubyNumber(step) && (isRubyNumber(end) || end === NIL)) {
     return yield* stepNumericRange(self, Number(begin), Number(step), block);
@@ -542,15 +561,15 @@ function* stepIntegerRange(self: RRange, begin: bigint, step: bigint, block: RPr
 }
 
 // code-gauge-allow functionCognitiveComplexity 22 -- Numeric Range bounds are directional and distinguish exclusive ends.
-function* stepNumericRange(self: RRange, start: number, by: number, block: RProc): Gen {
+function* stepNumericRange(self: RRange, start: number, by: number, block: RProc, floatEnd?: number): Gen {
   const { end, exclusive } = self;
-  const count = end === NIL ? Number.POSITIVE_INFINITY : floatStepCount(start, Number(end), by, exclusive);
+  const boundary = floatEnd ?? Number(end);
+  const count = end === NIL ? Number.POSITIVE_INFINITY : floatStepCount(start, boundary, by, exclusive);
   if (Number.isNaN(count)) return self;
   for (let index = 0; index < count; index++) {
     rt().spend();
     let value = index === 0 ? start : fusedMultiplyAdd(index, by, start);
     if (end !== NIL) {
-      const boundary = Number(end);
       if (exclusive && !(index === 0 && !Number.isFinite(by)) && (by > 0 ? value >= boundary : value <= boundary))
         break;
       if (by > 0 ? value > boundary : value < boundary) value = boundary;

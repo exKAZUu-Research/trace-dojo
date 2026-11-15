@@ -1875,7 +1875,7 @@ function implicitParams(names: Set<string>): Params {
 function isRubyLocalName(name: string): boolean {
   return (
     /^[_\p{Ll}\p{Lm}\p{Lo}][_\p{L}\p{M}\p{N}]*$/u.test(name) &&
-    !/^(?:alias|and|begin|break|case|class|def|defined\?|do|else|elsif|end|ensure|false|for|if|in|module|next|nil|not|or|redo|rescue|retry|return|self|super|then|true|undef|unless|until|when|while|yield)$/.test(
+    !/^(?:__FILE__|__LINE__|__ENCODING__|alias|and|begin|break|case|class|def|defined\?|do|else|elsif|end|ensure|false|for|if|in|module|next|nil|not|or|redo|rescue|retry|return|self|super|then|true|undef|unless|until|when|while|yield)$/.test(
       name
     )
   );
