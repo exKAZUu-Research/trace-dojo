@@ -149,6 +149,7 @@ function escapedCalendarByte(byte: number): string {
   if (byte === 12) return String.raw`\f`;
   if (byte === 13) return String.raw`\r`;
   if (byte === 27) return String.raw`\e`;
+  if (byte === 127) return String.raw`\c?`;
   if (byte < 32 || byte >= 127) return `\\x${byte.toString(16).toUpperCase().padStart(2, '0')}`;
   return String.fromCodePoint(byte);
 }

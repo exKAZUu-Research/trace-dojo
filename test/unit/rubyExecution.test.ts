@@ -9023,6 +9023,11 @@ test('calendar microseconds preserve tiny Floats and reject non-ASCII numeric wh
   ).toMatchObject({ stdout: '[70, 70, 92, 110]\n' });
   expect(
     run(
+      'class S<String;def inspect;255.chr+127.chr;end;end;begin;Time.utc(2024,1,1,0,0,0,S.new("bad"));rescue=>e;p e.message.bytes.last(5);end'
+    )
+  ).toMatchObject({ stdout: '[70, 70, 92, 99, 63]\n' });
+  expect(
+    run(
       'class S<String;def inspect;"é";end;end;begin;Time.utc(2024,1,1,0,0,0,S.new("bad"));rescue=>e;p e.message.encoding;end'
     )
   ).toMatchObject({ stdout: '#<Encoding:UTF-8>\n' });
