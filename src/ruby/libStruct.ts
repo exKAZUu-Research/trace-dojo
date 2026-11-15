@@ -1,6 +1,7 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   addressOf,
+  className,
   inspect,
   rEql,
   rEquals,
@@ -36,11 +37,17 @@ export function copyStructLayout(source: RClass, copy: RClass): void {
 }
 
 function layoutOf(cls: RClass): Layout {
+  const layout = layoutFor(cls);
+  if (layout) return layout;
+  throw typeError('not a struct');
+}
+
+function layoutFor(cls: RClass): Layout | undefined {
   for (let current: RClass | undefined = cls; current; current = current.superclass) {
     const layout = layouts.get(current);
     if (layout) return layout;
   }
-  throw typeError('not a struct');
+  return undefined;
 }
 
 class StructValues {
@@ -260,6 +267,9 @@ def(
 );
 sdef('Struct', 'members', 0, (self: RClass) => arr(layoutOf(self).members.map((name) => sym(name))));
 sdef('Struct', 'keyword_init?', 0, (self: RClass) => layoutOf(self).keywordInit ?? NIL);
+sdef('Struct', 'inspect', 0, (self: RClass) =>
+  str(`${className(self)}${layoutFor(self)?.keywordInit === true ? '(keyword_init: true)' : ''}`)
+);
 def('Struct', 'members', 0, (self: RObject) => arr(layoutOf(self.cls).members.map((name) => sym(name))));
 def('Struct', ['to_a', 'deconstruct', 'values'], 0, (self: RObject) => arr([...valuesOf(self)]));
 def('Struct', 'values_at', [0, -1], function* (self: RObject, args) {

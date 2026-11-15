@@ -7888,6 +7888,14 @@ test('Struct and Data hashes remain stable when their classes gain names', () =>
   });
 });
 
+test('keyword-init Struct classes show their mode when inspected', () => {
+  expect(
+    run('S=Struct.new(:a,keyword_init:true);T=Struct.new(:a,keyword_init:false);p S,S.inspect,S.to_s,T')
+  ).toMatchObject({
+    stdout: 'S(keyword_init: true)\n"S(keyword_init: true)"\n"S"\nT\n',
+  });
+});
+
 test('defined? probes negation receiver methods and visibility', () => {
   expect(
     run(
@@ -7910,6 +7918,9 @@ test('defined? checks call receivers before resolving their methods', () => {
 
 test('defined? evaluates chained negation receivers once', () => {
   expect(run('def value;puts :value;Object.new;end;p defined?(!value.to_s)')).toMatchObject({
+    stdout: 'value\n"method"\n',
+  });
+  expect(run('def value;puts :value;"x";end;p defined?(value.to_s.size)')).toMatchObject({
     stdout: 'value\n"method"\n',
   });
 });
