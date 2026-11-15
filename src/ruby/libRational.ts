@@ -236,6 +236,7 @@ def('Rational', 'inspect', 0, (self: RObject) =>
 );
 def('Rational', 'to_f', 0, (self: RObject) => toNumber(fractionOf(self)));
 def('Rational', 'to_r', 0, (self) => self);
+def('NilClass', 'to_r', 0, () => makeRational(0n, 1n));
 def('Rational', 'rationalize', [0, 1], (self: RObject, args) => {
   if (args.length > 0) throw new UnsupportedFeatureError('Rational#rationalize（許容誤差）');
   return self;

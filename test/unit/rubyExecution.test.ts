@@ -7592,6 +7592,34 @@ test('nested regexp character classes fail explicitly', () => {
   });
 });
 
+test('Symbol regexp methods and nil Rational conversion remain available', () => {
+  expect(run('p :abc.match(/a/),:abc.match?(/a/),:abc.encoding,nil.to_r')).toMatchObject({
+    stdout: '#<MatchData "a">\ntrue\n#<Encoding:US-ASCII>\n(0/1)\n',
+  });
+});
+
+test('MatchData named captures accept symbol keys', () => {
+  expect(run('m=/(?<a>1)(?<b>2)/.match("12");p m.named_captures(symbolize_names:true)')).toMatchObject({
+    stdout: '{a: "1", b: "2"}\n',
+  });
+});
+
+test('MatchData deconstruct_keys rejects surplus requested keys', () => {
+  expect(run('m=/(?<a>1)(?<b>2)/.match("12");p m.deconstruct_keys([:a,:b,:c])')).toMatchObject({
+    stdout: '{}\n',
+  });
+});
+
+test('Struct range selectors validate the first endpoint before the second', () => {
+  expect(
+    run(
+      's=Struct.new(:a).new(1);i=Object.new;j=Object.new;def i.<=>(x);0;end;def i.to_int;2**100;end;def j.to_int;puts :end;0;end;r=i..j;begin;s.values_at(r);rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({
+    stdout: 'RangeError\n',
+  });
+});
+
 test('regexp split yields fields and captures to a block', () => {
   expect(run('r=[];p "aXbXc".split(/(X)/){|part|r<<part},r')).toMatchObject({
     stdout: '"aXbXc"\n["a", "X", "b", "X", "c"]\n',

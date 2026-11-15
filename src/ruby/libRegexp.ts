@@ -993,12 +993,25 @@ def('MatchData', 'hash', 0, (self: RObject) => {
     `0x${digest(JSON.stringify([String(stringKeyHash(source)), encoding, regexp.source, regexp.encoding, regexp.ignoreCase, regexp.multiline, regexp.extended, state.groups]))}`
   );
 });
-def('MatchData', 'named_captures', 0, function* (self: RObject) {
-  const hash = newHash();
-  const state = stateOf(self);
-  for (const name of state.names) yield* hashSet(hash, str(name), groupText(state, state.namedGroups[name]));
-  return hash;
-});
+def(
+  'MatchData',
+  'named_captures',
+  0,
+  function* (self: RObject, _args, _block, keywords) {
+    let symbolize = false;
+    for (const entry of keywords?.map.values() ?? []) {
+      if (!(entry.key instanceof RSymbol) || entry.key.name !== 'symbolize_names')
+        throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
+      symbolize = truthy(entry.value);
+    }
+    const hash = newHash();
+    const state = stateOf(self);
+    for (const name of state.names)
+      yield* hashSet(hash, symbolize ? sym(name) : str(name), groupText(state, state.namedGroups[name]));
+    return hash;
+  },
+  { keywords: true }
+);
 
 def('MatchData', 'names', 0, (self: RObject) => arr(stateOf(self).names.map((name) => str(name))));
 def('MatchData', ['to_s'], 0, (self: RObject) => groupText(stateOf(self), 0));
@@ -1084,11 +1097,13 @@ def('MatchData', 'deconstruct_keys', 1, function* (self: RObject, [keys]) {
     throw typeError(`wrong argument type ${realClassOf(keys).name} (expected Array)`);
   const state = stateOf(self);
   const hash = newHash();
+  if (keys instanceof RArray && keys.items.length > state.names.length) return hash;
   const requested = keys instanceof RArray ? keys.items : state.names.map((name) => sym(name));
   for (const key of requested) {
     if (!(key instanceof RSymbol)) throw typeError(`wrong argument type ${realClassOf(key).name} (expected Symbol)`);
     const group = state.namedGroups[key.name];
-    if (group !== undefined) yield* hashSet(hash, key, groupText(state, group));
+    if (group === undefined) break;
+    yield* hashSet(hash, key, groupText(state, group));
   }
   return hash;
 });

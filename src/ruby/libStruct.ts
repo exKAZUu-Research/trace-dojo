@@ -1,5 +1,14 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { addressOf, inspect, rEql, rEquals, supportsImplicitConversion, toIndex, toInt } from './conversions';
+import {
+  addressOf,
+  inspect,
+  rEql,
+  rEquals,
+  supportsImplicitConversion,
+  toIndex,
+  toIndexExact,
+  toInt,
+} from './conversions';
 import { def, sdef, sundef } from './define';
 import { argumentError, frozenError, indexError, nameError, typeError } from './errors';
 import { digest, hashKeyOf, hashSet } from './hashes';
@@ -260,8 +269,8 @@ def('Struct', 'values_at', [0, -1], function* (self: RObject, args) {
   try {
     for (const argument of args) {
       if (argument instanceof RRange) {
-        const begin = argument.begin === NIL ? NIL : yield* toInt(argument.begin);
-        const end = argument.end === NIL ? NIL : yield* toInt(argument.end);
+        const begin = argument.begin === NIL ? NIL : (yield* toIndexExact(argument.begin)).integer;
+        const end = argument.end === NIL ? NIL : (yield* toIndexExact(argument.end)).integer;
         const expanded = (yield* callMethod(arr([...values]), 'values_at', [
           range(begin, end, argument.exclusive),
         ])) as RArray;

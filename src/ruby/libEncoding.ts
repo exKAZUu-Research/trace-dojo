@@ -2,7 +2,7 @@ import { def, sdef } from './define';
 import { rubyError } from './errors';
 import { callProc, type Gen, requireBlock } from './interp';
 import { makeEnumerator } from './libEnumerator';
-import { NIL, RObject, type RProc, type RString, type Value } from './objects';
+import { type RSymbol,NIL,RObject,type RProc,type RString,type Value } from './objects';
 import { ExitSignal, ReturnSignal, rt, RubyError, type Runtime, UnsupportedFeatureError } from './runtime';
 import { arr, str, stringBytes } from './values';
 
@@ -37,6 +37,12 @@ def(
   0,
   (self: RString) =>
     rt().c.Encoding.constants.get(self.binary ? 'ASCII_8BIT' : self.usAscii ? 'US_ASCII' : 'UTF_8') as Value
+);
+def(
+  'Symbol',
+  'encoding',
+  0,
+  (self: RSymbol) => rt().c.Encoding.constants.get(/[^\u0000-\u007F]/.test(self.name) ? 'UTF_8' : 'US_ASCII') as Value
 );
 export function validStringEncoding(self: RString): boolean {
   if (self.usAscii) return stringBytes(self).every((byte) => byte < 0x80);

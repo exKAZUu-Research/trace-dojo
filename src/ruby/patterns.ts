@@ -232,6 +232,8 @@ function* restOf(hash: RHash, pairs: { key: string }[]): Gen<RHash> {
   rest.defaultProc = hash.defaultProc;
   for (const [slot, entry] of hash.map) {
     if (entry.key instanceof RSymbol && pairs.some((pair) => pair.key === (entry.key as RSymbol).name)) continue;
+    rt().chargeSlots(1);
+    rt().spend();
     rest.map.set(slot, { ...entry });
   }
   return rest;

@@ -19,8 +19,7 @@ for (const [owner, methods] of Object.entries({
   Integer: ['singleton_method_added'],
   Float: ['singleton_method_added'],
   Set: ['compare_by_identity', 'compare_by_identity?', 'divide'],
-  Symbol: ['encoding', 'match', 'match?'],
-  NilClass: ['rationalize', 'to_c', 'to_r'],
+  NilClass: ['rationalize', 'to_c'],
   Proc: ['binding', 'ruby2_keywords', 'source_location', '>>', '<<'],
   Hash: ['<', '<=', '>', '>='],
   Module: [
