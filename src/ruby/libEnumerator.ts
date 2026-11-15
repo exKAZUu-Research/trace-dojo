@@ -1329,7 +1329,8 @@ function* streamLazyStep(
           }
           return yield* next(arr(tuple));
         } finally {
-          arrays.pop();
+          const root = arrays.lastIndexOf(tuple);
+          if (root !== -1) arrays.splice(root, 1);
         }
       }
       case 'each_slice':

@@ -947,6 +947,21 @@ test('lazy zip conversion and copied cursors retain turtles across callbacks', (
   expect(traceProgram('ruby', copy, copy).finalTurtles).toHaveLength(1);
 });
 
+test('lazy zip retains grouped Turtles while downstream buffers are live', () => {
+  for (const grouping of ['each_slice', 'each_cons']) {
+    const program = `e=Enumerator.new do |y|
+3.times do
+ y << Turtle.new
+end
+end
+items=e.lazy.zip([1,2,3]).${grouping}(3).force
+items[0][1][0].forward`;
+    const turtles = traceProgram('ruby', program, program).finalTurtles;
+    expect(turtles).toHaveLength(3);
+    expect(turtles.some((turtle) => turtle.y === 1)).toBe(true);
+  }
+});
+
 test('inherited hooks record unused final movement inside the hook', () => {
   const program = '$t=Turtle.new\nclass Base\n def self.inherited(c)\n  $t.forward\n end\nend\nclass Child<Base\nend';
   const result = traceProgram('ruby', program, program);

@@ -1054,8 +1054,17 @@ def('Regexp', 'names', 0, (self: RObject) =>
 function captureNameString(regexp: RObject, name: string): RString {
   const encoding = dataOf(regexp).encoding;
   if (encoding === 'US-ASCII') return asciiString(name);
-  if (encoding === 'BINARY (ASCII-8BIT)') return stringFromBytes(new TextEncoder().encode(name), true);
+  if (encoding === 'BINARY (ASCII-8BIT)')
+    return stringFromBytes(
+      Uint8Array.from(name, (char) => char.codePointAt(0) as number),
+      true
+    );
   return str(name);
+}
+
+function captureNameSymbol(regexp: RObject, name: string): RSymbol {
+  const string = captureNameString(regexp, name);
+  return RSymbol.of(name, string.binary, string.usAscii, stringBytes(string));
 }
 
 function* subjectText(value: Value): Gen<RString | undefined> {
@@ -1195,7 +1204,7 @@ def(
     for (const name of state.names)
       yield* hashSet(
         hash,
-        symbolize ? sym(name) : captureNameString(state.regexp, name),
+        symbolize ? captureNameSymbol(state.regexp, name) : captureNameString(state.regexp, name),
         groupText(state, state.namedGroups[name])
       );
     return hash;

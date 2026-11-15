@@ -8937,6 +8937,11 @@ test('named capture names retain their regexp encoding', () => {
     stdout: '[#<Encoding:US-ASCII>, #<Encoding:US-ASCII>, #<Encoding:US-ASCII>]\n',
   });
   expect(run('p /(?<word>é)/.names[0].encoding')).toMatchObject({ stdout: '#<Encoding:UTF-8>\n' });
+  expect(
+    run(
+      'r=Regexp.new("(?<"+233.chr+">a)");m=r.match("a");p r.names[0].bytes,m.names[0].bytes,m.named_captures(symbolize_names:true).keys[0].to_s.bytes'
+    )
+  ).toMatchObject({ stdout: '[233]\n[233]\n[233]\n' });
 });
 
 test('remove_method leaves undefined inherited methods hidden', () => {
