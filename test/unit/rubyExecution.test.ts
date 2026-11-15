@@ -7190,7 +7190,13 @@ test('Regexp encoding and matching respect escaped characters and binary subject
   expect(run(String.raw`s="\xFF";p /./.match(s,-99);begin;s.match(/./,99);rescue=>e;p e.class;end`)).toMatchObject({
     stdout: 'nil\nArgumentError\n',
   });
+});
+
+test('large US-ASCII Regexp scans retain every match', () => {
   expect(run('p String.new("a"*20000,encoding:"US-ASCII").scan(/./).size')).toMatchObject({ stdout: '20000\n' });
+});
+
+test('large Unicode-alternative Regexp scans retain every match', () => {
   expect(run('p ("a"*20000).scan(/é|a/).size')).toMatchObject({ stdout: '20000\n' });
 });
 
