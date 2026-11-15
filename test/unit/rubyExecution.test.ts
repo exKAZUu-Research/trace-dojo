@@ -8545,3 +8545,42 @@ test('lazy zip accepts BasicObject sources with public each', () => {
     stdout: '[[1, 2]]\n',
   });
 });
+
+test('binary Symbol regexp subjects retain their bytes and encoding', () => {
+  expect(run('s=255.chr.to_sym;p /./.match(s).string.encoding,/./.match(s)[0].bytes')).toMatchObject({
+    stdout: '#<Encoding:BINARY (ASCII-8BIT)>\n[255]\n',
+  });
+  expect(run('begin;p /ÿ/.match?(255.chr.to_sym);rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'Encoding::CompatibilityError\n',
+  });
+});
+
+test('lazy zip probes private respond_to? and iterates to_enum', () => {
+  expect(
+    run(
+      'class A;def each;yield 2;end;private;def respond_to?(n,*);n==:each || super;end;end;p [1].lazy.zip(A.new).force'
+    )
+  ).toMatchObject({
+    stdout: '[[1, 2]]\n',
+  });
+  expect(run('class A;def each;yield 2;end;def to_enum;[5].each;end;end;p [1].lazy.zip(A.new).force')).toMatchObject({
+    stdout: '[[1, 5]]\n',
+  });
+});
+
+test('String initialization does not mutate on option conversion error', () => {
+  expect(
+    run(
+      'e=Object.new;def e.to_str;raise "encoding";end;s="old";begin;s.send(:initialize,"new",encoding:e);rescue;end;p s'
+    )
+  ).toMatchObject({
+    stdout: '"old"\n',
+  });
+  expect(
+    run(
+      'c=Object.new;def c.to_int;raise "capacity";end;s="old";begin;s.send(:initialize,"new",capacity:c);rescue;end;p s'
+    )
+  ).toMatchObject({
+    stdout: '"old"\n',
+  });
+});

@@ -208,39 +208,37 @@ def(
         else if (key === 'encoding') encodingValue = entry.value;
         else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
       }
-    let sourceBytes: Uint8Array | undefined;
-    if (args.length > 0) {
-      const source = yield* toStrValue(args[0]);
-      sourceBytes = stringBytes(source);
-      setBytes(self, sourceBytes, source.binary);
-      self.usAscii = source.usAscii;
+    const source = args.length > 0 ? yield* toStrValue(args[0]) : undefined;
+    let encoding: string | undefined;
+    let binary: boolean | undefined;
+    let usAscii: boolean | undefined;
+    if (encodingValue !== undefined) {
+      encoding =
+        encodingValue instanceof RString
+          ? encodingValue.s
+          : encodingValue instanceof RObject && encodingValue.cls === rt().c.Encoding
+            ? (encodingValue.data as string)
+            : yield* toStr(encodingValue);
+      const normalized = encoding.toUpperCase();
+      if (normalized === 'ASCII-8BIT' || normalized === 'BINARY') binary = true;
+      // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby spells the encoding name UTF-8.
+      else if (['UTF-8', 'CP65001', 'US-ASCII', 'ASCII', 'ANSI_X3.4-1968', '646'].includes(normalized)) {
+        binary = false;
+        // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby's ASCII alias is uppercase after normalization.
+        usAscii = ['US-ASCII', 'ASCII', 'ANSI_X3.4-1968', '646'].includes(normalized);
+        // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Reject Ruby's invalid UTF8 spelling after uppercase normalization.
+      } else if (normalized === 'UTF8') throw argumentError(`unknown encoding name - ${encoding}`);
+      else throw new UnsupportedFeatureError(`String.new の文字コード ${encoding}`);
     }
-    if (keywords) {
-      if (encodingValue !== undefined) {
-        const encoding =
-          encodingValue instanceof RString
-            ? encodingValue.s
-            : encodingValue instanceof RObject && encodingValue.cls === rt().c.Encoding
-              ? (encodingValue.data as string)
-              : yield* toStr(encodingValue);
-        const normalizedEncoding = encoding.toUpperCase();
-        if (normalizedEncoding === 'ASCII-8BIT' || normalizedEncoding === 'BINARY')
-          setBytes(self, sourceBytes ?? stringBytes(self), true);
-        // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby spells the encoding name UTF-8.
-        else if (['UTF-8', 'CP65001', 'US-ASCII', 'ASCII', 'ANSI_X3.4-1968', '646'].includes(normalizedEncoding)) {
-          setBytes(self, sourceBytes ?? stringBytes(self), false);
-          // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby's ASCII alias is uppercase after normalization.
-          self.usAscii = ['US-ASCII', 'ASCII', 'ANSI_X3.4-1968', '646'].includes(normalizedEncoding);
-          // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Reject Ruby's invalid UTF8 spelling after uppercase normalization.
-        } else if (normalizedEncoding === 'UTF8') {
-          throw argumentError(`unknown encoding name - ${encoding}`);
-        } else throw new UnsupportedFeatureError(`String.new の文字コード ${encoding}`);
-      }
-      if (capacityValue !== undefined) {
-        const capacity = yield* toIndex(capacityValue);
-        if (self.frozen) throw frozenError(self, yield* inspect(self));
-        if (capacity > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
-      }
+    if (capacityValue !== undefined) {
+      const capacity = yield* toIndex(capacityValue);
+      if (self.frozen) throw frozenError(self, yield* inspect(self));
+      if (capacity > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+    }
+    if (source || binary !== undefined) {
+      setBytes(self, source ? stringBytes(source) : stringBytes(self), binary ?? source?.binary ?? self.binary);
+      if (usAscii !== undefined) self.usAscii = usAscii;
+      else if (source) self.usAscii = source.usAscii && !self.binary;
     }
     return NIL;
   },
@@ -353,7 +351,7 @@ function binaryInspect(bytes: Uint8Array): string {
 def('String', ['to_sym', 'intern'], 0, (self: RString) => {
   if (self.rawBytes && !self.binary)
     throw rubyError(rt().c.EncodingError, `invalid symbol in encoding UTF-8 :${inspectRawBytes(self.rawBytes)}`);
-  return sym(self.s);
+  return RSymbol.of(self.s, self.binary);
 });
 def('String', 'to_i', [0, 1], function* (self: RString, args) {
   const base = args.length > 0 ? yield* toRubyInt(args[0]) : 10;
@@ -1831,12 +1829,10 @@ def('String', 'between?', 2, function* (self: RString, [min, max]) {
 
 // Symbol --------------------------------------------------------------------------------------------------------------
 
-def('Symbol', ['to_s', 'id2name'], 0, (self: RSymbol) =>
-  /^[\u0000-\u007F]*$/.test(self.name) ? asciiString(self.name) : str(self.name)
-);
+def('Symbol', ['to_s', 'id2name'], 0, (self: RSymbol) => symbolString(self));
 def('Symbol', 'name', 0, (self: RSymbol) => {
   if (!self.nameString) {
-    self.nameString = /^[\u0000-\u007F]*$/.test(self.name) ? asciiString(self.name) : str(self.name);
+    self.nameString = symbolString(self);
     self.nameString.frozen = true;
   }
   return self.nameString;
@@ -1905,6 +1901,11 @@ export function symbolProc(name: string): Value {
 }
 
 export function symbolString(self: RSymbol): RString {
+  if (self.binary)
+    return stringFromBytes(
+      Uint8Array.from(self.name, (char) => char.codePointAt(0) ?? 0),
+      true
+    );
   return /^[\u0000-\u007F]*$/.test(self.name) ? asciiString(self.name) : str(self.name);
 }
 

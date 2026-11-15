@@ -1127,11 +1127,11 @@ def('Enumerator::Lazy', 'zip', [0, -1], function* (self: RObject, others, block)
           `can't convert ${realClassOf(other).name} to Array (${realClassOf(other).name}#to_ary gives ${realClassOf(array).name})`
         );
       else if (
-        respondsTo(other, 'respond_to?')
-          ? truthy(yield* callMethod(other, 'respond_to?', [sym('each')]))
+        respondsTo(other, 'respond_to?', true)
+          ? truthy(yield* callMethod(other, 'respond_to?', [sym('each')], undefined, undefined, { fcall: true }))
           : respondsTo(other, 'each')
       )
-        converted.push(other);
+        converted.push(yield* callMethod(other, 'to_enum', []));
       else throw typeError(`wrong argument type ${realClassOf(other).name} (must respond to :each)`);
     }
     const data = self.data as LazyData;

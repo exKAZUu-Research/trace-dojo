@@ -17,14 +17,19 @@ export const NIL = new RNil();
 export class RSymbol {
   readonly id = (nextObjectId += 8);
   nameString?: RString;
-  private constructor(readonly name: string) {}
+  private constructor(
+    readonly name: string,
+    readonly binary: boolean
+  ) {}
 
-  static of(name: string): RSymbol {
+  static of(name: string, binary = false): RSymbol {
     const symbols = rt().symbols;
-    let symbol = symbols.get(name);
+    const encoded = binary && /[^\u0000-\u007F]/.test(name);
+    const key = `${encoded ? 'binary:' : 'text:'}${name}`;
+    let symbol = symbols.get(key);
     if (!symbol) {
-      symbol = new RSymbol(name);
-      symbols.set(name, symbol);
+      symbol = new RSymbol(name, encoded);
+      symbols.set(key, symbol);
     }
     return symbol;
   }

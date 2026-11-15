@@ -43,7 +43,10 @@ def(
   'Symbol',
   'encoding',
   0,
-  (self: RSymbol) => rt().c.Encoding.constants.get(/[^\u0000-\u007F]/.test(self.name) ? 'UTF_8' : 'US_ASCII') as Value
+  (self: RSymbol) =>
+    rt().c.Encoding.constants.get(
+      self.binary ? 'ASCII_8BIT' : /[^\u0000-\u007F]/.test(self.name) ? 'UTF_8' : 'US_ASCII'
+    ) as Value
 );
 export function validStringEncoding(self: RString): boolean {
   if (self.usAscii) return stringBytes(self).every((byte) => byte < 0x80);

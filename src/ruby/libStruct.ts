@@ -397,8 +397,12 @@ function* inspectMembers(self: RObject, kind: 'struct' | 'data'): Gen {
   inspecting.add(self);
   try {
     const parts: string[] = [];
+    let length = head.length + 1;
     for (const [index, member] of layoutOf(self.cls).members.entries()) {
-      parts.push(`${member}=${yield* inspect(valuesOf(self)[index])}`);
+      const value = yield* inspect(valuesOf(self)[index]);
+      length += member.length + 1 + value.length + (parts.length > 0 ? 2 : 0);
+      rt().checkStringLength(length);
+      parts.push(`${member}=${value}`);
     }
     if (parts.length === 0) return str(`${name === undefined ? head : head.trimEnd()}>`);
     return str(`${head}${parts.join(', ')}>`);
