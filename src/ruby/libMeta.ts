@@ -175,7 +175,7 @@ function* findForMethodObject(self: Value, name: string, publicOnly = false): Ge
       },
     };
   }
-  const description = self === rt().mainObject ? 'an instance of Object' : `class '${realClassOf(self).name}'`;
+  const description = self === rt().mainObject ? 'an instance of Object' : `class '${className(classOf(self))}'`;
   throw nameError(`undefined method '${name}' for ${description}`, self, name);
 }
 

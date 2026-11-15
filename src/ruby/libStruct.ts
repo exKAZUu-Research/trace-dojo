@@ -220,6 +220,7 @@ def(
     if (self.frozen) throw frozenError(self, yield* inspect(self));
     const { members, keywordInit } = layoutOf(self.cls);
     const values = valuesOf(self);
+    const next: Value[] = members.map(() => NIL);
     if (keywordInit || (keywordInit === undefined && args.length === 0 && keywords)) {
       if (args.length > 0) throw argumentError(`wrong number of arguments (given ${args.length}, expected 0)`);
       const unknown: string[] = [];
@@ -227,14 +228,16 @@ def(
         const name = entry.key instanceof RSymbol ? entry.key.name : yield* inspect(entry.key);
         const index = members.indexOf(name);
         if (index === -1) unknown.push(name);
-        else values[index] = entry.value;
+        else next[index] = entry.value;
       }
       if (unknown.length > 0) throw argumentError(`unknown keywords: ${unknown.join(', ')}`);
+      values.splice(0, values.length, ...next);
       return NIL;
     }
     const all = keywords ? [...args, keywords] : args;
     if (all.length > members.length) throw argumentError('struct size differs');
-    for (const [index, value] of all.entries()) values[index] = value;
+    for (const [index, value] of all.entries()) next[index] = value;
+    values.splice(0, values.length, ...next);
     return NIL;
   },
   { visibility: 'private', keywords: true }

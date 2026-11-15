@@ -880,6 +880,12 @@ test('Struct trace entries retain prototype-named members', () => {
   if (node?.kind === 'object') expect(Object.hasOwn(node.entries, '__proto__')).toBe(true);
 });
 
+test('MatchData roots its retained regexp', () => {
+  const program =
+    'r=Regexp.new("a")\nr.instance_variable_set(:@t,Turtle.new)\nm=r.match("a")\nr=nil\nx=1\nm.regexp.instance_variable_get(:@t).forward';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
 test('saved Method implementations retain their captured turtles', () => {
   const program =
     'def make;t=Turtle.new;c=Class.new;c.define_method(:go){t.forward};c.new.method(:go);end;m=make;m.receiver.class.remove_method(:go);x=1;m.call';

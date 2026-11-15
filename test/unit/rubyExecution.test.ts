@@ -6093,7 +6093,7 @@ test('Regexp retains scoped lines, Unicode words and literal match metadata', ()
   expect(run('p(/[[:word:]]/.match?("‿"));p(/[[:word:]]/.match?("²"))')).toMatchObject({
     stdout: 'true\nfalse\n',
   });
-  expect(run('"hello".sub("ell","x");p $~')).toMatchObject({ stdout: '#<MatchData "ell">\n' });
+  expect(run('"hello".sub("ell","x");p $~')).toMatchObject({ stdout: '#<MatchData: ell>\n' });
   expect(run('m=/(?<constructor>a)/.match("a");p m.names,m[:constructor],/(?<x>a)|(?<x>b)/.names')).toMatchObject({
     stdout: '["constructor"]\n"a"\n["x"]\n',
   });
@@ -7373,8 +7373,8 @@ test('defined recognizes the special last-line global', () => {
   });
 });
 
-test('literal searches inspect MatchData with quoted captures', () => {
-  expect(run('"abc".sub("b","x");p $~')).toMatchObject({ stdout: '#<MatchData "b">\n' });
+test('literal searches inspect MatchData with the colon form', () => {
+  expect(run('"abc".sub("b","x");p $~')).toMatchObject({ stdout: '#<MatchData: b>\n' });
 });
 
 test('keyword expansion rehashes keys across identity modes', () => {
@@ -7430,6 +7430,22 @@ test('Struct values_at reads fields before later selector conversions', () => {
 
 test('Struct.new defines an empty anonymous Struct class', () => {
   expect(run('S=Struct.new;p S.new.members,S.new.inspect')).toMatchObject({ stdout: '[]\n"#<struct S>"\n' });
+});
+
+test('method lookup names singleton classes in errors', () => {
+  expect(run('begin;Object.method(:zz);rescue=>e;p e.message;end')).toMatchObject({
+    stdout: "\"undefined method 'zz' for class '#<Class:Object>'\"\n",
+  });
+});
+
+test('Kernel not-match can invoke a private match operator', () => {
+  expect(run('class C;private;def =~(x);1;end;end;p C.new !~ 1')).toMatchObject({ stdout: 'false\n' });
+});
+
+test('Struct initialization clears members omitted on later calls', () => {
+  expect(run('S=Struct.new(:a,:b);s=S.new(1,2);s.send(:initialize,3);p s')).toMatchObject({
+    stdout: '#<struct S a=3, b=nil>\n',
+  });
 });
 
 test('regexp split yields fields and captures to a block', () => {

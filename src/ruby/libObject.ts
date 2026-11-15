@@ -151,7 +151,7 @@ def('Kernel', 'eql?', 1, function* (self, [other]) {
   return yield* rEql(self, other);
 });
 def('Kernel', '!~', 1, function* (self, [other]) {
-  return !truthy(yield* callMethod(self, '=~', [other]));
+  return !truthy(yield* callMethod(self, '=~', [other], undefined, undefined, { fcall: true }));
 });
 def('Kernel', 'hash', 0, (self) => BigInt(hashString(String(objectId(self)))));
 def('Kernel', '<=>', 1, function* (self, [other]) {
