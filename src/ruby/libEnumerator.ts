@@ -13,6 +13,7 @@ import {
   tryImplicitConversion,
 } from './conversions';
 import { def, iundef, sdef } from './define';
+import { cycleSize, windowSize } from './enumeratorSize';
 import { argumentCountError, argumentError, floatDomainError, rangeError, rubyError, typeError } from './errors';
 import { floatStepCount } from './floatMath';
 import { pushFrameReferences } from './garbageCollection';
@@ -140,22 +141,9 @@ function* enumeratorSize(recv: Value, method: string, args: Value[], keywords?: 
   }
   const base = yield* receiverSize(recv);
   if ((method === 'each_slice' || method === 'each_cons') && args[0] !== undefined && base !== NIL) {
-    const slice = method === 'each_slice';
-    const count = (yield* toIndexExact(args[0])).integer;
-    if (count <= 0n) throw argumentError(slice ? 'invalid slice size' : 'invalid size');
-    if (typeof base === 'bigint') return slice ? (base + count - 1n) / count : base >= count ? base - count + 1n : 0n;
-    if (isRubyFloat(base) && Number(base) === Infinity) return base;
-    if (base instanceof RString) throw typeError('no implicit conversion of Integer into String');
-    return slice
-      ? yield* callMethod(yield* callMethod(base, '/', [count]), 'ceil', [])
-      : yield* callMethod(yield* callMethod(base, '-', [count]), '+', [1n]);
+    return yield* windowSize(base, method, args[0]);
   }
-  if (method === 'cycle' && typeof base === 'bigint') {
-    if (base === 0n) return 0n;
-    const count = args[0] === undefined || args[0] === NIL ? undefined : (yield* toIndexExact(args[0])).integer;
-    if (count !== undefined && count <= 0n) return 0n;
-    return count === undefined ? Number.POSITIVE_INFINITY : base * count;
-  }
+  if (method === 'cycle' && base !== NIL) return yield* cycleSize(base, args[0]);
   if (FIXED_SIZE_METHODS.has(method)) return base;
   return NIL;
 }
@@ -170,7 +158,10 @@ export function* receiverSize(recv: Value): Gen<Value> {
     const size = sourceOf(recv).size?.() ?? NIL;
     return isGenerator(size) ? yield* size : size;
   }
-  if (recv instanceof RObject && (yield* respondsToName(recv, 'size', true)))
+  if (
+    recv instanceof RObject &&
+    truthy(yield* callMethod(recv, 'respond_to?', [sym('size'), true], undefined, undefined, { fcall: true }))
+  )
     return yield* callMethod(recv, 'size', [], undefined, undefined, { fcall: true });
   return NIL;
 }
@@ -999,6 +990,15 @@ interface LazyData {
   copy(): LazyData;
 }
 
+const lazyDisplaySources = new WeakMap<RObject, { source: Value; args: Value[] }>();
+
+function lazyIterationSource(source: Value, args: Value[], displayArgs: Value[]): RObject {
+  const enumerator = makeEnumerator(source, 'each', args);
+  const previous = source instanceof RObject ? lazyDisplaySources.get(source) : undefined;
+  lazyDisplaySources.set(enumerator, { source: previous?.source ?? source, args: displayArgs });
+  return enumerator;
+}
+
 function* lazySize(self: RObject): Gen {
   const { source, steps } = self.data as LazyData;
   if (!respondsTo(source, 'size')) return NIL;
@@ -1103,7 +1103,7 @@ for (const kind of ['each_slice', 'each_cons'] as const) {
 }
 def('Enumerator::Lazy', 'each_entry', [0, -1], function* (self: RObject, args, block) {
   const data = self.data as LazyData;
-  const source = args.length > 0 ? makeEnumerator(data.source, 'each', args) : data.source;
+  const source = args.length > 0 ? lazyIterationSource(data.source, args, []) : data.source;
   const lazy = makeLazy(source, [...data.steps, { kind: 'each_entry', args }]);
   if (!block) return lazy;
   yield* runLazy(lazy, (value) => callProc(block, [value], { used: false }));
@@ -1403,7 +1403,7 @@ def('Enumerator::Lazy', 'each', [0, -1], function* (self: RObject, args, block) 
   if (!block) {
     if (args.length === 0) return self;
     const data = self.data as LazyData;
-    return makeLazy(makeEnumerator(data.source, 'each', args), data.steps);
+    return makeLazy(lazyIterationSource(data.source, args, args), data.steps);
   }
   return yield* runLazy(self, (value, yielded) => callProc(block, yielded ?? [value], { used: false }), args);
 });
@@ -1448,7 +1448,11 @@ def('Enumerator::Lazy', 'eager', 0, function* (self: RObject) {
 });
 def('Enumerator::Lazy', ['inspect', 'to_s'], 0, function* (self: RObject) {
   const data = self.data as LazyData;
-  let text = `#<Enumerator::Lazy: ${yield* inspect(data.source)}>`;
+  const displayed = data.source instanceof RObject ? lazyDisplaySources.get(data.source) : undefined;
+  const source = yield* inspect(displayed?.source ?? data.source);
+  const sourceArgs: string[] = [];
+  for (const arg of displayed?.args ?? []) sourceArgs.push(yield* inspect(arg));
+  let text = `#<Enumerator::Lazy: ${source}${sourceArgs.length > 0 ? `(${sourceArgs.join(', ')})` : ''}>`;
   for (const step of data.steps) {
     const argumentsText: string[] = [];
     for (const argument of step.args ?? []) argumentsText.push(yield* inspect(argument));

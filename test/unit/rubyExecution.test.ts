@@ -9102,6 +9102,11 @@ test('Enumerable size callbacks respect method shape and visibility', () => {
       'class C;include Enumerable;def each;yield 1;end;def respond_to_missing?(n,*);n==:size || super;end;def method_missing(n,*);n==:size ? 3 : super;end;end;p C.new.map.size,C.new.each_cons(2).size'
     )
   ).toMatchObject({ stdout: '3\n2\n' });
+  expect(
+    run(
+      'class C;include Enumerable;def each;yield 1;end;def size;3;end;def respond_to?(*a);puts :respond;false;end;end;p C.new.map.size'
+    )
+  ).toMatchObject({ stdout: 'respond\nnil\n' });
 });
 
 test('Enumerable window sizes use custom numeric size values', () => {
@@ -9115,6 +9120,13 @@ test('Enumerable window sizes use custom numeric size values', () => {
       'class C;include Enumerable;def each;yield 1;end;def size;"3";end;end;begin;C.new.each_slice(2).size;rescue=>e;p e.class;end'
     )
   ).toMatchObject({ stdout: 'TypeError\n' });
+  expect(
+    run(
+      'class C;include Enumerable;def each;yield 1;end;def size;3.5;end;end;p C.new.each_cons(5).size,C.new.cycle(2).size'
+    )
+  ).toMatchObject({
+    stdout: '0\n7.0\n',
+  });
 });
 
 test('Enumerator with_index converts its offset when iterated once', () => {
@@ -9135,6 +9147,13 @@ test('Lazy each_entry forwards iteration arguments', () => {
   expect(
     run('class C;include Enumerable;def each(n=1);n.times{|i|yield i};end;end;p C.new.lazy.each_entry(3).force')
   ).toMatchObject({ stdout: '[0, 1, 2]\n' });
+  expect(
+    run(
+      'class C;include Enumerable;def each(n=1);n.times{|i|yield i};end;def inspect;"C";end;end;p C.new.lazy.each_entry(3),C.new.lazy.each(3)'
+    )
+  ).toMatchObject({
+    stdout: '#<Enumerator::Lazy: #<Enumerator::Lazy: C>:each_entry(3)>\n#<Enumerator::Lazy: C(3)>\n',
+  });
 });
 
 test('Enumerator adapters pack zero-argument yields as nil', () => {
@@ -9179,6 +9198,14 @@ test('Lazy zip preserves callback packing for multi-yield sources', () => {
   expect(run('p [1].lazy.zip([3]).map{|x|x}.force')).toMatchObject({ stdout: '[[1, 3]]\n' });
 });
 
+test('define_method blocks retain lexical definition visibility', () => {
+  expect(
+    run(
+      'class C;private;define_method(:outer){def inner;1;end};end;C.new.send(:outer);p C.private_method_defined?(:inner),C.public_method_defined?(:inner)'
+    )
+  ).toMatchObject({ stdout: 'true\nfalse\n' });
+});
+
 test('invalid US-ASCII strings remain distinct Hash keys from UTF-8', () => {
   expect(run('a="é";b=String.new(a,encoding:"US-ASCII");p [a==b,a.eql?(b),{a=>1}[b],{a=>1,b=>2}.size]')).toMatchObject({
     stdout: '[false, false, nil, 2]\n',
@@ -9206,6 +9233,14 @@ test('Time exact arguments accept to_int hooks', () => {
   expect(run('class Seconds;def to_int;3;end;end;v=Seconds.new;p Time.at(v).to_i,(Time.at(0)+v).to_i')).toMatchObject({
     stdout: '3\n3\n',
   });
+});
+
+test('Time exact arguments prefer fractional to_r hooks', () => {
+  expect(
+    run(
+      'class Seconds;def to_r;Rational(1,3);end;def to_int;0;end;end;v=Seconds.new;p Time.at(v)==Time.at(Rational(1,3)),(Time.at(0)+v).to_f'
+    )
+  ).toMatchObject({ stdout: 'true\n0.3333333333333333\n' });
 });
 
 test('fixed format rounds Rational and Integer values exactly', () => {

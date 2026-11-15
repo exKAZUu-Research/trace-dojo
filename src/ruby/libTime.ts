@@ -1,5 +1,13 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { compareValues, inspectValue, supportsImplicitConversion, toFloat, toInt, toStr } from './conversions';
+import {
+  compareValues,
+  inspectValue,
+  supportsImplicitConversion,
+  toFloat,
+  toInt,
+  toStr,
+  tryImplicitConversion,
+} from './conversions';
 import { def, sdef } from './define';
 import { argumentError, floatDomainError, frozenError, rangeError, rubyError, typeError } from './errors';
 import { bigintRatio } from './floatMath';
@@ -160,13 +168,19 @@ function* secondsValue(arg: Value): Gen<number> {
   return yield* toFloat(arg);
 }
 
-function* exactNumber(value: Value): Gen<number | bigint> {
+function* exactNumber(value: Value): Gen<number | bigint | RObject> {
   try {
     return yield* toFloat(value);
   } catch (error) {
     if (error instanceof RubyError && error.exception.cls === rt().c.TypeError) {
       const message = error.exception.exception?.message;
       if (message instanceof RString && message.s.endsWith('into Float')) {
+        if (value instanceof RString) throw typeError("can't convert String into an exact number");
+        const rational = yield* tryImplicitConversion(value, 'to_r');
+        if (rational !== undefined) {
+          if (!isRational(rational)) throw typeError(`can't convert ${realClassOf(value).name} into an exact number`);
+          return rational;
+        }
         if (yield* supportsImplicitConversion(value, 'to_int')) return yield* toInt(value);
         throw typeError(`can't convert ${realClassOf(value).name} into an exact number`);
       }

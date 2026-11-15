@@ -76,6 +76,7 @@ export class Frame implements TracedFrame {
   get definitionOwner(): RClass | undefined {
     if (this.extra.definee) return this.extra.definee;
     if (this.extra.definitionTarget) return this.extra.definitionTarget;
+    if (this.extra.lexicalDefinitionOwner) return this.extra.lexicalDefinitionOwner;
     if (this.kind === 'class') return this.self as RClass;
     return this.home.kind === 'class' ? (this.home.self as RClass) : undefined;
   }
@@ -106,6 +107,7 @@ export function rootValues(frame: Frame, values: readonly Value[]): void {
 
 export interface FrameExtra {
   definitionTarget?: RClass;
+  lexicalDefinitionOwner?: RClass;
   forbidSingletonDefinition?: boolean;
   /** The running method. */
   method?: RMethod;

@@ -2173,6 +2173,7 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
       def: outer.home.extra.def,
       definee: options.definitionTarget ? undefined : (options.definee ?? outer.extra.definee),
       definitionTarget: options.definee ? undefined : (options.definitionTarget ?? outer.extra.definitionTarget),
+      lexicalDefinitionOwner: options.method ? outer.definitionOwner : outer.extra.lexicalDefinitionOwner,
       forbidSingletonDefinition:
         options.forbidSingletonDefinition ??
         (options.definee || options.definitionTarget ? false : outer.extra.forbidSingletonDefinition),
