@@ -1838,15 +1838,28 @@ def('Symbol', 'name', 0, (self: RSymbol) => {
 def('Symbol', 'to_sym', 0, (self) => self);
 def('Symbol', 'intern', 0, (self) => self);
 def('Symbol', 'casecmp', 1, (self: RSymbol, [other]) => {
-  if (!(other instanceof RSymbol) || self.binary !== other.binary || self.usAscii !== other.usAscii) return NIL;
-  return BigInt(compareBytes(foldAsciiBytes(symbolString(self)), foldAsciiBytes(symbolString(other))));
+  if (!(other instanceof RSymbol)) return NIL;
+  const left = symbolString(self);
+  const right = symbolString(other);
+  if (!compatibleSymbolCase(self, other, left, right)) return NIL;
+  return BigInt(compareBytes(foldAsciiBytes(left), foldAsciiBytes(right)));
 });
 def('Symbol', 'casecmp?', 1, (self: RSymbol, [other]) => {
-  if (!(other instanceof RSymbol) || self.binary !== other.binary || self.usAscii !== other.usAscii) return NIL;
-  if (self.binary || self.usAscii)
-    return compareBytes(foldAsciiBytes(symbolString(self)), foldAsciiBytes(symbolString(other))) === 0;
+  if (!(other instanceof RSymbol)) return NIL;
+  const left = symbolString(self);
+  const right = symbolString(other);
+  if (!compatibleSymbolCase(self, other, left, right)) return NIL;
+  if (self.binary || self.usAscii || other.binary || other.usAscii)
+    return compareBytes(foldAsciiBytes(left), foldAsciiBytes(right)) === 0;
   return foldCase(self.name) === foldCase(other.name);
 });
+function compatibleSymbolCase(left: RSymbol, right: RSymbol, leftString: RString, rightString: RString): boolean {
+  return (
+    (left.binary === right.binary && left.usAscii === right.usAscii) ||
+    stringBytes(leftString).every((byte) => byte < 0x80) ||
+    stringBytes(rightString).every((byte) => byte < 0x80)
+  );
+}
 def('Symbol', 'inspect', 0, (self: RSymbol) => {
   const text = symInspect(self);
   return /^[\u0000-\u007F]*$/.test(text) ? asciiString(text) : str(text);

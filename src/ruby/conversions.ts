@@ -617,10 +617,12 @@ export function symInspect(symbol: string | RSymbol): string {
 export function quotedSymbolName(symbol: string | RSymbol): string {
   const name = typeof symbol === 'string' ? symbol : symbol.name;
   if (symbol instanceof RSymbol && (symbol.binary || symbol.usAscii)) {
-    const escaped = Array.from(symbol.bytes ?? [], (byte) =>
-      byte >= 0x80
-        ? `\\x${byte.toString(16).toUpperCase().padStart(2, '0')}`
-        : strInspect(String.fromCodePoint(byte), 'hex').slice(1, -1)
+    const escaped = Array.from(symbol.bytes ?? [], (byte, index) =>
+      byte === 35 && [36, 64, 123].includes(symbol.bytes?.[index + 1] ?? -1)
+        ? String.raw`\#`
+        : byte >= 0x80
+          ? `\\x${byte.toString(16).toUpperCase().padStart(2, '0')}`
+          : strInspect(String.fromCodePoint(byte), 'hex').slice(1, -1)
     ).join('');
     return `"${escaped}"`;
   }

@@ -8751,6 +8751,15 @@ test('binary Symbol comparisons retain byte order and encoding', () => {
   expect(run('a=233.chr.to_sym;b=:é;p [a<=>b,a.casecmp(b),a.casecmp?(b)]')).toMatchObject({
     stdout: '[1, nil, nil]\n',
   });
+  expect(run('p [255.chr.to_sym.casecmp(:a),255.chr.to_sym.casecmp?(:a),:a.casecmp(255.chr.to_sym)]')).toMatchObject({
+    stdout: '[1, false, -1]\n',
+  });
+});
+
+test('encoded Symbol inspection escapes interpolation markers', () => {
+  expect(run(String.raw`s=(255.chr+%q(#{x})).to_sym;p s,{s=>1}`)).toMatchObject({
+    stdout: ':"\\xFF\\#{x}"\n{"\\xFF\\#{x}": 1}\n',
+  });
 });
 
 test('prepend merges shared included child chains', () => {
