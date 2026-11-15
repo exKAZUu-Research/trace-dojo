@@ -248,7 +248,8 @@ export function* noMatchingPattern(value: Value, single: boolean): Gen<unknown> 
   if (failure?.missingKey !== undefined) rt().held.push(failure.missingKey);
   if (failure?.matchee !== undefined) rt().held.push(failure.matchee);
   try {
-    if (!single || !failure) return rubyError(rt().c.NoMatchingPatternError, (yield* toSValue(value)).s);
+    if (!single || !failure)
+      return rubyError(rt().c.NoMatchingPatternError, value === NIL ? NIL : (yield* toSValue(value)).s);
     const subject = yield* inspect(value);
     const error = rubyError(
       failure.missingKey === undefined ? rt().c.NoMatchingPatternError : rt().c.NoMatchingPatternKeyError,

@@ -7409,6 +7409,9 @@ test('Class.new establishes its own definition target inside eval', () => {
 
 test('multiple unmatched patterns use the subject string as their message', () => {
   expect(run('begin;case "str";in 1;in 2;end;rescue=>e;p e.message;end')).toMatchObject({ stdout: '"str"\n' });
+  expect(run('begin;case nil;in 1;in 2;end;rescue=>e;p e.message;end')).toMatchObject({
+    stdout: '"NoMatchingPatternError"\n',
+  });
 });
 
 test('empty String initialization preserves existing bytes and encoding', () => {
