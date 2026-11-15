@@ -1242,10 +1242,10 @@ def('Enumerable', 'chain', [0, -1], (self, others) => {
     return enumerator;
   });
   enumerator.cls = rt().c['Enumerator::Chain'];
-  (enumerator.data as EnumeratorSource).size = () => {
+  (enumerator.data as EnumeratorSource).size = function* () {
     let total: bigint | number = 0n;
     for (const source of sources) {
-      const size = receiverSize(source);
+      const size = yield* receiverSize(source);
       if (size === NIL) return NIL;
       if (size === Number.POSITIVE_INFINITY) return size;
       total =
@@ -1264,8 +1264,8 @@ def('Enumerable', 'to_set', [0, -1], function* (self, args, block) {
 });
 
 /** The size of a collection when it can tell without iterating, for an enumerator's `size`. */
-export function sizeOf(collection: Value): Value {
-  return receiverSize(collection);
+export function* sizeOf(collection: Value): Gen<Value> {
+  return yield* receiverSize(collection);
 }
 
 export { callProc, respondsTo, spaceship };

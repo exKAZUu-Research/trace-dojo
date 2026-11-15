@@ -26,7 +26,6 @@ import {
   nativeProc,
   requireBlock,
   respondsTo,
-  runToEnd,
 } from './interp';
 import { iterate, iterateYielded, STOP, zipCollections } from './libEnumerable';
 import { rangeSize } from './libRange';
@@ -135,7 +134,7 @@ function* enumeratorSize(recv: Value, method: string, args: Value[], keywords?: 
       return distance < 0n ? 0n : distance + 1n;
     }
   }
-  const base = receiverSize(recv);
+  const base = yield* receiverSize(recv);
   if (method === 'each_slice' && args[0] !== undefined && typeof base === 'bigint') {
     const count = (yield* toIndexExact(args[0])).integer;
     if (count <= 0n) throw argumentError('invalid slice size');
@@ -158,15 +157,15 @@ function* enumeratorSize(recv: Value, method: string, args: Value[], keywords?: 
   return NIL;
 }
 
-export function receiverSize(recv: Value): Value {
+export function* receiverSize(recv: Value): Gen<Value> {
   if (recv instanceof RArray) return BigInt(recv.items.length);
   if (recv instanceof RHash) return BigInt(recv.map.size);
   if (recv instanceof RString) return BigInt(stringCharacterCount(recv));
-  if (recv instanceof RRange) return rangeSize(recv);
+  if (recv instanceof RRange) return yield* rangeSize(recv);
   if (recv instanceof RObject && recv.cls.isSubclassOf(rt().c.Set)) return setSize(recv);
   if (recv instanceof RObject && recv.cls.isSubclassOf(rt().c.Enumerator)) {
     const size = sourceOf(recv).size?.() ?? NIL;
-    return isGenerator(size) ? runToEnd(size) : size;
+    return isGenerator(size) ? yield* size : size;
   }
   return NIL;
 }
@@ -302,7 +301,7 @@ const FIXED_SIZE_METHODS = new Set([
 const NIL_SIZE_METHODS = new Set(['find', 'find_index', 'take_while', 'drop_while', 'bsearch', 'each_line']);
 const ARRAY_SELECTION_METHODS = new Set(['combination', 'permutation', 'repeated_combination', 'repeated_permutation']);
 
-export function sizedEnumerator(recv: Value, method: string, args: Value[], size: () => Value): RObject {
+export function sizedEnumerator(recv: Value, method: string, args: Value[], size: () => Value | Gen<Value>): RObject {
   const enumerator = makeEnumerator(recv, method, args);
   (enumerator.data as EnumeratorSource).size = size;
   return enumerator;

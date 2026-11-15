@@ -19,12 +19,13 @@ import { structuralHashValue } from './hashes';
 import { callBlock, callMethod, type Gen, invoke, makeRange, nativeProc, respondsTo, truthyValue } from './interp';
 import { rangeHelpers, STOP, sum, toArray } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
+import { respondsToName } from './libMeta';
 import { kernelFloat } from './libNumeric';
 import { fractionOf, isRational } from './libRational';
 import { isRubyFloat, isRubyNumber, NIL, type RObject, type RProc, RRange, RString, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { successorBytes } from './stringTransforms';
-import { arr, asciiString, isA, realClassOf, str, stringBytes, stringFromBytes } from './values';
+import { arr, asciiString, classOf, isA, realClassOf, str, stringBytes, stringFromBytes, sym, truthy } from './values';
 
 type Visit = (value: Value) => Gen<unknown>;
 
@@ -238,7 +239,7 @@ def('Range', 'sum', [0, 1], function* (self: RRange, args, block) {
 });
 
 // code-gauge-allow functionCognitiveComplexity 21 -- Range size handles Integer, Float, beginless, endless, and exclusive bounds.
-export function rangeSize(range: RRange): Value {
+export function* rangeSize(range: RRange): Gen<Value> {
   const { begin, end, exclusive } = range;
   if (typeof begin === 'bigint') {
     if (end === NIL) return Number.POSITIVE_INFINITY;
@@ -259,8 +260,16 @@ export function rangeSize(range: RRange): Value {
       return rationalRangeSize(begin, end, exclusive);
     }
   }
-  if (begin !== NIL && !respondsToSucc(begin)) throw typeError(`can't iterate from ${realClassOf(begin).name}`);
+  if (begin !== NIL && !(yield* hasDynamicSuccessor(begin)))
+    throw typeError(`can't iterate from ${realClassOf(begin).name}`);
   return NIL;
+}
+
+function* hasDynamicSuccessor(value: Value): Gen<boolean> {
+  const responder = classOf(value).findMethod('respond_to?');
+  return responder
+    ? truthy(yield* callMethod(value, 'respond_to?', [sym('succ')]))
+    : yield* respondsToName(value, 'succ', false);
 }
 
 function rationalRangeSize(begin: bigint, end: RObject, exclusive: boolean): bigint {
@@ -271,10 +280,12 @@ function rationalRangeSize(begin: bigint, end: RObject, exclusive: boolean): big
   return size > 0n ? size : 0n;
 }
 
-def('Range', 'size', 0, (self: RRange) => rangeSize(self));
+def('Range', 'size', 0, function* (self: RRange) {
+  return yield* rangeSize(self);
+});
 def('Range', 'count', [0, 1], function* (self: RRange, args, block) {
   if (args.length === 0 && !block) {
-    const size = rangeSize(self);
+    const size = yield* rangeSize(self);
     if (size !== NIL) return size;
   }
   return yield* callEnumerable(self, 'count', args, block);

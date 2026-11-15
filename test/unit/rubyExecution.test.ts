@@ -7807,6 +7807,19 @@ test('Range size handles Rational ends and rejects non-successor begins', () => 
   ).toMatchObject({ stdout: 'TypeError\n"can\'t iterate from Rational"\nTypeError\n"can\'t iterate from Time"\n' });
 });
 
+test('Range size consults dynamic successor responders', () => {
+  expect(
+    run(
+      'class C;def <=>(x);0;end;def respond_to_missing?(n,*);n==:succ;end;def method_missing(n,*);self;end;end;p (C.new..C.new).size'
+    )
+  ).toMatchObject({ stdout: 'nil\n' });
+  expect(
+    run(
+      'class C;def <=>(x);0;end;def succ;self;end;def respond_to?(n,*);false;end;end;begin;p (C.new..C.new).size;rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({ stdout: 'TypeError\n' });
+});
+
 test('Lazy select and reject predicates receive packed entries', () => {
   expect(run('p [nil,1,1,2].lazy.with_index.select{|x|x}.force')).toMatchObject({
     stdout: '[[nil, 0], [1, 1], [1, 2], [2, 3]]\n',
