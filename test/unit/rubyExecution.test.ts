@@ -9030,6 +9030,11 @@ test('bracketed binary negated properties retain casefold membership', () => {
       String.raw`r=Regexp.new(String.new('[\P{Lower}]',encoding:'ASCII-8BIT'),Regexp::IGNORECASE);p r.match?('a'),r.match?('A'),r.match?(233.chr)`
     )
   ).toMatchObject({ stdout: 'true\ntrue\ntrue\n' });
+  expect(
+    run(
+      String.raw`r=Regexp.new(String.new('[\P{Lower}]',encoding:'ASCII-8BIT'),Regexp::IGNORECASE);p [170,186,233].map{|n|r.match?(n.chr)}`
+    )
+  ).toMatchObject({ stdout: '[true, true, true]\n' });
 });
 
 test('word escapes stay ASCII under Unicode case folding', () => {
@@ -9112,6 +9117,11 @@ test('Enumerable size callbacks respect method shape and visibility', () => {
       'class C<BasicObject;include ::Enumerable;def each;yield 1;end;def size;3;end;end;::Kernel.p C.new.map.size,C.new.each_slice(2).size'
     )
   ).toMatchObject({ stdout: '3\n2\n' });
+  expect(
+    run(
+      'class C<BasicObject;include ::Enumerable;def each;yield 1;end;def method_missing(n,*a);return 3 if n==:size;super;end;end;::Kernel.p C.new.map.size,C.new.each_cons(2).size'
+    )
+  ).toMatchObject({ stdout: '3\n2\n' });
 });
 
 test('Enumerable window sizes use custom numeric size values', () => {
@@ -9146,6 +9156,11 @@ test('untransformed Lazy rewind reaches a stateful source', () => {
       'class C;include Enumerable;def initialize;@i=0;end;def each;while @i<3;@i+=1;yield @i;end;end;def rewind;@i=0;end;end;l=C.new.lazy;p l.next;l.rewind;p l.next'
     )
   ).toMatchObject({ stdout: '1\n1\n' });
+  expect(
+    run(
+      'class C;include Enumerable;def initialize;@i=0;end;def each(*);@i+=1;yield @i;end;def rewind;@i=0;end;end;l=C.new.lazy.each_entry(3);p l.next;l.rewind;p l.next'
+    )
+  ).toMatchObject({ stdout: '1\n1\n' });
 });
 
 test('Lazy each_entry forwards iteration arguments', () => {
@@ -9158,6 +9173,14 @@ test('Lazy each_entry forwards iteration arguments', () => {
     )
   ).toMatchObject({
     stdout: '#<Enumerator::Lazy: #<Enumerator::Lazy: C>:each_entry(3)>\n#<Enumerator::Lazy: C(3)>\n',
+  });
+  expect(
+    run(
+      'class C;include Enumerable;def each(*args);yield args;end;def inspect;"C";end;end;p C.new.lazy.each(2).each(3),C.new.lazy.each_entry(2).each(3),C.new.lazy.each(2).each_entry(3)'
+    )
+  ).toMatchObject({
+    stdout:
+      '#<Enumerator::Lazy: C(2, 3)>\n#<Enumerator::Lazy: #<Enumerator::Lazy: C>:each_entry(2, 3)>\n#<Enumerator::Lazy: #<Enumerator::Lazy: C(2)>:each_entry(3)>\n',
   });
 });
 
@@ -9191,6 +9214,9 @@ test('encoded String ordering returns a normalized comparison sign', () => {
 test('literal MatchData inspection retains matched binary bytes', () => {
   expect(run('255.chr.sub(255.chr,"");p $~.inspect.bytes.last(3),$~.inspect.encoding')).toMatchObject({
     stdout: '[32, 255, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  });
+  expect(run('"a".sub("a","");p $~.inspect.encoding;65.chr.scan(65.chr);p $~.inspect.encoding')).toMatchObject({
+    stdout: '#<Encoding:BINARY (ASCII-8BIT)>\n#<Encoding:BINARY (ASCII-8BIT)>\n',
   });
 });
 
@@ -9260,6 +9286,12 @@ test('Time exact wrappers require to_int availability without probing twice', ()
       'class N;def respond_to?(n,*);return super if n!=:to_int;@n=(@n||0)+1;@n==1;end;def to_int;3;end;end;p Time.at(N.new).to_i'
     )
   ).toMatchObject({ stdout: '3\n' });
+});
+
+test('Time exact wrappers accept integer to_r results', () => {
+  expect(run('class N;def to_r;2;end;def to_int;99;end;end;p (Time.at(0)+N.new).to_i')).toMatchObject({
+    stdout: '2\n',
+  });
 });
 
 test('fixed format rounds Rational and Integer values exactly', () => {

@@ -47,7 +47,7 @@ import {
   type Value,
 } from './objects';
 import { type Frame, rt, RubyError, UnsupportedFeatureError } from './runtime';
-import { arr, isA, newHash, realClassOf, str, stringBytes, stringCharacterCount, sym, truthy } from './values';
+import { arr, classOf, isA, newHash, realClassOf, str, stringBytes, stringCharacterCount, sym, truthy } from './values';
 
 /** What an enumerator iterates: a method of a receiver, called with the block it is given. */
 export interface EnumeratorSource {
@@ -159,9 +159,10 @@ export function* receiverSize(recv: Value): Gen<Value> {
     return isGenerator(size) ? yield* size : size;
   }
   if (recv instanceof RObject) {
+    const missing = classOf(recv).findMethod('method_missing');
     const available = respondsTo(recv, 'respond_to?', true)
       ? truthy(yield* callMethod(recv, 'respond_to?', [sym('size'), true], undefined, undefined, { fcall: true }))
-      : respondsTo(recv, 'size', true);
+      : respondsTo(recv, 'size', true) || (missing !== undefined && missing.body.kind !== 'native');
     if (available) return yield* callMethod(recv, 'size', [], undefined, undefined, { fcall: true });
   }
   return NIL;
@@ -821,7 +822,8 @@ def('Enumerator', 'rewind', 0, function* (self: RObject) {
   if (receiver !== self && respondsTo(receiver, 'rewind')) yield* callMethod(receiver, 'rewind', []);
   if (self.cls === rt().c['Enumerator::Lazy']) {
     const data = self.data as LazyData;
-    if (data.steps.length === 0 && respondsTo(data.source, 'rewind')) yield* callMethod(data.source, 'rewind', []);
+    if (data.steps.every((step) => step.kind === 'each_entry') && respondsTo(data.source, 'rewind'))
+      yield* callMethod(data.source, 'rewind', []);
   }
   sourceOf(self).cursor = undefined;
   return self;
@@ -997,7 +999,10 @@ const zippedYieldArgs = new WeakSet<Value[]>();
 function lazyIterationSource(source: Value, args: Value[], displayArgs: Value[]): RObject {
   const enumerator = makeEnumerator(source, 'each', args);
   const previous = source instanceof RObject ? lazyDisplaySources.get(source) : undefined;
-  lazyDisplaySources.set(enumerator, { source: previous?.source ?? source, args: displayArgs });
+  lazyDisplaySources.set(enumerator, {
+    source: previous?.source ?? source,
+    args: [...(previous?.args ?? []), ...displayArgs],
+  });
   return enumerator;
 }
 
@@ -1406,7 +1411,12 @@ def('Enumerator::Lazy', 'each', [0, -1], function* (self: RObject, args, block) 
   if (!block) {
     if (args.length === 0) return self;
     const data = self.data as LazyData;
-    return makeLazy(lazyIterationSource(data.source, args, args), data.steps);
+    const last = data.steps.at(-1);
+    const steps =
+      last?.kind === 'each_entry'
+        ? [...data.steps.slice(0, -1), { ...last, args: [...(last.args ?? []), ...args] }]
+        : data.steps;
+    return makeLazy(lazyIterationSource(data.source, args, last?.kind === 'each_entry' ? [] : args), steps);
   }
   return yield* runLazy(self, (value, yielded) => callProc(block, yielded ?? [value], { used: false }), args);
 });
@@ -1452,10 +1462,9 @@ def('Enumerator::Lazy', 'eager', 0, function* (self: RObject) {
 def('Enumerator::Lazy', ['inspect', 'to_s'], 0, function* (self: RObject) {
   const data = self.data as LazyData;
   const displayed = data.source instanceof RObject ? lazyDisplaySources.get(data.source) : undefined;
-  const source = yield* inspect(displayed?.source ?? data.source);
   const sourceArgs: string[] = [];
   for (const arg of displayed?.args ?? []) sourceArgs.push(yield* inspect(arg));
-  let text = `#<Enumerator::Lazy: ${source}${sourceArgs.length > 0 ? `(${sourceArgs.join(', ')})` : ''}>`;
+  let text = `#<Enumerator::Lazy: ${yield* inspect(displayed?.source ?? data.source)}${sourceArgs.length > 0 ? `(${sourceArgs.join(', ')})` : ''}>`;
   for (const step of data.steps) {
     const argumentsText: string[] = [];
     for (const argument of step.args ?? []) argumentsText.push(yield* inspect(argument));

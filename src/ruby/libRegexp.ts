@@ -492,7 +492,7 @@ function translateEscape(
       if (body !== undefined) {
         if (inClass && negated) {
           if (classes === ASCII_POSIX_CLASSES && casefold && (key === 'lower' || key === 'upper'))
-            return `\\P{${PROPERTY_NAMES[key]}}`;
+            return String.raw`\x00-\xFF`;
           addNegatedClass(body);
           return '';
         }
@@ -1379,7 +1379,11 @@ def('MatchData', 'inspect', 0, (self: RObject) => {
   bytes.set(prefix);
   bytes.set(body, prefix.length);
   bytes[bytes.length - 1] = 62;
-  return stringFromBytes(bytes, matched.binary, matched.usAscii);
+  return stringFromBytes(
+    bytes,
+    matched.binary || body.every((byte) => byte < 0x80),
+    matched.usAscii && body.some((byte) => byte >= 0x80)
+  );
 });
 
 function matchDataInspect(match: RObject): string {

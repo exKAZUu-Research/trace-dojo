@@ -180,7 +180,8 @@ function* exactNumber(value: Value): Gen<number | bigint | RObject> {
         if (!(yield* supportsImplicitConversion(value, 'to_int')))
           throw typeError(`can't convert ${realClassOf(value).name} into an exact number`);
         if (rational !== undefined) {
-          if (!isRational(rational)) throw typeError(`can't convert ${realClassOf(value).name} into an exact number`);
+          if (typeof rational !== 'bigint' && !isRational(rational))
+            throw typeError(`can't convert ${realClassOf(value).name} into an exact number`);
           return rational;
         }
         const integer = yield* callMethod(value, 'to_int', [], undefined, undefined, { fcall: true });
