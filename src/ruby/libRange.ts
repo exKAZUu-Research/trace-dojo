@@ -503,9 +503,10 @@ for (const method of ['step', '%'])
       !(yield* supportsImplicitConversion(step, 'coerce'))
     )
       throw typeError('no implicit conversion of String into Integer');
-    if (isRubyNumber(step)) {
-      if (Number(step) < 0 && !isRubyNumber(self.begin)) throw argumentError("step can't be negative");
-      if (Number(step) === 0) throw argumentError("step can't be 0");
+    if (isNumericRangeOperand(step)) {
+      const value = yield* toFloat(step);
+      if (value < 0 && !isNumericRangeOperand(self.begin)) throw argumentError("step can't be negative");
+      if (value === 0) throw argumentError("step can't be 0");
     }
     if (!block) return makeEnumerator(self, method, args);
     return yield* stepRange(self, step, block);
@@ -582,6 +583,7 @@ function* stepNumericRange(self: RRange, start: number, by: number, block: RProc
 function* stepCustomRange(self: RRange, step: Value, block: RProc): Gen {
   const { end, exclusive } = self;
   let value = self.begin;
+  let descending = false;
   if (end !== NIL) {
     const initialOrder = yield* spaceship(value, end);
     if (initialOrder === 0) {
@@ -590,14 +592,20 @@ function* stepCustomRange(self: RRange, step: Value, block: RProc): Gen {
     }
     const next = yield* callMethod(value, '+', [step]);
     const progressOrder = yield* spaceship(value, next);
-    if (initialOrder === undefined || initialOrder > 0 || progressOrder === undefined || progressOrder >= 0)
+    if (
+      initialOrder === undefined ||
+      progressOrder === undefined ||
+      progressOrder === 0 ||
+      initialOrder < 0 !== progressOrder < 0
+    )
       return self;
+    descending = progressOrder > 0;
   }
   for (;;) {
     rt().spend();
     if (end !== NIL) {
       const order = yield* spaceship(value, end);
-      if (order === undefined || order > 0 || (exclusive && order === 0)) break;
+      if (order === undefined || (descending ? order < 0 : order > 0) || (exclusive && order === 0)) break;
       yield* callBlock(block, [value], false);
       if (order === 0) break;
     } else {

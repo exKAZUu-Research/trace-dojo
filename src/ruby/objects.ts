@@ -339,7 +339,11 @@ export class RClass extends RBasic {
       active.add(module);
       rt().spend();
       for (const prepended of mergedPrepends(module.prepends))
-        if (!seenPrepended.has(prepended) && !active.has(prepended)) {
+        if (
+          !seenPrepended.has(prepended) &&
+          !active.has(prepended) &&
+          !(placement === 'body' && module !== this && (inSuper.has(prepended) || seen.has(prepended)))
+        ) {
           seenPrepended.add(prepended);
           if (placement === 'body' && module !== this) seenInBody.add(prepended);
           rt().spend();

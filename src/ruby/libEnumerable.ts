@@ -353,7 +353,8 @@ export function* sum(self: Value, args: Value[], block: RProc | undefined): Gen 
   const mark = rt().held.length;
   rt().held.push(total);
   const initial = isRubyFloat(total) ? Number(total) : undefined;
-  let exact = typeof total === 'bigint' ? total : 0n;
+  const exactActive = typeof total === 'bigint' || isRational(total) || initial !== undefined;
+  let exact: Value = typeof total === 'bigint' || isRational(total) ? total : 0n;
   let floating: number | undefined;
   let compensation = 0;
   let sawValue = false;
@@ -362,15 +363,19 @@ export function* sum(self: Value, args: Value[], block: RProc | undefined): Gen 
     yield* iterate(self, function* (value) {
       const item = block ? yield* call(block, value) : value;
       sawValue = true;
-      if (!generic && floating === undefined && (typeof total === 'bigint' || initial !== undefined)) {
-        if (typeof item === 'bigint') {
-          exact += item;
+      if (!generic && floating === undefined && exactActive) {
+        if (typeof item === 'bigint' || isRational(item)) {
+          exact =
+            typeof exact === 'bigint' && typeof item === 'bigint'
+              ? exact + item
+              : yield* callMethod(exact, '+', [item]);
           total = exact;
           rt().held[mark] = total;
           return;
         }
         if (isRubyFloat(item) || initial !== undefined) {
-          floating = initial === undefined ? Number(exact) : initial + Number(exact);
+          const prefix = yield* toFloat(exact);
+          floating = initial === undefined ? prefix : initial + prefix;
         }
       }
       if (floating !== undefined) {
@@ -398,7 +403,8 @@ export function* sum(self: Value, args: Value[], block: RProc | undefined): Gen 
     });
     if (!sawValue) return total;
     if (floating !== undefined) return floating + compensation;
-    if (!generic && initial !== undefined && typeof total === 'bigint') return initial + Number(exact);
+    if (!generic && initial !== undefined && (typeof exact === 'bigint' || isRational(exact)))
+      return initial + (yield* toFloat(exact));
     return total;
   } finally {
     rt().held.length = mark;

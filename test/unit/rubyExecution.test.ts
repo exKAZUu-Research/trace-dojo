@@ -8623,11 +8623,17 @@ test('Float sum retains compensation across Rational values', () => {
   expect(run('p [0.5,1/3r,1/7r].sum; p [9/11r,2/5r,9/2r,6/5r].sum(0.0)')).toMatchObject({
     stdout: '0.9761904761904762\n6.918181818181818\n',
   });
+  expect(run('p [3/10r,0.9,2/9r].sum; p [1/10r,1/10r,1/10r].sum(0.0);p [8/7r,3].sum(1.0)')).toMatchObject({
+    stdout: '1.4222222222222223\n0.3\n5.142857142857143\n',
+  });
 });
 
 test('Range step converts Rational values when a Float participates', () => {
   expect(run('p((1..2.5).step(1/2r).to_a);p(((1/2r)..2.5).step(1/2r).to_a)')).toMatchObject({
     stdout: '[1.0, 1.5, 2.0, 2.5]\n[0.5, 1.0, 1.5, 2.0, 2.5]\n',
+  });
+  expect(run('p (3r..1r).step(-1r).to_a; p (3..1/2r).step(-1).to_a; p (3r..1).step(-1).to_a')).toMatchObject({
+    stdout: '[(3/1), (2/1), (1/1)]\n[3, 2, 1]\n[(3/1), (2/1), (1/1)]\n',
   });
 });
 
@@ -8699,6 +8705,13 @@ test('included modules share nested prepends without duplicate ancestors', () =>
     )
   ).toMatchObject({
     stdout: '[Svc, Log, Auth, Base]\n"LAB"\n',
+  });
+  expect(
+    run(
+      'module Log;end;module Auth;prepend Log;end;class Base;include Log;end;class Sub<Base;include Auth;end;p Sub.ancestors.take(5)'
+    )
+  ).toMatchObject({
+    stdout: '[Sub, Auth, Base, Log, Object]\n',
   });
 });
 
