@@ -866,6 +866,12 @@ test('lazy zip conversion and copied cursors retain turtles across callbacks', (
   expect(traceProgram('ruby', copy, copy).finalTurtles).toHaveLength(1);
 });
 
+test('inherited hooks record unused final movement inside the hook', () => {
+  const program = '$t=Turtle.new\nclass Base\n def self.inherited(c)\n  $t.forward\n end\nend\nclass Child<Base\nend';
+  const result = traceProgram('ruby', program, program);
+  expect(result.traceItems.some((step) => step.line === 4 && step.turtles.some((turtle) => turtle.y === 1))).toBe(true);
+});
+
 test('nested cursor cleanup keeps caller turtles rooted during resumption', () => {
   const program =
     'e=Enumerator.new{|y|(1..1).lazy.each{|x|y<<x};q=1;y<<2};e.next;i=0;a=(1..4).lazy.map{Turtle.new}.each_cons(2).map{|ts|i+=1;e.next if i==2;ts}.force;a.each{|ts|ts.each{|t|t.forward}}';

@@ -7902,6 +7902,12 @@ test('Enumerator.produce exposes infinite size', () => {
   });
 });
 
+test('Enumerator.produce passes nil to its first unseeded callback', () => {
+  expect(run('f=->(x){x ? x+1 : 1};p Enumerator.produce(&f).take(3)')).toMatchObject({
+    stdout: '[1, 2, 3]\n',
+  });
+});
+
 test('Enumerator.new preserves the receiving subclass', () => {
   expect(run('class E<Enumerator;def twice;[self.next,self.next];end;end;p E.new{|y|y<<1<<2}.twice')).toMatchObject({
     stdout: '[1, 2]\n',

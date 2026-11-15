@@ -927,7 +927,7 @@ sdef('Enumerator', 'produce', [0, 1], function* (_self, args, block) {
   const generator = new RObject(runtime.c['Enumerator::Generator']);
   const producer = nativeProc(1, function* ([yielder]) {
     try {
-      let value = args.length > 0 ? args[0] : yield* callProc(step, []);
+      let value = args.length > 0 ? args[0] : yield* callProc(step, [NIL]);
       for (;;) {
         yield* callMethod(yielder, '<<', [value]);
         value = yield* callProc(step, [value]);
