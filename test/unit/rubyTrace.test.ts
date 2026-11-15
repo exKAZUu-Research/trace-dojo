@@ -17,6 +17,12 @@ const withoutLines = (items: TraceItem[]): unknown[] =>
 
 const rubyTrace = (program: string): TraceItem[] => traceProgram('ruby', program, program).traceItems;
 
+test('named regexp captures create only valid Ruby local variables', () => {
+  const items = rubyTrace('/(?<YEAR>\\d+)(?<class>a)(?<year>\\d+)/ =~ "2024a7"\nx=1');
+  expect(items.some(({ vars }) => Object.hasOwn(vars, 'YEAR') || Object.hasOwn(vars, 'class'))).toBe(false);
+  expect(items.some(({ vars }) => vars.year === '7')).toBe(true);
+});
+
 test('Struct, Data and value objects remain visible in the variable trace', () => {
   const program =
     'S=Struct.new(:a)\nD=Data.define(:x)\ns=S.new(1)\nd=D.new(2)\nr=1/3r\nt=Time.utc(2024)\nre=/a/\nm=/a(b)/.match("ab")\np s.a\n';

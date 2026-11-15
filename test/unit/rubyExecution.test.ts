@@ -8355,3 +8355,62 @@ test('regexp split yields fields and captures to a block', () => {
 test('escaped backslash replacements stay within the execution budget', () => {
   expect(run(String.raw`r="\\\\"*150000;p "a".sub(/a/,r).size`)).toMatchObject({ stdout: '150000\n' });
 });
+
+test('String initialization validates options before conversion and frozen reservations', () => {
+  expect(
+    run('s="x".freeze;begin;s.send(:initialize,capacity:1000001);rescue=>e;p e.class;end;puts :continued')
+  ).toMatchObject({
+    stdout: 'FrozenError\ncontinued\n',
+  });
+  expect(
+    run(
+      'c=Object.new;def c.to_int;puts :converted;1;end;begin;String.new(capacity:c,unknown:1);rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({
+    stdout: 'ArgumentError\n',
+  });
+  expect(
+    run(
+      'e=Object.new;def e.to_str;puts :encoding;"UTF-8";end;c=Object.new;def c.to_int;puts :capacity;1;end;String.new(capacity:c,encoding:e)'
+    )
+  ).toMatchObject({
+    stdout: 'encoding\ncapacity\n',
+  });
+});
+
+test('POSIX regexp classes include Unicode case, format, and private-use characters', () => {
+  expect(run('p "ⅫⒶA".scan(/[[:upper:]]/),"ⅻⓐa".scan(/[[:lower:]]/)')).toMatchObject({
+    stdout: '["Ⅻ", "Ⓐ", "A"]\n["ⅻ", "ⓐ", "a"]\n',
+  });
+  expect(run('p "👩‍💻".scan(/[[:graph:]]/).join,"👩‍💻".scan(/[[:print:]]/).join')).toMatchObject({
+    stdout: '"👩‍💻"\n"👩‍💻"\n',
+  });
+});
+
+test('main delegates define_method and has no protected method', () => {
+  expect(run('define_method(:bar){|x=2|x};p bar;begin;protected :bar;rescue=>e;p e.class;end')).toMatchObject({
+    stdout: '2\nNoMethodError\n',
+  });
+});
+
+test('alias and undef decode quoted symbol names', () => {
+  expect(run('class C;def foo;1;end;alias :"bar" :"foo";undef :"foo";end;p C.new.bar')).toMatchObject({
+    stdout: '1\n',
+  });
+});
+
+test('external enumerators retain their own rescued exception state', () => {
+  expect(
+    run(
+      'e=Enumerator.new{|y|begin;raise "inner";rescue;y<<$!.message;end};begin;raise "outer";rescue;p e.next;p $!.message;end'
+    )
+  ).toMatchObject({
+    stdout: '"inner"\n"outer"\n',
+  });
+});
+
+test('zero-padded floats and fractional rationals fail before execution', () => {
+  expect(run('p 007.25')).toMatchObject({ kind: 'compileError' });
+  expect(run('p 01e3')).toMatchObject({ kind: 'compileError' });
+  expect(run('p 01.5r')).toMatchObject({ kind: 'compileError' });
+});

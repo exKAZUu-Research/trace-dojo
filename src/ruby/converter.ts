@@ -447,7 +447,7 @@ export class Converter {
       case 'alias': {
         const names = [node.childForFieldName('name'), node.childForFieldName('alias')].map((part) => required(part));
         if (names.some((part) => part.type === 'global_variable')) this.unsupported(node, 'グローバル変数の別名');
-        const [newName, oldName] = names.map((part) => methodNameOf(part));
+        const [newName, oldName] = names.map((part) => this.methodName(part));
         return { k: 'alias', newName, oldName };
       }
       case 'undef': {
@@ -455,7 +455,7 @@ export class Converter {
           k: 'undef',
           names: namedChildren(node)
             .filter((c) => c.type !== 'comment')
-            .map((c) => methodNameOf(c)),
+            .map((c) => this.methodName(c)),
         };
       }
       case 'redo': {
@@ -660,7 +660,9 @@ export class Converter {
   }
 
   private floatValue(node: Node): number {
-    return Number(node.text.replaceAll('_', ''));
+    const text = node.text.replaceAll('_', '');
+    if (/^0\d/.test(text)) this.fail(node, '数値リテラルの書き方に誤りがあります。');
+    return Number(text);
   }
 
   private string(node: Node): Expr {
@@ -1145,10 +1147,12 @@ export class Converter {
       left.k === 'regex' &&
       left.parts.every((part) => typeof part === 'string')
     ) {
-      const names = regexpCaptureNames(left.parts.join(''), left.flags.includes('x')).map((name) => {
-        this.checkReservedBinding(leftNode, name);
-        return { k: 'lvar' as const, name, depth: this.ctx.scope.declare(name) };
-      });
+      const names = regexpCaptureNames(left.parts.join(''), left.flags.includes('x'))
+        .filter(isRubyLocalName)
+        .map((name) => {
+          this.checkReservedBinding(leftNode, name);
+          return { k: 'lvar' as const, name, depth: this.ctx.scope.declare(name) };
+        });
       if (names.length > 0) return { k: 'matchWrite', match: this.operatorCall(node, left, operator, [right]), names };
     }
     switch (operator) {
@@ -1775,9 +1779,20 @@ export class Converter {
     const number = onlyNamedChild(node);
     const text = number.text.replaceAll('_', '');
     if (number.type === 'integer') return { k: 'rational', numerator: this.integerValue(number), denominator: 1n };
+    if (/^0\d/.test(text)) this.fail(node, '数値リテラルの書き方に誤りがあります。');
     if (!/^\d+\.\d+$/.test(text)) this.fail(node, '有理数のリテラルの書き方に誤りがあります。');
     const [whole, fraction] = text.split('.');
     return { k: 'rational', numerator: BigInt(whole + fraction), denominator: 10n ** BigInt(fraction.length) };
+  }
+
+  private methodName(node: Node): string {
+    if (node.type === 'simple_symbol') return node.text.slice(1);
+    if (node.type !== 'delimited_symbol') return node.text;
+    const text = node.text;
+    if (text.startsWith(":'")) return decodeSingleQuoted(text.slice(2, -1));
+    if (text.startsWith(':"')) return this.decode(node, text.slice(2, -1)).text;
+    if (text.startsWith('%s')) return decodePercentLiteral(text.slice(3, -1), text[2], false);
+    return text;
   }
 
   /** A heredoc's text, from the body the tree placed after its line; `<<~` removes the common indentation. */
@@ -1857,8 +1872,13 @@ function implicitParams(names: Set<string>): Params {
   return params;
 }
 
-function methodNameOf(node: Node): string {
-  return node.type === 'simple_symbol' ? node.text.slice(1) : node.text;
+function isRubyLocalName(name: string): boolean {
+  return (
+    /^[_\p{Ll}\p{Lm}\p{Lo}][_\p{L}\p{M}\p{N}]*$/u.test(name) &&
+    !/^(?:alias|and|begin|break|case|class|def|defined\?|do|else|elsif|end|ensure|false|for|if|in|module|next|nil|not|or|redo|rescue|retry|return|self|super|then|true|undef|unless|until|when|while|yield)$/.test(
+      name
+    )
+  );
 }
 
 /** Removes the indentation that every line of a `<<~` heredoc shares, from the starts of its lines. */

@@ -687,6 +687,7 @@ interface Cursor {
   held: Value[];
   heldArrays: Value[][];
   catchTags: Value[];
+  exception: Value;
   peeked: Value[][];
   feed?: Value;
   feedSet: boolean;
@@ -700,6 +701,7 @@ function cursorRoots(cursor: Cursor | undefined): Value[] {
   const values = [...cursor.held, ...cursor.heldArrays.flat(), ...cursor.catchTags, ...cursor.peeked.flat()];
   if (cursor.feedSet) values.push(cursor.feed as Value);
   if (cursor.result !== undefined) values.push(cursor.result);
+  values.push(cursor.exception);
   for (const frame of cursor.frames) pushFrameReferences(frame, values);
   return values;
 }
@@ -712,7 +714,17 @@ function startCursor(self: RObject): Cursor {
       });
     })()
   );
-  return { runner, frames: [], held: [], heldArrays: [], catchTags: [], peeked: [], feedSet: false, started: false };
+  return {
+    runner,
+    frames: [],
+    held: [],
+    heldArrays: [],
+    catchTags: [],
+    exception: NIL,
+    peeked: [],
+    feedSet: false,
+    started: false,
+  };
 }
 
 /** Resumes the iteration until it yields its next value, or raises StopIteration when it has ended. */
@@ -738,6 +750,8 @@ function nextValues(self: RObject): Value[] {
   runtime.heldSnapshots.push({ values: callerHeld, arrays: callerArrays });
   const row = runtime.currentRow;
   const callerTags = runtime.catchTags.splice(0);
+  const callerException = runtime.globals.get('$!') ?? NIL;
+  runtime.globals.set('$!', cursor.exception);
   if (cursor.frames[0]?.callRow !== undefined) cursor.frames[0].callRow = row;
   runtime.frames.push(...cursor.frames);
   runtime.held.push(...cursor.held);
@@ -768,6 +782,8 @@ function nextValues(self: RObject): Value[] {
     cursor.held = runtime.held.splice(heldBase);
     cursor.heldArrays = runtime.heldArrays.splice(arraysBase);
     cursor.catchTags = runtime.catchTags.splice(0);
+    cursor.exception = runtime.globals.get('$!') ?? NIL;
+    runtime.globals.set('$!', callerException);
     runtime.catchTags.push(...callerTags);
     runtime.currentRow = row;
     runtime.heldSnapshots.pop();

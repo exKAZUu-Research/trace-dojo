@@ -1284,8 +1284,9 @@ export function defineMainObject(main: RObject): void {
       visibility: 'private',
       body: {
         kind: 'native',
-        fn: (_self, args) => {
+        fn: (_self, args, block) => {
           if (name === 'include') return callMethod(object, 'include', args);
+          if (name === 'define_method') return callMethod(object, name, args, undefined, block);
           return setVisibility(object, args, visibility);
         },
         min: 0,
@@ -1295,9 +1296,9 @@ export function defineMainObject(main: RObject): void {
     });
   };
   delegate('include', 'public');
+  delegate('define_method', 'public');
   delegate('public', 'public');
   delegate('private', 'private');
-  delegate('protected', 'protected');
   for (const name of ['to_s', 'inspect']) {
     singleton.methods.set(name, {
       name,

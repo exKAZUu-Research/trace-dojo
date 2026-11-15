@@ -206,34 +206,41 @@ def(
       setBytes(self, sourceBytes, source.binary);
       self.usAscii = source.usAscii;
     }
-    if (keywords)
+    if (keywords) {
+      let capacityValue: Value | undefined;
+      let encodingValue: Value | undefined;
       for (const entry of keywords.map.values()) {
         const key = entry.key instanceof RSymbol ? entry.key.name : undefined;
-        if (key === 'capacity') {
-          const capacity = yield* toIndex(entry.value);
-          if (capacity > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
-          if (self.frozen) throw frozenError(self, yield* inspect(self));
-        } else if (key === 'encoding') {
-          const encoding =
-            entry.value instanceof RString
-              ? entry.value.s
-              : entry.value instanceof RObject && entry.value.cls === rt().c.Encoding
-                ? (entry.value.data as string)
-                : yield* toStr(entry.value);
-          const normalizedEncoding = encoding.toUpperCase();
-          if (normalizedEncoding === 'ASCII-8BIT' || normalizedEncoding === 'BINARY')
-            setBytes(self, sourceBytes ?? stringBytes(self), true);
-          // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby spells the encoding name UTF-8.
-          else if (['UTF-8', 'CP65001', 'US-ASCII', 'ASCII', 'ANSI_X3.4-1968', '646'].includes(normalizedEncoding)) {
-            setBytes(self, sourceBytes ?? stringBytes(self), false);
-            // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby's ASCII alias is uppercase after normalization.
-            self.usAscii = ['US-ASCII', 'ASCII', 'ANSI_X3.4-1968', '646'].includes(normalizedEncoding);
-            // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Reject Ruby's invalid UTF8 spelling after uppercase normalization.
-          } else if (normalizedEncoding === 'UTF8') {
-            throw argumentError(`unknown encoding name - ${encoding}`);
-          } else throw new UnsupportedFeatureError(`String.new の文字コード ${encoding}`);
-        } else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
+        if (key === 'capacity') capacityValue = entry.value;
+        else if (key === 'encoding') encodingValue = entry.value;
+        else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
       }
+      if (encodingValue !== undefined) {
+        const encoding =
+          encodingValue instanceof RString
+            ? encodingValue.s
+            : encodingValue instanceof RObject && encodingValue.cls === rt().c.Encoding
+              ? (encodingValue.data as string)
+              : yield* toStr(encodingValue);
+        const normalizedEncoding = encoding.toUpperCase();
+        if (normalizedEncoding === 'ASCII-8BIT' || normalizedEncoding === 'BINARY')
+          setBytes(self, sourceBytes ?? stringBytes(self), true);
+        // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby spells the encoding name UTF-8.
+        else if (['UTF-8', 'CP65001', 'US-ASCII', 'ASCII', 'ANSI_X3.4-1968', '646'].includes(normalizedEncoding)) {
+          setBytes(self, sourceBytes ?? stringBytes(self), false);
+          // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby's ASCII alias is uppercase after normalization.
+          self.usAscii = ['US-ASCII', 'ASCII', 'ANSI_X3.4-1968', '646'].includes(normalizedEncoding);
+          // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Reject Ruby's invalid UTF8 spelling after uppercase normalization.
+        } else if (normalizedEncoding === 'UTF8') {
+          throw argumentError(`unknown encoding name - ${encoding}`);
+        } else throw new UnsupportedFeatureError(`String.new の文字コード ${encoding}`);
+      }
+      if (capacityValue !== undefined) {
+        const capacity = yield* toIndex(capacityValue);
+        if (self.frozen) throw frozenError(self, yield* inspect(self));
+        if (capacity > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+      }
+    }
     return NIL;
   },
   { visibility: 'private', keywords: true }
