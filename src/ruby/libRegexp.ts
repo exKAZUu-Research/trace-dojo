@@ -1120,6 +1120,14 @@ function captureNameSymbol(regexp: RObject, name: string): RSymbol {
   return RSymbol.of(name, string.binary, string.usAscii, stringBytes(string));
 }
 
+function namedCaptureGroup(state: MatchState, key: RString | RSymbol): number {
+  const symbol = key instanceof RSymbol ? key : RSymbol.of(key.s, key.binary, key.usAscii, stringBytes(key));
+  const name = state.names.find((candidate) => captureNameSymbol(state.regexp, candidate) === symbol);
+  if (name === undefined)
+    throw indexError(`undefined group name reference: ${key instanceof RSymbol ? key.name : key.s}`);
+  return state.namedGroups[name];
+}
+
 function* subjectText(value: Value): Gen<RString | undefined> {
   if (value === NIL) return undefined;
   if (value instanceof RSymbol) return symbolString(value);
@@ -1182,10 +1190,7 @@ sundef('MatchData', ['new', 'allocate']);
 function* matchIndex(match: RObject, key: Value): Gen {
   const state = stateOf(match);
   if (key instanceof RString || key instanceof RSymbol) {
-    const name = key instanceof RString ? key.s : key.name;
-    const group = state.namedGroups[name];
-    if (group === undefined) throw indexError(`undefined group name reference: ${name}`);
-    return groupText(state, group);
+    return groupText(state, namedCaptureGroup(state, key));
   }
   let group = yield* toIndex(key);
   if (group < 0) group += state.groups.length;
@@ -1297,12 +1302,7 @@ def('MatchData', 'offset', 1, function* (self: RObject, [key]) {
 });
 
 function* captureGroup(state: MatchState, key: Value): Gen<number> {
-  if (key instanceof RString || key instanceof RSymbol) {
-    const name = key instanceof RString ? key.s : key.name;
-    const group = state.namedGroups[name];
-    if (group === undefined) throw indexError(`undefined group name reference: ${name}`);
-    return group;
-  }
+  if (key instanceof RString || key instanceof RSymbol) return namedCaptureGroup(state, key);
   const group = yield* toIndex(key);
   if (group < 0 || group >= state.groups.length) throw indexError(`index ${group} out of matches`);
   return group;
@@ -1713,10 +1713,7 @@ wrapFirst('slice!', function* (self, args) {
 });
 function* sliceCaptureRange(state: MatchState, key: Value): Gen<readonly [number, number] | 'unmatched' | undefined> {
   if (key instanceof RString || key instanceof RSymbol) {
-    const name = key instanceof RString ? key.s : key.name;
-    const group = state.namedGroups[name];
-    if (group === undefined) throw indexError(`undefined group name reference: ${name}`);
-    return state.groups[group] ?? 'unmatched';
+    return state.groups[namedCaptureGroup(state, key)] ?? 'unmatched';
   }
   let group = yield* toIndex(key);
   if (group < 0) group += state.groups.length;

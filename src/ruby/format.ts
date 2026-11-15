@@ -514,7 +514,7 @@ function formatExactFixed(value: bigint | RObject, spec: Spec): string {
   const digits = rounded.toString().padStart(precision + 1, '0');
   const integer = precision === 0 ? digits : digits.slice(0, -precision);
   const fraction = precision === 0 ? '' : `.${digits.slice(-precision)}`;
-  const body = `${integer}${fraction}${spec.sharp && precision === 0 ? '.' : ''}`;
+  const body = `${integer}${fraction}`;
   const sign = signOf(numerator < 0n, spec);
   const width = spec.width ?? 0;
   if (spec.zero && !spec.minus && sign.length + body.length < width)

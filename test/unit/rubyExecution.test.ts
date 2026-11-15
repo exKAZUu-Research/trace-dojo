@@ -8955,6 +8955,11 @@ test('named capture names retain their regexp encoding', () => {
       'r=Regexp.new("(?<"+233.chr+">a)");m=r.match("a");p m.deconstruct_keys(nil).keys[0].to_s.bytes,m.deconstruct_keys([:é])'
     )
   ).toMatchObject({ stdout: '[233]\n{}\n' });
+  expect(
+    run(
+      'm=Regexp.new("(?<"+233.chr+">a)").match("a");[:é,"é",233.chr.to_sym].each{|key|begin;p m[key];rescue=>e;p e.class;end}'
+    )
+  ).toMatchObject({ stdout: 'IndexError\nIndexError\n"a"\n' });
 });
 
 test('encoding-neutral regexp classes use binary byte semantics on binary strings', () => {
@@ -9059,6 +9064,12 @@ test('fixed format rounds Rational and Integer values exactly', () => {
   });
   expect(run('p format("%f",10**30)')).toMatchObject({
     stdout: '"1000000000000000000000000000000.000000"\n',
+  });
+});
+
+test('exact fixed formatting omits alternate decimal point at zero precision', () => {
+  expect(run('p [format("%#.0f",1),format("%#.0f",1r),format("%#.0f",1.0)]')).toMatchObject({
+    stdout: '["1", "1", "1."]\n',
   });
 });
 

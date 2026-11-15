@@ -113,11 +113,14 @@ function* memberIndex(self: RObject, key: Value): Gen<number> {
 
 function* membersFrom(args: Value[], kind: 'struct' | 'data'): Gen<RSymbol[]> {
   const members: RSymbol[] = [];
+  const seen = new Set<RSymbol>();
   for (const arg of args) {
+    rt().spend();
     const member = yield* symbolNameOf(arg);
     const name = member.name;
     if (name.endsWith('=')) throw argumentError(`invalid ${kind} member: ${name}`);
-    if (members.some((member) => member.name === name)) throw argumentError(`duplicate member: ${name}`);
+    if (seen.has(member)) throw argumentError(`duplicate member: ${name}`);
+    seen.add(member);
     members.push(member);
   }
   return members;
