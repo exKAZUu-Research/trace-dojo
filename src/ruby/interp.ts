@@ -1210,6 +1210,7 @@ function* definedText(e: Expr, frame: Frame): Gen {
       for (const arg of e.args) if ((yield* definedText(arg, frame)) === NIL) return NIL;
       let recv: Value = frame.self;
       if (e.recv) {
+        if ((yield* definedText(e.recv, frame)) === NIL) return NIL;
         try {
           recv = yield* ev(e.recv, frame);
         } catch (error) {

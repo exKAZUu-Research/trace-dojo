@@ -7902,6 +7902,18 @@ test('defined? keeps unavailable negation operands unavailable', () => {
   });
 });
 
+test('defined? checks call receivers before resolving their methods', () => {
+  expect(run('p defined?(@x.nil?),defined?($z.to_s),defined?(@x.to_s.size);@y=1;p defined?(@y.succ)')).toMatchObject({
+    stdout: 'nil\nnil\nnil\n"method"\n',
+  });
+});
+
+test('Struct hashing does not consume displayed object addresses', () => {
+  expect(run('Struct.new(:x).new(1).hash;p Object.new')).toMatchObject({
+    stdout: '#<Object:0x00007f1a2b3c0000>\n',
+  });
+});
+
 test('UTC identity affects unpadded zone directives', () => {
   expect(run('p Time.utc(2024).strftime("%-z"),Time.at(0).getlocal(0).strftime("%-z")')).toMatchObject({
     stdout: '"-0000"\n"+0000"\n',

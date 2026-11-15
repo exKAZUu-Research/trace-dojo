@@ -364,7 +364,12 @@ function* structuralHash(self: RObject): Gen<bigint> {
   runtime.structHashDepth++;
   runtime.structHashing.add(self);
   try {
-    const parts = [addressOf(self.cls)];
+    let classId = runtime.structClassHashIds.get(self.cls);
+    if (classId === undefined) {
+      classId = runtime.nextStructClassHashId++;
+      runtime.structClassHashIds.set(self.cls, classId);
+    }
+    const parts: (number | string)[] = [classId];
     for (const value of valuesOf(self)) parts.push(yield* hashKeyOf(value));
     return BigInt(`0x${digest(JSON.stringify(parts))}`);
   } finally {
