@@ -8582,6 +8582,27 @@ test('lazy zip probes private respond_to? and iterates to_enum', () => {
   expect(run('class A;def each;yield 2;end;def to_enum;[5].each;end;end;p [1].lazy.zip(A.new).force')).toMatchObject({
     stdout: '[[1, 5]]\n',
   });
+  expect(
+    run(
+      'class Cursor;def next;5;end;end;class A;def each;yield 2;end;def to_enum;Cursor.new;end;end;p [1,2].lazy.zip(A.new).force'
+    )
+  ).toMatchObject({
+    stdout: '[[1, 5], [2, 5]]\n',
+  });
+  expect(
+    run(
+      'class A;def each;yield 2;end;def to_enum;puts :convert;[2].each;end;end;z=[1].lazy.zip(A.new);puts :built;p z.force'
+    )
+  ).toMatchObject({
+    stdout: 'built\nconvert\n[[1, 2]]\n',
+  });
+  expect(
+    run(
+      'class A<BasicObject;def respond_to_missing?(n,*)=n==:each;def method_missing(n,*);n==:each ? yield(2) : super;end;def to_enum;[2].each;end;end;p [1].lazy.zip(A.new).force'
+    )
+  ).toMatchObject({
+    stdout: '[[1, 2]]\n',
+  });
 });
 
 test('prepend merges shared included child chains', () => {

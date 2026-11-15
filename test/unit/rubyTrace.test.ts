@@ -46,6 +46,19 @@ test('dynamic and unbound method adapters preserve discarded trace steps', () =>
   }
 });
 
+test('discarded eval and exit blocks record final movement', () => {
+  for (const source of [
+    '$t=Turtle.new\nObject.new.instance_eval do\n $t.forward\nend',
+    '$t=Turtle.new\nat_exit do\n $t.forward\nend\nx=1',
+  ]) {
+    const items = rubyTrace(source);
+    expect(
+      items.some(({ line, turtles }) => line === 3 && turtles[0]?.y === 1),
+      source
+    ).toBe(true);
+  }
+});
+
 test('cursor resumption roots the caller exception', () => {
   const source =
     'it=Enumerator.new{|y|x=1;y<<0}\nat_exit{it.next;$!.instance_variable_get(:@t).forward}\nraise RuntimeError.new.tap{|e|e.instance_variable_set(:@t,Turtle.new)}\n';

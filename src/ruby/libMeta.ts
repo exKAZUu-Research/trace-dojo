@@ -423,30 +423,36 @@ function refuseStringEval(name: string, args: Value[], block: RProc | undefined)
   return block;
 }
 
-def('BasicObject', 'instance_eval', [0, -1], function* (self, args, block) {
+def('BasicObject', 'instance_eval', [0, -1], function* (self, args, block, _keywords, used) {
   const body = refuseStringEval('instance_eval', args, block);
   const definee = self instanceof RBasic && !isRubyFloat(self) ? singletonClassOf(self) : undefined;
-  return yield* callProc(body, [self], { self, definee, forbidSingletonDefinition: !definee });
+  return yield* callProc(body, [self], { self, definee, forbidSingletonDefinition: !definee, used });
 });
 def(
   'BasicObject',
   'instance_exec',
   [0, -1],
-  function* (self, args, block, keywords) {
+  function* (self, args, block, keywords, used) {
     const definee = self instanceof RBasic && !isRubyFloat(self) ? singletonClassOf(self) : undefined;
-    return yield* callProc(requireBlock(block), args, { self, definee, keywords, forbidSingletonDefinition: !definee });
+    return yield* callProc(requireBlock(block), args, {
+      self,
+      definee,
+      keywords,
+      forbidSingletonDefinition: !definee,
+      used,
+    });
   },
   { keywords: true }
 );
-def('Module', ['class_eval', 'module_eval'], [0, -1], function* (self: RClass, args, block) {
-  return yield* callProc(refuseStringEval('class_eval', args, block), [self], { self, definee: self });
+def('Module', ['class_eval', 'module_eval'], [0, -1], function* (self: RClass, args, block, _keywords, used) {
+  return yield* callProc(refuseStringEval('class_eval', args, block), [self], { self, definee: self, used });
 });
 def(
   'Module',
   ['class_exec', 'module_exec'],
   [0, -1],
-  function* (self: RClass, args, block, keywords) {
-    return yield* callProc(requireBlock(block), args, { self, definee: self, keywords });
+  function* (self: RClass, args, block, keywords, used) {
+    return yield* callProc(requireBlock(block), args, { self, definee: self, keywords, used });
   },
   { keywords: true }
 );

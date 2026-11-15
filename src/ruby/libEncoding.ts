@@ -80,7 +80,7 @@ export function* runAtExit(): Gen<(RubyError | ExitSignal | UnsupportedFeatureEr
     const handler = runtime.atExit.pop() as RProc;
     runtime.completedExitHandlers.push(handler);
     try {
-      yield* callProc(handler, []);
+      yield* callProc(handler, [], { used: false });
     } catch (error) {
       if (error instanceof ReturnSignal) {
         const converted = rubyError(runtime.c.LocalJumpError, 'unexpected return');
