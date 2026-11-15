@@ -374,7 +374,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
       return yield* runModuleBody(singletonClassOf(target), e.body, frame);
     }
     case 'alias': {
-      const owner = frame.kind === 'class' ? (frame.self as RClass) : (frame.extra.definee ?? frame.cref[0]);
+      const owner = frame.definitionOwner ?? frame.cref[0];
       const method = owner.findMethod(e.oldName);
       if (!method) {
         throw nameError(`undefined method '${e.oldName}' for class '${owner.name}'`, owner, e.oldName);
@@ -386,7 +386,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
       return NIL;
     }
     case 'undef': {
-      const owner = frame.kind === 'class' ? (frame.self as RClass) : (frame.extra.definee ?? frame.cref[0]);
+      const owner = frame.definitionOwner ?? frame.cref[0];
       for (const name of e.names) {
         if (!owner.findMethod(name))
           throw nameError(`undefined method '${name}' for class '${owner.name}'`, owner, name);

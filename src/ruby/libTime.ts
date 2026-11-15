@@ -5,7 +5,7 @@ import { argumentError, floatDomainError, frozenError, rangeError, typeError } f
 import { bigintRatio } from './floatMath';
 import type { Gen } from './interp';
 import { floatToRational, isRational } from './libRational';
-import { NIL, RObject, RString, type Value } from './objects';
+import { isRubyFloat, NIL, RObject, RString, type Value } from './objects';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
 import { arr, realClassOf, str } from './values';
 
@@ -123,7 +123,7 @@ function* fieldValue(arg: Value, index: number): Gen<number> {
       ? MONTHS.findIndex((name) => name.slice(0, 3).toLowerCase() === arg.s.toLowerCase())
       : -1;
   if (month >= 0) return month + 1;
-  if (/^\s*[+-]?\d+\s*$/.test(arg.s)) return Number(BigInt(arg.s.trim()));
+  if (/^\s*[+-]?\d(?:_?\d)*\s*$/.test(arg.s)) return Number(BigInt(arg.s.trim().replaceAll('_', '')));
   throw argumentError(
     index === 0 ? `can't parse: ${JSON.stringify(arg.s)}` : `invalid value for Integer(): ${JSON.stringify(arg.s)}`
   );
@@ -150,7 +150,7 @@ function* exactNumber(value: Value): Gen<number> {
 
 function* parseOffset(value: Value): Gen<number> {
   if (value === NIL) return LOCAL_OFFSET;
-  if (typeof value === 'bigint' || typeof value === 'number' || isRational(value)) {
+  if (typeof value === 'bigint' || isRubyFloat(value) || isRational(value)) {
     const offset = yield* toFloat(value);
     if (Math.abs(offset) >= 86_400) throw argumentError('utc_offset out of range');
     return offset;
@@ -172,7 +172,7 @@ function* parseOffset(value: Value): Gen<number> {
 
 function exactOffset(value: Value): Value | undefined {
   if (isRational(value)) return value;
-  if (typeof value === 'number' && !Number.isInteger(value)) return floatToRational(value);
+  if (isRubyFloat(value) && !Number.isInteger(Number(value))) return floatToRational(Number(value));
   return undefined;
 }
 

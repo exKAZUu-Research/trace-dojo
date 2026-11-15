@@ -1,5 +1,5 @@
 import type { Params } from './ast';
-import { className, inspect, tryImplicitConversion } from './conversions';
+import { addressOf, className, inspect, tryImplicitConversion } from './conversions';
 import { def, sdef, sundef } from './define';
 import { argumentError, frozenError, nameError, typeError } from './errors';
 import { digest, hashGet } from './hashes';
@@ -175,7 +175,8 @@ function* findForMethodObject(self: Value, name: string, publicOnly = false): Ge
       },
     };
   }
-  const description = self === rt().mainObject ? 'an instance of Object' : `class '${className(classOf(self))}'`;
+  const receiverClass = self === rt().mainObject ? `#<Class:#<Object:${addressOf(self)}>>` : className(classOf(self));
+  const description = `class '${receiverClass}'`;
   throw nameError(`undefined method '${name}' for ${description}`, self, name);
 }
 

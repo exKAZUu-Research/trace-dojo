@@ -5,11 +5,11 @@ import { argumentError, frozenError, indexError, nameError, typeError } from './
 import { digest, hashKeyOf, hashSet } from './hashes';
 import { addMethod, assertMutableClass, callBlock, callMethod, callProc, type Gen, invoke } from './interp';
 import { tryAry } from './libArray';
-import { makeEnumerator } from './libEnumerator';
+import { sizedEnumerator } from './libEnumerator';
 import { nameOf } from './libMeta';
 import { NIL, RArray, RClass, type RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
-import { arr, newHash, realClassOf, singletonClassOf, str, sym, truthy } from './values';
+import { arr, newHash, range, realClassOf, singletonClassOf, str, sym, truthy } from './values';
 
 /** The members of a Struct or Data class, and whether its `new` takes keywords only. */
 interface Layout {
@@ -230,8 +230,8 @@ def(
         if (index === -1) unknown.push(name);
         else next[index] = entry.value;
       }
-      if (unknown.length > 0) throw argumentError(`unknown keywords: ${unknown.join(', ')}`);
       values.splice(0, values.length, ...next);
+      if (unknown.length > 0) throw argumentError(`unknown keywords: ${unknown.join(', ')}`);
       return NIL;
     }
     const all = keywords ? [...args, keywords] : args;
@@ -253,7 +253,11 @@ def('Struct', 'values_at', [0, -1], function* (self: RObject, args) {
   try {
     for (const argument of args) {
       if (argument instanceof RRange) {
-        const expanded = (yield* callMethod(arr([...values]), 'values_at', [argument])) as RArray;
+        const begin = argument.begin === NIL ? NIL : yield* toInt(argument.begin);
+        const end = argument.end === NIL ? NIL : yield* toInt(argument.end);
+        const expanded = (yield* callMethod(arr([...values]), 'values_at', [
+          range(begin, end, argument.exclusive),
+        ])) as RArray;
         selected.push(...expanded.items);
         continue;
       }
@@ -280,12 +284,12 @@ def('Struct', '[]=', 2, function* (self: RObject, [key, value]) {
   return value;
 });
 def('Struct', ['each'], 0, function* (self: RObject, _args, block) {
-  if (!block) return makeEnumerator(self, 'each', []);
+  if (!block) return sizedEnumerator(self, 'each', [], () => BigInt(layoutOf(self.cls).members.length));
   for (let index = 0; index < valuesOf(self).length; index++) yield* callBlock(block, [valuesOf(self)[index]], false);
   return self;
 });
 def('Struct', 'each_pair', 0, function* (self: RObject, _args, block) {
-  if (!block) return makeEnumerator(self, 'each_pair', []);
+  if (!block) return sizedEnumerator(self, 'each_pair', [], () => BigInt(layoutOf(self.cls).members.length));
   for (const [index, name] of layoutOf(self.cls).members.entries()) {
     yield* callBlock(block, [arr([sym(name), valuesOf(self)[index]])], false);
   }
@@ -368,7 +372,7 @@ function* inspectMembers(self: RObject, kind: 'struct' | 'data'): Gen {
     for (const [index, member] of layoutOf(self.cls).members.entries()) {
       parts.push(`${member}=${yield* inspect(valuesOf(self)[index])}`);
     }
-    if (parts.length === 0) return str(`${head.trimEnd()}>`);
+    if (parts.length === 0) return str(`${name === undefined ? head : head.trimEnd()}>`);
     return str(`${head}${parts.join(', ')}>`);
   } finally {
     inspecting.delete(self);
@@ -442,10 +446,12 @@ function* deconstructKeys(self: RObject, keys: Value): Gen<RHash> {
   if (keys instanceof RArray && keys.items.length > members.length) return hash;
   const names = keys === NIL ? members.map((name) => sym(name)) : (keys as RArray).items;
   for (const key of names) {
-    if (!(key instanceof RSymbol)) break;
-    const index = members.indexOf(key.name);
-    if (index === -1) break;
-    yield* hashSet(hash, key, valuesOf(self)[index]);
+    const named = key instanceof RSymbol || key instanceof RString;
+    const index = named ? members.indexOf(key instanceof RSymbol ? key.name : key.s) : yield* toIndex(key);
+    if (named && index < 0) break;
+    const normalized = index < 0 ? index + members.length : index;
+    if (normalized < 0 || normalized >= members.length) break;
+    yield* hashSet(hash, key, valuesOf(self)[normalized]);
   }
   return hash;
 }

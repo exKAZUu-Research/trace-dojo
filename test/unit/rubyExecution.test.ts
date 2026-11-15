@@ -7451,6 +7451,65 @@ test('Struct initialization clears members omitted on later calls', () => {
   });
 });
 
+test('Struct deconstruct_keys keeps requested key forms', () => {
+  expect(
+    run('s=Struct.new(:a,:b).new(1,2);p s.deconstruct_keys(["a"]),s.deconstruct_keys([0]),s.deconstruct_keys([-1])')
+  ).toMatchObject({
+    stdout: '{"a" => 1}\n{0 => 1}\n{-1 => 2}\n',
+  });
+});
+
+test('Struct iteration enumerators report member count', () => {
+  expect(run('s=Struct.new(:a,:b).new;p s.each.size,s.each_pair.size')).toMatchObject({ stdout: '2\n2\n' });
+});
+
+test('Struct keyword initialization updates known members before an error', () => {
+  expect(
+    run(
+      'S=Struct.new(:a,:b,keyword_init:true);s=S.new(a:1,b:2);begin;s.send(:initialize,a:3,z:4);rescue=>e;p e.class;end;p s'
+    )
+  ).toMatchObject({
+    stdout: 'ArgumentError\n#<struct S a=3, b=nil>\n',
+  });
+});
+
+test('Class.new alias and undef use its definition owner', () => {
+  expect(run('c=Class.new do;def a;1;end;alias b a;end;p c.new.b')).toMatchObject({ stdout: '1\n' });
+  expect(run('c=Class.new do;def a;1;end;undef a;end;p c.new.respond_to?(:a)')).toMatchObject({
+    stdout: 'false\n',
+  });
+});
+
+test('anonymous empty Struct and Data keep their inspect spacing', () => {
+  expect(run('x=Struct.new;p x.new.inspect;d=Data.define;p d.new.inspect')).toMatchObject({
+    stdout: '"#<struct >"\n"#<data >"\n',
+  });
+});
+
+test('main method lookup describes its singleton class', () => {
+  expect(run('begin;method(:zz);rescue=>e;p e.message;end')).toMatchObject({
+    stdout: expect.stringMatching(/for class '#<Class:#<Object:0x[\da-f]+>>'/),
+  });
+});
+
+test('Struct range selectors read values after endpoint conversion', () => {
+  expect(
+    run('S=Struct.new(:a,:b);s=S.new(1,2);i=Object.new;i.define_singleton_method(:to_int){s.a=9;0};p s.values_at(i..i)')
+  ).toMatchObject({
+    stdout: '[9]\n',
+  });
+});
+
+test('Time accepts boxed Float offsets and integer string separators', () => {
+  expect(run('p Time.new(2024,1,1,0,0,0,-0.0).utc_offset,Time.utc(2000,1,1,0,0,"1_0").sec')).toMatchObject({
+    stdout: '0\n10\n',
+  });
+});
+
+test('Rational coerce accepts Rational operands', () => {
+  expect(run('p Rational(1,2).coerce(Rational(1,3))')).toMatchObject({ stdout: '[(1/3), (1/2)]\n' });
+});
+
 test('regexp split yields fields and captures to a block', () => {
   expect(run('r=[];p "aXbXc".split(/(X)/){|part|r<<part},r')).toMatchObject({
     stdout: '"aXbXc"\n["a", "X", "b", "X", "c"]\n',

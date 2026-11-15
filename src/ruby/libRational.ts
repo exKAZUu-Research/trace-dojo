@@ -220,6 +220,7 @@ def('Rational', '==', 1, function* (self: RObject, [other]) {
   return yield* callMethod(other, '==', [self]);
 });
 def('Rational', 'coerce', 1, (self: RObject, [other]) => {
+  if (isRational(other)) return arr([other, self]);
   if (typeof other === 'bigint') return arr([makeRational(other, 1n), self]);
   if (isRubyFloat(other)) return arr([other, toNumber(fractionOf(self))]);
   throw typeError(`${realClassOf(other).name} can't be coerced into Rational`);
