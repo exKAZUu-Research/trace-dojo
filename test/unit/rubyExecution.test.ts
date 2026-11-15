@@ -8470,6 +8470,16 @@ test('prepend preserves direct and nested module order', () => {
   ).toMatchObject({
     stdout: '[C, A, B, X]\n"CABX"\n',
   });
+  expect(
+    run(
+      'module A;end;module B;prepend A;end;module C;include A;end;module D;end;class X;prepend B,D,C;end;p X.ancestors.take(5)'
+    )
+  ).toMatchObject({ stdout: '[D, C, A, B, X]\n' });
+  expect(
+    run(
+      'module A;def f;"A"+super;end;end;module B;include A;def f;"B"+super;end;end;module D;def f;"D"+super;end;end;module C;include D;def f;"C"+super;end;end;class X;def f;"X";end;prepend B,C,A;end;p X.ancestors.take(5),X.new.f'
+    )
+  ).toMatchObject({ stdout: '[B, C, D, A, X]\n"BCDAX"\n' });
 });
 
 test('String rejects unknown keywords before source conversion or mutation', () => {
@@ -8506,5 +8516,32 @@ test('Regexp.new rejects invalid pattern encoding', () => {
 test('braced Unicode regexp escapes accept codepoint lists', () => {
   expect(run(String.raw`p /\u{41 42}/.match("AB").to_a,/\u{3042 3044}/.match("あい").to_a`)).toMatchObject({
     stdout: '["AB"]\n["あい"]\n',
+  });
+});
+
+test('Regexp case equality retains ASCII Symbol capture encoding', () => {
+  expect(run('p(/a/===:abc);p $~.string.encoding,$~[0].encoding')).toMatchObject({
+    stdout: 'true\n#<Encoding:US-ASCII>\n#<Encoding:US-ASCII>\n',
+  });
+});
+
+test('defined? keeps compound assignment classification', () => {
+  expect(run('a=[];p defined?(a[1] ||= 1),defined?(a.first += 1)')).toMatchObject({
+    stdout: '"assignment"\n"assignment"\n',
+  });
+  expect(
+    run(
+      'class W; attr_writer :w; def []=(i,v); end\n private def qw=(x); end\n def t = defined?(self.qw = 1)\nend\np W.new.t'
+    )
+  ).toMatchObject({
+    stdout: 'nil\n',
+  });
+});
+
+test('lazy zip accepts BasicObject sources with public each', () => {
+  expect(
+    run('class A<BasicObject;def each;yield 2;end;def to_enum;[2].each;end;end;p [1].lazy.zip(A.new).force')
+  ).toMatchObject({
+    stdout: '[[1, 2]]\n',
   });
 });

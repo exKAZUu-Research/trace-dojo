@@ -1018,7 +1018,7 @@ def('Regexp', '===', 1, function* (self: RObject, [value]) {
     const name = realClassOf(value).name;
     throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
   }
-  const subject = converted instanceof RString ? converted : str(converted.name);
+  const subject = converted instanceof RString ? converted : symbolString(converted);
   const state = execAt(self, subject.s, 0, subject);
   setLastMatch(state);
   yield* [];

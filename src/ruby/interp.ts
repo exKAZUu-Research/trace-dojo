@@ -1281,8 +1281,7 @@ function* definedText(e: Expr, frame: Frame): Gen {
       }
       return text('expression');
     }
-    case 'asgn':
-    case 'opasgn': {
+    case 'asgn': {
       const target = e.target;
       if (target.k === 'attr' || target.k === 'index')
         return yield* definedText(
@@ -1292,13 +1291,16 @@ function* definedText(e: Expr, frame: Frame): Gen {
             name: target.k === 'attr' ? `${target.name}=` : '[]=',
             args: target.k === 'index' ? [...target.args, e.value] : [e.value],
             safe: target.k === 'attr' && target.safe,
-            fcall: target.recv.k === 'self',
+            fcall: false,
             vcall: false,
             used: 0,
             row: e.row,
           },
           frame
         );
+      return text('assignment');
+    }
+    case 'opasgn': {
       return text('assignment');
     }
     default: {
