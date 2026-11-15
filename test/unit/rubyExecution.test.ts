@@ -8834,6 +8834,25 @@ test('Struct and Data retain encoded member Symbol identities', () => {
   });
 });
 
+test('singleton class errors include their actual class name', () => {
+  expect(
+    run(
+      'class Foo\n class << self\n  def build = Bar.new\n end\nend\nbegin\n Foo.build\nrescue NameError=>e\n puts e.message\nend'
+    )
+  ).toMatchObject({
+    stdout: 'uninitialized constant #<Class:Foo>::Bar\n',
+  });
+});
+
+test('Time calendar microseconds replace fractions and respect field bounds', () => {
+  expect(run('p Time.utc(1970,1,1,0,0,1.5,250000).to_f,Time.utc(1970,1,1,0,0,1.5,nil).to_f')).toMatchObject({
+    stdout: '1.25\n1.5\n',
+  });
+  expect(run('begin;Time.utc(1970,1,1,0,0,0,1000000);rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'ArgumentError\n"subsecx out of range"\n',
+  });
+});
+
 test('frozen DATA rejects reads and cursor operations', () => {
   expect(
     run(

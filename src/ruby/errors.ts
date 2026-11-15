@@ -1,3 +1,4 @@
+import { className } from './conversions';
 import { NIL, type RClass, RObject, RString, RSymbol, type Value } from './objects';
 import { rt, RubyError } from './runtime';
 import { realClassOf, str } from './values';
@@ -83,13 +84,9 @@ export function receiverDescription(value: Value): string {
   }
   const cls = value as RClass;
   if ('isModule' in cls && cls.constants !== undefined) {
-    return `${cls.isModule ? 'module' : 'class'} ${cls.name ?? inspectAnonymous(cls)}`;
+    return `${cls.isModule ? 'module' : 'class'} ${className(cls)}`;
   }
   return `an instance of ${realClassOf(value).name}`;
-}
-
-function inspectAnonymous(cls: RClass): string {
-  return `#<${cls.isModule ? 'Module' : 'Class'}:0x${'0'.repeat(16)}>`;
 }
 
 /** How "no implicit conversion of X into Y" names a value: `nil`, `true`, `false`, or its class. */

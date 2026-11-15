@@ -212,17 +212,20 @@ function* buildTime(args: Value[], offset: number, zone: TimeData['zone'], micro
     0
   );
   const fraction = exactSeconds.numerator - BigInt(whole) * exactSeconds.denominator;
-  const microsecondsValue =
-    microseconds === undefined
-      ? 0n
-      : microseconds instanceof RString
-        ? yield* fieldValue(microseconds, 1)
-        : typeof microseconds === 'bigint' || typeof microseconds === 'number' || isRational(microseconds)
-          ? microseconds
-          : yield* toFloat(microseconds);
+  const hasMicroseconds = microseconds !== undefined && microseconds !== NIL;
+  const microsecondsValue = !hasMicroseconds
+    ? 0n
+    : microseconds instanceof RString
+      ? yield* fieldValue(microseconds, 1)
+      : typeof microseconds === 'bigint' || typeof microseconds === 'number' || isRational(microseconds)
+        ? microseconds
+        : yield* toFloat(microseconds);
   const micros = offsetFraction(microsecondsValue, 0);
+  if (micros.numerator < 0n || micros.numerator >= 1_000_000n * micros.denominator)
+    throw argumentError('subsecx out of range');
   const localNumerator =
-    (localNanoseconds * exactSeconds.denominator + fraction * 1_000_000_000n) * micros.denominator +
+    (localNanoseconds * exactSeconds.denominator + (hasMicroseconds ? 0n : fraction) * 1_000_000_000n) *
+      micros.denominator +
     micros.numerator * 1000n * exactSeconds.denominator;
   const localDenominator = exactSeconds.denominator * micros.denominator;
   const fractionOffset = offsetFraction(exact, offset);

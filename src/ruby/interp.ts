@@ -15,6 +15,7 @@ import type {
 } from './ast';
 import {
   caseEquals,
+  className,
   combinedStringEncoding,
   inspect,
   numericCompare,
@@ -789,7 +790,7 @@ export function findConstInAncestors(module: RClass, name: string): Value | unde
 function missingConstant(module: RClass, name: string, scoped = false): never {
   const feature = UNSUPPORTED_CONSTANTS[name];
   if (feature && (module === rt().c.Object || !scoped)) throw new UnsupportedFeatureError(feature);
-  const prefix = module === rt().c.Object || !module.name ? '' : `${module.name}::`;
+  const prefix = module === rt().c.Object ? '' : `${className(module)}::`;
   throw nameError(`uninitialized constant ${prefix}${name}`, module, name);
 }
 
