@@ -9085,10 +9085,56 @@ test('Enumerable enumerator sizes use a custom receiver size', () => {
   ).toMatchObject({ stdout: '2\n3\n2\n' });
 });
 
+test('Enumerable size callbacks respect method shape and visibility', () => {
+  expect(
+    run('class C;include Enumerable;def each;yield 1;end;def size;puts :called;3;end;end;p C.new.find.size')
+  ).toMatchObject({ stdout: 'nil\n' });
+  expect(
+    run(
+      'class C;include Enumerable;def each;yield 1;end;end;c=C.new;def c.size;3;end;p c.map.size,c.each_slice(2).size'
+    )
+  ).toMatchObject({ stdout: '3\n2\n' });
+  expect(
+    run('class C;include Enumerable;def each;yield 1;end;private;def size;3;end;end;p C.new.map.size')
+  ).toMatchObject({ stdout: '3\n' });
+  expect(
+    run(
+      'class C;include Enumerable;def each;yield 1;end;def respond_to_missing?(n,*);n==:size || super;end;def method_missing(n,*);n==:size ? 3 : super;end;end;p C.new.map.size,C.new.each_cons(2).size'
+    )
+  ).toMatchObject({ stdout: '3\n2\n' });
+});
+
+test('Enumerable window sizes use custom numeric size values', () => {
+  expect(
+    run(
+      'class C;include Enumerable;def each;yield 1;end;def size;3.5;end;end;p C.new.each_slice(2).size,C.new.each_cons(2).size'
+    )
+  ).toMatchObject({ stdout: '2\n2.5\n' });
+  expect(
+    run(
+      'class C;include Enumerable;def each;yield 1;end;def size;"3";end;end;begin;C.new.each_slice(2).size;rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({ stdout: 'TypeError\n' });
+});
+
 test('Enumerator with_index converts its offset when iterated once', () => {
   expect(
     run('x=Object.new;def x.to_int;puts :convert;2;end;e=[1].each.with_index(x);puts :made;p e.to_a')
   ).toMatchObject({ stdout: 'made\nconvert\n[[1, 2]]\n' });
+});
+
+test('untransformed Lazy rewind reaches a stateful source', () => {
+  expect(
+    run(
+      'class C;include Enumerable;def initialize;@i=0;end;def each;while @i<3;@i+=1;yield @i;end;end;def rewind;@i=0;end;end;l=C.new.lazy;p l.next;l.rewind;p l.next'
+    )
+  ).toMatchObject({ stdout: '1\n1\n' });
+});
+
+test('Lazy each_entry forwards iteration arguments', () => {
+  expect(
+    run('class C;include Enumerable;def each(n=1);n.times{|i|yield i};end;end;p C.new.lazy.each_entry(3).force')
+  ).toMatchObject({ stdout: '[0, 1, 2]\n' });
 });
 
 test('Enumerator adapters pack zero-argument yields as nil', () => {
@@ -9132,6 +9178,12 @@ test('Time calendar microseconds replace fractions and respect field bounds', ()
   });
   expect(run('begin;Time.utc(1970,1,1,0,0,0,1000000);rescue=>e;p e.class,e.message;end')).toMatchObject({
     stdout: 'ArgumentError\n"subsecx out of range"\n',
+  });
+});
+
+test('Time exact arguments accept to_int hooks', () => {
+  expect(run('class Seconds;def to_int;3;end;end;v=Seconds.new;p Time.at(v).to_i,(Time.at(0)+v).to_i')).toMatchObject({
+    stdout: '3\n3\n',
   });
 });
 

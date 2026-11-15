@@ -119,6 +119,8 @@ export function makeEnumerator(
 
 function* enumeratorSize(recv: Value, method: string, args: Value[], keywords?: RHash): Gen<Value> {
   if (method === 'step' || method === '%') return yield* stepSize(recv, args, keywords);
+  if (NIL_SIZE_METHODS.has(method)) return NIL;
+  if (method === 'loop') return Number.POSITIVE_INFINITY;
   if (recv instanceof RString && method === 'each_byte') return BigInt(stringBytes(recv).length);
   if (recv instanceof RArray && ARRAY_SELECTION_METHODS.has(method))
     return arraySelectionSize(recv.items.length, method, args[0] === undefined ? undefined : yield* toInt(args[0]));
@@ -137,15 +139,16 @@ function* enumeratorSize(recv: Value, method: string, args: Value[], keywords?: 
     }
   }
   const base = yield* receiverSize(recv);
-  if (method === 'each_slice' && args[0] !== undefined && typeof base === 'bigint') {
+  if ((method === 'each_slice' || method === 'each_cons') && args[0] !== undefined && base !== NIL) {
+    const slice = method === 'each_slice';
     const count = (yield* toIndexExact(args[0])).integer;
-    if (count <= 0n) throw argumentError('invalid slice size');
-    return (base + count - 1n) / count;
-  }
-  if (method === 'each_cons' && args[0] !== undefined && typeof base === 'bigint') {
-    const count = (yield* toIndexExact(args[0])).integer;
-    if (count <= 0n) throw argumentError('invalid size');
-    return base >= count ? base - count + 1n : 0n;
+    if (count <= 0n) throw argumentError(slice ? 'invalid slice size' : 'invalid size');
+    if (typeof base === 'bigint') return slice ? (base + count - 1n) / count : base >= count ? base - count + 1n : 0n;
+    if (isRubyFloat(base) && Number(base) === Infinity) return base;
+    if (base instanceof RString) throw typeError('no implicit conversion of Integer into String');
+    return slice
+      ? yield* callMethod(yield* callMethod(base, '/', [count]), 'ceil', [])
+      : yield* callMethod(yield* callMethod(base, '-', [count]), '+', [1n]);
   }
   if (method === 'cycle' && typeof base === 'bigint') {
     if (base === 0n) return 0n;
@@ -153,8 +156,6 @@ function* enumeratorSize(recv: Value, method: string, args: Value[], keywords?: 
     if (count !== undefined && count <= 0n) return 0n;
     return count === undefined ? Number.POSITIVE_INFINITY : base * count;
   }
-  if (method === 'loop') return Number.POSITIVE_INFINITY;
-  if (NIL_SIZE_METHODS.has(method)) return NIL;
   if (FIXED_SIZE_METHODS.has(method)) return base;
   return NIL;
 }
@@ -169,7 +170,8 @@ export function* receiverSize(recv: Value): Gen<Value> {
     const size = sourceOf(recv).size?.() ?? NIL;
     return isGenerator(size) ? yield* size : size;
   }
-  if (recv instanceof RObject && recv.cls.findMethod('size')) return yield* callMethod(recv, 'size', []);
+  if (recv instanceof RObject && (yield* respondsToName(recv, 'size', true)))
+    return yield* callMethod(recv, 'size', [], undefined, undefined, { fcall: true });
   return NIL;
 }
 
@@ -825,6 +827,10 @@ def('Enumerator', 'peek', 0, (self: RObject) => {
 def('Enumerator', 'rewind', 0, function* (self: RObject) {
   const receiver = sourceOf(self).recv;
   if (receiver !== self && respondsTo(receiver, 'rewind')) yield* callMethod(receiver, 'rewind', []);
+  if (self.cls === rt().c['Enumerator::Lazy']) {
+    const data = self.data as LazyData;
+    if (data.steps.length === 0 && respondsTo(data.source, 'rewind')) yield* callMethod(data.source, 'rewind', []);
+  }
   sourceOf(self).cursor = undefined;
   return self;
 });
@@ -1095,9 +1101,10 @@ for (const kind of ['each_slice', 'each_cons'] as const) {
     return self;
   });
 }
-def('Enumerator::Lazy', 'each_entry', 0, function* (self: RObject, _args, block) {
+def('Enumerator::Lazy', 'each_entry', [0, -1], function* (self: RObject, args, block) {
   const data = self.data as LazyData;
-  const lazy = makeLazy(data.source, [...data.steps, { kind: 'each_entry' }]);
+  const source = args.length > 0 ? makeEnumerator(data.source, 'each', args) : data.source;
+  const lazy = makeLazy(source, [...data.steps, { kind: 'each_entry', args }]);
   if (!block) return lazy;
   yield* runLazy(lazy, (value) => callProc(block, [value], { used: false }));
   return self;
