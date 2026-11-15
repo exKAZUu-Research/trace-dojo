@@ -8900,6 +8900,11 @@ test('Struct unknown keyword errors retain encoded name bytes', () => {
   ).toMatchObject({
     stdout: 'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n',
   });
+  expect(
+    run(
+      'a=String.new(255.chr,encoding:"US-ASCII").to_sym;b=233.chr.to_sym;begin;Struct.new(:x,keyword_init:true).new(**{a=>1,b=>2});rescue=>e;p e.message.encoding;end'
+    )
+  ).toMatchObject({ stdout: '#<Encoding:BINARY (ASCII-8BIT)>\n' });
 });
 
 test('anonymous class instances have Ruby class names in method errors', () => {
@@ -8980,6 +8985,14 @@ test('calendar microseconds preserve tiny Floats and reject non-ASCII numeric wh
   expect(run('begin;Time.utc(1970,1,1,0,0,0,"1\u2028");rescue=>e;p e.message.include?(%q{\\u2028});end')).toMatchObject(
     { stdout: 'true\n' }
   );
+  expect(run('begin;Time.utc(2024,1,1,0,0,0,255.chr);rescue=>e;p e.message;end')).toMatchObject({
+    stdout: '"invalid value for Integer(): \\"\\\\xFF\\""\n',
+  });
+  expect(
+    run(
+      'class S<String;def inspect;puts :seen;"custom";end;end;begin;Time.utc(2024,1,1,0,0,0,S.new("bad"));rescue=>e;p e.message;end'
+    )
+  ).toMatchObject({ stdout: 'seen\n"invalid value for Integer(): custom"\n' });
 });
 
 test('defined? rejects END through statement modifiers', () => {

@@ -1,5 +1,5 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { compareValues, strInspect, toFloat, toInt, toStr } from './conversions';
+import { compareValues, inspect, toFloat, toInt, toStr } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, floatDomainError, frozenError, rangeError, typeError } from './errors';
 import { bigintRatio } from './floatMath';
@@ -125,9 +125,8 @@ function* fieldValue(arg: Value, index: number): Gen<number> {
   if (month >= 0) return month + 1;
   if (/^[ \t\n\r\v\f]*[+-]?\d(?:_?\d)*[ \t\n\r\v\f]*$/.test(arg.s))
     return Number(BigInt(arg.s.replaceAll(/^[ \t\n\r\v\f]+|[ \t\n\r\v\f]+$/g, '').replaceAll('_', '')));
-  throw argumentError(
-    index === 0 ? `can't parse: ${strInspect(arg.s)}` : `invalid value for Integer(): ${strInspect(arg.s)}`
-  );
+  const shown = yield* inspect(arg);
+  throw argumentError(index === 0 ? `can't parse: ${shown}` : `invalid value for Integer(): ${shown}`);
 }
 
 function* secondsValue(arg: Value): Gen<number> {

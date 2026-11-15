@@ -292,7 +292,12 @@ def(
       if (incompatibleEncodings)
         throw rubyError(
           rt().c['Encoding::CompatibilityError'],
-          `incompatible character encodings: ${incompatibleEncodings[0]} and ${incompatibleEncodings[1]}`
+          stringFromBytes(
+            new TextEncoder().encode(
+              `incompatible character encodings: ${incompatibleEncodings[0]} and ${incompatibleEncodings[1]}`
+            ),
+            true
+          )
         );
       if (unknown.length > 0) {
         const prefix = new TextEncoder().encode('unknown keywords: ');
