@@ -324,7 +324,7 @@ function fastInspect(value: Value): string | undefined {
     !(value.usAscii && stringBytes(value).some((byte) => byte >= 0x80))
   )
     return strInspect(value.s, value.usAscii ? 'hex' : 'unicode');
-  if (value instanceof RSymbol) return symInspect(value.name);
+  if (value instanceof RSymbol) return symInspect(value);
   if (typeof value === 'object') return undefined;
   return fastToS(value);
 }
@@ -360,11 +360,12 @@ export function* inspectHash(hash: RHash): Gen<RString> {
     for (const { key, value } of hash.map.values()) {
       if (parts.length > 0) length = pushInspectionPart(parts, asciiString(', '), length);
       if (key instanceof RSymbol) {
-        const name = isSimpleSymbol(key.name)
-          ? /^[\u0000-\u007F]*$/.test(key.name)
-            ? asciiString(key.name)
-            : str(key.name)
-          : str(quotedSymbolName(key.name));
+        const name =
+          !key.binary && !key.usAscii && isSimpleSymbol(key.name)
+            ? /^[\u0000-\u007F]*$/.test(key.name)
+              ? asciiString(key.name)
+              : str(key.name)
+            : str(quotedSymbolName(key));
         const shownValue = (yield inspectValue(value)) as RString;
         length = pushInspectionPart(parts, name, length);
         length = pushInspectionPart(parts, asciiString(': '), length);
@@ -604,14 +605,25 @@ const OPERATOR_SYMBOLS = new Set([
   '`',
 ]);
 
-export function symInspect(name: string): string {
+export function symInspect(symbol: string | RSymbol): string {
+  const name = typeof symbol === 'string' ? symbol : symbol.name;
+  if (symbol instanceof RSymbol && (symbol.binary || symbol.usAscii)) return `:${quotedSymbolName(symbol)}`;
   if (OPERATOR_SYMBOLS.has(name)) return `:${name}`;
   if (/^(?:\$|@@?)?[A-Za-z_\u0080-￿][\w\u0080-￿]*$/u.test(name)) return `:${name}`;
   if (/^[A-Za-z_\u0080-￿][\w\u0080-￿]*[?!=]$/u.test(name)) return `:${name}`;
   return `:${quotedSymbolName(name)}`;
 }
 
-export function quotedSymbolName(name: string): string {
+export function quotedSymbolName(symbol: string | RSymbol): string {
+  const name = typeof symbol === 'string' ? symbol : symbol.name;
+  if (symbol instanceof RSymbol && (symbol.binary || symbol.usAscii)) {
+    const escaped = Array.from(symbol.bytes ?? [], (byte) =>
+      byte >= 0x80
+        ? `\\x${byte.toString(16).toUpperCase().padStart(2, '0')}`
+        : strInspect(String.fromCodePoint(byte), 'hex').slice(1, -1)
+    ).join('');
+    return `"${escaped}"`;
+  }
   return strInspect(name, /^[\u0000-\u007F]*$/.test(name) ? 'hex' : 'unicode');
 }
 

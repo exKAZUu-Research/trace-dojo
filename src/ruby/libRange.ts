@@ -504,9 +504,15 @@ for (const method of ['step', '%'])
     )
       throw typeError('no implicit conversion of String into Integer');
     if (isNumericRangeOperand(step)) {
-      const value = yield* toFloat(step);
-      if (value < 0 && !isNumericRangeOperand(self.begin)) throw argumentError("step can't be negative");
-      if (value === 0) throw argumentError("step can't be 0");
+      const sign = isRational(step)
+        ? fractionOf(step).numerator < 0n
+          ? -1
+          : fractionOf(step).numerator > 0n
+            ? 1
+            : 0
+        : Math.sign(Number(step));
+      if (sign < 0 && !isNumericRangeOperand(self.begin)) throw argumentError("step can't be negative");
+      if (sign === 0) throw argumentError("step can't be 0");
     }
     if (!block) return makeEnumerator(self, method, args);
     return yield* stepRange(self, step, block);

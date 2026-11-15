@@ -354,7 +354,7 @@ function inspectionCallbackCount(value: Value, seen: Set<object>, budget: BuildB
 }
 
 function isSimplePrettySymbol(key: RSymbol): boolean {
-  return !/^:["$@]|[%&*+\-/<=>@\]^`|~]$/.test(symInspect(key.name));
+  return !/^:["$@]|[%&*+\-/<=>@\]^`|~]$/.test(symInspect(key));
 }
 
 function stringLines(value: RString): RString[] {
@@ -373,7 +373,7 @@ function stringLines(value: RString): RString[] {
 function* pair(key: Value, value: Value, seen: Set<object>, budget: BuildBudget, defer = false): Gen<Doc[]> {
   const parts: Doc[] = [];
   if (key instanceof RSymbol) {
-    parts.push(text(`${isSimplePrettySymbol(key) ? key.name : quotedSymbolName(key.name)}:`, budget));
+    parts.push(text(`${isSimplePrettySymbol(key) ? key.name : quotedSymbolName(key)}:`, budget));
   } else {
     parts.push(yield* build(key, seen, budget, defer), text(' ', budget), text('=>', budget));
   }

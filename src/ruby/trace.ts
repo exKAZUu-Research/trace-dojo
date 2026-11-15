@@ -4,7 +4,7 @@ import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
-import { formatFloat, strInspect, symInspect } from './conversions';
+import { formatFloat, quotedSymbolName, strInspect, symInspect } from './conversions';
 import { regexpValueDisplayOf } from './libRegexp';
 import { structEntriesOf } from './libStruct';
 import { timeDisplayOf } from './libTime';
@@ -140,7 +140,7 @@ function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }
   if (value === NIL) return null;
   if (value instanceof RFloat) return value.value;
   if (value instanceof RString) return value.s;
-  if (value instanceof RSymbol) return symInspect(value.name);
+  if (value instanceof RSymbol) return symInspect(value);
   if (!(value instanceof RArray) || seen.has(value)) return NOT_SCALAR;
   if (seen.size >= 256) throw new ExecutionLimitError('trace');
   seen.add(value);
@@ -171,7 +171,7 @@ function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: num
   if (value === NIL) return NULL_NODE;
   if (value instanceof RFloat) return { kind: 'value', value: value.value };
   if (value instanceof RString) return { kind: 'value', value: value.s };
-  if (value instanceof RSymbol) return { kind: 'value', value: symInspect(value.name) };
+  if (value instanceof RSymbol) return { kind: 'value', value: symInspect(value) };
   if (!isVariableValue(value) || seen.has(value)) return undefined;
   if (seen.size >= 256) return { kind: 'value', value: '…' };
   if (value instanceof RRange) return { kind: 'value', value: rangeText(value) };
@@ -307,7 +307,8 @@ function keyLabels(keys: Value[]): string[] {
 function keyText(key: Value, quoted: boolean, seen = new Set<RArray>(), memo = new WeakMap<RArray, string>()): string {
   rt().spend();
   if (key instanceof RString) return boundedKeyText(quoted ? strInspect(key.s) : key.s);
-  if (key instanceof RSymbol) return quoted ? symInspect(key.name) : key.name;
+  if (key instanceof RSymbol)
+    return quoted ? symInspect(key) : key.binary || key.usAscii ? quotedSymbolName(key) : key.name;
   if (typeof key === 'boolean' || typeof key === 'bigint') return String(key);
   if (typeof key === 'number' || key instanceof RFloat) return formatFloat(Number(key));
   if (key === NIL) return 'nil';

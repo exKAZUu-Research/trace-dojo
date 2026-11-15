@@ -5,7 +5,6 @@ import {
   combinedStringEncoding,
   compareBytes,
   compareRubyStrings,
-  compareStrings,
   compareValues,
   inspect,
   rangeCovers,
@@ -348,9 +347,9 @@ function binaryInspect(bytes: Uint8Array): string {
   return `${result}"`;
 }
 def('String', ['to_sym', 'intern'], 0, (self: RString) => {
-  if (self.rawBytes && !self.binary)
+  if (self.rawBytes && !self.binary && !self.usAscii)
     throw rubyError(rt().c.EncodingError, `invalid symbol in encoding UTF-8 :${inspectRawBytes(self.rawBytes)}`);
-  return RSymbol.of(self.s, self.binary);
+  return RSymbol.of(self.s, self.binary, self.usAscii, stringBytes(self));
 });
 def('String', 'to_i', [0, 1], function* (self: RString, args) {
   const base = args.length > 0 ? yield* toRubyInt(args[0]) : 10;
@@ -1838,21 +1837,18 @@ def('Symbol', 'name', 0, (self: RSymbol) => {
 });
 def('Symbol', 'to_sym', 0, (self) => self);
 def('Symbol', 'intern', 0, (self) => self);
-def('Symbol', 'casecmp', 1, (self: RSymbol, [other]) =>
-  other instanceof RSymbol
-    ? BigInt(
-        compareStrings(
-          self.name.replaceAll(/[A-Z]/g, (char) => char.toLowerCase()),
-          other.name.replaceAll(/[A-Z]/g, (char) => char.toLowerCase())
-        )
-      )
-    : NIL
-);
-def('Symbol', 'casecmp?', 1, (self: RSymbol, [other]) =>
-  other instanceof RSymbol ? foldCase(self.name) === foldCase(other.name) : NIL
-);
+def('Symbol', 'casecmp', 1, (self: RSymbol, [other]) => {
+  if (!(other instanceof RSymbol) || self.binary !== other.binary || self.usAscii !== other.usAscii) return NIL;
+  return BigInt(compareBytes(foldAsciiBytes(symbolString(self)), foldAsciiBytes(symbolString(other))));
+});
+def('Symbol', 'casecmp?', 1, (self: RSymbol, [other]) => {
+  if (!(other instanceof RSymbol) || self.binary !== other.binary || self.usAscii !== other.usAscii) return NIL;
+  if (self.binary || self.usAscii)
+    return compareBytes(foldAsciiBytes(symbolString(self)), foldAsciiBytes(symbolString(other))) === 0;
+  return foldCase(self.name) === foldCase(other.name);
+});
 def('Symbol', 'inspect', 0, (self: RSymbol) => {
-  const text = symInspect(self.name);
+  const text = symInspect(self);
   return /^[\u0000-\u007F]*$/.test(text) ? asciiString(text) : str(text);
 });
 def('Symbol', ['length', 'size'], 0, (self: RSymbol) => BigInt(charLength(self.name)));
@@ -1861,13 +1857,13 @@ def('Symbol', ['==', '===', 'eql?', 'equal?'], 1, (self, [other]) => self === ot
 def('Symbol', 'hash', 0, (self: RSymbol) => BigInt(self.name.length * 31 + (self.name.codePointAt(0) ?? 0)));
 def('Symbol', '<=>', 1, (self: RSymbol, [other]) => {
   if (!(other instanceof RSymbol)) return NIL;
-  return BigInt(compareStrings(self.name, other.name));
+  return BigInt(compareRubyStrings(symbolString(self), symbolString(other)));
 });
 for (const name of ['upcase', 'downcase', 'capitalize', 'swapcase', 'succ', 'next']) {
   def('Symbol', name, 0, function* (self: RSymbol) {
     const result = yield* invoke(coreMethod(rt().c.String, name), symbolString(self), [], undefined, undefined, false);
     if (!(result instanceof RString)) throw new TypeError(`Invalid String#${name} result`);
-    return RSymbol.of(result.s, result.binary);
+    return RSymbol.of(result.s, result.binary, result.usAscii, stringBytes(result));
   });
 }
 def('Symbol', ['[]', 'slice'], [1, 2], (self: RSymbol, args) =>
@@ -1876,10 +1872,9 @@ def('Symbol', ['[]', 'slice'], [1, 2], (self: RSymbol, args) =>
 def('Symbol', 'start_with?', [0, -1], (self: RSymbol, args) =>
   invoke(coreMethod(rt().c.String, 'start_with?'), symbolString(self), args, undefined, undefined, false)
 );
-def('Symbol', 'end_with?', [0, -1], function* (self: RSymbol, args) {
-  for (const arg of args) if (self.name.endsWith(yield* stringArg(arg))) return true;
-  return false;
-});
+def('Symbol', 'end_with?', [0, -1], (self: RSymbol, args) =>
+  invoke(coreMethod(rt().c.String, 'end_with?'), symbolString(self), args, undefined, undefined, false)
+);
 def('Symbol', 'to_proc', 0, (self: RSymbol) => symbolProc(self.name));
 
 /** The lambda `&:name` passes: it calls the method `name` on its first argument. */
@@ -1897,11 +1892,7 @@ export function symbolProc(name: string): Value {
 }
 
 export function symbolString(self: RSymbol): RString {
-  if (self.binary)
-    return stringFromBytes(
-      Uint8Array.from(self.name, (char) => char.codePointAt(0) ?? 0),
-      true
-    );
+  if (self.binary || self.usAscii) return stringFromBytes(self.bytes as Uint8Array, self.binary, self.usAscii);
   return /^[\u0000-\u007F]*$/.test(self.name) ? asciiString(self.name) : str(self.name);
 }
 

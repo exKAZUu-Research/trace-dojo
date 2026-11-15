@@ -457,7 +457,7 @@ def(
   { keywords: true }
 );
 def('Kernel', 'define_singleton_method', [1, 2], function* (self, args, block) {
-  if (!(self instanceof RBasic)) throw typeError("can't define singleton");
+  if (!(self instanceof RBasic) || isRubyFloat(self)) throw typeError("can't define singleton");
   return yield* defineMethodFrom(singletonClassOf(self), args, block, 'public');
 });
 

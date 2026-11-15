@@ -8626,6 +8626,9 @@ test('Float sum retains compensation across Rational values', () => {
   expect(run('p [3/10r,0.9,2/9r].sum; p [1/10r,1/10r,1/10r].sum(0.0);p [8/7r,3].sum(1.0)')).toMatchObject({
     stdout: '1.4222222222222223\n0.3\n5.142857142857143\n',
   });
+  expect(run('p [8/7r,3].each.sum(0.0);p [1/10r,1/10r,1/10r].each.sum(0.0)')).toMatchObject({
+    stdout: '4.142857142857142\n0.30000000000000004\n',
+  });
 });
 
 test('Range step converts Rational values when a Float participates', () => {
@@ -8635,6 +8638,7 @@ test('Range step converts Rational values when a Float participates', () => {
   expect(run('p (3r..1r).step(-1r).to_a; p (3..1/2r).step(-1).to_a; p (3r..1).step(-1).to_a')).toMatchObject({
     stdout: '[(3/1), (2/1), (1/1)]\n[3, 2, 1]\n[(3/1), (2/1), (1/1)]\n',
   });
+  expect(run('t=Rational(1,10**324);p (0r..t).step(t).to_a.size')).toMatchObject({ stdout: '2\n' });
 });
 
 test('Numeric coerce accepts Rational values', () => {
@@ -8705,6 +8709,29 @@ test('binary Symbol case conversion keeps byte encoding', () => {
   });
 });
 
+test('US-ASCII Symbol interning retains invalid source bytes', () => {
+  expect(
+    run('s=String.new("é",encoding:"US-ASCII");q=s.to_sym;p [q.encoding,q.to_s.valid_encoding?,q.to_s.bytes,q==:é]')
+  ).toMatchObject({
+    stdout: '[#<Encoding:US-ASCII>, false, [195, 169], false]\n',
+  });
+  expect(run('s=String.new(255.chr,encoding:"US-ASCII").to_sym;p s.encoding,s.to_s.bytes')).toMatchObject({
+    stdout: '#<Encoding:US-ASCII>\n[255]\n',
+  });
+});
+
+test('binary Symbol inspection escapes original bytes', () => {
+  expect(run('p 255.chr.to_sym,{255.chr.to_sym=>1}')).toMatchObject({
+    stdout: ':"\\xFF"\n{"\\xFF": 1}\n',
+  });
+});
+
+test('binary Symbol comparisons retain byte order and encoding', () => {
+  expect(run('a=233.chr.to_sym;b=:é;p [a<=>b,a.casecmp(b),a.casecmp?(b)]')).toMatchObject({
+    stdout: '[1, nil, nil]\n',
+  });
+});
+
 test('prepend merges shared included child chains', () => {
   expect(
     run(
@@ -8737,6 +8764,29 @@ test('included modules share nested prepends without duplicate ancestors', () =>
   ).toMatchObject({
     stdout: '[Sub, Auth, Base, Log, Object]\n',
   });
+  expect(
+    run(
+      'module Log;end;module Auth;include Log;end;class Base;end;class P1<Base;prepend Log;include Auth;end;p P1.ancestors.take(4)'
+    )
+  ).toMatchObject({
+    stdout: '[Log, P1, Auth, Base]\n',
+  });
+});
+
+test('boxed Float cannot acquire a singleton method', () => {
+  expect(run('begin;Float::INFINITY.define_singleton_method(:hi){1};rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'TypeError\n"can\'t define singleton"\n',
+  });
+});
+
+test('binary Symbol suffix checks preserve encoding errors', () => {
+  expect(run('begin;255.chr.to_sym.end_with?("é");rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'Encoding::CompatibilityError\n',
+  });
+});
+
+test('Struct class names honor to_str', () => {
+  expect(run('x=Object.new;def x.to_str;"A";end;p Struct.new(x,:a)')).toMatchObject({ stdout: 'Struct::A\n' });
 });
 
 test('frozen DATA rejects reads and cursor operations', () => {

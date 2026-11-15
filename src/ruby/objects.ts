@@ -19,16 +19,24 @@ export class RSymbol {
   nameString?: RString;
   private constructor(
     readonly name: string,
-    readonly binary: boolean
+    readonly binary: boolean,
+    readonly usAscii: boolean,
+    readonly bytes?: Uint8Array
   ) {}
 
-  static of(name: string, binary = false): RSymbol {
+  static of(name: string, binary = false, usAscii = false, sourceBytes?: Uint8Array): RSymbol {
     const symbols = rt().symbols;
-    const encoded = binary && /[^\u0000-\u007F]/.test(name);
-    const key = `${encoded ? 'binary:' : 'text:'}${name}`;
+    const bytes = sourceBytes ?? new TextEncoder().encode(name);
+    const high = bytes.some((byte) => byte >= 0x80);
+    const encodedBinary = binary && high;
+    const encodedAscii = usAscii && high && !binary;
+    const key =
+      encodedBinary || encodedAscii
+        ? `${encodedBinary ? 'binary' : 'ascii'}:${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`
+        : `text:${name}`;
     let symbol = symbols.get(key);
     if (!symbol) {
-      symbol = new RSymbol(name, encoded);
+      symbol = new RSymbol(name, encodedBinary, encodedAscii, high ? Uint8Array.from(bytes) : undefined);
       symbols.set(key, symbol);
     }
     return symbol;
@@ -254,6 +262,7 @@ export class RClass extends RBasic {
   /** The modules this module includes directly, the last included first. */
   readonly includes: RClass[] = [];
   readonly prepends: RClass[] = [];
+  readonly includePrependSnapshots = new Map<RClass, Set<RClass>>();
   /** The object a singleton class belongs to. */
   attached?: Value;
   /** The module whose constant first named this one, for names such as `Outer::Inner`. */
@@ -327,12 +336,12 @@ export class RClass extends RBasic {
       chainMemo.set(module, chain);
       return chain;
     };
-    const addModule = (module: RClass, placement: 'prepend' | 'body' = 'body'): void => {
+    const addModule = (module: RClass, placement: 'prepend' | 'body' = 'body', priorPrepends?: Set<RClass>): void => {
       const visited = placement === 'prepend' ? seenPrepended : seen;
       if (
         visited.has(module) ||
         active.has(module) ||
-        (placement !== 'prepend' && (inSuper.has(module) || seenInBody.has(module)))
+        (placement !== 'prepend' && (inSuper.has(module) || seenInBody.has(module) || priorPrepends?.has(module)))
       )
         return;
       visited.add(module);
@@ -342,7 +351,11 @@ export class RClass extends RBasic {
         if (
           !seenPrepended.has(prepended) &&
           !active.has(prepended) &&
-          !(placement === 'body' && module !== this && (inSuper.has(prepended) || seen.has(prepended)))
+          !(
+            placement === 'body' &&
+            module !== this &&
+            (inSuper.has(prepended) || seen.has(prepended) || priorPrepends?.has(prepended))
+          )
         ) {
           seenPrepended.add(prepended);
           if (placement === 'body' && module !== this) seenInBody.add(prepended);
@@ -350,7 +363,8 @@ export class RClass extends RBasic {
           list.push(prepended);
         }
       list.push(module);
-      for (const included of module.includes) addModule(included, placement);
+      for (const included of module.includes)
+        addModule(included, placement, module === this ? this.includePrependSnapshots.get(included) : priorPrepends);
       active.delete(module);
     };
     addModule(this);

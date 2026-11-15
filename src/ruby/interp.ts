@@ -215,7 +215,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
     }
     case 'dsym': {
       const name = yield* interpolateString(e.parts, frame);
-      return RSymbol.of(name.s, name.binary);
+      return RSymbol.of(name.s, name.binary, name.usAscii, stringBytes(name));
     }
     case 'array': {
       return arr(yield* evalList(e.items, frame));

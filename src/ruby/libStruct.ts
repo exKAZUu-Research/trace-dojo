@@ -9,6 +9,7 @@ import {
   toIndex,
   toIndexExact,
   toInt,
+  toStrValue,
   tryImplicitConversion,
 } from './conversions';
 import { def, sdef, sundef } from './define';
@@ -203,8 +204,8 @@ sdef(
   // code-gauge-allow functionCognitiveComplexity 19 -- Ruby's method takes these argument forms, which the branches mirror.
   function* (self: RClass, args, block, keywords) {
     const first = args[0];
-    if (first !== undefined && first !== NIL && !(first instanceof RString) && !(first instanceof RSymbol))
-      throw typeError(`no implicit conversion of ${realClassOf(first).name} into String`);
+    const classNameValue =
+      first === undefined || first === NIL || first instanceof RSymbol ? undefined : yield* toStrValue(first);
     let keywordInit: boolean | undefined;
     if (keywords) {
       for (const entry of keywords.map.values()) {
@@ -213,8 +214,8 @@ sdef(
         else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
       }
     }
-    const names = first instanceof RString || first === NIL ? args.slice(1) : args;
-    const name = first instanceof RString ? first.s : undefined;
+    const names = classNameValue || first === NIL ? args.slice(1) : args;
+    const name = classNameValue?.s;
     if (name !== undefined) {
       if (!/^[\p{Lu}\p{Lt}][\p{L}\p{M}\p{N}_]*$/u.test(name))
         throw nameError(`identifier ${name} needs to be constant`);

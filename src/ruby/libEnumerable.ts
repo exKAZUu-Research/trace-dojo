@@ -355,7 +355,7 @@ export function* sum(self: Value, args: Value[], block: RProc | undefined): Gen 
   const initial = isRubyFloat(total) ? Number(total) : undefined;
   const exactActive = typeof total === 'bigint' || isRational(total) || initial !== undefined;
   let exact: Value = typeof total === 'bigint' || isRational(total) ? total : 0n;
-  let floating: number | undefined;
+  let floating: number | undefined = initial !== undefined && !(self instanceof RArray) ? initial : undefined;
   let compensation = 0;
   let sawValue = false;
   let generic = false;
