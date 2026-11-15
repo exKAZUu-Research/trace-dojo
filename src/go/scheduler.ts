@@ -197,7 +197,7 @@ interface Timer {
 /** The scheduler of the running program, which only programs that use goroutines have. */
 export function scheduler(): Scheduler {
   const found = currentRuntime().scheduler;
-  if (!(found instanceof Scheduler)) throw new Error('The program runs without a scheduler');
+  if (!(found instanceof Scheduler)) throw new TypeError('The program runs without a scheduler');
   return found;
 }
 

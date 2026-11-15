@@ -88,6 +88,6 @@ function describeUncaught(runtime: Runtime, error: unknown, frame: Frame): strin
   if (error instanceof ThrowSignal || error instanceof BreakSignal || error instanceof NextSignal) {
     throw new TypeError('A control signal escaped the program');
   }
-  if (error instanceof RetrySignal) throw new Error('A retry escaped its rescue clause');
+  if (error instanceof RetrySignal) throw new TypeError('A retry escaped its rescue clause');
   throw error;
 }

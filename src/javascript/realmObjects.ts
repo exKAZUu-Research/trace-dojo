@@ -21,7 +21,7 @@ type ObjectMethod = (name: string, length: number, run: (runtime: Runtime, args:
 /** Defines the Object functions that describe and define properties, and the remaining everyday Object functions. */
 export function defineObjectBuiltins(builder: RealmBuilder): void {
   const objectConstructor = builder.realm.globals.bindings.get('Object')?.value;
-  if (!(objectConstructor instanceof JsFunction)) throw new Error('Object must be defined first');
+  if (!(objectConstructor instanceof JsFunction)) throw new TypeError('Object must be defined first');
   const method: ObjectMethod = (name, length, run) => {
     builder.method(objectConstructor, name, length, ({ runtime, args }) => run(runtime, args));
   };

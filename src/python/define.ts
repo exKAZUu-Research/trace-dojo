@@ -103,7 +103,7 @@ export function method(
 export function redeclareMethods(cls: PyClass, base: PyClass, names: readonly string[]): void {
   for (const name of names) {
     const inherited = base.dict.get(name);
-    if (!(inherited instanceof PyBuiltinFunction)) throw new Error(`${base.name}.${name} is not a builtin method`);
+    if (!(inherited instanceof PyBuiltinFunction)) throw new TypeError(`${base.name}.${name} is not a builtin method`);
     defineMethod(cls, name, (self, args, kwargs) => inherited.run([self, ...args], kwargs), {
       receiver: hasSlot(`${cls.name}.${name}`, name) ? 'wrapper' : 'method',
     });
