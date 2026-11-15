@@ -169,6 +169,7 @@ export function* receiverSize(recv: Value): Gen<Value> {
     const size = sourceOf(recv).size?.() ?? NIL;
     return isGenerator(size) ? yield* size : size;
   }
+  if (recv instanceof RObject && recv.cls.findMethod('size')) return yield* callMethod(recv, 'size', []);
   return NIL;
 }
 
@@ -392,8 +393,8 @@ def('Enumerator', 'each_with_index', 0, (self: RObject, args, block) =>
 );
 
 function* withIndex(self: RObject, args: Value[], block: RProc | undefined, name: string): Gen {
-  let index = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : 0n;
   if (!block) return makeEnumerator(self, name, args);
+  let index = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : 0n;
   const userBlock = block;
   const source = sourceOf(self);
   const proc = nativeProc(-1, (yielded, _block, used) => {

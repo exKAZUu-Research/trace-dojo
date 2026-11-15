@@ -9055,6 +9055,20 @@ test('suspended enumerator comparisons and hashes keep caller Struct state indep
   ).toMatchObject({ stdout: 'true\n' });
 });
 
+test('Enumerable enumerator sizes use a custom receiver size', () => {
+  expect(
+    run(
+      'class C;include Enumerable;def each;yield 1;yield 2;yield 3;end;def size;3;end;end;p C.new.each_slice(2).size,C.new.map.size,C.new.each_cons(2).size'
+    )
+  ).toMatchObject({ stdout: '2\n3\n2\n' });
+});
+
+test('Enumerator with_index converts its offset when iterated once', () => {
+  expect(
+    run('x=Object.new;def x.to_int;puts :convert;2;end;e=[1].each.with_index(x);puts :made;p e.to_a')
+  ).toMatchObject({ stdout: 'made\nconvert\n[[1, 2]]\n' });
+});
+
 test('anonymous instance singleton names use the anonymous class name', () => {
   expect(
     run('k=Class.new;o=k.new;class << o;def g = Nope;end;begin;o.g;rescue NameError=>e;puts e.message;end')
