@@ -265,15 +265,15 @@ export function textByteLengthOf(value: RString, text: string): number {
   return textByteLength(text, stringTextMode(value));
 }
 export function inspectStringEncoding(self: RString): string {
-  return self.rawBytes ? inspectRawBytes(self.rawBytes) : self.binary ? binaryInspect(self.s) : strInspect(self.s);
+  return self.binary
+    ? binaryInspect(stringBytes(self))
+    : self.rawBytes
+      ? inspectRawBytes(self.rawBytes)
+      : strInspect(self.s);
 }
 def('String', 'inspect', 0, (self: RString) => str(inspectStringEncoding(self)));
 def('String', 'dump', 0, (self: RString) => {
-  const quoted = self.rawBytes
-    ? inspectRawBytes(self.rawBytes)
-    : self.binary
-      ? binaryInspect(self.s)
-      : strInspect(self.s);
+  const quoted = inspectStringEncoding(self);
   return str(
     quoted.replaceAll(/[\u0080-\u{10FFFF}]/gu, (char) => {
       const point = char.codePointAt(0) as number;
@@ -308,8 +308,8 @@ function inspectRawBytes(bytes: Uint8Array): string {
 }
 
 /** A binary string's inspect, which shows the bytes from 128 on as `\xFF`. */
-function binaryInspect(text: string): string {
-  return strInspect(text).replaceAll(
+function binaryInspect(bytes: Uint8Array): string {
+  return strInspect(Buffer.from(bytes).toString('latin1')).replaceAll(
     /[\u0080-\u00FF]/g,
     (char) => `\\x${(char.codePointAt(0) as number).toString(16).toUpperCase()}`
   );

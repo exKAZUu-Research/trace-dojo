@@ -7945,6 +7945,14 @@ test('regexp preprocessing bounds repeated incomplete lookbehind openers', () =>
   });
 });
 
+test('binary String inspect escapes valid UTF-8 byte sequences', () => {
+  expect(
+    run('s=String.new;s<<195<<169;p s,s.encoding;puts s.dump;u=String.new("é",encoding:Encoding::BINARY);p u')
+  ).toMatchObject({
+    stdout: '"\\xC3\\xA9"\n#<Encoding:BINARY (ASCII-8BIT)>\n"\\xC3\\xA9"\n"\\xC3\\xA9"\n',
+  });
+});
+
 test('UTC identity affects unpadded zone directives', () => {
   expect(run('p Time.utc(2024).strftime("%-z"),Time.at(0).getlocal(0).strftime("%-z")')).toMatchObject({
     stdout: '"-0000"\n"+0000"\n',
