@@ -2129,9 +2129,12 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
       def: outer.home.extra.def,
       definee: options.definee ?? outer.extra.definee,
       definitionTarget: options.definitionTarget ?? outer.extra.definitionTarget,
-      forbidSingletonDefinition: options.forbidSingletonDefinition ?? outer.extra.forbidSingletonDefinition,
+      forbidSingletonDefinition:
+        options.forbidSingletonDefinition ??
+        (options.definee || options.definitionTarget ? false : outer.extra.forbidSingletonDefinition),
     }
   );
+  frame.defaultVisibility = options.definee || options.definitionTarget ? 'public' : outer.defaultVisibility;
   if (options.block) frame.extra.block = options.block;
   runtime.pushFrame(frame);
   const savedRow = runtime.currentRow;

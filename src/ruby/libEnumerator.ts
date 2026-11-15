@@ -306,7 +306,9 @@ export function customEnumerator(recv: Value, method: string, held: Value[], ite
   const enumerator = makeEnumerator(recv, method, []);
   const source = enumerator.data as EnumeratorSource;
   source.iterate = iterate;
-  source.held = () => [recv, ...held, ...cursorRoots(source.cursor)];
+  source.held = function () {
+    return [this.recv, ...held, ...cursorRoots(this.cursor)];
+  };
   source.generatorAddress = addressOf(enumerator);
   return enumerator;
 }
@@ -704,6 +706,7 @@ function nextValues(self: RObject): Value[] {
   const arraysBase = runtime.heldArrays.length;
   const callerHeld = [...runtime.held];
   const callerArrays = [...runtime.heldArrays];
+  runtime.heldSnapshots.push({ values: callerHeld, arrays: callerArrays });
   const row = runtime.currentRow;
   const callerTags = runtime.catchTags.splice(0);
   runtime.frames.push(...cursor.frames);
@@ -732,6 +735,7 @@ function nextValues(self: RObject): Value[] {
     cursor.catchTags = runtime.catchTags.splice(0);
     runtime.catchTags.push(...callerTags);
     runtime.currentRow = row;
+    runtime.heldSnapshots.pop();
     if (failed) source.cursor = undefined;
   }
   if (step.done) {
@@ -905,13 +909,13 @@ sdef('Enumerator', 'produce', [0, 1], function* (_self, args, block) {
 
 type LazyStep = (
   | { kind: 'map' | 'select' | 'reject' | 'take_while' | 'drop_while' | 'filter_map' | 'flat_map'; block: RProc }
-  | { kind: 'take' | 'drop'; count: number }
+  | { kind: 'take' | 'drop'; count: number; exactCount: bigint }
   | { kind: 'compact' }
   | { kind: 'with_index'; offset: bigint; block?: RProc }
   | { kind: 'grep' | 'grep_v'; pattern: Value; block?: RProc }
   | { kind: 'uniq'; block?: RProc }
   | { kind: 'zip'; others: Value[] }
-  | { kind: 'each_slice' | 'each_cons'; count: number }
+  | { kind: 'each_slice' | 'each_cons'; count: number; exactCount: bigint }
   | { kind: 'each_entry' }
   | { kind: 'each_with_object'; memo: Value }
 ) & { label?: string; args?: Value[] };
@@ -935,19 +939,18 @@ function* lazySize(self: RObject): Gen {
 function nextLazySize(size: Value, step: LazyStep): Value {
   if (size === NIL) return NIL;
   if (step.kind === 'take') {
-    if (typeof size === 'bigint') return size < BigInt(step.count) ? size : BigInt(step.count);
-    if (isRubyFloat(size)) return Number(size) < step.count ? size : BigInt(step.count);
+    if (typeof size === 'bigint') return size < step.exactCount ? size : step.exactCount;
+    if (isRubyFloat(size)) return Number(size) < step.count ? size : step.exactCount;
     return size;
   }
   if (step.kind === 'drop') {
-    if (typeof size === 'bigint') return size > BigInt(step.count) ? size - BigInt(step.count) : 0n;
+    if (typeof size === 'bigint') return size > step.exactCount ? size - step.exactCount : 0n;
     if (isRubyFloat(size)) return Math.max(0, Number(size) - step.count);
     return size;
   }
-  if (step.kind === 'each_slice' && typeof size === 'bigint')
-    return (size + BigInt(step.count - 1)) / BigInt(step.count);
+  if (step.kind === 'each_slice' && typeof size === 'bigint') return (size + step.exactCount - 1n) / step.exactCount;
   if (step.kind === 'each_cons' && typeof size === 'bigint')
-    return size >= BigInt(step.count) ? size - BigInt(step.count) + 1n : 0n;
+    return size >= step.exactCount ? size - step.exactCount + 1n : 0n;
   if ((step.kind === 'each_slice' || step.kind === 'each_cons') && isRubyFloat(size) && Number(size) === Infinity)
     return size;
   return ['map', 'with_index', 'zip', 'each_entry', 'each_with_object'].includes(step.kind) ? size : NIL;
@@ -1018,10 +1021,10 @@ def('Enumerator::Lazy', 'uniq', 0, (self: RObject, _args, block) => {
 });
 for (const kind of ['each_slice', 'each_cons'] as const) {
   def('Enumerator::Lazy', kind, 1, function* (self: RObject, [count], block) {
-    const size = (yield* toIndexExact(count)).number;
+    const { number: size, integer: exactCount } = yield* toIndexExact(count);
     if (size <= 0) throw argumentError('invalid slice size');
     const data = self.data as LazyData;
-    const lazy = makeLazy(data.source, [...data.steps, { kind, count: size, args: [count] }]);
+    const lazy = makeLazy(data.source, [...data.steps, { kind, count: size, exactCount, args: [count] }]);
     if (!block) return lazy;
     yield* runLazy(lazy, (value) => callProc(block, [value], { used: false }));
     return self;
@@ -1051,29 +1054,34 @@ for (const name of ['slice_when', 'slice_before', 'slice_after', 'chunk', 'chunk
 def('Enumerator::Lazy', 'zip', [0, -1], function* (self: RObject, others, block) {
   if (block) return yield* zipCollections(self, others, block);
   const converted: Value[] = [];
-  for (const other of others) {
-    if (other instanceof RArray) {
-      converted.push(other);
-      continue;
+  rt().heldArrays.push(converted);
+  try {
+    for (const other of others) {
+      if (other instanceof RArray) {
+        converted.push(other);
+        continue;
+      }
+      const array = yield* tryImplicitConversion(other, 'to_ary');
+      if (array instanceof RArray) converted.push(array);
+      else if (array !== undefined && array !== NIL)
+        throw typeError(
+          `can't convert ${realClassOf(other).name} to Array (${realClassOf(other).name}#to_ary gives ${realClassOf(array).name})`
+        );
+      else if (respondsTo(other, 'each', true)) converted.push(other);
+      else throw typeError(`wrong argument type ${realClassOf(other).name} (must respond to :each)`);
     }
-    const array = yield* tryImplicitConversion(other, 'to_ary');
-    if (array instanceof RArray) converted.push(array);
-    else if (array !== undefined && array !== NIL)
-      throw typeError(
-        `can't convert ${realClassOf(other).name} to Array (${realClassOf(other).name}#to_ary gives ${realClassOf(array).name})`
-      );
-    else if (respondsTo(other, 'each', true)) converted.push(other);
-    else throw typeError(`wrong argument type ${realClassOf(other).name} (must respond to :each)`);
+    const data = self.data as LazyData;
+    return makeLazy(data.source, [...data.steps, { kind: 'zip', others: converted, args: others }]);
+  } finally {
+    rt().heldArrays.pop();
   }
-  const data = self.data as LazyData;
-  return makeLazy(data.source, [...data.steps, { kind: 'zip', others: converted, args: others }]);
 });
 for (const kind of ['take', 'drop'] as const) {
   def('Enumerator::Lazy', kind, 1, function* (self: RObject, [count]) {
     const data = self.data as LazyData;
-    const n = (yield* toIndexExact(count)).number;
+    const { number: n, integer: exactCount } = yield* toIndexExact(count);
     if (n < 0) throw argumentError(`attempt to ${kind} negative size`);
-    return makeLazy(data.source, [...data.steps, { kind, count: n, args: [count] }]);
+    return makeLazy(data.source, [...data.steps, { kind, count: n, exactCount, args: [count] }]);
   });
 }
 def('Enumerator::Lazy', 'compact', 0, (self: RObject) => {

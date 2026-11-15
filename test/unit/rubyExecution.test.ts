@@ -7192,3 +7192,30 @@ test('numeric conversions call dynamic responders', () => {
     'class D;def method_missing(m,*a);return 5 if m==:to_i;return 2.5 if m==:to_f;return [a[0],11] if m==:coerce;super;end;end;p Integer(D.new),Float(D.new),1+D.new';
   expect(run(source)).toMatchObject({ stdout: '5\n2.5\n12\n' });
 });
+
+test('nested evaluation keeps its own definition visibility and target', () => {
+  expect(run('C=Class.new;C.class_eval{private;1.times{def x;1;end}};p C.private_method_defined?(:x)')).toMatchObject({
+    stdout: 'true\n',
+  });
+  expect(
+    run('C=Class.new;C.class_eval{protected;define_method(:x){1}};p C.protected_method_defined?(:x)')
+  ).toMatchObject({
+    stdout: 'true\n',
+  });
+  expect(run('C=Class.new;1.instance_eval{C.class_eval{def f;1;end}};p C.new.f')).toMatchObject({ stdout: '1\n' });
+});
+
+test('Struct dig accepts singleton dig implementations', () => {
+  expect(run('S=Struct.new(:x);v=Object.new;def v.dig(k);[k];end;p S.new(v).dig(:x,:y)')).toMatchObject({
+    stdout: '[:y]\n',
+  });
+});
+
+test('quoted pattern shorthand requires a literal local name', () => {
+  expect(run('case {a:1};in {"A":};p :ok;end')).toMatchObject({ kind: 'compileError' });
+  expect(run(String.raw`case {a:1};in {"\u0061":};p a;end`)).toMatchObject({ kind: 'compileError' });
+});
+
+test('Lazy size calculations retain exact accepted counts', () => {
+  expect(run('p (1..).lazy.take(2**63-1).size')).toMatchObject({ stdout: '9223372036854775807\n' });
+});

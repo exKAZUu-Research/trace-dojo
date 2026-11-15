@@ -1701,7 +1701,7 @@ export class Converter {
       const valueNode = child.childForFieldName('value');
       if (valueNode) pairs.push({ key, pattern: this.pattern(valueNode) });
       else {
-        if (!/^[\p{ID_Start}_][\p{ID_Continue}_]*$/u.test(key))
+        if (rawKey !== key || !/^[\p{Ll}_][\p{ID_Continue}_]*$/u.test(key))
           this.fail(keyNode, 'パターンのキーを変数名として使えません。');
         pairs.push({ key, target: this.bindTarget(keyNode, key) });
       }

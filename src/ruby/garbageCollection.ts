@@ -14,6 +14,10 @@ export function collectGarbage(runtime: Runtime): void {
   for (const handler of runtime.atExit) pending.push(handler);
   for (const handler of runtime.completedExitHandlers) pending.push(handler);
   for (const values of runtime.heldArrays) for (const value of values) pending.push(value);
+  for (const snapshot of runtime.heldSnapshots) {
+    pending.push(...snapshot.values);
+    for (const values of snapshot.arrays) pending.push(...values);
+  }
   pending.push(runtime.c.Object);
   while (pending.length > 0) {
     const value = pending.pop() as Value;

@@ -33,6 +33,7 @@ import {
   RString,
   RSymbol,
   type Value,
+  type Visibility,
 } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { arr, classOf, isA, realClassOf, singletonClassOf, str, sym, truthy } from './values';
@@ -436,12 +437,7 @@ def('Kernel', 'define_singleton_method', [1, 2], function* (self, args, block) {
 
 // Defining methods -----------------------------------------------------------------------------------------------------
 
-function* defineMethodFrom(
-  owner: RClass,
-  args: Value[],
-  block: RProc | undefined,
-  visibility: 'public' | 'private'
-): Gen {
+function* defineMethodFrom(owner: RClass, args: Value[], block: RProc | undefined, visibility: Visibility): Gen {
   const name = yield* nameOf(args[0]);
   const body = args.length > 1 ? args[1] : requireBlock(block);
   let method: RMethod;
@@ -461,9 +457,10 @@ function* defineMethodFrom(
 def('Module', 'define_method', [1, 2], function* (self: RClass, args, block) {
   const frame = rt().frame;
   const visibility =
-    ((frame.kind === 'class' && frame.self === self) || frame.extra.definee === self) &&
-    frame.defaultVisibility === 'private'
-      ? 'private'
+    (frame.kind === 'class' && frame.self === self) ||
+    frame.extra.definee === self ||
+    frame.extra.definitionTarget === self
+      ? frame.defaultVisibility
       : 'public';
   return yield* defineMethodFrom(self, args, block, visibility);
 });

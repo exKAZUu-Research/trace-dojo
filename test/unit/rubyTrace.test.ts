@@ -857,6 +857,21 @@ test('an exhausted external iterator preserves its lazy caller roots', () => {
   }
 });
 
+test('lazy zip conversion and copied cursors retain turtles across callbacks', () => {
+  const zip =
+    'class A;def to_ary;[Turtle.new];end;end;class B;def to_ary;x=1;[];end;end;z=[1].lazy.zip(A.new,B.new);x=1;z.force[0][1].forward';
+  expect(traceProgram('ruby', zip, zip).finalTurtles).toHaveLength(1);
+  const copy =
+    'class C;include Enumerable;def each;t=Turtle.new;yield nil;t.forward;yield nil;end;end;e=C.new.chain([]);f=e.dup;f.next;x=1;f.next;x=2';
+  expect(traceProgram('ruby', copy, copy).finalTurtles).toHaveLength(1);
+});
+
+test('nested cursor cleanup keeps caller turtles rooted during resumption', () => {
+  const program =
+    'e=Enumerator.new{|y|(1..1).lazy.each{|x|y<<x};q=1;y<<2};e.next;i=0;a=(1..4).lazy.map{Turtle.new}.each_cons(2).map{|ts|i+=1;e.next if i==2;ts}.force;a.each{|ts|ts.each{|t|t.forward}}';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(4);
+});
+
 test('saved Method implementations retain their captured turtles', () => {
   const program =
     'def make;t=Turtle.new;c=Class.new;c.define_method(:go){t.forward};c.new.method(:go);end;m=make;m.receiver.class.remove_method(:go);x=1;m.call';

@@ -168,6 +168,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly held: Value[] = [];
   currentNumericReceiver?: Value;
   readonly heldArrays: Value[][] = [];
+  readonly heldSnapshots: { values: Value[]; arrays: Value[][] }[] = [];
   /** The tags of the `catch` blocks running now, innermost last, which `throw` must match. */
   readonly catchTags: Value[] = [];
   /** The blocks `at_exit` and `END` registered, which run when the program ends, the last first. */

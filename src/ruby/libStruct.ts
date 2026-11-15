@@ -1,5 +1,5 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { addressOf, inspect, rEql, rEquals, toIndex, toInt } from './conversions';
+import { addressOf, inspect, rEql, rEquals, supportsImplicitConversion, toIndex, toInt } from './conversions';
 import { def, sdef, sundef } from './define';
 import { argumentError, frozenError, indexError, nameError, typeError } from './errors';
 import { digest, hashKeyOf, hashSet } from './hashes';
@@ -291,7 +291,7 @@ def('Struct', 'dig', [1, -1], function* (self: RObject, args) {
   if (index < 0 || index >= members.length) return NIL;
   const value = valuesOf(self)[index];
   if (args.length === 1 || value === NIL) return value;
-  if (!value || !realClassOf(value).findMethod('dig'))
+  if (!(yield* supportsImplicitConversion(value, 'dig')))
     throw typeError(`${realClassOf(value).name} does not have #dig method`);
   return yield* callMethod(value, 'dig', args.slice(1));
 });
