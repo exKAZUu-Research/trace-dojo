@@ -6692,9 +6692,9 @@ test('compound equality dispatches native value eql?', () => {
   });
 });
 
-test('Data reports unknown keywords before missing ones when counts match', () => {
+test('Data reports missing keywords before unknown ones', () => {
   expect(run('Coord=Data.define(:lat,:lng);Coord.new(lat:1,lon:2)')).toMatchObject({
-    uncaughtException: 'unknown keyword: :lon (ArgumentError)',
+    uncaughtException: 'missing keyword: :lng (ArgumentError)',
   });
 });
 
@@ -7272,4 +7272,25 @@ test('Time calendar constructors classify trailing arguments', () => {
   expect(run('begin;Time.utc(2020,1,1,1,1,1,"x");rescue=>e;p e.class,e.message;end')).toMatchObject({
     stdout: 'ArgumentError\n"invalid value for Integer(): \\"x\\""\n',
   });
+});
+
+test('Class inherited hooks can call their default with super', () => {
+  expect(
+    run(
+      'class Base\ndef self.inherited(sub)\nsuper\n@subs=sub\nend\ndef self.subs\n@subs\nend\nend\nclass Kid < Base\nend\np Base.subs'
+    )
+  ).toMatchObject({
+    stdout: 'Kid\n',
+  });
+});
+
+test('regexp split yields fields and captures to a block', () => {
+  expect(run('r=[];p "aXbXc".split(/(X)/){|part|r<<part},r')).toMatchObject({
+    stdout: '"aXbXc"\n["a", "X", "b", "X", "c"]\n',
+  });
+  expect(run('p "".split(/x/){|part|part}')).toMatchObject({ stdout: '""\n' });
+});
+
+test('escaped backslash replacements stay within the execution budget', () => {
+  expect(run(String.raw`r="\\\\"*150000;p "a".sub(/a/,r).size`)).toMatchObject({ stdout: '150000\n' });
 });

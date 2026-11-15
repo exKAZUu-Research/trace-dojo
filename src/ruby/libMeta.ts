@@ -578,6 +578,7 @@ def(
   { visibility: 'private' }
 );
 def('Module', 'prepended', 1, () => NIL, { visibility: 'private' });
+def('Class', 'inherited', 1, () => NIL, { visibility: 'private' });
 
 function moduleDependsOn(module: RClass, target: RClass): boolean {
   const pending = [module];

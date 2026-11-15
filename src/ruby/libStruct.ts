@@ -407,7 +407,7 @@ def(
       }
     }
     const missing = members.filter((name) => !given.has(name)).map((name) => `:${name}`);
-    if (missing.length > 0 && (keywords?.map.size ?? 0) < members.length)
+    if (missing.length > 0)
       throw argumentError(`missing keyword${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`);
     if (unknown.length > 0)
       throw argumentError(`unknown keyword${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}`);

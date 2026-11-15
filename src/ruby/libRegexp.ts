@@ -1151,8 +1151,10 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
           break;
         }
         case '\\': {
-          part = sliceStringEncoding(replacement, match.index + 1, match.index + 2);
-          break;
+          appendLiteral(bytePosition + 1, bytePosition + 2);
+          position = match.index + match[0].length;
+          bytePosition += textByteLengthOf(replacement, match[0]);
+          continue;
         }
         case '`': {
           part = sliceStringEncoding(source, 0, whole[0]);
@@ -1314,7 +1316,7 @@ wrapFirst('scan', function* (self, args, block) {
   setLastMatch(last);
   return self;
 });
-wrapFirst('split', function* (self, args) {
+wrapFirst('split', function* (self, args, block) {
   const text = self.s;
   const limit = args.length > 1 ? yield* toIndex(args[1]) : 0;
   if (limit !== 1) setLastMatch(undefined);
@@ -1347,8 +1349,12 @@ wrapFirst('split', function* (self, args) {
     searchFrom = charIndex(text, to) + (from === to ? 1 : 0);
   }
   parts.push(sliceStringEncoding(self, position));
-  if (text.length === 0) return arr([]);
+  if (text.length === 0) return block ? self : arr([]);
   if (limit === 0) while (parts.length > 0 && parts.at(-1)?.s === '') parts.pop();
+  if (block) {
+    for (const part of parts) yield* callBlock(block, [part], false);
+    return self;
+  }
   return arr(parts);
 });
 for (const name of ['index', 'rindex'] as const) {
