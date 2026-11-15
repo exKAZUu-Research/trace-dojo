@@ -595,7 +595,7 @@ export function execAt(
   }
   return {
     text,
-    snapshot: snapshot ?? (source ? copyStringEncoding(source) : undefined),
+    snapshot: snapshot ?? (source ? matchSnapshot(source) : undefined),
     groups: [...result.indices],
     names,
     namedGroups,
@@ -629,18 +629,29 @@ function requiresMultiCharacterFold(source: string, text: string): boolean {
 function matchData(state: MatchState): RObject {
   state.snapshot ??= str(state.text);
   const original = state.snapshot;
-  const snapshot = new RString(original.cls, original.s);
-  snapshot.binary = original.binary;
-  snapshot.usAscii = original.usAscii;
-  snapshot.rawBytes = original.rawBytes;
-  snapshot.frozen = true;
-  state.snapshot = snapshot;
+  if (!original.frozen) {
+    const snapshot = new RString(original.cls, original.s);
+    snapshot.binary = original.binary;
+    snapshot.usAscii = original.usAscii;
+    snapshot.rawBytes = original.rawBytes;
+    snapshot.ivars = original.ivars && new Map(original.ivars);
+    snapshot.frozen = true;
+    state.snapshot = snapshot;
+  }
   const match = new RObject(rt().c.MatchData);
   match.data = {
     ...state,
     held: () => [state.regexp, state.snapshot ?? NIL],
   };
   return match;
+}
+
+function matchSnapshot(source: RString): RString {
+  if (source.frozen) return source;
+  const snapshot = copyStringEncoding(source);
+  snapshot.cls = source.cls;
+  snapshot.ivars = source.ivars && new Map(source.ivars);
+  return snapshot;
 }
 
 function stateOf(match: RObject): MatchState {
@@ -667,7 +678,7 @@ export function setLiteralMatch(source: RString, text: string, target: string, f
   }
   const state: MatchState = {
     text,
-    snapshot: copyStringEncoding(source),
+    snapshot: matchSnapshot(source),
     literal: true,
     groups: [[from, from + target.length]],
     names: [],
@@ -717,7 +728,7 @@ export function matchGlobal(name: string): Value {
 /** All matches from the start of a text, advancing past empty matches as Ruby does. */
 function allMatches(regexp: RObject, source: RString): MatchState[] {
   const matches: MatchState[] = [];
-  const snapshot = copyStringEncoding(source);
+  const snapshot = matchSnapshot(source);
   validateRegexpSubject(regexp, source);
   let start = 0;
   const text = source.s;
@@ -1219,7 +1230,7 @@ function* substituteRegexp(
   let text = self.s;
   const sourceLength = stringBytes(self).length;
   let sourceRawBytes = self.rawBytes;
-  let snapshot = copyStringEncoding(self);
+  let snapshot = matchSnapshot(self);
   validateRegexpSubject(regexp, self);
   const chunks: RString[] = [sliceStringEncoding(self, 0, 0)];
   let length = 0;
@@ -1254,7 +1265,7 @@ function* substituteRegexp(
       if (stringBytes(self).length !== sourceLength) throw rubyError(rt().c.RuntimeError, 'string modified');
       text = self.s;
       sourceRawBytes = self.rawBytes;
-      snapshot = copyStringEncoding(self);
+      snapshot = matchSnapshot(self);
       validateRegexpSubject(regexp, self);
     }
     if (position < from) append(sliceStringEncoding(self, position, from));
@@ -1341,7 +1352,7 @@ wrapFirst('scan', function* (self, args, block) {
   const sourceLength = stringBytes(self).length;
   let text = self.s;
   let sourceRawBytes = self.rawBytes;
-  let snapshot = copyStringEncoding(self);
+  let snapshot = matchSnapshot(self);
   validateRegexpSubject(regexp, self);
   let state = execAt(regexp, text, 0, self, snapshot, true);
   let last: MatchState | undefined;
@@ -1358,7 +1369,7 @@ wrapFirst('scan', function* (self, args, block) {
       if (stringBytes(self).length !== sourceLength) throw rubyError(rt().c.RuntimeError, 'string modified');
       text = self.s;
       sourceRawBytes = self.rawBytes;
-      snapshot = copyStringEncoding(self);
+      snapshot = matchSnapshot(self);
       validateRegexpSubject(regexp, self);
     }
     last = state;

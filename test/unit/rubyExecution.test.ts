@@ -7638,6 +7638,28 @@ test('Data deconstruct_keys converts string-like keys', () => {
   });
 });
 
+test('MatchData snapshots preserve String subclasses', () => {
+  expect(
+    run('class S<String;end;s=S.new("a");m=/a/.match(s);p m.string.class,m.string.frozen?,m.string.equal?(s)')
+  ).toMatchObject({
+    stdout: 'S\ntrue\nfalse\n',
+  });
+});
+
+test('MatchData reuses frozen subject identity', () => {
+  expect(
+    run('s="aa".freeze;a=[];s.scan(/a/){a<<$~};p a[0].string.equal?(s),a[0].string.equal?(a[1].string)')
+  ).toMatchObject({
+    stdout: 'true\ntrue\n',
+  });
+});
+
+test('FrozenError describes the frozen object', () => {
+  expect(run('a=[1].freeze;begin;def a.foo;end;rescue=>e;p e.message;end')).toMatchObject({
+    stdout: '"can\'t modify frozen Array: [1]"\n',
+  });
+});
+
 test('Regexp constructor rejects literal-only option letters', () => {
   expect(run('begin;Regexp.new("a","n");rescue=>e;p e.class,e.message;end')).toMatchObject({
     stdout: 'ArgumentError\n"unknown regexp option: n"\n',

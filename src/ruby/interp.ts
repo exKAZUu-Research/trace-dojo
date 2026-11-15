@@ -1545,7 +1545,7 @@ export function assertNoDefinitionHook(owner: RClass, action: 'added' | 'removed
 export function assertMutableClass(owner: RClass): void {
   const target = owner.attached instanceof RBasic ? owner.attached : owner;
   if (target.frozen)
-    throw frozenError(target, target instanceof RClass ? (target.name ?? '') : (realClassOf(target).name ?? ''));
+    throw frozenError(target, target instanceof RClass ? (target.name ?? '') : runToEnd(inspect(target)));
 }
 
 function* moduleContainer(e: { scope?: Expr; top?: boolean }, frame: Frame): Gen<RClass> {

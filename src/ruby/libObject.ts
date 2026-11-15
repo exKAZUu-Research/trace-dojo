@@ -724,10 +724,10 @@ def(
   'Module',
   'extend_object',
   1,
-  (self: RClass, [target]) => {
+  function* (self: RClass, [target]) {
     if (!(target instanceof RBasic) || target instanceof RFloat) throw typeError("can't define singleton");
     if (target.frozen)
-      throw frozenError(target, target instanceof RClass ? (target.name ?? '') : (realClassOf(target).name ?? ''));
+      throw frozenError(target, target instanceof RClass ? (target.name ?? '') : yield* inspect(target));
     const singleton = singletonClassOf(target);
     if (!singleton.includes.includes(self)) singleton.includes.unshift(self);
     invalidateMethodCaches();
