@@ -1000,6 +1000,8 @@ export class Converter {
     const methodNode = node.childForFieldName('method');
     const argumentsNode = node.childForFieldName('arguments');
     const blockNode = node.childForFieldName('block');
+    const localParts = this.localCommandParts(node);
+    if (localParts && localParts.length === 1) return localParts[0];
     if (argumentsNode && !argumentsNode.text.trimStart().startsWith('(')) {
       const first = namedChildren(argumentsNode).find((child) => child.type !== 'comment');
       if (first?.type === 'hash' && first.text.startsWith('{'))
@@ -1058,6 +1060,12 @@ export class Converter {
     let blockArg: Expr | undefined;
     const meaningful = nodes.filter((node) => node.type !== 'comment');
     for (const child of meaningful) {
+      const localParts = this.localCommandParts(child);
+      if (localParts) {
+        if (pairs.length > 0 || blockArg) this.fail(child, 'キーワード引数の後に位置引数は書けません。');
+        args.push(...localParts);
+        continue;
+      }
       const nestedArgs = child.type === 'call' ? child.childForFieldName('arguments') : undefined;
       if (meaningful.length > 1 && nestedArgs && !nestedArgs.text.trimStart().startsWith('('))
         this.fail(child, '引数の中に括弧のないメソッド呼び出しは書けません。');
@@ -1091,6 +1099,36 @@ export class Converter {
     }
     if (pairs.length > 0) args.push({ k: 'hash', items: this.hashItems(pairs), braces: false });
     return { args, blockArg };
+  }
+
+  private localCommandParts(node: Node): Expr[] | undefined {
+    if (node.type !== 'call' || node.childForFieldName('receiver') || node.childForFieldName('block')) return undefined;
+    const method = node.childForFieldName('method');
+    const argumentsNode = node.childForFieldName('arguments');
+    if (method?.type !== 'identifier' || !argumentsNode || argumentsNode.text.trimStart().startsWith('('))
+      return undefined;
+    const depth = this.ctx.scope.depthOf(method.text);
+    if (depth < 0) return undefined;
+    const parts = namedChildren(argumentsNode).filter((part) => part.type !== 'comment');
+    const first = parts[0];
+    if (!first) return undefined;
+    const recv: Expr = { k: 'lvar', name: method.text, depth };
+    let expression: Expr;
+    if (first.type === 'unary' && first.childForFieldName('operator')?.text === '-')
+      expression = this.operatorCall(node, recv, '-', [this.valueExpr(required(first.childForFieldName('operand')))]);
+    else if (first.type === 'splat_argument')
+      expression = this.operatorCall(node, recv, '*', [this.anonymousOr(first, FORWARD_REST)]);
+    else if (first.type === 'block_argument')
+      expression = this.operatorCall(node, recv, '&', [this.anonymousOr(first, FORWARD_BLOCK)]);
+    else if (first.type === 'array')
+      expression = this.operatorCall(
+        node,
+        recv,
+        '[]',
+        namedChildren(first).map((part) => this.argument(part))
+      );
+    else return undefined;
+    return [expression, ...parts.slice(1).map((part) => this.argument(part))];
   }
 
   private binary(node: Node): Expr {

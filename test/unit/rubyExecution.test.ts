@@ -7656,6 +7656,15 @@ test('Data deconstruct_keys reports invalid to_str results', () => {
   });
 });
 
+test('local variables followed by operator-like syntax stay local reads', () => {
+  expect(run('def fib(n)\nreturn n if n<2\nfib(n -1)+fib(n -2)\nend\np fib(10)')).toMatchObject({
+    stdout: '55\n',
+  });
+  expect(run('n=3;def g(a,b);a+b;end;p g(n -1,2)')).toMatchObject({ stdout: '4\n' });
+  expect(run('x=5;puts x *2')).toMatchObject({ stdout: '10\n' });
+  expect(run('x=[1,2];p x [0]')).toMatchObject({ stdout: '1\n' });
+});
+
 test('MatchData reuses frozen subject identity', () => {
   expect(
     run('s="aa".freeze;a=[];s.scan(/a/){a<<$~};p a[0].string.equal?(s),a[0].string.equal?(a[1].string)')
