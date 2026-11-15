@@ -1,8 +1,8 @@
 import type { Entity } from '../entities';
-import { addMethod, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
+import { addMethod, definePackage, fn, namedType, nativeFunc, nativeFunction, typeEntity } from '../native';
 import { nilPointerPanic } from '../runtimeErrors';
 import { BASIC, type NamedType, pointerTo, sliceOf, type Type } from '../types';
-import { Cell, copyValue, GoFunc, GoStruct, Iface, Pointer, type Value } from '../values';
+import { Cell, copyValue, GoStruct, Iface, Pointer, type Value } from '../values';
 import { libraryVariable } from './io';
 import { callFunction, callMethod, INT, receiverStruct, sliceValues, spendFor } from './support';
 
@@ -161,7 +161,7 @@ function modelFunc(convert: Value): Iface {
 }
 
 function nativeModel(convert: (color: Value) => Iface): Iface {
-  return modelFunc(new GoFunc(([color]) => convert(color)));
+  return modelFunc(nativeFunc(([color]) => convert(color)));
 }
 
 function luminance(r: bigint, g: bigint, b: bigint): bigint {

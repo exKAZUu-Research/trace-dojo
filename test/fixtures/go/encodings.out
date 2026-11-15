@@ -1,0 +1,24 @@
+9672d27dc1fd1ee79a970bad8c5aec30
+5d21f71a6600f3754431bf20ce4c69e7ff23f66d3140b8a8346e5e26eab201dc
+1563820848
+d41d8cd98f00b204e9800998ecf8427e e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+"hi" <nil>
+"" illegal base64 data at input byte 3
+"" illegal base64 data at input byte 0
+"hi" <nil>
+"" illegal base64 data at input byte 2
+"" illegal base64 data at input byte 2
+"" illegal base64 data at input byte 0
+"" illegal base64 data at input byte 0
+"" illegal base64 data at input byte 0
+"" illegal base64 data at input byte 0
+"hello world" <nil>
+"hello wor" illegal base64 data at input byte 15
+"hello wor" illegal base64 data at input byte 12
+"hello world" <nil>
+encoding/hex: invalid byte: U+0067 'g'
+encoding/hex: odd length hex string
+encoding/hex: invalid byte: U+007A 'z'
+encoding/hex: invalid byte: U+0047 'G'
+BigEndian 578437695752307201
+runtime error: index out of range [3] with length 1

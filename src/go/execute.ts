@@ -8,6 +8,7 @@ import { withRuntime } from './native';
 import { describePanic } from './panicText';
 import { parseGo } from './parse';
 import { type Frame, GoFatal, GoPanic, ProgramExit, Runtime } from './runtime';
+import { Scheduler } from './scheduler';
 import { BASIC, typeString } from './types';
 import { Cell, Iface } from './values';
 
@@ -37,12 +38,25 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
     let uncaughtException: string | undefined;
     try {
       runtime.globals = program.globalZeros.map((zero) => new Cell(zero()));
-      runtime.call(program.initializer, [], [], undefined);
       // The turtles that main's variables still reach when it ends are the final ones, as in Java.
-      runtime.call(program.main, [], [], undefined, undefined, (frame) => {
+      const onMainEnd = (frame: Frame): void => {
+        runtime.scheduler?.finishMain();
         onEnd?.(frame);
         runtime.collectGarbage();
-      });
+      };
+      if (program.concurrent) {
+        const scheduler = new Scheduler(runtime);
+        const main = scheduler.spawn(function* () {
+          yield* runtime.resume(program.initializer, [], [], undefined);
+          for (const init of program.inits) yield* runtime.resume(init, [], [], undefined);
+          return yield* runtime.resume(program.main, [], [], undefined, undefined, onMainEnd);
+        });
+        scheduler.run(main);
+      } else {
+        runtime.call(program.initializer, [], [], undefined);
+        for (const init of program.inits) runtime.call(init, [], [], undefined);
+        runtime.call(program.main, [], [], undefined, undefined, onMainEnd);
+      }
     } catch (error) {
       uncaughtException = describeUncaught(error);
     }

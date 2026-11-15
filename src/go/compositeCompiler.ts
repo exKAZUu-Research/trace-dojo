@@ -24,9 +24,12 @@ const ZERO_FIELD: SsaFacts = { ssaConstant: always };
 
 /** Compiles composite literals: structs, arrays, slices, and maps, whose nested literals may elide their types. */
 export abstract class CompositeCompiler extends ExpressionCompiler {
+  // code-gauge-allow functionNcss 46 -- Compiles literal elements together with their destination type and storage lifetime.
   protected composite(expression: CompositeLiteral, elided: Type | undefined): Operand {
     let type = elided;
-    if (expression.type) type = this.resolveType(expression.type);
+    if (expression.type?.kind === 'array' && expression.type.length === undefined) {
+      type = this.implicitLengthArray(expression, expression.type.element);
+    } else if (expression.type) type = this.resolveType(expression.type);
     if (!type) {
       this.error(expression, '複合リテラルには型を書いてください。');
       return this.invalid(expression);
@@ -85,6 +88,26 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
     };
   }
 
+  private implicitLengthArray(expression: CompositeLiteral, elementSyntax: CompositeLiteral['type'] & object): Type {
+    const element = this.resolveType(elementSyntax);
+    let length = 0;
+    let next = 0;
+    for (const item of expression.elements) {
+      if (item.key) {
+        const { value } = this.constantExpression(item.key);
+        if (value === undefined) {
+          this.error(item.key, '配列やスライスのリテラルのキーには、0 以上の整数の定数を書いてください。');
+          return BASIC.invalid;
+        }
+        next = Number(value);
+      }
+      next++;
+      length = Math.max(length, next);
+    }
+    if (element === BASIC.invalid) return BASIC.invalid;
+    return { kind: 'array', element, length };
+  }
+
   /**
    * An element of a composite literal, whose own literal may elide its type; `holder` stands for the literal, or is
    * absent for an element that escapes, as a map's does.
@@ -121,7 +144,6 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
     return this.assign(operand, type, context, holder);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 35 -- Keyed and unkeyed struct literals with promoted fields and evaluation order.
   private structLiteral(
     expression: CompositeLiteral,
     type: Type,
@@ -263,7 +285,8 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Keyed and unkeyed array/slice literals with constant bounds checks.
+  // code-gauge-allow functionCognitiveComplexity 27 -- Compiles literal elements together with their destination type and storage lifetime.
+  // code-gauge-allow functionNcss 50 -- Compiles literal elements together with their destination type and storage lifetime.
   private arrayLiteral(
     expression: CompositeLiteral,
     type: Type,
@@ -329,6 +352,7 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
     return { mode: 'value', type, span: expression, eval: (frame) => new Slice(build(frame), 0, size, size) };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 27 -- Compiles literal elements together with their destination type and storage lifetime.
   private mapLiteral(expression: CompositeLiteral, type: Type, under: Extract<Type, { kind: 'map' }>): Operand {
     const entries: { key: Eval; value: Eval }[] = [];
     const constantKeys = new Set<string>();

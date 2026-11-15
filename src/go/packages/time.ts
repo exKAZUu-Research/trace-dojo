@@ -3,6 +3,7 @@ import type { Entity, VarEntity } from '../entities';
 import { newError } from '../errorValues';
 import {
   addMethod,
+  blockingFunction,
   currentRuntime,
   definePackage,
   fn,
@@ -14,8 +15,9 @@ import {
 } from '../native';
 import type { Runtime } from '../runtime';
 import { nilPointerPanic } from '../runtimeErrors';
+import { type Goroutine, goroutineFunction, makeChannel, scheduler } from '../scheduler';
 import { BASIC, pointerTo, type Type } from '../types';
-import { Cell, GoStruct, Iface, Pointer, type Value } from '../values';
+import { Cell, type Channel, GoStruct, Iface, Pointer, type Value } from '../values';
 import * as goTime from './goTime';
 import * as timeFormat from './goTimeFormat';
 import {
@@ -351,11 +353,9 @@ addMethod(
 
 // The clock -------------------------------------------------------------------------------------------------------
 
-/** The clock of a run, where `time.Sleep` moves time forward at once instead of waiting. */
+/** The wall clock at the start of a run, advanced by the scheduler's virtual time. */
 interface Clock {
-  startMilliseconds: number;
   startUnixNanos: bigint;
-  slept: bigint;
 }
 
 const clocks = new WeakMap<Runtime, Clock>();
@@ -363,23 +363,178 @@ const clocks = new WeakMap<Runtime, Clock>();
 function clockOf(runtime: Runtime): Clock {
   let clock = clocks.get(runtime);
   if (!clock) {
-    clock = { startMilliseconds: performance.now(), startUnixNanos: BigInt(Date.now()) * 1_000_000n, slept: 0n };
+    clock = { startUnixNanos: BigInt(Date.now()) * 1_000_000n };
     clocks.set(runtime, clock);
   }
   return clock;
 }
 
 /** The monotonic clock, counted from 1 when the program first reads it, as Go counts from its start. */
-function monotonic(clock: Clock): bigint {
-  return BigInt(Math.round((performance.now() - clock.startMilliseconds) * 1e6)) + clock.slept + 1n;
+function monotonic(): bigint {
+  return (currentRuntime().scheduler?.now ?? 0n) + 1n;
 }
 
 export function now(): goTime.Time {
+  return timeAt(currentRuntime().scheduler?.now ?? 0n);
+}
+
+function timeAt(elapsed: bigint): goTime.Time {
   const clock = clockOf(currentRuntime());
-  const mono = monotonic(clock);
+  const mono = elapsed + 1n;
   // The wall clock of darwin, where Go reads it through the C library, counts microseconds.
   const wall = clock.startUnixNanos + mono - 1n;
   return goTime.now(wall - (wall % 1000n), mono);
+}
+
+const RECEIVE_TIME: Type = { kind: 'chan', dir: 'receive', element: TIME };
+/** `time.Timer` and `time.Ticker`, whose field C delivers the times they fire at. */
+const TIMER = namedType('time', 'Timer', {
+  kind: 'struct',
+  fields: [{ name: 'C', type: RECEIVE_TIME, embedded: false }],
+});
+const TICKER = namedType('time', 'Ticker', {
+  kind: 'struct',
+  fields: [{ name: 'C', type: RECEIVE_TIME, embedded: false }],
+});
+
+interface TimerState {
+  pending?: ReturnType<ReturnType<typeof scheduler>['addTimer']>;
+  action: { kind: 'channel'; channel: Channel; period?: bigint } | { kind: 'callback'; task: Value };
+}
+
+/** Sends the time to a timer's channel unless a value waits there already, as a ticker drops ticks no one takes. */
+function deliver(channel: Channel, when: bigint): void {
+  if (channel.buffer.length > 0) return;
+  const receiver = channel.receivers.shift() as
+    | { goroutine: Goroutine; select?: { done: boolean }; index: number }
+    | undefined;
+  const value = timeValue(timeAt(when));
+  if (receiver && !(receiver.select && receiver.select.done)) {
+    if (receiver.select) receiver.select.done = true;
+    scheduler().ready(receiver.goroutine, { index: receiver.index, value, ok: true });
+    return;
+  }
+  if (receiver) {
+    deliver(channel, when);
+    return;
+  }
+  channel.buffer.push(value);
+}
+
+function arm(state: TimerState, delay: bigint): void {
+  const running = scheduler();
+  const { action } = state;
+  const timer = running.addTimer(
+    delay,
+    () => {
+      const when = timer.when;
+      state.pending = undefined;
+      if (action.kind === 'callback') {
+        const task = goroutineFunction(action.task);
+        running.spawn(
+          function* () {
+            return task.resume ? yield* task.resume([]) : task.call([]);
+          },
+          [task]
+        );
+        return;
+      }
+      deliver(action.channel, when);
+      if (action.period !== undefined) {
+        const next = when + ((running.now - when) / action.period + 1n) * action.period;
+        arm(state, next - running.now);
+      }
+    },
+    action.kind === 'channel' ? action.channel : undefined,
+    action.kind === 'callback' ? [action.task] : []
+  );
+  state.pending = timer;
+}
+
+function newTimer(delay: bigint, period?: bigint, callback?: { task: Value }): Pointer {
+  const action: TimerState['action'] = callback
+    ? { kind: 'callback', task: callback.task }
+    : {
+        kind: 'channel',
+        channel: makeChannel(0, () => timeValue({ wall: 0n, ext: 0n, loc: undefined }), true),
+        period,
+      };
+  const state: TimerState = { action };
+  arm(state, delay);
+  const channel = action.kind === 'channel' ? action.channel : undefined;
+  return new Pointer(
+    new Cell(
+      new GoStruct([channel], {
+        timer: state,
+        roots: () => (action.kind === 'callback' ? [action.task] : [action.channel]),
+      })
+    ),
+    'v'
+  );
+}
+
+function timerStateOf(receiver: Value, operation: string, allowZero = false): TimerState | undefined {
+  if (!(receiver instanceof Pointer)) nilPointerPanic();
+  const state = (receiver.load() as GoStruct).native?.timer as TimerState | undefined;
+  if (!state && !allowZero)
+    stringPanic(`time: ${operation.split('.')[1]} called on uninitialized ${operation.split('.')[0]}`);
+  return state;
+}
+
+/** Stops a timer, discarding a time it sent that no one took, as Go 1.23 does; tells whether it was pending. */
+function stopTimer(state: TimerState): boolean {
+  const pending = state.pending !== undefined && scheduler().removeTimer(state.pending);
+  const channel = state.action.kind === 'channel' ? state.action.channel : undefined;
+  const wasPending = pending || (channel?.buffer.length ?? 0) > 0;
+  state.pending = undefined;
+  if (channel) channel.buffer.length = 0;
+  return wasPending;
+}
+
+for (const type of [TIMER, TICKER]) {
+  addMethod(
+    type,
+    'Stop',
+    fn([], type === TIMER ? [BOOL] : []),
+    (receiver) => {
+      const state = timerStateOf(receiver, `${type.name}.Stop`, type === TICKER);
+      const stopped = state ? stopTimer(state) : false;
+      return type === TIMER ? stopped : undefined;
+    },
+    true
+  );
+}
+addMethod(
+  TIMER,
+  'Reset',
+  fn([DURATION], [BOOL]),
+  (receiver, [delay]) => {
+    const state = timerStateOf(receiver, 'Timer.Reset') as TimerState;
+    const wasPending = stopTimer(state);
+    arm(state, delay as bigint);
+    return wasPending;
+  },
+  true
+);
+addMethod(
+  TICKER,
+  'Reset',
+  fn([DURATION], []),
+  (receiver, [period]) => {
+    const duration = positivePeriod(period as bigint, 'Ticker.Reset');
+    const state = timerStateOf(receiver, 'Ticker.Reset') as TimerState;
+    stopTimer(state);
+    const action = state.action as Extract<TimerState['action'], { kind: 'channel' }>;
+    action.period = duration;
+    arm(state, action.period);
+    return;
+  },
+  true
+);
+
+function positivePeriod(period: bigint, name: string): bigint {
+  if (period <= 0n) stringPanic(`non-positive interval for ${name}`);
+  return period;
 }
 
 // Package members -------------------------------------------------------------------------------------------------
@@ -439,23 +594,38 @@ const members: Record<string, Entity> = {
   ...Object.fromEntries(
     Object.entries(timeFormat.LAYOUTS).map(([name, layout]) => [name, constant(name, BASIC.untypedString, layout)])
   ),
+  Timer: typeEntity(TIMER),
+  Ticker: typeEntity(TICKER),
   Now: nativeFunction('Now', fn([], [TIME]), () => timeValue(now())),
   Since: nativeFunction('Since', fn([TIME], [DURATION]), ([value]) => {
     const t = timeOf(value);
-    if (goTime.hasMonotonic(t)) return goTime.subMono(monotonic(clockOf(currentRuntime())), t.ext);
+    if (goTime.hasMonotonic(t)) return goTime.subMono(monotonic(), t.ext);
     return goTime.sub(now(), t);
   }),
   Until: nativeFunction('Until', fn([TIME], [DURATION]), ([value]) => {
     const t = timeOf(value);
-    if (goTime.hasMonotonic(t)) return goTime.subMono(t.ext, monotonic(clockOf(currentRuntime())));
+    if (goTime.hasMonotonic(t)) return goTime.subMono(t.ext, monotonic());
     return goTime.sub(t, now());
   }),
-  Sleep: nativeFunction('Sleep', fn([DURATION], []), ([d]) => {
-    const runtime = currentRuntime();
-    runtime.spend();
-    if ((d as bigint) > 0n) clockOf(runtime).slept += d as bigint;
+  Sleep: blockingFunction('Sleep', fn([DURATION], []), function* ([duration]) {
+    yield* scheduler().sleep(duration as bigint);
     return;
   }),
+  After: nativeFunction(
+    'After',
+    fn([DURATION], [RECEIVE_TIME]),
+    ([delay]) => (newTimer(delay as bigint).load() as GoStruct).fields[0]
+  ),
+  NewTimer: nativeFunction('NewTimer', fn([DURATION], [pointerTo(TIMER)]), ([delay]) => newTimer(delay as bigint)),
+  AfterFunc: nativeFunction('AfterFunc', fn([DURATION, fn([], [])], [pointerTo(TIMER)]), ([delay, task]) =>
+    newTimer(delay as bigint, undefined, { task })
+  ),
+  NewTicker: nativeFunction('NewTicker', fn([DURATION], [pointerTo(TICKER)]), ([period]) =>
+    newTimer(positivePeriod(period as bigint, 'NewTicker'), period as bigint)
+  ),
+  Tick: nativeFunction('Tick', fn([DURATION], [RECEIVE_TIME]), ([period]) =>
+    (period as bigint) <= 0n ? undefined : (newTimer(period as bigint, period as bigint).load() as GoStruct).fields[0]
+  ),
   Unix: nativeFunction('Unix', fn([INT64, INT64], [TIME]), ([sec, nsec]) =>
     timeValue(goTime.unix(sec as bigint, nsec as bigint))
   ),
@@ -503,15 +673,5 @@ const members: Record<string, Entity> = {
   }),
 };
 
-/** The time package, without what needs the time zone database files or goroutines and channels. */
-export const TIME_PACKAGE = definePackage('time', members, [
-  'LoadLocation',
-  'LoadLocationFromTZData',
-  'Tick',
-  'Ticker',
-  'NewTicker',
-  'Timer',
-  'NewTimer',
-  'After',
-  'AfterFunc',
-]);
+/** The time package, without operations that need time zone database files. */
+export const TIME_PACKAGE = definePackage('time', members, ['LoadLocation', 'LoadLocationFromTZData']);

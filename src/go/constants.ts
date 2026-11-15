@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 406 -- Keeps decimal and hexadecimal literal normalization beside their shared precision bounds.
 /**
  * Go's constants have arbitrary precision: integers are exact, and floating-point constants are exact fractions here,
  * which Go's compiler approximates with at least 256 bits of mantissa.
@@ -21,7 +22,8 @@ export interface Rational {
 const MAX_CONSTANT_BITS = 512n;
 const MAX_RAT_BITS = 4096n;
 const FLOAT_PREC = 512;
-const MAX_FLOAT_EXP = 1_000_000_000;
+const MAX_FLOAT_EXP = 2_147_483_647;
+const MIN_FLOAT_EXP = -2_147_483_648;
 
 export class ConstantOverflow extends Error {}
 export class ConstantDivisionByZero extends Error {}
@@ -75,7 +77,8 @@ function approxFraction(num: bigint, den: bigint, expOffset: number): Rational {
     mantissa >>= 1n;
     exp += 1;
   }
-  if (Math.abs(exp) > MAX_FLOAT_EXP) throw new ConstantOverflow();
+  const normalizedExponent = exp + mantissa.toString(2).length;
+  if (normalizedExponent < MIN_FLOAT_EXP || normalizedExponent > MAX_FLOAT_EXP) throw new ConstantOverflow();
   return { num: negative ? -mantissa : mantissa, den: 1n, exp };
 }
 
@@ -96,7 +99,21 @@ function bitLength(value: bigint): bigint {
 }
 
 /** Reads a decimal float literal such as `1.5e-3` or `.5` exactly, switching to 512-bit float for large exponents. */
+// code-gauge-allow functionCognitiveComplexity 21 -- Keeps decimal and hexadecimal literal normalization beside their shared precision bounds.
+// code-gauge-allow functionNcss 34 -- Keeps decimal and hexadecimal literal normalization beside their shared precision bounds.
 export function parseFloatLiteral(text: string): Rational {
+  text = text.replaceAll('_', '');
+  if (/^0[xX]/.test(text)) {
+    const hex = /^0[xX]([\da-fA-F]*)(?:\.([\da-fA-F]*))?[pP]([+-]?\d+)$/.exec(text);
+    if (!hex) throw new Error(`Invalid float literal ${text}`);
+    const digits = BigInt(`0x${hex[1]}${hex[2] ?? ''}`);
+    const exponent = Number(hex[3]) - 4 * (hex[2]?.length ?? 0);
+    if (digits === 0n) return ZERO;
+    const normalizedExponent = exponent + digits.toString(2).length;
+    if (normalizedExponent < MIN_FLOAT_EXP || normalizedExponent > MAX_FLOAT_EXP) throw new ConstantOverflow();
+    if (Math.abs(exponent) > 4000) return approxFraction(digits, 1n, exponent);
+    return exponent >= 0 ? rational(digits << BigInt(exponent)) : rational(digits, 1n << BigInt(-exponent));
+  }
   const match = /^(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/.exec(text);
   if (!match) throw new Error(`Invalid float literal ${text}`);
   const [, whole = '', fraction = '', exponentText = '0'] = match;
@@ -124,6 +141,14 @@ function pow10Float(power: number): Rational {
     if (remaining > 0) base = mul(base, base);
   }
   return result;
+}
+
+/** The value of an integer literal: decimal, `0x` hexadecimal, `0b` binary, or `0o` and `0` octal, with `_` removed. */
+export function parseIntegerText(literal: string): bigint {
+  const text = literal.replaceAll('_', '');
+  if (/^0\d+$/.test(text)) return BigInt(`0o${text.slice(1)}`);
+  if (/^0[oO]/.test(text)) return BigInt(`0o${text.slice(2)}`);
+  return BigInt(text);
 }
 
 export function toRational(constant: Constant): Rational {
@@ -211,7 +236,6 @@ export function compareRational(a: Rational, b: Rational): number {
  *
  * @param integerDivision Whether `/` truncates, as it does when the operands are integers.
  */
-// code-gauge-allow functionCognitiveComplexity 40 -- One case per operator and kind of constant.
 export function binaryConstant(operator: string, a: Constant, b: Constant, integerDivision: boolean): Constant {
   if (a.kind === 'bool' && b.kind === 'bool') {
     switch (operator) {
@@ -438,6 +462,7 @@ const MAX_FLOAT32 = 3.4028234663852886e38;
  * Computes `mantissa * 2 ** exponent` rounded once to the nearest double, or float32 when `single`, halves to even,
  * handling subnormals.
  */
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps decimal and hexadecimal literal normalization beside their shared precision bounds.
 export function scaleToFloat(mantissa: bigint, exponent: number, single = false): number {
   if (mantissa === 0n) return 0;
   const bits = mantissa.toString(2).length;

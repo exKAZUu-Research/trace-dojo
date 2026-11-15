@@ -46,6 +46,7 @@ import {
   STRCONV_SYNTAX,
   TextError,
   UNEXPECTED_EOF,
+  unquote,
   unquoteMayCopy,
 } from './jsonWire';
 import { bitsOf, callPointerMethod, implementsVia } from './reflection';
@@ -120,16 +121,24 @@ function makeDefaultArshaler(type: Type): Arshaler {
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes the typed Go arshalers so tagged and ordinary values share diagnostics.
 function makeBoolArshaler(type: Type): Arshaler {
   return {
     nonDefault: false,
     marshal: (enc, ref) => enc.writeToken(ref.get() ? 't' : 'f'),
-    unmarshal: (dec, ref) => {
+    unmarshal: (dec, ref, uo) => {
       const [token, err] = dec.readToken();
       if (err) return err;
       if (token.kind === 'n') return;
-      if (token.kind === 't' || token.kind === 'f') {
+      if (!uo.stringify && (token.kind === 't' || token.kind === 'f')) {
         ref.set(token.kind === 't');
+        return;
+      }
+      if (uo.stringify && token.kind === '"') {
+        const text = unquoteMayCopy(token.raw as string, false);
+        if (text === 'null') return;
+        if (text !== 'true' && text !== 'false') return newUnmarshalErrorAfterWithValue(dec, type, STRCONV_SYNTAX);
+        ref.set(text === 'true');
         return;
       }
       return newUnmarshalErrorAfterWithSkipping(dec, type, undefined);
@@ -137,17 +146,25 @@ function makeBoolArshaler(type: Type): Arshaler {
   };
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes the typed Go arshalers so tagged and ordinary values share diagnostics.
 function makeStringArshaler(type: Type): Arshaler {
   return {
     nonDefault: false,
     marshal: (enc, ref) => enc.writeToken('"', ref.get() as string),
-    unmarshal: (dec, ref) => {
+    unmarshal: (dec, ref, uo) => {
       const flags = { nonVerbatim: false };
       const [val, err] = dec.readValue(flags);
       if (err) return err;
       if (val[0] === 'n') return;
       if (val[0] === '"') {
-        ref.set(unquoteMayCopy(val, !flags.nonVerbatim));
+        let text = unquoteMayCopy(val, !flags.nonVerbatim);
+        if (uo.stringify) {
+          if (text === 'null') return;
+          const [decoded, error] = unquote(text);
+          if (error) return newUnmarshalErrorAfter(dec, type, new SyntacticError(0, '', error));
+          text = decoded;
+        }
+        ref.set(text);
         return;
       }
       return newUnmarshalErrorAfter(dec, type, undefined);
@@ -155,7 +172,7 @@ function makeStringArshaler(type: Type): Arshaler {
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- A transcription of Go's makeIntArshaler, step by step.
+// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes the typed Go arshalers so tagged and ordinary values share diagnostics.
 function makeIntArshaler(type: Type): Arshaler {
   const bits = bitsOf(type);
   const signed = typeKind(type) === 'int';
@@ -165,8 +182,8 @@ function makeIntArshaler(type: Type): Arshaler {
       const text = String(ref.get() as bigint);
       return enc.tokens.last.needObjectName ? enc.appendRaw('"', text) : enc.appendRaw('0', text);
     },
-    unmarshal: (dec, ref) => {
-      const stringify = dec.tokens.last.needObjectName;
+    unmarshal: (dec, ref, uo) => {
+      const stringify = dec.tokens.last.needObjectName || uo.stringify;
       const flags = { nonVerbatim: false };
       const [raw, err] = dec.readValue(flags);
       if (err) return err;
@@ -239,12 +256,18 @@ function makeFloatArshaler(type: Type): Arshaler {
       const text = formatJSONFloat(value, bits);
       return enc.tokens.last.needObjectName ? enc.appendRaw('"', text) : enc.appendRaw('0', text);
     },
-    unmarshal: (dec, ref) => unmarshalFloat(dec, ref, type, bits),
+    unmarshal: (dec, ref, uo) => unmarshalFloat(dec, ref, type, bits, uo.stringify),
   };
 }
 
-function unmarshalFloat(dec: DecoderState, ref: Ref, type: Type, bits: 32 | 64): LibError | undefined {
-  const stringify = dec.tokens.last.needObjectName;
+function unmarshalFloat(
+  dec: DecoderState,
+  ref: Ref,
+  type: Type,
+  bits: 32 | 64,
+  stringTag = false
+): LibError | undefined {
+  const stringify = dec.tokens.last.needObjectName || stringTag;
   const flags = { nonVerbatim: false };
   const [raw, err] = dec.readValue(flags);
   if (err) return err;

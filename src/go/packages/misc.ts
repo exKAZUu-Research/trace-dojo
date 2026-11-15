@@ -1,6 +1,7 @@
 import type { Entity } from '../entities';
-import { definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
+import { blockingFunction, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
 import { PANIC_NIL_ERROR, TYPE_ASSERTION_ERROR } from '../runtimeErrors';
+import { scheduler } from '../scheduler';
 import { ANY, BASIC } from '../types';
 
 // runtime -------------------------------------------------------------------------------------------------------
@@ -36,9 +37,9 @@ const runtimeMembers: Record<string, Entity> = {
   Error: typeEntity(RUNTIME_ERROR),
   TypeAssertionError: typeEntity(TYPE_ASSERTION_ERROR),
   PanicNilError: typeEntity(PANIC_NIL_ERROR),
-  NumGoroutine: nativeFunction('NumGoroutine', fn([], [BASIC.int]), () => 1n),
-  Gosched: noOp('Gosched'),
-  GC: noOp('GC'),
+  Gosched: blockingFunction('Gosched', fn([], []), function* () {
+    yield* scheduler().yieldTurn();
+  }),
   LockOSThread: noOp('LockOSThread'),
   UnlockOSThread: noOp('UnlockOSThread'),
   KeepAlive: nativeFunction('KeepAlive', fn([ANY], []), () => []),
@@ -50,6 +51,8 @@ const runtimeMembers: Record<string, Entity> = {
  * statistics, profiles), or ends a goroutine (Goexit).
  */
 export const RUNTIME_PACKAGE = definePackage('runtime', runtimeMembers, [
+  'NumGoroutine',
+  'GC',
   'NumCPU',
   'GOMAXPROCS',
   'Goexit',

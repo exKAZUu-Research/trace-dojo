@@ -1,8 +1,9 @@
+// code-gauge-allow-file fileNcss 546 -- Resolves each Go type form together with its scope and diagnostic context.
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
-import type { Expression, Span, TypeExpression, TypeParameter } from './ast';
-import { type Entity, type FunctionContext, type PackageEntity, type TypeEntity, type VarEntity } from './entities';
-import { substituteInterface } from './generics';
-import type { Exec, FunctionInfo, LocalInfo } from './runtime';
+import type { Expression, Span, TypeElementSyntax, TypeExpression, TypeParameter } from './ast';
+import type { Entity, FunctionContext, PackageEntity, TypeEntity, VarEntity } from './entities';
+import { containsTypeParam, substituteInterface } from './generics';
+import type { Eval, Exec, Frame, FunctionInfo, LocalInfo, Suspending } from './runtime';
 import { Scope } from './scope';
 import { sizeOf, STACK_BUFFER_SIZE } from './sliceOps';
 import { newSliceTracking } from './slicePass';
@@ -12,6 +13,7 @@ import {
   COMPARABLE,
   CONSTRAINT_NAMES,
   describeType,
+  effectiveTerms,
   EMPTY_INTERFACE,
   type Field,
   type FuncType,
@@ -23,6 +25,7 @@ import {
   type NamedType,
   type Type,
   type TypeParamType,
+  type TypeTerm,
   underlying,
 } from './types';
 import { UNIVERSE } from './universe';
@@ -34,6 +37,21 @@ export interface TraceSettings {
 
 let nextTypeParamId = 0;
 
+/**
+ * A computation that may block, such as a call of the program's function or a channel receive, which a statement of a
+ * program that uses goroutines runs before the rest of it, keeping the result in a hidden slot. Go evaluates calls and
+ * receives in the order they are written, before the other operands, which this order follows.
+ */
+export interface Hoist {
+  slot: number;
+  run: (frame: Frame) => Suspending<unknown>;
+}
+
+/** An expression and the computations that may block that it needs to run first. */
+export interface Part<T = Eval> {
+  value: T;
+  hoists: Hoist[] | undefined;
+}
 const NO_SPAN: Span = { row: 0, column: 0 };
 
 /** The shared state of compiling one file: scopes, diagnostics, and the function being compiled. */
@@ -46,6 +64,17 @@ export abstract class CompilerBase {
   protected fn: FunctionContext | undefined;
   /** Whether errors are being reported; instances of generic code were checked once already. */
   protected reporting = true;
+  /** Whether a constraint is being resolved, where interfaces with type sets may appear. */
+  private inConstraint = false;
+  private constraintParameterDepth = 0;
+  private readonly constraintMapKeys: { key: Type; span: Span }[] = [];
+  private readonly constraintTypeArguments: { params: TypeParamType[]; args: Type[]; span: Span }[] = [];
+  /** The value of `iota` in the constant spec being compiled, which is undefined elsewhere. */
+  protected iota: number | undefined;
+  /** Whether the program uses goroutines, channels, locks, or sleeps, whose statements may block. */
+  protected concurrent = false;
+  /** Where the computations that may block of the expression being compiled go, when it may block. */
+  protected hoists: Hoist[] | undefined;
   /** The compiled functions by their runtime information, for finding the function a frame runs. */
   protected readonly functionContexts = new Map<FunctionInfo, FunctionContext>();
   protected runtimeCallCount = 0;
@@ -66,8 +95,11 @@ export abstract class CompilerBase {
 
   // Diagnostics ---------------------------------------------------------------------------------------------------
 
+  protected diagnosticSpan: Span | undefined;
+
   /** Records an error and returns the invalid type, which suppresses the errors that would follow from it. */
   protected error(span: Span, message: string): Type {
+    span = this.diagnosticSpan ?? span;
     if (this.reporting && !this.diagnostics.some((d) => d.row === span.row && d.message === message)) {
       this.diagnostics.push({ row: span.row, message });
     }
@@ -150,14 +182,55 @@ export abstract class CompilerBase {
     return { kind: 'var', name, type: BASIC.invalid, span, used: true, boxed: false, owner: this.fn, slot: -1 };
   }
 
+  // Blocking -----------------------------------------------------------------------------------------------------
+
+  /** Compiles an expression or statement, collecting the computations that may block that it must run first. */
+  protected part<T>(compile: () => T): Part<T> {
+    if (!this.concurrent || !this.fn) return { value: compile(), hoists: undefined };
+    const outer = this.hoists;
+    const hoists: Hoist[] = [];
+    this.hoists = hoists;
+    try {
+      const value = compile();
+      return { value, hoists: hoists.length > 0 ? hoists : undefined };
+    } finally {
+      this.hoists = outer;
+    }
+  }
+
+  /**
+   * Runs a computation that may block before the statement, when the statement can block, and reads its result in its
+   * place; elsewhere, runs it to its end in place.
+   */
+  protected suspending(run: (frame: Frame) => Suspending<unknown>, plain: Eval): Eval {
+    const hoists = this.hoists;
+    if (!hoists) return plain;
+    const slot = this.hiddenSlot();
+    hoists.push({ slot, run });
+    return (frame) => frame.locals[slot] as never;
+  }
+
   /** Allocates a slot that no name refers to, such as an unnamed result. */
   protected hiddenSlot(): number {
     return (this.fn as FunctionContext).info.slotCount++;
   }
 
-  /** Looks up a name, marking variables of enclosing functions as captured by the function being compiled. */
-  protected lookup(name: string): Entity | undefined {
+  /** The packages imported with `.`, whose members the file's scope holds. */
+  protected readonly dotImports: PackageEntity[] = [];
+  protected readonly dotMembers = new Map<Entity, PackageEntity>();
+
+  protected lookup(name: string, span?: Span): Entity | undefined {
     const entity = this.scope.lookup(name);
+    if (!entity) {
+      const unavailable = this.dotImports.find((pkg) => pkg.package.unsupported?.has(name));
+      if (unavailable) {
+        unavailable.used = true;
+        this.unsupported(span ?? unavailable.span, `${unavailable.package.path}.${name}`);
+        return { kind: 'type', name, type: BASIC.invalid };
+      }
+    }
+    const dotPackage = entity && this.dotMembers.get(entity);
+    if (dotPackage) dotPackage.used = true;
     if (entity?.kind === 'var' && entity.owner && this.fn && entity.owner !== this.fn) this.capture(entity, this.fn);
     if (entity?.kind === 'package') entity.used = true;
     return entity;
@@ -224,19 +297,23 @@ export abstract class CompilerBase {
    * reference to that type makes it infinitely large. `constraint` tells whether the syntax stands where Go allows an
    * interface with a type set: as a type parameter's constraint, or as the whole type of a type declaration.
    */
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of type syntax.
   resolveType(syntax: TypeExpression, direct = false, constraint = false): Type {
+    const type = this.resolveTypeSyntax(syntax, direct);
+    const under = underlying(type);
+    if (!constraint && under.kind === 'interface' && under.typeSet) {
+      return this.error(
+        syntax,
+        `${describeType(type)} 型は、型の制約にしか使えません（型の集合を持つインターフェースです）。`
+      );
+    }
+    return type;
+  }
+
+  // code-gauge-allow functionNcss 36 -- Resolves each Go type form together with its scope and diagnostic context.
+  private resolveTypeSyntax(syntax: TypeExpression, direct: boolean): Type {
     switch (syntax.kind) {
       case 'name': {
-        const type = this.resolveNamedType(syntax, direct);
-        const under = underlying(type);
-        if (!constraint && under.kind === 'interface' && under.typeSet) {
-          return this.error(
-            syntax,
-            `${describeType(type)} 型は、型の制約にしか使えません（型の集合を持つインターフェースです）。`
-          );
-        }
-        return type;
+        return this.resolveNamedType(syntax, direct);
       }
       case 'pointer': {
         return { kind: 'pointer', element: this.resolveType(syntax.element) };
@@ -246,7 +323,8 @@ export abstract class CompilerBase {
       }
       case 'array': {
         const element = this.resolveType(syntax.element, direct);
-        if (syntax.length === undefined) return BASIC.invalid;
+        if (syntax.length === undefined)
+          return this.error(syntax, '[...] で長さを省けるのは、配列の複合リテラルの型だけです。');
         const { value, type } = this.constantExpression(syntax.length);
         if (type === BASIC.invalid) return BASIC.invalid;
         if (value === undefined) return this.error(syntax.length, '配列の長さには、整数の定数を書いてください。');
@@ -262,6 +340,9 @@ export abstract class CompilerBase {
         }
         return { kind: 'map', key, value };
       }
+      case 'chan': {
+        return { kind: 'chan', dir: syntax.dir, element: this.resolveType(syntax.element) };
+      }
       case 'func': {
         return this.resolveSignature(syntax.signature).type;
       }
@@ -275,9 +356,14 @@ export abstract class CompilerBase {
   }
 
   private isComparableKey(type: Type, span?: Span): boolean {
-    // A named type still being declared is checked once its declaration completes.
+    // A named type still being declared is checked when it is complete.
     if (type.kind === 'named' && type.underlying === BASIC.invalid) {
       if (span) this.deferredMapKeys.push({ key: type, span });
+      return true;
+    }
+    // A constraint may use a type parameter whose own constraint comes later in the list.
+    if (this.inConstraint && containsTypeParam(type)) {
+      if (span) this.constraintMapKeys.push({ key: type, span });
       return true;
     }
     return isComparable(type);
@@ -365,6 +451,8 @@ export abstract class CompilerBase {
     return undefined;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 20 -- Resolves each Go type form together with its scope and diagnostic context.
+  // code-gauge-allow functionNcss 34 -- Resolves each Go type form together with its scope and diagnostic context.
   private resolveNamedType(syntax: Extract<TypeExpression, { kind: 'name' }>, direct: boolean): Type {
     let entity: Entity | undefined;
     if (syntax.package) {
@@ -373,7 +461,7 @@ export abstract class CompilerBase {
       entity = this.packageMember(pkg, syntax.name, syntax);
       if (!entity) return BASIC.invalid;
     } else {
-      entity = this.lookup(syntax.name);
+      entity = this.lookup(syntax.name, syntax);
     }
     if (!entity) return this.error(syntax, `${syntax.name} は宣言されていません。`);
     if (entity.kind !== 'type') return this.error(syntax, `${syntax.name} は型ではありません。`);
@@ -392,8 +480,20 @@ export abstract class CompilerBase {
       return entity.generic.instantiate(args, syntax);
     }
     if (syntax.typeArguments.length > 0) return this.error(syntax, `${syntax.name} は型引数を持たない型です。`);
+    const type = entity.type;
     void direct;
-    return entity.type;
+    return type;
+  }
+
+  /** Resolves a constraint, where interfaces with type sets may appear. */
+  protected resolveConstraint(syntax: TypeExpression): Type {
+    const outer = this.inConstraint;
+    this.inConstraint = true;
+    try {
+      return this.resolveType(syntax, false, true);
+    } finally {
+      this.inConstraint = outer;
+    }
   }
 
   /** Completes a type entity whose declaration has not been resolved yet. */
@@ -401,6 +501,7 @@ export abstract class CompilerBase {
 
   protected packageMember(pkg: PackageEntity, name: string, span: Span): Entity | undefined {
     pkg.used = true;
+    if (pkg.package.unavailable) return undefined;
     const member = pkg.package.members.get(name);
     if (member) return member;
     if (pkg.package.unsupported?.has(name)) {
@@ -430,7 +531,7 @@ export abstract class CompilerBase {
       }
       if (name !== '_' && names.has(name)) this.error(field, `フィールド ${name} が2回宣言されています。`);
       names.add(name);
-      fields.push({ name, type, embedded: field.name === undefined });
+      fields.push({ name, type, embedded: field.name === undefined, tag: field.tag });
     }
     return { kind: 'struct', fields };
   }
@@ -446,9 +547,17 @@ export abstract class CompilerBase {
     }
   }
 
+  // code-gauge-allow functionNcss 35 -- Resolves each Go type form together with its scope and diagnostic context.
   private resolveInterface(syntax: Extract<TypeExpression, { kind: 'interface' }>): InterfaceType {
-    if (syntax.methods.length === 0) return EMPTY_INTERFACE;
+    if (syntax.methods.length === 0 && syntax.elements.length === 0) return EMPTY_INTERFACE;
     const methods: InterfaceMethod[] = [];
+    const addMethod = (method: InterfaceMethod, span: Span): void => {
+      const existing = methods.find((other) => other.name === method.name);
+      // An interface may embed the same method twice, with identical signatures.
+      if (existing && !identical(existing.type, method.type))
+        this.error(span, `メソッド ${method.name} が2回宣言されています。`);
+      if (!existing) methods.push(method);
+    };
     for (const method of syntax.methods) {
       if (methods.some((other) => other.name === method.name)) {
         this.error(method, `メソッド ${method.name} が2回宣言されています。`);
@@ -456,19 +565,93 @@ export abstract class CompilerBase {
       }
       methods.push({ name: method.name, type: this.resolveSignature(method.signature).type });
     }
+    let terms: TypeTerm[] | undefined;
+    let comparable = false;
+    for (const element of syntax.elements) {
+      const resolved = this.resolveTypeElement(element);
+      if (!resolved) continue;
+      if ('embedded' in resolved) {
+        for (const method of resolved.embedded.methods) addMethod(method, element);
+        if (resolved.embedded.typeSet?.comparable) comparable = true;
+        const embeddedTerms = resolved.embedded.typeSet?.terms;
+        if (embeddedTerms) terms = terms ? intersectTerms(terms, embeddedTerms) : embeddedTerms;
+        continue;
+      }
+      terms = terms ? intersectTerms(terms, resolved.terms) : resolved.terms;
+    }
     methods.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    return { kind: 'interface', methods };
+    if (!terms && !comparable) return { kind: 'interface', methods };
+    return { kind: 'interface', methods, typeSet: { comparable: comparable || undefined, terms } };
+  }
+
+  /** An element of an interface: an embedded interface, or a union of type terms, which may contain interfaces. */
+  // code-gauge-allow functionCognitiveComplexity 21 -- Resolves each Go type form together with its scope and diagnostic context.
+  private resolveTypeElement(
+    element: TypeElementSyntax
+  ): { embedded: InterfaceType } | { terms: TypeTerm[] } | undefined {
+    const resolved = element.terms.map((term) => ({
+      tilde: term.tilde,
+      type: this.resolveConstraintTerm(term.type),
+      syntax: term,
+    }));
+    if (resolved.some((term) => term.type === BASIC.invalid)) return undefined;
+    if (resolved.length === 1 && !resolved[0].tilde && underlying(resolved[0].type).kind === 'interface') {
+      return { embedded: underlying(resolved[0].type) as InterfaceType };
+    }
+    const terms: TypeTerm[] = [];
+    const concrete: TypeTerm[] = [];
+    let unrestricted = false;
+    for (const term of resolved) {
+      const under = underlying(term.type);
+      if (under.kind === 'interface') {
+        if (term.tilde || under.typeSet?.comparable || under.methods.length > 0) {
+          this.error(
+            term.syntax.type,
+            `メソッドを持つインターフェース ${describeType(term.type)} は、| で並べられません。`
+          );
+          continue;
+        }
+        if (!under.typeSet?.terms) unrestricted = true;
+        else terms.push(...under.typeSet.terms);
+        continue;
+      }
+      if (term.tilde && !identical(term.type, under)) {
+        this.error(
+          term.syntax.type,
+          `~ を付けられるのは、元の型そのものだけです（${describeType(term.type)} の元の型は ${describeType(under)} です）。`
+        );
+        continue;
+      }
+      if (concrete.some((previous) => termIncludes(previous, term) || termIncludes(term, previous)))
+        this.error(term.syntax.type, '型集合の | には、重なり合う型を並べられません。');
+      concrete.push(term);
+      terms.push({ tilde: term.tilde, type: term.type });
+    }
+    return unrestricted ? { embedded: EMPTY_INTERFACE } : { terms };
+  }
+
+  private resolveConstraintTerm(syntax: TypeExpression): Type {
+    const type = this.resolveConstraint(syntax);
+    return type.kind === 'typeParam'
+      ? this.error(syntax, '型パラメータそのものは、型集合の要素には使えません。')
+      : type;
   }
 
   protected resolveSignature(signature: {
-    parameters: { name?: string; type: TypeExpression }[];
+    parameters: ({ name?: string; type: TypeExpression; variadic?: boolean } & Partial<Span>)[];
     results: { name?: string; type: TypeExpression }[];
   }): {
     type: FuncType;
   } {
-    const params = signature.parameters.map((parameter) => this.resolveType(parameter.type));
+    const last = signature.parameters.length - 1;
+    const params = signature.parameters.map((parameter, index): Type => {
+      const type = this.resolveType(parameter.type);
+      if (!parameter.variadic) return type;
+      if (index !== last) this.error(parameter as Span, '... を付けられるのは最後の引数だけです。');
+      return type === BASIC.invalid ? type : { kind: 'slice', element: type };
+    });
     const results = signature.results.map((result) => this.resolveType(result.type));
-    return { type: funcType(params, results) };
+    return { type: funcType(params, results, signature.parameters.at(-1)?.variadic === true) };
   }
 
   /** Creates the type parameters of a generic declaration, resolving their constraints in `scope`. */
@@ -483,25 +666,45 @@ export abstract class CompilerBase {
       this.declare(parameter.name, { kind: 'type', name: parameter.name, type: declared[index] }, parameter);
       this.typeParamSpans.set(declared[index].id, parameter);
     }
-    for (const [index, parameter] of parameters.entries()) {
-      const constraint = this.resolveType(parameter.constraint, false, true);
-      const under = underlying(constraint);
-      if (constraint === BASIC.invalid) continue;
-      if (under.kind !== 'interface') {
-        this.error(
-          parameter.constraint,
-          `${describeType(constraint)} は型の制約には使えません（インターフェースを書いてください）。`
-        );
-        continue;
+    this.constraintParameterDepth++;
+    try {
+      for (const [index, parameter] of parameters.entries()) {
+        const constraint = this.resolveConstraint(parameter.constraint);
+        if (constraint.kind === 'typeParam') {
+          this.error(parameter.constraint, '型パラメータそのものは、型の制約に使えません。');
+          continue;
+        }
+        const under = underlying(constraint);
+        if (constraint === BASIC.invalid) continue;
+        if (constraint.kind === 'named') declared[index].constraintName = constraint;
+        // A constraint that is not an interface, `[T int]`, stands for the interface of that single type.
+        declared[index].constraint =
+          under.kind === 'interface'
+            ? under
+            : { kind: 'interface', methods: [], typeSet: { terms: [{ tilde: false, type: constraint }] } };
       }
-      if (constraint.kind === 'named') declared[index].constraintName = constraint;
-      declared[index].constraint = under;
+    } finally {
+      this.constraintParameterDepth--;
     }
+    if (this.constraintParameterDepth === 0) this.checkDeferredConstraints();
     return declared;
+  }
+
+  private checkDeferredConstraints(): void {
+    for (const { params, args, span } of this.constraintTypeArguments.splice(0))
+      this.checkTypeArguments(params, args, span);
+    for (const { key, span } of this.constraintMapKeys.splice(0)) {
+      if (!isComparable(key))
+        this.error(span, `${describeType(key)} は比較できない型なので、map のキーには使えません。`);
+    }
   }
 
   /** Checks that type arguments satisfy their constraints, reporting the first one that does not. */
   protected checkTypeArguments(params: TypeParamType[], args: Type[], span: Span): boolean {
+    if (this.constraintParameterDepth > 0 && args.some((arg) => containsTypeParam(arg))) {
+      this.constraintTypeArguments.push({ params, args, span });
+      return true;
+    }
     // A constraint may refer to the other type parameters, as `S ~[]E` does.
     const mapping = new Map(params.map((param, index) => [param.id, args[index]]));
     for (const [index, param] of params.entries()) {
@@ -521,21 +724,19 @@ export abstract class CompilerBase {
   }
 
   /** Why a type does not satisfy a constraint, or undefined when it does. */
+  // code-gauge-allow functionCognitiveComplexity 22 -- Resolves each Go type form together with its scope and diagnostic context.
   protected unsatisfied(type: Type, constraint: InterfaceType): string | undefined {
     const set = constraint.typeSet;
     if (set?.comparable && !isComparable(type)) return '比較できない型です';
-    if (set?.terms) {
-      const matches = set.terms.some((term) =>
+    const terms = effectiveTerms(constraint);
+    if (terms) {
+      const matches = terms.some((term) =>
         term.tilde ? identical(underlying(type), underlying(term.type)) : identical(type, term.type)
       );
       if (!matches && type.kind !== 'typeParam') return '使える型の一覧にありません';
       if (type.kind === 'typeParam') {
-        const own = type.constraint.typeSet?.terms;
-        const covered = own?.every((ownTerm) =>
-          set.terms?.some((term) =>
-            term.tilde ? identical(underlying(ownTerm.type), underlying(term.type)) : identical(ownTerm.type, term.type)
-          )
-        );
+        const own = effectiveTerms(type.constraint);
+        const covered = own?.every((ownTerm) => terms.some((term) => termIncludes(term, ownTerm)));
         if (!covered) return '使える型の一覧にありません';
       }
     }
@@ -565,7 +766,26 @@ function describeConstraint(param: TypeParamType): string {
   return describeType(constraint);
 }
 
+/** Whether a term's types all belong to another term's. */
+function termIncludes(outer: TypeTerm, inner: TypeTerm): boolean {
+  if (outer.tilde) return identical(underlying(inner.type), outer.type);
+  return !inner.tilde && identical(inner.type, outer.type);
+}
+
+/** The terms of the intersection of two unions, as an interface with several type elements has. */
+function intersectTerms(a: TypeTerm[], b: TypeTerm[]): TypeTerm[] {
+  const result: TypeTerm[] = [];
+  for (const x of a) {
+    for (const y of b) {
+      if (termIncludes(y, x)) result.push(x);
+      else if (termIncludes(x, y)) result.push(y);
+    }
+  }
+  return result;
+}
+
 // code-gauge-allow functionCognitiveComplexity 25 -- Traverses all composite type constructors.
+// code-gauge-allow functionNcss 43 -- Resolves each Go type form together with its scope and diagnostic context.
 function collectTypeParams(type: Type, out: TypeParamType[], seen = new Set<Type>()): void {
   if (type.kind === 'typeParam') {
     out.push(type);

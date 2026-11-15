@@ -1,0 +1,29 @@
+["" "aaa" ""]
+["" "" "" ""]
+-a-b-c-
+["a" "b" "c"]
+["a" "b,c"]
+["b" "n" "n" ""]
+[15 21]
+[漢字 漢]
+[ab cd]
+true false
+abc
+[[0 2] [10 12]]
+world_ $ 
+Smith, John
+error parsing regexp: invalid nested repetition operator: `**`
+error parsing regexp: missing argument to repetition operator: `*`
+error parsing regexp: invalid repeat count: `{1001}`
+error parsing regexp: invalid character class range: `z-a`
+error parsing regexp: invalid or unsupported Perl syntax: `(?=`
+error parsing regexp: invalid escape sequence: `\1`
+error parsing regexp: unexpected ): `a)`
+error parsing regexp: missing closing ]: `[abc`
+error parsing regexp: trailing backslash at end of expression: ``
+error parsing regexp: invalid repeat count: `{2,1}`
+error parsing regexp: invalid escape sequence: `\8`
+[0 1 0 1 -1 -1] 3
+-1 [1 22]
+true -a-
+regexp: Compile(`(`): error parsing regexp: missing closing ): `(`

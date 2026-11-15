@@ -19,6 +19,7 @@ export type Value =
   | GoMap
   | GoFunc
   | Iface
+  | Channel
   | undefined;
 
 export class Complex {
@@ -50,7 +51,68 @@ export class Pointer {
   }
 
   equals(other: Pointer): boolean {
-    return this.base === other.base && this.key === other.key;
+    const [base, key] = this.address();
+    const [otherBase, otherKey] = other.address();
+    return base === otherBase && key === otherKey;
+  }
+
+  address(): [Cell | Value[], number | 'v'] {
+    const value = this.load();
+    if (value instanceof GoArray) return arrayAddress(value.elements, 0);
+    return Array.isArray(this.base) ? arrayAddress(this.base, this.key as number) : [this.base, this.key];
+  }
+}
+
+/**
+ * A pointer to an array that a slice's elements make up, as converting a slice to `*[N]T` gives: the array shares the
+ * slice's elements, and storing a whole array through the pointer stores its elements there.
+ */
+export class SliceArrayPointer extends Pointer {
+  constructor(
+    array: Value[],
+    offset: number,
+    private readonly length: number
+  ) {
+    super(array, offset);
+  }
+
+  override load(): Value {
+    const array = this.base as Value[];
+    const offset = this.key as number;
+    const length = this.length;
+    const view = new Proxy([] as Value[], {
+      get: (target, property, receiver) => {
+        if (property === 'length') return length;
+        if (typeof property === 'string' && /^\d+$/.test(property)) return array[offset + Number(property)];
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+      set: (_target, property, value: Value) => {
+        if (typeof property === 'string' && /^\d+$/.test(property)) array[offset + Number(property)] = value;
+        return true;
+      },
+      has: (_target, property) => typeof property === 'string' && /^\d+$/.test(property) && Number(property) < length,
+    });
+    arrayViews.set(view, { array, offset });
+    return new GoArray(view);
+  }
+
+  override store(value: Value): void {
+    const array = this.base as Value[];
+    for (const [index, element] of (value as GoArray).elements.entries())
+      array[(this.key as number) + index] = writeInPlace(array[(this.key as number) + index], element);
+  }
+}
+
+const arrayViews = new WeakMap<Value[], { array: Value[]; offset: number }>();
+
+function arrayAddress(elements: Value[], index: number): [Value[], number] {
+  let array = elements;
+  let offset = index;
+  for (;;) {
+    const view = arrayViews.get(array);
+    if (!view) return [array, offset];
+    offset += view.offset;
+    array = view.array;
   }
 }
 
@@ -66,6 +128,7 @@ export class GoStruct {
 export interface NativeState {
   turtle?: TurtleState;
   clone?(): NativeState;
+  roots?(): unknown[];
   /** The values of the type's declared fields, for a library type that keeps them in this state instead. */
   fieldValues?(): Value[];
   [key: string]: unknown;
@@ -118,7 +181,33 @@ export class GoFunc {
       stackBuffers?: StackBuffers
     ) => Value | Value[],
     /** The values the function keeps alive, which garbage collection follows. */
-    readonly captured: readonly unknown[] = []
+    readonly captured: readonly unknown[] = [],
+    /** Runs the function as {@link call} does, yielding when its goroutine blocks; absent when it never blocks. */
+    readonly resume?: (
+      args: Value[],
+      callRow?: number,
+      deferredFor?: unknown,
+      stackBuffers?: StackBuffers
+    ) => Generator<{ reason: string }, Value | Value[], unknown>
+  ) {}
+}
+
+/** A channel: its buffer, and the goroutines waiting to send to it or receive from it, which the scheduler manages. */
+export class Channel {
+  readonly buffer: Value[] = [];
+  closed = false;
+  /** Goroutines blocked sending, with the values they send, which the scheduler manages. */
+  readonly senders: unknown[] = [];
+  /** Goroutines blocked receiving. */
+  readonly receivers: unknown[] = [];
+
+  constructor(
+    readonly capacity: number,
+    /** The zero value of the element type, which a receive from a closed channel gives. */
+    readonly zero: () => Value,
+    /** Numbers channels in the order the program makes them, for printing them as addresses. */
+    readonly id: number,
+    readonly timer = false
   ) {}
 }
 

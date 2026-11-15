@@ -1,0 +1,13 @@
+3 <nil> Alice 30 1.65
+2 <nil> 10
+2 <nil> 7 8
+2 <nil> 7 8
+2 <nil> 1 2
+1 unexpected newline 1 2
+0 expected integer
+0 EOF
+255
+2 <nil> true Z
+"leading" "spaces"
+quoted str
+0 unsigned integer overflow on token 300 0
