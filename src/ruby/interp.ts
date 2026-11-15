@@ -1259,6 +1259,9 @@ function* definedText(e: Expr, frame: Frame): Gen {
     case 'splat': {
       return e.e ? yield* definedText(e.e, frame) : text('expression');
     }
+    case 'not': {
+      return (yield* definedText(e.e, frame)) === NIL ? NIL : text('method');
+    }
     case 'hash': {
       for (const item of e.items) {
         if ('splat' in item) {

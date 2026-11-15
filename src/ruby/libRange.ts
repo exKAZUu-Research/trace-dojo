@@ -284,6 +284,7 @@ def('Range', 'size', 0, function* (self: RRange) {
 });
 def('Range', 'count', [0, 1], function* (self: RRange, args, block) {
   if (args.length === 0 && !block) {
+    if (self.begin === NIL || self.end === NIL) return Number.POSITIVE_INFINITY;
     const size = yield* rangeSize(self);
     if (size !== NIL) return size;
   }

@@ -326,7 +326,7 @@ function* rationalOf(value: Value): Gen<RObject> {
   if (typeof value === 'bigint') return makeRational(value, 1n);
   if (isRubyFloat(value)) return floatToRational(Number(value));
   if (isRational(value)) return value;
-  const text = (yield* toStr(value)).trim();
+  const text = (yield* toStr(value)).replaceAll(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, '');
   const result = parseRationalText(text, true);
   if (!result) throw argumentError(`invalid value for convert(): ${JSON.stringify(text)}`);
   return result;
@@ -386,5 +386,5 @@ def(
   { visibility: 'private' }
 );
 def('String', 'to_r', 0, function* (self: RString) {
-  return parseRationalText(self.s.trimStart(), false) ?? makeRational(0n, 1n);
+  return parseRationalText(self.s.replace(/^[ \t\n\r\f\v]+/, ''), false) ?? makeRational(0n, 1n);
 });

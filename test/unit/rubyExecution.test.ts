@@ -7837,6 +7837,24 @@ test('beginless Range size rejects a non-discrete begin', () => {
   });
 });
 
+test('beginless Range count returns Infinity', () => {
+  expect(run('p (..1).count,(nil..nil).count,(nil..).count')).toMatchObject({
+    stdout: 'Infinity\nInfinity\nInfinity\n',
+  });
+});
+
+test('defined? probes negation operands without executing them', () => {
+  expect(run('p defined?(!true),defined?(not true),defined?(!missing),defined?(not missing)')).toMatchObject({
+    stdout: '"method"\n"method"\nnil\nnil\n',
+  });
+});
+
+test('Rational text conversion skips only Ruby numeric whitespace', () => {
+  expect(run('p " 1/2".to_r;begin;p Rational(" 1/2");rescue=>e;p e.class;end')).toMatchObject({
+    stdout: '(0/1)\nArgumentError\n',
+  });
+});
+
 test('Proc parameters rejects unknown keyword options', () => {
   expect(run('begin;p proc{|x|}.parameters(lamda:true);rescue=>e;p e.class;end')).toMatchObject({
     stdout: 'ArgumentError\n',
