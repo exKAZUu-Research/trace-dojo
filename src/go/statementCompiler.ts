@@ -153,12 +153,7 @@ export abstract class StatementCompiler extends CallCompiler {
     try {
       compiled = statements.map((statement, index) => {
         labels.positions[labels.positions.length - 1] = index;
-        if (statement.kind === 'labeled') {
-          this.declareLabel(statement, labels, index);
-          targets.set(statement.label, index);
-          const fn = this.fn;
-          enterLabel(fn, statement.label, () => fn?.flow?.reaches(statement, true) ?? true);
-        }
+        this.registerLabels(statement, index, targets);
         if (declaresVariables(statement)) declarations.push(index);
         return this.statement(statement);
       });
@@ -193,6 +188,22 @@ export abstract class StatementCompiler extends CallCompiler {
 
   // Labels --------------------------------------------------------------------------------------------------------
 
+  private registerLabels(statement: Statement, index: number, targets: Map<string, number>): void {
+    const labels = this.labelState();
+    const fn = this.fn;
+    for (let current = statement; current.kind === 'labeled'; current = current.statement) {
+      const label = current.label;
+      if (label === '_') continue;
+      if (labels.declared.has(label)) {
+        this.error(current, `ラベル ${label} が2回宣言されています。`);
+        continue;
+      }
+      labels.declared.set(label, { span: current, used: false, path: [...labels.path], index });
+      targets.set(label, index);
+      enterLabel(fn, label, () => fn?.flow?.reaches(current, true) ?? true);
+    }
+  }
+
   private labelState(): LabelState {
     const fn = this.fn as FunctionContext;
     fn.labels ??= {
@@ -205,14 +216,6 @@ export abstract class StatementCompiler extends CallCompiler {
       nextList: 0,
     };
     return fn.labels;
-  }
-
-  private declareLabel(statement: Extract<Statement, { kind: 'labeled' }>, labels: LabelState, index: number): void {
-    if (labels.declared.has(statement.label)) {
-      this.error(statement, `ラベル ${statement.label} が2回宣言されています。`);
-      return;
-    }
-    labels.declared.set(statement.label, { span: statement, used: false, path: [...labels.path], index });
   }
 
   /** The label of the statement being compiled, which only a loop, switch, or select takes. */

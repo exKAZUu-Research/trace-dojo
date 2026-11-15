@@ -305,3 +305,49 @@ test('deferred nested generic arguments still reject incompatible final constrai
     expect(executeProgram('go', source)).toMatchObject({ kind: 'compileError' });
   }
 });
+
+test('stacked goto labels share statement positions and retain direct loop targets', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";func main(){if false{goto Outer};goto Inner;Outer:Inner:fmt.Println("ok");n:=0;if false{goto A};goto C;A:B:C:n++;if n==1{goto B};fmt.Println(n);if false{goto L};goto M;L:M:for i:=0;i<3;i++{if i<2{continue M};fmt.Println(i);break M};goto Named;Named:_:_:fmt.Println("blank");_:fmt.Println("again")}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'ok\n2\n2\nblank\nagain\n', uncaughtException: undefined });
+});
+
+test('stacked labels on blocks switches selects and empty statements remain goto targets', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";func main(){if false{goto A;goto C;goto E;goto G};goto B;A:B:{fmt.Println("block")};goto D;C:D:switch{default:fmt.Println("switch");break D};goto F;E:F:select{default:fmt.Println("select");break F};goto H;G:H:;fmt.Println("empty")}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'block\nswitch\nselect\nempty\n', uncaughtException: undefined });
+});
+
+test('stacked goto labels preserve reachable product facts and late predecessors', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";func f(x,y,c float64)float64{defer func(){}();p:=x*y;goto Inner;Outer:Inner:return p+c;goto Outer};func g(x,y,c float64)float64{defer func(){}();p:=0.0;goto Body;Outer:Inner:return p+c;Body:p=x*y;goto Inner;goto Outer};func h(x,y,c float64)float64{defer func(){}();p:=x*y;_:q:=p;_:return q+c};func main(){fmt.Println(f(1.0000000000000002,1.0000000000000002,-1.0000000000000004),g(1.0000000000000002,1.0000000000000002,-1.0000000000000004),h(1.0000000000000002,1.0000000000000002,-1.0000000000000004))}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '4.930380657631324e-32 4.930380657631324e-32 4.930380657631324e-32\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('stacked labels reject indirect loop targets unused duplicates and invalid scope jumps', () => {
+  for (const source of [
+    'package main;func main(){goto _;_:for{}}',
+    'package main;func main(){_:for{break _}}',
+    'package main;func main(){_:for{continue _}}',
+    'package main;func main(){goto Outer;Outer:Inner:for{continue Outer;break Inner}}',
+    'package main;func main(){goto Outer;Outer:Inner:for{break Outer;continue Inner}}',
+    'package main;func main(){goto Outer;Outer:Inner:_=1}',
+    'package main;func main(){if false{goto Outer};goto Inner;Outer:Inner:_=1;Inner:_=2}',
+    'package main;func main(){if false{goto Outer};goto Inner;var x int;Outer:Inner:_=x}',
+    'package main;func main(){if false{goto Outer};goto Inner;{Outer:Inner:_=1}}',
+  ])
+    expect(executeProgram('go', source)).toMatchObject({ kind: 'compileError' });
+});
