@@ -915,6 +915,12 @@ test('Enumerator generator blocks keep a consistent call depth', () => {
   expect(calls).toEqual([[], []]);
 });
 
+test('Data deconstruction roots keys through later conversions', () => {
+  const program =
+    'class K\ndef initialize(name);@name=name;end\ndef to_str;s=@name.dup;s.instance_variable_set(:@t,Turtle.new);s.freeze;end\nend\nD=Data.define(:a,:b)\nh=D.new(1,2).deconstruct_keys([K.new("a"),K.new("b")])\nh.keys.each{|s|s.instance_variable_get(:@t).forward}';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(2);
+});
+
 test('saved Method implementations retain their captured turtles', () => {
   const program =
     'def make;t=Turtle.new;c=Class.new;c.define_method(:go){t.forward};c.new.method(:go);end;m=make;m.receiver.class.remove_method(:go);x=1;m.call';

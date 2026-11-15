@@ -464,26 +464,37 @@ function* deconstructKeys(self: RObject, keys: Value): Gen<RHash> {
     throw typeError(`wrong argument type ${realClassOf(keys).name} (expected Array)`);
   if (keys instanceof RArray && keys.items.length > members.length) return hash;
   const names = keys === NIL ? members.map((name) => sym(name)) : (keys as RArray).items;
-  for (const key of names) {
-    let resolved = key;
-    if (kind === 'data' && !(key instanceof RSymbol) && !(key instanceof RString)) {
-      const converted = yield* tryImplicitConversion(key, 'to_str');
-      if (!(converted instanceof RString)) throw typeError(`${yield* inspect(key)} is not a symbol nor a string`);
-      resolved = converted;
+  const mark = rt().held.length;
+  rt().held.push(hash);
+  try {
+    for (const key of names) {
+      let resolved = key;
+      if (kind === 'data' && !(key instanceof RSymbol) && !(key instanceof RString)) {
+        const converted = yield* tryImplicitConversion(key, 'to_str');
+        if (converted === undefined || converted === NIL)
+          throw typeError(`${yield* inspect(key)} is not a symbol nor a string`);
+        if (!(converted instanceof RString))
+          throw typeError(
+            `can't convert ${realClassOf(key).name} to String (${realClassOf(key).name}#to_str gives ${realClassOf(converted).name})`
+          );
+        resolved = converted;
+      }
+      const named = resolved instanceof RSymbol || resolved instanceof RString;
+      const index =
+        resolved instanceof RSymbol
+          ? members.indexOf(resolved.name)
+          : resolved instanceof RString
+            ? members.indexOf(resolved.s)
+            : yield* toIndex(resolved);
+      if (named && index < 0) break;
+      const normalized = index < 0 ? index + members.length : index;
+      if (normalized < 0 || normalized >= members.length) break;
+      yield* hashSet(hash, resolved, valuesOf(self)[normalized]);
     }
-    const named = resolved instanceof RSymbol || resolved instanceof RString;
-    const index =
-      resolved instanceof RSymbol
-        ? members.indexOf(resolved.name)
-        : resolved instanceof RString
-          ? members.indexOf(resolved.s)
-          : yield* toIndex(resolved);
-    if (named && index < 0) break;
-    const normalized = index < 0 ? index + members.length : index;
-    if (normalized < 0 || normalized >= members.length) break;
-    yield* hashSet(hash, resolved, valuesOf(self)[normalized]);
+    return hash;
+  } finally {
+    rt().held.length = mark;
   }
-  return hash;
 }
 
 function* structToHash(self: RObject, block: RProc | undefined): Gen<RHash> {

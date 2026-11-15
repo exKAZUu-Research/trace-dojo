@@ -7646,6 +7646,16 @@ test('MatchData snapshots preserve String subclasses', () => {
   });
 });
 
+test('Data deconstruct_keys reports invalid to_str results', () => {
+  expect(
+    run(
+      'd=Data.define(:a).new(1);o=Object.new;def o.to_str;1;end;begin;d.deconstruct_keys([o]);rescue=>e;p e.class,e.message;end'
+    )
+  ).toMatchObject({
+    stdout: 'TypeError\n"can\'t convert Object to String (Object#to_str gives Integer)"\n',
+  });
+});
+
 test('MatchData reuses frozen subject identity', () => {
   expect(
     run('s="aa".freeze;a=[];s.scan(/a/){a<<$~};p a[0].string.equal?(s),a[0].string.equal?(a[1].string)')
