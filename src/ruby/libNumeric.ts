@@ -382,6 +382,7 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
       } else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
     }
   }
+  if (step === NIL) step = 1n;
   if (step === 0n || step === 0 || (!isNum(step) && truthy(yield* callMethod(step, '==', [0n]))))
     throw argumentError("step can't be 0");
   if (!isNum(step) && !(yield* supportsImplicitConversion(step, 'coerce')))

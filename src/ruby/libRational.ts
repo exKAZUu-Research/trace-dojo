@@ -236,7 +236,7 @@ def('Rational', 'rationalize', [0, 1], (self: RObject, args) => {
   if (args.length > 0) throw new UnsupportedFeatureError('Rational#rationalize（許容誤差）');
   return self;
 });
-def('Rational', 'to_i', 0, (self: RObject) => fractionOf(self).numerator / fractionOf(self).denominator);
+def('Rational', ['to_i', 'to_int'], 0, (self: RObject) => fractionOf(self).numerator / fractionOf(self).denominator);
 def('Rational', 'truncate', [0, 1], (self: RObject, args) => roundTo(self, args, 'truncate'));
 def('Rational', 'hash', 0, (self: RObject) => fractionOf(self).numerator ^ fractionOf(self).denominator);
 def(

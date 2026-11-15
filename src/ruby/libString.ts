@@ -261,6 +261,9 @@ export function sliceStringEncoding(self: RString, from: number, to = self.s.len
   slice.usAscii = self.usAscii;
   return slice;
 }
+export function textByteLengthOf(value: RString, text: string): number {
+  return textByteLength(text, stringTextMode(value));
+}
 export function inspectStringEncoding(self: RString): string {
   return self.rawBytes ? inspectRawBytes(self.rawBytes) : self.binary ? binaryInspect(self.s) : strInspect(self.s);
 }

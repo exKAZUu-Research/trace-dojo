@@ -19,7 +19,13 @@ import { digest, hashDefault, hashGet, hashSet, stringKeyEquals, stringKeyHash }
 import { callBlock, callMethod, type Gen } from './interp';
 import { validStringEncoding } from './libEncoding';
 import { makeEnumerator } from './libEnumerator';
-import { copyStringEncoding, inspectStringEncoding, setBytes, sliceStringEncoding } from './libString';
+import {
+  copyStringEncoding,
+  inspectStringEncoding,
+  setBytes,
+  sliceStringEncoding,
+  textByteLengthOf,
+} from './libString';
 import {
   type NativeFn,
   NIL,
@@ -1090,7 +1096,9 @@ def('MatchData', 'deconstruct_keys', 1, function* (self: RObject, [keys]) {
 function expand(replacement: RString, state: MatchState, limit: number): RString {
   const whole = state.groups[0] as readonly [number, number];
   const source = state.snapshot ?? str(state.text);
+  const replacementBytes = stringBytes(replacement);
   const parts: RString[] = [];
+  let literalBytes: number[] = [];
   let length = 0;
   const append = (part: RString): void => {
     const bytes = stringBytes(part).length;
@@ -1100,10 +1108,29 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
     rt().spend(Math.ceil(bytes / 256));
     parts.push(part);
   };
+  const flushLiteral = (): void => {
+    if (literalBytes.length === 0) return;
+    const literal = stringFromBytes(Uint8Array.from(literalBytes), replacement.binary);
+    literal.usAscii = replacement.usAscii;
+    literalBytes = [];
+    append(literal);
+  };
+  const appendLiteral = (from: number, to: number): void => {
+    for (let index = from; index < to; index++) {
+      literalBytes.push(replacementBytes[index]);
+      if (length + literalBytes.length > limit) throw new ExecutionLimitError('storage');
+      if (literalBytes.length === 4096) flushLiteral();
+    }
+  };
   let position = 0;
+  let bytePosition = 0;
   for (const match of replacement.s.matchAll(/\\(k<([\p{ID_Start}_][\p{ID_Continue}_]*)>|[0-9&+\\`'])/gu)) {
     rt().spend(1);
-    if (match.index > position) append(sliceStringEncoding(replacement, position, match.index));
+    if (match.index > position) {
+      const byteEnd = bytePosition + textByteLengthOf(replacement, replacement.s.slice(position, match.index));
+      appendLiteral(bytePosition, byteEnd);
+      bytePosition = byteEnd;
+    }
     const [, code, name] = match;
     let part: RString;
     if (name !== undefined) {
@@ -1141,10 +1168,17 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
         }
       }
     }
-    append(part);
+    if (stringBytes(part).length > 0) {
+      flushLiteral();
+      append(part);
+    }
     position = match.index + match[0].length;
+    bytePosition += textByteLengthOf(replacement, match[0]);
   }
-  if (position < replacement.s.length) append(sliceStringEncoding(replacement, position));
+  if (position < replacement.s.length) {
+    appendLiteral(bytePosition, replacementBytes.length);
+  }
+  flushLiteral();
   return concatRegexpPieces(parts, limit);
 }
 

@@ -7230,3 +7230,19 @@ test('negated and combined flip-flops fail before execution', () => {
 test('strftime pads composite dates before their negative year', () => {
   expect(run('p Time.utc(-1).strftime("%015F")')).toMatchObject({ stdout: '"0000-0001-01-01"\n' });
 });
+
+test('numeric step treats an explicit nil step as omitted', () => {
+  expect(run('p 1.step(3,nil).to_a,1.0.step(3,nil).to_a')).toMatchObject({
+    stdout: '[1, 2, 3]\n[1.0, 2.0, 3.0]\n',
+  });
+});
+
+test('Rational supports implicit integer conversion', () => {
+  expect(run('p 3r.to_int,[1,2].last(3r),(2r/3).to_int')).toMatchObject({
+    stdout: '3\n[1, 2]\n0\n',
+  });
+});
+
+test('large regexp replacements process short literal fragments within the budget', () => {
+  expect(run(String.raw`r="x\\1"*200000;p "a".sub(/(b)?a/,r).size`)).toMatchObject({ stdout: '200000\n' });
+});
