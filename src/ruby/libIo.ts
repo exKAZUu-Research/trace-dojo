@@ -95,8 +95,8 @@ export function* writeStderrLine(message: RString): Gen<void> {
 }
 
 function checkWritable(self: RObject): void {
-  if (self.data !== 'stdout' && self.data !== 'stderr') throw rubyError(rt().c.IOError, 'not opened for writing');
   checkFrozenIo(self);
+  if (self.data !== 'stdout' && self.data !== 'stderr') throw rubyError(rt().c.IOError, 'not opened for writing');
 }
 
 function checkFrozenIo(self: RObject): void {

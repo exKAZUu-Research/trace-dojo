@@ -7677,6 +7677,14 @@ test('DATA retains read-only IO queries and flushing', () => {
   ).toMatchObject({ stdout: 'true\n0\nfalse\ntrue\nfalse\nfalse\n"a\\n"\n' });
 });
 
+test('frozen DATA reports FrozenError before read-only write errors', () => {
+  expect(
+    run(
+      'DATA.freeze;[:write,:puts,:print,:printf,:putc].each{|m|begin;DATA.send(m,"x");rescue=>e;p e.class;end};begin;DATA << "x";rescue=>e;p e.class;end\n__END__\na\n'
+    )
+  ).toMatchObject({ stdout: 'FrozenError\nFrozenError\nFrozenError\nFrozenError\nFrozenError\nFrozenError\n' });
+});
+
 test('anonymous pattern rest avoids materializing discarded arrays', () => {
   expect(run('items=(1..20000).to_a;sum=0;100.times{items=>[head,*];sum+=head;items.shift};p sum')).toMatchObject({
     stdout: '5050\n',
@@ -7730,6 +7738,14 @@ test('implicit conversion respects a negative respond_to_missing? answer', () =>
       String.raw`class Ghost;def method_missing(name,*);puts "missing: #{name}";super;end;def respond_to_missing?(name,ip=false);false;end;def to_s;"Ghost";end;end;g=Ghost.new;puts g;p [g,g].flatten.size;print g,"\n"`
     )
   ).toMatchObject({ stdout: 'Ghost\n2\nGhost\n' });
+});
+
+test('BasicObject implicit conversion respects respond_to_missing?', () => {
+  expect(
+    run(
+      'class Ghost < BasicObject;def method_missing(n,*);::Kernel.puts "missing: #{n}";super;end;def respond_to_missing?(n,p=false);false;end;end;g=Ghost.new;p [g].flatten.size'
+    )
+  ).toMatchObject({ stdout: '1\n' });
 });
 
 test('MatchData reuses frozen subject identity', () => {

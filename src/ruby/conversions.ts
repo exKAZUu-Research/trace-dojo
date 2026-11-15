@@ -93,8 +93,16 @@ function* respondsToConversion(
 ): Gen<{ callable: boolean; advertised: boolean }> {
   const responder = classOf(value).findMethod('respond_to?');
   if (!responder) {
+    if (resolved) return { callable: true, advertised: true };
+    const missingResponder = classOf(value).findMethod('respond_to_missing?');
+    if (missingResponder && missingResponder.body.kind !== 'native') {
+      const advertised = truthy(
+        yield* callMethod(value, 'respond_to_missing?', [RSymbol.of(name), true], undefined, undefined, { fcall: true })
+      );
+      return { callable: advertised, advertised };
+    }
     const missing = classOf(value).findMethod('method_missing');
-    return { callable: resolved || (missing !== undefined && missing.body.kind !== 'native'), advertised: resolved };
+    return { callable: missing !== undefined && missing.body.kind !== 'native', advertised: false };
   }
   const onePositional = methodArity(responder) === 1;
   const advertised = truthy(
@@ -111,7 +119,7 @@ function* respondsToConversion(
     return { callable: advertised, advertised };
   if (advertised) return { callable: true, advertised: true };
   const missingResponder = classOf(value).findMethod('respond_to_missing?');
-  if (missingResponder?.body.kind !== 'native') return { callable: false, advertised: false };
+  if (missingResponder && missingResponder.body.kind !== 'native') return { callable: false, advertised: false };
   const missing = classOf(value).findMethod('method_missing');
   return { callable: missing !== undefined && missing.body.kind !== 'native', advertised: false };
 }
