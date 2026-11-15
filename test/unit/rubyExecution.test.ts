@@ -8965,6 +8965,9 @@ test('calendar microseconds preserve tiny Floats and reject non-ASCII numeric wh
   expect(run('Time.utc(1970,1,1,0,0,0,"\u00A02")')).toMatchObject({
     uncaughtException: expect.stringContaining('invalid value for Integer()'),
   });
+  expect(run('begin;Time.utc(1970,1,1,0,0,0,"1\u2028");rescue=>e;p e.message.include?(%q{\\u2028});end')).toMatchObject(
+    { stdout: 'true\n' }
+  );
 });
 
 test('defined? rejects END through statement modifiers', () => {
