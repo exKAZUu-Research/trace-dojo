@@ -7879,6 +7879,15 @@ test('Data.define preserves the receiving subclass', () => {
   });
 });
 
+test('Struct and Data hashes remain stable when their classes gain names', () => {
+  expect(run('k=Struct.new(:x);s=k.new(1);h={s=>:hit};v=s.hash;Named=k;p [v==s.hash,h[s],k.name]')).toMatchObject({
+    stdout: '[true, :hit, "Named"]\n',
+  });
+  expect(run('k=Data.define(:x);s=k.new(1);h={s=>:hit};v=s.hash;Named=k;p [v==s.hash,h[s],k.name]')).toMatchObject({
+    stdout: '[true, :hit, "Named"]\n',
+  });
+});
+
 test('defined? probes negation receiver methods and visibility', () => {
   expect(
     run(

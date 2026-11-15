@@ -364,17 +364,13 @@ function* structuralHash(self: RObject): Gen<bigint> {
   runtime.structHashDepth++;
   runtime.structHashing.add(self);
   try {
-    const parts = [className(self.cls)];
+    const parts = [addressOf(self.cls)];
     for (const value of valuesOf(self)) parts.push(yield* hashKeyOf(value));
     return BigInt(`0x${digest(JSON.stringify(parts))}`);
   } finally {
     runtime.structHashDepth--;
     runtime.structHashing.delete(self);
   }
-}
-
-function className(cls: RClass): string {
-  return realClassOf(new RObject(cls)).name ?? '';
 }
 
 const inspecting = new Set<RObject>();
