@@ -59,9 +59,11 @@ export interface RegexpData {
   extended: boolean;
   /** The translated expression; its `lastIndex` is set before each use. */
   js: RegExp;
+  binaryJs?: RegExp;
   safeNative: boolean;
   reverseSticky?: RegExp;
   context?: vm.Context;
+  binaryContext?: vm.Context;
 }
 
 const MATCH_SCRIPT = new vm.Script('regexp.exec(input)');
@@ -80,6 +82,22 @@ const POSIX_CLASSES: Record<string, string> = {
   print: String.raw`\p{L}\p{M}\p{N}\p{P}\p{S}\p{Cf}\p{Co}\p{Zs}`,
   graph: String.raw`\p{L}\p{M}\p{N}\p{P}\p{S}\p{Cf}\p{Co}`,
   blank: String.raw`\p{Zs}\t`,
+};
+
+const ASCII_POSIX_CLASSES: Record<string, string> = {
+  alpha: 'A-Za-z',
+  digit: '0-9',
+  alnum: 'A-Za-z0-9',
+  upper: 'A-Z',
+  lower: 'a-z',
+  space: String.raw` \t\n\v\f\r`,
+  punct: String.raw`\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E`,
+  xdigit: '0-9A-Fa-f',
+  word: 'A-Za-z0-9_',
+  cntrl: String.raw`\x00-\x1F\x7F`,
+  print: String.raw`\x20-\x7E`,
+  graph: String.raw`\x21-\x7E`,
+  blank: String.raw` \t`,
 };
 
 const PROPERTY_NAMES: Record<string, string> = {
@@ -121,7 +139,14 @@ function unicodeRegexpEscape(source: string): { points: string[]; length: number
 }
 
 /** Translates a Ruby (Onigmo) expression into JavaScript's syntax, rejecting what has no counterpart. */
-export function translate(source: string, extended: boolean, multiline = false, dynamic = false): string {
+export function translate(
+  source: string,
+  extended: boolean,
+  multiline = false,
+  dynamic = false,
+  ascii = false
+): string {
+  const classes = ascii ? ASCII_POSIX_CLASSES : POSIX_CLASSES;
   for (const name of captureNamesForValidation(source, extended))
     if ((/^[\p{ID_Start}_]/u.test(name) || /^\\u(?:[\dA-Fa-f]{4}|\{[\dA-Fa-f]+\})/.test(name)) && /[-\\]/.test(name))
       throw unsupportedSyntax('特殊なキャプチャ名');
@@ -198,14 +223,15 @@ export function translate(source: string, extended: boolean, multiline = false, 
         (count) => {
           index += count;
         },
-        (body) => negatedClassBodies.push(body)
+        (body) => negatedClassBodies.push(body),
+        classes
       );
       continue;
     }
     if (char === '[') {
       const posix = /^\[:(\^?)(\w+):\]/.exec(source.slice(index));
       if (inClass > 0 && posix) {
-        const body = POSIX_CLASSES[posix[2]];
+        const body = classes[posix[2]];
         if (!body) throw unsupportedSyntax(`[:${posix[2]}:]`);
         if (posix[1]) negatedClassBodies.push(body);
         else out += body;
@@ -374,7 +400,8 @@ function translateEscape(
   index: number,
   inClass: boolean,
   skip: (count: number) => void,
-  addNegatedClass: (body: string) => void
+  addNegatedClass: (body: string) => void,
+  classes: Record<string, string>
 ): string {
   if (inClass && 'AzZR'.includes(next)) return next;
   switch (next) {
@@ -399,12 +426,12 @@ function translateEscape(
     }
     case 'b': {
       if (inClass) return String.raw`\b`;
-      const word = `[${POSIX_CLASSES.word}]`;
+      const word = `[${classes.word}]`;
       return `(?:(?<=${word})(?!${word})|(?<!${word})(?=${word}))`;
     }
     case 'B': {
       if (inClass) throw unsupportedClassEscape(String.raw`\B`);
-      const word = `[${POSIX_CLASSES.word}]`;
+      const word = `[${classes.word}]`;
       return `(?:(?<=${word})(?=${word})|(?<!${word})(?!${word}))`;
     }
     case 'R': {
@@ -431,7 +458,7 @@ function translateEscape(
       const key = rawName.toLowerCase();
       skip(property[0].length);
       const negated = (next === 'P') !== (property[1] === '^');
-      const body = key === 'punct' || key === 'upper' || key === 'lower' ? undefined : POSIX_CLASSES[key];
+      const body = key === 'punct' || key === 'upper' || key === 'lower' ? undefined : classes[key];
       if (body !== undefined) {
         if (inClass && negated) {
           addNegatedClass(body);
@@ -661,7 +688,10 @@ export function execAt(
   if (source && !validated) validateRegexpSubject(regexp, source);
   if (data.ignoreCase && requiresMultiCharacterFold(data.source, text))
     throw new UnsupportedFeatureError('Unicode の複数文字 casefold');
-  const { js } = data;
+  const binaryMatch = source?.binary === true && data.encoding !== RUBY_UTF8;
+  const js = binaryMatch
+    ? (data.binaryJs ??= new RegExp(translate(data.source, data.extended, data.multiline, true, true), data.js.flags))
+    : data.js;
   rt().spend();
   const startUnit = unitIndex(text, start);
   js.lastIndex = startUnit;
@@ -670,7 +700,9 @@ export function execAt(
   else {
     const remaining = rt().budget.remainingMilliseconds;
     if (remaining === 0) throw new ExecutionLimitError('time');
-    const context = (data.context ??= vm.createContext({ regexp: js, input: text }));
+    const context = binaryMatch
+      ? (data.binaryContext ??= vm.createContext({ regexp: js, input: text }))
+      : (data.context ??= vm.createContext({ regexp: js, input: text }));
     context.input = text;
     try {
       result = MATCH_SCRIPT.runInContext(context, { timeout: remaining }) as RegExpExecArray | null;

@@ -8944,6 +8944,14 @@ test('named capture names retain their regexp encoding', () => {
   ).toMatchObject({ stdout: '[233]\n[233]\n[233]\n' });
 });
 
+test('encoding-neutral regexp classes use binary byte semantics on binary strings', () => {
+  expect(
+    run(
+      String.raw`p 233.chr.match?(/[[:alpha:]]/),233.chr.match?(/[[:word:]]/),"é".match?(/[[:alpha:]]/),178.chr.match?(/[[:alnum:]]/),233.chr.match?(/[[:^alpha:]]/),(233.chr+"a").match?(/\ba/)`
+    )
+  ).toMatchObject({ stdout: 'false\nfalse\ntrue\nfalse\ntrue\ntrue\n' });
+});
+
 test('remove_method leaves undefined inherited methods hidden', () => {
   expect(
     run(
