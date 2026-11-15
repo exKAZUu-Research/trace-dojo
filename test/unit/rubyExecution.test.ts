@@ -7549,6 +7549,49 @@ test('Struct rejects member names ending in equals', () => {
   });
 });
 
+test('external iterator reentrancy raises Ruby FiberError', () => {
+  expect(run('e=Enumerator.new{|y|e.next};begin;e.next;rescue=>x;p x.class,x.message;end')).toMatchObject({
+    stdout: 'FiberError\n"attempt to resume the current fiber"\n',
+  });
+});
+
+test('Rational comparisons coerce custom numeric values', () => {
+  expect(run('class B;def coerce(v);[v,2];end;end;p 1r.send(:<=>,B.new);p(1r<B.new)')).toMatchObject({
+    stdout: '-1\ntrue\n',
+  });
+});
+
+test('Data with bypasses overridden public constructors', () => {
+  expect(run('D=Data.define(:x);d=D.new(1);def D.new(**k);puts :custom;:other;end;p d.with(x:2)')).toMatchObject({
+    stdout: '#<data D x=2>\n',
+  });
+});
+
+test('bare Struct and Data classes reject allocation', () => {
+  expect(run('begin;Struct.allocate.to_a;rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'TypeError\n"allocator undefined for Struct"\n',
+  });
+  expect(run('begin;Data.allocate.deconstruct;rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'TypeError\n"allocator undefined for Data"\n',
+  });
+});
+
+test('Module const_get includes Object constants with inheritance', () => {
+  expect(run('module N;end;module M;end;p M.const_get("N")==N,M.const_defined?(:N)')).toMatchObject({
+    stdout: 'true\ntrue\n',
+  });
+});
+
+test('the last match global accepts nil assignments', () => {
+  expect(run('$~ = nil;p $~')).toMatchObject({ stdout: 'nil\n' });
+});
+
+test('nested regexp character classes fail explicitly', () => {
+  expect(run('p "b" =~ /[a[bc]]/')).toMatchObject({
+    uncaughtException: expect.stringContaining('入れ子の文字クラスは、この採点環境では使えません。'),
+  });
+});
+
 test('regexp split yields fields and captures to a block', () => {
   expect(run('r=[];p "aXbXc".split(/(X)/){|part|r<<part},r')).toMatchObject({
     stdout: '"aXbXc"\n["a", "X", "b", "X", "c"]\n',

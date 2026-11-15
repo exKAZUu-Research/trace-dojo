@@ -694,6 +694,12 @@ const UNSUPPORTED_GLOBALS: Record<string, string> = {
 };
 
 function globalSet(name: string, value: Value): void {
+  if (name === '$~') {
+    if (value !== NIL && (!(value instanceof RObject) || realClassOf(value) !== rt().c.MatchData))
+      throw typeError(`wrong argument type ${realClassOf(value).name} (expected MatchData)`);
+    rt().frame.home.extra.lastMatch = value;
+    return;
+  }
   const unsupported = unsupportedGlobal(name);
   if (unsupported) throw new UnsupportedFeatureError(unsupported);
   if (name === '$!') throw nameError('$! is a read-only variable');
@@ -780,7 +786,7 @@ export function constInModule(module: RClass, name: string): Value {
   return missingConstant(module, name, true);
 }
 
-function findConstInAncestors(module: RClass, name: string): Value | undefined {
+export function findConstInAncestors(module: RClass, name: string): Value | undefined {
   for (const ancestor of module.ancestors()) {
     const value = ancestor.constants.get(name);
     if (value !== undefined) return value;

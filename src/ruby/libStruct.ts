@@ -168,6 +168,11 @@ function allocateStruct(cls: RClass): RObject {
   return object;
 }
 
+for (const name of ['Struct', 'Data'])
+  sdef(name, 'allocate', 0, () => {
+    throw typeError(`allocator undefined for ${name}`);
+  });
+
 function* constructStruct(self: RClass, args: Value[], block: RProc | undefined, keywords?: RHash): Gen<RObject> {
   const object = allocateStruct(self);
   const initialize = self.findMethod('initialize');
@@ -490,7 +495,7 @@ def(
     for (const [index, name] of layoutOf(self.cls).members.entries())
       yield* hashSet(hash, sym(name), valuesOf(self)[index]);
     for (const entry of keywords.map.values()) yield* hashSet(hash, entry.key, entry.value);
-    return yield* callMethod(self.cls, 'new', [], hash);
+    return yield* constructData(self.cls, [], undefined, hash);
   },
   { keywords: true }
 );

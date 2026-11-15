@@ -198,7 +198,7 @@ def('Rational', '**', 1, function* (self: RObject, [exponent]) {
   return toNumber(fractionOf(self)) ** power;
 });
 def('Rational', '-@', 0, (self: RObject) => makeRational(-fractionOf(self).numerator, fractionOf(self).denominator));
-def('Rational', '<=>', 1, (self: RObject, [other]) => {
+def('Rational', '<=>', 1, function* (self: RObject, [other]) {
   const a = fractionOf(self);
   if (isRubyFloat(other)) {
     if (Number.isNaN(Number(other))) return NIL;
@@ -206,7 +206,12 @@ def('Rational', '<=>', 1, (self: RObject, [other]) => {
     return x < Number(other) ? -1n : x > Number(other) ? 1n : 0n;
   }
   const b = asFraction(other);
-  if (!b) return NIL;
+  if (!b) {
+    const pair = yield* tryImplicitConversion(other, 'coerce', [self]);
+    if (pair === undefined) return NIL;
+    if (!(pair instanceof RArray) || pair.items.length !== 2) throw typeError('coerce must return [x, y]');
+    return yield* callMethod(pair.items[0], '<=>', [pair.items[1]]);
+  }
   const difference = a.numerator * b.denominator - b.numerator * a.denominator;
   return difference < 0n ? -1n : difference > 0n ? 1n : 0n;
 });

@@ -192,9 +192,7 @@ export function translate(source: string, extended: boolean, multiline = false):
         continue;
       }
       if (inClass > 0) {
-        if (source[index + 1] === '[' || source[index + 1] === '^') throw unsupportedSyntax('入れ子の文字クラス');
-        out += String.raw`\[`;
-        continue;
+        throw unsupportedSyntax('入れ子の文字クラス');
       }
       atomStart = out.length;
       classStart = out.length;

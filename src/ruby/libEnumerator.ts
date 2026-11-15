@@ -691,6 +691,7 @@ interface Cursor {
   feed?: Value;
   feedSet: boolean;
   started: boolean;
+  running?: boolean;
   result?: Value;
 }
 
@@ -719,6 +720,7 @@ function nextValues(self: RObject): Value[] {
   const source = sourceOf(self);
   source.cursor ??= startCursor(self);
   const cursor = source.cursor;
+  if (cursor.running) throw rubyError(rt().c.FiberError, 'attempt to resume the current fiber');
   if (cursor.peeked.length > 0) return cursor.peeked.shift() as Value[];
   if (cursor.result !== undefined) throw stopIteration(cursor.result);
   const runtime = rt();
@@ -730,6 +732,7 @@ function nextValues(self: RObject): Value[] {
   runtime.heldSnapshots.push({ values: callerHeld, arrays: callerArrays });
   const row = runtime.currentRow;
   const callerTags = runtime.catchTags.splice(0);
+  if (cursor.frames[0]) cursor.frames[0].callRow = row;
   runtime.frames.push(...cursor.frames);
   runtime.held.push(...cursor.held);
   runtime.heldArrays.push(...cursor.heldArrays);
@@ -737,6 +740,7 @@ function nextValues(self: RObject): Value[] {
   let step: IteratorResult<unknown, Value>;
   let failed = false;
   try {
+    cursor.running = true;
     const feed = cursor.started && cursor.feedSet ? cursor.feed : NIL;
     if (cursor.started) {
       cursor.feedSet = false;
@@ -748,6 +752,7 @@ function nextValues(self: RObject): Value[] {
     failed = true;
     throw error;
   } finally {
+    cursor.running = false;
     runtime.held.splice(0, heldBase, ...callerHeld);
     runtime.heldArrays.splice(0, arraysBase, ...callerArrays);
     cursor.frames = runtime.frames.splice(frameBase);

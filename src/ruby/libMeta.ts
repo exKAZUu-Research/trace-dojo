@@ -10,6 +10,7 @@ import {
   callMethod,
   callProc,
   constInModule,
+  findConstInAncestors,
   type Gen,
   invoke,
   ivarGet,
@@ -631,7 +632,11 @@ def('Module', 'const_get', [1, 2], function* (self: RClass, args) {
   for (const part of parts) {
     if (!(module instanceof RClass)) throw typeError(`${requested} does not refer to class/module`);
     const constant = yield* constantName(str(part));
-    const value: Value | undefined = inherit ? constInModule(module, constant) : module.constants.get(constant);
+    const value: Value | undefined = inherit
+      ? (findConstInAncestors(module, constant) ??
+        (module.isModule ? rt().c.Object.constants.get(constant) : undefined))
+      : module.constants.get(constant);
+    if (value === undefined && inherit) constInModule(module, constant);
     if (value === undefined)
       throw nameError(
         `uninitialized constant ${module === rt().c.Object ? '' : `${className(module)}::`}${constant}`,
