@@ -7235,6 +7235,10 @@ test('numeric step treats an explicit nil step as omitted', () => {
   expect(run('p 1.step(3,nil).to_a,1.0.step(3,nil).to_a')).toMatchObject({
     stdout: '[1, 2, 3]\n[1.0, 2.0, 3.0]\n',
   });
+  expect(run('begin;1.step(3,nil){|x|p x};rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'TypeError\n"step must be numeric"\n',
+  });
+  expect(run('p 1.step(3,nil).inspect')).toMatchObject({ stdout: '"(1.step(3, nil))"\n' });
 });
 
 test('Rational supports implicit integer conversion', () => {

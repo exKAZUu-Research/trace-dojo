@@ -29,7 +29,7 @@ import {
 import { exactFloatPower } from './floatPower';
 import { chargeIntegerResult, integerBits } from './integerBudget';
 import { callBlock, callMethod, type Gen } from './interp';
-import { makeEnumerator, sizedEnumerator } from './libEnumerator';
+import { type EnumeratorSource, makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { makeRational } from './libRational';
 import { boxFloat, NIL, RArray, RFloat, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { platformGamma, platformLog2, platformLog10, platformLogGamma } from './platformMath';
@@ -382,12 +382,25 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
       } else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
     }
   }
-  if (step === NIL) step = 1n;
+  const positionalNilStep = args.length > 1 && args[1] === NIL;
+  if (step === NIL) {
+    if (positionalNilStep && block) throw typeError('step must be numeric');
+    step = 1n;
+  }
   if (step === 0n || step === 0 || (!isNum(step) && truthy(yield* callMethod(step, '==', [0n]))))
     throw argumentError("step can't be 0");
   if (!isNum(step) && !(yield* supportsImplicitConversion(step, 'coerce')))
     throw typeError(`no implicit conversion of ${realClassOf(step).name} into Integer`);
-  if (!block) return makeEnumerator(self, 'step', args, keywords);
+  if (!block) {
+    const iterationArgs = positionalNilStep ? [args[0], 1n] : args;
+    const enumerator = makeEnumerator(self, 'step', iterationArgs, keywords);
+    if (positionalNilStep) {
+      const source = enumerator.data as EnumeratorSource;
+      source.args = [...args];
+      source.iterationArgs = iterationArgs;
+    }
+    return enumerator;
+  }
   if (!isNum(step)) return yield* stepCustomNumeric(self, limit, step, block);
   const useFloat = typeof self === 'number' || typeof limit === 'number' || typeof step === 'number';
   if (useFloat && limit !== NIL && !isNum(limit)) limit = yield* toStepFloat(limit);

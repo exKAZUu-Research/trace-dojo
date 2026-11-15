@@ -54,6 +54,7 @@ export interface EnumeratorSource {
   recv: Value;
   method: string;
   args: Value[];
+  iterationArgs?: Value[];
   keywords?: RHash;
   size?: () => Value | Gen<Value>;
   arithmetic?: boolean;
@@ -103,7 +104,12 @@ export function makeEnumerator(
     },
     copy() {
       if (this.cursor?.started) throw typeError("can't copy execution context");
-      return { ...this, args: [...this.args], cursor: undefined };
+      return {
+        ...this,
+        args: [...this.args],
+        iterationArgs: this.iterationArgs && [...this.iterationArgs],
+        cursor: undefined,
+      };
     },
   };
   enumerator.data = source;
@@ -349,9 +355,16 @@ function* runSource(source: EnumeratorSource, block: RProc, args: Value[] = []):
     if (source.method === 'chain' && count > 0) throw argumentCountError(count, 0, 0);
     return yield* source.iterate(block);
   }
-  return yield* callMethod(source.recv, source.method, [...source.args, ...args], source.keywords, block, {
-    fcall: true,
-  });
+  return yield* callMethod(
+    source.recv,
+    source.method,
+    [...(source.iterationArgs ?? source.args), ...args],
+    source.keywords,
+    block,
+    {
+      fcall: true,
+    }
+  );
 }
 
 def('Enumerator', 'each', [0, -1], function* (self: RObject, args, block) {
@@ -406,16 +419,16 @@ def('Enumerator', 'size', 0, function* (self: RObject) {
 for (const name of ['begin', 'end', 'step'] as const)
   def('Enumerator::ArithmeticSequence', name, 0, (self: RObject) => {
     const source = sourceOf(self);
-    const spec = arithmeticSpec(source.recv, source.args, source.keywords);
+    const spec = arithmeticSpec(source.recv, source.iterationArgs ?? source.args, source.keywords);
     return name === 'begin' ? spec.start : name === 'end' ? spec.end : spec.step;
   });
 def('Enumerator::ArithmeticSequence', 'exclude_end?', 0, (self: RObject) => {
   const source = sourceOf(self);
-  return arithmeticSpec(source.recv, source.args, source.keywords).exclusive;
+  return arithmeticSpec(source.recv, source.iterationArgs ?? source.args, source.keywords).exclusive;
 });
 def('Enumerator::ArithmeticSequence', 'first', [0, 1], function* (self: RObject, args) {
   const source = sourceOf(self);
-  const { start, end, step } = arithmeticSpec(source.recv, source.args, source.keywords);
+  const { start, end, step } = arithmeticSpec(source.recv, source.iterationArgs ?? source.args, source.keywords);
   const floatSequence = isRubyFloat(start) || isRubyFloat(end) || isRubyFloat(step);
   const first = floatSequence ? Number(start) : start;
   const order = yield* arithmeticFirstOrder(start, end, floatSequence, args.length === 0);
@@ -458,7 +471,11 @@ function* arithmeticFirstOrder(
 
 def('Enumerator::ArithmeticSequence', 'last', [0, 1], function* (self: RObject, args) {
   const source = sourceOf(self);
-  const { start, step, end, exclusive } = arithmeticSpec(source.recv, source.args, source.keywords);
+  const { start, step, end, exclusive } = arithmeticSpec(
+    source.recv,
+    source.iterationArgs ?? source.args,
+    source.keywords
+  );
   if (end === NIL) throw rangeError('cannot get the last element of endless arithmetic sequence');
   if (isRubyFloat(step) && Number.isNaN(Number(step))) throw floatDomainError('NaN');
   const index = arithmeticLastIndex(
@@ -509,7 +526,11 @@ def('Enumerator::ArithmeticSequence', 'last', [0, 1], function* (self: RObject, 
 });
 def('Enumerator::ArithmeticSequence', 'hash', 0, (self: RObject) => {
   const source = sourceOf(self);
-  const { start, end, step, exclusive } = arithmeticSpec(source.recv, source.args, source.keywords);
+  const { start, end, step, exclusive } = arithmeticSpec(
+    source.recv,
+    source.iterationArgs ?? source.args,
+    source.keywords
+  );
   const parts = [
     canonicalNumber(start),
     end === NIL ? 'nil' : canonicalNumber(end),
@@ -568,8 +589,8 @@ for (const name of ['==', '===', 'eql?'])
     if (!(other instanceof RObject) || other.cls !== rt().c['Enumerator::ArithmeticSequence']) return false;
     const left = sourceOf(self);
     const right = sourceOf(other);
-    const a = arithmeticSpec(left.recv, left.args, left.keywords);
-    const b = arithmeticSpec(right.recv, right.args, right.keywords);
+    const a = arithmeticSpec(left.recv, left.iterationArgs ?? left.args, left.keywords);
+    const b = arithmeticSpec(right.recv, right.iterationArgs ?? right.args, right.keywords);
     return (
       a.exclusive === b.exclusive &&
       numericCompare(a.start as bigint | number, b.start as bigint | number) === 0 &&
