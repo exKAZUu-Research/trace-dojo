@@ -1224,7 +1224,7 @@ function* definedText(e: Expr, frame: Frame): Gen {
         if (!hook) return NIL;
         try {
           return truthy(yield* invoke(hook, recv, [RSymbol.of(e.name), false], undefined, undefined, false))
-            ? text('method')
+            ? text(e.block ? 'expression' : 'method')
             : NIL;
         } catch (error) {
           if (error instanceof RubyError) return NIL;
@@ -1233,7 +1233,7 @@ function* definedText(e: Expr, frame: Frame): Gen {
       }
       if (method.visibility === 'private' && !e.fcall) return NIL;
       if (method.visibility === 'protected' && !e.fcall && !isA(frame.self, method.owner)) return NIL;
-      return text('method');
+      return text(e.block ? 'expression' : 'method');
     }
     case 'yield': {
       return text(frame.home.extra.block ? 'yield' : undefined);
@@ -1283,6 +1283,22 @@ function* definedText(e: Expr, frame: Frame): Gen {
     }
     case 'asgn':
     case 'opasgn': {
+      const target = e.target;
+      if (target.k === 'attr' || target.k === 'index')
+        return yield* definedText(
+          {
+            k: 'call',
+            recv: target.recv,
+            name: target.k === 'attr' ? `${target.name}=` : '[]=',
+            args: target.k === 'index' ? [...target.args, e.value] : [e.value],
+            safe: target.k === 'attr' && target.safe,
+            fcall: target.recv.k === 'self',
+            vcall: false,
+            used: 0,
+            row: e.row,
+          },
+          frame
+        );
       return text('assignment');
     }
     default: {
@@ -1850,7 +1866,7 @@ export function* invoke(
         if (numericMethod) runtime.currentNumericReceiver = recv;
         const nativeRecv = numericMethod && recv instanceof RFloat ? recv.value : recv;
         const nativeArgs = numericMethod ? actual.map((arg) => (arg instanceof RFloat ? arg.value : arg)) : actual;
-        const result = body.fn(nativeRecv, nativeArgs, block, body.takesKeywords ? keywords : undefined);
+        const result = body.fn(nativeRecv, nativeArgs, block, body.takesKeywords ? keywords : undefined, used);
         const value = isGenerator(result) ? yield* result : result;
         if (recv instanceof RFloat && Object.is(value, recv.value) && (method.name === 'to_f' || method.name === 'dup'))
           return recv;

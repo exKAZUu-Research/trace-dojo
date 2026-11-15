@@ -201,6 +201,7 @@ export function translate(source: string, extended: boolean, multiline = false):
       continue;
     }
     if (char === ']' && inClass > 0) {
+      if (out.length === classStart + 1 && negatedClassBodies.length === 0) throw new SyntaxError('empty char-class');
       if (out.slice(classStart + 1) === '^' && negatedClassBodies.length === 0) {
         out += String.raw`\]`;
         continue;
@@ -457,7 +458,13 @@ export function makeRegexp(
   if (regexpCaptureNames(source, options.extended).length > 0 && regexpHasNumberedBackref(source, options.extended))
     throw rubyError(rt().c.RegexpError, `numbered backref/call is not allowed. (use name): /${source}/`);
   const regexp = new RObject(rt().c.Regexp);
-  const translated = translate(source, options.extended ?? false, options.multiline ?? false);
+  let translated: string;
+  try {
+    translated = translate(source, options.extended ?? false, options.multiline ?? false);
+  } catch (error) {
+    if (error instanceof SyntaxError) throw rubyError(rt().c.RegexpError, `invalid pattern: /${source}/`);
+    throw error;
+  }
   let js: RegExp;
   try {
     js = new RegExp(translated, `dgmu${options.ignoreCase ? 'i' : ''}${options.multiline ? 's' : ''}`);
@@ -1364,16 +1371,16 @@ function concatRegexpPieces(parts: RString[], limit: number): RString {
 
 function wrapFirst(
   names: string | string[],
-  handle: (self: RString, args: Value[], block: RProc | undefined, previous: NativeFn) => Gen | Value,
+  handle: (self: RString, args: Value[], block: RProc | undefined, previous: NativeFn, used: boolean) => Gen | Value,
   anyRegexp = false
 ): void {
   extend(
     'String',
     typeof names === 'string' ? [names] : names,
-    (previous) => (self: RString, args, block, keywords) => {
+    (previous) => (self: RString, args, block, keywords, used) => {
       if (args.length > 0 && (anyRegexp ? args.some(isRegexp) : isRegexp(args[0])))
-        return handle(self, args, block, previous);
-      return previous(self, args, block, keywords);
+        return handle(self, args, block, previous, used);
+      return previous(self, args, block, keywords, used);
     }
   );
 }
@@ -1542,7 +1549,7 @@ function* sliceCaptureRange(state: MatchState, key: Value): Gen<readonly [number
 }
 wrapFirst(
   'start_with?',
-  function* (self, args, block, previous) {
+  function* (self, args, block, previous, used) {
     for (const arg of args) {
       if (isRegexp(arg)) {
         const state = execAt(arg, self.s, 0, self);
@@ -1551,7 +1558,7 @@ wrapFirst(
         if (prefix) {
           return true;
         }
-      } else if (truthy((yield* asGen(previous(self, [arg], block, undefined))) as Value)) {
+      } else if (truthy((yield* asGen(previous(self, [arg], block, undefined, used))) as Value)) {
         return true;
       }
     }

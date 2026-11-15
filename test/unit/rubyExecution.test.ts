@@ -8463,4 +8463,33 @@ test('prepend preserves direct and nested module order', () => {
   ).toMatchObject({
     stdout: '[B, C, A, X]\n"BCAX"\n',
   });
+  expect(
+    run(
+      'module A;def f;"A"+super;end;end;module B;prepend A;def f;"B"+super;end;end;module C;include A;def f;"C"+super;end;end;class X;def f;"X";end;prepend B,C;end;p X.ancestors.take(4),X.new.f'
+    )
+  ).toMatchObject({
+    stdout: '[C, A, B, X]\n"CABX"\n',
+  });
+});
+
+test('String rejects unknown keywords before source conversion or mutation', () => {
+  expect(run('s="old";begin;s.send(:initialize,"new",bad:1);rescue ArgumentError;end;p s')).toMatchObject({
+    stdout: '"old"\n',
+  });
+  expect(
+    run('o=Object.new;def o.to_str;puts :converted;"new";end;begin;String.new(o,bad:1);rescue ArgumentError;end')
+  ).toMatchObject({
+    stdout: '',
+  });
+});
+
+test('defined? reports writer methods and block expressions', () => {
+  expect(run('a=[];p defined?(a.b=1),defined?(a[1]=1),defined?(a.each{}),defined?(proc{})')).toMatchObject({
+    stdout: 'nil\n"method"\n"expression"\n"expression"\n',
+  });
+});
+
+test('empty regexp classes fail before program execution', () => {
+  expect(run('puts "before"; p /[]/')).toMatchObject({ kind: 'compileError' });
+  expect(run('begin;Regexp.new("[]");rescue=>e;p e.class;end')).toMatchObject({ stdout: 'RegexpError\n' });
 });

@@ -199,6 +199,15 @@ def(
   'initialize',
   [0, 1],
   function* (self: RString, args, _block, keywords) {
+    let capacityValue: Value | undefined;
+    let encodingValue: Value | undefined;
+    if (keywords)
+      for (const entry of keywords.map.values()) {
+        const key = entry.key instanceof RSymbol ? entry.key.name : undefined;
+        if (key === 'capacity') capacityValue = entry.value;
+        else if (key === 'encoding') encodingValue = entry.value;
+        else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
+      }
     let sourceBytes: Uint8Array | undefined;
     if (args.length > 0) {
       const source = yield* toStrValue(args[0]);
@@ -207,14 +216,6 @@ def(
       self.usAscii = source.usAscii;
     }
     if (keywords) {
-      let capacityValue: Value | undefined;
-      let encodingValue: Value | undefined;
-      for (const entry of keywords.map.values()) {
-        const key = entry.key instanceof RSymbol ? entry.key.name : undefined;
-        if (key === 'capacity') capacityValue = entry.value;
-        else if (key === 'encoding') encodingValue = entry.value;
-        else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
-      }
       if (encodingValue !== undefined) {
         const encoding =
           encodingValue instanceof RString

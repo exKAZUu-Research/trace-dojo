@@ -219,7 +219,8 @@ export type NativeFn = (
   self: any,
   args: Value[],
   block: RProc | undefined,
-  keywords: RHash | undefined
+  keywords: RHash | undefined,
+  used: boolean
 ) => NativeResult;
 
 export type MethodBody =
@@ -311,7 +312,15 @@ export class RClass extends RBasic {
           if (index > 0) addEdge(chain[index - 1], item);
         }
       }
-      for (let index = 1; index < modules.length; index++) addEdge(modules[index - 1], modules[index]);
+      const precedes = (before: RClass, after: RClass, visited = new Set<RClass>()): boolean => {
+        rt().spend();
+        if (before === after) return true;
+        if (visited.has(after)) return false;
+        visited.add(after);
+        return [...(prerequisites.get(after) ?? [])].some((prior) => precedes(before, prior, visited));
+      };
+      for (let index = 1; index < modules.length; index++)
+        if (!precedes(modules[index], modules[index - 1])) addEdge(modules[index - 1], modules[index]);
       const result: RClass[] = [];
       const emitted = new Set<RClass>();
       while (emitted.size < prerequisites.size) {

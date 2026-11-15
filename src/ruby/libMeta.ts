@@ -77,9 +77,9 @@ function* classVariableName(value: Value): Gen<string> {
 
 // Calling by name ------------------------------------------------------------------------------------------------------
 
-const sendByName: NativeFn = function* (self, args, block, keywords) {
+const sendByName: NativeFn = function* (self, args, block, keywords, used) {
   const name = yield* nameOf(args[0]);
-  return yield* callMethod(self, name, args.slice(1), keywords, block, { fcall: true });
+  return yield* callMethod(self, name, args.slice(1), keywords, block, { fcall: true, used });
 };
 def('Kernel', 'send', [1, -1], sendByName, { keywords: true });
 def('BasicObject', '__send__', [1, -1], sendByName, { keywords: true });
@@ -87,9 +87,9 @@ def(
   'Kernel',
   'public_send',
   [1, -1],
-  function* (self, args, block, keywords) {
+  function* (self, args, block, keywords, used) {
     const name = yield* nameOf(args[0]);
-    return yield* callMethod(self, name, args.slice(1), keywords, block, { publicOnly: true });
+    return yield* callMethod(self, name, args.slice(1), keywords, block, { publicOnly: true, used });
   },
   { keywords: true }
 );
@@ -190,9 +190,9 @@ def(
   'Method',
   ['call', '()', '[]', '==='],
   [0, -1],
-  function* (self: RObject, args, block, keywords) {
+  function* (self: RObject, args, block, keywords, used) {
     const { recv, method } = self.data as MethodData;
-    return yield* invoke(method, recv, args, keywords, block, true);
+    return yield* invoke(method, recv, args, keywords, block, used);
   },
   { keywords: true }
 );
@@ -200,7 +200,7 @@ def('Method', 'to_proc', 0, (self: RObject) => {
   const { recv, method } = self.data as MethodData;
   const proc = nativeProc(
     methodArity(method),
-    (args, block, _used, keywords) => invoke(method, recv, args, keywords, block, true),
+    (args, block, used, keywords) => invoke(method, recv, args, keywords, block, used),
     true
   );
   proc.captured = [recv, method.owner, ...(method.body.kind === 'proc' ? [method.body.proc] : [])];

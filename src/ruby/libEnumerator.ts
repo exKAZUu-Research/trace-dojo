@@ -747,10 +747,10 @@ function nextValues(self: RObject): Value[] {
   const arraysBase = runtime.heldArrays.length;
   const callerHeld = [...runtime.held];
   const callerArrays = [...runtime.heldArrays];
-  runtime.heldSnapshots.push({ values: callerHeld, arrays: callerArrays });
+  const callerException = runtime.globals.get('$!') ?? NIL;
+  runtime.heldSnapshots.push({ values: [...callerHeld, callerException], arrays: callerArrays });
   const row = runtime.currentRow;
   const callerTags = runtime.catchTags.splice(0);
-  const callerException = runtime.globals.get('$!') ?? NIL;
   runtime.globals.set('$!', cursor.exception);
   if (cursor.frames[0]?.callRow !== undefined) cursor.frames[0].callRow = row;
   runtime.frames.push(...cursor.frames);

@@ -23,6 +23,24 @@ test('named regexp captures create only valid Ruby local variables', () => {
   expect(items.some(({ vars }) => vars.year === '7')).toBe(true);
 });
 
+test('reflective calls preserve discarded statement trace steps', () => {
+  const prefix = '$t=Turtle.new\ndef walk(x=nil)\n $t.forward\nend\n';
+  for (const call of ['walk', 'send(:walk)', 'method(:walk).call', '[1].each(&method(:walk))']) {
+    const items = rubyTrace(prefix + call);
+    expect(
+      items.some(({ line, turtles }) => line === 3 && turtles[0]?.y === 1),
+      call
+    ).toBe(true);
+  }
+});
+
+test('cursor resumption roots the caller exception', () => {
+  const source =
+    'it=Enumerator.new{|y|x=1;y<<0}\nat_exit{it.next;$!.instance_variable_get(:@t).forward}\nraise RuntimeError.new.tap{|e|e.instance_variable_set(:@t,Turtle.new)}\n';
+  const result = traceProgram('ruby', source, source);
+  expect(result.finalTurtles[0]?.y).toBe(1);
+});
+
 test('Struct, Data and value objects remain visible in the variable trace', () => {
   const program =
     'S=Struct.new(:a)\nD=Data.define(:x)\ns=S.new(1)\nd=D.new(2)\nr=1/3r\nt=Time.utc(2024)\nre=/a/\nm=/a(b)/.match("ab")\np s.a\n';
