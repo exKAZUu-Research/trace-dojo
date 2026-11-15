@@ -1260,7 +1260,10 @@ function* definedText(e: Expr, frame: Frame): Gen {
       return e.e ? yield* definedText(e.e, frame) : text('expression');
     }
     case 'not': {
-      return (yield* definedText(e.e, frame)) === NIL ? NIL : text('method');
+      return yield* definedText(
+        { k: 'call', recv: e.e, name: '!', args: [], safe: false, fcall: false, vcall: false, used: 0, row: e.row },
+        frame
+      );
     }
     case 'hash': {
       for (const item of e.items) {

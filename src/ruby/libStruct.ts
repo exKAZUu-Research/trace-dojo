@@ -398,8 +398,8 @@ function* inspectMembers(self: RObject, kind: 'struct' | 'data'): Gen {
 
 // Data -----------------------------------------------------------------------------------------------------------------
 
-sdef('Data', 'define', [0, -1], function* (_self, args, block) {
-  const cls = yield* newStructClass(rt().c.Data, yield* membersFrom(args, 'data'), {
+sdef('Data', 'define', [0, -1], function* (self: RClass, args, block) {
+  const cls = yield* newStructClass(self, yield* membersFrom(args, 'data'), {
     keywordInit: undefined,
     kind: 'data',
   });

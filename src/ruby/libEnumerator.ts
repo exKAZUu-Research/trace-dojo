@@ -30,18 +30,20 @@ import {
 import { iterate, iterateYielded, STOP, zipCollections } from './libEnumerable';
 import { rangeSize } from './libRange';
 import { setSize } from './libSet';
-import { type RClass,
+import {
   isRubyFloat,
   isRubyNumber,
   NIL,
   RArray,
+  type RClass,
   RHash,
   RObject,
   RProc,
   RRange,
   RString,
   RSymbol,
-  type Value } from './objects';
+  type Value,
+} from './objects';
 import { type Frame, rt, RubyError, UnsupportedFeatureError } from './runtime';
 import { arr, isA, newHash, realClassOf, str, stringBytes, stringCharacterCount, truthy } from './values';
 
@@ -856,6 +858,9 @@ sdef('Enumerator', 'new', [0, 1], function* (self: RClass, args, block) {
     }
   }
   return enumerator;
+});
+sdef('Enumerator::Lazy', 'new', [0, -1], () => {
+  throw new UnsupportedFeatureError('Enumerator::Lazy.new');
 });
 def('Enumerator::Generator', 'each', [0, -1], function* (self: RObject, args, block) {
   const producer = (self.data as GeneratorData | undefined)?.block;

@@ -7873,6 +7873,20 @@ test('Enumerator.new preserves the receiving subclass', () => {
   });
 });
 
+test('Data.define preserves the receiving subclass', () => {
+  expect(run('class S<Data;def greet;:ok;end;end;C=S.define(:x);p C.new(1).greet,C.superclass')).toMatchObject({
+    stdout: ':ok\nS\n',
+  });
+});
+
+test('defined? probes negation receiver methods and visibility', () => {
+  expect(
+    run(
+      'def value;puts :operand;true;end;p defined?(!value);def bad;puts :raising;raise "bad";end;p defined?(!bad);class C;undef_method :!;end;p defined?(!C.new);class D;private;def !;true;end;end;p defined?(!D.new)'
+    )
+  ).toMatchObject({ stdout: 'operand\n"method"\nraising\nnil\nnil\nnil\n' });
+});
+
 test('Proc parameters rejects unknown keyword options', () => {
   expect(run('begin;p proc{|x|}.parameters(lamda:true);rescue=>e;p e.class;end')).toMatchObject({
     stdout: 'ArgumentError\n',
