@@ -462,7 +462,7 @@ def('Kernel', 'define_singleton_method', [1, 2], function* (self, args, block) {
 
 function* defineMethodFrom(owner: RClass, args: Value[], block: RProc | undefined, visibility: Visibility): Gen {
   const name = yield* nameOf(args[0]);
-  if (PRIVATE_METHOD_NAMES.has(name)) visibility = 'private';
+  if (!owner.isSingleton && PRIVATE_METHOD_NAMES.has(name)) visibility = 'private';
   const body = args.length > 1 ? args[1] : requireBlock(block);
   let method: RMethod;
   if (body instanceof RProc) {

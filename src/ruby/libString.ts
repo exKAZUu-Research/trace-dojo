@@ -269,8 +269,9 @@ export function textByteLengthOf(value: RString, text: string): number {
   return textByteLength(text, stringTextMode(value));
 }
 export function inspectStringEncoding(self: RString, dump = false): string {
-  return self.binary
-    ? binaryInspect(stringBytes(self))
+  const bytes = stringBytes(self);
+  return self.binary || (self.usAscii && bytes.some((byte) => byte >= 0x80))
+    ? binaryInspect(bytes)
     : self.rawBytes
       ? inspectRawBytes(self.rawBytes, dump)
       : strInspect(self.s, self.usAscii || dump ? 'hex' : 'unicode');

@@ -7992,6 +7992,9 @@ test('String dump retains its supported encoding', () => {
   expect(run('p 65.chr.dump.encoding,255.chr.dump.encoding')).toMatchObject({
     stdout: '#<Encoding:US-ASCII>\n#<Encoding:BINARY (ASCII-8BIT)>\n',
   });
+  expect(run('s=String.new("é",encoding:"US-ASCII");p s;puts s.dump;p s.dump.encoding')).toMatchObject({
+    stdout: '"\\xC3\\xA9"\n"\\xC3\\xA9"\n#<Encoding:US-ASCII>\n',
+  });
 });
 
 test('String.new recognizes supported encoding aliases', () => {
@@ -8083,10 +8086,30 @@ test('define_method keeps lifecycle methods private', () => {
   ).toMatchObject({ stdout: 'true\ninit\nNoMethodError\n' });
 });
 
+test('dynamically defined singleton lifecycle methods stay public', () => {
+  expect(
+    run('o=Object.new;o.define_singleton_method(:initialize){:ok};p o.respond_to?(:initialize),o.initialize')
+  ).toMatchObject({
+    stdout: 'true\n:ok\n',
+  });
+});
+
 test('inherited hooks installed from blocks run for new subclasses', () => {
   expect(
     run('class Base;define_singleton_method(:inherited){|sub|puts :child};end;Class.new(Base);class Child<Base;end')
   ).toMatchObject({ stdout: 'child\nchild\n' });
+});
+
+test('inherited hooks copied from native methods run for new subclasses', () => {
+  expect(
+    run('class Base;define_singleton_method(:inherited,Kernel.instance_method(:p));end;class Child<Base;end')
+  ).toMatchObject({ stdout: 'Child\n' });
+});
+
+test('Time keeps colon-qualified non-zone directives literal', () => {
+  expect(run('t=Time.at(0).getlocal(0);p t.strftime("%:Z|%::Z|%:::Z")')).toMatchObject({
+    stdout: '"%:Z|%::Z|%:::Z"\n',
+  });
 });
 
 test('Lazy index inspection records normalized offset and method name', () => {

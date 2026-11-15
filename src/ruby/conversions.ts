@@ -317,7 +317,12 @@ export function* inspectValue(value: Value): Gen<RString> {
 
 function fastInspect(value: Value): string | undefined {
   if (value === NIL) return 'nil';
-  if (value instanceof RString && !value.binary && !value.rawBytes)
+  if (
+    value instanceof RString &&
+    !value.binary &&
+    !value.rawBytes &&
+    !(value.usAscii && stringBytes(value).some((byte) => byte >= 0x80))
+  )
     return strInspect(value.s, value.usAscii ? 'hex' : 'unicode');
   if (value instanceof RSymbol) return symInspect(value.name);
   if (typeof value === 'object') return undefined;
