@@ -73,6 +73,13 @@ export class Frame implements TracedFrame {
     this.definitionMode = outer.definitionMode;
   }
 
+  get definitionOwner(): RClass | undefined {
+    if (this.extra.definee) return this.extra.definee;
+    if (this.extra.definitionTarget) return this.extra.definitionTarget;
+    if (this.kind === 'class') return this.self as RClass;
+    return this.home.kind === 'class' ? (this.home.self as RClass) : undefined;
+  }
+
   // code-gauge-allow functionParameterCount 8 -- A frame carries the call context needed by Ruby method, block, and class execution.
   constructor(
     readonly kind: FrameKind,

@@ -7297,6 +7297,62 @@ test('nested blocks share their lexical definition visibility', () => {
   });
 });
 
+test('dynamic conversion preserves exceptions raised inside its hook', () => {
+  expect(
+    run(
+      'class C;def respond_to_missing?(n,*);n==:to_str||super;end;def method_missing(n,*);return Object.new.foo if n==:to_str;super;end;end;begin;[1].join(C.new);rescue=>e;p e.class,e.name;end'
+    )
+  ).toMatchObject({
+    stdout: 'NoMethodError\n:foo\n',
+  });
+});
+
+test('multi assignment rescue wraps the right-hand values', () => {
+  expect(run('a,b=1,Integer("x") rescue 7;p [a,b]')).toMatchObject({ stdout: '[7, nil]\n' });
+  expect(run('a,b=1,2 rescue puts "z"')).toMatchObject({ kind: 'compileError' });
+});
+
+test('hash pattern remainder keeps identity key comparison', () => {
+  expect(
+    run('a="x";b="x";h={}.compare_by_identity;h[a]=1;h[b]=2;h=>{**rest};p rest,rest.compare_by_identity?')
+  ).toMatchObject({
+    stdout: '{"x" => 1, "x" => 2}\ntrue\n',
+  });
+});
+
+test('pattern failure describes the deconstructed array', () => {
+  expect(run('S=Struct.new(:a);begin;S.new(1)=>[x,y];rescue NoMatchingPatternError=>e;p e.message;end')).toMatchObject({
+    stdout: '"#<struct S a=1>: [1] length mismatch (given 1, expected 2)"\n',
+  });
+});
+
+test('lexical definition target survives ordinary nested blocks', () => {
+  expect(run('class C;1.times{private};def x;1;end;end;p C.private_method_defined?(:x)')).toMatchObject({
+    stdout: 'true\n',
+  });
+  expect(
+    run(
+      'module M;end;M.module_eval{1.times{module_function};def x;1;end};p M.respond_to?(:x),M.private_method_defined?(:x)'
+    )
+  ).toMatchObject({
+    stdout: 'true\ntrue\n',
+  });
+});
+
+test('Time calendar seconds reject fractional string fields', () => {
+  expect(run('begin;Time.utc(1970,1,1,0,0,"0.1");rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'ArgumentError\n"invalid value for Integer(): \\"0.1\\""\n',
+  });
+});
+
+test('Struct values_at converts each selector once', () => {
+  expect(
+    run('class I;def initialize;@n=-1;end;def to_int;@n+=1;end;end;s=Struct.new(:a,:b).new(10,20);p s.values_at(I.new)')
+  ).toMatchObject({
+    stdout: '[10]\n',
+  });
+});
+
 test('regexp split yields fields and captures to a block', () => {
   expect(run('r=[];p "aXbXc".split(/(X)/){|part|r<<part},r')).toMatchObject({
     stdout: '"aXbXc"\n["a", "X", "b", "X", "c"]\n',

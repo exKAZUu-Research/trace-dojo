@@ -395,10 +395,23 @@ export class Converter {
         return this.beginNode(node, use);
       }
       case 'rescue_modifier': {
+        const bodyNode = required(node.childForFieldName('body'));
+        const handlerNode = required(node.childForFieldName('handler'));
+        const body = this.expr(bodyNode);
+        if (
+          body.k === 'asgn' &&
+          bodyNode.type === 'assignment' &&
+          bodyNode.childForFieldName('left')?.type === 'left_assignment_list'
+        ) {
+          const argumentsNode = handlerNode.childForFieldName('arguments');
+          if (handlerNode.type === 'call' && argumentsNode && !argumentsNode.text.trimStart().startsWith('('))
+            this.fail(handlerNode, '書き方に誤りがあります。');
+          return { ...body, value: { k: 'rescueMod', body: body.value, handler: this.expr(handlerNode) } };
+        }
         return {
           k: 'rescueMod',
-          body: this.expr(required(node.childForFieldName('body'))),
-          handler: this.expr(required(node.childForFieldName('handler'))),
+          body,
+          handler: this.expr(handlerNode),
         };
       }
       case 'method': {

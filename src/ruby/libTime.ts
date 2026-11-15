@@ -131,7 +131,7 @@ function* fieldValue(arg: Value, index: number): Gen<number> {
 
 function* secondsValue(arg: Value): Gen<number> {
   if (arg === NIL) return 0;
-  if (arg instanceof RString && /^\s*[+-]?\d+(?:\.\d+)?\s*$/.test(arg.s)) return Number(arg.s);
+  if (arg instanceof RString) return yield* fieldValue(arg, 5);
   return yield* toFloat(arg);
 }
 

@@ -1466,14 +1466,8 @@ function* defineMethod(def: MethodDef, singleton: Expr | undefined, frame: Frame
     owner = singletonClassOf(object);
   } else if (frame.extra.forbidSingletonDefinition) {
     throw typeError("can't define singleton");
-  } else if (frame.kind === 'class') {
-    owner = frame.self as RClass;
-    visibility = frame.defaultVisibility;
-  } else if (frame.extra.definee) {
-    owner = frame.extra.definee;
-    visibility = frame.defaultVisibility;
-  } else if (frame.extra.definitionTarget) {
-    owner = frame.extra.definitionTarget;
+  } else if (frame.definitionOwner) {
+    owner = frame.definitionOwner;
     visibility = frame.defaultVisibility;
   } else if (frame.home.kind === 'main') {
     owner = runtime.c.Object;
@@ -1490,7 +1484,7 @@ function* defineMethod(def: MethodDef, singleton: Expr | undefined, frame: Frame
     body: { kind: 'user', def, cref: frame.cref },
   };
   addMethod(owner, method);
-  if (!singleton && frame.kind === 'class' && frame.moduleFunction) {
+  if (!singleton && frame.definitionOwner === owner && frame.moduleFunction) {
     const copy: RMethod = { ...method, owner: singletonClassOf(owner), visibility: 'public' };
     addMethod(copy.owner, copy);
     method.visibility = 'private';

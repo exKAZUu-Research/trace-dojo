@@ -83,14 +83,18 @@ export function* toInt(value: Value): Gen<bigint> {
 }
 
 export function* supportsImplicitConversion(value: Value, name: string): Gen<boolean> {
-  return yield* respondsToConversion(value, name, classOf(value).findMethod(name) !== undefined);
+  return (yield* respondsToConversion(value, name, classOf(value).findMethod(name) !== undefined)).callable;
 }
 
-function* respondsToConversion(value: Value, name: string, resolved: boolean): Gen<boolean> {
+function* respondsToConversion(
+  value: Value,
+  name: string,
+  resolved: boolean
+): Gen<{ callable: boolean; advertised: boolean }> {
   const responder = classOf(value).findMethod('respond_to?');
   if (!responder) {
     const missing = classOf(value).findMethod('method_missing');
-    return resolved || (missing !== undefined && missing.body.kind !== 'native');
+    return { callable: resolved || (missing !== undefined && missing.body.kind !== 'native'), advertised: resolved };
   }
   const onePositional = methodArity(responder) === 1;
   const advertised = truthy(
@@ -103,19 +107,27 @@ function* respondsToConversion(value: Value, name: string, resolved: boolean): G
       { fcall: true }
     )
   );
-  if (responder.body.kind !== 'native' || !('builtinResponder' in responder.body.fn)) return advertised;
-  if (advertised) return true;
+  if (responder.body.kind !== 'native' || !('builtinResponder' in responder.body.fn))
+    return { callable: advertised, advertised };
+  if (advertised) return { callable: true, advertised: true };
   const missing = classOf(value).findMethod('method_missing');
-  return missing !== undefined && missing.body.kind !== 'native';
+  return { callable: missing !== undefined && missing.body.kind !== 'native', advertised: false };
 }
 
 export function* tryImplicitConversion(value: Value, name: string, args: Value[] = []): Gen<Value | undefined> {
   const resolved = classOf(value).findMethod(name);
-  if (!(yield* respondsToConversion(value, name, resolved !== undefined))) return undefined;
+  const availability = yield* respondsToConversion(value, name, resolved !== undefined);
+  if (!availability.callable) return undefined;
   try {
     return yield* callMethod(value, name, args, undefined, undefined, { fcall: true });
   } catch (error) {
-    if (!resolved && error instanceof RubyError && isA(error.exception, rt().c.NoMethodError)) return undefined;
+    if (
+      !resolved &&
+      !availability.advertised &&
+      error instanceof RubyError &&
+      isA(error.exception, rt().c.NoMethodError)
+    )
+      return undefined;
     throw error;
   }
 }

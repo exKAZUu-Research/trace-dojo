@@ -136,7 +136,7 @@ function* matchArray(
   const fixed = pattern.pre.length + pattern.post.length;
   if (pattern.rest ? items.length < fixed : items.length !== fixed) {
     return yield* fail(function* () {
-      return `${yield* inspect(value)} length mismatch (given ${items.length}, expected ${fixed}${pattern.rest ? '+' : ''})`;
+      return `${yield* inspect(arr(items))} length mismatch (given ${items.length}, expected ${fixed}${pattern.rest ? '+' : ''})`;
     });
   }
   for (const [index, item] of pattern.pre.entries())
@@ -173,7 +173,7 @@ function* matchFind(
     return true;
   }
   return yield* fail(function* () {
-    return `${yield* inspect(value)} does not match to find pattern`;
+    return `${yield* inspect(arr(items))} does not match to find pattern`;
   });
 }
 
@@ -227,6 +227,7 @@ function* matchHash(pattern: Extract<Pattern, { k: 'hash' }>, value: Value, fram
 
 function* restOf(hash: RHash, pairs: { key: string }[]): Gen<RHash> {
   const rest = newHash();
+  rest.byIdentity = hash.byIdentity;
   for (const entry of hash.map.values()) {
     if (entry.key instanceof RSymbol && pairs.some((pair) => pair.key === (entry.key as RSymbol).name)) continue;
     yield* hashSet(rest, entry.key, entry.value);

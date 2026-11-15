@@ -784,12 +784,7 @@ function* symbolName(value: Value): Gen<string> {
 
 function* defineAttributes(self: RClass, names: Value[], reader: boolean, writer: boolean): Gen<RArray> {
   const frame = rt().frame;
-  const visibility =
-    (frame.kind === 'class' && frame.self === self) ||
-    frame.extra.definitionTarget === self ||
-    frame.extra.definee === self
-      ? frame.defaultVisibility
-      : 'public';
+  const visibility = frame.definitionOwner === self ? frame.defaultVisibility : 'public';
   const defined: Value[] = [];
   for (const value of names) {
     const name = yield* symbolName(value);
@@ -826,11 +821,7 @@ def('Module', 'attr_accessor', [0, -1], function* (self: RClass, args) {
 function* setVisibility(self: RClass, args: Value[], visibility: Visibility): Gen {
   const frame = rt().frame;
   if (args.length === 0) {
-    if (
-      (frame.kind === 'class' && frame.self === self) ||
-      frame.extra.definitionTarget === self ||
-      frame.extra.definee === self
-    ) {
+    if (frame.definitionOwner === self) {
       frame.defaultVisibility = visibility;
       frame.moduleFunction = false;
     } else if (frame.kind === 'main' && self === rt().c.Object) {
@@ -867,7 +858,7 @@ def(
   function* (self: RClass, args) {
     const frame = rt().frame;
     if (args.length === 0) {
-      if ((frame.kind === 'class' && frame.self === self) || frame.extra.definee === self) {
+      if (frame.definitionOwner === self) {
         frame.moduleFunction = true;
         frame.defaultVisibility = 'private';
       }

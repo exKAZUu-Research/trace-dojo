@@ -456,12 +456,7 @@ function* defineMethodFrom(owner: RClass, args: Value[], block: RProc | undefine
 
 def('Module', 'define_method', [1, 2], function* (self: RClass, args, block) {
   const frame = rt().frame;
-  const visibility =
-    (frame.kind === 'class' && frame.self === self) ||
-    frame.extra.definee === self ||
-    frame.extra.definitionTarget === self
-      ? frame.defaultVisibility
-      : 'public';
+  const visibility = frame.definitionOwner === self ? frame.defaultVisibility : 'public';
   return yield* defineMethodFrom(self, args, block, visibility);
 });
 def('Module', 'alias_method', 2, function* (self: RClass, [newName, oldName]) {

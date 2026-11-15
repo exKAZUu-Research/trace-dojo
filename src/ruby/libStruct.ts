@@ -247,13 +247,18 @@ def('Struct', 'members', 0, (self: RObject) => arr(layoutOf(self.cls).members.ma
 def('Struct', ['to_a', 'deconstruct', 'values'], 0, (self: RObject) => arr([...valuesOf(self)]));
 def('Struct', 'values_at', [0, -1], function* (self: RObject, args) {
   const values = valuesOf(self);
+  const selectors: Value[] = [];
   for (const argument of args) {
-    if (argument instanceof RRange) continue;
+    if (argument instanceof RRange) {
+      selectors.push(argument);
+      continue;
+    }
     const index = yield* toInt(argument);
     if (index < -BigInt(values.length)) throw indexError(`offset ${index} too small for struct(size:${values.length})`);
     if (index >= BigInt(values.length)) throw indexError(`offset ${index} too large for struct(size:${values.length})`);
+    selectors.push(index);
   }
-  return yield* callMethod(arr([...values]), 'values_at', args);
+  return yield* callMethod(arr([...values]), 'values_at', selectors);
 });
 def('Struct', 'to_h', 0, (self: RObject, _args, block) => structToHash(self, block));
 def('Struct', 'deconstruct_keys', 1, (self: RObject, [keys]) => deconstructKeys(self, keys));
