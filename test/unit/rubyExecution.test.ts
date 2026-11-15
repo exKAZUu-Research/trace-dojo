@@ -7246,3 +7246,30 @@ test('Rational supports implicit integer conversion', () => {
 test('large regexp replacements process short literal fragments within the budget', () => {
   expect(run(String.raw`r="x\\1"*200000;p "a".sub(/(b)?a/,r).size`)).toMatchObject({ stdout: '200000\n' });
 });
+
+test('pattern shorthand accepts uncased Unicode local names', () => {
+  expect(run('case {名前:1};in {"名前":};p 名前;end')).toMatchObject({ stdout: '1\n' });
+});
+
+test('literal condition ranges are unavailable flip-flops', () => {
+  expect(run('if (1..2);p :ran;end')).toMatchObject({ kind: 'compileError' });
+  expect(run('x=true;if x && (1..2);p :ran;end')).toMatchObject({ kind: 'compileError' });
+});
+
+test('Enumerator Generator includes Enumerable', () => {
+  expect(run('g=Enumerator::Generator.new{|y|y<<1<<2};p g.respond_to?(:to_a),g.map{|x|x*2},g.to_a')).toMatchObject({
+    stdout: 'true\n[2, 4]\n[1, 2]\n',
+  });
+  expect(run('g=Enumerator::Generator.new{|y|y<<1};begin;g.each;rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'LocalJumpError\n"no block given"\n',
+  });
+});
+
+test('Time calendar constructors classify trailing arguments', () => {
+  expect(run('p Time.utc(2020,1,1,1,1,1,1,9).nsec,Time.local(2020,1,1,1,1,1,1,9).nsec')).toMatchObject({
+    stdout: '0\n0\n',
+  });
+  expect(run('begin;Time.utc(2020,1,1,1,1,1,"x");rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'ArgumentError\n"invalid value for Integer(): \\"x\\""\n',
+  });
+});

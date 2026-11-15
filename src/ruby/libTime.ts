@@ -208,9 +208,11 @@ function* buildTime(args: Value[], offset: number, zone: TimeData['zone'], micro
   const microsecondsValue =
     microseconds === undefined
       ? 0n
-      : typeof microseconds === 'bigint' || typeof microseconds === 'number' || isRational(microseconds)
-        ? microseconds
-        : yield* toFloat(microseconds);
+      : microseconds instanceof RString
+        ? yield* fieldValue(microseconds, 1)
+        : typeof microseconds === 'bigint' || typeof microseconds === 'number' || isRational(microseconds)
+          ? microseconds
+          : yield* toFloat(microseconds);
   const micros = offsetFraction(microsecondsValue, 0);
   const localNumerator =
     (localNanoseconds * exactSeconds.denominator + fraction * 1_000_000_000n) * micros.denominator +
@@ -258,10 +260,10 @@ sdef(
   { keywords: true }
 );
 sdef('Time', ['local', 'mktime'], [1, 10], (_self, args) =>
-  buildTime(calendarArgs(args), LOCAL_OFFSET, 'local', args.length === 10 ? undefined : args[6])
+  buildTime(calendarArgs(args), LOCAL_OFFSET, 'local', args.length === 7 ? args[6] : undefined)
 );
 sdef('Time', ['utc', 'gm'], [1, 10], (_self, args) =>
-  buildTime(calendarArgs(args), 0, 'utc', args.length === 10 ? undefined : args[6])
+  buildTime(calendarArgs(args), 0, 'utc', args.length === 7 ? args[6] : undefined)
 );
 sdef(
   'Time',

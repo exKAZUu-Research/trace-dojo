@@ -868,17 +868,7 @@ export class Converter {
   private checkFlipFlopCondition(node: Node): void {
     let form = node;
     while (form.type === 'parenthesized_statements' && namedChildren(form).length === 1) form = namedChildren(form)[0];
-    if (form.type === 'range') {
-      const begin = form.childForFieldName('begin');
-      const end = form.childForFieldName('end');
-      if (
-        !begin ||
-        !end ||
-        !['integer', 'float', 'string', 'simple_symbol'].includes(begin.type) ||
-        !['integer', 'float', 'string', 'simple_symbol'].includes(end.type)
-      )
-        this.unsupported(form, 'フリップフロップ');
-    }
+    if (form.type === 'range') this.unsupported(form, 'フリップフロップ');
     if (form.type === 'unary' && ['!', 'not'].includes(form.childForFieldName('operator')?.text ?? ''))
       this.checkFlipFlopCondition(required(form.childForFieldName('operand')));
     if (form.type === 'binary' && LOGICAL_OPERATORS.has(form.childForFieldName('operator')?.text ?? '')) {
@@ -1711,7 +1701,7 @@ export class Converter {
       const valueNode = child.childForFieldName('value');
       if (valueNode) pairs.push({ key, pattern: this.pattern(valueNode) });
       else {
-        if (rawKey !== key || !/^[\p{Ll}_][\p{ID_Continue}_]*$/u.test(key))
+        if (rawKey !== key || !/^[\p{Ll}\p{Lm}\p{Lo}_][\p{ID_Continue}_]*$/u.test(key))
           this.fail(keyNode, 'パターンのキーを変数名として使えません。');
         pairs.push({ key, target: this.bindTarget(keyNode, key) });
       }

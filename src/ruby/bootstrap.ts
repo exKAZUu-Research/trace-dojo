@@ -143,7 +143,7 @@ export function bootstrap(runtime: Runtime): void {
   defineClass('ArithmeticSequence', enumerator, enumerator);
   defineClass('Chain', enumerator, enumerator);
   defineClass('Yielder', object, enumerator);
-  defineClass('Generator', object, enumerator);
+  defineClass('Generator', object, enumerator).includes.push(c.Enumerable);
   defineClass('Lazy', enumerator, enumerator);
   defineClass('IO', object);
   defineClass('Method', object);

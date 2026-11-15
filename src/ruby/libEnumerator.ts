@@ -827,7 +827,8 @@ def('Enumerator::Generator', 'each', [0, -1], function* (self: RObject, args, bl
   const producer = (self.data as GeneratorData | undefined)?.block;
   if (!producer) throw argumentError('uninitialized generator');
   const yielder = new RObject(rt().c['Enumerator::Yielder']);
-  const consumer = requireBlock(block);
+  if (!block) throw rubyError(rt().c.LocalJumpError, 'no block given');
+  const consumer = block;
   const data: { consumer: RProc; held(): Value[] } = {
     consumer,
     held() {
