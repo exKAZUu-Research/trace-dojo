@@ -720,7 +720,13 @@ function nextValues(self: RObject): Value[] {
   const source = sourceOf(self);
   source.cursor ??= startCursor(self);
   const cursor = source.cursor;
-  if (cursor.running) throw rubyError(rt().c.FiberError, 'attempt to resume the current fiber');
+  if (cursor.running)
+    throw rubyError(
+      rt().c.FiberError,
+      rt().activeCursor === cursor
+        ? 'attempt to resume the current fiber'
+        : 'attempt to resume a resumed fiber (double resume)'
+    );
   if (cursor.peeked.length > 0) return cursor.peeked.shift() as Value[];
   if (cursor.result !== undefined) throw stopIteration(cursor.result);
   const runtime = rt();
@@ -739,8 +745,10 @@ function nextValues(self: RObject): Value[] {
   runtime.catchTags.push(...cursor.catchTags);
   let step: IteratorResult<unknown, Value>;
   let failed = false;
+  const previousCursor = runtime.activeCursor;
   try {
     cursor.running = true;
+    runtime.activeCursor = cursor;
     const feed = cursor.started && cursor.feedSet ? cursor.feed : NIL;
     if (cursor.started) {
       cursor.feedSet = false;
@@ -753,6 +761,7 @@ function nextValues(self: RObject): Value[] {
     throw error;
   } finally {
     cursor.running = false;
+    runtime.activeCursor = previousCursor;
     runtime.held.splice(0, heldBase, ...callerHeld);
     runtime.heldArrays.splice(0, arraysBase, ...callerArrays);
     cursor.frames = runtime.frames.splice(frameBase);

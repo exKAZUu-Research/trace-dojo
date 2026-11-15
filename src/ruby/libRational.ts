@@ -208,7 +208,7 @@ def('Rational', '<=>', 1, function* (self: RObject, [other]) {
   const b = asFraction(other);
   if (!b) {
     const pair = yield* tryImplicitConversion(other, 'coerce', [self]);
-    if (pair === undefined) return NIL;
+    if (pair === undefined || pair === NIL) return NIL;
     if (!(pair instanceof RArray) || pair.items.length !== 2) throw typeError('coerce must return [x, y]');
     return yield* callMethod(pair.items[0], '<=>', [pair.items[1]]);
   }

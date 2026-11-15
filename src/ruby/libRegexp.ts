@@ -628,7 +628,13 @@ function requiresMultiCharacterFold(source: string, text: string): boolean {
 
 function matchData(state: MatchState): RObject {
   state.snapshot ??= str(state.text);
-  state.snapshot.frozen = true;
+  const original = state.snapshot;
+  const snapshot = new RString(original.cls, original.s);
+  snapshot.binary = original.binary;
+  snapshot.usAscii = original.usAscii;
+  snapshot.rawBytes = original.rawBytes;
+  snapshot.frozen = true;
+  state.snapshot = snapshot;
   const match = new RObject(rt().c.MatchData);
   match.data = {
     ...state,
@@ -735,8 +741,7 @@ function* optionsOf(value: Value | undefined): Gen<{ ignoreCase: boolean; multil
     return { ignoreCase: (value & 1n) !== 0n, extended: (value & 2n) !== 0n, multiline: (value & 4n) !== 0n };
   }
   if (value instanceof RString) {
-    if (/[^imxnesu]/.test(value.s)) throw argumentError(`unknown regexp option: ${value.s}`);
-    if (/[nesu]/.test(value.s)) throw new UnsupportedFeatureError(`Regexp.new のオプション ${value.s}`);
+    if (/[^imx]/.test(value.s)) throw argumentError(`unknown regexp option: ${value.s}`);
     return { ignoreCase: value.s.includes('i'), multiline: value.s.includes('m'), extended: value.s.includes('x') };
   }
   yield* [];
@@ -1183,7 +1188,7 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
           break;
         }
         default: {
-          const value = state.names.length > 0 ? NIL : groupText(state, Number(code));
+          const value = state.names.length > 0 && code !== '0' ? NIL : groupText(state, Number(code));
           part = value === NIL ? str('') : (value as RString);
         }
       }

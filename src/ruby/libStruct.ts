@@ -88,10 +88,11 @@ function* memberIndex(self: RObject, key: Value): Gen<number> {
   return index;
 }
 
-function* membersFrom(args: Value[]): Gen<string[]> {
+function* membersFrom(args: Value[], kind: 'struct' | 'data'): Gen<string[]> {
   const members: string[] = [];
   for (const arg of args) {
     const name = yield* nameOf(arg);
+    if (name.endsWith('=')) throw argumentError(`invalid ${kind} member: ${name}`);
     if (members.includes(name)) throw argumentError(`duplicate member: ${name}`);
     members.push(name);
   }
@@ -127,8 +128,6 @@ function defineAccessors(cls: RClass, members: string[], writable: boolean): voi
 }
 
 function* newStructClass(superclass: RClass, members: string[], layout: Omit<Layout, 'members'>): Gen<RClass> {
-  for (const member of members)
-    if (member.endsWith('=')) throw argumentError(`invalid ${layout.kind} member: ${member}`);
   const cls = new RClass(rt().c.Class, undefined, superclass, false);
   cls.isUserDefined = true;
   layouts.set(cls, { ...layout, members });
@@ -215,7 +214,7 @@ sdef(
         throw nameError(`identifier ${name} needs to be constant`);
       assertMutableClass(self);
     }
-    const cls = yield* newStructClass(self, yield* membersFrom(names), { keywordInit, kind: 'struct' });
+    const cls = yield* newStructClass(self, yield* membersFrom(names, 'struct'), { keywordInit, kind: 'struct' });
     if (name !== undefined) {
       cls.baseName = name;
       cls.lexicalParent = self;
@@ -398,7 +397,10 @@ function* inspectMembers(self: RObject, kind: 'struct' | 'data'): Gen {
 // Data -----------------------------------------------------------------------------------------------------------------
 
 sdef('Data', 'define', [0, -1], function* (_self, args, block) {
-  const cls = yield* newStructClass(rt().c.Data, yield* membersFrom(args), { keywordInit: undefined, kind: 'data' });
+  const cls = yield* newStructClass(rt().c.Data, yield* membersFrom(args, 'data'), {
+    keywordInit: undefined,
+    kind: 'data',
+  });
   if (block) yield* callProc(block, [cls], { self: cls, definee: cls });
   return cls;
 });
@@ -456,12 +458,14 @@ def('Data', 'to_h', 0, (self: RObject, _args, block) => structToHash(self, block
 
 function* deconstructKeys(self: RObject, keys: Value): Gen<RHash> {
   const hash = newHash();
-  const members = layoutOf(self.cls).members;
+  const { members, kind } = layoutOf(self.cls);
   if (keys !== NIL && !(keys instanceof RArray))
     throw typeError(`wrong argument type ${realClassOf(keys).name} (expected Array)`);
   if (keys instanceof RArray && keys.items.length > members.length) return hash;
   const names = keys === NIL ? members.map((name) => sym(name)) : (keys as RArray).items;
   for (const key of names) {
+    if (kind === 'data' && !(key instanceof RSymbol) && !(key instanceof RString))
+      throw typeError(`${yield* inspect(key)} is not a symbol nor a string`);
     const named = key instanceof RSymbol || key instanceof RString;
     const index = named ? members.indexOf(key instanceof RSymbol ? key.name : key.s) : yield* toIndex(key);
     if (named && index < 0) break;

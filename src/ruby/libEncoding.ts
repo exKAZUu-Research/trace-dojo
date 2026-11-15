@@ -2,7 +2,7 @@ import { def, sdef } from './define';
 import { rubyError } from './errors';
 import { callProc, type Gen, requireBlock } from './interp';
 import { makeEnumerator } from './libEnumerator';
-import { type RSymbol,NIL,RObject,type RProc,type RString,type Value } from './objects';
+import { NIL, RObject, type RProc, type RString, type RSymbol, type Value } from './objects';
 import { ExitSignal, ReturnSignal, rt, RubyError, type Runtime, UnsupportedFeatureError } from './runtime';
 import { arr, str, stringBytes } from './values';
 

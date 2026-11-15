@@ -7620,6 +7620,50 @@ test('Struct range selectors validate the first endpoint before the second', () 
   });
 });
 
+test('named regexp replacement keeps the whole-match zero reference', () => {
+  expect(run(String.raw`p "abc".sub(/(?<x>a)/,%q{\0})`)).toMatchObject({ stdout: '"abc"\n' });
+});
+
+test('Data deconstruct_keys rejects positional keys', () => {
+  expect(run('begin;Data.define(:a).new(1).deconstruct_keys([0]);rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'TypeError\n"0 is not a symbol nor a string"\n',
+  });
+});
+
+test('Regexp constructor rejects literal-only option letters', () => {
+  expect(run('begin;Regexp.new("a","n");rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'ArgumentError\n"unknown regexp option: n"\n',
+  });
+});
+
+test('Rational comparison treats nil coerce as incomparable', () => {
+  expect(run('class N;def coerce(x);nil;end;end;p(1r<=>N.new)')).toMatchObject({ stdout: 'nil\n' });
+});
+
+test('match snapshots have per-match String identity', () => {
+  expect(
+    run('a=[];"aa".scan(/a/){a<<$~};p a[0].string.equal?(a[1].string),a[0].string.equal?(a[0].string)')
+  ).toMatchObject({
+    stdout: 'false\ntrue\n',
+  });
+});
+
+test('indirect external iterator reentrancy reports double resume', () => {
+  expect(
+    run('b=nil;a=Enumerator.new{|y|b.next};b=Enumerator.new{|y|a.next};begin;a.next;rescue=>e;p e.class,e.message;end')
+  ).toMatchObject({
+    stdout: 'FiberError\n"attempt to resume a resumed fiber (double resume)"\n',
+  });
+});
+
+test('Struct and Data reject invalid first members before later conversions', () => {
+  expect(
+    run('o=Object.new;def o.to_str;raise "later";end;begin;Data.define(:"a=",o);rescue=>e;p e.class,e.message;end')
+  ).toMatchObject({
+    stdout: 'ArgumentError\n"invalid data member: a="\n',
+  });
+});
+
 test('regexp split yields fields and captures to a block', () => {
   expect(run('r=[];p "aXbXc".split(/(X)/){|part|r<<part},r')).toMatchObject({
     stdout: '"aXbXc"\n["a", "X", "b", "X", "c"]\n',
