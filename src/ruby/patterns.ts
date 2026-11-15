@@ -141,7 +141,7 @@ function* matchArray(
   }
   for (const [index, item] of pattern.pre.entries())
     if (!(yield* matchPattern(item, items[index], frame))) return false;
-  if (pattern.rest)
+  if (pattern.rest?.target)
     bind(pattern.rest.target, arr(items.slice(pattern.pre.length, items.length - pattern.post.length)), frame);
   const offset = items.length - pattern.post.length;
   for (const [index, item] of pattern.post.entries())
@@ -168,8 +168,8 @@ function* matchFind(
       }
     }
     if (!matched) continue;
-    bind(pattern.before, arr(items.slice(0, start)), frame);
-    bind(pattern.after, arr(items.slice(start + width)), frame);
+    if (pattern.before) bind(pattern.before, arr(items.slice(0, start)), frame);
+    if (pattern.after) bind(pattern.after, arr(items.slice(start + width)), frame);
     return true;
   }
   return yield* fail(function* () {

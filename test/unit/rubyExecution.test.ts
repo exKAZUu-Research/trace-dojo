@@ -7671,6 +7671,12 @@ test('DATA rejects inherited write methods with Ruby IOError', () => {
   });
 });
 
+test('anonymous pattern rest avoids materializing discarded arrays', () => {
+  expect(run('items=(1..20000).to_a;sum=0;100.times{items=>[head,*];sum+=head;items.shift};p sum')).toMatchObject({
+    stdout: '5050\n',
+  });
+});
+
 test('infinite Time offsets raise FloatDomainError', () => {
   expect(run('begin;Time.at(0).getlocal(Float::INFINITY);rescue=>e;p e.class,e.message;end')).toMatchObject({
     stdout: 'FloatDomainError\n"Infinity"\n',
