@@ -8994,6 +8994,14 @@ test('remove_method leaves undefined inherited methods hidden', () => {
   ).toMatchObject({ stdout: 'NameError\n"method \'f\' not defined in B"\nfalse\n' });
 });
 
+test('suspended enumerator inspections do not mark caller Structs recursive', () => {
+  expect(
+    run(
+      'class X;def inspect;if !$once;$once=true;$y << :pause;end;"X";end;end;s=Struct.new(:v).new(X.new);e=Enumerator.new{|y|$y=y;p s.inspect};p e.next;p s.inspect;begin;e.next;rescue StopIteration;end'
+    )
+  ).toMatchObject({ stdout: ':pause\n"#<struct v=X>"\n"#<struct v=X>"\n' });
+});
+
 test('anonymous instance singleton names use the anonymous class name', () => {
   expect(
     run('k=Class.new;o=k.new;class << o;def g = Nope;end;begin;o.g;rescue NameError=>e;puts e.message;end')

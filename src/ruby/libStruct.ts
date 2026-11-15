@@ -452,9 +452,20 @@ function* structuralHash(self: RObject): Gen<bigint> {
   }
 }
 
-const inspecting = new Set<RObject>();
+const inspectingContexts = new WeakMap<object, Set<RObject>>();
+
+function inspectingForContext(): Set<RObject> {
+  const context = rt().activeCursor ?? rt();
+  let inspecting = inspectingContexts.get(context);
+  if (!inspecting) {
+    inspecting = new Set<RObject>();
+    inspectingContexts.set(context, inspecting);
+  }
+  return inspecting;
+}
 
 function* inspectMembers(self: RObject, kind: 'struct' | 'data'): Gen {
+  const inspecting = inspectingForContext();
   const name = realClassOf(self).name;
   const head = name === undefined ? `#<${kind} ` : `#<${kind} ${name} `;
   if (inspecting.has(self)) return str(`${head.trimEnd()}:...>`);
