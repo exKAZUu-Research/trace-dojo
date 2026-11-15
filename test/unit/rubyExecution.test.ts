@@ -7664,6 +7664,14 @@ test('Struct and Data reject invalid first members before later conversions', ()
   });
 });
 
+test('qualified Module const_get only uses Object for the first segment', () => {
+  expect(
+    run('module N;end;module K;end;module M;end;begin;M.const_get("K::N");rescue=>e;p e.class,e.message;end')
+  ).toMatchObject({
+    stdout: 'NameError\n"uninitialized constant K::N"\n',
+  });
+});
+
 test('regexp split yields fields and captures to a block', () => {
   expect(run('r=[];p "aXbXc".split(/(X)/){|part|r<<part},r')).toMatchObject({
     stdout: '"aXbXc"\n["a", "X", "b", "X", "c"]\n',

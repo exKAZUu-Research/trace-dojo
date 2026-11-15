@@ -738,7 +738,7 @@ function nextValues(self: RObject): Value[] {
   runtime.heldSnapshots.push({ values: callerHeld, arrays: callerArrays });
   const row = runtime.currentRow;
   const callerTags = runtime.catchTags.splice(0);
-  if (cursor.frames[0]) cursor.frames[0].callRow = row;
+  if (cursor.frames[0]?.callRow !== undefined) cursor.frames[0].callRow = row;
   runtime.frames.push(...cursor.frames);
   runtime.held.push(...cursor.held);
   runtime.heldArrays.push(...cursor.heldArrays);

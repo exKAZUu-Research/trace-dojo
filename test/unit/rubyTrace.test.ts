@@ -907,6 +907,14 @@ test('resumed external iterators use the current call line', () => {
   expect(calls).toEqual([[8], [9]]);
 });
 
+test('Enumerator generator blocks keep a consistent call depth', () => {
+  const program = 'e=Enumerator.new do |y|\na=1\ny<<1\nb=2\ny<<2\nend\ne.next\ne.next';
+  const calls = traceProgram('ruby', program, program)
+    .traceItems.filter((item) => item.line === 2 || item.line === 4)
+    .map((item) => item.callLines);
+  expect(calls).toEqual([[], []]);
+});
+
 test('saved Method implementations retain their captured turtles', () => {
   const program =
     'def make;t=Turtle.new;c=Class.new;c.define_method(:go){t.forward};c.new.method(:go);end;m=make;m.receiver.class.remove_method(:go);x=1;m.call';

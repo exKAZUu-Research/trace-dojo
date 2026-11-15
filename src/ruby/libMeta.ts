@@ -629,12 +629,12 @@ def('Module', 'const_get', [1, 2], function* (self: RClass, args) {
   const parts = (absolute ? requested.slice(2) : requested).split('::');
   if (parts.some((part) => part.length === 0)) throw nameError(`wrong constant name ${requested}`, NIL, requested);
   let module: Value = absolute ? rt().c.Object : self;
-  for (const part of parts) {
+  for (const [index, part] of parts.entries()) {
     if (!(module instanceof RClass)) throw typeError(`${requested} does not refer to class/module`);
     const constant = yield* constantName(str(part));
     const value: Value | undefined = inherit
       ? (findConstInAncestors(module, constant) ??
-        (module.isModule ? rt().c.Object.constants.get(constant) : undefined))
+        (index === 0 && module.isModule ? rt().c.Object.constants.get(constant) : undefined))
       : module.constants.get(constant);
     if (value === undefined && inherit) constInModule(module, constant);
     if (value === undefined)
