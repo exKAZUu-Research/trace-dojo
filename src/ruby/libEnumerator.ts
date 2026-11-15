@@ -859,7 +859,11 @@ def('Enumerator::Yielder', ['<<'], 1, function* (self: RObject, [value]) {
 def('Enumerator::Yielder', ['yield', 'call'], [0, -1], function* (self: RObject, args) {
   return yield* callProc(consumerOf(self), args);
 });
-def('Enumerator::Yielder', 'to_proc', 0, (self: RObject) => nativeProc(-1, (args) => callProc(consumerOf(self), args)));
+def('Enumerator::Yielder', 'to_proc', 0, (self: RObject) => {
+  const proc = nativeProc(-1, (args) => callProc(consumerOf(self), args));
+  proc.captured = [self];
+  return proc;
+});
 sdef('Enumerator', 'produce', [0, 1], function* (_self, args, block) {
   const step = requireBlock(block);
   const runtime = rt();

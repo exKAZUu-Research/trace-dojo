@@ -5330,6 +5330,9 @@ test('Hash equality observes identity comparison for nonempty hashes', () => {
   expect(
     run('s="a";t="a";h={s=>1}.compare_by_identity;g={t=>1}.compare_by_identity;p h==g,h.eql?(g),g[s],h[t]')
   ).toMatchObject({ stdout: 'true\ntrue\nnil\nnil\n' });
+  expect(run('h={}.compare_by_identity;h["a"]=1;g={}.compare_by_identity;g["a"]=1;p h==g,h.eql?(g)')).toMatchObject({
+    stdout: 'false\nfalse\n',
+  });
   expect(
     run('a="a";b="a";h={}.compare_by_identity;h[a]=1;h[b]=2;g={}.compare_by_identity;g[a]=1;g[b]=2;p h==g,h.eql?(g)')
   ).toMatchObject({ stdout: 'true\ntrue\n' });
@@ -6703,6 +6706,20 @@ test('Struct and Data allocate nil-filled member storage', () => {
   });
 });
 
+test('Struct and Data initializers enforce their freeze lifecycle', () => {
+  expect(
+    run('S=Struct.new(:x);s=S.new(1).freeze;begin;s.send(:initialize,2);rescue=>e;p e.class;end;p s')
+  ).toMatchObject({
+    stdout: 'FrozenError\n#<struct S x=1>\n',
+  });
+  expect(run('D=Data.define(:x);d=D.new(1);begin;d.send(:initialize,x:2);rescue=>e;p e.class;end;p d')).toMatchObject({
+    stdout: 'FrozenError\n#<data D x=1>\n',
+  });
+  expect(run('D=Data.define(:x){def initialize(x:);@y=x;end};p D.new(x:1).frozen?')).toMatchObject({
+    stdout: 'false\n',
+  });
+});
+
 test('Struct dig returns nil for missing names and indexes', () => {
   expect(run('S=Struct.new(:a);p S.new(1).dig(:b),S.new(1).dig(2)')).toMatchObject({ stdout: 'nil\nnil\n' });
 });
@@ -6743,6 +6760,22 @@ test('direct Enumerator helpers initialize their blocks and guard allocate', () 
       'begin;Enumerator::Yielder.allocate.yield(1);rescue=>e;p e.class,e.message;end;begin;Enumerator::Generator.allocate.each{|x|};rescue=>e;p e.class,e.message;end'
     )
   ).toMatchObject({ stdout: 'ArgumentError\n"uninitialized yielder"\nArgumentError\n"uninitialized generator"\n' });
+});
+
+test('public_send rejects protected methods from their owner', () => {
+  expect(
+    run(
+      'class C;protected;def x;1;end;public;def y;public_send(:x);end;end;begin;C.new.y;rescue=>e;p e.class,e.message;end'
+    )
+  ).toMatchObject({ stdout: 'NoMethodError\n"protected method \'x\' called for an instance of C"\n' });
+});
+
+test('define_method preserves missing-call reasons through super', () => {
+  expect(
+    run(
+      'class A;define_method(:method_missing){|n,*a|super(n,*a)};def foo;zzz;end;end;begin;A.new.foo;rescue=>e;p e.class,e.message;end'
+    )
+  ).toMatchObject({ stdout: 'NameError\n"undefined local variable or method \'zzz\' for an instance of A"\n' });
 });
 
 test('allocated Regexp and Time reject native operations as Ruby errors', () => {
@@ -6851,6 +6884,10 @@ test('non-leading unparenthesized command arguments fail before execution', () =
   expect(run('p({a: 1})')).toMatchObject({ stdout: '{a: 1}\n' });
 });
 
+test('pattern guards reject void expressions before execution', () => {
+  expect(run('def f;case 1;in a if return;1;end;end;p f')).toMatchObject({ kind: 'compileError' });
+});
+
 test('large Integer quo retains finite Float results', () => {
   expect(run('p (10**400).quo(1e300),(10**400).quo(1e308)')).toMatchObject({
     stdout: '1.0e+100\n1.0e+92\n',
@@ -6925,6 +6962,7 @@ test('MatchData source snapshots preserve binary bytes and freezing', () => {
   expect(run('m=/./.match(255.chr);p m[0].bytes,m.string.bytes,m[0].encoding')).toMatchObject({
     stdout: '[255]\n[255]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
   });
+  expect(run('p /./.match(233.chr)')).toMatchObject({ stdout: '#<MatchData "\\xE9">\n' });
   expect(run('s=255.chr;p s.split(/x/).first.bytes,s.partition(/x/).first.bytes,s[/./].bytes')).toMatchObject({
     stdout: '[255]\n[255]\n[255]\n',
   });

@@ -260,9 +260,10 @@ export function sliceStringEncoding(self: RString, from: number, to = self.s.len
   slice.usAscii = self.usAscii;
   return slice;
 }
-def('String', 'inspect', 0, (self: RString) =>
-  str(self.rawBytes ? inspectRawBytes(self.rawBytes) : self.binary ? binaryInspect(self.s) : strInspect(self.s))
-);
+export function inspectStringEncoding(self: RString): string {
+  return self.rawBytes ? inspectRawBytes(self.rawBytes) : self.binary ? binaryInspect(self.s) : strInspect(self.s);
+}
+def('String', 'inspect', 0, (self: RString) => str(inspectStringEncoding(self)));
 def('String', 'dump', 0, (self: RString) => {
   const quoted = self.rawBytes
     ? inspectRawBytes(self.rawBytes)

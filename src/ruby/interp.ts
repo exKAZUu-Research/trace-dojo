@@ -1624,6 +1624,7 @@ function* runModuleBody(module: RClass, body: Body, frame: Frame): Gen {
 export interface CallOptions {
   /** Whether the call has no explicit receiver, which may call private methods. */
   fcall?: boolean;
+  publicOnly?: boolean;
   explicitSelf?: boolean;
   /** Whether the call is a bare name, which reports a missing method as a missing variable too. */
   vcall?: boolean;
@@ -1735,11 +1736,11 @@ export function* callMethod(
   if (!method) return yield* callMethodMissing(recv, name, args, keywords, block, options);
   if (recv instanceof RClass && !recv.isModule && name === 'module_function' && method.owner === rt().c.Module)
     methodMissing(recv, name, options);
-  if (method.visibility !== 'public' && !options.fcall && !options.explicitSelf) {
+  if (method.visibility !== 'public' && (options.publicOnly || (!options.fcall && !options.explicitSelf))) {
     if (method.visibility === 'private') {
       return yield* callMethodMissing(recv, name, args, keywords, block, options, 'private');
     }
-    if (method.visibility === 'protected' && !isA(rt().frame.self, method.owner)) {
+    if (method.visibility === 'protected' && (options.publicOnly || !isA(rt().frame.self, method.owner))) {
       return yield* callMethodMissing(recv, name, args, keywords, block, options, 'protected');
     }
   }
@@ -1845,7 +1846,15 @@ export function* invoke(
       return yield* invokeUser(method, body.def, body.cref, recv, args, keywords, block, used, missingReason);
     }
     case 'proc': {
-      return yield* callProc(body.proc, args, { keywords, block, self: recv, used, method, lambdaArgs: true });
+      return yield* callProc(body.proc, args, {
+        keywords,
+        block,
+        self: recv,
+        used,
+        method,
+        lambdaArgs: true,
+        missingReason,
+      });
     }
     case 'undefined': {
       throw noMethodError(`undefined method '${method.name}' for ${receiverDescription(recv)}`, recv, method.name);
@@ -2071,6 +2080,7 @@ export interface ProcCallOptions {
   definee?: RClass;
   /** The method a proc is the body of (`define_method`), which `super` in it continues. */
   method?: RMethod;
+  missingReason?: 'vcall' | 'private' | 'protected';
   /** Whether the arguments bind strictly, as a method's do, for a proc that is a method's body. */
   lambdaArgs?: boolean;
   definitionTarget?: RClass;
@@ -2112,6 +2122,7 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
       isLambda: proc.isLambda || options.lambdaArgs,
       block: options.method ? options.block : (options.block ?? outer.home.extra.block),
       method: options.method ?? outer.home.extra.method,
+      missingReason: options.missingReason,
       def: outer.home.extra.def,
       definee: options.definee ?? outer.extra.definee,
       definitionTarget: options.definitionTarget ?? outer.extra.definitionTarget,

@@ -1474,7 +1474,7 @@ export class Converter {
         const pattern = this.pattern(required(child.childForFieldName('pattern')));
         const guard = guardNode
           ? {
-              cond: this.expr(required(guardNode.childForFieldName('condition'))),
+              cond: this.valueExpr(required(guardNode.childForFieldName('condition'))),
               unless: guardNode.type === 'unless_guard',
             }
           : undefined;

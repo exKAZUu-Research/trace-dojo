@@ -263,10 +263,15 @@ function insertHashEntry(hash: RHash, base: string, slot: string, key: Value, va
 }
 
 function frozenCopy(key: RString): RString {
+  const id = `${key.binary}:${key.usAscii}:${key.s}`;
+  const cached = rt().frozenHashKeys.get(id);
+  if (cached) return cached;
   const copy = str(key.s);
   copy.binary = key.binary;
+  copy.usAscii = key.usAscii;
   copy.rawBytes = key.rawBytes ? Uint8Array.from(key.rawBytes) : undefined;
   copy.frozen = true;
+  rt().frozenHashKeys.set(id, copy);
   return copy;
 }
 

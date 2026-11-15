@@ -82,7 +82,7 @@ def(
   [1, -1],
   function* (self, args, block, keywords) {
     const name = yield* nameOf(args[0]);
-    return yield* callMethod(self, name, args.slice(1), keywords, block, { fcall: false });
+    return yield* callMethod(self, name, args.slice(1), keywords, block, { publicOnly: true });
   },
   { keywords: true }
 );

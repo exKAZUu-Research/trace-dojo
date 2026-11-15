@@ -855,3 +855,8 @@ test('saved Method implementations retain their captured turtles', () => {
     'def make;t=Turtle.new;c=Class.new;c.define_method(:go){t.forward};c.new.method(:go);end;m=make;m.receiver.class.remove_method(:go);x=1;m.call';
   expect(traceProgram('ruby', program, program).finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
 });
+
+test('Yielder Proc retains its consumer and captured turtles', () => {
+  const program = 'def make;t=Turtle.new;y=Enumerator::Yielder.new{|x|t.forward};y.to_proc;end;p=make;x=1;p.call(1)';
+  expect(traceProgram('ruby', program, program).finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
+});

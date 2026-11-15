@@ -647,23 +647,10 @@ export function* compareHashEntries(
 ): Gen<boolean> {
   if (a.map.size !== b.map.size) return false;
   if (a.map.size > 0 && a.byIdentity !== b.byIdentity) return false;
-  const distinctIdentityKeys =
-    a.byIdentity && ((yield* hasEquivalentIdentityKeys(a)) || (yield* hasEquivalentIdentityKeys(b)));
-  const paired = new Set<object>();
   a.iterating++;
   try {
     for (const entry of a.map.values()) {
-      let other: typeof entry | undefined;
-      if (a.byIdentity && !distinctIdentityKeys) {
-        for (const candidate of b.map.values()) {
-          if (paired.has(candidate)) continue;
-          if (entry.key === candidate.key || (yield* rEql(entry.key, candidate.key))) {
-            other = candidate;
-            paired.add(candidate);
-            break;
-          }
-        }
-      } else other = yield* hashGet(b, entry.key);
+      const other = yield* hashGet(b, entry.key);
       if (!other || (entry.value !== other.value && !((yield equals(entry.value, other.value)) as boolean)))
         return false;
     }
@@ -671,14 +658,6 @@ export function* compareHashEntries(
   } finally {
     a.iterating--;
   }
-}
-
-function* hasEquivalentIdentityKeys(hash: RHash): Gen<boolean> {
-  const keys = [...hash.map.values()].map((entry) => entry.key);
-  for (let first = 0; first < keys.length; first++)
-    for (let second = first + 1; second < keys.length; second++)
-      if (yield* rEql(keys[first], keys[second])) return true;
-  return false;
 }
 
 export function numericEquals(a: bigint | number, b: bigint | number): boolean {

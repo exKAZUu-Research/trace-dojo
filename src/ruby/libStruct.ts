@@ -212,6 +212,7 @@ def(
   [0, -1],
   // code-gauge-allow functionCognitiveComplexity 19 -- Ruby's method takes these argument forms, which the branches mirror.
   function* (self: RObject, args, _block, keywords) {
+    if (self.frozen) throw frozenError(self, yield* inspect(self));
     const { members, keywordInit } = layoutOf(self.cls);
     const values = valuesOf(self);
     if (keywordInit || (keywordInit === undefined && args.length === 0 && keywords)) {
@@ -374,7 +375,6 @@ function* constructData(self: RClass, args: Value[], block: RProc | undefined, k
   const object = allocateStruct(self);
   const initialize = self.findMethod('initialize');
   if (initialize) yield* invoke(initialize, object, [], hash.map.size > 0 ? hash : undefined, block, false);
-  object.frozen = true;
   return object;
 }
 
@@ -383,6 +383,7 @@ def(
   'initialize',
   [0, 0],
   function* (self: RObject, _args, _block, keywords) {
+    if (self.frozen) throw frozenError(self, yield* inspect(self));
     const { members } = layoutOf(self.cls);
     const values = valuesOf(self);
     const given = new Set<string>();
@@ -401,6 +402,7 @@ def(
       throw argumentError(`missing keyword${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`);
     if (unknown.length > 0)
       throw argumentError(`unknown keyword${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}`);
+    self.frozen = true;
     return NIL;
   },
   { visibility: 'private', keywords: true }

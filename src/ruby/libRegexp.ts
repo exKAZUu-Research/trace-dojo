@@ -18,7 +18,7 @@ import { argumentError, frozenError, indexError, rubyError, typeError } from './
 import { digest, hashDefault, hashGet, hashSet } from './hashes';
 import { callBlock, callMethod, type Gen } from './interp';
 import { makeEnumerator } from './libEnumerator';
-import { copyStringEncoding, setBytes, sliceStringEncoding } from './libString';
+import { copyStringEncoding, inspectStringEncoding, setBytes, sliceStringEncoding } from './libString';
 import {
   type NativeFn,
   NIL,
@@ -516,7 +516,13 @@ function unitIndex(text: string, char: number): number {
 }
 
 /** Runs a regexp from a character position, returning the match's state or undefined. */
-export function execAt(regexp: RObject, text: string, start: number, source?: RString): MatchState | undefined {
+export function execAt(
+  regexp: RObject,
+  text: string,
+  start: number,
+  source?: RString,
+  snapshot?: RString
+): MatchState | undefined {
   if (start < 0 || start > charIndex(text, text.length)) return undefined;
   const data = dataOf(regexp);
   if (data.ignoreCase && requiresMultiCharacterFold(data.source, text))
@@ -551,7 +557,7 @@ export function execAt(regexp: RObject, text: string, start: number, source?: RS
   }
   return {
     text,
-    snapshot: source ? copyStringEncoding(source) : undefined,
+    snapshot: snapshot ?? (source ? copyStringEncoding(source) : undefined),
     groups: [...result.indices],
     names,
     namedGroups,
@@ -651,11 +657,12 @@ export function matchGlobal(name: string): Value {
 /** All matches from the start of a text, advancing past empty matches as Ruby does. */
 function allMatches(regexp: RObject, source: RString): MatchState[] {
   const matches: MatchState[] = [];
+  const snapshot = copyStringEncoding(source);
   let start = 0;
   const text = source.s;
   const length = charIndex(text, text.length);
   while (start <= length) {
-    const state = execAt(regexp, text, start, source);
+    const state = execAt(regexp, text, start, source, snapshot);
     if (!state) break;
     matches.push(state);
     const [from, to] = state.groups[0] as readonly [number, number];
@@ -963,7 +970,9 @@ function matchDataInspect(match: RObject): string {
     return `#<MatchData: ${state.text.slice(range[0], range[1])}>`;
   }
   const parts = state.groups.map((range, group) => {
-    const shown = range ? strInspect(state.text.slice(range[0], range[1])) : 'nil';
+    const shown = range
+      ? inspectStringEncoding(sliceStringEncoding(state.snapshot ?? str(state.text), range[0], range[1]))
+      : 'nil';
     if (group === 0) return shown;
     const name = state.names.find((candidate) => state.namedGroups[candidate] === group);
     return `${name ?? group}:${shown}`;
