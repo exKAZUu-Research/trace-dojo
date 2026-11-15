@@ -1212,7 +1212,7 @@ function* streamLazyStep(
       }
       case 'select':
       case 'reject': {
-        return truthy(yield* callProc(step.block, yielded)) === (step.kind === 'select')
+        return truthy(yield* callProc(step.block, [item])) === (step.kind === 'select')
           ? yield* next(item, yielded)
           : undefined;
       }

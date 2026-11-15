@@ -7807,6 +7807,15 @@ test('Range size handles Rational ends and rejects non-successor begins', () => 
   ).toMatchObject({ stdout: 'TypeError\n"can\'t iterate from Rational"\nTypeError\n"can\'t iterate from Time"\n' });
 });
 
+test('Lazy select and reject predicates receive packed entries', () => {
+  expect(run('p [nil,1,1,2].lazy.with_index.select{|x|x}.force')).toMatchObject({
+    stdout: '[[nil, 0], [1, 1], [1, 2], [2, 3]]\n',
+  });
+  expect(run('p [nil,1].lazy.with_index.reject{|x|x.nil?}.force')).toMatchObject({
+    stdout: '[[nil, 0], [1, 1]]\n',
+  });
+});
+
 test('MatchData reuses frozen subject identity', () => {
   expect(
     run('s="aa".freeze;a=[];s.scan(/a/){a<<$~};p a[0].string.equal?(s),a[0].string.equal?(a[1].string)')
