@@ -8610,6 +8610,19 @@ test('lazy zip probes private respond_to? and iterates to_enum', () => {
   ).toMatchObject({
     stdout: '[]\n[]\n',
   });
+  expect(
+    run(
+      'class Cursor;def initialize;@n=0;end;def next;@n+=1;puts @n;raise StopIteration if @n==2;5;end;end;class A;def each;yield 2;end;def to_enum;Cursor.new;end;end;p [1,2,3].lazy.zip(A.new).force'
+    )
+  ).toMatchObject({
+    stdout: '1\n2\n3\n[[1, 5], [2, nil], [3, 5]]\n',
+  });
+});
+
+test('Float sum retains compensation across Rational values', () => {
+  expect(run('p [0.5,1/3r,1/7r].sum; p [9/11r,2/5r,9/2r,6/5r].sum(0.0)')).toMatchObject({
+    stdout: '0.9761904761904762\n6.918181818181818\n',
+  });
 });
 
 test('prepend merges shared included child chains', () => {

@@ -7,6 +7,7 @@ import {
   inspect,
   rEquals,
   spaceship,
+  toFloat,
   toIndex,
   toIndexExact,
   tryImplicitConversion,
@@ -24,6 +25,7 @@ import {
   receiverSize,
   sizedEnumerator,
 } from './libEnumerator';
+import { isRational } from './libRational';
 import {
   isRubyFloat,
   isRubyNumber,
@@ -372,8 +374,9 @@ export function* sum(self: Value, args: Value[], block: RProc | undefined): Gen 
         }
       }
       if (floating !== undefined) {
-        if (isRubyNumber(item)) {
-          const x = Number(item);
+        const rational = isRational(item);
+        if (isRubyNumber(item) || rational) {
+          const x = rational ? yield* toFloat(item) : Number(item);
           if (Number.isNaN(floating)) return;
           if (Number.isNaN(x)) floating = x;
           else if (!Number.isFinite(x))

@@ -1220,7 +1220,6 @@ interface LazyState {
   index: bigint;
   keys?: RHash;
   cursors?: Value[];
-  cursorDone?: boolean[];
   buffer?: Value[];
 }
 
@@ -1307,7 +1306,6 @@ function* streamLazyStep(
           }
           state.cursors = cursors;
         }
-        state.cursorDone ??= step.others.map(() => false);
         const tuple: Value[] = [item];
         const arrays = rt().heldArrays;
         arrays.push(tuple);
@@ -1318,17 +1316,12 @@ function* streamLazyStep(
               tuple.push(other.items[index] ?? NIL);
               continue;
             }
-            if (state.cursorDone[position]) {
-              tuple.push(NIL);
-              continue;
-            }
             const cursor = state.cursors?.[position];
             if (cursor === undefined) throw new Error('Missing lazy zip cursor');
             try {
               tuple.push(yield* callMethod(cursor, 'next', []));
             } catch (error) {
               if (!(error instanceof RubyError) || !isA(error.exception, rt().c.StopIteration)) throw error;
-              state.cursorDone[position] = true;
               tuple.push(NIL);
             }
           }
