@@ -7692,6 +7692,26 @@ test('standard streams expose Ruby default sync modes', () => {
   expect(run('p $stdout.sync,$stderr.sync,STDOUT.sync')).toMatchObject({ stdout: 'false\ntrue\nfalse\n' });
 });
 
+test('Time string offsets accept compact seconds and reject mixed separators', () => {
+  expect(
+    run('p Time.at(0).getlocal("+090001").utc_offset;begin;Time.at(0).getlocal("+0900:01");rescue=>e;p e.class;end')
+  ).toMatchObject({ stdout: '32401\nArgumentError\n' });
+});
+
+test('Time to_s omits second digits from numeric UTC offsets', () => {
+  expect(run('p Time.at(0).getlocal(1).to_s')).toMatchObject({ stdout: '"1970-01-01 00:00:01 +0000"\n' });
+});
+
+test('BasicObject exposes __send__ without Kernel', () => {
+  expect(run('class Proxy<BasicObject;def greet;42;end;end;::Kernel.p Proxy.new.__send__(:greet)')).toMatchObject({
+    stdout: '42\n',
+  });
+});
+
+test('defined? keeps its actual block context for implicit parameters', () => {
+  expect(run('p defined?(it),defined?(_1)')).toMatchObject({ stdout: 'nil\nnil\n' });
+});
+
 test('frozen DATA reports FrozenError before read-only write errors', () => {
   expect(
     run(

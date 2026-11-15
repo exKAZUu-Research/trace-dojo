@@ -25,6 +25,7 @@ import {
   invalidateMethodCaches,
   isRubyFloat,
   type MethodBody,
+  type NativeFn,
   NIL,
   RBasic,
   RClass,
@@ -76,16 +77,12 @@ function* classVariableName(value: Value): Gen<string> {
 
 // Calling by name ------------------------------------------------------------------------------------------------------
 
-def(
-  'Kernel',
-  ['send', '__send__'],
-  [1, -1],
-  function* (self, args, block, keywords) {
-    const name = yield* nameOf(args[0]);
-    return yield* callMethod(self, name, args.slice(1), keywords, block, { fcall: true });
-  },
-  { keywords: true }
-);
+const sendByName: NativeFn = function* (self, args, block, keywords) {
+  const name = yield* nameOf(args[0]);
+  return yield* callMethod(self, name, args.slice(1), keywords, block, { fcall: true });
+};
+def('Kernel', 'send', [1, -1], sendByName, { keywords: true });
+def('BasicObject', '__send__', [1, -1], sendByName, { keywords: true });
 def(
   'Kernel',
   'public_send',

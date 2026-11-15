@@ -1195,7 +1195,7 @@ export class Converter {
     const operandNode = required(node.childForFieldName('operand'));
     if (operator === 'defined?') {
       const context = this.ctx;
-      this.ctx = { ...context, inDef: true, inLoop: true, inBlock: true, inRescue: true, inClassBody: false };
+      this.ctx = { ...context, inDef: true, inLoop: true, inRescue: true, inClassBody: false };
       try {
         return { k: 'defined', e: this.expr(operandNode) };
       } finally {

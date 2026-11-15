@@ -167,7 +167,7 @@ function* parseOffset(value: Value): Gen<number> {
     const letter = text.codePointAt(0) as number;
     return (letter <= 73 ? letter - 64 : letter <= 77 ? letter - 65 : -(letter - 77)) * 3600;
   }
-  const match = /^([+-])(\d{2}):?(\d{2})(?::(\d{2}))?$/.exec(text);
+  const match = /^([+-])(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(text) ?? /^([+-])(\d{2})(\d{2})(\d{2})?$/.exec(text);
   if (!match || Number(match[3]) > 59 || Number(match[4] ?? 0) > 59)
     throw argumentError(`"+HH:MM", "-HH:MM", "UTC" or "A".."I","K".."Z" expected for utc_offset: ${text}`);
   const offset =
@@ -637,7 +637,7 @@ function timeText(data: TimeData, withFraction: boolean): string {
           : ` ${reducedNumerator}/${reducedDenominator}`;
     }
   }
-  return `${text} ${data.zone === 'utc' ? 'UTC' : offsetText(data.offset, false, true)}`;
+  return `${text} ${data.zone === 'utc' ? 'UTC' : offsetText(data.offset, false, withFraction)}`;
 }
 
 export function timeDisplayOf(value: RObject): string | undefined {

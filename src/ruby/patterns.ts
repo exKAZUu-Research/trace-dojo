@@ -1,5 +1,5 @@
 import type { Expr, LocalRef, Pattern } from './ast';
-import { caseEquals, inspect, rEquals, toSValue } from './conversions';
+import { caseEquals, inspect, toSValue } from './conversions';
 import { rubyError, typeError } from './errors';
 import { hashGet } from './hashes';
 import { callMethod, ev, type Gen } from './interp';
@@ -267,5 +267,3 @@ export function* noMatchingPattern(value: Value, single: boolean): Gen<unknown> 
     rt().held.length = mark;
   }
 }
-
-export { rEquals, truthy };
