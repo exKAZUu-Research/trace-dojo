@@ -14,7 +14,7 @@ import {
   tryImplicitConversion,
 } from './conversions';
 import { def, sdef, sundef } from './define';
-import { argumentError, frozenError, indexError, nameError, typeError } from './errors';
+import { argumentError, frozenError, indexError, nameError, rubyError, typeError } from './errors';
 import { digest, hashKeyOf, hashSet } from './hashes';
 import { addMethod, assertMutableClass, callBlock, callMethod, callProc, type Gen, invoke } from './interp';
 import { tryAry } from './libArray';
@@ -22,7 +22,17 @@ import { sizedEnumerator } from './libEnumerator';
 import { symbolNameOf } from './libMeta';
 import { NIL, RArray, RClass, type RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
-import { arr, newHash, range, realClassOf, singletonClassOf, str, stringBytes, truthy } from './values';
+import {
+  arr,
+  newHash,
+  range,
+  realClassOf,
+  singletonClassOf,
+  str,
+  stringBytes,
+  stringFromBytes,
+  truthy,
+} from './values';
 
 /** The members of a Struct or Data class, and whether its `new` takes keywords only. */
 interface Layout {
@@ -254,20 +264,36 @@ def(
     const next: Value[] = members.map(() => NIL);
     if (keywordInit || (keywordInit === undefined && args.length === 0 && keywords)) {
       if (args.length > 0) throw argumentError(`wrong number of arguments (given ${args.length}, expected 0)`);
-      const unknown: string[] = [];
+      const unknown: Uint8Array[] = [];
       for (const entry of keywords?.map.values() ?? []) {
-        const name =
-          entry.key instanceof RSymbol
-            ? entry.key.binary || entry.key.usAscii
-              ? symInspect(entry.key)
-              : entry.key.name
-            : yield* inspect(entry.key);
         const index = entry.key instanceof RSymbol ? memberSymbols.indexOf(entry.key) : -1;
-        if (index === -1) unknown.push(name);
+        if (index === -1)
+          unknown.push(
+            entry.key instanceof RSymbol
+              ? (entry.key.bytes ?? new TextEncoder().encode(entry.key.name))
+              : new TextEncoder().encode(yield* inspect(entry.key))
+          );
         else next[index] = entry.value;
       }
       values.splice(0, values.length, ...next);
-      if (unknown.length > 0) throw argumentError(`unknown keywords: ${unknown.join(', ')}`);
+      if (unknown.length > 0) {
+        const prefix = new TextEncoder().encode('unknown keywords: ');
+        const length =
+          prefix.length + unknown.reduce((size, bytes) => size + bytes.length, 0) + 2 * (unknown.length - 1);
+        rt().checkStringLength(length);
+        const message = new Uint8Array(length);
+        message.set(prefix);
+        let offset = prefix.length;
+        for (const [index, bytes] of unknown.entries()) {
+          if (index > 0) {
+            message.set([44, 32], offset);
+            offset += 2;
+          }
+          message.set(bytes, offset);
+          offset += bytes.length;
+        }
+        throw rubyError(rt().c.ArgumentError, stringFromBytes(message));
+      }
       return NIL;
     }
     const all = keywords ? [...args, keywords] : args;

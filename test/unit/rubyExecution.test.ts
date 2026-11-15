@@ -8872,6 +8872,22 @@ test('Data keyword errors preserve encoded Symbol names', () => {
   });
 });
 
+test('Struct unknown keyword errors retain encoded name bytes', () => {
+  expect(
+    run('a=233.chr.to_sym;begin;Struct.new(:x,keyword_init:true).new(**{a=>1});rescue=>e;p e.message.bytes.last;end')
+  ).toMatchObject({
+    stdout: '233\n',
+  });
+});
+
+test('anonymous instance singleton names use the anonymous class name', () => {
+  expect(
+    run('k=Class.new;o=k.new;class << o;def g = Nope;end;begin;o.g;rescue NameError=>e;puts e.message;end')
+  ).toMatchObject({
+    stdout: expect.stringMatching(/^uninitialized constant #<Class:#<#<Class:0x[\da-f]+>:0x[\da-f]+>>::Nope\n$/),
+  });
+});
+
 test('Time calendar microseconds replace fractions and respect field bounds', () => {
   expect(run('p Time.utc(1970,1,1,0,0,1.5,250000).to_f,Time.utc(1970,1,1,0,0,1.5,nil).to_f')).toMatchObject({
     stdout: '1.25\n1.5\n',

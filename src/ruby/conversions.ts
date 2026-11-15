@@ -487,7 +487,9 @@ export function className(cls: RClass): string {
   if (cls.isSingleton) {
     const attached = cls.attached as Value;
     const shown =
-      attached instanceof RClass ? className(attached) : `#<${realClassOf(attached).name}:${addressOf(attached)}>`;
+      attached instanceof RClass
+        ? className(attached)
+        : `#<${className(realClassOf(attached))}:${addressOf(attached)}>`;
     return `#<Class:${shown}>`;
   }
   return cls.name ?? anonymousClassName(cls);
