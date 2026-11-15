@@ -7176,5 +7176,12 @@ test('Regexp encoding and matching respect escaped characters and binary subject
   expect(run(String.raw`s="\xFF";begin;/./.match(s,99);rescue=>e;p e.class,e.message;end`)).toMatchObject({
     stdout: 'ArgumentError\n"invalid byte sequence in UTF-8"\n',
   });
+  expect(run(String.raw`s="\xFF";p /./.match(s,-99);begin;s.match(/./,99);rescue=>e;p e.class;end`)).toMatchObject({
+    stdout: 'nil\nArgumentError\n',
+  });
   expect(run('p String.new("a"*20000,encoding:"US-ASCII").scan(/./).size')).toMatchObject({ stdout: '20000\n' });
+});
+
+test('BasicObject receives block instance evaluation', () => {
+  expect(run('class B < BasicObject;def run;instance_eval{1};end;end;p B.new.run')).toMatchObject({ stdout: '1\n' });
 });

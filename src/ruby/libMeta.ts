@@ -414,12 +414,12 @@ function refuseStringEval(name: string, args: Value[], block: RProc | undefined)
   return block;
 }
 
-def('Kernel', 'instance_eval', [0, -1], function* (self, args, block) {
+def('BasicObject', 'instance_eval', [0, -1], function* (self, args, block) {
   const body = refuseStringEval('instance_eval', args, block);
   const definee = self instanceof RBasic && !isRubyFloat(self) ? singletonClassOf(self) : undefined;
   return yield* callProc(body, [self], { self, definee, forbidSingletonDefinition: !definee });
 });
-def('Kernel', 'instance_exec', [0, -1], function* (self, args, block) {
+def('BasicObject', 'instance_exec', [0, -1], function* (self, args, block) {
   const definee = self instanceof RBasic && !isRubyFloat(self) ? singletonClassOf(self) : undefined;
   return yield* callProc(requireBlock(block), args, { self, definee, forbidSingletonDefinition: !definee });
 });

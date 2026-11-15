@@ -866,14 +866,20 @@ function* subjectText(value: Value): Gen<RString | undefined> {
   return yield* toStrValue(value);
 }
 
+function matchAt(regexp: RObject, subject: RString, offset: number): MatchState | undefined {
+  const text = subject.s;
+  const start = offset < 0 ? offset + charIndex(text, text.length) : offset;
+  if (start < 0) return undefined;
+  if (!validStringEncoding(subject))
+    throw argumentError(`invalid byte sequence in ${subject.usAscii ? 'US-ASCII' : RUBY_UTF8}`);
+  return execAt(regexp, text, start, subject, undefined, true);
+}
+
 def('Regexp', 'match', [1, 2], function* (self: RObject, args, block) {
   const subject = yield* subjectText(args[0]);
   if (subject === undefined) return setLastMatch(undefined);
-  if (!validStringEncoding(subject))
-    throw argumentError(`invalid byte sequence in ${subject.usAscii ? 'US-ASCII' : RUBY_UTF8}`);
-  const text = subject.s;
   const start = args.length > 1 ? yield* toIndex(args[1]) : 0;
-  const match = setLastMatch(execAt(self, text, start < 0 ? start + charIndex(text, text.length) : start, subject));
+  const match = setLastMatch(matchAt(self, subject, start));
   if (block && match !== NIL) return yield* callBlock(block, [match]);
   return match;
 });
@@ -1463,9 +1469,7 @@ function* asRegexp(pattern: Value): Gen<RObject> {
 def('String', 'match', [1, 2], function* (self: RString, args, block) {
   const regexp = yield* asRegexp(args[0]);
   const start = args.length > 1 ? yield* toIndex(args[1]) : 0;
-  const match = setLastMatch(
-    execAt(regexp, self.s, start < 0 ? start + charIndex(self.s, self.s.length) : start, self)
-  );
+  const match = setLastMatch(matchAt(regexp, self, start));
   if (block && match !== NIL) return yield* callBlock(block, [match]);
   return match;
 });
