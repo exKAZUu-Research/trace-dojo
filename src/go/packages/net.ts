@@ -373,8 +373,7 @@ const members: Record<string, Entity> = {
 
 /**
  * The net package's addresses and errors. What dials, listens, resolves names, reads the machine's interfaces, or
- * converts to net/netip types (a package this environment does not provide) is unavailable, as are pipes, which need
- * goroutines.
+ * converts to net/netip types (a package this environment does not provide) is unavailable, as are pipes.
  */
 export const NET_PACKAGE = definePackage('net', members, [
   'Dial',

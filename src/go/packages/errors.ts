@@ -2,13 +2,15 @@ import type { Entity } from '../entities';
 import { equalityOf } from '../equality';
 import { newError } from '../errorValues';
 import { dynamicMethod } from '../methods';
-import { addMethod, definePackage, fn, namedType, nativeFunction } from '../native';
+import { addMethod, definePackage, fn, genericFunction, namedType, nativeFunction, typeParam } from '../native';
 import { runtimeErrorPanic } from '../runtimeErrors';
 import {
   ANY,
   BASIC,
   ERROR_TYPE,
+  funcType,
   identical,
+  type InterfaceType,
   isComparable,
   missingMethod,
   pointerTo,
@@ -18,6 +20,7 @@ import {
 } from '../types';
 import { Cell, copyValue, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 import { libraryVariable } from './io';
+import { zeroValue } from './reflection';
 import { receiverStruct, sliceValues } from './support';
 
 const ERROR_SLICE = sliceOf(ERROR_TYPE);
@@ -47,6 +50,14 @@ const members: Record<string, Entity> = {
   New: nativeFunction('New', fn([BASIC.string], [ERROR_TYPE]), ([text]) => newError(text as string)),
   Is: nativeFunction('Is', fn([ERROR_TYPE, ERROR_TYPE], [BASIC.bool]), ([error, target]) => is(error, target)),
   As: nativeFunction('As', fn([ERROR_TYPE, ANY], [BASIC.bool]), ([error, target]) => as(error, target)),
+  AsType: (() => {
+    const e = typeParam('E', underlying(ERROR_TYPE) as InterfaceType);
+    return genericFunction('AsType', [e], funcType([ERROR_TYPE], [e, BASIC.bool]), ([type]) => ([error]) => {
+      const target = new Pointer(new Cell(zeroValue(type)), 'v');
+      const ok = as(error, new Iface(pointerTo(type), target));
+      return [target.load(), ok];
+    });
+  })(),
   Unwrap: nativeFunction('Unwrap', fn([ERROR_TYPE], [ERROR_TYPE]), ([error]) => {
     if (error === undefined || unwrapKind((error as Iface).type) !== 'single') return;
     return dynamicMethod((error as Iface).type, 'Unwrap')?.((error as Iface).value, []) as Value;
@@ -60,8 +71,7 @@ const members: Record<string, Entity> = {
   }),
 };
 
-/** The errors package, without AsType, which a program can only call with explicit type arguments. */
-export const ERRORS_PACKAGE = definePackage('errors', members, ['AsType']);
+export const ERRORS_PACKAGE = definePackage('errors', members);
 
 function errorMessage(error: Value): string {
   const iface = error as Iface;

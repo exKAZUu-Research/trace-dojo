@@ -1,6 +1,9 @@
 import { expect, test } from 'vitest';
 
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
+import { useStillExecutionClock } from '../helpers/executionClock';
+
+useStillExecutionClock();
 
 test('input prompts and text reads consume one shared input stream through EOF', () => {
   const program = `import sys

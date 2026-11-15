@@ -174,7 +174,8 @@ export function appendValues(
   const newLength = length + values.length;
   if (values.length === 0) return slice;
   if (slice && newLength <= capacity) {
-    for (const [index, value] of values.entries()) slice.set(length + index, copyValue(value));
+    const copied = values.map(copyValue);
+    for (const [index, value] of copied.entries()) slice.set(length + index, value);
     return new Slice(slice.array, slice.offset, newLength, capacity);
   }
   const stackCapacity = stack && stackBufferCapacity(stack, length, newLength, element);

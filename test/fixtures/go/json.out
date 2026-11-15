@@ -1,0 +1,18 @@
+{"name":"太郎","age":20,"tags":["a","\u003cb\u003e"],"addr":{"city":"Tokyo"},"meta":{"a":2,"z":1},"Score":1e+21} <nil>
+{
+  "a": null,
+  "b": [
+    1,
+    2
+  ],
+  "c": 1.5
+}
+json: cannot unmarshal string into Go struct field User.age of type int
+{Name:Bob Age:31 Email: Tags:[] Addr:<nil> Meta:map[] private:0 Score:0} <nil>
+map[f:2.5 l:[true <nil>] n:1 o:map[k:v] s:str]
+float64 string []interface {} map[string]interface {}
+invalid character 'b' looking for beginning of object key string
+[1,"two",3,null,true,1e-7,"aGk="]
+<nil> [1 2 3]
+{"X":1,"Y":2}
+{"S":null}

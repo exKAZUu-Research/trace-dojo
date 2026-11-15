@@ -2,7 +2,7 @@
 import { utf8Encode } from '../literals';
 import { callDynamic } from '../methods';
 import { currentRuntime } from '../native';
-import { GoPanic } from '../runtime';
+import { GoPanic, type Suspending } from '../runtime';
 import { nilPointerPanic } from '../runtimeErrors';
 import { appendValues } from '../sliceOps';
 import { ANY, BASIC, ERROR_TYPE, sliceOf, type Type } from '../types';
@@ -78,6 +78,12 @@ export function appendBytes(slice: Value, bytes: string): Slice | undefined {
 export function callFunction(fn: Value, args: Value[]): Value | Value[] {
   if (!(fn instanceof GoFunc)) nilPointerPanic();
   return fn.call(args.map(copyValue));
+}
+
+export function* resumeFunction(fn: Value, args: Value[]): Suspending<Value | Value[]> {
+  if (!(fn instanceof GoFunc)) nilPointerPanic();
+  const copied = args.map(copyValue);
+  return fn.resume ? yield* fn.resume(copied) : fn.call(copied);
 }
 
 /** Calls a method of an interface value, as `sort.Sort` calls `Less`. */

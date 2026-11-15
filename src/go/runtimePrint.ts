@@ -5,7 +5,6 @@ import { Complex, Iface, type Slice, type Value } from './values';
 const address = (value: Value): string => (value === undefined ? '0x0' : addressOf(value as object));
 
 /** What the builtins `print` and `println` write for a value of a type, as Go's runtime prints it. */
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of type, as Go's runtime print functions.
 export function runtimePrint(value: Value, type: Type): string {
   const under = underlying(type);
   switch (under.kind) {
@@ -23,7 +22,7 @@ export function runtimePrint(value: Value, type: Type): string {
     }
     case 'slice': {
       const slice = value as Slice | undefined;
-      return `[${slice?.length ?? 0}/${slice?.capacity ?? 0}]${slice ? addressOf(slice.array) : '0x0'}`;
+      return `[${slice?.length ?? 0}/${slice?.capacity ?? 0}]${slice ? addressOf(slice) : '0x0'}`;
     }
     default: {
       return address(value);

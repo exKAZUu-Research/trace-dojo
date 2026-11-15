@@ -1,5 +1,6 @@
 import { type Constant, exactInteger, floatToRational, rationalToFloat, toRational } from './constants';
 import {
+  effectiveTerms,
   identical,
   integerBits,
   isBasic,
@@ -13,6 +14,7 @@ import {
   missingMethod,
   type Type,
   typeIdentityKey,
+  type TypeParamType,
   underlying,
 } from './types';
 import { Complex, type Value } from './values';
@@ -20,7 +22,7 @@ import { Complex, type Value } from './values';
 export type Representation = { constant: Constant } | { error: 'overflows' | 'truncated' | 'mismatch' };
 
 /** Converts a constant to a basic type, as an untyped constant converts implicitly or a typed one is checked. */
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of basic type.
+// code-gauge-allow functionNcss 45 -- Applies Go assignment rules in their precedence order with one diagnostic result.
 export function represent(constant: Constant, type: Type): Representation {
   const under = underlying(type);
   if (under.kind !== 'basic') return { error: 'mismatch' };
@@ -123,14 +125,13 @@ export type AssignFailure = { kind: 'mismatch' } | { kind: 'missingMethod'; miss
  * Whether a value of a typed type is assignable to another type, as the specification defines. Untyped constants
  * and nil are handled by the caller.
  */
+// code-gauge-allow functionCognitiveComplexity 26 -- Applies Go assignment rules in their precedence order with one diagnostic result.
 export function assignFailure(from: Type, to: Type): AssignFailure | undefined {
   if (identical(from, to)) return undefined;
   const fromUnder = underlying(from);
   const toUnder = underlying(to);
   if (from.kind === 'basic' && from.basic === 'untypedNil') {
-    return ['pointer', 'slice', 'map', 'func', 'interface'].includes(toUnder.kind) && to.kind !== 'typeParam'
-      ? undefined
-      : { kind: 'mismatch' };
+    return nilable(to) ? undefined : { kind: 'mismatch' };
   }
   if (from.kind === 'basic' && from.basic === 'untypedBool' && isBasic(to, 'bool') && to.kind !== 'typeParam')
     return undefined;
@@ -151,7 +152,29 @@ export function assignFailure(from: Type, to: Type): AssignFailure | undefined {
   ) {
     return undefined;
   }
+  // A bidirectional channel goes where a directional one of the same element type is wanted.
+  if (
+    fromUnder.kind === 'chan' &&
+    toUnder.kind === 'chan' &&
+    fromUnder.dir === 'both' &&
+    (!fromNamed || !toNamed) &&
+    identical(fromUnder.element, toUnder.element)
+  ) {
+    return undefined;
+  }
+  if (!fromNamed && to.kind === 'typeParam' && everyTerm(to, (term) => !assignFailure(from, term))) return undefined;
+  if (from.kind === 'typeParam' && !toNamed && everyTerm(from, (term) => !assignFailure(term, to))) return undefined;
   return { kind: 'mismatch' };
+}
+
+function nilable(type: Type): boolean {
+  if (type.kind === 'typeParam') return everyTerm(type, nilable);
+  return ['pointer', 'slice', 'map', 'chan', 'func', 'interface'].includes(underlying(type).kind);
+}
+
+function everyTerm(type: TypeParamType, predicate: (term: Type) => boolean): boolean {
+  const terms = effectiveTerms(type.constraint);
+  return terms !== undefined && terms.length > 0 && terms.every((term) => predicate(term.type));
 }
 
 /** Whether an explicit conversion `T(x)` from one non-constant type to another is allowed. */
@@ -163,11 +186,14 @@ export function convertible(from: Type, to: Type): boolean {
   if (from.kind === 'typeParam' || to.kind === 'typeParam') {
     return typeParamConvertible(from, to);
   }
-  if (identical(fromUnder, toUnder)) return true;
+  // A conversion ignores the tags of struct fields.
+  if (identical(fromUnder, toUnder, true)) return true;
   if (
+    from.kind === 'pointer' &&
+    to.kind === 'pointer' &&
     fromUnder.kind === 'pointer' &&
     toUnder.kind === 'pointer' &&
-    identical(underlying(fromUnder.element), underlying(toUnder.element))
+    identical(underlying(fromUnder.element), underlying(toUnder.element), true)
   ) {
     return true;
   }
@@ -189,7 +215,7 @@ export function convertible(from: Type, to: Type): boolean {
 
 /** The types a type parameter allows, or the type itself. */
 function termsOf(type: Type): Type[] {
-  return type.kind === 'typeParam' ? (type.constraint.typeSet?.terms?.map((term) => term.type) ?? []) : [type];
+  return type.kind === 'typeParam' ? (effectiveTerms(type.constraint)?.map((term) => term.type) ?? []) : [type];
 }
 
 function typeParamConvertible(from: Type, to: Type): boolean {

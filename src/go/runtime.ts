@@ -4,9 +4,11 @@ import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
+import type { Hoist, Part } from './compilerBase';
 import type { Type } from './types';
 import {
   Cell,
+  Channel,
   copyValue,
   GoArray,
   GoFunc,
@@ -20,7 +22,22 @@ import {
 } from './values';
 
 /** What a statement does next, when it does not simply complete. */
-export type Completion = { kind: 'break' } | { kind: 'continue' } | { kind: 'return' } | { kind: 'fallthrough' };
+export type Completion =
+  | { kind: 'break'; label?: string }
+  | { kind: 'continue'; label?: string }
+  | { kind: 'return' }
+  | { kind: 'fallthrough' }
+  | { kind: 'goto'; label: string };
+
+/** Whether a completion breaks out of the statement with the label, or the innermost one when it has none. */
+export function breaks(completion: Completion | void, label: string | undefined): boolean {
+  return completion?.kind === 'break' && (completion.label === undefined || completion.label === label);
+}
+
+/** Whether a completion continues the loop with the label, or the innermost one when it has none. */
+export function continues(completion: Completion | void, label: string | undefined): boolean {
+  return completion?.kind === 'continue' && (completion.label === undefined || completion.label === label);
+}
 
 export const BREAK: Completion = { kind: 'break' };
 export const CONTINUE: Completion = { kind: 'continue' };
@@ -30,7 +47,20 @@ export const FALLTHROUGH: Completion = { kind: 'fallthrough' };
 export type Eval = (frame: Frame) => Value;
 /** Evaluates a list of values, such as the arguments of a call or the results of one with several. */
 export type ListEval = (frame: Frame) => Value[];
-export type Exec = (frame: Frame) => Completion | undefined;
+/**
+ * Runs statements as a generator, which yields when its goroutine blocks (on a channel, a lock, or a sleep) and is
+ * resumed when the scheduler runs the goroutine again.
+ */
+// oxlint-disable-next-line typescript/no-invalid-void-type -- A generator that ends with a bare return returns void.
+export type Execution = Generator<Blocked, Completion | void, unknown>;
+export type Exec = (frame: Frame) => Execution;
+/** A computation that may block, such as a call of a function of the program. */
+export type Suspending<T> = Generator<Blocked, T, unknown>;
+
+/** What a blocked goroutine waits for, as Go names it in a goroutine's status (`chan receive`, `sleep`, ...). */
+export interface Blocked {
+  reason: string;
+}
 
 /** A local variable as the trace shows it. */
 export interface LocalInfo {
@@ -88,6 +118,7 @@ export const UNASSIGNED: unique symbol = Symbol('unassigned');
 
 interface DeferredCall {
   run: () => void;
+  resume?: () => Suspending<unknown>;
   /** The function and arguments, which garbage collection must follow until the call runs. */
   values: unknown[];
 }
@@ -188,10 +219,14 @@ export class Runtime implements TracedRuntime<Frame> {
   /** The standard streams and the files of the run. */
   readonly io: ProgramIO;
   readonly steps = new StepTracker();
-  readonly frames: Frame[] = [];
+  /** The frames of the running goroutine. */
+  frames: Frame[] = [];
+  /** Runs the goroutines when the program uses them. */
+  scheduler: { roots(): unknown[]; now: bigint; transferCallRoots(): void; finishMain(): void } | undefined;
   /** The package-level variables, which pointers may refer to. */
   globals: Cell[] = [];
   private allocated = 0;
+  nativeRoots: (readonly unknown[])[] = [];
   private readonly stdoutDecoder = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
   private readonly stderrDecoder = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
 
@@ -237,6 +272,7 @@ export class Runtime implements TracedRuntime<Frame> {
    * Calls a compiled function: binds the arguments, runs the body and then the deferred calls, and returns the
    * results, as one value, an array for several, or undefined for none.
    */
+  // code-gauge-allow functionParameterCount 7 -- Preserves the complete frame, defer and retained-value protocol at the runtime boundary.
   call(
     info: FunctionInfo,
     cells: readonly Cell[],
@@ -247,6 +283,20 @@ export class Runtime implements TracedRuntime<Frame> {
     onExit?: (frame: Frame) => void,
     stackBuffers?: StackBuffers
   ): Value | Value[] {
+    return runToEnd(this.resume(info, cells, args, callRow, deferredFor, onExit, stackBuffers));
+  }
+
+  /** Calls a compiled function as {@link call} does, yielding when its goroutine blocks. */
+  // code-gauge-allow functionParameterCount 7 -- Preserves the complete frame, defer and retained-value protocol at the runtime boundary.
+  *resume(
+    info: FunctionInfo,
+    cells: readonly Cell[],
+    args: Value[],
+    callRow: number | undefined,
+    deferredFor?: Frame,
+    onExit?: (frame: Frame) => void,
+    stackBuffers?: StackBuffers
+  ): Suspending<Value | Value[]> {
     this.spend();
     if (this.frames.length >= LIMITS.maxCallDepth) {
       throw new GoFatal('runtime: goroutine stack exceeds 1000000000-byte limit\nfatal error: stack overflow');
@@ -254,21 +304,24 @@ export class Runtime implements TracedRuntime<Frame> {
     const frame = new Frame(this, info, cells, callRow, deferredFor, stackBuffers);
     for (const [index, { slot, boxed }] of info.params.entries())
       frame.locals[slot] = boxed ? new Cell(args[index]) : args[index];
-    this.frames.push(frame);
+    const frames = this.frames;
+    frames.push(frame);
+    this.scheduler?.transferCallRoots();
     try {
-      this.runBody(frame);
+      yield* this.runBody(frame);
     } finally {
       onExit?.(frame);
-      this.frames.pop();
+      frames.pop();
     }
     if (info.isAtomic) this.steps.completeAtomicCall();
     return resultsOf(frame);
   }
 
-  private runBody(frame: Frame): void {
+  // code-gauge-allow functionCognitiveComplexity 17 -- Preserves the complete frame, defer and retained-value protocol at the runtime boundary.
+  private *runBody(frame: Frame): Suspending<void> {
     let panic: GoPanic | undefined;
     try {
-      frame.info.body(frame);
+      yield* frame.info.body(frame);
     } catch (error) {
       if (!(error instanceof GoPanic)) throw error;
       panic = error;
@@ -281,7 +334,8 @@ export class Runtime implements TracedRuntime<Frame> {
     while (frame.defers.length > 0) {
       const deferred = frame.defers.pop() as DeferredCall;
       try {
-        deferred.run();
+        if (deferred.resume) yield* deferred.resume();
+        else deferred.run();
       } catch (error) {
         if (!(error instanceof GoPanic)) throw error;
         // A panic in a deferred call replaces the one in progress, which Go reports as recovered or not.
@@ -302,24 +356,39 @@ export class Runtime implements TracedRuntime<Frame> {
     return panic.value;
   }
 
-  defer(frame: Frame, run: () => void, values: unknown[]): void {
-    (frame.defers ??= []).push({ run, values });
+  defer(frame: Frame, run: () => void, values: unknown[], resume?: () => Suspending<unknown>): void {
+    (frame.defers ??= []).push({ run, values, resume });
+  }
+
+  withRoots<T>(roots: readonly unknown[], run: () => T): T {
+    const scope = [...roots];
+    const scopes = this.nativeRoots;
+    scopes.push(scope);
+    try {
+      return run();
+    } finally {
+      scopes.pop();
+    }
+  }
+
+  *resumeWithRoots<T>(roots: readonly unknown[], run: Suspending<T>): Suspending<T> {
+    const scope = [...roots];
+    const scopes = this.nativeRoots;
+    scopes.push(scope);
+    try {
+      return yield* run;
+    } finally {
+      scopes.pop();
+    }
   }
 
   /** Removes the turtles that no variable, temporary value, or pending deferred call reaches. */
   collectGarbage(): void {
     const reached = new Set<unknown>();
-    const stack: unknown[] = [];
+    const stack: unknown[] = [...this.nativeRoots];
     for (const cell of this.globals) stack.push(cell);
-    for (const frame of this.frames) {
-      for (const local of frame.locals) stack.push(local);
-      for (const cell of frame.cells) stack.push(cell);
-      for (const temporary of frame.temporaries) stack.push(temporary);
-      for (const deferred of frame.defers ?? []) {
-        for (const value of deferred.values) stack.push(value);
-      }
-      if (frame.panicking) stack.push(frame.panicking.value);
-    }
+    if (this.scheduler) stack.push(...this.scheduler.roots());
+    else pushFrameRoots(this.frames, stack);
     const turtles = new Set<unknown>();
     while (stack.length > 0) {
       const item = stack.pop();
@@ -331,14 +400,39 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 }
 
+/** Pushes what the frames of a goroutine keep alive, for garbage collection. */
+export function pushFrameRoots(frames: readonly Frame[], stack: unknown[]): void {
+  for (const frame of frames) {
+    stack.push(...frame.locals, ...frame.cells, ...frame.temporaries);
+    for (const deferred of frame.defers ?? []) stack.push(...deferred.values);
+    if (frame.panicking) stack.push(frame.panicking.value);
+  }
+}
+
+/**
+ * Runs a computation that may block to its end, where the caller cannot wait, such as a callback that a library
+ * function calls. Blocking there is a limit of this interpreter, which it reports instead of behaving differently.
+ */
+export function runToEnd<T>(computation: Suspending<T>): T {
+  const next = computation.next();
+  if (next.done) return next.value;
+  computation.return(undefined as T);
+  throw new GoFatal(
+    'ライブラリの関数から呼ばれた関数の中で、チャネルやロックを待つことは、この採点環境では使えません。'
+  );
+}
+
 function rawBytes(bytes: string): Uint8Array {
   const array = new Uint8Array(bytes.length);
   for (let index = 0; index < bytes.length; index++) array[index] = bytes.charCodeAt(index) & 0xff;
   return array;
 }
 
+// code-gauge-allow functionCognitiveComplexity 26 -- Preserves the complete frame, defer and retained-value protocol at the runtime boundary.
+// code-gauge-allow functionNcss 46 -- Preserves the complete frame, defer and retained-value protocol at the runtime boundary.
 function pushChildren(item: object, stack: unknown[], turtles: Set<unknown>): void {
-  if (item instanceof Cell) stack.push(item.v);
+  if (item instanceof Frame) pushFrameRoots([item], stack);
+  else if (item instanceof Cell) stack.push(item.v);
   else if (item instanceof Pointer) stack.push(item.base);
   else if (Array.isArray(item)) {
     for (const entry of item as unknown[]) stack.push(entry);
@@ -347,15 +441,18 @@ function pushChildren(item: object, stack: unknown[], turtles: Set<unknown>): vo
     const native = item.native;
     if (native?.turtle) turtles.add(native.turtle);
     else if (native) {
+      if (native.roots) stack.push(...native.roots());
       for (const value of Object.values(native)) stack.push(value);
     }
   } else if (item instanceof GoArray) stack.push(item.elements);
   else if (item instanceof Slice) stack.push(item.array);
-  else if (item instanceof GoMap) {
-    for (const entry of item.entries.values()) stack.push(entry.key, entry.value);
-  } else if (item instanceof GoFunc) {
-    for (const captured of item.captured) stack.push(captured);
-  } else if (item instanceof Iface) stack.push(item.value);
+  else if (item instanceof GoMap) for (const entry of item.entries.values()) stack.push(entry.key, entry.value);
+  else if (item instanceof GoFunc) stack.push(...item.captured);
+  else if (item instanceof Iface) stack.push(item.value);
+  else if (item instanceof Channel) {
+    stack.push(...item.buffer);
+    for (const sender of item.senders) stack.push((sender as { value: unknown }).value);
+  }
 }
 
 function resultsOf(frame: Frame): Value | Value[] {
@@ -405,4 +502,31 @@ export function writeLocal(frame: Frame, slot: number, value: Value): void {
   if (current instanceof Cell) current.v = writeInPlace(current.v, value);
   else if (current === UNASSIGNED) frame.locals[slot] = copyValue(value);
   else frame.locals[slot] = writeInPlace(current, value);
+}
+
+/** Runs the computations that may block of a statement, keeping their results in their hidden slots. */
+export function* runHoists(frame: Frame, hoists: readonly Hoist[]): Suspending<void> {
+  let completed = false;
+  try {
+    for (const hoist of hoists) frame.locals[hoist.slot] = (yield* hoist.run(frame)) as Value;
+    completed = true;
+  } finally {
+    if (!completed) clearHoists(frame, hoists);
+  }
+}
+
+/** Lets go of the results of the computations that may block once their statement used them. */
+export function clearHoists(frame: Frame, hoists: readonly Hoist[]): void {
+  for (const hoist of hoists) frame.locals[hoist.slot] = undefined;
+}
+
+/** Evaluates an expression after the computations that may block in it. */
+export function* evaluatePart(frame: Frame, part: Part): Suspending<Value> {
+  const hoists = part.hoists as Hoist[];
+  yield* runHoists(frame, hoists);
+  try {
+    return part.value(frame);
+  } finally {
+    clearHoists(frame, hoists);
+  }
 }

@@ -177,6 +177,16 @@ test.each([
   ['a type mismatch', 'package main\n\nfunc main() {\n\tvar s string = 1\n\t_ = s\n}', 4],
   ['an untyped constant that overflows', 'package main\n\nfunc main() {\n\tvar b byte = 256\n\t_ = b\n}', 4],
   ['an unused import', 'package main\n\nimport "strings"\n\nfunc main() {}', 3],
+  ['an unused label', 'package main\n\nfunc main() {\nL:\n\tfor {\n\t}\n}', 4],
+  ['a goto into a block', 'package main\n\nfunc main() {\n\tgoto L\n\t{\n\tL:\n\t}\n}', 4],
+  ['a goto over a declaration', 'package main\n\nfunc main() {\n\tgoto L\n\tx := 1\n\t_ = x\nL:\n}', 4],
+  [
+    'an interface with a type set used as a type',
+    'package main\n\ntype N interface{ ~int }\n\nfunc main() {\n\tvar x N\n\t_ = x\n}',
+    6,
+  ],
+  ['a ... that is not the final parameter', 'package main\n\nfunc f(a ...int, b int) {}\n\nfunc main() {}', 3],
+  ['a send on a receive-only channel', 'package main\n\nfunc main() {\n\tvar c <-chan int\n\tc <- 1\n}', 5],
 ])('%s is a compile error where Go reports it', (_name, program, line) => {
   const execution = executeProgram('go', program);
   expect(execution).toMatchObject({ kind: 'compileError' });
@@ -217,11 +227,14 @@ test('a wrong verb prints its value with the width and precision written', () =>
   expect(executeProgram('go', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
-test('syntax of later stages is rejected as unavailable', () => {
-  const execution = executeProgram('go', goMain('\tch := make(chan int)\n\tfmt.Println(ch)'));
+test('packages that learners do not meet are rejected as unavailable', () => {
+  const execution = executeProgram(
+    'go',
+    'package main\n\nimport "reflect"\n\nfunc main() {\n\t_ = reflect.TypeOf(1)\n}'
+  );
   expect(execution).toMatchObject({
     kind: 'compileError',
-    diagnostics: [{ message: 'チャネルは、この採点環境では使えません。' }],
+    diagnostics: [{ message: 'パッケージ reflectは、この採点環境では使えません。' }],
   });
 });
 

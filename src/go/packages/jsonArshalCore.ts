@@ -204,6 +204,7 @@ export interface MarshalOptions {
 }
 
 export interface UnmarshalOptions {
+  stringify?: boolean;
   useNumber: boolean;
   rejectUnknownMembers: boolean;
 }

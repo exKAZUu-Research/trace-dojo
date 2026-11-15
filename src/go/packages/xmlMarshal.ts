@@ -1,14 +1,15 @@
-// code-gauge-allow-file fileNcss 512 -- One port of Go's encoding package source, whose parts share its state and helpers.
+// code-gauge-allow-file fileNcss 516 -- Transcribes Go XML encoding cases with shared encoder state, namespace handling and errors.
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { formatFloat } from '../floatFormat';
 import { decodeRune, RUNE_ERROR } from '../literals';
 import { currentRuntime } from '../native';
+import { lookupStructTag } from '../structTags';
 import { type Field, isExported, pointerTo, type Type, typeIdentityKey, typeString, underlying } from '../types';
 import { type GoArray, GoStruct, type Iface, Pointer, Slice, type Value } from '../values';
 import { ERR_SHORT_WRITE } from './io';
 import { TEXT_MARSHALER } from './jsonArshalCore';
 import { bitsOf, callValueMethod, fieldName, implementsInterface, newVariable, structOf, typeName } from './reflection';
-import { byteSlice, bytesOf, callMethod } from './support';
+import { byteSlice, bytesOf, callMethod, stringPanic } from './support';
 import { typeKind } from './templateReflect';
 import { isInCharacterRange, isName, XML_URL } from './xmlDecoder';
 import {
@@ -48,6 +49,8 @@ export function getTypeInfo(type: Type): TypeInfo | { err: Value } {
   const struct = structOf(type);
   if (struct && type !== NAME) {
     for (const [i, field] of struct.fields.entries()) {
+      if ((isExported(field.name) || field.embedded) && field.tag && lookupStructTag(field.tag, 'xml') !== undefined)
+        stringPanic('encoding/xml の構造体タグは、この採点環境では使えません。');
       const err = addField(type, info, i, field);
       if (err !== undefined) return { err };
     }

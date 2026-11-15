@@ -1,0 +1,11 @@
+abcd <nil>
+hi hi
+tee
+hello
+5 <nil>
+2 EOF
+3 <nil> abc
+0 short buffer
+xy 0
+<nil>
+*io.LimitedReader io.nopCloserWriterTo

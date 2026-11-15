@@ -441,5 +441,5 @@ const members: Record<string, Entity> = {
   }),
 };
 
-/** The io package, without the pipes, which need goroutines. */
+/** The io package, without pipes. */
 export const IO_PACKAGE = definePackage('io', members, ['Pipe', 'PipeReader', 'PipeWriter']);

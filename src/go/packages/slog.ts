@@ -1,9 +1,9 @@
 import type { Entity, FuncEntity } from '../entities';
 import { newError } from '../errorValues';
-import { addMethod, currentRuntime, definePackage, fn, namedType, opaqueType, typeEntity } from '../native';
+import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunc, opaqueType, typeEntity } from '../native';
 import type { FunctionInfo, Runtime } from '../runtime';
 import { BASIC, ERROR_TYPE, pointerTo, sliceOf, type Type } from '../types';
-import { Cell, GoFunc, GoStruct, Iface, type NativeState, Pointer, type Value } from '../values';
+import { Cell, GoStruct, Iface, type NativeState, Pointer, type Value } from '../values';
 import { ERRORS_PACKAGE } from './errors';
 import { FMT_PACKAGE } from './fmt';
 import { IO_WRITER, libraryVariable } from './io';
@@ -549,7 +549,7 @@ function functionWithRow(
   impl: (args: Value[], callRow: number | undefined) => Value | Value[],
   variadic = false
 ): FuncEntity {
-  const value = new GoFunc((args, callRow) => impl(args, callRow));
+  const value = nativeFunc((args, callRow) => impl(args, callRow));
   return {
     kind: 'func',
     name,

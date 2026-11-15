@@ -1,0 +1,3 @@
+3s true
+recovered: send on closed channel
+again: close of nil channel

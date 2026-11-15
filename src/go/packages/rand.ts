@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 450 -- Keeps the reference random generators and their standard-library adapters together.
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { LIMITS } from '../../interpreter/limits';
 import type { Entity } from '../entities';
@@ -50,7 +51,7 @@ const MASK63 = (1n << 63n) - 1n;
 const INT32_MAX = 2_147_483_647n;
 
 /** math/rand's additive lagged Fibonacci generator (rngSource), transcribed from Go's rng.go. */
-class LaggedFibonacci {
+export class LaggedFibonacci {
   private readonly vec: bigint[] = Array.from({ length: 607 }, () => 0n);
   private tap = 0;
   private feed = 607 - 273;
