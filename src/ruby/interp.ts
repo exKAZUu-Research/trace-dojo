@@ -214,7 +214,8 @@ export function* ev(e: Expr, frame: Frame): Gen {
       return RSymbol.of(e.name);
     }
     case 'dsym': {
-      return RSymbol.of(yield* interpolate(e.parts, frame));
+      const name = yield* interpolateString(e.parts, frame);
+      return RSymbol.of(name.s, name.binary);
     }
     case 'array': {
       return arr(yield* evalList(e.items, frame));
@@ -487,15 +488,6 @@ function* atCallRow<T>(row: number, action: () => Gen<T>): Gen<T> {
   } finally {
     runtime.currentRow = saved;
   }
-}
-
-function* interpolate(parts: StrPart[], frame: Frame): Gen<string> {
-  let text = '';
-  for (const part of parts) {
-    text += typeof part === 'string' ? part : 'text' in part ? part.text : yield* toS(yield* ev(part, frame));
-  }
-  if (text.length > 1_000_000) throw rubyError(rt().c.NoMemoryError, 'failed to allocate memory');
-  return text;
 }
 
 function* interpolateString(parts: StrPart[], frame: Frame): Gen<RString> {

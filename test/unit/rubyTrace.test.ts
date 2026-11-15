@@ -34,6 +34,18 @@ test('reflective calls preserve discarded statement trace steps', () => {
   }
 });
 
+test('dynamic and unbound method adapters preserve discarded trace steps', () => {
+  const prefix =
+    '$t=Turtle.new\nclass C\n def respond_to_missing?(*);true;end\n def method_missing(*)\n  $t.forward\n end\nend\nc=C.new\n';
+  for (const call of ['c.walk', 'c.method(:walk).call', 'C.instance_method(:method_missing).bind_call(c,:walk)']) {
+    const items = rubyTrace(prefix + call);
+    expect(
+      items.some(({ line, turtles }) => line === 5 && turtles[0]?.y === 1),
+      call
+    ).toBe(true);
+  }
+});
+
 test('cursor resumption roots the caller exception', () => {
   const source =
     'it=Enumerator.new{|y|x=1;y<<0}\nat_exit{it.next;$!.instance_variable_get(:@t).forward}\nraise RuntimeError.new.tap{|e|e.instance_variable_set(:@t,Turtle.new)}\n';

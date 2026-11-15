@@ -8562,6 +8562,13 @@ test('binary Symbol regexp subjects retain their bytes and encoding', () => {
   expect(run('begin;p /ÿ/.match?(255.chr.to_sym);rescue=>e;p e.class;end')).toMatchObject({
     stdout: 'Encoding::CompatibilityError\n',
   });
+  expect(
+    run(
+      's=255.chr;v=:"#{s}";p v.encoding,/./.match(v).string.bytes;v=%I[#{s}][0];p v.encoding,/./.match(v).string.bytes'
+    )
+  ).toMatchObject({
+    stdout: '#<Encoding:BINARY (ASCII-8BIT)>\n[255]\n#<Encoding:BINARY (ASCII-8BIT)>\n[255]\n',
+  });
 });
 
 test('lazy zip probes private respond_to? and iterates to_enum', () => {

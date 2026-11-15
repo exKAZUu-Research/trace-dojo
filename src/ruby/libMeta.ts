@@ -165,8 +165,8 @@ function* findForMethodObject(self: Value, name: string, publicOnly = false): Ge
       visibility: 'public',
       body: {
         kind: 'native',
-        fn: (recv, args, block, keywords) =>
-          callMethod(recv, 'method_missing', [sym(name), ...args], keywords, block, { fcall: true }),
+        fn: (recv, args, block, keywords, used) =>
+          callMethod(recv, 'method_missing', [sym(name), ...args], keywords, block, { fcall: true, used }),
         min: 0,
         max: -1,
         takesKeywords: true,
@@ -553,8 +553,8 @@ def(
   'UnboundMethod',
   'bind_call',
   [1, -1],
-  function* (self: RObject, [recv, ...args], block, keywords) {
-    return yield* invoke(validBoundMethod(self, recv), recv, args, keywords, block, true);
+  function* (self: RObject, [recv, ...args], block, keywords, used) {
+    return yield* invoke(validBoundMethod(self, recv), recv, args, keywords, block, used);
   },
   { keywords: true }
 );
