@@ -34,6 +34,7 @@ import {
 import { curry, makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { writeStderrLine } from './libIo';
 import { kernelFloat, kernelInteger } from './libNumeric';
+import { copyStructLayout } from './libStruct';
 import {
   invalidateMethodCaches,
   NIL,
@@ -253,6 +254,7 @@ function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
 
 function copyClass(source: RClass): RClass {
   const copy = new RClass(source.cls, undefined, source.superclass, source.isModule, source.isSingleton);
+  copyStructLayout(source, copy);
   copy.instanceKind = source.instanceKind;
   copy.isUserDefined = source.isUserDefined;
   for (const included of source.includes) copy.includes.push(included);
@@ -783,7 +785,9 @@ function* symbolName(value: Value): Gen<string> {
 function* defineAttributes(self: RClass, names: Value[], reader: boolean, writer: boolean): Gen<RArray> {
   const frame = rt().frame;
   const visibility =
-    (frame.kind === 'class' && frame.self === self) || frame.extra.definitionTarget === self
+    (frame.kind === 'class' && frame.self === self) ||
+    frame.extra.definitionTarget === self ||
+    frame.extra.definee === self
       ? frame.defaultVisibility
       : 'public';
   const defined: Value[] = [];
@@ -822,7 +826,11 @@ def('Module', 'attr_accessor', [0, -1], function* (self: RClass, args) {
 function* setVisibility(self: RClass, args: Value[], visibility: Visibility): Gen {
   const frame = rt().frame;
   if (args.length === 0) {
-    if ((frame.kind === 'class' && frame.self === self) || frame.extra.definitionTarget === self) {
+    if (
+      (frame.kind === 'class' && frame.self === self) ||
+      frame.extra.definitionTarget === self ||
+      frame.extra.definee === self
+    ) {
       frame.defaultVisibility = visibility;
       frame.moduleFunction = false;
     } else if (frame.kind === 'main' && self === rt().c.Object) {
@@ -859,7 +867,7 @@ def(
   function* (self: RClass, args) {
     const frame = rt().frame;
     if (args.length === 0) {
-      if (frame.kind === 'class' && frame.self === self) {
+      if ((frame.kind === 'class' && frame.self === self) || frame.extra.definee === self) {
         frame.moduleFunction = true;
         frame.defaultVisibility = 'private';
       }

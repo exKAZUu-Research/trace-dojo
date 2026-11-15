@@ -61,6 +61,7 @@ export interface EnumeratorSource {
   generatorAddress?: string;
   iterate?: (block: RProc) => Gen;
   held: () => Value[];
+  copy?: () => EnumeratorSource;
 }
 
 export function makeEnumerator(
@@ -99,6 +100,10 @@ export function makeEnumerator(
         ...(this.sizeBlock ? [this.sizeBlock] : []),
         ...cursorRoots(this.cursor),
       ];
+    },
+    copy() {
+      if (this.cursor?.started) throw typeError("can't copy execution context");
+      return { ...this, args: [...this.args], cursor: undefined };
     },
   };
   enumerator.data = source;
@@ -308,7 +313,8 @@ export function customEnumerator(recv: Value, method: string, held: Value[], ite
 
 function sourceOf(self: RObject): EnumeratorSource {
   if (self.cls === rt().c['Enumerator::Lazy']) {
-    const data = self.data as LazyData;
+    const data = self.data as LazyData | undefined;
+    if (!data) throw argumentError('uninitialized enumerator');
     data.enumerator ??= {
       recv: self,
       method: 'each',
@@ -319,7 +325,9 @@ function sourceOf(self: RObject): EnumeratorSource {
     };
     return data.enumerator;
   }
-  return self.data as EnumeratorSource;
+  const source = self.data as EnumeratorSource | undefined;
+  if (!source) throw argumentError('uninitialized enumerator');
+  return source;
 }
 
 /** Runs the enumerator's method, passing each yielded value (several packed into an array) to `visit`. */
@@ -694,6 +702,8 @@ function nextValues(self: RObject): Value[] {
   const frameBase = runtime.frames.length;
   const heldBase = runtime.held.length;
   const arraysBase = runtime.heldArrays.length;
+  const callerHeld = [...runtime.held];
+  const callerArrays = [...runtime.heldArrays];
   const row = runtime.currentRow;
   const callerTags = runtime.catchTags.splice(0);
   runtime.frames.push(...cursor.frames);
@@ -714,6 +724,8 @@ function nextValues(self: RObject): Value[] {
     failed = true;
     throw error;
   } finally {
+    runtime.held.splice(0, heldBase, ...callerHeld);
+    runtime.heldArrays.splice(0, arraysBase, ...callerArrays);
     cursor.frames = runtime.frames.splice(frameBase);
     cursor.held = runtime.held.splice(heldBase);
     cursor.heldArrays = runtime.heldArrays.splice(arraysBase);
@@ -909,6 +921,7 @@ interface LazyData {
   steps: LazyStep[];
   enumerator?: EnumeratorSource;
   held(): Value[];
+  copy(): LazyData;
 }
 
 function* lazySize(self: RObject): Gen {
@@ -935,6 +948,8 @@ function nextLazySize(size: Value, step: LazyStep): Value {
     return (size + BigInt(step.count - 1)) / BigInt(step.count);
   if (step.kind === 'each_cons' && typeof size === 'bigint')
     return size >= BigInt(step.count) ? size - BigInt(step.count) + 1n : 0n;
+  if ((step.kind === 'each_slice' || step.kind === 'each_cons') && isRubyFloat(size) && Number(size) === Infinity)
+    return size;
   return ['map', 'with_index', 'zip', 'each_entry', 'each_with_object'].includes(step.kind) ? size : NIL;
 }
 
@@ -951,6 +966,10 @@ function makeLazy(source: Value, steps: LazyStep[]): RObject {
         ...this.steps.flatMap((step) => ('pattern' in step ? [step.pattern] : 'others' in step ? step.others : [])),
         ...cursorRoots(this.enumerator?.cursor),
       ];
+    },
+    copy() {
+      if (this.enumerator?.cursor?.started) throw typeError("can't copy execution context");
+      return { ...this, steps: [...this.steps], enumerator: undefined };
     },
   };
   lazy.data = data;
@@ -999,7 +1018,7 @@ def('Enumerator::Lazy', 'uniq', 0, (self: RObject, _args, block) => {
 });
 for (const kind of ['each_slice', 'each_cons'] as const) {
   def('Enumerator::Lazy', kind, 1, function* (self: RObject, [count], block) {
-    const size = Number(yield* toInt(count));
+    const size = (yield* toIndexExact(count)).number;
     if (size <= 0) throw argumentError('invalid slice size');
     const data = self.data as LazyData;
     const lazy = makeLazy(data.source, [...data.steps, { kind, count: size, args: [count] }]);
@@ -1031,16 +1050,28 @@ for (const name of ['slice_when', 'slice_before', 'slice_after', 'chunk', 'chunk
   });
 def('Enumerator::Lazy', 'zip', [0, -1], function* (self: RObject, others, block) {
   if (block) return yield* zipCollections(self, others, block);
-  for (const other of others)
-    if (!(other instanceof RArray) && !respondsTo(other, 'each', true))
-      throw typeError(`wrong argument type ${realClassOf(other).name} (must respond to :each)`);
+  const converted: Value[] = [];
+  for (const other of others) {
+    if (other instanceof RArray) {
+      converted.push(other);
+      continue;
+    }
+    const array = yield* tryImplicitConversion(other, 'to_ary');
+    if (array instanceof RArray) converted.push(array);
+    else if (array !== undefined && array !== NIL)
+      throw typeError(
+        `can't convert ${realClassOf(other).name} to Array (${realClassOf(other).name}#to_ary gives ${realClassOf(array).name})`
+      );
+    else if (respondsTo(other, 'each', true)) converted.push(other);
+    else throw typeError(`wrong argument type ${realClassOf(other).name} (must respond to :each)`);
+  }
   const data = self.data as LazyData;
-  return makeLazy(data.source, [...data.steps, { kind: 'zip', others, args: others }]);
+  return makeLazy(data.source, [...data.steps, { kind: 'zip', others: converted, args: others }]);
 });
 for (const kind of ['take', 'drop'] as const) {
   def('Enumerator::Lazy', kind, 1, function* (self: RObject, [count]) {
     const data = self.data as LazyData;
-    const n = Number(yield* toInt(count));
+    const n = (yield* toIndexExact(count)).number;
     if (n < 0) throw argumentError(`attempt to ${kind} negative size`);
     return makeLazy(data.source, [...data.steps, { kind, count: n, args: [count] }]);
   });
@@ -1300,7 +1331,7 @@ def('Enumerator::Lazy', ['force', 'to_a'], [0, -1], function* (self: RObject, ar
 });
 def('Enumerator::Lazy', 'first', [0, 1], function* (self: RObject, args) {
   const items: Value[] = [];
-  const count = args.length > 0 ? Number(yield* toInt(args[0])) : 1;
+  const count = args.length > 0 ? (yield* toIndexExact(args[0])).number : 1;
   if (count < 0) throw argumentError('attempt to take negative size');
   rt().heldArrays.push(items);
   try {

@@ -122,7 +122,11 @@ def('File', 'read', 0, (self: RObject) => {
   state.position = state.text.length;
   return str(text);
 });
-def('File', 'gets', 0, (self: RObject) => readLine(self));
+def('File', 'gets', 0, (self: RObject) => {
+  const line = readLine(self);
+  rt().frame.home.scope.vars.set('$_', line);
+  return line;
+});
 
 function readLine(self: RObject): Value {
   const state = dataState(self);

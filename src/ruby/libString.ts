@@ -220,12 +220,13 @@ def(
               : entry.value instanceof RObject && entry.value.cls === rt().c.Encoding
                 ? (entry.value.data as string)
                 : yield* toStr(entry.value);
-          if (encoding === 'ASCII-8BIT' || encoding === 'BINARY')
+          const normalizedEncoding = encoding.toUpperCase();
+          if (normalizedEncoding === 'ASCII-8BIT' || normalizedEncoding === 'BINARY')
             setBytes(self, sourceBytes ?? stringBytes(self), true);
           // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby spells the encoding name UTF-8.
-          else if (encoding === 'UTF-8' || encoding === 'US-ASCII') {
+          else if (normalizedEncoding === 'UTF-8' || normalizedEncoding === 'US-ASCII') {
             setBytes(self, sourceBytes ?? stringBytes(self), false);
-            self.usAscii = encoding === 'US-ASCII';
+            self.usAscii = normalizedEncoding === 'US-ASCII';
           } else throw new UnsupportedFeatureError(`String.new の文字コード ${encoding}`);
         } else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
       }

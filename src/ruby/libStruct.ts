@@ -20,6 +20,11 @@ interface Layout {
 
 const layouts = new WeakMap<RClass, Layout>();
 
+export function copyStructLayout(source: RClass, copy: RClass): void {
+  const layout = layouts.get(source);
+  if (layout) layouts.set(copy, { ...layout, members: [...layout.members] });
+}
+
 function layoutOf(cls: RClass): Layout {
   for (let current: RClass | undefined = cls; current; current = current.superclass) {
     const layout = layouts.get(current);
@@ -286,6 +291,8 @@ def('Struct', 'dig', [1, -1], function* (self: RObject, args) {
   if (index < 0 || index >= members.length) return NIL;
   const value = valuesOf(self)[index];
   if (args.length === 1 || value === NIL) return value;
+  if (!value || !realClassOf(value).findMethod('dig'))
+    throw typeError(`${realClassOf(value).name} does not have #dig method`);
   return yield* callMethod(value, 'dig', args.slice(1));
 });
 def('Struct', '==', 1, (self: RObject, [other]) => sameValues(self, other, rEquals));

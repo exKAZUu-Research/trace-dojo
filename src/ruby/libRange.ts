@@ -130,7 +130,7 @@ def('Range', 'reverse_each', 0, function* (self: RRange, _args, block) {
     rt().heldArrays.pop();
   }
 });
-def('Range', ['to_a', 'to_ary', 'entries'], 0, function* (self: RRange) {
+def('Range', ['to_a', 'entries'], 0, function* (self: RRange) {
   if (self.end === NIL) throw rangeError('cannot convert endless range to an array');
   return arr(yield* toArray(self));
 });

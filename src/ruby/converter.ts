@@ -71,6 +71,7 @@ class LocalScope {
       scope;
       scope = scope.kind === 'block' || scope.kind === 'end' ? scope.parent : undefined
     ) {
+      if (scope.kind === 'block' && scope.set.has(name)) return -1;
       if (scope.kind === 'method' && scope.set.has(name)) return depth;
       depth++;
     }
@@ -325,7 +326,7 @@ export class Converter {
       case 'conditional': {
         return {
           k: 'if',
-          cond: this.valueExpr(required(node.childForFieldName('condition'))),
+          cond: this.conditionExpr(required(node.childForFieldName('condition'))),
           consequent: [this.statement(required(node.childForFieldName('consequence')), use)],
           alternative: [this.statement(required(node.childForFieldName('alternative')), use)],
         };
@@ -338,14 +339,14 @@ export class Converter {
       case 'if_modifier':
       case 'unless_modifier': {
         const body = [this.statement(required(node.childForFieldName('body')), use)];
-        const cond = this.valueExpr(required(node.childForFieldName('condition')));
+        const cond = this.conditionExpr(required(node.childForFieldName('condition')));
         return node.type === 'if_modifier'
           ? { k: 'if', cond, consequent: body }
           : { k: 'if', cond, consequent: [], alternative: body };
       }
       case 'while':
       case 'until': {
-        const cond = this.valueExpr(required(node.childForFieldName('condition')));
+        const cond = this.conditionExpr(required(node.childForFieldName('condition')));
         const body = this.loopBody(() => this.bodyOf(node.childForFieldName('body'), 0));
         return { k: 'while', cond, body, until: node.type === 'until', doWhile: false };
       }
@@ -357,7 +358,7 @@ export class Converter {
         const body = this.loopBody(() =>
           flattenBegin ? this.body(namedChildren(bodyNode), 0) : [this.statement(bodyNode, 0)]
         );
-        const cond = this.valueExpr(required(node.childForFieldName('condition')));
+        const cond = this.conditionExpr(required(node.childForFieldName('condition')));
         return { k: 'while', cond, body, until: node.type === 'until_modifier', doWhile };
       }
       case 'for': {
@@ -483,9 +484,16 @@ export class Converter {
         return { k: 'array', items };
       }
       case 'delimited_symbol': {
+        const text = node.text;
+        const raw = text.startsWith('%s') ? decodePercentLiteral(text.slice(3, -1), text[2], false) : undefined;
         return {
           k: 'dsym',
-          parts: node.text.startsWith(":'") ? [decodeSingleQuoted(node.text.slice(2, -1))] : this.stringParts(node),
+          parts:
+            raw !== undefined
+              ? [raw]
+              : text.startsWith(":'")
+                ? [decodeSingleQuoted(text.slice(2, -1))]
+                : this.stringParts(node),
         };
       }
       case 'rational': {
@@ -549,6 +557,8 @@ export class Converter {
       return { k: 'lvar', name, depth: 0 };
     }
     if (depth >= 0) return { k: 'lvar', name, depth };
+    if (name === 'it' && this.ctx.inBlock && this.ctx.scope.kind !== 'end' && this.ctx.implicit === undefined)
+      this.fail(node, '通常の引数を持つブロックでは it を使えません。');
     if (this.ctx.implicit && (name === 'it' || /^_[1-9]$/.test(name))) {
       this.ctx.implicit.add(name);
       this.ctx.scope.declareOwn(name);
@@ -850,6 +860,23 @@ export class Converter {
     return value;
   }
 
+  private conditionExpr(node: Node): Expr {
+    let form = node;
+    while (form.type === 'parenthesized_statements' && namedChildren(form).length === 1) form = namedChildren(form)[0];
+    if (form.type === 'range') {
+      const begin = form.childForFieldName('begin');
+      const end = form.childForFieldName('end');
+      if (
+        !begin ||
+        !end ||
+        !['integer', 'float', 'string', 'simple_symbol'].includes(begin.type) ||
+        !['integer', 'float', 'string', 'simple_symbol'].includes(end.type)
+      )
+        this.unsupported(form, 'フリップフロップ');
+    }
+    return this.valueExpr(node);
+  }
+
   /**
    * Rejects a value that leaves the expression or has none, such as `x = return` or `p((5 => x))`, as Ruby's "void
    * value expression" does.
@@ -1146,7 +1173,7 @@ export class Converter {
   // Control structures ------------------------------------------------------------------------------------------------
 
   private ifNode(node: Node, use: Use): Expr {
-    const cond = this.valueExpr(required(node.childForFieldName('condition')));
+    const cond = this.conditionExpr(required(node.childForFieldName('condition')));
     const consequence = this.bodyOf(node.childForFieldName('consequence'), use);
     const alternativeNode = node.childForFieldName('alternative');
     let alternative: Body | undefined;
@@ -1510,8 +1537,7 @@ export class Converter {
     return { subject: { k: 'matchPattern', value: subject, pattern, raise: false }, testedBy: first };
   }
 
-  private bindTarget(node: Node): LocalRef | undefined {
-    const name = node.text;
+  private bindTarget(node: Node, name = node.text): LocalRef | undefined {
     this.checkReservedBinding(node, name);
     if (this.alternativeDepth > 0 && !name.startsWith('_')) this.fail(node, '選択パターンでは変数を束縛できません。');
     if (!name.startsWith('_') && this.patternBindings.has(name))
@@ -1647,6 +1673,7 @@ export class Converter {
   private hashPattern(node: Node): Pattern {
     const cls = this.patternClass(node);
     const pairs: { key: string; pattern?: Pattern; target?: LocalRef }[] = [];
+    const keys = new Set<string>();
     let rest: LocalRef | 'nil' | 'any' | undefined;
     for (const child of namedChildren(node)) {
       if (child.type === 'comment' || child.id === node.childForFieldName('class')?.id) continue;
@@ -1669,9 +1696,15 @@ export class Converter {
           : keyNode.text.startsWith("'")
             ? decodeSingleQuoted(rawKey)
             : this.decode(keyNode, rawKey).text;
+      if (keys.has(key)) this.fail(keyNode, 'パターンのキーが重複しています。');
+      keys.add(key);
       const valueNode = child.childForFieldName('value');
       if (valueNode) pairs.push({ key, pattern: this.pattern(valueNode) });
-      else pairs.push({ key, target: this.bindTarget(keyNode) });
+      else {
+        if (!/^[\p{ID_Start}_][\p{ID_Continue}_]*$/u.test(key))
+          this.fail(keyNode, 'パターンのキーを変数名として使えません。');
+        pairs.push({ key, target: this.bindTarget(keyNode, key) });
+      }
     }
     return { k: 'hash', cls, pairs, rest };
   }

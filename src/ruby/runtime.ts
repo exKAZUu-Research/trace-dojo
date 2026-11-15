@@ -79,6 +79,7 @@ export function rootValues(frame: Frame, values: readonly Value[]): void {
 
 export interface FrameExtra {
   definitionTarget?: RClass;
+  forbidSingletonDefinition?: boolean;
   /** The running method. */
   method?: RMethod;
   missingReason?: 'vcall' | 'private' | 'protected';

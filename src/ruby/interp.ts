@@ -1464,6 +1464,8 @@ function* defineMethod(def: MethodDef, singleton: Expr | undefined, frame: Frame
     const object = yield* ev(singleton, frame);
     if (!(object instanceof RBasic)) throw typeError(`can't define singleton`);
     owner = singletonClassOf(object);
+  } else if (frame.extra.forbidSingletonDefinition) {
+    throw typeError("can't define singleton");
   } else if (frame.kind === 'class') {
     owner = frame.self as RClass;
     visibility = frame.defaultVisibility;
@@ -2084,6 +2086,7 @@ export interface ProcCallOptions {
   /** Whether the arguments bind strictly, as a method's do, for a proc that is a method's body. */
   lambdaArgs?: boolean;
   definitionTarget?: RClass;
+  forbidSingletonDefinition?: boolean;
 }
 
 /** Calls a block or proc with arguments, binding them as a block (or a lambda) does. */
@@ -2126,6 +2129,7 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
       def: outer.home.extra.def,
       definee: options.definee ?? outer.extra.definee,
       definitionTarget: options.definitionTarget ?? outer.extra.definitionTarget,
+      forbidSingletonDefinition: options.forbidSingletonDefinition ?? outer.extra.forbidSingletonDefinition,
     }
   );
   if (options.block) frame.extra.block = options.block;

@@ -850,6 +850,13 @@ test('suspended Lazy buffers leave the board when their enumerator is released',
   expect(traceProgram('ruby', nested, nested).finalTurtles).toEqual([]);
 });
 
+test('an exhausted external iterator preserves its lazy caller roots', () => {
+  for (const grouping of ['each_cons', 'each_slice']) {
+    const program = `e=(1..3).lazy.each_cons(2);e.next;a=(1..3).lazy.map{Turtle.new}.${grouping}(2).map{|ts|loop{e.next};ts}.force;a.each{|ts|ts.each{|t|t.forward}}`;
+    expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(3);
+  }
+});
+
 test('saved Method implementations retain their captured turtles', () => {
   const program =
     'def make;t=Turtle.new;c=Class.new;c.define_method(:go){t.forward};c.new.method(:go);end;m=make;m.receiver.class.remove_method(:go);x=1;m.call';

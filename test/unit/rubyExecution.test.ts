@@ -6710,6 +6710,12 @@ test('Struct and Data allocate nil-filled member storage', () => {
   });
 });
 
+test('copied Struct and Data classes retain their member layouts', () => {
+  expect(run('S=Struct.new(:x);p S.dup.new(1);D=Data.define(:x);p D.dup.new(1)')).toMatchObject({
+    stdout: '#<struct x=1>\n#<data x=1>\n',
+  });
+});
+
 test('Data subclasses do not inherit the define factory', () => {
   expect(run('D=Data.define(:a);p D.respond_to?(:define);begin;D.define(:x);rescue=>e;p e.class;end')).toMatchObject({
     stdout: 'false\nNoMethodError\n',
@@ -6732,6 +6738,9 @@ test('Struct and Data initializers enforce their freeze lifecycle', () => {
 
 test('Struct dig returns nil for missing names and indexes', () => {
   expect(run('S=Struct.new(:a);p S.new(1).dig(:b),S.new(1).dig(2)')).toMatchObject({ stdout: 'nil\nnil\n' });
+  expect(run('S=Struct.new(:x);begin;S.new(1).dig(:x,:y);rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'TypeError\n"Integer does not have #dig method"\n',
+  });
 });
 
 test('String.new retains UTF-8 bytes when choosing binary encoding', () => {
@@ -6743,6 +6752,9 @@ test('String.new retains UTF-8 bytes when choosing binary encoding', () => {
   });
   expect(run('s=String.new("é",encoding:Encoding::US_ASCII);p s.valid_encoding?,s.bytes')).toMatchObject({
     stdout: 'false\n[195, 169]\n',
+  });
+  expect(run('p String.new("a",encoding:"utf-8").encoding,String.new("a",encoding:"binary").encoding')).toMatchObject({
+    stdout: '#<Encoding:UTF-8>\n#<Encoding:BINARY (ASCII-8BIT)>\n',
   });
 });
 
@@ -6770,6 +6782,34 @@ test('direct Enumerator helpers initialize their blocks and guard allocate', () 
       'begin;Enumerator::Yielder.allocate.yield(1);rescue=>e;p e.class,e.message;end;begin;Enumerator::Generator.allocate.each{|x|};rescue=>e;p e.class,e.message;end'
     )
   ).toMatchObject({ stdout: 'ArgumentError\n"uninitialized yielder"\nArgumentError\n"uninitialized generator"\n' });
+});
+
+test('copied Enumerators start independently and reject active cursor copies', () => {
+  expect(run('e=(1..3).each;f=e.dup;p e.next,f.next')).toMatchObject({ stdout: '1\n1\n' });
+  expect(run('e=(1..3).each;e.next;begin;e.dup;rescue=>x;p x.class,x.message;end')).toMatchObject({
+    stdout: 'TypeError\n"can\'t copy execution context"\n',
+  });
+});
+
+test('Lazy zip converts array-like arguments before iteration', () => {
+  expect(run('class A;def to_ary;[3,4];end;end;p [1,2].lazy.zip(A.new).force')).toMatchObject({
+    stdout: '[[1, 3], [2, 4]]\n',
+  });
+});
+
+test('Lazy counts reject oversized integers and keep infinite grouped sizes', () => {
+  expect(run('p [1].lazy.take(10**400).size')).toMatchObject({
+    uncaughtException: expect.stringContaining('bignum too big to convert into'),
+  });
+  expect(run('p (1..).lazy.each_slice(2).size,(1..).lazy.each_cons(2).size')).toMatchObject({
+    stdout: 'Infinity\nInfinity\n',
+  });
+});
+
+test('uninitialized Enumerator raises a Ruby error', () => {
+  expect(run('begin;Enumerator.allocate.next;rescue=>e;p e.class,e.message;end')).toMatchObject({
+    stdout: 'ArgumentError\n"uninitialized enumerator"\n',
+  });
 });
 
 test('public_send rejects protected methods from their owner', () => {
@@ -6915,6 +6955,26 @@ test('non-leading unparenthesized command arguments fail before execution', () =
   expect(run('p({a: 1})')).toMatchObject({ stdout: '{a: 1}\n' });
 });
 
+test('shadowed anonymous forwarding fails before execution', () => {
+  expect(run('def f(*);[1].each{|*|p(*)};end;f(3)')).toMatchObject({ kind: 'compileError' });
+});
+
+test('class_eval visibility and numeric instance_eval definitions follow their receiver', () => {
+  expect(run('C=Class.new;C.class_eval{private;define_method(:x){1}};p C.private_method_defined?(:x)')).toMatchObject({
+    stdout: 'true\n',
+  });
+  expect(run('2.5.instance_exec{def f;1;end}')).toMatchObject({
+    uncaughtException: "can't define singleton (TypeError)",
+  });
+});
+
+test('condition flip-flops fail explicitly when unavailable', () => {
+  expect(run('(1..10).each{|k|puts k if (k==3)..(k==5)}')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: 'フリップフロップは、この採点環境では使えません。' }],
+  });
+});
+
 test('pattern guards reject void expressions before execution', () => {
   expect(run('def f;case 1;in a if return;1;end;end;p f')).toMatchObject({ kind: 'compileError' });
 });
@@ -6930,6 +6990,18 @@ test('strftime distinguishes unknown from truncated directives', () => {
     run('begin; Time.utc(2024).strftime("100%"); rescue => e; p e.message; end; p Time.utc(2024).strftime("%Q")')
   ).toMatchObject({
     stdout: '"invalid format: 100%"\n"%Q"\n',
+  });
+});
+
+test('strftime zero padding keeps negative signs at the front', () => {
+  expect(run('p Time.at(-1).utc.strftime("%5s|%010s|%_5s")')).toMatchObject({
+    stdout: '"-0001|-000000001|   -1"\n',
+  });
+});
+
+test('DATA gets updates and clears the caller last line', () => {
+  expect(run('$_="before";p DATA.gets;p $_;p DATA.gets;p $_\n__END__\na\n')).toMatchObject({
+    stdout: '"a\\n"\n"a\\n"\nnil\nnil\n',
   });
 });
 
@@ -7092,4 +7164,17 @@ test('DATA inspect identifies its script file', () => {
   expect(run('p DATA.to_s\n__END__\ntext')).toMatchObject({
     stdout: expect.stringMatching(/^"#<File:0x[\da-f]+>"\n$/),
   });
+});
+
+test('Regexp encoding and matching respect escaped characters and binary subjects', () => {
+  expect(run(String.raw`p /\u00E9/.encoding;begin;/\u00E9/.match?(233.chr);rescue=>e;p e.class;end`)).toMatchObject({
+    stdout: '#<Encoding:UTF-8>\nEncoding::CompatibilityError\n',
+  });
+  expect(run('a=Regexp.new("é");b=Regexp.new(233.chr);p a==b,a.eql?(b),{a=>1}[b]')).toMatchObject({
+    stdout: 'false\nfalse\nnil\n',
+  });
+  expect(run(String.raw`s="\xFF";begin;/./.match(s,99);rescue=>e;p e.class,e.message;end`)).toMatchObject({
+    stdout: 'ArgumentError\n"invalid byte sequence in UTF-8"\n',
+  });
+  expect(run('p String.new("a"*20000,encoding:"US-ASCII").scan(/./).size')).toMatchObject({ stdout: '20000\n' });
 });

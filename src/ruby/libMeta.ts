@@ -22,6 +22,7 @@ import {
 import { procArity } from './libObject';
 import {
   invalidateMethodCaches,
+  isRubyFloat,
   type MethodBody,
   NIL,
   RBasic,
@@ -415,12 +416,12 @@ function refuseStringEval(name: string, args: Value[], block: RProc | undefined)
 
 def('Kernel', 'instance_eval', [0, -1], function* (self, args, block) {
   const body = refuseStringEval('instance_eval', args, block);
-  const definee = self instanceof RBasic ? singletonClassOf(self) : undefined;
-  return yield* callProc(body, [self], { self, definee });
+  const definee = self instanceof RBasic && !isRubyFloat(self) ? singletonClassOf(self) : undefined;
+  return yield* callProc(body, [self], { self, definee, forbidSingletonDefinition: !definee });
 });
 def('Kernel', 'instance_exec', [0, -1], function* (self, args, block) {
-  const definee = self instanceof RBasic ? singletonClassOf(self) : undefined;
-  return yield* callProc(requireBlock(block), args, { self, definee });
+  const definee = self instanceof RBasic && !isRubyFloat(self) ? singletonClassOf(self) : undefined;
+  return yield* callProc(requireBlock(block), args, { self, definee, forbidSingletonDefinition: !definee });
 });
 def('Module', ['class_eval', 'module_eval'], [0, -1], function* (self: RClass, args, block) {
   return yield* callProc(refuseStringEval('class_eval', args, block), [self], { self, definee: self });
@@ -460,7 +461,10 @@ function* defineMethodFrom(
 def('Module', 'define_method', [1, 2], function* (self: RClass, args, block) {
   const frame = rt().frame;
   const visibility =
-    frame.kind === 'class' && frame.self === self && frame.defaultVisibility === 'private' ? 'private' : 'public';
+    ((frame.kind === 'class' && frame.self === self) || frame.extra.definee === self) &&
+    frame.defaultVisibility === 'private'
+      ? 'private'
+      : 'public';
   return yield* defineMethodFrom(self, args, block, visibility);
 });
 def('Module', 'alias_method', 2, function* (self: RClass, [newName, oldName]) {

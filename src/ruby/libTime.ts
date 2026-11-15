@@ -385,8 +385,13 @@ function strftime(data: TimeData, format: string): string {
       }
       let result = caseText(rendered, directive, flags);
       if (directive === 'z') return finish(padOffset(result, width, flag));
-      if (width !== undefined && flag !== '-')
-        result = result.padStart(width, flag === '_' || (flag !== '0' && defaultSpacePad(directive)) ? ' ' : '0');
+      if (width !== undefined && flag !== '-') {
+        const pad = flag === '_' || (flag !== '0' && defaultSpacePad(directive)) ? ' ' : '0';
+        result =
+          pad === '0' && result.startsWith('-')
+            ? `-${result.slice(1).padStart(width - 1, '0')}`
+            : result.padStart(width, pad);
+      }
       return finish(result);
     }
   );

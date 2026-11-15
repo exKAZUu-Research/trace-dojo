@@ -41,9 +41,12 @@ import {
 import { type Frame, rt, UnsupportedFeatureError } from './runtime';
 import { arr, newHash, realClassOf, str, stringBytes, stringFromBytes, sym, truthy } from './values';
 
+// oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby exposes the canonical name with a hyphen and uppercase letters.
+const RUBY_UTF8 = 'UTF-8';
+
 export interface RegexpData {
   source: string;
-  encoding: 'US-ASCII' | 'utf8' | 'BINARY (ASCII-8BIT)';
+  encoding: 'US-ASCII' | typeof RUBY_UTF8 | 'BINARY (ASCII-8BIT)';
   ignoreCase: boolean;
   multiline: boolean;
   extended: boolean;
@@ -428,7 +431,12 @@ export function makeRegexp(
   }
   const data: RegexpData = {
     source,
-    encoding: /[^\u0000-\u007F]/.test(source) ? (options.sourceBinary ? 'BINARY (ASCII-8BIT)' : 'utf8') : 'US-ASCII',
+    encoding:
+      /[^\u0000-\u007F]/.test(source) || hasNonAsciiRegexpEscape(source)
+        ? options.sourceBinary
+          ? 'BINARY (ASCII-8BIT)'
+          : RUBY_UTF8
+        : 'US-ASCII',
     ignoreCase: options.ignoreCase ?? false,
     multiline: options.multiline ?? false,
     extended: options.extended ?? false,
@@ -437,6 +445,27 @@ export function makeRegexp(
   };
   regexp.data = data;
   return regexp;
+}
+
+function hasNonAsciiRegexpEscape(source: string): boolean {
+  for (let index = 0; index < source.length; index++) {
+    if (source[index] !== '\\') continue;
+    const escape = source[index + 1];
+    if (escape === '\\') {
+      index++;
+      continue;
+    }
+    if (escape === 'u') {
+      const digits = /^\{([\da-fA-F]{1,6})\}|^([\da-fA-F]{4})/.exec(source.slice(index + 2));
+      if (digits && Number.parseInt(digits[1] ?? digits[2], 16) > 127) return true;
+    }
+    if (escape === 'x') {
+      const digits = /^[\da-fA-F]{2}/.exec(source.slice(index + 2));
+      if (digits && Number.parseInt(digits[0], 16) > 127) return true;
+    }
+    index++;
+  }
+  return false;
 }
 
 export function hasVariableLengthLookbehind(source: string): boolean {
@@ -524,14 +553,15 @@ export function execAt(
   text: string,
   start: number,
   source?: RString,
-  snapshot?: RString
+  snapshot?: RString,
+  validated = false
 ): MatchState | undefined {
   if (start < 0 || start > charIndex(text, text.length)) return undefined;
   const data = dataOf(regexp);
-  if (source && !validStringEncoding(source))
-    throw argumentError(`invalid byte sequence in ${source.usAscii ? 'US-ASCII' : 'utf8'}`);
+  if (source && !validated && !validStringEncoding(source))
+    throw argumentError(`invalid byte sequence in ${source.usAscii ? 'US-ASCII' : RUBY_UTF8}`);
   if (source && data.encoding !== 'US-ASCII' && stringBytes(source).some((byte) => byte >= 0x80)) {
-    const subjectEncoding = source.binary ? 'BINARY (ASCII-8BIT)' : source.usAscii ? 'US-ASCII' : 'utf8';
+    const subjectEncoding = source.binary ? 'BINARY (ASCII-8BIT)' : source.usAscii ? 'US-ASCII' : RUBY_UTF8;
     if (data.encoding !== subjectEncoding)
       throw rubyError(
         rt().c['Encoding::CompatibilityError'],
@@ -671,11 +701,13 @@ export function matchGlobal(name: string): Value {
 function allMatches(regexp: RObject, source: RString): MatchState[] {
   const matches: MatchState[] = [];
   const snapshot = copyStringEncoding(source);
+  if (!validStringEncoding(source))
+    throw argumentError(`invalid byte sequence in ${source.usAscii ? 'US-ASCII' : RUBY_UTF8}`);
   let start = 0;
   const text = source.s;
   const length = charIndex(text, text.length);
   while (start <= length) {
-    const state = execAt(regexp, text, start, source, snapshot);
+    const state = execAt(regexp, text, start, source, snapshot, true);
     if (!state) break;
     matches.push(state);
     const [from, to] = state.groups[0] as readonly [number, number];
@@ -801,7 +833,7 @@ def(
     rt().c.Encoding.constants.get(
       dataOf(self).encoding === 'BINARY (ASCII-8BIT)'
         ? 'ASCII_8BIT'
-        : dataOf(self).encoding === 'utf8'
+        : dataOf(self).encoding === RUBY_UTF8
           ? 'UTF_8'
           : 'US_ASCII'
     ) as Value
@@ -812,10 +844,18 @@ def('Regexp', ['==', 'eql?'], 1, (self: RObject, [other]) => {
   const a = dataOf(self);
   const b = dataOf(other);
   return (
-    a.source === b.source && a.ignoreCase === b.ignoreCase && a.multiline === b.multiline && a.extended === b.extended
+    a.source === b.source &&
+    a.encoding === b.encoding &&
+    a.ignoreCase === b.ignoreCase &&
+    a.multiline === b.multiline &&
+    a.extended === b.extended
   );
 });
-def('Regexp', 'hash', 0, (self: RObject) => BigInt(dataOf(self).source.length));
+def('Regexp', 'hash', 0, (self: RObject) =>
+  BigInt(
+    `0x${digest(JSON.stringify([dataOf(self).source, dataOf(self).encoding, dataOf(self).ignoreCase, dataOf(self).multiline, dataOf(self).extended]))}`
+  )
+);
 def('Regexp', 'names', 0, (self: RObject) =>
   arr([...new Set(regexpCaptureNames(dataOf(self).js.source))].map((name) => str(name)))
 );
@@ -829,6 +869,8 @@ function* subjectText(value: Value): Gen<RString | undefined> {
 def('Regexp', 'match', [1, 2], function* (self: RObject, args, block) {
   const subject = yield* subjectText(args[0]);
   if (subject === undefined) return setLastMatch(undefined);
+  if (!validStringEncoding(subject))
+    throw argumentError(`invalid byte sequence in ${subject.usAscii ? 'US-ASCII' : RUBY_UTF8}`);
   const text = subject.s;
   const start = args.length > 1 ? yield* toIndex(args[1]) : 0;
   const match = setLastMatch(execAt(self, text, start < 0 ? start + charIndex(text, text.length) : start, subject));
@@ -913,6 +955,7 @@ def('MatchData', ['==', 'eql?'], 1, (self: RObject, [other]) => {
   return (
     stringKeyEquals(leftSource, rightSource) &&
     leftRegexp.source === rightRegexp.source &&
+    leftRegexp.encoding === rightRegexp.encoding &&
     leftRegexp.ignoreCase === rightRegexp.ignoreCase &&
     leftRegexp.multiline === rightRegexp.multiline &&
     leftRegexp.extended === rightRegexp.extended &&
@@ -930,7 +973,7 @@ def('MatchData', 'hash', 0, (self: RObject) => {
   const source = state.snapshot ?? str(state.text);
   const encoding = source.binary && stringBytes(source).some((byte) => byte >= 0x80) ? 'binary' : 'ascii-compatible';
   return BigInt(
-    `0x${digest(JSON.stringify([String(stringKeyHash(source)), encoding, regexp.source, regexp.ignoreCase, regexp.multiline, regexp.extended, state.groups]))}`
+    `0x${digest(JSON.stringify([String(stringKeyHash(source)), encoding, regexp.source, regexp.encoding, regexp.ignoreCase, regexp.multiline, regexp.extended, state.groups]))}`
   );
 });
 def('MatchData', 'named_captures', 0, function* (self: RObject) {
@@ -1042,13 +1085,16 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
   const parts: RString[] = [];
   let length = 0;
   const append = (part: RString): void => {
-    length += stringBytes(part).length;
+    const bytes = stringBytes(part).length;
+    if (bytes === 0) return;
+    length += bytes;
     if (length > limit) throw new ExecutionLimitError('storage');
-    rt().spend(Math.ceil(stringBytes(part).length / 256));
+    rt().spend(Math.ceil(bytes / 256));
     parts.push(part);
   };
   let position = 0;
   for (const match of replacement.s.matchAll(/\\(k<([\p{ID_Start}_][\p{ID_Continue}_]*)>|[0-9&+\\`'])/gu)) {
+    rt().spend(1);
     append(sliceStringEncoding(replacement, position, match.index));
     const [, code, name] = match;
     let part: RString;
