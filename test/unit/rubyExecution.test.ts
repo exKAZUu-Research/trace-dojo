@@ -7970,6 +7970,12 @@ test('Time composite and zone widths honor explicit minus flags', () => {
   ).toMatchObject({ stdout: '"  13:05:09|  02/29/24|     13:05"\n"-000000000|-000000:00"\n' });
 });
 
+test('strftime v uses four-character signed years', () => {
+  expect(run('p Time.utc(-1,1,1).strftime("%-20v"),Time.utc(-42,1,1).strftime("%v")')).toMatchObject({
+    stdout: '"          1-JAN--001"\n" 1-JAN--042"\n',
+  });
+});
+
 test('const_defined? does not fall back to Object for BasicObject classes', () => {
   expect(run('X=1;class C<BasicObject;end;p C.const_defined?(:X),C.const_defined?(:String)')).toMatchObject({
     stdout: 'false\nfalse\n',

@@ -515,7 +515,9 @@ function calendarDirective(data: TimeData, date: Date, directive: string, flag: 
       return strftime(data, '%m/%d/%y');
     }
     case 'v': {
-      return strftime(data, '%e-%^b-%Y');
+      const year = date.getUTCFullYear();
+      const shownYear = year < 0 ? `-${String(-year).padStart(3, '0')}` : String(year).padStart(4, '0');
+      return `${strftime(data, '%e-%^b')}-${shownYear}`;
     }
     default: {
       return undefined;
