@@ -1065,7 +1065,7 @@ def('Enumerator::Lazy', 'uniq', 0, (self: RObject, _args, block) => {
 for (const kind of ['each_slice', 'each_cons'] as const) {
   def('Enumerator::Lazy', kind, 1, function* (self: RObject, [count], block) {
     const { number: size, integer: exactCount } = yield* toIndexExact(count);
-    if (size <= 0) throw argumentError('invalid slice size');
+    if (size <= 0) throw argumentError(kind === 'each_cons' ? 'invalid size' : 'invalid slice size');
     const data = self.data as LazyData;
     const lazy = makeLazy(data.source, [...data.steps, { kind, count: size, exactCount, args: [count] }]);
     if (!block) return lazy;

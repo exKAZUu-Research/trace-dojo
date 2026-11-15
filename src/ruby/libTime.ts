@@ -183,7 +183,8 @@ function exactOffset(value: Value): Value | undefined {
 }
 
 function zoneFromOffset(value: Value): TimeData['zone'] {
-  return value instanceof RString && (value.s === 'UTC' || value.s === 'Z' || /^-00:?00(?::00)?$/.test(value.s))
+  return value instanceof RString &&
+    (value.s === 'UTC' || value.s === 'Z' || /^(?:-0000(?:00)?|-00:00(?::00)?)$/.test(value.s))
     ? 'utc'
     : 'fixed';
 }

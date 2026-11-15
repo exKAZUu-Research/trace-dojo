@@ -212,6 +212,7 @@ def(
         if (key === 'capacity') {
           const capacity = yield* toIndex(entry.value);
           if (capacity > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+          if (self.frozen) throw frozenError(self, yield* inspect(self));
         } else if (key === 'encoding') {
           const encoding =
             entry.value instanceof RString

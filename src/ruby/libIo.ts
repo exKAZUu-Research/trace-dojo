@@ -378,7 +378,11 @@ def('IO', ['tty?', 'isatty'], 0, (self: RObject) => {
   checkFrozenIo(self);
   return false;
 });
-def('IO', 'fileno', 0, (self: RObject) => (self.data === 'stdout' ? 1n : 2n));
+def('IO', 'fileno', 0, (self: RObject) => {
+  if (self.data === 'stdout') return 1n;
+  if (self.data === 'stderr') return 2n;
+  throw new UnsupportedFeatureError('DATA.fileno');
+});
 def('IO', 'inspect', 0, (self: RObject) => str(`#<IO:<${self.data === 'stdout' ? 'STDOUT' : 'STDERR'}>>`));
 for (const name of ['gets', 'read', 'readline', 'readlines', 'each_line', 'getc', 'close', 'reopen']) {
   def('IO', name, [0, -1], () => {

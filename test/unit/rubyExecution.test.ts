@@ -7698,6 +7698,32 @@ test('Time string offsets accept compact seconds and reject mixed separators', (
   ).toMatchObject({ stdout: '32401\nArgumentError\n' });
 });
 
+test('compact negative zero offsets retain UTC identity', () => {
+  expect(run('t=Time.at(0).getlocal("-000000");p t.utc?,t.zone,t.to_s')).toMatchObject({
+    stdout: 'true\n"UTC"\n"1970-01-01 00:00:00 UTC"\n',
+  });
+});
+
+test('Lazy each_cons reports its own invalid size error', () => {
+  expect(run('begin;[].lazy.each_cons(0);rescue=>e;p e.message;end')).toMatchObject({
+    stdout: '"invalid size"\n',
+  });
+});
+
+test('frozen String capacity initialization raises after conversion', () => {
+  expect(
+    run('class S<String;def initialize;freeze;super(capacity:10);end;end;begin;S.new;rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'FrozenError\n',
+  });
+});
+
+test('DATA file descriptor is explicitly unavailable', () => {
+  expect(run('DATA.fileno\n__END__\nx\n')).toMatchObject({
+    uncaughtException: 'DATA.fileno は、この採点環境では使えません。',
+  });
+});
+
 test('Time to_s omits second digits from numeric UTC offsets', () => {
   expect(run('p Time.at(0).getlocal(1).to_s')).toMatchObject({ stdout: '"1970-01-01 00:00:01 +0000"\n' });
 });
