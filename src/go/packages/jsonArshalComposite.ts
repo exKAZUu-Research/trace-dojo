@@ -315,8 +315,8 @@ export function makeStructArshaler(type: Type, lookup: Lookup): Arshaler {
         const value = walkField(ref, type, field, false);
         if (
           !value ||
-          (field.omitEmpty && emptyJsonValue(value.get(), field.type)) ||
-          (field.omitZero && zeroJsonValue(value, field.type))
+          (field.omitZero && zeroJsonValue(value, field.type)) ||
+          (field.omitEmpty && emptyJsonValue(value.get(), field.type))
         )
           continue;
         err = enc.writeToken('"', field.name);
@@ -666,11 +666,12 @@ function unmarshalField(
 
 function zeroJsonValue(ref: Ref, type: Type): boolean {
   const value = ref.get();
-  if (value === undefined) return true;
   const method = implementsVia(type, IS_ZERO);
   if (method === 'value') {
+    const kind = underlying(type).kind;
+    const nilReceiver = value === undefined && (kind === 'pointer' || kind === 'interface');
     const nilPointer = value instanceof Iface && value.value === undefined && underlying(value.type).kind === 'pointer';
-    return nilPointer || (callValueMethod(type, value, 'IsZero', []) as boolean);
+    return nilReceiver || nilPointer || (callValueMethod(type, value, 'IsZero', []) as boolean);
   }
   if (method === 'pointer') {
     return callPointerMethod(type, ref.pointer, 'IsZero', []) as boolean;

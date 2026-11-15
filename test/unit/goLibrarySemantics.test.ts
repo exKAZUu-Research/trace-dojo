@@ -1234,3 +1234,17 @@ test('JSON IsZero dispatch skips typed nil pointers and calls nil map and slice 
     uncaughtException: undefined,
   });
 });
+
+test('JSON IsZero handles direct nil value receivers and addressable nil fields', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main\nimport("fmt";"encoding/json")\nvar calls int\ntype M map[string]int\nfunc(M)IsZero()bool{calls++;return false}\ntype L []int\nfunc(L)IsZero()bool{calls++;return false}\ntype PM map[string]int\nfunc(m *PM)IsZero()bool{calls++;if *m==nil{*m=PM{"n":1}};return false}\ntype PL []int\nfunc(l *PL)IsZero()bool{calls++;if *l==nil{*l=PL{3}};return false}\ntype C chan int\nfunc(C)IsZero()bool{calls++;return true}\ntype F func()\nfunc(F)IsZero()bool{calls++;return true}\ntype PC chan int\nfunc(*PC)IsZero()bool{calls++;return true}\ntype PF func()\nfunc(*PF)IsZero()bool{calls++;return true}\ntype S struct{\n M M `json:",omitzero"`\n L L `json:",omitzero"`\n PM PM `json:",omitzero"`\n PL PL `json:",omitzero"`\n C C `json:",omitzero"`\n F F `json:",omitzero"`\n PC PC `json:",omitzero"`\n PF PF `json:",omitzero"`\n P *M `json:",omitzero"`\n}\nfunc main(){\n s:=S{};b,e:=json.Marshal(&s);fmt.Println(string(b),e,calls,s.PM["n"],s.PL[0])\n s.M=M{"v":2};s.L=L{4};b,e=json.Marshal(s);fmt.Println(string(b),e,calls)\n t:=struct{M M `json:",omitempty,omitzero"`;PM PM `json:",omitempty,omitzero"`}{};b,e=json.Marshal(&t);fmt.Println(string(b),e,calls,t.PM["n"])\n}\n'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '{"M":null,"L":null,"PM":{"n":1},"PL":[3]} <nil> 8 1 3\n{"M":{"v":2},"L":[4],"PM":{"n":1},"PL":[3]} <nil> 16\n{"PM":{"n":1}} <nil> 18 1\n',
+    uncaughtException: undefined,
+  });
+});
