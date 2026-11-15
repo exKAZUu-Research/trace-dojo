@@ -1870,11 +1870,8 @@ for (const [name, transform] of [
 ] as const) {
   def('Symbol', name, 0, (self: RSymbol) => sym(transform(self.name)));
 }
-def('Symbol', ['[]', 'slice'], [1, 2], (self: RSymbol, args) => substring(str(self.name), args));
-def('Symbol', 'start_with?', [0, -1], function* (self: RSymbol, args) {
-  for (const arg of args) if (self.name.startsWith(yield* stringArg(arg))) return true;
-  return false;
-});
+def('Symbol', ['[]', 'slice'], [1, 2], (self: RSymbol, args) => callMethod(str(self.name), '[]', args));
+def('Symbol', 'start_with?', [0, -1], (self: RSymbol, args) => callMethod(str(self.name), 'start_with?', args));
 def('Symbol', 'end_with?', [0, -1], function* (self: RSymbol, args) {
   for (const arg of args) if (self.name.endsWith(yield* stringArg(arg))) return true;
   return false;
@@ -1883,7 +1880,7 @@ def('Symbol', 'to_proc', 0, (self: RSymbol) => symbolProc(self.name));
 
 /** The lambda `&:name` passes: it calls the method `name` on its first argument. */
 export function symbolProc(name: string): Value {
-  return nativeProc(
+  const proc = nativeProc(
     -2,
     (args, block) => {
       if (args.length === 0) throw argumentError('no receiver given');
@@ -1891,6 +1888,8 @@ export function symbolProc(name: string): Value {
     },
     true
   );
+  proc.nativeRequired = 1;
+  return proc;
 }
 
 export { requireBlock, rangeCovers, typeError };

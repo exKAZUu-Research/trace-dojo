@@ -281,8 +281,8 @@ function parameterList(params: Params, isLambda: boolean): Value {
 }
 
 /** What `parameters` lists for a method or proc implemented natively, which Ruby knows only by its arity. */
-function nativeParameterList(arity: number): Value {
-  if (arity < 0) return arr([arr([sym('rest')])]);
+function nativeParameterList(arity: number, required = 0): Value {
+  if (arity < 0) return arr([...Array.from({ length: required }, () => arr([sym('req')])), arr([sym('rest')])]);
   return arr(Array.from({ length: arity }, () => arr([sym('req')])));
 }
 
@@ -298,13 +298,13 @@ def(
     const asLambda = keywords ? (yield* hashGet(keywords, sym('lambda')))?.value : undefined;
     const isLambda = asLambda === undefined || asLambda === NIL ? self.isLambda : truthy(asLambda);
     if (self.reflectedMethod) return methodParameterList(self.reflectedMethod, isLambda);
-    if (self.body.kind === 'native') return nativeParameterList(self.body.arity);
+    if (self.body.kind === 'native') return nativeParameterList(self.body.arity, self.nativeRequired);
     return self.body.def.params ? parameterList(self.body.def.params, isLambda) : arr([]);
   },
   { keywords: true }
 );
 function callParameters(proc: RProc, isLambda = true): Value {
-  if (proc.body.kind === 'native') return nativeParameterList(proc.body.arity);
+  if (proc.body.kind === 'native') return nativeParameterList(proc.body.arity, proc.nativeRequired);
   return proc.body.def.params ? parameterList(proc.body.def.params, isLambda) : arr([]);
 }
 

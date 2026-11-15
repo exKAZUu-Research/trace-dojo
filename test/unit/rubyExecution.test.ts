@@ -7734,6 +7734,18 @@ test('BasicObject exposes __send__ without Kernel', () => {
   });
 });
 
+test('Symbol String-equivalent methods accept supported Regexps', () => {
+  expect(run('p :abc[/b./],:abc.slice(/b(.)/,1),:abc.start_with?(/a/)')).toMatchObject({
+    stdout: '"bc"\n"c"\ntrue\n',
+  });
+});
+
+test('Symbol to_proc retains its required receiver parameter', () => {
+  expect(run('p :to_s.to_proc.arity,:to_s.to_proc.parameters,:to_s.to_proc.parameters(lambda:false)')).toMatchObject({
+    stdout: '-2\n[[:req], [:rest]]\n[[:req], [:rest]]\n',
+  });
+});
+
 test('defined? keeps its actual block context for implicit parameters', () => {
   expect(run('p defined?(it),defined?(_1)')).toMatchObject({ stdout: 'nil\nnil\n' });
 });

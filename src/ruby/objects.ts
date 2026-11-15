@@ -175,6 +175,7 @@ export class RProc extends RBasic {
   isLambda = false;
   captured?: Value[];
   reflectedMethod?: RMethod;
+  nativeRequired = 0;
   /** The call that received this block as its block literal, which a `break` in it leaves. */
   breakTag?: object;
 

@@ -228,6 +228,7 @@ function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
     proc.isLambda = self.isLambda;
     proc.captured = self.captured ? [...self.captured] : undefined;
     proc.reflectedMethod = self.reflectedMethod;
+    proc.nativeRequired = self.nativeRequired;
     proc.breakTag = self.breakTag;
     proc.callSiteState = self.callSiteState;
     copy = proc;
