@@ -8673,6 +8673,30 @@ test('Unicode regexp lists allow ASCII edge whitespace and reject surrogate valu
   expect(run(String.raw`begin;Regexp.new("\\u{D800}");rescue=>e;p e.class;end`)).toMatchObject({
     stdout: 'RegexpError\n',
   });
+  expect(run(String.raw`p /\uD800/`)).toMatchObject({ kind: 'compileError' });
+  expect(run(String.raw`begin;Regexp.new("\\uD800");rescue=>e;p e.class;end`)).toMatchObject({
+    stdout: 'RegexpError\n',
+  });
+});
+
+test('Regexp options precede source conversion', () => {
+  expect(
+    run('o=Object.new;def o.to_str;puts :source;"a";end;begin;Regexp.new(o,"bad");rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'ArgumentError\n',
+  });
+});
+
+test('Regexp errors preserve escaped invalid source bytes', () => {
+  expect(run(String.raw`begin;Regexp.new("\\\xFF");rescue=>e;p e.message.bytes.last(4);end`)).toMatchObject({
+    stdout: '[47, 92, 255, 47]\n',
+  });
+});
+
+test('Struct bracket constructor ignores an overridden new method', () => {
+  expect(run('S=Struct.new(:x);def S.new(*);:special;end;p S[1]')).toMatchObject({
+    stdout: '#<struct S x=1>\n',
+  });
 });
 
 test('binary Symbol case conversion keeps byte encoding', () => {

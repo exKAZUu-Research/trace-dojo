@@ -114,7 +114,10 @@ function unicodeRegexpEscape(source: string): { points: string[]; length: number
     return { points, length: braced[0].length };
   }
   const fixed = /^[0-9a-fA-F]{4}/.exec(source);
-  return fixed ? { points: [fixed[0]], length: fixed[0].length } : undefined;
+  if (!fixed) return undefined;
+  const value = Number.parseInt(fixed[0], 16);
+  if (value >= 0xd8_00 && value <= 0xdf_ff) throw new SyntaxError('invalid Unicode codepoint');
+  return { points: [fixed[0]], length: fixed[0].length };
 }
 
 /** Translates a Ruby (Onigmo) expression into JavaScript's syntax, rejecting what has no counterpart. */
@@ -850,29 +853,48 @@ function* optionsOf(value: Value | undefined): Gen<{ ignoreCase: boolean; multil
   return { ignoreCase: true, multiline: false, extended: false };
 }
 
-function invalidPatternSource(pattern: RString): string {
-  const bytes = stringBytes(pattern);
+function invalidPatternMessage(pattern: RString): RString {
+  const source = stringBytes(pattern);
+  const result = new Uint8Array(LIMITS.maxStringLength);
   const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
-  rt().spend(Math.ceil(bytes.length / 256));
-  let displayed = '';
-  const append = (piece: string): void => {
-    rt().checkStringLength(displayed.length + piece.length);
-    displayed += piece;
+  let length = 0;
+  const appendByte = (byte: number): void => {
+    rt().checkStringLength(length + 1);
+    result[length++] = byte;
   };
-  for (let index = 0; index < bytes.length;) {
-    const first = bytes[index];
+  const appendAscii = (text: string): void => {
+    for (const char of text) appendByte(char.codePointAt(0) ?? 0);
+  };
+  appendAscii('invalid multibyte character: /');
+  rt().spend(Math.ceil(source.length / 256));
+  for (let index = 0; index < source.length;) {
+    const first = source[index];
+    if (first === 92 && (source[index + 1] ?? 0) >= 0x80) {
+      appendByte(first);
+      const next = source[index + 1];
+      const width = next < 0xe0 ? 2 : next < 0xf0 ? 3 : 4;
+      let count = 1;
+      if (index + 1 + width <= source.length)
+        try {
+          decoder.decode(source.subarray(index + 1, index + 1 + width));
+          count = width;
+        } catch {}
+      for (let offset = 0; offset < count; offset++) appendByte(source[index + 1 + offset]);
+      index += 1 + count;
+      continue;
+    }
     if (first < 0x80) {
-      append(String.fromCodePoint(first));
+      appendByte(first);
       index++;
       continue;
     }
     if (!pattern.usAscii) {
       const width = first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
       try {
-        const character = decoder.decode(bytes.subarray(index, index + width));
+        const character = decoder.decode(source.subarray(index, index + width));
         const point = character.codePointAt(0);
         if (point !== undefined) {
-          append(
+          appendAscii(
             point <= 0xff_ff
               ? `\\u${point.toString(16).toUpperCase().padStart(4, '0')}`
               : `\\u{${point.toString(16).toUpperCase()}}`
@@ -882,10 +904,11 @@ function invalidPatternSource(pattern: RString): string {
         }
       } catch {}
     }
-    append(`\\x${first.toString(16).toUpperCase().padStart(2, '0')}`);
+    appendAscii(`\\x${first.toString(16).toUpperCase().padStart(2, '0')}`);
     index++;
   }
-  return displayed;
+  appendByte(47);
+  return stringFromBytes(result.subarray(0, length), false, pattern.usAscii);
 }
 
 sdef('Regexp', ['new', 'compile'], [1, 2], function* (_self, [source, options]) {
@@ -893,10 +916,9 @@ sdef('Regexp', ['new', 'compile'], [1, 2], function* (_self, [source, options]) 
     const data = dataOf(source);
     return makeRegexp(data.source, { ...data, sourceBinary: data.encoding === 'BINARY (ASCII-8BIT)' });
   }
-  const pattern = yield* toStrValue(source);
   const parsedOptions = yield* optionsOf(options);
-  if (!validStringEncoding(pattern))
-    throw rubyError(rt().c.RegexpError, `invalid multibyte character: /${invalidPatternSource(pattern)}/`);
+  const pattern = yield* toStrValue(source);
+  if (!validStringEncoding(pattern)) throw rubyError(rt().c.RegexpError, invalidPatternMessage(pattern));
   return makeRegexp(pattern.s, { ...parsedOptions, sourceBinary: pattern.binary });
 });
 sdef('Regexp', ['escape', 'quote'], 1, function* (_self, [value]) {

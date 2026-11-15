@@ -153,9 +153,7 @@ function* newStructClass(superclass: RClass, members: string[], layout: Omit<Lay
         fn: (self, args, block, keywords) =>
           layout.kind === 'data'
             ? constructData(self as RClass, args, block, keywords)
-            : name === 'new'
-              ? constructStruct(self as RClass, args, block, keywords)
-              : callMethod(self, 'new', args, keywords, block),
+            : constructStruct(self as RClass, args, block, keywords),
         min: 0,
         max: -1,
         takesKeywords: true,
