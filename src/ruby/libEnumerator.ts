@@ -991,6 +991,7 @@ interface LazyData {
 }
 
 const lazyDisplaySources = new WeakMap<RObject, { source: Value; args: Value[] }>();
+const zippedYieldArgs = new WeakSet<Value[]>();
 
 function lazyIterationSource(source: Value, args: Value[], displayArgs: Value[]): RObject {
   const enumerator = makeEnumerator(source, 'each', args);
@@ -1245,7 +1246,7 @@ function* streamLazyStep(
   const rootIndex = held.push(item) - 1;
   try {
     const step = steps[position];
-    if (!step) return yield* visit(item, yielded);
+    if (!step) return yield* visit(item, zippedYieldArgs.has(yielded) ? [item] : yielded);
     const state = states[position];
     const next = (value: Value, args: Value[] = [value]): Gen<unknown> =>
       streamLazyStep(steps, states, position + 1, value, visit, args);
@@ -1336,6 +1337,7 @@ function* streamLazyStep(
             }
           }
           const packed = arr(tuple);
+          zippedYieldArgs.add(tuple);
           return yield* next(packed, yielded.length > 1 ? tuple : [packed]);
         } finally {
           const root = arrays.lastIndexOf(tuple);

@@ -9196,6 +9196,9 @@ test('Lazy zip preserves callback packing for multi-yield sources', () => {
     )
   ).toMatchObject({ stdout: '[6]\n[1, 2]\n' });
   expect(run('p [1].lazy.zip([3]).map{|x|x}.force')).toMatchObject({ stdout: '[[1, 3]]\n' });
+  expect(
+    run('e=Enumerator.new{|y|y.yield 1,2};e.lazy.zip([3]).each{|*args|p args};p e.lazy.zip([3]).next_values')
+  ).toMatchObject({ stdout: '[[[1, 2], 3]]\n[[[1, 2], 3]]\n' });
 });
 
 test('define_method blocks retain lexical definition visibility', () => {
