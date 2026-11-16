@@ -15010,3 +15010,53 @@ test('Repeated super dispatch reuses hierarchy positions within the execution bu
     uncaughtException: undefined,
   });
 });
+
+const canonicalAliasMutationCases = [
+  [
+    'a=Time.instance_method(:mon);b=Time.instance_method(:month);p [a==b,a.hash==b.hash];class Time;def month;99;end;end;t=Time.utc(2024,2);p [t.mon,t.month];p a==Time.instance_method(:month);p a.bind(t).call',
+    '[true, true]\n[2, 99]\nfalse\n2\n',
+  ],
+  [
+    'm=/a(b)?/.match("a");a=m.method(:captures);b=m.method(:deconstruct);p [a==b,a.hash==b.hash];class MatchData;def captures;[:custom];end;end;p [m.captures,m.deconstruct,a.call,b.call]',
+    '[true, true]\n[[:custom], [nil], [nil], [nil]]\n',
+  ],
+] as const;
+
+test.each(canonicalAliasMutationCases)(
+  'Canonical aliases retain captured identity across redefinition: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
+
+const rationalPowerIdentityCases = [
+  ['begin;v=(0)**(-1/2r);p v,v.class;rescue=>e;p e.class,e.message;end', 'ZeroDivisionError\n"divided by 0"\n'],
+  ['begin;v=(0)**(1/3r);p v,v.class;rescue=>e;p e.class,e.message;end', '(0/1)\nRational\n'],
+  ['begin;v=(0)**(1/2r);p v,v.class;rescue=>e;p e.class,e.message;end', '(0/1)\nRational\n'],
+  ['begin;v=(1)**(-1/2r);p v,v.class;rescue=>e;p e.class,e.message;end', '(1/1)\nRational\n'],
+  ['begin;v=(1)**(1/3r);p v,v.class;rescue=>e;p e.class,e.message;end', '(1/1)\nRational\n'],
+  ['begin;v=(1)**(1/2r);p v,v.class;rescue=>e;p e.class,e.message;end', '(1/1)\nRational\n'],
+  ['begin;v=(0r)**(-1/2r);p v,v.class;rescue=>e;p e.class,e.message;end', 'ZeroDivisionError\n"divided by 0"\n'],
+  ['begin;v=(0r)**(1/3r);p v,v.class;rescue=>e;p e.class,e.message;end', '(0/1)\nRational\n'],
+  ['begin;v=(0r)**(1/2r);p v,v.class;rescue=>e;p e.class,e.message;end', '(0/1)\nRational\n'],
+  ['begin;v=(1r)**(-1/2r);p v,v.class;rescue=>e;p e.class,e.message;end', '(1/1)\nRational\n'],
+  ['begin;v=(1r)**(1/3r);p v,v.class;rescue=>e;p e.class,e.message;end', '(1/1)\nRational\n'],
+  ['begin;v=(1r)**(1/2r);p v,v.class;rescue=>e;p e.class,e.message;end', '(1/1)\nRational\n'],
+  ['begin;v=(0r)**(-0.5);p v,v.class;rescue=>e;p e.class,e.message;end', 'Infinity\nFloat\n'],
+  ['begin;v=(0r)**(0.5);p v,v.class;rescue=>e;p e.class,e.message;end', '0.0\nFloat\n'],
+  ['begin;v=(1r)**(-0.5);p v,v.class;rescue=>e;p e.class,e.message;end', '1.0\nFloat\n'],
+  ['begin;v=(1r)**(0.5);p v,v.class;rescue=>e;p e.class,e.message;end', '1.0\nFloat\n'],
+  ['begin;v=(1r)**(Float::INFINITY);p v,v.class;rescue=>e;p e.class;end', '1.0\nFloat\n'],
+  ['begin;v=(1r)**(-Float::INFINITY);p v,v.class;rescue=>e;p e.class;end', '1.0\nFloat\n'],
+  ['begin;v=(1r)**(Float::NAN);p v,v.class;rescue=>e;p e.class;end', '1.0\nFloat\n'],
+  ['begin;v=(-1r)**(Float::INFINITY);p v,v.class;rescue=>e;p e.class;end', '1.0\nFloat\n'],
+  ['begin;v=(-1r)**(-Float::INFINITY);p v,v.class;rescue=>e;p e.class;end', '1.0\nFloat\n'],
+  ['begin;v=(Rational(10))**(23.0);p v,v.class;rescue=>e;p e.class;end', '1.0e+23\nFloat\n'],
+] as const;
+
+test.each(rationalPowerIdentityCases)(
+  'Rational powers retain exact identities and native Float dispatch: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);

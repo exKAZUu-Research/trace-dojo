@@ -1,4 +1,5 @@
 import type { NativeFn, RClass, RMethod, Visibility } from './objects';
+import { coreMethodAliases } from './rubyCoreMethods';
 import type { Runtime } from './runtime';
 
 interface NativeSpec {
@@ -135,6 +136,7 @@ export function setSingletonFactory(factory: (cls: RClass, exposed?: boolean) =>
 }
 
 // code-gauge-allow functionCognitiveComplexity 29 -- The ordered cases for native method registration share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss 31 -- Native definitions, aliases and reflection snapshots must install in that order.
 export function installNatives(runtime: Runtime): void {
   // Extensions apply after every definition, whatever order the modules that register them load in.
   for (const spec of [...specs.filter((each) => !each.wrap), ...specs.filter((each) => each.wrap)]) {
@@ -173,11 +175,23 @@ export function installNatives(runtime: Runtime): void {
     if (method.visibility === 'private')
       singleton.methods.set(name, { ...method, owner: singleton, visibility: 'public' });
   }
+  installAliasIdentities(runtime);
   for (const owner of Object.values(runtime.c))
     coreMethods.set(
       owner,
       new Map([...owner.methods].map(([name, method]) => [name, { ...method, body: { ...method.body } }]))
     );
+}
+
+function installAliasIdentities(runtime: Runtime): void {
+  for (const [owner, names] of coreMethodAliases) {
+    const functions = names.flatMap((name) => {
+      const body = runtime.c[owner].methods.get(name)?.body;
+      return body?.kind === 'native' ? [body.fn] : [];
+    });
+    const identity = functions.find((fn) => fn.nativeIdentity)?.nativeIdentity ?? {};
+    for (const fn of functions) fn.nativeIdentity = identity;
+  }
 }
 
 function installConstructorBarriers(runtime: Runtime): void {

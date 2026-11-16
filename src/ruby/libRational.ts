@@ -5,6 +5,7 @@ import { argumentError, floatDomainError, typeError, zeroDivisionError } from '.
 import { exceptionOption } from './exceptionOption';
 import { exactDecimal } from './floatFormat';
 import { bigintRatio } from './floatMath';
+import { floatPower } from './floatPower';
 import { digest } from './hashes';
 import { chargeIntegerResult, integerBits, integerGcd } from './integerBudget';
 import { callMethod, type Gen } from './interp';
@@ -181,15 +182,15 @@ function* numericRemainder(self: RObject, other: Value): Gen {
 // code-gauge-allow functionCognitiveComplexity 30 -- Exact powers, fractional domains and custom coercion retain Ruby numeric dispatch order.
 def('Rational', '**', 1, function* (self: RObject, [exponent]) {
   const { numerator, denominator } = fractionOf(self);
-  if (isRational(exponent) && fractionOf(exponent).denominator === 1n) exponent = fractionOf(exponent).numerator;
+  const rationalPower = isRational(exponent) ? fractionOf(exponent) : undefined;
+  if (rationalPower?.denominator === 1n) exponent = rationalPower.numerator;
+  const exactPower = typeof exponent === 'bigint' ? exponent : rationalPower?.numerator;
+  if (exactPower !== undefined) {
+    const identity = exactPowerIdentity(numerator, denominator, exactPower);
+    if (identity) return identity;
+  }
   if (typeof exponent === 'bigint') {
-    if (exponent === 0n) return makeRational(1n, 1n);
-    if (numerator === 0n) {
-      if (exponent < 0n) throw zeroDivisionError();
-      return makeRational(0n, 1n);
-    }
-    if (denominator === 1n && (numerator === 1n || numerator === -1n))
-      return makeRational(numerator === -1n && exponent % 2n !== 0n ? -1n : 1n, 1n);
+    if (denominator === 1n && numerator === -1n) return makeRational(exponent % 2n !== 0n ? -1n : 1n, 1n);
     const magnitude = exponent < 0n ? -exponent : exponent;
     const bits = [numerator, denominator]
       .map((value) => (value < 0n ? -value : value))
@@ -204,9 +205,17 @@ def('Rational', '**', 1, function* (self: RObject, [exponent]) {
     return yield* callMethod(left, '**', [right]);
   }
   const power = yield* toFloat(exponent);
-  if (numerator < 0n && !Number.isInteger(power)) throw new UnsupportedFeatureError('複素数（Rational の小数乗）');
-  return toNumber(fractionOf(self)) ** power;
+  if (numerator < 0n && (Number.isNaN(power) || (!Number.isInteger(power) && Number.isFinite(power))))
+    throw new UnsupportedFeatureError('複素数（Rational の小数乗）');
+  return floatPower(toNumber(fractionOf(self)), power);
 });
+function exactPowerIdentity(numerator: bigint, denominator: bigint, power: bigint): RObject | undefined {
+  if (power === 0n || numerator === denominator) return makeRational(1n, 1n);
+  if (numerator !== 0n) return undefined;
+  if (power < 0n) throw zeroDivisionError();
+  return makeRational(0n, 1n);
+}
+
 def('Rational', '-@', 0, (self: RObject) => makeRational(-fractionOf(self).numerator, fractionOf(self).denominator));
 // code-gauge-allow functionCognitiveComplexity 18 -- The ordered cases for exact Rational coercion and rounding share state; splitting them solely for the metric would hide their sequencing.
 def('Rational', '<=>', 1, function* (self: RObject, [other]) {

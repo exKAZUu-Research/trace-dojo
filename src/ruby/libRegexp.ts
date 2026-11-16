@@ -1386,7 +1386,7 @@ def('MatchData', '[]', [1, 2], function* (self: RObject, args) {
   }
   return yield* matchIndex(self, args[0]);
 });
-def('MatchData', 'captures', 0, (self: RObject) =>
+def('MatchData', ['captures', 'deconstruct'], 0, (self: RObject) =>
   arr(
     stateOf(self)
       .groups.slice(1)
@@ -1542,13 +1542,6 @@ function matchDataInspect(match: RObject): string {
   });
   return `#<MatchData ${parts.join(' ')}>`;
 }
-def('MatchData', 'deconstruct', 0, (self: RObject) =>
-  arr(
-    stateOf(self)
-      .groups.slice(1)
-      .map((_range, group) => groupText(stateOf(self), group + 1))
-  )
-);
 def('MatchData', 'deconstruct_keys', 1, function* (self: RObject, [keys]) {
   if (keys !== NIL && !(keys instanceof RArray))
     throw typeError(`wrong argument type ${realClassOf(keys).name} (expected Array)`);

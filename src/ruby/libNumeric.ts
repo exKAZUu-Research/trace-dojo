@@ -28,7 +28,7 @@ import {
   ldexpDouble,
   roundedDouble,
 } from './floatMath';
-import { exactFloatPower } from './floatPower';
+import { floatPower } from './floatPower';
 import { chargeIntegerResult, integerBits, integerGcd } from './integerBudget';
 import { callBlock, callMethod, type Gen } from './interp';
 import { type EnumeratorSource, makeEnumerator, sizedEnumerator } from './libEnumerator';
@@ -124,14 +124,6 @@ function intPow(base: bigint, exponent: bigint): Value {
   return base ** exponent;
 }
 
-function floatPow(base: number, exponent: number): Value {
-  if (base === 1 || (base === -1 && !Number.isNaN(exponent) && !Number.isFinite(exponent))) return 1;
-  if (base < 0 && (Number.isNaN(exponent) || (!Number.isInteger(exponent) && Number.isFinite(exponent)))) {
-    throw new UnsupportedFeatureError('負の数の小数乗（結果が複素数になるもの）');
-  }
-  return exactFloatPower(base, exponent) ?? base ** exponent;
-}
-
 // code-gauge-allow functionNcss 37 -- Arithmetic dispatches Integer and Float operands across Ruby operators and zero-division rules.
 // code-gauge-allow duplicateLines 19 -- Ruby integer and float arithmetic use matching operator cases with different numeric representations.
 function arithmetic(op: string, a: Num, b: Num): Value {
@@ -180,7 +172,7 @@ function arithmetic(op: string, a: Num, b: Num): Value {
       return floatMod(x, y);
     }
     case '**': {
-      return floatPow(x, y);
+      return floatPower(x, y);
     }
   }
   throw new Error(`Unknown operator ${op}`);

@@ -844,16 +844,14 @@ def('Time', 'strftime', 1, function* (self: RObject, [format]) {
 });
 for (const [name, read] of [
   ['year', (date: Date) => date.getUTCFullYear()],
-  ['month', (date: Date) => date.getUTCMonth() + 1],
-  ['mon', (date: Date) => date.getUTCMonth() + 1],
-  ['day', (date: Date) => date.getUTCDate()],
-  ['mday', (date: Date) => date.getUTCDate()],
+  [['month', 'mon'], (date: Date) => date.getUTCMonth() + 1],
+  [['day', 'mday'], (date: Date) => date.getUTCDate()],
   ['hour', (date: Date) => date.getUTCHours()],
   ['min', (date: Date) => date.getUTCMinutes()],
   ['sec', (date: Date) => date.getUTCSeconds()],
   ['wday', (date: Date) => date.getUTCDay()],
   ['yday', yearDay],
-] as const) {
+] satisfies [string | string[], (date: Date) => number][]) {
   def('Time', name, 0, (self: RObject) => BigInt(read(dataOf(self).fields())));
 }
 for (const [index, day] of DAYS.entries()) {
