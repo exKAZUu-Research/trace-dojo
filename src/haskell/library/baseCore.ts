@@ -411,8 +411,8 @@ instance Integral Int where
   rem = primitive "intRem"
   div = primitive "intDiv"
   mod = primitive "intMod"
-  quotRem x y = (quot x y, rem x y)
-  divMod x y = (div x y, mod x y)
+  quotRem x y = if y == -1 && x == minBound then (quot x y, 0) else let q = quot x y in q ${BT}seq${BT} (q, rem x y)
+  divMod x y = if y == -1 && x == minBound then (div x y, 0) else let q = div x y in q ${BT}seq${BT} (q, mod x y)
   toInteger = primitive "intToInteger"
 
 instance Num Integer where
@@ -432,8 +432,8 @@ instance Integral Integer where
   rem = primitive "integerRem"
   div = primitive "integerDiv"
   mod = primitive "integerMod"
-  quotRem x y = (quot x y, rem x y)
-  divMod x y = (div x y, mod x y)
+  quotRem x y = let q = quot x y in q ${BT}seq${BT} (q, rem x y)
+  divMod x y = let q = div x y in q ${BT}seq${BT} (q, mod x y)
   toInteger x = x
 
 instance Eq Word where
@@ -463,8 +463,8 @@ instance Integral Word where
   rem = primitive "wordRem"
   div = primitive "wordQuot"
   mod = primitive "wordRem"
-  quotRem x y = (quot x y, rem x y)
-  divMod x y = (quot x y, rem x y)
+  quotRem x y = let q = quot x y in q ${BT}seq${BT} (q, rem x y)
+  divMod = quotRem
   toInteger = primitive "intToInteger"
 
 instance Bounded Word where
