@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 597 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 605 -- The file holds one layer of the compiler, whose parts share its private state.
 import type { SourceDiagnostic } from '../interpreter/diagnostics';
+import { ExecutionBudget } from '../interpreter/limits';
 import { isDiscardName } from './ast';
 import type {
   Capture,
@@ -23,9 +24,10 @@ import { primitiveType } from './types';
  */
 export function checkSource(
   file: SourceFile,
-  predeclared: readonly string[]
+  predeclared: readonly string[],
+  budget = new ExecutionBudget()
 ): { errors: SourceDiagnostic[]; fatal: boolean } {
-  const checker = new AstChecker();
+  const checker = new AstChecker(budget);
   const environment: NamespaceScope = {
     kind: 'namespace',
     names: new Set(predeclared),
@@ -69,7 +71,7 @@ interface NamespaceScope {
 
 interface BlockScope {
   kind: 'block';
-  locals: LocalBinding[];
+  locals: Map<string, LocalBinding>;
   parent: Scope | undefined;
 }
 
@@ -113,6 +115,8 @@ class AstChecker {
   fatal = false;
   private scope: Scope | undefined;
   private functionDepth = 0;
+
+  constructor(private readonly budget: ExecutionBudget) {}
 
   private error(span: Span, message: string): void {
     this.errors.push({ row: span.row, message });
@@ -184,7 +188,7 @@ class AstChecker {
   private outerLocal(name: string): LocalBinding | undefined {
     for (let scope = this.scope; scope; scope = scope.parent) {
       if (scope.kind !== 'block') continue;
-      const local = scope.locals.find((binding) => binding.name === name);
+      const local = scope.locals.get(name);
       if (local) return local;
     }
     return undefined;
@@ -231,7 +235,7 @@ class AstChecker {
   private checkFunction(fn: FunctionDeclaration): void {
     const outer = this.scope;
     this.scope = { kind: 'function', parent: outer };
-    const params: BlockScope = { kind: 'block', locals: [], parent: this.scope };
+    const params: BlockScope = { kind: 'block', locals: new Map(), parent: this.scope };
     this.functionDepth++;
     try {
       // Each parameter is in scope for the types of the later ones and the return type.
@@ -254,13 +258,14 @@ class AstChecker {
   // Bindings --------------------------------------------------------------------------------------------------------
 
   private declare(name: string, category: Category, span: NamedSpan): LocalBinding {
+    this.budget.spend();
     const what = CATEGORY_NAMES[category];
     if (!span.quotedName && primitiveType(name) !== undefined) {
       this.error(span, `「${name}」は組み込みの型の名前なので、${what}の名前には使えません。`);
     }
     for (let scope = this.scope; scope; scope = scope.parent) {
       if (scope.kind === 'block') {
-        const outer = scope.locals.find((local) => local.name === name);
+        const outer = scope.locals.get(name);
         if (outer) {
           this.error(span, `${what}「${name}」は、外側の${CATEGORY_NAMES[outer.category]}と同じ名前です。`);
           break;
@@ -280,12 +285,12 @@ class AstChecker {
       usedAsLvalue: false,
     };
     const block = this.scope as BlockScope;
-    block.locals.push(binding);
+    block.locals.set(name, binding);
     return binding;
   }
 
   private checkUsed(block: BlockScope): void {
-    for (const local of block.locals) {
+    for (const local of block.locals.values()) {
       const what = CATEGORY_NAMES[local.category];
       if (!local.used && !local.discardSpan) {
         this.minorError(local.span, `${what}「${local.name}」を使っていません。`);
@@ -306,7 +311,7 @@ class AstChecker {
 
   private withBlock<T>(run: (block: BlockScope) => T): T {
     const outer = this.scope;
-    const block: BlockScope = { kind: 'block', locals: [], parent: outer };
+    const block: BlockScope = { kind: 'block', locals: new Map(), parent: outer };
     this.scope = block;
     try {
       const result = run(block);
@@ -336,7 +341,7 @@ class AstChecker {
     let crossedNamespace = false;
     for (let scope = this.scope; scope; scope = scope.parent) {
       if (scope.kind === 'block') {
-        const local = scope.locals.findLast((binding) => binding.name === name);
+        const local = scope.locals.get(name);
         if (!local) continue;
         if (crossedNamespace && local.category === 'local variable') {
           this.error(span, `変数「${name}」は、型の中の関数からは使えません。`);
@@ -374,6 +379,7 @@ class AstChecker {
   }
 
   private statement(statement: Statement): void {
+    this.budget.spend();
     switch (statement.kind) {
       case 'var': {
         if (statement.type) this.expression(statement.type, 'value');
@@ -425,6 +431,7 @@ class AstChecker {
   // Expressions -----------------------------------------------------------------------------------------------------
 
   expression(expression: Expression, use: Use): void {
+    this.budget.spend();
     switch (expression.kind) {
       case 'identifier': {
         this.reference(expression.name, expression, use);
@@ -593,8 +600,12 @@ class AstChecker {
         break;
       }
       case 'errorSetType': {
-        const duplicate = expression.names.find((name, index) => expression.names.indexOf(name) !== index);
-        if (duplicate) this.error(expression, `エラー集合に error.${duplicate} が2回書かれています。`);
+        const seen = new Set<string>();
+        for (const name of expression.names) {
+          this.budget.spend();
+          if (seen.has(name)) this.error(expression, `エラー集合に error.${name} が2回書かれています。`);
+          seen.add(name);
+        }
         break;
       }
       default: {

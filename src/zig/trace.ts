@@ -4,11 +4,10 @@ import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable, TraceScalar } from '../problems/trace';
-import { type CompiledProgram, compileProgram } from './compiler';
+import { type CompiledProgram, compileSource } from './compiler';
 import { runProgram } from './execute';
 import { type AnyFloat, BigFloat, shortestDecimal, toNumber } from './floats';
 import { stringBytes } from './fmt';
-import { parseZig } from './parse';
 import { type Frame, Runtime } from './runtime';
 import { UNASSIGNED } from './semaBase';
 import type { Type } from './types';
@@ -27,7 +26,7 @@ import {
 } from './values';
 
 export function traceZigProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
-  const compiled = compileProgram(parseZig(program), {
+  const compiled = compileSource(program, {
     atomicRows: new Set(trace.atomicAnnotations.keys()),
   });
   const runtime = new Runtime(input);

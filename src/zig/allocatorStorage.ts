@@ -51,7 +51,10 @@ export function reserveAllocatorBytes(
   checkDepth(frame, depth);
   const owner = state?.owner?.load();
   const prior = previous ? allocationOf(previous) : undefined;
-  if (length === 0) return { complete: () => {} };
+  if (length === 0) {
+    if (previous) freeAllocatorMemory(state, previous);
+    return { complete: () => {} };
+  }
   if (owner instanceof ZStruct && state?.name === 'fixed') {
     const buffer = owner.slots[1] as Slice;
     const used = Number(owner.slots[0] as bigint);

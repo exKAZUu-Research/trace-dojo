@@ -1,8 +1,10 @@
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
+import { ExecutionBudget } from '../interpreter/limits';
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type { FunctionDeclaration, SourceFile, Span } from './ast';
 import { checkSource } from './astCheck';
 import type { FunctionInstance } from './functions';
+import { parseZig } from './parse';
 import './library/registry';
 import { PROCESS_INIT } from './library/std';
 import { TURTLE } from './library/turtle';
@@ -28,21 +30,29 @@ export interface CompiledProgram {
 export interface CompileOptions {
   /** The rows of `// atomic` annotations, when the program is traced. */
   atomicRows?: ReadonlySet<number>;
+  budget?: ExecutionBudget;
+}
+
+export function compileSource(source: string, options: CompileOptions = {}): CompiledProgram {
+  const budget = options.budget ?? new ExecutionBudget();
+  return compileProgram(parseZig(source, budget), { ...options, budget });
 }
 
 /** Checks and compiles a file, starting from `main` and analyzing only what it uses, as Zig does. */
 export function compileProgram(file: SourceFile, options: CompileOptions = {}): CompiledProgram {
-  const astErrors = checkSource(file, ['Turtle']);
+  const budget = options.budget ?? new ExecutionBudget();
+  const astErrors = checkSource(file, ['Turtle'], budget);
   if (astErrors.fatal) throw new CompileError(firstErrors(astErrors.errors));
   let compiled: CompiledProgram;
   try {
-    compiled = new Compiler(file, options).compileMain();
+    compiled = new Compiler(file, { ...options, budget }).compileMain();
   } catch (error) {
     // Zig reports type errors together with unused locals and similar errors, which do not stop its analysis.
     if (!(error instanceof CompileError) || astErrors.errors.length === 0) throw error;
     throw new CompileError(firstErrors([...astErrors.errors, ...error.diagnostics]));
   }
   if (astErrors.errors.length > 0) throw new CompileError(firstErrors(astErrors.errors));
+  budget.spend();
   return compiled;
 }
 
@@ -60,7 +70,7 @@ class Compiler extends StatementCompiler {
     options: CompileOptions
   ) {
     const root: Namespace = { name: 'main', decls: new Map() };
-    super(root);
+    super(root, options.budget);
     addDecls(root, file.members);
     if (!root.decls.has('Turtle')) {
       root.decls.set('Turtle', {
@@ -138,7 +148,7 @@ class Compiler extends StatementCompiler {
 
   /** Runs code at compile time, as a container-level declaration's initializer runs. */
   protected evaluateAtCompileTime(expression: TExpr): Value {
-    const runtime = new Runtime();
+    const runtime = new Runtime(undefined, this.compilationBudget);
     const frame = new Frame(
       runtime,
       { name: 'comptime', locals: [], isAtomic: false } as unknown as FunctionInstance,

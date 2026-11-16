@@ -2,16 +2,15 @@ import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
-import { type CompiledProgram, compileProgram } from './compiler';
+import { type CompiledProgram, compileSource } from './compiler';
 import { ExitSignal, processInit } from './library/std';
-import { parseZig } from './parse';
 import { Frame, OutOfMemory, Runtime, StackOverflow, ZigPanic } from './runtime';
 import { ErrorValue } from './values';
 
 export function executeZigProgram(source: string, input?: ProgramInput): ProgramExecution {
   let compiled: CompiledProgram;
   try {
-    compiled = compileProgram(parseZig(source));
+    compiled = compileSource(source);
   } catch (error) {
     if (error instanceof CompileError) return { kind: 'compileError', diagnostics: error.diagnostics };
     if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };

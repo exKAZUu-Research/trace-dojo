@@ -1,7 +1,7 @@
 import type { Expression, Span } from '../ast';
 import { BigFloat, compareFloats } from '../floats';
 import { type Frame, withHeldValues, ZigPanic } from '../runtime';
-import { copyForStorage, evaluateHeld, known, runtime, type SemaApi, type TExpr } from '../semaBase';
+import { copyForStorage, evaluateHeld, known, runtime, type SemaApi, type TExpr, valueEvaluators } from '../semaBase';
 import {
   BOOL,
   type EnumType,
@@ -127,7 +127,7 @@ export function computed(
       if (!(error instanceof ZigPanic)) throw error;
     }
   }
-  const evaluators = args.map((arg) => arg.eval);
+  const evaluators = valueEvaluators(args);
   return runtime(
     type,
     (frame) => {

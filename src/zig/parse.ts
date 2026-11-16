@@ -1,6 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../interpreter/diagnostics';
+import { ExecutionBudget } from '../interpreter/limits';
 import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { SourceFile } from './ast';
@@ -15,10 +16,14 @@ const MISSING_TOKEN_NAMES: Record<string, string> = {
 };
 
 /** Parses a source file, throwing a `CompileError` for invalid or unsupported syntax. */
-export function parseZig(source: string): SourceFile {
-  return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) => convertFile(root), {
+export function parseZig(source: string, budget = new ExecutionBudget()): SourceFile {
+  budget.spend(1 + Math.floor(source.length / 64));
+  const file = parseSource(parser, source, MISSING_TOKEN_NAMES, (root) => convertFile(root, budget), {
     locateErrors: (root, errors) => zigSyntaxErrors(root, source, errors),
+    progress: () => budget.spend(),
   });
+  budget.spend();
+  return file;
 }
 
 /**

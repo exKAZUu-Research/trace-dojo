@@ -818,7 +818,7 @@ export abstract class StatementCompiler extends CallCompiler {
     };
     target.breaks.push(site);
     if (target.resultType) site.final = site.value;
-    return (frame) => new Jump('break', id, copiedIfStored(site.final ?? site.value)(frame));
+    return (frame) => new Jump('break', id, copyJumpValue(site.final ?? site.value)(frame));
   }
 
   private returnMaker(expression: ExpressionOf<'return'>): (frame: Frame) => Jump {
@@ -832,7 +832,7 @@ export abstract class StatementCompiler extends CallCompiler {
     let value = this.compile(expression.value, returnType);
     this.recordErrors(value.type, value);
     value = this.coerce(value, returnType, expression.value);
-    const evaluate = copiedIfStored(value);
+    const evaluate = copyJumpValue(value);
     return (frame) => new Jump('return', target, evaluate(frame));
   }
 
@@ -1591,7 +1591,6 @@ export abstract class StatementCompiler extends CallCompiler {
     } else {
       return this.error(span, `${typeName(type)} 型は、for で回せません。`);
     }
-    if (byPointer && isConst) this.error(span, '定数の要素は |*x| で受け取れません。');
     if (compiled.known && type.kind === 'array') {
       const value = compiled.value;
       evaluate = () => value;
@@ -2437,13 +2436,8 @@ function isSelfType(type: Type, namespace: { name: string }): boolean {
 
 export { isObjectCreation };
 
-/**
- * Evaluates a returned or broken value, copying an aggregate read from storage: Zig copies it to the result before
- * deferred code runs, which may change the storage.
- */
-function copiedIfStored(value: TExpr): (frame: Frame) => Value {
+function copyJumpValue(value: TExpr): (frame: Frame) => Value {
   const evaluate = value.eval;
-  if (!value.place) return evaluate;
   return (frame) => copyForFrame(frame, evaluate(frame), value.type);
 }
 

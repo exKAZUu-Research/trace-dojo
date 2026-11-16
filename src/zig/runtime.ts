@@ -68,7 +68,7 @@ export interface Deferred {
 }
 
 export class Runtime {
-  readonly budget = new ExecutionBudget();
+  readonly budget: ExecutionBudget;
   readonly io: ProgramIO;
   readonly world = new TurtleWorld();
   readonly steps = new StepTracker();
@@ -81,7 +81,8 @@ export class Runtime {
   private readonly identities = new WeakMap<object, bigint>();
   private nextIdentity = 1n;
 
-  constructor(input?: ProgramInput) {
+  constructor(input?: ProgramInput, budget = new ExecutionBudget()) {
+    this.budget = budget;
     this.io = new ProgramIO(this.budget, input);
   }
 

@@ -803,14 +803,9 @@ export abstract class ExpressionCompiler extends SemaBase {
       operandType = arrayOf(0, pointerType.child, pointerType.sentinel);
     }
     let operand = this.compile(expression.operand, operandType);
-    if (
-      operand.known &&
-      !operand.place &&
-      operandType &&
-      (operand.type.kind === 'comptime_int' || operand.type.kind === 'comptime_float') &&
-      (operandType.kind === 'int' || operandType.kind === 'float')
-    )
-      operand = this.coerce(operand, operandType, expression.operand);
+    const valueType = pointerType?.kind === 'pointer' && pointerType.size === 'slice' ? undefined : operandType;
+    if (!operand.place && valueType && operand.type !== valueType)
+      operand = this.coerce(operand, valueType, expression.operand);
     return this.addressOf(operand);
   }
 

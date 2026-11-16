@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 500 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 521 -- Groups the related standard library operations that share this module.
 import { checked, divCeil, divExact, divFloor, divTrunc, floatMod, floatRem, mod, PANIC, panic, rem } from '../arith';
 import type { Expression } from '../ast';
 import { fusedMultiplyAdd, intFittingRange, roundFloat } from '../builtins';
@@ -18,6 +18,7 @@ import {
   isInfinite,
   isIntegral,
   isNaNFloat,
+  minMaxFloat,
   negate,
   parseFloatLiteral,
   roundNumber,
@@ -234,13 +235,19 @@ function shiftedBy(value: bigint, distance: bigint, toLeft: boolean, type: IntTy
 }
 
 /** `rotl` and `rotr` of `(T, x, r)` for an unsigned `T`, taking the amount modulo the bit count. */
+// code-gauge-allow functionCognitiveComplexity 18 -- Validates the rotation domain before sharing the modulo and bit arithmetic for both directions.
 function rotate(name: string, left: boolean): () => Member {
   return generic(name, 3, (sema, call, type, [xArg, amountArg]) => {
     if (type.kind !== 'int' || type.signed) {
       return sema.error(call.span, `${name} には符号なし整数の型を渡してください（${typeName(type)} です）。`);
     }
     const x = sema.coerce(sema.compile(xArg, type), type, xArg);
-    const amount = sema.compile(amountArg);
+    let amount = sema.compile(amountArg);
+    if (type.bits !== 0) {
+      if (amount.type.kind !== 'int' && amount.type.kind !== 'comptime_int')
+        return sema.error(amountArg, `${name} の回転量は整数にしてください。`);
+      if (amount.type.kind === 'comptime_int') amount = sema.coerce(amount, intType(false, 16), amountArg);
+    }
     return computed(type, [x, amount], call.span, ([value, n]) => {
       if (type.bits === 0) return 0n;
       const bits = BigInt(type.bits);
@@ -323,10 +330,43 @@ function floatDivisionMember(
   });
 }
 
-function gcd(a: bigint, b: bigint): bigint {
+function gcdMember(lcm: boolean): Member {
+  const name = lcm ? 'std.math.lcm' : 'std.math.gcd';
+  return fnMember(name, (sema, call) => {
+    const [aArg, bArg] = expectArgs(sema, call, 2, name);
+    const a = sema.compile(aArg);
+    const b = sema.compile(bArg, a.type);
+    const type = sema.peerType([a, b], call.span);
+    if (type.kind !== 'int' && type.kind !== 'comptime_int')
+      return sema.error(call.span, `${name} の引数は整数にしてください。`);
+    if (
+      !lcm &&
+      ((type.kind === 'int' && type.signed) ||
+        (type.kind === 'comptime_int' && [a, b].some((x) => (x.value as bigint) < 0n)))
+    )
+      return sema.error(call.span, 'std.math.gcd の引数は符号なし整数にしてください。');
+    return computed(type, [sema.coerce(a, type), sema.coerce(b, type)], call.span, ([x, y], frame) =>
+      gcdResult(x as bigint, y as bigint, type, lcm, () => (frame ? frame.runtime.spend() : sema.spendCompilation()))
+    );
+  })();
+}
+
+function gcdResult(left: bigint, right: bigint, type: Type, lcm: boolean, spend: () => void): bigint {
+  if (!lcm && left === 0n && right === 0n) panic(PANIC.unreachable);
+  const divisor = gcd(left, right, spend);
+  if (!lcm) return divisor;
+  const product = divisor === 0n ? 0n : (left / divisor) * right;
+  const result = product < 0n ? -product : product;
+  return type.kind === 'int' ? checked(result, type) : result;
+}
+
+function gcd(a: bigint, b: bigint, spend: () => void): bigint {
   let x = a < 0n ? -a : a;
   let y = b < 0n ? -b : b;
-  while (y !== 0n) [x, y] = [y, x % y];
+  while (y !== 0n) {
+    spend();
+    [x, y] = [y, x % y];
+  }
   return x;
 }
 
@@ -557,14 +597,22 @@ const MEMBERS: Record<string, () => Member> = {
       return typeof result === 'string' ? ErrorValue.of(result) : result;
     });
   }),
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps numeric type checks, ordered-bound assertions, and float min/max behavior together.
   clamp: fnMember('std.math.clamp', (sema, call) => {
     const [valueArg, lowArg, highArg] = expectArgs(sema, call, 3, 'std.math.clamp');
     const parts = [valueArg, lowArg, highArg].map((arg) => sema.compile(arg));
     const runtimeType = parts.find((part) => part.type.kind === 'int' || part.type.kind === 'float')?.type;
     const operands = runtimeType ? [valueArg, lowArg, highArg].map((arg) => sema.compile(arg, runtimeType)) : parts;
     const type = sema.peerType(operands, call.span);
+    if (!['int', 'comptime_int', 'float', 'comptime_float'].includes(type.kind))
+      return sema.error(call.span, 'std.math.clamp の引数は数にしてください。');
     const coerced = operands.map((operand) => sema.coerce(operand, type, operand.span));
     return computed(type, coerced, call.span, ([v, low, high]) => {
+      if (type.kind === 'float' || type.kind === 'comptime_float') {
+        const order = compareFloats(low as AnyFloat, high as AnyFloat);
+        if (order === undefined || order > 0) panic(PANIC.unreachable);
+        return minMaxFloat(low as AnyFloat, minMaxFloat(v as AnyFloat, high as AnyFloat, false), true);
+      }
       if (compareScalarsAny(low, high) > 0) panic(PANIC.unreachable);
       return compareScalarsAny(v, low) < 0 ? low : compareScalarsAny(v, high) > 0 ? high : v;
     });
@@ -592,26 +640,8 @@ const MEMBERS: Record<string, () => Member> = {
   ),
   mod: intDivision('std.math.mod', MOD_ERRORS, (a, b) => mod(a, b)),
   rem: intDivision('std.math.rem', MOD_ERRORS, (a, b) => rem(a, b)),
-  gcd: fnMember('std.math.gcd', (sema, call) => {
-    const [aArg, bArg] = expectArgs(sema, call, 2, 'std.math.gcd');
-    const a = sema.compile(aArg);
-    const b = sema.compile(bArg, a.type);
-    const type = sema.peerType([a, b], call.span);
-    return computed(type, [sema.coerce(a, type), sema.coerce(b, type)], call.span, ([x, y]) =>
-      gcd(x as bigint, y as bigint)
-    );
-  }),
-  lcm: fnMember('std.math.lcm', (sema, call) => {
-    const [aArg, bArg] = expectArgs(sema, call, 2, 'std.math.lcm');
-    const a = sema.compile(aArg);
-    const b = sema.compile(bArg, a.type);
-    const type = sema.peerType([a, b], call.span);
-    return computed(type, [sema.coerce(a, type), sema.coerce(b, type)], call.span, ([x, y]) => {
-      const divisor = gcd(x as bigint, y as bigint);
-      const result = divisor === 0n ? 0n : ((x as bigint) / divisor) * (y as bigint);
-      return type.kind === 'int' ? checked(result, type) : result;
-    });
-  }),
+  gcd: () => gcdMember(false),
+  lcm: () => gcdMember(true),
   CompareOperator: typeMember(() => COMPARE_OPERATOR),
   compare: fnMember('std.math.compare', (sema, call) => {
     const [aArg, opArg, bArg] = expectArgs(sema, call, 3, 'std.math.compare');

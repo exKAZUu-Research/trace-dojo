@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 890 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 907 -- The file holds one layer of the compiler, whose parts share its private state.
 // code-gauge-allow-file duplicateLines 18 -- Undefined and zero initializers share aggregate shapes but differ in scalar and optional values.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
@@ -187,7 +187,6 @@ export function isType(value: Value): value is Type {
 
 export abstract class SemaBase implements SemaApi {
   protected readonly storage = new CompilationStorage();
-  protected readonly compilationBudget = new ExecutionBudget();
   protected scope: Scope;
   /** The namespaces of user containers, by syntax, so that a container expression evaluates to one type. */
   protected readonly containerTypes = new Map<Container, Type>();
@@ -197,7 +196,10 @@ export abstract class SemaBase implements SemaApi {
   /** How many structs' fields are being resolved, during which function bodies wait to compile. */
   protected resolvingFields = 0;
 
-  constructor(readonly root: Namespace) {
+  constructor(
+    readonly root: Namespace,
+    protected readonly compilationBudget = new ExecutionBudget()
+  ) {
     this.scope = { namespace: root };
   }
 
@@ -461,6 +463,8 @@ export abstract class SemaBase implements SemaApi {
     if (seen.has(type)) return;
     seen.add(type);
     if (type.kind === 'array' || type.kind === 'optional') this.resolveLayout(type.child, span, seen);
+    else if (type.kind === 'error_union') this.resolveLayout(type.payload, span, seen);
+    else if (type.kind === 'enum') this.enumFields(type);
     else if (type.kind === 'struct') {
       for (const field of this.structFields(type, span)) this.resolveLayout(field.type, span, seen);
     } else if (type.kind === 'union') {
@@ -478,6 +482,9 @@ export abstract class SemaBase implements SemaApi {
       case 'optional': {
         return this.holdsByValue(type.child, target, seen);
       }
+      case 'error_union': {
+        return this.holdsByValue(type.payload, target, seen);
+      }
       case 'struct': {
         return (type.fields ?? []).some((field) => this.holdsByValue(field.type, target, seen));
       }
@@ -491,6 +498,7 @@ export abstract class SemaBase implements SemaApi {
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- Checks each rule of Zig's type coercion or container analysis in turn.
+  // code-gauge-allow functionNcss 33 -- Resolves enum tags, indexed uniqueness, and integer range checks in declaration order.
   enumFields(type: EnumType): NonNullable<EnumType['fields']> {
     if (type.fields) return type.fields;
     const syntax = type.namespace.syntax;
@@ -502,7 +510,9 @@ export abstract class SemaBase implements SemaApi {
       type.exhaustive = named.length === syntax.fields.length;
       const fields: { name: string; value: bigint }[] = [];
       let next = 0n;
+      const values = new Set<bigint>();
       for (const field of named) {
+        this.spendCompilation();
         let value = next;
         if (field.value) {
           const tagType = declaredTag as IntType;
@@ -511,7 +521,8 @@ export abstract class SemaBase implements SemaApi {
             'enum の値'
           ) as bigint;
         }
-        if (fields.some((other) => other.value === value)) this.error(field, `enum の値 ${value} が重複しています。`);
+        if (values.has(value)) this.error(field, `enum の値 ${value} が重複しています。`);
+        values.add(value);
         fields.push({ name: field.name as string, value });
         next = value + 1n;
       }
@@ -533,6 +544,7 @@ export abstract class SemaBase implements SemaApi {
     if (!syntax) return [];
     this.inContainerScope(type.namespace, () => {
       const fields = syntax.fields.map((field) => {
+        this.spendCompilation();
         if (field.name === undefined) this.error(field, 'union のフィールドには名前を書いてください。');
         return { name: field.name, type: field.type ? this.compileType(field.type) : VOID };
       });
@@ -556,13 +568,17 @@ export abstract class SemaBase implements SemaApi {
         const tagType = this.compileType(syntax.argument);
         if (tagType.kind !== 'enum') this.error(syntax, 'union(T) の T は enum の型にしてください。');
         const tagFields = this.enumFields(tagType);
+        const tagNames = new Set(tagFields.map((field) => field.name));
+        const fieldNames = new Set(fields.map((field) => field.name));
         for (const field of fields) {
-          if (!tagFields.some((tag) => tag.name === field.name)) {
+          this.spendCompilation();
+          if (!tagNames.has(field.name)) {
             this.error(syntax, `enum ${typeName(tagType)} には、フィールド「${field.name}」がありません。`);
           }
         }
         for (const tag of tagFields) {
-          if (!fields.some((field) => field.name === tag.name)) {
+          this.spendCompilation();
+          if (!fieldNames.has(tag.name)) {
             this.error(syntax, `union にフィールド「${tag.name}」がありません。`);
           }
         }
@@ -1214,6 +1230,10 @@ export function evaluateHeld(
     frame.temporaries.length = mark;
   }
   return values;
+}
+
+export function valueEvaluators(args: readonly TExpr[]): TExpr['eval'][] {
+  return args.map((arg) => (frame) => copyForFrame(frame, arg.eval(frame), arg.type));
 }
 
 export function copyForFrame(frame: Frame, value: Value, type: Type): Value {

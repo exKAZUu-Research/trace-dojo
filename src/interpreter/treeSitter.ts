@@ -36,10 +36,36 @@ export function parseSource<T>(
     maxNestingDepth = MAX_NESTING_DEPTH,
     tooDeepMessage = '括弧やブロックなどの入れ子が深すぎます。',
     locateErrors = (_root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] => errors,
+    progress,
+  }: {
+    maxNestingDepth?: number;
+    tooDeepMessage?: string;
+    locateErrors?: (root: Node, errors: SourceDiagnostic[]) => SourceDiagnostic[];
+    progress?: () => void;
   } = {}
 ): T {
-  const tree = parser.parse(source);
-  if (!tree) throw new Error('The parser returned no tree');
+  let parsingFailure: { error: unknown } | undefined;
+  const tree = parser.parse(
+    source,
+    progress
+      ? {
+          progressCallback: () => {
+            try {
+              progress();
+            } catch (error) {
+              parsingFailure = { error };
+              return true;
+            }
+          },
+        }
+      : undefined
+  );
+  if (!tree) {
+    // A cancelled parse retains resumable state, which must not be reused for another program.
+    parser.reset();
+    if (parsingFailure) throw parsingFailure.error;
+    throw new Error('The parser returned no tree');
+  }
   try {
     const tooDeep = findTooDeepNode(tree.rootNode, maxNestingDepth);
     if (tooDeep) {

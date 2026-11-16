@@ -1,7 +1,8 @@
-// code-gauge-allow-file fileNcss 768 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 772 -- The file holds one layer of the compiler, whose parts share its private state.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
+import { ExecutionBudget } from '../interpreter/limits';
 import type {
   AssignOperator,
   BinaryOperator,
@@ -28,7 +29,8 @@ import type {
 import { LiteralDecoder, parseFloatText, parseIntegerText, validateCommentText } from './literals';
 
 /** Converts tree-sitter's tree of a file into the AST, rejecting the syntax this grader does not run. */
-export function convertFile(root: Node): SourceFile {
+export function convertFile(root: Node, budget = new ExecutionBudget()): SourceFile {
+  conversionBudget = budget;
   validateCommentText(root);
   source = root.text;
   literals = new LiteralDecoder();
@@ -41,6 +43,7 @@ export function convertFile(root: Node): SourceFile {
 let source = '';
 let literals = new LiteralDecoder();
 let functions: FunctionDeclaration[] = [];
+let conversionBudget: ExecutionBudget;
 
 /** The keyword tokens that stand for values where an expression is expected. */
 const KEYWORD_VALUES = new Set(['null', 'undefined', 'unreachable', 'anyframe']);
@@ -50,6 +53,7 @@ function identifierName(node: Node): { name: string; quotedName: boolean } {
 }
 
 function spanOf(node: Node): Span {
+  conversionBudget.spend();
   return {
     row: node.startPosition.row,
     col: node.startPosition.column,

@@ -1,8 +1,9 @@
-// code-gauge-allow-file fileNcss 576 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 577 -- Groups the related standard library operations that share this module.
 // code-gauge-allow-file duplicateLines 25 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
 import { type AnyFloat, compareFloats, floatFromBigInt, minMaxFloat } from '../floats';
+import { sizeOf } from '../layout';
 import type { Frame } from '../runtime';
 import { copyForStorage, known, newArray, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
@@ -21,7 +22,7 @@ import {
   USIZE,
   VOID,
 } from '../types';
-import { NULL, type Pointer, Slice, storageLocation, storeInto, type Value, ZStruct } from '../values';
+import { NULL, type Pointer, Slice, storageLocation, storageOverlaps, storeInto, type Value, ZStruct } from '../values';
 import { WeakValueMap } from '../weakValueMap';
 import { blockSortFunction, runBlockSort } from './blockSort';
 import {
@@ -632,8 +633,14 @@ const MEMBERS: Record<string, () => Member> = {
         if (matches) {
           if (written + replace.length > target.length) indexOutOfBounds(replace.length, target.length - written);
           if (
-            target.target.slots === replace.target.slots &&
-            Math.abs(target.start + written - replace.start) < replace.length
+            storageOverlaps(
+              target.target,
+              target.start + written,
+              replace.target,
+              replace.start,
+              replace.length,
+              sizeOf(type)
+            )
           )
             panic(PANIC.memcpyAlias);
           spend(1 + Math.floor(replace.length / 16));

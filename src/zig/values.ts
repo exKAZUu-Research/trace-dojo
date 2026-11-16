@@ -42,6 +42,21 @@ export function registerStorageLocation(
   storageLocations.set(storage, locate);
 }
 
+export function storageOverlaps(
+  left: Slots,
+  leftStart: number,
+  right: Slots,
+  rightStart: number,
+  length: number,
+  stride: number
+): boolean {
+  const a = storageLocation(left.slots, leftStart);
+  const b = storageLocation(right.slots, rightStart);
+  const first = storageLocations.has(left.slots) ? a.index : a.index * stride;
+  const second = storageLocations.has(right.slots) ? b.index : b.index * stride;
+  return a.storage === b.storage && Math.abs(first - second) < length * stride;
+}
+
 export function storageLocation(storage: object, index: number): { storage: object; index: number } {
   return storageLocations.get(storage)?.(index) ?? { storage, index };
 }

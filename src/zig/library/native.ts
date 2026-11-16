@@ -2,7 +2,6 @@ import type { Expression, Span } from '../ast';
 import { FunctionInstance } from '../functions';
 import { type Frame, withHeldValues } from '../runtime';
 import {
-  copyForFrame,
   evaluateHeld,
   known,
   NATIVE_FN_TYPE,
@@ -11,6 +10,7 @@ import {
   runtime,
   type SemaApi,
   type TExpr,
+  valueEvaluators,
 } from '../semaBase';
 import {
   type Decl,
@@ -119,7 +119,7 @@ export function nativeCall(
   span: Span,
   compute: (values: Value[], frame: Frame) => Value
 ): TExpr {
-  const evaluators = args.map((arg) => (frame: Frame) => copyForFrame(frame, arg.eval(frame), arg.type));
+  const evaluators = valueEvaluators(args);
   return runtime(
     type,
     (frame) => {
@@ -149,7 +149,7 @@ export function nativeStateCall<S extends NativeState>(
   receiver: (frame: Frame) => S,
   compute: (state: S, values: Value[], frame: Frame) => Value
 ): TExpr {
-  const evaluators = args.map((arg) => (frame: Frame) => copyForFrame(frame, arg.eval(frame), arg.type));
+  const evaluators = valueEvaluators(args);
   return runtime(
     type,
     (frame) => {

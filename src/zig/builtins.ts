@@ -33,6 +33,7 @@ import {
   signBit,
   toNumber,
 } from './floats';
+import { sizeOf } from './layout';
 import { importStd } from './library/std';
 import { ZigPanic } from './runtime';
 import {
@@ -65,7 +66,7 @@ import {
   wrapInt,
 } from './types';
 import { decodeUtf8 } from './utf8';
-import { ErrorValue, Pointer, Slice, storeInto, type Value, ZArray, ZStruct, ZUnion } from './values';
+import { ErrorValue, Pointer, Slice, storageOverlaps, storeInto, type Value, ZArray, ZStruct, ZUnion } from './values';
 
 /** Builtins of stages C and D, which this grader rejects with the stage's message. */
 const UNAVAILABLE = new Map<string, string>([
@@ -866,6 +867,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       return this.error(expression.args[0], `${name} の書き込み先には、変更できる配列やスライスを指定してください。`);
     if (!from) return this.error(expression.args[1], `${name} の読み込み元には、配列やスライスを指定してください。`);
     if (!inMemoryCoercible(from.child, target.child)) this.error(expression, `${name} の要素の型が一致しません。`);
+    this.resolveStorage(target.child, expression);
     const destinationLength = knownLengthOf(destination);
     const sourceLength = knownLengthOf(source);
     if (destinationLength !== undefined && sourceLength !== undefined && destinationLength !== sourceLength)
@@ -881,8 +883,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         if (out.length !== input.length) panic(PANIC.memcpyLengths);
         if (
           name === '@memcpy' &&
-          out.slots.slots === input.slots.slots &&
-          Math.abs(out.start - input.start) < out.length
+          storageOverlaps(out.slots, out.start, input.slots, input.start, out.length, sizeOf(target.child))
         )
           panic(PANIC.memcpyAlias);
         const values = input.slots.slots.slice(input.start, input.start + input.length).map(copyForStorage);

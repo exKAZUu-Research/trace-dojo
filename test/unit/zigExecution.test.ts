@@ -2377,3 +2377,168 @@ test('allocated opaque native values preserve their state and supported fields',
     uncaughtException: undefined,
   });
 });
+
+test.each(['rotl', 'rotr'])('rotation arguments must be integers before native evaluation: %s', (operation) => {
+  for (const amount of ['true', '2.0', '"x"'])
+    expect(
+      executeProgram('zig', `const std=@import("std");pub fn main()void{_=std.math.${operation}(u8,1,${amount});}`).kind
+    ).toBe('compileError');
+});
+
+test.each(['gcd', 'lcm'])(
+  'integer number theory rejects float operands without entering native loops: %s',
+  (operation) => {
+    expect(
+      executeProgram(
+        'zig',
+        `const std=@import("std");pub fn main()void{_=std.math.${operation}(@as(f64,1),@as(f64,2));}`
+      ).kind
+    ).toBe('compileError');
+  }
+);
+
+test('gcd validates its unsigned domain and lcm preserves absolute signed results', () => {
+  expect(
+    executeProgram('zig', `const std=@import("std");pub fn main()void{_=std.math.gcd(@as(i32,1),@as(i32,2));}`).kind
+  ).toBe('compileError');
+  const source = `const std=@import("std");pub fn main()void{std.debug.print("{} {} {}",.{std.math.gcd(@as(u32,48),18),std.math.lcm(@as(i32,-3),4),std.math.lcm(0,0)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '6 12 0',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['anyerror!struct{bytes:[100]u8}', 'enum(u64){a}', '?anyerror!struct{bytes:[100]u8}'])(
+  'allocator accounting resolves complete previously unused layouts: %s',
+  (type) => {
+    const source = `const std=@import("std");const T=${type};pub fn main()void{var bytes:[0]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);_=f.allocator().alloc(T,1) catch |err|{std.debug.print("{s}",.{@errorName(err)});return;};std.debug.print("allocated",.{});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'OutOfMemory',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('recursive by-value types through error unions fail before materializing storage', () => {
+  const source = `const std=@import("std");const S=struct{x:anyerror!S};pub fn main()void{var bytes:[8]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);_=f.allocator().create(S) catch return;}`;
+  expect(executeProgram('zig', source).kind).toBe('compileError');
+});
+
+test.each([
+  '@memcpy(bytes[1..3],p[0..2])',
+  '@memcpy(p[1..3],bytes[0..2])',
+  '_=std.mem.replace(u8,"aa","a",p[0..2],bytes[1..5])',
+])('overlap checks normalize allocated and caller-backed views: %s', (operation) => {
+  const source = `const std=@import("std");pub fn main()!void{var bytes:[8]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().alloc(u8,4);@memset(p,97);${operation};}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'panic: @memcpy arguments alias',
+  });
+});
+
+test('disjoint multi-byte memory ranges remain copyable', () => {
+  const source = `const std=@import("std");pub fn main()void{var a=[_]u16{1,2,3,4};@memcpy(a[2..4],a[0..2]);@memcpy(a[0..0],a[0..0]);std.debug.print("{any}",.{a});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '{ 1, 2, 1, 2 }',
+    uncaughtException: undefined,
+  });
+});
+
+test('contextual addresses coerce complete temporary values into optional and error-union pointees', () => {
+  const source = `const std=@import("std");fn make()u8{return 6;}pub fn main()void{const a:*const ?u8=&null;const b:*const ?u8=&@as(u8,3);const c:*const error{A}!u8=&@as(u8,1);const d:*const ?[]const u8=&"ab";const e:*const ?i32=&(1+2);const f:*const ?u8=&make();std.debug.print("{} {} {!} {s} {} {}",.{a.*==null,b.*.?,c.*,d.*.?,e.*.?,f.*.?});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 3 1 ab 3 6',
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('zig', `pub fn main()void{var n:u8=3;const p:*const ?u8=&n;_=p;}`).kind).toBe('compileError');
+});
+
+test.each(['&a', 's'])('for pointer captures preserve read-only element types: %s', (operand) => {
+  const source = `const std=@import("std");pub fn main()void{const a=[_]u8{1,2};${operand === 's' ? 'const s:[]const u8=&a;' : ''}for(${operand})|*p|std.debug.print("{} ",.{p.*});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 2 ',
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('zig', `pub fn main()void{const a=[_]u8{1,2};for(&a)|*p|p.*=3;}`).kind).toBe('compileError');
+});
+
+test('composed return and break values are snapshotted before deferred source mutation', () => {
+  const source = `const std=@import("std");const S=struct{x:u8};fn returned(flag:bool)S{var a:S=.{.x=1};defer a.x=9;return if(flag)a else S{.x=2};}fn broken(flag:bool)S{return blk:{var a:S=.{.x=3};defer a.x=9;break :blk if(flag)a else S{.x=4};};}pub fn main()void{std.debug.print("{} {}",.{returned(true).x,broken(true).x});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 3',
+    uncaughtException: undefined,
+  });
+});
+
+test('computed native calls snapshot aggregate operands before later argument effects', () => {
+  const source = `const std=@import("std");const S=struct{x:u8};fn change(p:*S)S{p.x=2;return p.*;}fn array(p:*[2]u8)[2]u8{p[0]=2;return p.*;}pub fn main()void{var a=S{.x=1};var b=[_]u8{1,3};std.debug.print("{} {}",.{std.meta.eql(a,change(&a)),std.meta.eql(b,array(&b))});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'false false',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['list.shrinkAndFree(g,0);', 'list.clearRetainingCapacity();_=try list.toOwnedSlice(g);'])(
+  'zero-sized list replacements release prior allocator reservations: %s',
+  (operation) => {
+    const source = `const std=@import("std");pub fn main()!void{var bytes:[256]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const g=f.allocator();var list:std.ArrayList(u8)=.empty;try list.append(g,1);${operation}const p=try g.alloc(u8,200);std.debug.print("{} {}",.{p.len,f.end_index});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '200 200',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['f64', 'f128'])('clamp shares numeric min/max semantics and rejects unordered bounds: %s', (type) => {
+  const source = `const std=@import("std");pub fn main()void{const n=std.math.nan(${type});std.debug.print("{d}|",.{std.math.clamp(n,@as(${type},0),@as(${type},1))});std.debug.print("{d}",.{std.math.clamp(@as(${type},0.5),n,@as(${type},1))});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1|',
+    uncaughtException: 'panic: reached unreachable code',
+  });
+});
+
+test('large unreachable binding lists obey compilation limits and leave the parser reusable', () => {
+  const declarations = Array.from({ length: 80_000 }, (_, i) => `const x${i}=0;_=x${i};`).join('');
+  expect(executeProgram('zig', `fn never()void{${declarations}}pub fn main()void{}`)).toMatchObject({
+    kind: 'limitExceeded',
+  });
+  expect(executeProgram('zig', 'pub fn main()void{}')).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['error{One,Two,One}', 'enum(u8){one=1,two=1}', 'union(enum{one,two}){one:u8,three:u8}'])(
+  'indexed declaration validation retains duplicate and missing-tag diagnostics: %s',
+  (type) => {
+    const source = `const std=@import("std");const T=${type};pub fn main()void{var bytes:[8]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);_=f.allocator().create(T) catch return;}`;
+    expect(executeProgram('zig', source).kind).toBe('compileError');
+  }
+);
+
+test('native aggregate selections snapshot on return while slice results retain shared backing', () => {
+  const source = `const std=@import("std");const S=struct{x:u8};var global=[_]u8{1};fn less(_:void,a:S,b:S)bool{return a.x<b.x;}fn selected()S{var a=[_]S{.{.x=1}};defer a[0].x=9;return std.sort.min(S,&a,{},less).?;}fn view()[]u8{defer global[0]=9;return &global;}pub fn main()void{std.debug.print("{} {}",.{selected().x,view()[0]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 9',
+    uncaughtException: undefined,
+  });
+});
+
+test('zero-sized allocator replacements and empty allocations do not leak debug reservations', () => {
+  const source = `const std=@import("std");pub fn main()!void{var d=std.heap.DebugAllocator(.{}).init;const g=d.allocator();const p=try g.alloc(u8,2);_=try g.realloc(p,0);_=try g.alloc(u8,0);std.debug.print("{}",.{d.deinit()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '.ok',
+    uncaughtException: undefined,
+  });
+});
