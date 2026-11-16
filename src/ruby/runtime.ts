@@ -110,13 +110,15 @@ export function rootValues(frame: Frame, values: readonly Value[]): void {
   for (const value of values) frame.temporaries.push(value);
 }
 
+export type MissingReason = 'vcall' | 'private' | 'protected' | 'super';
+
 export interface FrameExtra {
   definitionTarget?: RClass;
   lexicalDefinitionOwner?: RClass;
   forbidSingletonDefinition?: boolean;
   /** The running method. */
   method?: RMethod;
-  missingReason?: 'vcall' | 'private' | 'protected';
+  missingReason?: MissingReason;
   def?: MethodDef;
   block?: RProc;
   lexicalBlockHome?: Frame;

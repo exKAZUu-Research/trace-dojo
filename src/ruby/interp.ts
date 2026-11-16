@@ -72,6 +72,7 @@ import { regexpLiteralEncoding } from './regexpLiteralEncoding';
 import {
   BreakSignal,
   Frame,
+  type MissingReason,
   NextSignal,
   RedoSignal,
   RetrySignal,
@@ -1894,10 +1895,14 @@ function* callMethodMissing(
   keywords: RHash | undefined,
   block: RProc | undefined,
   options: CallOptions,
-  visibility?: 'private' | 'protected'
+  reason: MissingReason | undefined = options.vcall ? 'vcall' : undefined
 ): Gen {
+  if (name === 'method_missing') {
+    if (reason === 'super') throw new UnsupportedFeatureError('継承元がない method_missing の super');
+    raiseMethodMissing(recv, args, reason);
+  }
   const handler = classOf(recv).findMethod('method_missing');
-  if (handler && !isCoreMethod(handler, rt().c.BasicObject, 'method_missing')) {
+  if (handler && !isCoreMethod(handler, rt().c.BasicObject, 'method_missing'))
     return yield* invoke(
       handler,
       recv,
@@ -1905,25 +1910,26 @@ function* callMethodMissing(
       keywords,
       block,
       options.used ?? true,
-      visibility ?? (options.vcall ? 'vcall' : undefined)
+      reason
     );
-  }
-  if (visibility)
-    throw noMethodError(`${visibility} method '${name}' called for ${receiverDescription(recv)}`, recv, name);
-  methodMissing(recv, name, options);
+  methodMissing(recv, name, options, reason);
 }
 
-export function methodMissing(
-  recv: Value,
-  name: string,
-  options: CallOptions,
-  visibility?: 'private' | 'protected'
-): never {
-  if (visibility)
-    throw noMethodError(`${visibility} method '${name}' called for ${receiverDescription(recv)}`, recv, name);
-  if (options.vcall) {
+export function raiseMethodMissing(recv: Value, args: Value[], reason?: MissingReason): never {
+  if (args.length === 0) throw argumentError('no method name given');
+  const name = args[0];
+  if (!(name instanceof RSymbol))
+    throw argumentError(`method name must be a Symbol but ${className(realClassOf(name))} is given`);
+  methodMissing(recv, name.key, {}, reason);
+}
+
+export function methodMissing(recv: Value, name: string, options: CallOptions, reason?: MissingReason): never {
+  if (reason === 'private' || reason === 'protected')
+    throw noMethodError(`${reason} method '${name}' called for ${receiverDescription(recv)}`, recv, name);
+  if (reason === 'super')
+    throw noMethodError(`super: no superclass method '${name}' for ${receiverDescription(recv)}`, recv, name);
+  if (options.vcall || reason === 'vcall')
     throw nameError(`undefined local variable or method '${name}' for ${receiverDescription(recv)}`, recv, name);
-  }
   throw noMethodError(`undefined method '${name}' for ${receiverDescription(recv)}`, recv, name);
 }
 
@@ -1937,7 +1943,7 @@ export function* invoke(
   keywords: RHash | undefined,
   block: RProc | undefined,
   used: boolean,
-  missingReason?: 'vcall' | 'private' | 'protected'
+  missingReason?: MissingReason
 ): Gen {
   const runtime = rt();
   const { body } = method;
@@ -2016,7 +2022,7 @@ function* invokeUser(
   keywords: RHash | undefined,
   block: RProc | undefined,
   used: boolean,
-  missingReason?: 'vcall' | 'private' | 'protected'
+  missingReason?: MissingReason
 ): Gen {
   const runtime = rt();
   runtime.userCallVersion++;
@@ -2062,7 +2068,7 @@ function hostStackOverflow(error: unknown, depth: number): unknown {
 export const STACK_OVERFLOW = { stackOverflow: true };
 let overflowDepth: number | undefined;
 
-// code-gauge-allow functionCognitiveComplexity 22 -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity 23 -- Super dispatches a found method or the shared missing-method handler while preserving lexical block control flow.
 // code-gauge-allow functionNcss 46 -- Super forwards explicit or implicit arguments and the active block to the next method owner.
 function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
   const home = frame.home;
@@ -2092,21 +2098,18 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
     else if (e.blockArg) block = yield* toBlock(yield* ev(e.blockArg, frame));
     const superName = method.superName ?? method.name;
     const superMethod = classOf(home.self).findSuperMethod(superName, method.owner, method.lookupOccurrence);
-    if (!superMethod) {
-      throw noMethodError(
-        `super: no superclass method '${superName}' for ${receiverDescription(home.self)}`,
-        home.self,
-        method.name
-      );
-    }
     const used = e.used === 1 || (e.used === 2 && frame.resultUsed);
     rt().currentRow = e.row;
     const missingReason = method.name === 'method_missing' ? home.extra.missingReason : undefined;
-    if (!e.block) return yield* invoke(superMethod, home.self, args, keywords, block, used, missingReason);
+    const dispatch = (): Gen =>
+      superMethod
+        ? invoke(superMethod, home.self, args, keywords, block, used, missingReason)
+        : callMethodMissing(home.self, superName, args, keywords, block, { used }, 'super');
+    if (!e.block) return yield* dispatch();
     const proc = block as RProc;
     if (proc.callSiteState) proc.callSiteState.active = true;
     try {
-      return yield* invoke(superMethod, home.self, args, keywords, proc, used, missingReason);
+      return yield* dispatch();
     } catch (error) {
       if (error instanceof BreakSignal && error.tag === proc.breakTag) return error.value;
       throw error;
@@ -2224,7 +2227,7 @@ export interface ProcCallOptions {
   definee?: RClass;
   /** The method a proc is the body of (`define_method`), which `super` in it continues. */
   method?: RMethod;
-  missingReason?: 'vcall' | 'private' | 'protected';
+  missingReason?: MissingReason;
   /** Whether the arguments bind strictly, as a method's do, for a proc that is a method's body. */
   lambdaArgs?: boolean;
   definitionTarget?: RClass;

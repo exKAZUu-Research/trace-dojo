@@ -18,10 +18,10 @@ import {
   invoke,
   ivarGet,
   ivarSet,
-  methodMissing,
   missingConstant,
   nativeProc,
   PRIVATE_METHOD_NAMES,
+  raiseMethodMissing,
   requireBlock,
   setClassVariable,
 } from './interp';
@@ -774,11 +774,8 @@ function assertMethodOwner(owner: RClass, target: Value, defining: boolean): voi
 def(
   'BasicObject',
   'method_missing',
-  [1, -1],
-  (self, [name]) => {
-    const reason = rt().frame.home.extra.missingReason;
-    methodMissing(self, (name as RSymbol).key, { vcall: reason === 'vcall' }, reason === 'vcall' ? undefined : reason);
-  },
+  [0, -1],
+  (self, args) => raiseMethodMissing(self, args, rt().frame.home.extra.missingReason),
   { visibility: 'private' }
 );
 def(

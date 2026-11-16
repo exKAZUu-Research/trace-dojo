@@ -18065,3 +18065,452 @@ test.each([
     uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
   });
 });
+
+const superMissingDispatchCases = [
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;def f(x=3,**k,&b);super;end;end;begin;p C.new.f(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [3], {}]\n:handled\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;def f(x=3,**k,&b);super;end;end;begin;p C.new.f(3,tag:1){|n|n+10};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [3], {tag: 1}]\n17\n:handled\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;def f(x=3,**k,&b);super;end;end;begin;p C.new.f(3){break :stopped};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [3], {}]\n:stopped\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;def f(x=3,**k,&b);super(x+1,**k,&b);end;end;begin;p C.new.f(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [4], {}]\n:handled\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;def f(x=3,**k,&b);super(x+1,**k,&b);end;end;begin;p C.new.f(3,tag:1){|n|n+10};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [4], {tag: 1}]\n17\n:handled\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;def f(x=3,**k,&b);super(x+1,**k,&b);end;end;begin;p C.new.f(3){break :stopped};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [4], {}]\n:stopped\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;def f(x=3,**k,&b);super();end;end;begin;p C.new.f(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [], {}]\n:handled\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;def f(x=3,**k,&b);super();end;end;begin;p C.new.f(3,tag:1){|n|n+10};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [], {}]\n17\n:handled\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;def f(x=3,**k,&b);super();end;end;begin;p C.new.f(3){break :stopped};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [], {}]\n:stopped\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;def f(x=3,**k,&b);super(x,**k){|v|v*2};end;end;begin;p C.new.f(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [3], {}]\n14\n:handled\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;def f(x=3,**k,&b);super(x,**k){|v|v*2};end;end;begin;p C.new.f(3,tag:1){|n|n+10};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [3], {tag: 1}]\n14\n:handled\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;def f(x=3,**k,&b);super(x,**k){|v|v*2};end;end;begin;p C.new.f(3){break :stopped};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [3], {}]\n14\n:handled\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;define_method(:f){|x=3,**k,&b|super(x+1,**k,&b)};end;begin;p C.new.f(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [4], {}]\n:handled\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;define_method(:f){|x=3,**k,&b|super(x+1,**k,&b)};end;begin;p C.new.f(3,tag:1){|n|n+10};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [4], {tag: 1}]\n17\n:handled\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;define_method(:f){|x=3,**k,&b|super(x+1,**k,&b)};end;begin;p C.new.f(3){break :stopped};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [4], {}]\n:stopped\n',
+    },
+  ],
+  [
+    'class C;define_method(:method_missing){|n,*a,**k,&b|p [n,a,k];p b.call(7) if b;:handled};def f(x=3,**k,&b);super;end;end;begin;p C.new.f(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [3], {}]\n:handled\n',
+    },
+  ],
+  [
+    'class C;define_method(:method_missing){|n,*a,**k,&b|p [n,a,k];p b.call(7) if b;:handled};def f(x=3,**k,&b);super;end;end;begin;p C.new.f(3,tag:1){|n|n+10};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [3], {tag: 1}]\n17\n:handled\n',
+    },
+  ],
+  [
+    'class C;define_method(:method_missing){|n,*a,**k,&b|p [n,a,k];p b.call(7) if b;:handled};def f(x=3,**k,&b);super;end;end;begin;p C.new.f(3){break :stopped};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [3], {}]\n:stopped\n',
+    },
+  ],
+  [
+    'class C;define_method(:method_missing){|n,*a,**k,&b|p [n,a,k];p b.call(7) if b;:handled};def f(x=3,**k,&b);super(x+1,**k,&b);end;end;begin;p C.new.f(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [4], {}]\n:handled\n',
+    },
+  ],
+  [
+    'class C;define_method(:method_missing){|n,*a,**k,&b|p [n,a,k];p b.call(7) if b;:handled};def f(x=3,**k,&b);super(x+1,**k,&b);end;end;begin;p C.new.f(3,tag:1){|n|n+10};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [4], {tag: 1}]\n17\n:handled\n',
+    },
+  ],
+  [
+    'class C;define_method(:method_missing){|n,*a,**k,&b|p [n,a,k];p b.call(7) if b;:handled};def f(x=3,**k,&b);super(x+1,**k,&b);end;end;begin;p C.new.f(3){break :stopped};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [4], {}]\n:stopped\n',
+    },
+  ],
+  [
+    'class C;define_method(:method_missing){|n,*a,**k,&b|p [n,a,k];p b.call(7) if b;:handled};def f(x=3,**k,&b);super();end;end;begin;p C.new.f(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [], {}]\n:handled\n',
+    },
+  ],
+  [
+    'class C;define_method(:method_missing){|n,*a,**k,&b|p [n,a,k];p b.call(7) if b;:handled};def f(x=3,**k,&b);super();end;end;begin;p C.new.f(3,tag:1){|n|n+10};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [], {}]\n17\n:handled\n',
+    },
+  ],
+  [
+    'class C;define_method(:method_missing){|n,*a,**k,&b|p [n,a,k];p b.call(7) if b;:handled};def f(x=3,**k,&b);super();end;end;begin;p C.new.f(3){break :stopped};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [], {}]\n:stopped\n',
+    },
+  ],
+  [
+    'class C;define_method(:method_missing){|n,*a,**k,&b|p [n,a,k];p b.call(7) if b;:handled};def f(x=3,**k,&b);super(x,**k){|v|v*2};end;end;begin;p C.new.f(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [3], {}]\n14\n:handled\n',
+    },
+  ],
+  [
+    'class C;define_method(:method_missing){|n,*a,**k,&b|p [n,a,k];p b.call(7) if b;:handled};def f(x=3,**k,&b);super(x,**k){|v|v*2};end;end;begin;p C.new.f(3,tag:1){|n|n+10};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [3], {tag: 1}]\n14\n:handled\n',
+    },
+  ],
+  [
+    'class C;define_method(:method_missing){|n,*a,**k,&b|p [n,a,k];p b.call(7) if b;:handled};def f(x=3,**k,&b);super(x,**k){|v|v*2};end;end;begin;p C.new.f(3){break :stopped};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [3], {}]\n14\n:handled\n',
+    },
+  ],
+  [
+    'class C;define_method(:method_missing){|n,*a,**k,&b|p [n,a,k];p b.call(7) if b;:handled};define_method(:f){|x=3,**k,&b|super(x+1,**k,&b)};end;begin;p C.new.f(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [4], {}]\n:handled\n',
+    },
+  ],
+  [
+    'class C;define_method(:method_missing){|n,*a,**k,&b|p [n,a,k];p b.call(7) if b;:handled};define_method(:f){|x=3,**k,&b|super(x+1,**k,&b)};end;begin;p C.new.f(3,tag:1){|n|n+10};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [4], {tag: 1}]\n17\n:handled\n',
+    },
+  ],
+  [
+    'class C;define_method(:method_missing){|n,*a,**k,&b|p [n,a,k];p b.call(7) if b;:handled};define_method(:f){|x=3,**k,&b|super(x+1,**k,&b)};end;begin;p C.new.f(3){break :stopped};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [4], {}]\n:stopped\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);super;end;def f(x=3,**k,&b);super;end;end;begin;p C.new.f(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);super;end;def f(x=3,**k,&b);super;end;end;begin;p C.new.f(3,tag:1){|n|n+10};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);super;end;def f(x=3,**k,&b);super;end;end;begin;p C.new.f(3){break :stopped};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);super;end;def f(x=3,**k,&b);super(x+1,**k,&b);end;end;begin;p C.new.f(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);super;end;def f(x=3,**k,&b);super(x+1,**k,&b);end;end;begin;p C.new.f(3,tag:1){|n|n+10};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);super;end;def f(x=3,**k,&b);super(x+1,**k,&b);end;end;begin;p C.new.f(3){break :stopped};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);super;end;def f(x=3,**k,&b);super();end;end;begin;p C.new.f(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);super;end;def f(x=3,**k,&b);super();end;end;begin;p C.new.f(3,tag:1){|n|n+10};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);super;end;def f(x=3,**k,&b);super();end;end;begin;p C.new.f(3){break :stopped};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);super;end;def f(x=3,**k,&b);super(x,**k){|v|v*2};end;end;begin;p C.new.f(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);super;end;def f(x=3,**k,&b);super(x,**k){|v|v*2};end;end;begin;p C.new.f(3,tag:1){|n|n+10};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);super;end;def f(x=3,**k,&b);super(x,**k){|v|v*2};end;end;begin;p C.new.f(3){break :stopped};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);super;end;define_method(:f){|x=3,**k,&b|super(x+1,**k,&b)};end;begin;p C.new.f(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);super;end;define_method(:f){|x=3,**k,&b|super(x+1,**k,&b)};end;begin;p C.new.f(3,tag:1){|n|n+10};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);super;end;define_method(:f){|x=3,**k,&b|super(x+1,**k,&b)};end;begin;p C.new.f(3){break :stopped};rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;def f(x);super;end;alias g f;end;begin;p C.new.g(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [3], {}]\n:handled\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;def f(x);super;end;alias g f;undef_method :f;end;begin;p C.new.g(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: '[:f, [3], {}]\n:handled\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);super;end;def f(x);super;end;alias g f;end;begin;p C.new.g(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);super;end;def f(x);super;end;alias g f;undef_method :f;end;begin;p C.new.g(3);rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\n',
+    },
+  ],
+  [
+    'class P;def method_missing(n,*a,**k,&b);puts :parent;super;end;end;class C<P;def method_missing(n,*a,**k,&b);puts :child;super;end;def f(x);super;end;alias g f;end;begin;C.new.f(3);rescue=>e;p e.class,e.message,e.name,e.receiver.class;end',
+    {
+      stdout: 'child\nparent\nNoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\nC\n',
+    },
+  ],
+  [
+    'class P;def method_missing(n,*a,**k,&b);puts :parent;super;end;end;class C<P;def method_missing(n,*a,**k,&b);puts :child;super;end;def f(x);super;end;alias g f;end;begin;C.new.g(3);rescue=>e;p e.class,e.message,e.name,e.receiver.class;end',
+    {
+      stdout: 'child\nparent\nNoMethodError\n"super: no superclass method \'f\' for an instance of C"\n:f\nC\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a);Object.new.absent;end;def f;super;end;end;begin;C.new.f;rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"undefined method \'absent\' for an instance of Object"\n:absent\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a);BasicObject.instance_method(:method_missing).bind(Object.new).call(:other);end;def f;super;end;end;begin;C.new.f;rescue=>e;p e.class,e.message,e.name;end',
+    {
+      stdout: 'NoMethodError\n"super: no superclass method \'other\' for an instance of Object"\n:other\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,&b);p [n,a];b.call if b;end;def f;super{break :stopped};end;end;p C.new.f',
+    {
+      stdout: '[:f, []]\n:stopped\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a,&b);p [n,a];b.call if b;end;define_method(:f){super(){break :stopped}};end;p C.new.f',
+    {
+      stdout: '[:f, []]\n:stopped\n',
+    },
+  ],
+  [
+    'class BasicObject;undef_method :method_missing;end;class C;def method_missing(n,*a);super;end;def f;super;end;end;begin;C.new.f;rescue Exception=>e;p e.class,e.message;end',
+    {
+      uncaughtException: '継承元がない method_missing の super は、この採点環境では使えません。',
+      stdout: '',
+    },
+  ],
+  [
+    'class BasicObject;undef_method :method_missing;end;class C;def method_missing(*a);super;end;private;def f;end;end;begin;C.new.zz(3);rescue Exception=>e;p e.class,e.message;end',
+    {
+      uncaughtException: '継承元がない method_missing の super は、この採点環境では使えません。',
+      stdout: '',
+    },
+  ],
+  [
+    'class BasicObject;undef_method :method_missing;end;class C;def method_missing(*a);super;end;private;def f;end;end;begin;C.new.send(:method_missing,:f);rescue Exception=>e;p e.class,e.message;end',
+    {
+      uncaughtException: '継承元がない method_missing の super は、この採点環境では使えません。',
+      stdout: '',
+    },
+  ],
+  [
+    'class BasicObject;undef_method :method_missing;end;class C;def method_missing(*a);super;end;private;def f;end;end;begin;C.new.f;rescue Exception=>e;p e.class,e.message;end',
+    {
+      uncaughtException: '継承元がない method_missing の super は、この採点環境では使えません。',
+      stdout: '',
+    },
+  ],
+  [
+    'class BasicObject;undef_method :method_missing;end;class C;def method_missing(*a);super;end;private;def f;end;end;begin;C.new.send(:method_missing,"f");rescue Exception=>e;p e.class,e.message;end',
+    {
+      uncaughtException: '継承元がない method_missing の super は、この採点環境では使えません。',
+      stdout: '',
+    },
+  ],
+  [
+    'class BasicObject;undef_method :method_missing;end;class C;def method_missing(*a);super;end;private;def f;end;end;begin;C.new.send(:method_missing,nil);rescue Exception=>e;p e.class,e.message;end',
+    {
+      uncaughtException: '継承元がない method_missing の super は、この採点環境では使えません。',
+      stdout: '',
+    },
+  ],
+  [
+    'class BasicObject;undef_method :method_missing;end;class C;def method_missing(*a);super;end;private;def f;end;end;begin;C.new.send(:method_missing);rescue Exception=>e;p e.class,e.message;end',
+    {
+      uncaughtException: '継承元がない method_missing の super は、この採点環境では使えません。',
+      stdout: '',
+    },
+  ],
+  [
+    'begin;Object.new.send(:method_missing);rescue=>e;p e.class,e.message;end',
+    {
+      stdout: 'ArgumentError\n"no method name given"\n',
+    },
+  ],
+  [
+    'begin;Object.new.send(:method_missing,:f);rescue=>e;p e.class,e.message;end',
+    {
+      stdout: 'NoMethodError\n"undefined method \'f\' for an instance of Object"\n',
+    },
+  ],
+  [
+    'begin;Object.new.send(:method_missing,"f");rescue=>e;p e.class,e.message;end',
+    {
+      stdout: 'ArgumentError\n"method name must be a Symbol but String is given"\n',
+    },
+  ],
+  [
+    'begin;Object.new.send(:method_missing,nil);rescue=>e;p e.class,e.message;end',
+    {
+      stdout: 'ArgumentError\n"method name must be a Symbol but NilClass is given"\n',
+    },
+  ],
+  [
+    'module M;def f(x,**k,&b);super;end;end;class C;include M;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7);end;end;p C.new.f(3,tag:1){|n|n+10}',
+    {
+      stdout: '[:f, [3], {tag: 1}]\n17\n17\n',
+    },
+  ],
+  [
+    'module M;def f(x,**k,&b);super(x+1,**k,&b);end;end;class C;include M;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7);end;end;p C.new.f(3,tag:1){|n|n+10}',
+    {
+      stdout: '[:f, [4], {tag: 1}]\n17\n17\n',
+    },
+  ],
+  [
+    'module M;def f(x,**k,&b);super;end;end;class C;prepend M;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7);end;end;p C.new.f(3,tag:1){|n|n+10}',
+    {
+      stdout: '[:f, [3], {tag: 1}]\n17\n17\n',
+    },
+  ],
+  [
+    'module M;def f(x,**k,&b);super(x+1,**k,&b);end;end;class C;prepend M;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7);end;end;p C.new.f(3,tag:1){|n|n+10}',
+    {
+      stdout: '[:f, [4], {tag: 1}]\n17\n17\n',
+    },
+  ],
+  [
+    'class C;def self.method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7);end;def self.f(x,**k,&b);super;end;end;p C.f(3,tag:1){|n|n+10}',
+    {
+      stdout: '[:f, [3], {tag: 1}]\n17\n17\n',
+    },
+  ],
+  [
+    'class C;def method_missing(n,*a);p [n,a];end;def respond_to_missing?(*);false;end;def f(x);super;end;end;C.new.f(3)',
+    {
+      stdout: '[:f, [3]]\n',
+    },
+  ],
+] as const;
+
+test.each(superMissingDispatchCases)(
+  'super preserves missing-method dispatch and fallback state: %s',
+  (source, expected) => {
+    expect(run(source)).toMatchObject(expected);
+  }
+);
