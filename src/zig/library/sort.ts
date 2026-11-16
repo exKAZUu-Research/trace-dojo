@@ -1,5 +1,4 @@
 import type { Span } from '../ast';
-// code-gauge-allow-file duplicateLines 26 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { type Frame, withHeldValues } from '../runtime';
 import { copyForFrame, known, type SemaApi } from '../semaBase';
 import { BOOL, fnType, optionalOf, type StructType, type Type, typeName, USIZE, VOID } from '../types';
@@ -40,7 +39,7 @@ function comparator(name: string, direction: number): () => Member {
 }
 
 /** `sort(T, items, context, lessThan)` for each of Zig's sort algorithms. */
-function sorter(name: string, algorithm: SortAlgorithm): () => Member {
+export function sorter(name: string, algorithm: SortAlgorithm): () => Member {
   return generic(name, 4, (sema, call, type, [itemsArg, contextArg, lessThanArg]) => {
     const items = mutableSlice(sema, itemsArg, type);
     const context = sema.compile(contextArg);

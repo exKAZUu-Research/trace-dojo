@@ -2943,3 +2943,142 @@ test.each([
 ])('runtime native conditions retain all branch checks: %s', (body) => {
   expect(executeProgram('zig', `const std=@import("std");pub fn main()void{${body}}`).kind).toBe('compileError');
 });
+
+test.each(['300', '-1', 'true', '1.5'])(
+  'enumFromInt rejects nonrepresentable or noninteger known input %s',
+  (value) => {
+    const source = `const std=@import("std");const E=enum(u8){a,_};pub fn main()void{const x:E=@enumFromInt(${value});std.debug.print("{}",.{@intFromEnum(x)});}`;
+    expect(executeProgram('zig', source).kind).toBe('compileError');
+  }
+);
+
+test('enumFromInt retains valid nonexhaustive tags and dynamic range panics', () => {
+  const valid = `const std=@import("std");const E=enum(u8){a,_};pub fn main()void{const x:E=@enumFromInt(255);std.debug.print("{}",.{@intFromEnum(x)});}`;
+  expect(executeProgram('zig', valid)).toMatchObject({ kind: 'executed', stderr: '255', uncaughtException: undefined });
+  const dynamic = valid.replace('const x:E=@enumFromInt(255);', 'var n:u16=300;_=&n;const x:E=@enumFromInt(n);');
+  expect(executeProgram('zig', dynamic)).toMatchObject({ kind: 'executed', uncaughtException: expect.any(String) });
+});
+
+test.each(['[]Turtle', '*[1]Turtle'])('memset roots its temporary %s destination through filler evaluation', (type) => {
+  const source = `const std=@import("std");fn first(a:std.mem.Allocator)!${type}{const p=try a.${type === '[]Turtle' ? 'alloc(Turtle,1)' : 'create([1]Turtle)'};p[0]=Turtle.init(0,1);return p;}fn fill()Turtle{const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});return t;}pub fn main(init:std.process.Init)!void{@memset(try first(init.gpa),fill());}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'false',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['fn next()!u8{std.debug.print("call|",.{});return 3;}', 'next()', 'call|3'],
+  ['fn next()error{}!u8{return 3;}', 'next()', '3'],
+  ['', 'e', '3'],
+])('infallible error-union while conditions skip dead handlers: %s', (declaration, condition, output) => {
+  const source = `const std=@import("std");${declaration}pub fn main()void{${condition === 'e' ? 'const e:error{Bad}!u8=3;' : ''}while(${condition})|x|{std.debug.print("{}",.{x});break;}else|err|{_=err;}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: output,
+    uncaughtException: undefined,
+  });
+});
+
+test('fallible error-union while conditions retain handler validation', () => {
+  const source = `fn next()error{Bad}!u8{return error.Bad;}pub fn main()void{while(next())|x|{_=x;break;}else|err|{_=err;}}`;
+  expect(executeProgram('zig', source).kind).toBe('compileError');
+});
+
+test.each([
+  ['const n:u16=if(get()) |_| @as(u8,3) else |_| unreachable;', '3'],
+  ['const n=(if(get()) |_| @as(u8,3) else |_| unreachable)+1;', '4'],
+])(
+  'selected known results retain runtime condition effects through coercion and arithmetic: %s',
+  (declaration, output) => {
+    const source = `const std=@import("std");fn get()error{}!u8{std.debug.print("call|",.{});return 1;}pub fn main()void{${declaration}std.debug.print("{}",.{n});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: `call|${output}`,
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([
+  'std.math.isPowerOfTwo(true)',
+  'std.math.isPowerOfTwo(1.5)',
+  'std.math.cast(u8,true)',
+  'std.math.cast(u8,1.5)',
+  'std.math.lossyCast(u8,true)',
+  'std.math.lossyCast(f64,true)',
+  'std.math.lossyCast(u8,"abc")',
+])('math rejects nonnumeric or noninteger inputs before evaluation: %s', (expression) => {
+  expect(
+    executeProgram(
+      'zig',
+      `const std=@import("std");pub fn main()void{const x=${expression};std.debug.print("{any}",.{x});}`
+    ).kind
+  ).toBe('compileError');
+});
+
+test.each(['anytype', 'usize'])(
+  'compile-time type contexts evaluate pure helper calls with %s parameters',
+  (parameter) => {
+    const source = `const std=@import("std");fn half(v:${parameter})usize{return v/2;}pub fn main()void{const a:[half(4)]u8=@splat(0);std.debug.print("{} {}",.{a.len,@as([half(4)]u8,@splat(0)).len});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '2 2',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('compile-time helper evaluation rejects runtime reads and output in type contexts', () => {
+  for (const declarations of [
+    'var n:usize=4;fn count()usize{return n;}',
+    'fn count()usize{std.debug.print("x",.{});return 4;}',
+  ]) {
+    expect(
+      executeProgram(
+        'zig',
+        `const std=@import("std");${declarations}pub fn main()void{const a:[count()]u8=@splat(0);std.debug.print("{}",.{a.len});}`
+      ).kind
+    ).toBe('compileError');
+  }
+});
+
+test('allocator instance methods reject const pointer receivers', () => {
+  for (const call of ['p.reset();', '_=p.allocator();']) {
+    const source = `const std=@import("std");pub fn main()void{var b:[16]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&b);const p:*const std.heap.FixedBufferAllocator=&f;${call}}`;
+    expect(executeProgram('zig', source).kind).toBe('compileError');
+  }
+});
+
+test.each([
+  'std.debug.print("{f}",.{P{}});',
+  'var b:[32]u8=undefined;_=std.fmt.bufPrint(&b,"{f}",.{P{}}) catch unreachable;',
+])('custom format rejects foreign errors for every print destination: %s', (statement) => {
+  for (const errorType of ['!void', 'error{Bad}!void']) {
+    const source = `const std=@import("std");const P=struct{pub fn format(_:P,w:*std.Io.Writer)${errorType}{_=w;return error.Bad;}};pub fn main()void{${statement}}`;
+    expect(executeProgram('zig', source).kind).toBe('compileError');
+  }
+});
+
+test.each(['sort', 'sortUnstable'])(
+  'mem.%s shares the exact comparator signature contract with sort adapters',
+  (name) => {
+    for (const signature of ['_:void,a:i64,b:i64', '_:u8,a:i32,b:i32']) {
+      const source = `const std=@import("std");fn less(${signature})bool{return a<b;}pub fn main()void{var a=[_]i32{3,2,1};std.mem.${name}(i32,&a,{},less);std.debug.print("{any}",.{a});}`;
+      expect(executeProgram('zig', source).kind).toBe('compileError');
+    }
+  }
+);
+
+test.each(['void', 'struct{}'])(
+  'zero-sized %s capacity slices preserve exact logical lengths and bounded access',
+  (type) => {
+    const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var l:std.ArrayList(${type})=.empty;try l.append(init.gpa,${type === 'void' ? '{}' : '.{}'});const u=l.unusedCapacitySlice();const all=l.allocatedSlice();const tail=u[1..];const part=u[0..2];_=part[1];std.debug.print("{} {} {} {}",.{u.len,all.len,tail.len,part.len});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '18446744073709551614 18446744073709551615 18446744073709551613 2',
+      uncaughtException: undefined,
+    });
+  }
+);

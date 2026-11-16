@@ -35,6 +35,7 @@ import {
 } from './floats';
 import { sizeOf } from './layout';
 import { importStd } from './library/std';
+import { isIntegerType } from './operands';
 import { ZigPanic } from './runtime';
 import {
   copyForStorage,
@@ -380,6 +381,9 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         const fields = this.enumFields(target);
         const tagType = target.tagType as IntType;
         const operand = this.compile(args[0], tagType);
+        if (!isIntegerType(operand.type)) this.error(args[0], '@enumFromInt の引数は整数にしてください。');
+        if (operand.known && !fitsInt(operand.value as bigint, tagType))
+          this.error(args[0], `enum ${typeName(target)} の整数型で値を表せません。`);
         if (operand.known) {
           const value = operand.value as bigint;
           if (target.exhaustive && !fields.some((field) => field.value === value)) {
@@ -913,8 +917,9 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     return runtime(
       VOID,
       (frame) => {
-        const out = target.view(evaluateDestination(frame));
-        const filler = copyForStorage(evaluateValue(frame));
+        const [destination, value] = evaluateHeld(frame, [evaluateDestination, evaluateValue]);
+        const out = target.view(destination);
+        const filler = copyForStorage(value);
         for (let index = 0; index < out.length; index++) storeInto(out.slots, out.start + index, filler);
         return;
       },

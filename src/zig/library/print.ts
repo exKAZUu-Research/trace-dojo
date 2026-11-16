@@ -2,8 +2,17 @@ import type { Expression, Span } from '../ast';
 import { byteValues } from '../builtins';
 import { checkFormat, FormatError, type Options, parseFormat, printValue, type Segment, type TypeInfo } from '../fmt';
 import { type Frame, withHeldValues, ZigPanic } from '../runtime';
-import { copyForFrame, type SemaApi } from '../semaBase';
-import { CONST_U8_SLICE, pointerTo, type StructField, type Type, typeName } from '../types';
+import { copyForFrame, runtime, type SemaApi } from '../semaBase';
+import {
+  CONST_U8_SLICE,
+  errorSetOf,
+  errorUnionOf,
+  pointerTo,
+  type StructField,
+  type Type,
+  typeName,
+  VOID,
+} from '../types';
 import { compileTimeReadable, ErrorValue, Pointer, type Value, type ZStruct } from '../values';
 import { bufferedBytes, bufferingWriter, WRITER, type WriterState, writerState, writerValue, writeTo } from './writer';
 
@@ -116,6 +125,11 @@ function formatMethod(sema: SemaApi, type: Type, span: Span): FormatMethod {
   if (fn.params.length !== 2 || writerType !== pointerTo(WRITER, false)) {
     throw new FormatError(`format には (self: ${typeName(type)}, w: *std.Io.Writer) を受け取らせてください`);
   }
+  sema.coerce(
+    runtime(fn.returnType, () => {}, span),
+    errorUnionOf(errorSetOf(['WriteFailed']), VOID),
+    span
+  );
   const byPointer = selfType.kind === 'pointer';
   return (frame, value, state) => {
     const header = writerValue(state);

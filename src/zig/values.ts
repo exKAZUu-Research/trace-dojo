@@ -1,3 +1,4 @@
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { BigFloat, compareFloats } from './floats';
 import type { FunctionInstance } from './functions';
@@ -42,13 +43,16 @@ export function aliasStorage(proxy: Value[], original: Value[]): void {
   storageAliases.set(proxy, original);
 }
 
+const virtualStorage = new WeakSet<object>();
 const storageLocations = new WeakMap<object, (index: number) => { storage: object; index: number }>();
 
 export function registerStorageLocation(
   storage: object,
-  locate: (index: number) => { storage: object; index: number }
+  locate: (index: number) => { storage: object; index: number },
+  virtual = false
 ): void {
   storageLocations.set(storage, locate);
+  if (virtual) virtualStorage.add(storage);
 }
 
 export function storageOverlaps(
@@ -124,7 +128,12 @@ export class ZArray implements Slots {
 
   /** The elements, followed by the sentinel when `withSentinel`. */
   values(withSentinel = false): Value[] {
-    return this.slots.slice(this.offset, this.offset + this.length + (withSentinel ? 1 : 0));
+    const length = this.length + (withSentinel ? 1 : 0);
+    if (virtualStorage.has(this.slots)) {
+      if (length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+      return Array.from({ length }, (_, index) => this.get(index));
+    }
+    return this.slots.slice(this.offset, this.offset + length);
   }
 }
 
@@ -205,6 +214,7 @@ export class Pointer {
 
   storageLocation(): { storage: object; index: number } {
     const slots = this.target.slots;
+    if (storageLocations.has(slots)) return storageLocation(slots, this.index);
     const value = (storageAliases.get(slots) ?? slots)[this.index];
     if (value instanceof ZArray) return storageLocation(value.slots, value.offset);
     return storageLocation(
@@ -222,11 +232,16 @@ export class Pointer {
 
 /** A slice: a pointer to the first of `length` elements of an array, and the length. */
 export class Slice {
+  readonly length: number;
+  readonly lengthValue: bigint;
   constructor(
     readonly target: Slots,
     readonly start: number,
-    readonly length: number
-  ) {}
+    length: number | bigint
+  ) {
+    this.length = Number(length);
+    this.lengthValue = typeof length === 'bigint' ? length : BigInt(length);
+  }
 
   get(index: number): Value {
     return this.target.slots[this.start + index];
@@ -237,7 +252,10 @@ export class Slice {
   }
 
   values(): Value[] {
-    return this.target.slots.slice(this.start, this.start + this.length);
+    if (this.lengthValue > BigInt(LIMITS.maxSlots)) throw new ExecutionLimitError('storage');
+    return virtualStorage.has(this.target.slots)
+      ? Array.from({ length: this.length }, (_, index) => this.get(index))
+      : this.target.slots.slice(this.start, this.start + this.length);
   }
 }
 
@@ -335,10 +353,10 @@ class SliceLength implements Slots {
 
   get slots(): Value[] {
     const slice = this.pointer.load() as Slice;
-    return new Proxy([BigInt(slice.length)], {
+    return new Proxy([slice.lengthValue], {
       set: (_, key, value) => {
         if (key === '0')
-          this.pointer.target.slots[this.pointer.index] = new Slice(slice.target, slice.start, Number(value));
+          this.pointer.target.slots[this.pointer.index] = new Slice(slice.target, slice.start, value as bigint);
         return true;
       },
     });

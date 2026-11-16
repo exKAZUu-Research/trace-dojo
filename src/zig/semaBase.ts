@@ -277,9 +277,8 @@ export abstract class SemaBase implements SemaApi {
   // Values known at compile time ------------------------------------------------------------------------------------
 
   knownValue(expression: TExpr, what: string): Value {
-    if (!expression.known)
-      this.error(expression.span, `${what}は、コンパイルのときに値が決まっていなければなりません。`);
-    return expression.value;
+    void what;
+    return expression.known ? expression.value : this.evaluateAtCompileTime(expression);
   }
 
   compileType(expression: Expression): Type {
@@ -1207,18 +1206,14 @@ export function newArray(values: Value[], sentinel: Value | undefined): ZArray {
   return new ZArray(withSentinel(values, sentinel), 0, values.length, sentinel !== undefined);
 }
 
-/**
- * Evaluates parts in order, keeping each part's value reachable while the later ones run, so that a turtle an earlier
- * part holds stays on the board while a later part's calls record steps.
- */
 export function knownLengthOf(expression: TExpr): number | undefined {
   const type = expression.type;
   if (type.kind === 'array') return type.length;
   if (type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array') return type.child.length;
-  return (
+  const length =
     expression.knownLength ??
-    (expression.known && expression.value instanceof Slice ? expression.value.length : undefined)
-  );
+    (expression.known && expression.value instanceof Slice ? expression.value.length : undefined);
+  return length !== undefined && Number.isSafeInteger(length) ? length : undefined;
 }
 
 export function evaluateHeld(

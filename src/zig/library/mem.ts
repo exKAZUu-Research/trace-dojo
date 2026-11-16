@@ -24,7 +24,6 @@ import {
 } from '../types';
 import { NULL, type Pointer, Slice, storageLocation, storageOverlaps, storeInto, type Value, ZStruct } from '../values';
 import { WeakValueMap } from '../weakValueMap';
-import { blockSortFunction, runBlockSort } from './blockSort';
 import {
   allocating,
   allocatorArg,
@@ -56,7 +55,7 @@ import {
   nativeStruct,
   typeMember,
 } from './native';
-import { type SortAlgorithm, sortValues } from './sorting';
+import { sorter } from './sort';
 
 interface AllocationPlan {
   length: number;
@@ -898,30 +897,6 @@ function allocatingCall(
     const result = newSlice(allocation.build());
     complete(result.target);
     return result;
-  });
-}
-
-function sorter(name: string, algorithm: SortAlgorithm): () => Member {
-  return generic(name, 4, (sema, call, type, [itemsArg, contextArg, lessThanArg]) => {
-    const items = mutableSlice(sema, itemsArg, type);
-    const context = sema.compile(contextArg);
-    const lessThan = sema.functionOf(sema.compile(lessThanArg), lessThanArg);
-    if (lessThan.params.length !== 3)
-      sema.error(lessThanArg, '比べる関数は fn (context, a, b) bool の形にしてください。');
-    if (lessThan.returnType !== BOOL) sema.error(lessThanArg, '比べる関数の戻り値は bool にしてください。');
-    const block = algorithm === 'block' ? blockSortFunction(sema, type, context.type, call.span) : undefined;
-    return nativeCall(VOID, [items, context], call.span, ([value, contextValue], frame) => {
-      const slice = value as Slice;
-      if (block) runBlockSort(sema, block, frame, slice, contextValue, (args) => lessThan.call(frame, args));
-      else
-        sortValues(
-          slice,
-          (a, b) => lessThan.call(frame, [contextValue, a, b]) as boolean,
-          algorithm as Exclude<SortAlgorithm, 'block'>,
-          frame
-        );
-      return;
-    });
   });
 }
 

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 524 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 531 -- Groups the related standard library operations that share this module.
 import { checked, divCeil, divExact, divFloor, divTrunc, floatMod, floatRem, mod, PANIC, panic, rem } from '../arith';
 import type { Expression } from '../ast';
 import { fusedMultiplyAdd, intFittingRange, roundFloat } from '../builtins';
@@ -27,6 +27,7 @@ import {
   toNumber,
   truncateToBigInt,
 } from '../floats';
+import { isArithmeticType, isIntegerType } from '../operands';
 import { known, type NativeCall, runtime, type SemaApi, type TExpr } from '../semaBase';
 import {
   BOOL,
@@ -747,8 +748,10 @@ const MEMBERS: Record<string, () => Member> = {
       return BigInt((x as bigint).toString().length - 1);
     });
   }),
+  // code-gauge-allow functionCognitiveComplexity 16 -- Validates numeric domains before selecting integer clamping or float conversion.
   lossyCast: generic('std.math.lossyCast', 2, (sema, call, type, [valueArg]) => {
     const value = sema.compile(valueArg);
+    if (!isArithmeticType(value.type)) return sema.error(valueArg, 'std.math.lossyCast の値は数にしてください。');
     if (type.kind === 'float') {
       return computed(type, [value], call.span, ([x]) =>
         typeof x === 'bigint' ? floatFromBigInt(x, type.bits) : floatOf(asBigFloat(x as AnyFloat), type.bits)
@@ -835,6 +838,7 @@ const MEMBERS: Record<string, () => Member> = {
   isPowerOfTwo: fnMember('std.math.isPowerOfTwo', (sema, call) => {
     const [arg] = expectArgs(sema, call, 1, 'std.math.isPowerOfTwo');
     const value = sema.compile(arg);
+    if (!isIntegerType(value.type)) return sema.error(arg, 'std.math.isPowerOfTwo の値は整数にしてください。');
     return computed(BOOL, [value], call.span, ([x]) => {
       const n = x as bigint;
       if (n <= 0n) panic(PANIC.unreachable);
@@ -844,6 +848,7 @@ const MEMBERS: Record<string, () => Member> = {
   cast: generic('std.math.cast', 2, (sema, call, type, [valueArg]) => {
     if (type.kind !== 'int') return sema.error(call.span, 'std.math.cast には整数の型を渡してください。');
     const value = sema.compile(valueArg);
+    if (!isIntegerType(value.type)) return sema.error(valueArg, 'std.math.cast の値は整数にしてください。');
     return computed(optionalOf(type), [value], call.span, ([x]) => (fitsInt(x as bigint, type) ? x : NULL));
   }),
   IntFittingRange: fnMember('std.math.IntFittingRange', (sema, call) => {

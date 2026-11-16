@@ -38,7 +38,7 @@ export function panic(message: string): never {
   throw new ZigPanic(message);
 }
 
-export function indexOutOfBounds(index: bigint | number, length: number): never {
+export function indexOutOfBounds(index: bigint | number, length: bigint | number): never {
   throw new ZigPanic(`index out of bounds: index ${index}, len ${length}`);
 }
 

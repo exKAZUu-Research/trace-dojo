@@ -357,14 +357,14 @@ export abstract class ExpressionCompiler extends SemaBase {
         if (type.size === 'slice') {
           if (name === 'len') {
             const evaluate = base.eval;
-            const length = knownLengthOf(base);
-            if (length !== undefined) return this.fixedResult(base, USIZE, BigInt(length), expression);
+            const length = this.sliceLengthValue(base);
+            if (length !== undefined) return this.fixedResult(base, USIZE, length, expression);
             const place = base.place;
             const lengthPlace: Place | undefined = place && {
               isConst: place.isConst,
               locate: (frame) => place.locate(frame).project('length'),
             };
-            return runtime(USIZE, (frame) => BigInt((evaluate(frame) as Slice).length), expression, lengthPlace);
+            return runtime(USIZE, (frame) => (evaluate(frame) as Slice).lengthValue, expression, lengthPlace);
           }
           if (name === 'ptr') this.error(expression, '多要素のポインタ（.ptr）は、この採点環境では使えません。');
         }
@@ -397,6 +397,12 @@ export abstract class ExpressionCompiler extends SemaBase {
       if (field && type.tagType) return this.typeMember(type.tagType, name, span);
     }
     return this.error(span, `${typeName(type)} には、「${name}」という宣言がありません。`);
+  }
+
+  private sliceLengthValue(value: TExpr): bigint | undefined {
+    if (value.known && value.value instanceof Slice) return value.value.lengthValue;
+    const length = knownLengthOf(value);
+    return length === undefined ? undefined : BigInt(length);
   }
 
   private typeOnlyOperand(value: TExpr): TExpr {
@@ -631,8 +637,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     const sentinel = type.kind === 'pointer' ? type.sentinel : undefined;
     return (value, index) => {
       const slice = value as Slice;
-      const limit = slice.length + (sentinel === undefined ? 0 : 1);
-      if (index >= BigInt(limit)) indexOutOfBounds(index, slice.length);
+      const limit = slice.lengthValue + (sentinel === undefined ? 0n : 1n);
+      if (index >= limit) indexOutOfBounds(index, slice.lengthValue);
       return { slots: slice.target, position: slice.start + Number(index) };
     };
   }
@@ -702,31 +708,33 @@ export abstract class ExpressionCompiler extends SemaBase {
     const evaluateBase = base.eval;
     const evaluateStart = start.eval;
     const evaluateEnd = end?.eval;
-    const compute = (frame: Frame): { target: Slots; from: number; to: number } => {
+    const compute = (frame: Frame): { target: Slots; from: number; to: number; length: bigint } => {
       const value = evaluateBase(frame);
       return withHeldValues(frame, [value], () => {
         let target: Slots;
         let offset: number;
-        let length: number;
+        let length: bigint;
         if (fromArray) {
           const array = (value as Pointer).load() as ZArray;
           target = array;
           offset = array.offset;
-          length = staticLen as number;
+          length = BigInt(staticLen as number);
         } else {
           const slice = value as Slice;
           target = slice.target;
           offset = slice.start;
-          length = slice.length;
+          length = slice.lengthValue;
         }
-        const from = Number(evaluateStart(frame) as bigint);
-        const to = evaluateEnd ? Number(evaluateEnd(frame) as bigint) : length;
-        if (to > limitOf(length)) indexOutOfBounds(to, length);
-        if (from > to) panic(`start index ${from} is larger than end index ${to}`);
+        const fromValue = evaluateStart(frame) as bigint;
+        const toValue = evaluateEnd ? (evaluateEnd(frame) as bigint) : length;
+        if (toValue > length + (sourceSentinel === undefined ? 0n : 1n)) indexOutOfBounds(toValue, length);
+        if (fromValue > toValue) panic(`start index ${fromValue} is larger than end index ${toValue}`);
+        const from = Number(fromValue),
+          to = Number(toValue);
         if (sentinel !== undefined && !scalarValuesEqual(target.slots[offset + to], sentinel)) {
           panic(`sentinel mismatch: expected ${String(sentinel)}, found ${String(target.slots[offset + to])}`);
         }
-        return { target, from: offset + from, to: offset + to };
+        return { target, from: offset + from, to: offset + to, length: toValue - fromValue };
       });
     };
     if (resultLength !== undefined) {
@@ -745,8 +753,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     return runtime(
       resultType,
       (frame) => {
-        const { target, from, to } = compute(frame);
-        return new Slice(target, from, to - from);
+        const { target, from, length } = compute(frame);
+        return new Slice(target, from, length);
       },
       expression
     );

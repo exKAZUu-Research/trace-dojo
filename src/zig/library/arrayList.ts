@@ -17,7 +17,20 @@ import {
   USIZE,
   VOID,
 } from '../types';
-import { NativeHandle, NULL, optionalSome, Pointer, Slice, storeInto, type Value, ZArray, ZStruct } from '../values';
+import {
+  NativeHandle,
+  NULL,
+  optionalSome,
+  Pointer,
+  registerStorageLocation,
+  Slice,
+  type Slots,
+  storageLocation,
+  storeInto,
+  type Value,
+  ZArray,
+  ZStruct,
+} from '../values';
 import { constSlice, elements } from './common';
 import {
   ALLOCATOR,
@@ -144,6 +157,21 @@ function setLength(list: List, length: number, frame: Frame): void {
     list.items.target.slots[list.items.start + index] = undefinedValue(list.child);
   list.struct.slots[0] = new Slice(list.items.target, list.items.start, length);
   list.items = list.struct.slots[0] as Slice;
+}
+
+function capacitySlice(list: List, unused: boolean): Slice {
+  const start = unused ? list.items.length : 0;
+  const length = (list.struct.slots[1] as bigint) - BigInt(start);
+  if (sizeOf(list.child) !== 0) return new Slice(list.items.target, list.items.start + start, length);
+  const storage: Slots = {
+    slots: new Proxy<Value[]>([], {
+      get: (target, key, receiver) =>
+        typeof key === 'string' && /^\d+$/.test(key) ? undefinedValue(list.child) : Reflect.get(target, key, receiver),
+      set: () => true,
+    }),
+  };
+  registerStorageLocation(storage.slots, () => storageLocation(list.items.target.slots, list.items.start), true);
+  return new Slice(storage, 0, length);
 }
 
 function defineMembers(type: StructType, child: Type): void {
@@ -361,10 +389,9 @@ function defineMembers(type: StructType, child: Type): void {
         return new Slice(list.items.target, list.items.start + previous, size - previous);
       }
     ),
-    unusedCapacitySlice: method('unusedCapacitySlice', { args: [], result: items, byValue: true }, (list, _, frame) => {
-      materializeLength(frame, list, list.capacity);
-      return new Slice(list.items.target, list.items.start + list.items.length, list.capacity - list.items.length);
-    }),
+    unusedCapacitySlice: method('unusedCapacitySlice', { args: [], result: items, byValue: true }, (list) =>
+      capacitySlice(list, true)
+    ),
     appendBounded: method('appendBounded', { args: [child], result: allocating(VOID) }, (list, [item], frame) => {
       if (list.items.length >= list.capacity) return ERROR_OUT_OF_MEMORY;
       materializeLength(frame, list, list.items.length + 1);
@@ -431,10 +458,9 @@ function defineMembers(type: StructType, child: Type): void {
       setLength(copy, list.items.length, frame);
       return copy.struct;
     }),
-    allocatedSlice: method('allocatedSlice', { args: [], result: items, byValue: true }, (list, _, frame) => {
-      materializeLength(frame, list, list.capacity);
-      return new Slice(list.items.target, list.items.start, list.capacity);
-    }),
+    allocatedSlice: method('allocatedSlice', { args: [], result: items, byValue: true }, (list) =>
+      capacitySlice(list, false)
+    ),
     expandToCapacity: method('expandToCapacity', { args: [], result: VOID }, (list, _, frame) => {
       setLength(list, list.capacity, frame);
       return;

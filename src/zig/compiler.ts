@@ -150,6 +150,7 @@ class Compiler extends StatementCompiler {
 
   /** Runs code at compile time, as a container-level declaration's initializer runs. */
   protected evaluateAtCompileTime(expression: TExpr): Value {
+    this.compilePendingBodies();
     const runtime = new Runtime(undefined, this.compilationBudget);
     const frame = new Frame(
       runtime,

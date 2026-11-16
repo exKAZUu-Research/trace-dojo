@@ -1075,7 +1075,7 @@ export abstract class StatementCompiler extends CallCompiler {
     if (condition.type.kind !== 'error_union') return this.error(expression.condition, 'エラー共用体の値が必要です。');
     const union = condition.type;
     if (!expression.otherwise) return this.error(expression, 'エラー共用体の if には else が要ります。');
-    if (condition.known || (union.errorSet.resolved !== false && union.errorSet.names?.size === 0)) {
+    if (condition.known || errorUnionCannotFail(condition)) {
       const failed = condition.known && condition.value instanceof ErrorValue;
       const capture = failed
         ? this.captureBinding(expression.elseCapture, union.errorSet, undefined)
@@ -1121,7 +1121,7 @@ export abstract class StatementCompiler extends CallCompiler {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps known capture facts and their lexical runtime initialization together.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps known capture facts and their lexical runtime initialization together.
   private selectedBranch(
     expression: Expression | undefined,
     capture: ReturnType<StatementCompiler['captureBinding']>,
@@ -1161,7 +1161,12 @@ export abstract class StatementCompiler extends CallCompiler {
     };
     const chosenValue = chosen.value;
     const value = chosenValue
-      ? { ...chosenValue, place: undefined, eval: (frame: Frame) => run(frame, chosenValue.eval) }
+      ? {
+          ...chosenValue,
+          known: chosenValue.known && condition.known,
+          place: undefined,
+          eval: (frame: Frame) => run(frame, chosenValue.eval),
+        }
       : known(VOID, undefined, condition.span);
     const chosenStmt = chosen.stmt;
     const stmt = chosenStmt
@@ -1328,6 +1333,7 @@ export abstract class StatementCompiler extends CallCompiler {
     };
     const condition = this.compile(expression.condition);
     const kind = conditionKind(condition.type, expression.capture !== undefined);
+    const infallible = errorUnionCannotFail(condition);
     const row = this.stepRow(expression);
     let binding: ReturnType<StatementCompiler['captureBinding']>;
     let errorBinding: ReturnType<StatementCompiler['captureBinding']>;
@@ -1354,7 +1360,8 @@ export abstract class StatementCompiler extends CallCompiler {
     } else if (condition.type.kind === 'error_union') {
       const union = condition.type;
       binding = this.captureBinding(expression.capture, union.payload, condition);
-      errorBinding = this.captureBinding(expression.elseCapture, union.errorSet, undefined);
+      infinite = infallible;
+      errorBinding = infallible ? undefined : this.captureBinding(expression.elseCapture, union.errorSet, undefined);
       const evaluate = condition.eval;
       const bind = binding?.bind;
       const bindError = errorBinding?.bind;
@@ -1393,11 +1400,12 @@ export abstract class StatementCompiler extends CallCompiler {
     } finally {
       fn.targets.pop();
     }
-    const otherwise = expression.otherwise
-      ? this.withCapture(errorBinding, () =>
-          this.branch(expression.otherwise as Expression, undefined, target.resultType, asStatement)
-        )
-      : undefined;
+    const otherwise =
+      expression.otherwise && !infallible
+        ? this.withCapture(errorBinding, () =>
+            this.branch(expression.otherwise as Expression, undefined, target.resultType, asStatement)
+          )
+        : undefined;
     const storesAnswer = binding ? storesAnswerValue(binding.binding.type) : false;
     const { id } = target;
     const bodyExec = body.exec;
@@ -2309,10 +2317,7 @@ export abstract class StatementCompiler extends CallCompiler {
     if (type.kind !== 'error_union') {
       return this.error(expression, `catch はエラー共用体の値にだけ使えます（${typeName(type)} 型です）。`);
     }
-    if (
-      (operand.known && !(operand.value instanceof ErrorValue)) ||
-      (type.errorSet.resolved !== false && type.errorSet.names?.size === 0)
-    ) {
+    if (errorUnionCannotFail(operand)) {
       if (discarded) this.rejectDiscardedError(type.payload, expression.operand);
       const payload = this.derived(operand, type.payload, (value) => value);
       return discarded
@@ -2563,4 +2568,11 @@ function clearingLocals<T>(slots: readonly number[], run: (frame: Frame) => T): 
       for (const slot of slots) frame.slots[slot] = UNASSIGNED;
     }
   };
+}
+
+function errorUnionCannotFail(value: TExpr): boolean {
+  if (value.type.kind !== 'error_union') return false;
+  return value.known
+    ? !(value.value instanceof ErrorValue)
+    : value.type.errorSet.resolved !== false && value.type.errorSet.names?.size === 0;
 }
