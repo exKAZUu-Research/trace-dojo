@@ -8,7 +8,7 @@ import qualified Base as B
 
 infixl 9 \\
 
-data Set a = SBin Int a (Set a) (Set a) | STip
+data Set a = SBin !Int !a !(Set a) !(Set a) | STip
 
 empty :: Set a
 empty = STip
@@ -25,7 +25,7 @@ null STip = True
 null _ = False
 
 member :: Ord a => a -> Set a -> Bool
-member _ STip = False
+member x STip = x ${BT}seq${BT} False
 member x (SBin _ y l r) = case compare x y of
   LT -> member x l
   GT -> member x r
@@ -42,7 +42,7 @@ insert x t@(SBin sz y l r) = case compare x y of
   EQ -> SBin sz x l r
 
 delete :: Ord a => a -> Set a -> Set a
-delete _ STip = STip
+delete x STip = x ${BT}seq${BT} STip
 delete x (SBin _ y l r) = case compare x y of
   LT -> balance y (delete x l) r
   GT -> balance y l (delete x r)
@@ -102,7 +102,7 @@ fromAscList :: Eq a => [a] -> Set a
 fromAscList xs = fromDistinctAscList (B.map B.head (group xs))
 
 fromDistinctAscList :: [a] -> Set a
-fromDistinctAscList xs = fst (build (length xs) xs)
+fromDistinctAscList xs = B.foldr seq () xs ${BT}seq${BT} fst (build (length xs) xs)
   where build n ys = if n == 0 then (STip, ys)
                      else let nl = (n - 1) ${BT}div${BT} 2
                               (l, rest) = build nl ys
@@ -137,7 +137,7 @@ foldl' :: (b -> a -> b) -> b -> Set a -> b
 foldl' f z s = B.foldl' f z (toAscList s)
 
 union :: Ord a => Set a -> Set a -> Set a
-union a b = fromDistinctAscList (mergeUnion (toAscList a) (toAscList b))
+union a b = b ${BT}seq${BT} a ${BT}seq${BT} fromDistinctAscList (mergeUnion (toAscList a) (toAscList b))
   where mergeUnion [] ys = ys
         mergeUnion xs [] = xs
         mergeUnion xs@(x:xt) ys@(y:yt) = case compare x y of
@@ -301,7 +301,7 @@ import qualified Data.Set.Internal as S
 
 infixl 9 !, !?, \\
 
-data Map k a = Bin Int k a (Map k a) (Map k a) | Tip
+data Map k a = Bin !Int !k a !(Map k a) !(Map k a) | Tip
 
 empty :: Map k a
 empty = Tip
@@ -318,7 +318,7 @@ null Tip = True
 null _ = False
 
 lookup :: Ord k => k -> Map k a -> Maybe a
-lookup _ Tip = Nothing
+lookup k Tip = k ${BT}seq${BT} Nothing
 lookup k (Bin _ kx x l r) = case compare k kx of
   LT -> lookup k l
   GT -> lookup k r
@@ -363,7 +363,7 @@ insertWithKey :: Ord k => (k -> a -> a -> a) -> k -> a -> Map k a -> Map k a
 insertWithKey f kx x m = insertWith (f kx) kx x m
 
 delete :: Ord k => k -> Map k a -> Map k a
-delete _ Tip = Tip
+delete k Tip = k ${BT}seq${BT} Tip
 delete k (Bin _ kx x l r) = case compare k kx of
   LT -> balance kx x (delete k l) r
   GT -> balance kx x l (delete k r)
@@ -373,7 +373,7 @@ adjust :: Ord k => (a -> a) -> k -> Map k a -> Map k a
 adjust f = adjustWithKey (\_ x -> f x)
 
 adjustWithKey :: Ord k => (k -> a -> a) -> k -> Map k a -> Map k a
-adjustWithKey _ _ Tip = Tip
+adjustWithKey _ k Tip = k ${BT}seq${BT} Tip
 adjustWithKey f k (Bin sx kx x l r) = case compare k kx of
   LT -> Bin sx kx x (adjustWithKey f k l) r
   GT -> Bin sx kx x l (adjustWithKey f k r)
@@ -453,7 +453,7 @@ fromAscList xs = fromDistinctAscList (combine xs)
         combine ys = ys
 
 fromDistinctAscList :: [(k, a)] -> Map k a
-fromDistinctAscList xs = fst (build (length xs) xs)
+fromDistinctAscList xs = B.foldr (\(k, _) rest -> k ${BT}seq${BT} rest) () xs ${BT}seq${BT} fst (build (length xs) xs)
   where build n ys = if n == 0 then (Tip, ys)
                      else let nl = (n - 1) ${BT}div${BT} 2
                               (l, rest) = build nl ys
@@ -559,7 +559,7 @@ unionWith :: Ord k => (a -> a -> a) -> Map k a -> Map k a -> Map k a
 unionWith f = unionWithKey (\_ x y -> f x y)
 
 unionWithKey :: Ord k => (k -> a -> a -> a) -> Map k a -> Map k a -> Map k a
-unionWithKey f a b = fromDistinctAscList (go (toAscList a) (toAscList b))
+unionWithKey f a b = b ${BT}seq${BT} a ${BT}seq${BT} fromDistinctAscList (go (toAscList a) (toAscList b))
   where go [] ys = ys
         go xs [] = xs
         go xs@((kx, x) : xt) ys@((ky, y) : yt) = case compare kx ky of
@@ -796,13 +796,13 @@ alter f k m = case f (L.lookup k m) of
   Just x -> insert k x m
 
 fromList :: Ord k => [(k, a)] -> Map k a
-fromList = B.foldl (\t (k, x) -> insert k x t) L.empty
+fromList = B.foldl' (\t (k, x) -> insert k x t) L.empty
 
 fromListWith :: Ord k => (a -> a -> a) -> [(k, a)] -> Map k a
-fromListWith f = B.foldl (\t (k, x) -> insertWith f k x t) L.empty
+fromListWith f = B.foldl' (\t (k, x) -> insertWith f k x t) L.empty
 
 fromListWithKey :: Ord k => (k -> a -> a -> a) -> [(k, a)] -> Map k a
-fromListWithKey f = B.foldl (\t (k, x) -> insertWith (f k) k x t) L.empty
+fromListWithKey f = B.foldl' (\t (k, x) -> insertWith (f k) k x t) L.empty
 
 fromAscList :: Eq k => [(k, a)] -> Map k a
 fromAscList xs = forceValues (L.fromAscList xs)

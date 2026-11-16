@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 762 -- The syntax-tree conversion covers every node kind of the grammar in one pass.
+// code-gauge-allow-file fileNcss 769 -- The syntax-tree conversion covers every node kind of the grammar in one pass.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type { CompileError } from '../interpreter/diagnostics';
@@ -597,14 +597,7 @@ function convertConstructor(node: Node): ConDecl {
   rejectUnsupported(inner);
   switch (inner.type) {
     case 'prefix': {
-      if (field(inner, 'type')) throw syntaxError(spanOf(inner), '書き方に誤りがあります。');
-      const nameNode = required(inner, 'name');
-      return {
-        name: plainName(nameNode),
-        fields: fields(inner, 'field').map(convertFieldType),
-        isInfix: false,
-        span: spanOf(inner),
-      };
+      return convertPrefixConstructor(inner);
     }
     case 'infix': {
       const operator = fields(inner, 'operator')[0];
@@ -638,9 +631,28 @@ function convertConstructor(node: Node): ConDecl {
   }
 }
 
+function convertPrefixConstructor(node: Node): ConDecl {
+  if (field(node, 'type')) throw syntaxError(spanOf(node), '書き方に誤りがあります。');
+  const fieldNodes = fields(node, 'field');
+  const strictFields = fieldNodes.flatMap((fieldNode, index) => (isStrictField(fieldNode) ? [index] : []));
+  return {
+    name: plainName(required(node, 'name')),
+    fields: fieldNodes.map(convertFieldType),
+    ...(strictFields.length > 0 ? { strictFields } : {}),
+    isInfix: false,
+    span: spanOf(node),
+  };
+}
+
 function convertFieldType(node: Node): TypeExpr {
+  if (isStrictField(node)) return convertType(required(node, 'type'));
   rejectUnsupported(node);
   return convertType(node);
+}
+
+/** Whether a field is marked `!`, which the library declares as GHC's containers do. */
+function isStrictField(node: Node): boolean {
+  return node.type === 'strict_field' && isLibrary;
 }
 
 function convertTypeSynonym(node: Node): Decl {

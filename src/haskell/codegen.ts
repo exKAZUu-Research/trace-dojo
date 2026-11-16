@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 834 -- The Core generator covers every construct of the language in one pass over shared state.
+// code-gauge-allow-file fileNcss 847 -- The Core generator covers every construct of the language in one pass over shared state.
 import {
   CHAR_TYPE,
   CONS_CON,
@@ -212,23 +212,33 @@ export class Codegen {
     globalOf(entity, entity.name, entity).code = this.compileFunction(fun, entity.name, false);
   }
 
-  /** Generates a constructor's function, for uses that do not apply it to all its fields. */
+  /**
+   * Generates a constructor's function, for uses that do not apply it to all its fields, and for every use of a
+   * constructor with strict fields, which evaluates them from left to right before building the value as GHC does.
+   */
   static constructorGlobal(con: ConInfo): GlobalDef {
     const def = globalOf(con, con.name);
-    def.code ??=
-      con.arity === 0
-        ? { k: 'con', con, args: [] }
-        : {
-            k: 'lam',
-            arity: con.arity,
-            size: con.arity,
-            body: {
-              k: 'con',
-              con,
-              args: Array.from({ length: con.arity }, (_, index) => ({ k: 'local', depth: 0, index }) as Core),
-            },
-          };
+    if (def.code) return def;
+    if (con.arity === 0) {
+      def.code = { k: 'con', con, args: [] };
+      return def;
+    }
+    let body: Core = {
+      k: 'con',
+      con,
+      args: Array.from({ length: con.arity }, (_, index) => ({ k: 'local', depth: 0, index }) as Core),
+    };
+    const seq: Core = { k: 'prim', prim: primitiveNamed('seq') };
+    for (const position of [...(con.strictFields ?? [])].toReversed())
+      body = { k: 'app', fn: seq, args: [{ k: 'local', depth: 0, index: position }, body] };
+    def.code = { k: 'lam', arity: con.arity, size: con.arity, body };
     return def;
+  }
+
+  /** A constructor applied to all its fields. */
+  private construct(con: ConInfo, args: Core[]): Core {
+    if (con.strictFields) return { k: 'app', fn: { k: 'global', global: Codegen.constructorGlobal(con) }, args };
+    return { k: 'con', con, args };
   }
 
   /** Generates a record field's selector, which fails for constructors without the field. */
@@ -652,7 +662,7 @@ export class Codegen {
         });
         for (const field of expr.fields)
           args[field.field.positions.get(expr.con) as number] = this.compileExpr(field.value);
-        return { k: 'con', con: expr.con, args };
+        return this.construct(expr.con, args);
       }
       case 'recordUpdate': {
         return this.compileRecordUpdate(expr);
@@ -716,11 +726,10 @@ export class Codegen {
       return { k: 'app', fn: prim, args: args.slice(1).map((rest) => this.compileExpr(rest)) };
     }
     if (head.k === 'con' && args.length >= head.con.arity && head.con.arity > 0) {
-      const con: Core = {
-        k: 'con',
-        con: head.con,
-        args: args.slice(0, head.con.arity).map((arg) => this.compileExpr(arg)),
-      };
+      const con = this.construct(
+        head.con,
+        args.slice(0, head.con.arity).map((arg) => this.compileExpr(arg))
+      );
       const rest = args.slice(head.con.arity);
       return rest.length === 0 ? con : { k: 'app', fn: con, args: rest.map((arg) => this.compileExpr(arg)) };
     }
@@ -778,7 +787,7 @@ export class Codegen {
       const args: Core[] = fieldSlots.map((fieldSlot): Core => ({ k: 'local', depth: 0, index: fieldSlot }));
       for (const value of values)
         args[value.field.positions.get(con) as number] = { k: 'local', depth: 0, index: value.slot };
-      alts.set(con.tag, { slots: fieldSlots, body: { k: 'con', con, args } });
+      alts.set(con.tag, { slots: fieldSlots, body: this.construct(con, args) });
     }
     const owner = expr.fields[0].field.type;
     const body: Core = {

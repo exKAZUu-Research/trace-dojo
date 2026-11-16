@@ -463,6 +463,7 @@ class Renamer {
         fieldNames: conDecl.fieldNames?.map((fieldName) => fieldName.name),
         isInfix: conDecl.isInfix,
         fieldTypes: [],
+        strictFields: conDecl.strictFields,
         span: conDecl.span,
       };
       entity.con = con;

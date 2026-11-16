@@ -38,6 +38,8 @@ export interface ConInfo {
   isInfix: boolean;
   /** The field types with the data type's parameters as `TGen` indices. */
   fieldTypes: Type[];
+  /** The positions of the fields that constructing a value evaluates first, in order. */
+  strictFields?: number[];
   span?: Span;
 }
 
