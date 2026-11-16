@@ -15,8 +15,9 @@ import { UnsupportedFeatureError } from './runtime';
 
 export function validateRegexpSourceSyntax(source: string, extended: boolean, binary = false): void {
   let root: SourceNode;
+  let nestingReference = false;
   try {
-    root = parseSourceRegexp(source, extended, binary);
+    ({ root, nestingReference } = parseSourceRegexp(source, extended, binary));
     validateSourceReferences(root);
   } catch (error) {
     if (error instanceof Error && error.message === 'Quantifier value unsupported in Oniguruma')
@@ -33,12 +34,13 @@ export function validateRegexpSourceSyntax(source: string, extended: boolean, bi
   }
   visitSource(root, false, false);
   if (hasZeroWidthRepeat(root)) throw new UnsupportedFeatureError('正規表現の量指定されたゼロ幅表明');
+  if (nestingReference) throw new UnsupportedFeatureError('正規表現のネストレベル付き後方参照');
 }
 
 export function hasRegexpProperty(source: string, extended: boolean): boolean {
   if (!/\\[pP]/.test(source)) return false;
   try {
-    return propertyNode(parseSourceRegexp(source, extended));
+    return propertyNode(parseSourceRegexp(source, extended).root);
   } catch {
     return false;
   }
@@ -50,17 +52,22 @@ function propertyNode(node: SourceNode): boolean {
   return 'body' in node && node.body.some(propertyNode);
 }
 
-function parseSourceRegexp(source: string, extended: boolean, binary = false): SourceNode {
+function parseSourceRegexp(
+  source: string,
+  extended: boolean,
+  binary = false
+): { root: SourceNode; nestingReference: boolean } {
   const normalized = normalizeRubyRegexpEscapes(source, extended, binary);
   const tokens = tokenize(normalized, { flags: extended ? 'x' : '' }).tokens;
   validateSourceTokens(tokens);
-  const root = parseOniguruma(quantifiableAssertionSource(aliasedCaptureTokens(tokens)), {
+  const aliased = aliasedCaptureTokens(tokens);
+  const root = parseOniguruma(quantifiableAssertionSource(aliased.tokens), {
     flags: extended ? 'x' : '',
     skipLookbehindValidation: true,
     skipBackrefValidation: true,
     skipPropertyNameValidation: true,
   });
-  return root;
+  return { root, nestingReference: aliased.nestingReference };
 }
 
 function validateSourceTokens(tokens: Token[]): void {
@@ -72,8 +79,36 @@ function validateSourceTokens(tokens: Token[]): void {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Capture declarations and references share one alias inventory before AST validation.
-function aliasedCaptureTokens(tokens: Token[]): Token[] {
+// code-gauge-allow functionCognitiveComplexity 22 -- Reference resolution preserves declaration order, numeric-reference restrictions and nesting syntax before AST aliases.
+function aliasedCaptureTokens(tokens: Token[]): { tokens: Token[]; nestingReference: boolean } {
+  const aliases = captureAliases(tokens);
+  let nestingReference = false;
+  const seen = new Set<string>();
+  const transformed = tokens.map((token) => {
+    if (token.type === 'GroupOpen' && token.kind === 'capturing' && token.name !== undefined) {
+      seen.add(token.name);
+      return { ...token, raw: `(?<${aliases.get(token.name)}>` };
+    }
+    if (token.type !== 'Backreference' && token.type !== 'Subroutine') return token;
+    const match = /^\\([gk])(?:<([^>]+)>|'([^']+)')$/.exec(token.raw);
+    if (!match) return token;
+    const payload = match[2] ?? match[3];
+    const reference = rubyReference(payload, match[1] === 'k', token.raw.at(-1) ?? '>');
+    nestingReference ||= reference.nesting;
+    const numeric = /^-?\d+$/.test(reference.name) || (match[1] === 'g' && /^[+-]/.test(reference.name));
+    if (numeric) {
+      if (aliases.size > 0 && (reference.name !== '0' || match[1] === 'k'))
+        throw new RegexpEncodingError('numbered backref/call is not allowed. (use name)');
+      return { ...token, raw: `\\${match[1]}<${reference.name}>` };
+    }
+    if (!(match[1] === 'k' ? seen : aliases).has(reference.name))
+      throw new RegexpEncodingError(`undefined name <${reference.name}> reference`);
+    return { ...token, raw: `\\${match[1]}<${aliases.get(reference.name)}>` };
+  });
+  return { tokens: transformed, nestingReference };
+}
+
+function captureAliases(tokens: Token[]): Map<string, string> {
   const aliases = new Map<string, string>();
   for (const token of tokens) {
     if (token.type !== 'GroupOpen' || token.kind !== 'capturing' || token.name === undefined) continue;
@@ -81,17 +116,17 @@ function aliasedCaptureTokens(tokens: Token[]): Token[] {
     if (/^[\d-]/.test(token.name)) throw new RegexpEncodingError(`invalid group name <${token.name}>`);
     if (!aliases.has(token.name)) aliases.set(token.name, `RubyCapture${aliases.size}`);
   }
-  return tokens.map((token) => {
-    if (token.type === 'GroupOpen' && token.kind === 'capturing' && token.name !== undefined)
-      return { ...token, raw: `(?<${aliases.get(token.name)}>` };
-    if (token.type === 'Backreference' || token.type === 'Subroutine') {
-      const match = /^\\([gk])(?:<([^>]+)>|'([^']+)')$/.exec(token.raw);
-      const name = match?.[2] ?? match?.[3];
-      if (match && name !== undefined && aliases.has(name))
-        return { ...token, raw: `\\${match[1]}<${aliases.get(name)}>` };
-    }
-    return token;
-  });
+  return aliases;
+}
+
+function rubyReference(payload: string, backreference: boolean, closing: string): { name: string; nesting: boolean } {
+  if (!backreference) return { name: payload, nesting: false };
+  const sign = payload.slice(1).search(/[+-]/);
+  if (sign < 0) return { name: payload, nesting: false };
+  const offset = sign + 1;
+  if (!/^[+-]\d+$/.test(payload.slice(offset)))
+    throw new RegexpEncodingError(`invalid group name <${payload}${closing}>`);
+  return { name: payload.slice(0, offset), nesting: true };
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- Source assertions are wrapped for AST parsing while group balance remains checked before recursive parsing.
@@ -129,7 +164,7 @@ function zeroWidthSource(node: SourceNode): boolean {
 
 export function supportsRegexpByteView(source: string, extended: boolean): boolean {
   try {
-    return byteViewNode(parseSourceRegexp(source, extended), false);
+    return byteViewNode(parseSourceRegexp(source, extended).root, false);
   } catch {
     return false;
   }

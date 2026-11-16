@@ -31,6 +31,7 @@ import {
   blockCompare,
   inject,
   iterate,
+  iterateArray,
   minmax as enumerableMinmax,
   nmin,
   sortBy,
@@ -1296,7 +1297,7 @@ def('Array', 'drop', 1, function* (self: RArray, [countValue]) {
   if (count < 0) throw argumentError('attempt to drop negative size');
   return arr(self.items.slice(count));
 });
-def('Array', 'sum', [0, 1], (self: RArray, args, block) => sum(self, args, block));
+def('Array', 'sum', [0, 1], (self: RArray, args, block) => sum(self, args, block, iterateArray));
 def('Array', ['inject', 'reduce'], [0, -1], (self: RArray, args, block) => inject(self, args, block));
 def('Array', 'max', [0, 1], function* (self: RArray, args, block) {
   if (args.length > 0 && args[0] !== NIL) return yield* nmin(self.items, args[0], undefined, block, true);

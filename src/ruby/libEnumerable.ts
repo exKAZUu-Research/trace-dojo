@@ -26,9 +26,11 @@ import {
 } from './libEnumerator';
 import { methodKeyOf } from './libMeta';
 import { isRational } from './libRational';
+import { nativeOwners } from './nativeOwners';
 import {
   isRubyFloat,
   isRubyNumber,
+  type NativeFn,
   NIL,
   RArray,
   RHash,
@@ -54,14 +56,10 @@ type Visit = (value: Value) => Gen<unknown>;
  * visitor returns {@link STOP} to end the iteration.
  */
 // code-gauge-allow functionCognitiveComplexity 26 -- Iteration must preserve yielded tuples and overrides across Array, Hash, Range and Enumerator.
-// code-gauge-allow functionNcss 33 -- Iteration must preserve yielded tuples and overrides across Array, Hash, Range and Enumerator.
 export function* iterate(collection: Value, visit: Visit, args: Value[] = []): Gen<void> {
   const runtime = rt();
   if (args.length === 0 && collection instanceof RArray && !isOverridden(collection)) {
-    for (let index = 0; index < collection.items.length; index++) {
-      runtime.spend();
-      if ((yield* visit(collection.items[index])) === STOP) return;
-    }
+    yield* iterateArray(collection, visit);
     return;
   }
   if (args.length === 0 && collection instanceof RHash && !isOverridden(collection)) {
@@ -143,14 +141,54 @@ export function* toArray(collection: Value, args: Value[] = []): Gen<Value[]> {
   return items;
 }
 
-function* collectInto(collection: Value, arrays: Value[][], visit: Visit, args: Value[] = []): Gen<void> {
+function* collectInto(
+  collection: Value,
+  arrays: Value[][],
+  visit: Visit,
+  args: Value[] = [],
+  iterator: typeof iterate = iterate
+): Gen<void> {
   const held = rt().heldArrays;
   const mark = held.length;
   for (const array of arrays) held.push(array);
   try {
-    yield* iterate(collection, visit, args);
+    yield* iterator(collection, visit, args);
   } finally {
     held.length = mark;
+  }
+}
+
+interface CollectionIteration {
+  iterate: typeof iterate;
+  collectInto: typeof collectInto;
+}
+
+function defineIterationMethods(
+  names: string | string[],
+  arity: number | [number, number],
+  build: (iteration: CollectionIteration) => NativeFn
+): void {
+  def('Enumerable', names, arity, build({ iterate, collectInto }));
+  const arrayNames = (typeof names === 'string' ? [names] : names).filter(
+    (name) => nativeOwners[`Array#${name}`] === 'Array'
+  );
+  if (arrayNames.length > 0)
+    def(
+      'Array',
+      arrayNames,
+      arity,
+      build({
+        iterate: iterateArray,
+        collectInto: (collection, arrays, visit, args) => collectInto(collection, arrays, visit, args, iterateArray),
+      })
+    );
+}
+
+export function* iterateArray(collection: Value, visit: Visit): Gen<void> {
+  if (!(collection instanceof RArray)) throw typeError('receiver must be an Array');
+  for (let index = 0; index < collection.items.length; index++) {
+    rt().spend();
+    if ((yield* visit(collection.items[index])) === STOP) return;
   }
 }
 
@@ -162,14 +200,19 @@ function call(block: RProc, value: Value, used = true): Gen {
 def('Enumerable', ['to_a', 'entries'], [0, -1], function* (self, args) {
   return arr(yield* toArray(self, args));
 });
-def('Enumerable', ['map', 'collect'], 0, function* (self, _args, block) {
-  if (!block) return sizedEnumerator(self, 'map', [], () => sizeOf(self));
-  const results: Value[] = [];
-  yield* collectInto(self, [results], function* (value) {
-    results.push(yield* call(block, value));
-  });
-  return arr(results);
-});
+defineIterationMethods(
+  ['map', 'collect'],
+  0,
+  ({ collectInto }) =>
+    function* (self, _args, block) {
+      if (!block) return sizedEnumerator(self, 'map', [], () => sizeOf(self));
+      const results: Value[] = [];
+      yield* collectInto(self, [results], function* (value) {
+        results.push(yield* call(block, value));
+      });
+      return arr(results);
+    }
+);
 def('Enumerable', ['flat_map', 'collect_concat'], 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'flat_map', []);
   const results: Value[] = [];
@@ -184,14 +227,19 @@ def('Enumerable', ['flat_map', 'collect_concat'], 0, function* (self, _args, blo
   });
   return arr(results);
 });
-def('Enumerable', ['select', 'filter', 'find_all'], 0, function* (self, _args, block) {
-  if (!block) return makeEnumerator(self, 'select', []);
-  const results: Value[] = [];
-  yield* collectInto(self, [results], function* (value) {
-    if (truthy(yield* call(block, value))) results.push(value);
-  });
-  return arr(results);
-});
+defineIterationMethods(
+  ['select', 'filter', 'find_all'],
+  0,
+  ({ collectInto }) =>
+    function* (self, _args, block) {
+      if (!block) return makeEnumerator(self, 'select', []);
+      const results: Value[] = [];
+      yield* collectInto(self, [results], function* (value) {
+        if (truthy(yield* call(block, value))) results.push(value);
+      });
+      return arr(results);
+    }
+);
 for (const [name, inverted] of [
   ['grep', false],
   ['grep_v', true],
@@ -212,14 +260,19 @@ def('Enumerable', 'filter_map', 0, function* (self, _args, block) {
   });
   return arr(results);
 });
-def('Enumerable', 'reject', 0, function* (self, _args, block) {
-  if (!block) return makeEnumerator(self, 'reject', []);
-  const results: Value[] = [];
-  yield* collectInto(self, [results], function* (value) {
-    if (!truthy(yield* call(block, value))) results.push(value);
-  });
-  return arr(results);
-});
+defineIterationMethods(
+  'reject',
+  0,
+  ({ collectInto }) =>
+    function* (self, _args, block) {
+      if (!block) return makeEnumerator(self, 'reject', []);
+      const results: Value[] = [];
+      yield* collectInto(self, [results], function* (value) {
+        if (!truthy(yield* call(block, value))) results.push(value);
+      });
+      return arr(results);
+    }
+);
 def('Enumerable', 'partition', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'partition', []);
   const accepted: Value[] = [];
@@ -229,20 +282,25 @@ def('Enumerable', 'partition', 0, function* (self, _args, block) {
   });
   return arr([arr(accepted), arr(rejected)]);
 });
-def('Enumerable', ['find', 'detect'], [0, 1], function* (self, args, block) {
-  if (!block) return makeEnumerator(self, 'find', args);
-  let found: Value = NIL;
-  let matched = false;
-  yield* iterate(self, function* (value) {
-    if (truthy(yield* call(block, value))) {
-      found = value;
-      matched = true;
-      return STOP;
+defineIterationMethods(
+  ['find', 'detect'],
+  [0, 1],
+  ({ iterate }) =>
+    function* (self, args, block) {
+      if (!block) return makeEnumerator(self, 'find', args);
+      let found: Value = NIL;
+      let matched = false;
+      yield* iterate(self, function* (value) {
+        if (truthy(yield* call(block, value))) {
+          found = value;
+          matched = true;
+          return STOP;
+        }
+      });
+      if (!matched && args.length > 0 && args[0] !== NIL) return yield* callMethod(args[0], 'call', []);
+      return found;
     }
-  });
-  if (!matched && args.length > 0 && args[0] !== NIL) return yield* callMethod(args[0], 'call', []);
-  return found;
-});
+);
 def('Enumerable', 'find_index', [0, 1], function* (self, args, block) {
   if (!block && args.length === 0) return makeEnumerator(self, 'find_index', []);
   let index = 0n;
@@ -343,7 +401,7 @@ def('Enumerable', ['inject', 'reduce'], [0, -1], (self, args, block) => inject(s
 
 /** `sum`, adding Integers exactly and Floats with Kahan-Babuska compensation as Ruby does. */
 // code-gauge-allow functionNcss 55 -- The ordered cases for enumerable iteration protocols share state; splitting them solely for the metric would hide their sequencing.
-export function* sum(self: Value, args: Value[], block: RProc | undefined): Gen {
+export function* sum(self: Value, args: Value[], block: RProc | undefined, iterator: typeof iterate = iterate): Gen {
   let total: Value = args.length > 0 ? args[0] : 0n;
   const mark = rt().held.length;
   rt().held.push(total);
@@ -355,7 +413,7 @@ export function* sum(self: Value, args: Value[], block: RProc | undefined): Gen 
   let sawValue = false;
   let generic = false;
   try {
-    yield* iterate(self, function* (value) {
+    yield* iterator(self, function* (value) {
       const item = block ? yield* call(block, value) : value;
       sawValue = true;
       if (!generic && floating === undefined && exactActive) {
@@ -419,66 +477,38 @@ def('Enumerable', 'count', [0, 1], function* (self, args, block) {
   return count;
 });
 
-function* predicate(
-  self: Value,
-  args: Value[],
-  block: RProc | undefined,
-  test: (value: Value) => Gen<boolean>
-): Gen<void> {
-  void args;
-  void block;
-  yield* iterate(self, function* (value) {
-    if (yield* test(value)) return STOP;
-  });
-}
-
 function* matches(value: Value, args: Value[], block: RProc | undefined): Gen<boolean> {
   if (args.length > 0) return yield* caseEquals(args[0], value);
   if (block) return truthy(yield* call(block, value));
   return truthy(value);
 }
 
-def('Enumerable', 'all?', [0, 1], function* (self, args, block) {
-  let result = true;
-  yield* predicate(self, args, block, function* (value) {
-    if (!(yield* matches(value, args, block))) {
-      result = false;
-      return true;
-    }
-    return false;
-  });
-  return result;
-});
-def('Enumerable', 'any?', [0, 1], function* (self, args, block) {
-  let result = false;
-  yield* predicate(self, args, block, function* (value) {
-    if (yield* matches(value, args, block)) {
-      result = true;
-      return true;
-    }
-    return false;
-  });
-  return result;
-});
-def('Enumerable', 'none?', [0, 1], function* (self, args, block) {
-  let result = true;
-  yield* predicate(self, args, block, function* (value) {
-    if (yield* matches(value, args, block)) {
-      result = false;
-      return true;
-    }
-    return false;
-  });
-  return result;
-});
-def('Enumerable', 'one?', [0, 1], function* (self, args, block) {
-  let count = 0;
-  yield* predicate(self, args, block, function* (value) {
-    if (yield* matches(value, args, block)) count++;
-    return count > 1;
-  });
-  return count === 1;
-});
+for (const name of ['all?', 'any?', 'none?', 'one?'])
+  // code-gauge-allow functionCognitiveComplexity 23 -- Quantified predicates share traversal while retaining their distinct short-circuit thresholds.
+  defineIterationMethods(
+    name,
+    [0, 1],
+    ({ iterate }) =>
+      function* (self, args, block) {
+        let count = 0;
+        let failed = false;
+        yield* iterate(self, function* (value) {
+          const matched = yield* matches(value, args, block);
+          if (name === 'all?') {
+            if (!matched) {
+              failed = true;
+              return STOP;
+            }
+          } else if (matched) {
+            count++;
+            if (count > (name === 'one?' ? 1 : 0)) return STOP;
+          }
+        });
+        if (name === 'all?') return !failed;
+        if (name === 'any?') return count > 0;
+        return name === 'none?' ? count === 0 : count === 1;
+      }
+  );
 def('Enumerable', ['include?', 'member?'], 1, function* (self, [target]) {
   let found = false;
   yield* iterate(self, function* (value) {
@@ -519,31 +549,41 @@ def('Enumerable', 'take', 1, function* (self, [countValue]) {
   });
   return arr(items);
 });
-def('Enumerable', 'take_while', 0, function* (self, _args, block) {
-  if (!block) return makeEnumerator(self, 'take_while', []);
-  const items: Value[] = [];
-  yield* collectInto(self, [items], function* (value) {
-    if (!truthy(yield* call(block, value))) return STOP;
-    items.push(value);
-  });
-  return arr(items);
-});
+defineIterationMethods(
+  'take_while',
+  0,
+  ({ collectInto }) =>
+    function* (self, _args, block) {
+      if (!block) return makeEnumerator(self, 'take_while', []);
+      const items: Value[] = [];
+      yield* collectInto(self, [items], function* (value) {
+        if (!truthy(yield* call(block, value))) return STOP;
+        items.push(value);
+      });
+      return arr(items);
+    }
+);
 def('Enumerable', 'drop', 1, function* (self, [countValue]) {
   const count = yield* toIndex(countValue);
   if (count < 0) throw argumentError('attempt to drop negative size');
   return arr((yield* toArray(self)).slice(count));
 });
-def('Enumerable', 'drop_while', 0, function* (self, _args, block) {
-  if (!block) return makeEnumerator(self, 'drop_while', []);
-  const items: Value[] = [];
-  let dropping = true;
-  yield* collectInto(self, [items], function* (value) {
-    if (dropping && truthy(yield* call(block, value))) return;
-    dropping = false;
-    items.push(value);
-  });
-  return arr(items);
-});
+defineIterationMethods(
+  'drop_while',
+  0,
+  ({ collectInto }) =>
+    function* (self, _args, block) {
+      if (!block) return makeEnumerator(self, 'drop_while', []);
+      const items: Value[] = [];
+      let dropping = true;
+      yield* collectInto(self, [items], function* (value) {
+        if (dropping && truthy(yield* call(block, value))) return;
+        dropping = false;
+        items.push(value);
+      });
+      return arr(items);
+    }
+);
 
 // Ordering ------------------------------------------------------------------------------------------------------------
 

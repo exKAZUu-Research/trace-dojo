@@ -11880,3 +11880,101 @@ p /(?x:a{2,#hi
 3}b)/.match?("aaab")`)
   ).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\n', uncaughtException: undefined });
 });
+
+test('Proc-defined super forwards the lexical block unless explicitly replaced', () => {
+  expect(
+    run(String.raw`class A
+ def f;block_given? ? yield(7) : :none;end
+end
+class B<A
+ define_method(:f){|&b|p block_given?,b.nil?;super()}
+ define_method(:explicit){|&b|super(&b)}
+ def self.install(&outer)
+  define_method(:g){|&b|p block_given?,b.nil?;super()}
+  define_method(:h){|&b|p block_given?,b.nil?;super(&b)}
+  define_method(:j){super(){|x|x+3}}
+ end
+end
+class A
+ alias g f
+ alias h f
+ alias j f
+ def explicit;block_given? ? yield(7) : :none;end
+end
+p B.new.f{99}
+p B.new.explicit{99}
+B.install{|x|x*2}
+p B.new.g,p(B.new.g{99})
+p B.new.h,p(B.new.h{99})
+p B.new.j{99}
+B.install
+p B.new.g{99}
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'false\nfalse\n:none\n99\ntrue\ntrue\ntrue\nfalse\n14\n14\n14\ntrue\ntrue\ntrue\nfalse\n99\n:none\n99\n10\nfalse\nfalse\n:none\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native Array methods retain direct iteration while Enumerable dispatches each', () => {
+  expect(
+    run(String.raw`class Array;alias each reverse_each;end
+a=[1,2,3]
+p a.map{|x|x},a.collect{|x|x},a.select{true},a.filter{true},a.reject{false},a.find{true},a.detect{true}
+p a.find_all{true},a.entries,a.inject([]){|r,x|r<<x}
+p a.take_while{|x|x<3},a.drop_while{|x|x<3}
+a.all?{|x|p x;true};a.any?{|x|p x;false};a.none?{|x|p x;false};a.one?{|x|p x;false}
+p a.sum{|x|p x;x}
+p a.map.to_a,a.select.to_a,a.find.to_a,a.take_while.to_a,a.drop_while.to_a
+p Enumerable.instance_method(:map).bind(a).call{|x|x}
+p Array.instance_method(:map).bind(a).call{|x|x}
+class A<Array;def each;yield 9;end;end
+b=A.new([1,2,3]);p b.map{|x|x},b.entries,b.select{true},b.find{true},b.sum
+class C
+ def each;yield 9;end
+ include Enumerable
+end
+p C.new.map{|x|x}
+a=[1,2];p a.map{|x|a<<3 if x==1;x}
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[1, 2, 3]\n[1, 2, 3]\n[1, 2, 3]\n[1, 2, 3]\n[1, 2, 3]\n1\n1\n[3, 2, 1]\n[3, 2, 1]\n[3, 2, 1]\n[1, 2]\n[3]\n1\n2\n3\n1\n2\n3\n1\n2\n3\n1\n2\n3\n1\n2\n3\n6\n[1, 2, 3]\n[1, 2, 3]\n[1, 2, 3]\n[1]\n[1]\n[3, 2, 1]\n[1, 2, 3]\n[1, 2, 3]\n[9]\n[1, 2, 3]\n1\n6\n[9]\n[1, 2, 3]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['foo!', 'a b', 'a.b', 'a:b', '+a', ':x', ' a', String.raw`a\b`, 'ä', 'あ'])(
+  'Ruby nesting references preserve valid capture names: %s',
+  (name) => {
+    const source = String.raw`puts :before;p /(?<${name}>a)\k<${name}+0>/`;
+    expect(run(source)).toMatchObject({
+      kind: 'executed',
+      stdout: 'before\n',
+      uncaughtException: '正規表現のネストレベル付き後方参照は、この採点環境では使えません。',
+    });
+  }
+);
+
+test.each([
+  String.raw`puts :before;p /(?<a-b>a)\k<a-b>/`,
+  String.raw`puts :before;p /(?<a-b>a)\k'a-b'/`,
+  String.raw`puts :before;p /(?<+a>a)\g<+a>/`,
+  String.raw`puts :before;p /(?<+a>a)\g'+a'/`,
+  String.raw`puts :before;p /(?<a-b>a)\k<a-b+0>/`,
+  String.raw`puts :before;p /(?<foo!>a)(?<=\k<foo!+0>)/`,
+  String.raw`puts :before;p /(?<foo!>a)\k<foo!+>/`,
+])('Ruby-invalid reference syntax rejects before execution: %s', (source) => {
+  expect(run(source)).toMatchObject({ kind: 'compileError' });
+});
+
+test('Dynamic nesting references fail explicitly after validation', () => {
+  expect(run(String.raw`puts :before;p Regexp.new('(?<foo!>a)\k<foo!+0>')`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'before\n',
+    uncaughtException: '正規表現のネストレベル付き後方参照は、この採点環境では使えません。',
+  });
+});

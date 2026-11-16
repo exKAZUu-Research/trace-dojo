@@ -2079,7 +2079,7 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
   rootValues(frame, args);
   if (keywords) frame.temporaries.push(keywords);
   try {
-    let block: RProc | undefined = home.extra.block;
+    let block: RProc | undefined = home.lexicalBlock;
     if (e.block) block = makeBlock(e.block, frame);
     else if (e.blockArg) block = yield* toBlock(yield* ev(e.blockArg, frame));
     const superName = method.superName ?? method.name;
