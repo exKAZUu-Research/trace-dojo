@@ -16574,3 +16574,196 @@ test.each(floatingRationalPowerCases)('Rational powers reject Float conversion p
     uncaughtException: 'Rational を含む Float の累乗は、この採点環境では使えません。',
   });
 });
+
+const numericSumTransitionCases = [
+  ['a=[1r/3,1.0];p a.sum(1.0)', '2.3333333333333335\n'],
+  ['a=[1r/3,1.0];p a.sum(1.0){|v|p [:seen,v];v}', '[:seen, (1/3)]\n[:seen, 1.0]\n[:seen, 1.0]\n2.3333333333333335\n'],
+  ['a=[1r/3,1.0];p a.each.sum(1.0)', '2.3333333333333335\n'],
+  ['a=[1r/3,1.0];p a.each.sum(1.0){|v|p [:seen,v];v}', '[:seen, (1/3)]\n[:seen, 1.0]\n2.3333333333333335\n'],
+  ['a=[1r/3,1.0];p Enumerable.instance_method(:sum).bind(a).call(1.0)', '2.3333333333333335\n'],
+  [
+    'a=[1r/3,1.0];p Enumerable.instance_method(:sum).bind(a).call(1.0){|v|p [:seen,v];v}',
+    '[:seen, (1/3)]\n[:seen, 1.0]\n2.3333333333333335\n',
+  ],
+  ['a=[1r/3,2.0];p a.sum(1.0)', '3.3333333333333335\n'],
+  ['a=[1r/3,2.0];p a.sum(1.0){|v|p [:seen,v];v}', '[:seen, (1/3)]\n[:seen, 2.0]\n[:seen, 2.0]\n3.3333333333333335\n'],
+  ['a=[1r/3,2.0];p a.each.sum(1.0)', '3.3333333333333335\n'],
+  ['a=[1r/3,2.0];p a.each.sum(1.0){|v|p [:seen,v];v}', '[:seen, (1/3)]\n[:seen, 2.0]\n3.3333333333333335\n'],
+  ['a=[1r/3,2.0];p Enumerable.instance_method(:sum).bind(a).call(1.0)', '3.3333333333333335\n'],
+  [
+    'a=[1r/3,2.0];p Enumerable.instance_method(:sum).bind(a).call(1.0){|v|p [:seen,v];v}',
+    '[:seen, (1/3)]\n[:seen, 2.0]\n3.3333333333333335\n',
+  ],
+  ['a=[1r/3,1.0,-1.0];p a.sum(1.0)', '1.3333333333333333\n'],
+  [
+    'a=[1r/3,1.0,-1.0];p a.sum(1.0){|v|p [:seen,v];v}',
+    '[:seen, (1/3)]\n[:seen, 1.0]\n[:seen, 1.0]\n[:seen, -1.0]\n1.3333333333333333\n',
+  ],
+  ['a=[1r/3,1.0,-1.0];p a.each.sum(1.0)', '1.3333333333333333\n'],
+  [
+    'a=[1r/3,1.0,-1.0];p a.each.sum(1.0){|v|p [:seen,v];v}',
+    '[:seen, (1/3)]\n[:seen, 1.0]\n[:seen, -1.0]\n1.3333333333333333\n',
+  ],
+  ['a=[1r/3,1.0,-1.0];p Enumerable.instance_method(:sum).bind(a).call(1.0)', '1.3333333333333333\n'],
+  [
+    'a=[1r/3,1.0,-1.0];p Enumerable.instance_method(:sum).bind(a).call(1.0){|v|p [:seen,v];v}',
+    '[:seen, (1/3)]\n[:seen, 1.0]\n[:seen, -1.0]\n1.3333333333333333\n',
+  ],
+  ['a=[1r/3,Float::INFINITY];p a.sum(1.0)', 'Infinity\n'],
+  [
+    'a=[1r/3,Float::INFINITY];p a.sum(1.0){|v|p [:seen,v];v}',
+    '[:seen, (1/3)]\n[:seen, Infinity]\n[:seen, Infinity]\nInfinity\n',
+  ],
+  ['a=[1r/3,Float::INFINITY];p a.each.sum(1.0)', 'Infinity\n'],
+  ['a=[1r/3,Float::INFINITY];p a.each.sum(1.0){|v|p [:seen,v];v}', '[:seen, (1/3)]\n[:seen, Infinity]\nInfinity\n'],
+  ['a=[1r/3,Float::INFINITY];p Enumerable.instance_method(:sum).bind(a).call(1.0)', 'Infinity\n'],
+  [
+    'a=[1r/3,Float::INFINITY];p Enumerable.instance_method(:sum).bind(a).call(1.0){|v|p [:seen,v];v}',
+    '[:seen, (1/3)]\n[:seen, Infinity]\nInfinity\n',
+  ],
+  ['a=[1r/3,Float::NAN];p a.sum(1.0)', 'NaN\n'],
+  ['a=[1r/3,Float::NAN];p a.sum(1.0){|v|p [:seen,v];v}', '[:seen, (1/3)]\n[:seen, NaN]\n[:seen, NaN]\nNaN\n'],
+  ['a=[1r/3,Float::NAN];p a.each.sum(1.0)', 'NaN\n'],
+  ['a=[1r/3,Float::NAN];p a.each.sum(1.0){|v|p [:seen,v];v}', '[:seen, (1/3)]\n[:seen, NaN]\nNaN\n'],
+  ['a=[1r/3,Float::NAN];p Enumerable.instance_method(:sum).bind(a).call(1.0)', 'NaN\n'],
+  [
+    'a=[1r/3,Float::NAN];p Enumerable.instance_method(:sum).bind(a).call(1.0){|v|p [:seen,v];v}',
+    '[:seen, (1/3)]\n[:seen, NaN]\nNaN\n',
+  ],
+  [
+    'a=[1r/3,1.0];n=0;p a.sum(1.0){|v|n+=1;p [n,v];a[1]=2.0 if n==2;v};p a',
+    '[1, (1/3)]\n[2, 1.0]\n[3, 2.0]\n3.3333333333333335\n[(1/3), 2.0]\n',
+  ],
+  [
+    'a=[1r/3,1.0];n=0;p a.sum(1.0){|v|n+=1;p [n,v];a.clear if n==2;v};p a',
+    '[1, (1/3)]\n[2, 1.0]\n1.3333333333333333\n[]\n',
+  ],
+  [
+    'a=[1r/3,1.0];n=0;p a.sum(1.0){|v|n+=1;p [n,v];a.shift if n==2;v};p a',
+    '[1, (1/3)]\n[2, 1.0]\n1.3333333333333333\n[1.0]\n',
+  ],
+  [
+    'a=[1r/3,1.0];n=0;p a.sum(1.0){|v|n+=1;p [n,v];a.pop if n==2;v};p a',
+    '[1, (1/3)]\n[2, 1.0]\n1.3333333333333333\n[(1/3)]\n',
+  ],
+  [
+    'a=[1r/3,1.0];n=0;p a.sum(1.0){|v|n+=1;p [n,v];a<<3 if n==2;v};p a',
+    '[1, (1/3)]\n[2, 1.0]\n[3, 1.0]\n[4, 3]\n5.333333333333333\n[(1/3), 1.0, 3]\n',
+  ],
+  [
+    'a=[1r/3,1.0];n=0;p a.each.sum(1.0){|v|n+=1;p [n,v];a[1]=2.0 if n==2;v};p a',
+    '[1, (1/3)]\n[2, 1.0]\n2.3333333333333335\n[(1/3), 2.0]\n',
+  ],
+  [
+    'a=[1r/3,1.0];n=0;p a.each.sum(1.0){|v|n+=1;p [n,v];a.clear if n==2;v};p a',
+    '[1, (1/3)]\n[2, 1.0]\n2.3333333333333335\n[]\n',
+  ],
+  [
+    'a=[1r/3,1.0];n=0;p a.each.sum(1.0){|v|n+=1;p [n,v];a.shift if n==2;v};p a',
+    '[1, (1/3)]\n[2, 1.0]\n2.3333333333333335\n[1.0]\n',
+  ],
+  [
+    'a=[1r/3,1.0];n=0;p a.each.sum(1.0){|v|n+=1;p [n,v];a.pop if n==2;v};p a',
+    '[1, (1/3)]\n[2, 1.0]\n2.3333333333333335\n[(1/3)]\n',
+  ],
+  [
+    'a=[1r/3,1.0];n=0;p a.each.sum(1.0){|v|n+=1;p [n,v];a<<3 if n==2;v};p a',
+    '[1, (1/3)]\n[2, 1.0]\n[3, 3]\n5.333333333333333\n[(1/3), 1.0, 3]\n',
+  ],
+  [
+    'a=[1r/3,1.0];n=0;p Enumerable.instance_method(:sum).bind(a).call(1.0){|v|n+=1;p [n,v];a[1]=2.0 if n==2;v};p a',
+    '[1, (1/3)]\n[2, 1.0]\n2.3333333333333335\n[(1/3), 2.0]\n',
+  ],
+  [
+    'a=[1r/3,1.0];n=0;p Enumerable.instance_method(:sum).bind(a).call(1.0){|v|n+=1;p [n,v];a.clear if n==2;v};p a',
+    '[1, (1/3)]\n[2, 1.0]\n2.3333333333333335\n[]\n',
+  ],
+  [
+    'a=[1r/3,1.0];n=0;p Enumerable.instance_method(:sum).bind(a).call(1.0){|v|n+=1;p [n,v];a.shift if n==2;v};p a',
+    '[1, (1/3)]\n[2, 1.0]\n2.3333333333333335\n[1.0]\n',
+  ],
+  [
+    'a=[1r/3,1.0];n=0;p Enumerable.instance_method(:sum).bind(a).call(1.0){|v|n+=1;p [n,v];a.pop if n==2;v};p a',
+    '[1, (1/3)]\n[2, 1.0]\n2.3333333333333335\n[(1/3)]\n',
+  ],
+  [
+    'a=[1r/3,1.0];n=0;p Enumerable.instance_method(:sum).bind(a).call(1.0){|v|n+=1;p [n,v];a<<3 if n==2;v};p a',
+    '[1, (1/3)]\n[2, 1.0]\n[3, 3]\n5.333333333333333\n[(1/3), 1.0, 3]\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;1r;end;end;a=[2**62,2**62];p a.sum(1r){|v|p [:seen,v];v}',
+    '[:seen, 4611686018427387904]\nplus\n[:seen, 4611686018427387904]\nplus\nplus\n(1/1)\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;1r;end;end;a=[2**62-1,1];p a.sum(1r){|v|p [:seen,v];v}',
+    '[:seen, 4611686018427387903]\n[:seen, 1]\nplus\nplus\n(1/1)\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;1r;end;end;a=[-2**62,-1];p a.sum(1r){|v|p [:seen,v];v}',
+    '[:seen, -4611686018427387904]\n[:seen, -1]\nplus\nplus\n(1/1)\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;1r;end;end;a=[1r,2**62,1r];p a.sum(1r){|v|p [:seen,v];v}',
+    '[:seen, (1/1)]\n[:seen, 4611686018427387904]\nplus\n[:seen, (1/1)]\n(3/1)\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;1r;end;end;a=[2**62,2**62];p a.each.sum(1r){|v|p [:seen,v];v}',
+    '[:seen, 4611686018427387904]\nplus\n[:seen, 4611686018427387904]\nplus\n(1/1)\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;1r;end;end;a=[2**62-1,1];p a.each.sum(1r){|v|p [:seen,v];v}',
+    '[:seen, 4611686018427387903]\n[:seen, 1]\nplus\n(1/1)\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;1r;end;end;a=[-2**62,-1];p a.each.sum(1r){|v|p [:seen,v];v}',
+    '[:seen, -4611686018427387904]\n[:seen, -1]\nplus\n(1/1)\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;1r;end;end;a=[1r,2**62,1r];p a.each.sum(1r){|v|p [:seen,v];v}',
+    '[:seen, (1/1)]\n[:seen, 4611686018427387904]\nplus\n[:seen, (1/1)]\n(3/1)\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;1r;end;end;a=[2**62,2**62];p Enumerable.instance_method(:sum).bind(a).call(1r){|v|p [:seen,v];v}',
+    '[:seen, 4611686018427387904]\nplus\n[:seen, 4611686018427387904]\nplus\n(1/1)\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;1r;end;end;a=[2**62-1,1];p Enumerable.instance_method(:sum).bind(a).call(1r){|v|p [:seen,v];v}',
+    '[:seen, 4611686018427387903]\n[:seen, 1]\nplus\n(1/1)\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;1r;end;end;a=[-2**62,-1];p Enumerable.instance_method(:sum).bind(a).call(1r){|v|p [:seen,v];v}',
+    '[:seen, -4611686018427387904]\n[:seen, -1]\nplus\n(1/1)\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;1r;end;end;a=[1r,2**62,1r];p Enumerable.instance_method(:sum).bind(a).call(1r){|v|p [:seen,v];v}',
+    '[:seen, (1/1)]\n[:seen, 4611686018427387904]\nplus\n[:seen, (1/1)]\n(3/1)\n',
+  ],
+  [
+    'class S;def +(x);puts :start;1r/3;end;end;class Rational;def +(x);puts :plus;1r;end;end;a=[1,1r/3,2];p a.sum(S.new)',
+    'start\nplus\nplus\n(1/1)\n',
+  ],
+  [
+    'class S;def +(x);puts :start;0.5;end;end;class Rational;def +(x);puts :plus;1r;end;end;a=[1,1r/3,2];p a.sum(S.new)',
+    'start\n2.833333333333333\n',
+  ],
+  [
+    'class S;def +(x);puts :start;1r/3;end;end;class Rational;def +(x);puts :plus;1r;end;end;a=[1,1r/3,2];p a.each.sum(S.new)',
+    'start\nplus\n(4/3)\n',
+  ],
+  [
+    'class S;def +(x);puts :start;0.5;end;end;class Rational;def +(x);puts :plus;1r;end;end;a=[1,1r/3,2];p a.each.sum(S.new)',
+    'start\n2.8333333333333335\n',
+  ],
+  [
+    'class S;def +(x);puts :start;1r/3;end;end;class Rational;def +(x);puts :plus;1r;end;end;a=[1,1r/3,2];p Enumerable.instance_method(:sum).bind(a).call(S.new)',
+    'start\nplus\n(4/3)\n',
+  ],
+  [
+    'class S;def +(x);puts :start;0.5;end;end;class Rational;def +(x);puts :plus;1r;end;end;a=[1,1r/3,2];p Enumerable.instance_method(:sum).bind(a).call(S.new)',
+    'start\n2.8333333333333335\n',
+  ],
+] as const;
+
+test.each(numericSumTransitionCases)('sum preserves numeric transitions and callback order: %s', (source, stdout) => {
+  expect(run(source)).toMatchObject({ stdout });
+});

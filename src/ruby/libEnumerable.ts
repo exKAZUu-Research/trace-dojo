@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 946 -- Enumerable methods share traversal protocols; extracting independent methods would not simplify those protocols.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   caseEquals,
@@ -5,15 +6,14 @@ import {
   comparisonFailed,
   rEquals,
   spaceship,
-  toFloat,
   toIndex,
   toIndexExact,
   tryImplicitConversion,
 } from './conversions';
-import { coreMethod, def, isCoreMethod } from './define';
+import { def, isCoreMethod } from './define';
 import { argumentCountError, argumentError, runtimeError, typeError } from './errors';
 import { eachEntryUntil, hashGetOrInsert, hashSet, hashUpdateEntry } from './hashes';
-import { callBlock, callMethod, callProc, flattenGenerator, type Gen, invoke, nativeProc, respondsTo } from './interp';
+import { callBlock, callMethod, callProc, flattenGenerator, type Gen, nativeProc, respondsTo } from './interp';
 import { tryAry } from './libArray';
 import {
   customEnumerator,
@@ -24,11 +24,10 @@ import {
   sizedEnumerator,
 } from './libEnumerator';
 import { methodKeyOf } from './libMeta';
-import { addRationals, isRational, rationalToFloat } from './libRational';
 import { nativeOwners } from './nativeOwners';
+import { NumericSum } from './numericSum';
 import {
   isRubyFloat,
-  isRubyNumber,
   type NativeFn,
   NIL,
   RArray,
@@ -36,7 +35,6 @@ import {
   RObject,
   type RProc,
   RRange,
-  RString,
   RSymbol,
   type Value,
 } from './objects';
@@ -410,91 +408,16 @@ function* fastOperator(left: Value, operator: string, right: Value): Gen {
 
 def('Enumerable', ['inject', 'reduce'], [0, -1], (self, args, block) => inject(self, args, block));
 
-export function* sum(self: Value, args: Value[], block: RProc | undefined, iterator: typeof iterate = iterate): Gen {
-  let total: Value = args.length > 0 ? args[0] : 0n;
-  const mark = rt().held.length;
-  rt().held.push(total);
-  const initial = isRubyFloat(total) ? Number(total) : undefined;
-  const exactActive = typeof total === 'bigint' || isRational(total) || initial !== undefined;
-  let integers = 0n;
-  let rationals: RObject | undefined;
-  let floating: number | undefined = initial !== undefined && !(self instanceof RArray) ? initial : undefined;
-  if (initial !== undefined && self instanceof RArray) total = 0n;
-  let compensation = 0;
-  let sawValue = false;
-  let generic = false;
-  const normalize = function* (includeZero: boolean): Gen {
-    if (integers !== 0n || (includeZero && (!(self instanceof RArray) || rationals === undefined)))
-      total = yield* invoke(coreMethod(rt().c.Integer, '+'), integers, [total], undefined, undefined, true);
-    integers = 0n;
-    rt().held[mark] = total;
-    if (rationals) {
-      total = isRubyFloat(total)
-        ? rationalToFloat(rationals) + Number(total)
-        : typeof total === 'bigint' || isRational(total)
-          ? addRationals(rationals, total)
-          : yield* invoke(coreMethod(rt().c.Rational, '+'), rationals, [total], undefined, undefined, true);
-      rationals = undefined;
-    }
-    rt().held[mark] = total;
-    return total;
-  };
+export function* sum(self: Value, args: Value[], block: RProc | undefined): Gen {
+  const accumulator = new NumericSum(args[0] ?? 0n, 'enumerable', args.length > 0);
   try {
-    yield* iterator(self, function* (value) {
-      const item = block ? yield* call(block, value) : value;
-      const hadValues = sawValue;
-      sawValue = true;
-      if (!generic && floating === undefined && exactActive) {
-        if (typeof item === 'bigint' || isRational(item)) {
-          if (typeof item === 'bigint') integers += item;
-          else rationals = rationals ? addRationals(rationals, item) : item;
-          rt().held[mark + 1] = rationals ?? NIL;
-          return;
-        }
-        yield* normalize(!(self instanceof RArray) || hadValues);
-        if (isRubyFloat(item) || initial !== undefined) {
-          const prefix = yield* sumFloat(total);
-          floating = initial !== undefined && self instanceof RArray ? initial + prefix : prefix;
-        }
-      }
-      if (floating !== undefined) {
-        const rational = isRational(item);
-        if (isRubyNumber(item) || rational) {
-          const x = rational ? rationalToFloat(item) : Number(item);
-          if (Number.isNaN(floating)) return;
-          if (Number.isNaN(x)) floating = x;
-          else if (!Number.isFinite(x))
-            floating = !Number.isFinite(floating) && Math.sign(x) !== Math.sign(floating) ? Number.NaN : x;
-          else if (Number.isFinite(floating)) {
-            const next = floating + x;
-            compensation += Math.abs(floating) >= Math.abs(x) ? floating - next + x : x - next + floating;
-            floating = next;
-          }
-          return;
-        }
-        total = floating;
-        rt().held[mark] = total;
-        floating = undefined;
-      }
-      generic = true;
-      total = yield* callMethod(total, '+', [item]);
-      rt().held[mark] = total;
+    yield* iterate(self, function* (value) {
+      yield* accumulator.add(block ? yield* call(block, value) : value);
     });
-    if (!sawValue) return args.length > 0 ? args[0] : 0n;
-    if (floating !== undefined) return floating + compensation;
-    if (generic) return total;
-    const exact = yield* normalize(args.length > 0 && self instanceof RArray);
-    return initial !== undefined && self instanceof RArray
-      ? yield* invoke(coreMethod(rt().c.Float, '+'), initial, [exact], undefined, undefined, true)
-      : exact;
+    return yield* accumulator.finish();
   } finally {
-    rt().held.length = mark;
+    accumulator.release();
   }
-}
-
-function* sumFloat(value: Value): Gen<number> {
-  if (value instanceof RString) throw typeError('no implicit conversion to float from string');
-  return isRational(value) ? rationalToFloat(value) : yield* toFloat(value);
 }
 
 def('Enumerable', 'sum', [0, 1], (self, args, block) => sum(self, args, block));

@@ -31,18 +31,17 @@ import {
   blockCompare,
   inject,
   iterate,
-  iterateArray,
   minmax as enumerableMinmax,
   nmin,
   sortBy,
   sortValues,
-  sum,
   uniqValues,
   zipCollections,
 } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { randomIndex } from './libRandom';
 import { rangeBounds } from './libString';
+import { arraySum } from './numericSum';
 import { NIL, RArray, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { arr, isA, newHash, realClassOf, str, stringBytes, stringFromBytes, truthy } from './values';
@@ -1317,7 +1316,7 @@ function* whileBoundary(self: RArray, block: RProc): Gen<number> {
   return index;
 }
 
-def('Array', 'sum', [0, 1], (self: RArray, args, block) => sum(self, args, block, iterateArray));
+def('Array', 'sum', [0, 1], (self: RArray, args, block) => arraySum(self, args, block));
 def('Array', ['inject', 'reduce'], [0, -1], (self: RArray, args, block) => inject(self, args, block));
 def('Array', 'max', [0, 1], function* (self: RArray, args, block) {
   if (args.length > 0 && args[0] !== NIL) return yield* nmin(self.items, args[0], undefined, block, true);
