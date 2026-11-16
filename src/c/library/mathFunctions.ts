@@ -32,7 +32,7 @@ function exp2(x: number): number {
   return pow(2, x);
 }
 
-const UNARY: Record<string, (x: number) => number> = {
+export const UNARY: Record<string, (x: number) => number> = {
   acos: Math.acos,
   asin: Math.asin,
   atan: Math.atan,
@@ -136,7 +136,7 @@ function nextAfter(x: number, y: number, isFloat = false): number {
   return view.getFloat64(0);
 }
 
-const BINARY: Record<string, (x: number, y: number) => number> = {
+export const BINARY: Record<string, (x: number, y: number) => number> = {
   atan2: Math.atan2,
   pow,
   fmod: (x, y) => x % y,

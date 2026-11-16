@@ -1,0 +1,199 @@
+import { binaryOperation } from '../../c/arith';
+import { CppRuntimeError } from '../errors';
+import type { Expr } from '../expr';
+import { BOOL, ClassInfo, classType, isArithmetic, type Type, typeName, unqualified } from '../types';
+import { CObject, type Value } from '../values';
+import { equalTo, lessThan } from './elements';
+import type { Library } from './registry';
+import { nativeConstructor } from './support';
+import { typeKey } from './templates';
+
+const FUNCTORS: Record<string, { isComparison: boolean; operator: string }> = {
+  less: { isComparison: true, operator: '<' },
+  greater: { isComparison: true, operator: '>' },
+  less_equal: { isComparison: true, operator: '<=' },
+  greater_equal: { isComparison: true, operator: '>=' },
+  equal_to: { isComparison: true, operator: '==' },
+  not_equal_to: { isComparison: true, operator: '!=' },
+  plus: { isComparison: false, operator: '+' },
+  minus: { isComparison: false, operator: '-' },
+  multiplies: { isComparison: false, operator: '*' },
+  divides: { isComparison: false, operator: '/' },
+  modulus: { isComparison: false, operator: '%' },
+};
+
+export const FUNCTOR_NAMES = Object.keys(FUNCTORS);
+
+/**
+ * A function object of `<functional>`, such as `std::greater<int>`, which compares or combines two values. Without a
+ * template argument (`std::greater<>`), it takes values of any type.
+ */
+export function functorClass(library: Library, name: string, argument: Type | undefined): ClassInfo {
+  const key = `${name}<${argument ? typeKey(argument) : ''}>`;
+  const cached = library.instances.get(key);
+  if (cached) return cached;
+  const cls = new ClassInfo(`std::${name}<${argument ? typeName(argument) : ''}>`, 'struct');
+  library.instances.set(key, cls);
+  cls.isComplete = true;
+  const { isComparison, operator } = FUNCTORS[name];
+  const apply = (type: Type): ((a: Value, b: Value) => Value) | undefined => {
+    const operand = unqualified(argument ?? type);
+    if (isComparison) {
+      if (operator === '==' || operator === '!=') {
+        const equal = equalTo(operand);
+        if (!equal) return undefined;
+        return (a, b) => ((operator === '==') === equal(a, b) ? 1 : 0);
+      }
+      const less = lessThan(operand);
+      if (!less) return undefined;
+      return (a, b) => {
+        const order = less(a, b);
+        const result =
+          operator === '<' ? order < 0 : operator === '>' ? order > 0 : operator === '<=' ? order <= 0 : order >= 0;
+        return result ? 1 : 0;
+      };
+    }
+    if (!isArithmetic(operand)) return undefined;
+    const run = binaryOperation(operator as never, operand as never);
+    return (a, b) => run(a as number, b as number);
+  };
+  cls.library = {
+    kind: 'functor',
+    args: argument ? [argument] : [],
+    size: 1,
+    align: 1,
+    apply,
+    call: (compiler, object, args, row) => {
+      if (args.length !== 2) return;
+      const type = argument ?? unqualified(compiler.rvalue(args[0]).type);
+      const operation = apply(type);
+      if (!operation) return compiler.error(row, `${cls.name} は ${typeName(type)} の値に使えません。`);
+      const values = args.map((arg) => compiler.convert(arg, unqualified(type), row).run);
+      const objectRun = object.run;
+      return {
+        type: isComparison ? BOOL : unqualified(type),
+        isLvalue: false,
+        row,
+        run: (frame) => {
+          objectRun(frame);
+          return operation(values[0](frame) as Value, values[1](frame) as Value);
+        },
+      };
+    },
+  };
+  cls.constructors = [nativeConstructor(cls, [], () => new CObject(cls, []))];
+  cls.operations = { copy: (_frame, value) => value, assign: () => {} };
+  return cls;
+}
+
+const LIMITS: Record<
+  string,
+  { min: number | bigint; max: number | bigint; lowest?: number; epsilon?: number; digits: number; digits10: number }
+> = {
+  bool: { min: 0, max: 1, digits: 1, digits10: 0 },
+  char: { min: -128, max: 127, digits: 7, digits10: 2 },
+  schar: { min: -128, max: 127, digits: 7, digits10: 2 },
+  uchar: { min: 0, max: 255, digits: 8, digits10: 2 },
+  short: { min: -32_768, max: 32_767, digits: 15, digits10: 4 },
+  ushort: { min: 0, max: 65_535, digits: 16, digits10: 4 },
+  int: { min: -2_147_483_648, max: 2_147_483_647, digits: 31, digits10: 9 },
+  uint: { min: 0, max: 4_294_967_295, digits: 32, digits10: 9 },
+  long: { min: -(2n ** 63n), max: 2n ** 63n - 1n, digits: 63, digits10: 18 },
+  ulong: { min: 0n, max: 2n ** 64n - 1n, digits: 64, digits10: 19 },
+  llong: { min: -(2n ** 63n), max: 2n ** 63n - 1n, digits: 63, digits10: 18 },
+  ullong: { min: 0n, max: 2n ** 64n - 1n, digits: 64, digits10: 19 },
+  float: {
+    min: 1.1754943508222875e-38,
+    max: 3.4028234663852886e38,
+    lowest: -3.4028234663852886e38,
+    epsilon: 1.1920928955078125e-7,
+    digits: 24,
+    digits10: 6,
+  },
+  double: {
+    min: 2.2250738585072014e-308,
+    max: Number.MAX_VALUE,
+    lowest: -Number.MAX_VALUE,
+    epsilon: Number.EPSILON,
+    digits: 53,
+    digits10: 15,
+  },
+  ldouble: {
+    min: 2.2250738585072014e-308,
+    max: Number.MAX_VALUE,
+    lowest: -Number.MAX_VALUE,
+    epsilon: Number.EPSILON,
+    digits: 53,
+    digits10: 15,
+  },
+};
+
+/** `std::numeric_limits<T>`, whose static members tell the range of an arithmetic type. */
+export function numericLimitsClass(library: Library, type: Type): ClassInfo {
+  const key = `numeric_limits<${typeKey(type)}>`;
+  const cached = library.instances.get(key);
+  if (cached) return cached;
+  const cls = new ClassInfo(`std::numeric_limits<${typeName(type)}>`, 'class');
+  library.instances.set(key, cls);
+  cls.isComplete = true;
+  cls.library = { kind: 'numeric_limits', args: [type], size: 1, align: 1 };
+  const target = unqualified(type);
+  if (!isArithmetic(target)) return cls;
+  const limits = LIMITS[target.name];
+  const staticFunction = (name: string, value: number | bigint): void => {
+    cls.methods.set(name, [
+      {
+        name,
+        displayName: `${cls.name}::${name}`,
+        params: [],
+        ret: target,
+        owner: cls,
+        isStatic: true,
+        isVirtual: false,
+        isConst: false,
+        isPure: false,
+        isConstructor: false,
+        isDestructor: false,
+        isOverride: false,
+        isFinal: false,
+        access: 'public',
+        row: -1,
+        isAtomic: false,
+        isDefined: true,
+        native: () => value,
+      },
+    ]);
+  };
+  staticFunction('max', limits.max);
+  staticFunction('min', limits.min);
+  staticFunction('lowest', limits.lowest ?? limits.min);
+  if (target.kind === 'float') {
+    staticFunction('epsilon', limits.epsilon as number);
+    staticFunction('infinity', Number.POSITIVE_INFINITY);
+    staticFunction('quiet_NaN', Number.NaN);
+  }
+  const int: Type = { kind: 'int', name: 'int' };
+  cls.constants.set('digits', constant(limits.digits, int));
+  cls.constants.set('digits10', constant(limits.digits10, int));
+  cls.constants.set(
+    'is_signed',
+    constant(
+      target.kind === 'float' || ['char', 'schar', 'short', 'int', 'long', 'llong'].includes(target.name) ? 1 : 0,
+      BOOL
+    )
+  );
+  cls.constants.set('is_integer', constant(target.kind === 'int' ? 1 : 0, BOOL));
+  void classType;
+  void CppRuntimeError;
+  return cls;
+}
+
+const constant =
+  (value: number | bigint, valueType: Type) =>
+  (row: number): Expr => ({
+    type: valueType,
+    isLvalue: false,
+    row,
+    run: () => value,
+    constant: value,
+  });

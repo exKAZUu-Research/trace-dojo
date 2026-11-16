@@ -1,6 +1,9 @@
 import { executeCProgram } from '../c/execute';
 import { findCTraceAnnotations } from '../c/parse';
 import { traceCProgram } from '../c/trace';
+import { executeCppProgram } from '../cpp/execute';
+import { findCppTraceAnnotations } from '../cpp/parse';
+import { traceCppProgram } from '../cpp/trace';
 import { executeGoProgram } from '../go/execute';
 import { findGoTraceAnnotations } from '../go/parse';
 import { traceGoProgram } from '../go/trace';
@@ -77,6 +80,7 @@ const interpreters = {
     execute: executeRubyProgram,
   },
   c: { findTraceAnnotations: findCTraceAnnotations, record: traceCProgram, execute: executeCProgram },
+  cpp: { findTraceAnnotations: findCppTraceAnnotations, record: traceCppProgram, execute: executeCppProgram },
 } satisfies Record<string, Interpreter>;
 
 /**

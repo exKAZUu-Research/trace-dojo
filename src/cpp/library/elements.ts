@@ -1,0 +1,201 @@
+import { CppRuntimeError } from '../errors';
+import type { ExpressionCompiler } from '../expressionCompiler';
+import { invoke, zeroOf } from '../objectCompiler';
+import type { Frame } from '../runtime';
+import { type ClassInfo, type FunctionInfo, isArithmetic, type Type, typeName } from '../types';
+import { Box, CObject, FunctionRef, Ptr, Store, UNINIT, type Value } from '../values';
+import { SequenceValue } from './containerValues';
+import { StringValue } from './string';
+
+/** What a container does with its elements: make them, copy them, assign them, and destroy them. */
+export interface ElementOperations {
+  type: Type;
+  /** A value-initialized element, as `std::vector<T>(n)` makes. */
+  make: (frame: Frame) => Value;
+  copy: (frame: Frame, value: Value) => Value;
+  /** Assigns `source` to the element `target`, giving the element's new value (the same object for a class). */
+  assign: (frame: Frame, target: Value, source: Value) => Value;
+  destroy?: (frame: Frame, value: Value) => void;
+  /** Whether copying or destroying an element runs code the program wrote, which reallocation then shows. */
+  hasEffects: boolean;
+}
+
+/** The element operations of a type, which the compiler makes while the class it uses is complete. */
+export function elementOperations(compiler: ExpressionCompiler, type: Type, row: number): ElementOperations {
+  if (type.kind === 'class') {
+    const { cls } = type;
+    const operations = cls.operations;
+    const make =
+      cls.isComplete && !cls.isAbstract
+        ? lazyDefault(compiler, cls, row)
+        : () => {
+            throw new CppRuntimeError('custom', `${cls.name} のオブジェクトは、引数なしでは作れません。`);
+          };
+    return {
+      type,
+      make,
+      copy: (frame, value) => {
+        if (cls.isNoncopyable) throw new CppRuntimeError('custom', `${cls.name} のオブジェクトはコピーできません。`);
+        return operations?.copy(frame, value) ?? value;
+      },
+      assign: (frame, target, source) => {
+        operations?.assign(frame, target, source);
+        return target;
+      },
+      destroy: operations?.destroy,
+      hasEffects:
+        !cls.library && (operations?.destroy !== undefined || cls.constructors.some((ctor) => isUserCopy(ctor, cls))),
+    };
+  }
+  const zero = zeroOf(type);
+  return {
+    type,
+    make: () => zero,
+    copy: (_frame, value) => value,
+    assign: (_frame, _target, source) => source,
+    hasEffects: false,
+  };
+}
+
+function isUserCopy(ctor: FunctionInfo, cls: ClassInfo): boolean {
+  const [first] = ctor.params;
+  return (
+    ctor.params.length === 1 &&
+    first.type.kind === 'reference' &&
+    first.type.to.kind === 'class' &&
+    first.type.to.cls === cls
+  );
+}
+
+function lazyDefault(compiler: ExpressionCompiler, cls: ClassInfo, row: number): (frame: Frame) => Value {
+  let run: ((frame: Frame) => Value) | undefined;
+  try {
+    run = compiler.defaultConstructed(cls, row, true).run as (frame: Frame) => Value;
+  } catch {
+    run = undefined;
+  }
+  return (frame) => {
+    if (!run) throw new CppRuntimeError('custom', `${cls.name} のオブジェクトは、引数なしでは作れません。`);
+    return run(frame);
+  };
+}
+
+/** A comparison of two elements, as `<` or a comparator object or function gives it. */
+export type Compare = (frame: Frame, a: Value, b: Value) => boolean;
+
+/** Compares two values of a type with `<` as the library's default comparators do, or undefined when `<` does not apply. */
+export function lessThan(type: Type): ((a: Value, b: Value) => number) | undefined {
+  if (isArithmetic(type)) {
+    return (a, b) => {
+      const x = a as number | bigint;
+      const y = b as number | bigint;
+      return x < y ? -1 : x > y ? 1 : 0;
+    };
+  }
+  if (type.kind === 'pointer') {
+    return (a, b) => {
+      const p = a as Ptr;
+      const q = b as Ptr;
+      if (p.store !== q.store) return (p.store?.id ?? -1) - (q.store?.id ?? -1);
+      return p.index - q.index;
+    };
+  }
+  if (type.kind !== 'class') return undefined;
+  const library = type.cls.library;
+  if (library?.kind === 'string') {
+    return (a, b) => {
+      const x = (a as StringValue).bytes;
+      const y = (b as StringValue).bytes;
+      return x < y ? -1 : x > y ? 1 : 0;
+    };
+  }
+  if (library?.kind === 'pair') {
+    const [first, second] = type.cls.fields;
+    const compareFirst = lessThan(first.type);
+    const compareSecond = lessThan(second.type);
+    if (!compareFirst || !compareSecond) return undefined;
+    return (a, b) => {
+      const x = a as CObject;
+      const y = b as CObject;
+      return compareFirst(x.values[0], y.values[0]) || compareSecond(x.values[1], y.values[1]);
+    };
+  }
+  if (library && ['vector', 'deque', 'array', 'list'].includes(library.kind)) {
+    const element = lessThan(library.args[0]);
+    if (!element) return undefined;
+    return (a, b) => {
+      const x = (a as SequenceValue).items;
+      const y = (b as SequenceValue).items;
+      for (let index = 0; index < Math.min(x.length, y.length); index++) {
+        const order = element(x[index], y[index]);
+        if (order !== 0) return order;
+      }
+      return x.length - y.length;
+    };
+  }
+  return undefined;
+}
+
+/** Whether two values of a type are equal, as `==` says, or undefined when `==` does not apply. */
+export function equalTo(type: Type): ((a: Value, b: Value) => boolean) | undefined {
+  if (type.kind === 'pointer') return (a, b) => (a as Ptr).equals(b as Ptr);
+  if (type.kind === 'class' && type.cls.library?.kind === 'pair') {
+    const [first, second] = type.cls.fields;
+    const a1 = equalTo(first.type);
+    const a2 = equalTo(second.type);
+    if (!a1 || !a2) return undefined;
+    return (a, b) =>
+      a1((a as CObject).values[0], (b as CObject).values[0]) && a2((a as CObject).values[1], (b as CObject).values[1]);
+  }
+  const less = lessThan(type);
+  if (!less) return undefined;
+  return (a, b) => less(a, b) === 0;
+}
+
+/** The location of a value, for passing it by reference to a function the program wrote. */
+export function locationOf(value: Value): Ptr {
+  return new Ptr(new Box(value), 0);
+}
+
+/**
+ * A comparator argument of an algorithm or a container: a function's name, or a function object such as
+ * `std::greater<int>()`, compiled for two elements of a type. Gives undefined when the argument is neither.
+ */
+export function comparatorOf(
+  compiler: ExpressionCompiler,
+  argumentType: Type,
+  functions: FunctionInfo[] | undefined,
+  elementType: Type,
+  row: number,
+  arity = 2
+): ((frame: Frame, callee: Value, ...args: Value[]) => Value) | undefined {
+  if (functions) {
+    const args = Array.from({ length: arity }, () => ({ type: elementType, isLvalue: true, row, run: () => UNINIT }));
+    const resolved = compiler.resolve('比較の関数', functions, args, undefined, row);
+    const fn = resolved.fn;
+    if (fn.owner && !fn.isStatic) return compiler.error(row, `メンバ関数 ${fn.displayName} は、関数として渡せません。`);
+    return (frame, _callee, ...values) =>
+      invoke(
+        frame,
+        fn,
+        values.map((value, index) => (fn.params[index].type.kind === 'reference' ? locationOf(value) : value)),
+        undefined,
+        row
+      ) as Value;
+  }
+  if (argumentType.kind === 'class' && argumentType.cls.library?.kind === 'functor') {
+    const operation = argumentType.cls.library.apply?.(elementType);
+    if (!operation) {
+      return compiler.error(row, `${argumentType.cls.name} では ${typeName(elementType)} を比べられません。`);
+    }
+    return (_frame, _callee, a, b) => operation(a, b);
+  }
+  return undefined;
+}
+
+/** Calls a predicate the program passed, which takes elements and gives a value that converts to `bool`. */
+export function truthy(value: Value): boolean {
+  return value !== 0 && value !== 0n && value !== undefined && !(value instanceof Ptr && value.isNull);
+}
+
+export { CObject, FunctionRef, SequenceValue, Store, StringValue };
