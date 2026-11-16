@@ -15,6 +15,7 @@ import {
   mergeErrorSets,
   runtime,
   type Scope,
+  staticResultOf,
   type TExpr,
   UNASSIGNED,
   undefinedValue,
@@ -88,8 +89,6 @@ interface BreakSite {
   value: TExpr;
   final?: TExpr;
 }
-
-const STATEMENT_DONE: Stmt = { exec: () => {}, noreturn: false };
 
 export abstract class StatementCompiler extends CallCompiler {
   protected fn: FnContext | undefined;
@@ -1006,21 +1005,22 @@ export abstract class StatementCompiler extends CallCompiler {
     asStatement: boolean
   ): { stmt: Stmt; value: TExpr } {
     const condition = this.compile(expression.condition);
+    const conditionResult = staticResultOf(condition);
     const kind = conditionKind(condition.type, expression.capture !== undefined);
     if (kind === 'bool') {
       const test = this.coerce(condition, BOOL, expression.condition);
       if (expression.capture) this.error(expression.capture, 'bool の条件からは値を受け取れません。');
       if (expression.elseCapture) this.error(expression.elseCapture, 'bool の条件の else では値を受け取れません。');
-      if (test.known) {
-        // Zig analyzes only the branch that a condition known at compile time selects.
-        const branch = (test.value as boolean) ? expression.consequent : expression.otherwise;
-        if (!branch) return { stmt: STATEMENT_DONE, value: known(VOID, undefined, expression) };
-        const chosen = this.branch(branch, undefined, resultType, asStatement);
-        return {
-          stmt: chosen.stmt ?? this.valueStmt(chosen.value as TExpr),
-          value: chosen.value ?? known(VOID, undefined, expression),
-        };
-      }
+      const result = staticResultOf(test);
+      if (result)
+        return this.selectedBranch(
+          result.value ? expression.consequent : expression.otherwise,
+          undefined,
+          test,
+          (value) => value,
+          resultType,
+          asStatement
+        );
       const then = this.branch(expression.consequent, undefined, resultType, asStatement);
       const otherwise = expression.otherwise
         ? this.branch(expression.otherwise, undefined, resultType, asStatement)
@@ -1034,8 +1034,8 @@ export abstract class StatementCompiler extends CallCompiler {
       if (condition.type.kind !== 'optional') return this.error(expression.condition, 'optional の値が必要です。');
       const child = condition.type.child;
       if (expression.elseCapture) this.error(expression.elseCapture, 'optional の条件の else では値を受け取れません。');
-      if (condition.known) {
-        const present = condition.value !== NULL;
+      if (conditionResult) {
+        const present = conditionResult.value !== NULL;
         return this.selectedBranch(
           present ? expression.consequent : expression.otherwise,
           present ? this.captureBinding(expression.capture, child, condition) : undefined,
@@ -1075,8 +1075,8 @@ export abstract class StatementCompiler extends CallCompiler {
     if (condition.type.kind !== 'error_union') return this.error(expression.condition, 'エラー共用体の値が必要です。');
     const union = condition.type;
     if (!expression.otherwise) return this.error(expression, 'エラー共用体の if には else が要ります。');
-    if (condition.known || errorUnionCannotFail(condition)) {
-      const failed = condition.known && condition.value instanceof ErrorValue;
+    if (conditionResult || errorUnionCannotFail(condition)) {
+      const failed = conditionResult?.value instanceof ErrorValue;
       const capture = failed
         ? this.captureBinding(expression.elseCapture, union.errorSet, undefined)
         : this.captureBinding(expression.capture, union.payload, condition);
@@ -1134,7 +1134,8 @@ export abstract class StatementCompiler extends CallCompiler {
       const value = this.derived(condition, VOID, () => {});
       return { stmt: this.valueStmt(value), value };
     }
-    if (capture && condition.known) {
+    const conditionResult = staticResultOf(condition);
+    if (capture && conditionResult) {
       const address = capture.locate ? this.addressOf(condition) : undefined;
       if (!address || address.known) {
         capture.binding = {
@@ -1144,7 +1145,7 @@ export abstract class StatementCompiler extends CallCompiler {
             ? condition.type.kind === 'optional'
               ? this.optionalPayloadPointer(address.value as Pointer)
               : address.value
-            : payload(condition.value),
+            : payload(conditionResult.value),
         };
       }
     }
@@ -1164,6 +1165,7 @@ export abstract class StatementCompiler extends CallCompiler {
       ? {
           ...chosenValue,
           known: chosenValue.known && condition.known,
+          staticResult: staticResultOf(chosenValue),
           place: undefined,
           eval: (frame: Frame) => run(frame, chosenValue.eval),
         }
@@ -1343,7 +1345,7 @@ export abstract class StatementCompiler extends CallCompiler {
     if (kind === 'bool') {
       const bool = this.coerce(condition, BOOL, expression.condition);
       if (expression.capture) this.error(expression.capture, 'bool の条件からは値を受け取れません。');
-      infinite = bool.known && bool.value === true;
+      infinite = staticResultOf(bool)?.value === true;
       const evaluate = bool.eval;
       test = (frame) => evaluate(frame) as boolean;
     } else if (kind === 'optional' && condition.type.kind === 'optional') {
@@ -1393,7 +1395,7 @@ export abstract class StatementCompiler extends CallCompiler {
               .exec
           : undefined;
         // Zig does not analyze the body of a loop whose condition is known to be false.
-        const neverRuns = kind === 'bool' && condition.known && condition.value === false;
+        const neverRuns = kind === 'bool' && staticResultOf(condition)?.value === false;
         const body: Stmt = neverRuns ? { exec: () => {}, noreturn: false } : this.loopBody(expression.body);
         return { body, continueExec: continuation };
       }));
@@ -1811,8 +1813,9 @@ export abstract class StatementCompiler extends CallCompiler {
   ): { stmt: Stmt; value: TExpr } {
     const fn = this.currentFn(expression);
     const operand = this.compile(expression.operand);
+    const operandResult = staticResultOf(operand);
     let operandType = operand.type;
-    if (operandType.kind === 'comptime_int' && !operand.known)
+    if (operandType.kind === 'comptime_int' && !operandResult)
       this.error(expression.operand, 'switch の値が決まりません。');
     const union = operandType.kind === 'union' ? operandType : undefined;
     const unionFields = union ? this.unionFields(union) : undefined;
@@ -1863,8 +1866,8 @@ export abstract class StatementCompiler extends CallCompiler {
     let elseProng: Prong | undefined;
     // A labeled switch may `continue` into any prong, so only an unlabeled one skips the prongs it never reaches.
     const reached =
-      operand.known && !union && !expression.label
-        ? this.reachedCase(expression, keyOf(operand.value), tagType)
+      operandResult && !union && !expression.label
+        ? this.reachedCase(expression, keyOf(operandResult.value), tagType)
         : undefined;
     fn.targets.push(target);
     try {
@@ -1927,7 +1930,7 @@ export abstract class StatementCompiler extends CallCompiler {
           : all.length > 0
             ? this.peerType(all, expression)
             : VOID;
-      if (!operand.known) this.rejectRuntimeComptime(type, expression);
+      if (!operandResult) this.rejectRuntimeComptime(type, expression);
       for (const site of target.breaks) site.final = this.coerce(site.value, type, site.value.span);
     }
     const coerced = new Map<TExpr, TExpr>();
@@ -2297,9 +2300,10 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** `x catch handler`; with `discarded`, as in `_ = x catch handler`, the payload and handler need no common type. */
-  // code-gauge-allow functionNcss 53 -- Keeps the success and error result conversions together.
+  // code-gauge-allow functionNcss 54 -- Keeps the success and error result conversions together.
   protected compileCatch(expression: ExpressionOf<'catch'>, resultType: Type | undefined, discarded = false): TExpr {
     const operand = this.compile(expression.operand);
+    const operandResult = staticResultOf(operand);
     const type = operand.type;
     if (type.kind === 'error_set' && !expression.capture) {
       const handler = this.compile(expression.handler, resultType);
@@ -2330,10 +2334,10 @@ export abstract class StatementCompiler extends CallCompiler {
     if (!expression.capture && unwrapParens(expression.handler).kind === 'unreachable') {
       // A library call the compiler folds still runs when the program does, as in Zig.
       const isCall = ['call', 'builtinCall'].includes(unwrapParens(expression.operand).kind);
-      if (operand.known && operand.value instanceof ErrorValue && !isCall) {
+      if (operand.known && operandResult?.value instanceof ErrorValue && !isCall) {
         this.error(
           expression,
-          `エラー error.${operand.value.name} が返っているので、catch unreachable にはできません。`
+          `エラー error.${operandResult.value.name} が返っているので、catch unreachable にはできません。`
         );
       }
       const evaluateOperand = operand.eval;
@@ -2347,7 +2351,7 @@ export abstract class StatementCompiler extends CallCompiler {
         expression
       );
     }
-    if (operand.known && operand.value instanceof ErrorValue) {
+    if (operandResult?.value instanceof ErrorValue) {
       const handler = this.selectedBranch(
         expression.handler,
         this.captureBinding(expression.capture, type.errorSet, undefined),
@@ -2572,7 +2576,8 @@ function clearingLocals<T>(slots: readonly number[], run: (frame: Frame) => T): 
 
 function errorUnionCannotFail(value: TExpr): boolean {
   if (value.type.kind !== 'error_union') return false;
-  return value.known
-    ? !(value.value instanceof ErrorValue)
+  const result = staticResultOf(value);
+  return result
+    ? !(result.value instanceof ErrorValue)
     : value.type.errorSet.resolved !== false && value.type.errorSet.names?.size === 0;
 }

@@ -184,17 +184,30 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
   );
   type = created;
   iteratorTypes.set(key, type);
-  const isDelimiter = (buffer: Value[], index: number, value: Value, equal: typeof equalValues): boolean => {
-    if (delimiter === 'scalar') return equal(buffer[index], value);
-    const set = elements(value);
-    if (delimiter === 'any') return set.some((each) => equal(each, buffer[index]));
-    return startsWith(buffer, set, equal, index);
+  const isDelimiter = (
+    buffer: Slice,
+    index: number,
+    value: Value,
+    equal: typeof equalValues,
+    spend: () => void
+  ): boolean => {
+    spend();
+    if (delimiter === 'scalar') return equal(buffer.get(index), value);
+    const set = value as Slice;
+    if (delimiter === 'any') {
+      for (let offset = 0; offset < set.length; offset++) if (equal(set.get(offset), buffer.get(index))) return true;
+      return false;
+    }
+    if (index + set.length > buffer.length) return false;
+    for (let offset = 0; offset < set.length; offset++)
+      if (!equal(buffer.get(index + offset), set.get(offset))) return false;
+    return true;
   };
-  const delimiterLength = (value: Value): number => (delimiter === 'sequence' ? elements(value).length : 1);
+  const delimiterLength = (value: Value): number => (delimiter === 'sequence' ? (value as Slice).length : 1);
   const method = (
     name: string,
     returnType: Type,
-    run: (state: ZStruct, equal: typeof equalValues) => Value
+    run: (state: ZStruct, equal: typeof equalValues, spend: () => void) => Value
   ): (() => Member) =>
     fnMember(`${key}.${name}`, (sema, call) => {
       expectArgs(sema, call, 0, name);
@@ -204,43 +217,43 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
         returnType,
         (frame) => {
           frame.runtime.spend();
-          return run(state(frame), comparisonBudget(sema, frame));
+          return run(state(frame), comparisonBudget(sema, frame), nativeBudget(sema, frame));
         },
         call.span
       );
     });
-  const tokenPeek = (state: ZStruct, equal: typeof equalValues): { start: number; end: number } | undefined => {
-    const buffer = elements(state.slots[0]);
+  const tokenPeek = (
+    state: ZStruct,
+    equal: typeof equalValues,
+    spend: () => void
+  ): { start: number; end: number } | undefined => {
+    const buffer = state.slots[0] as Slice;
     let index = Number(state.slots[1] as bigint);
-    while (index < buffer.length && isDelimiter(buffer, index, state.slots[2], equal))
+    while (index < buffer.length && isDelimiter(buffer, index, state.slots[2], equal, spend))
       index += delimiterLength(state.slots[2]);
     state.slots[1] = BigInt(index);
     if (index === buffer.length) return undefined;
     let end = index;
-    while (end < buffer.length && !isDelimiter(buffer, end, state.slots[2], equal)) end++;
+    while (end < buffer.length && !isDelimiter(buffer, end, state.slots[2], equal, spend)) end++;
     return { start: index, end };
   };
   const members: Record<string, () => Member> =
     kind === 'split'
       ? {
-          next: method('next', optionalOf(resultSlice), (state, equal) => {
+          next: method('next', optionalOf(resultSlice), (state, equal, spend) => {
             const startValue = state.slots[1];
             if (startValue === NULL) return NULL;
             const start = Number(startValue as bigint);
-            const buffer = elements(state.slots[0]);
+            const buffer = state.slots[0] as Slice;
             let end = buffer.length;
             let found = -1;
             for (let index = start; index < buffer.length; index++) {
-              if (
-                delimiter === 'sequence'
-                  ? startsWith(buffer, elements(state.slots[2]), equal, index)
-                  : isDelimiter(buffer, index, state.slots[2], equal)
-              ) {
+              if (isDelimiter(buffer, index, state.slots[2], equal, spend)) {
                 found = index;
                 break;
               }
             }
-            if (delimiter === 'sequence' && found === -1 && elements(state.slots[2]).length === 0) found = start;
+            if (delimiter === 'sequence' && found === -1 && delimiterLength(state.slots[2]) === 0) found = start;
             if (found === -1) {
               state.slots[1] = NULL;
             } else {
@@ -249,13 +262,13 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
             }
             return subSlice(state.slots[0] as Slice, start, end - start);
           }),
-          first: method('first', resultSlice, (state, equal) => {
+          first: method('first', resultSlice, (state, equal, spend) => {
             if (state.slots[1] === NULL) panic(PANIC.nullUnwrap);
             if (state.slots[1] !== 0n) panic(PANIC.unreachable);
-            const buffer = elements(state.slots[0]);
+            const buffer = state.slots[0] as Slice;
             let end = buffer.length;
             for (let index = 0; index < buffer.length; index++) {
-              if (isDelimiter(buffer, index, state.slots[2], equal)) {
+              if (isDelimiter(buffer, index, state.slots[2], equal, spend)) {
                 end = index;
                 break;
               }
@@ -263,14 +276,14 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
             state.slots[1] = end === buffer.length ? NULL : BigInt(end + delimiterLength(state.slots[2]));
             return subSlice(state.slots[0] as Slice, 0, end);
           }),
-          peek: method('peek', optionalOf(resultSlice), (state, equal) => {
+          peek: method('peek', optionalOf(resultSlice), (state, equal, spend) => {
             const startValue = state.slots[1];
             if (startValue === NULL) return NULL;
             const start = Number(startValue as bigint);
-            const buffer = elements(state.slots[0]);
+            const buffer = state.slots[0] as Slice;
             let end = buffer.length;
             for (let index = start; index < buffer.length; index++) {
-              if (isDelimiter(buffer, index, state.slots[2], equal)) {
+              if (isDelimiter(buffer, index, state.slots[2], equal, spend)) {
                 end = index;
                 break;
               }
@@ -289,21 +302,21 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
           }),
         }
       : {
-          next: method('next', optionalOf(resultSlice), (state, equal) => {
-            const token = tokenPeek(state, equal);
+          next: method('next', optionalOf(resultSlice), (state, equal, spend) => {
+            const token = tokenPeek(state, equal, spend);
             if (!token) return NULL;
             state.slots[1] = BigInt(token.end);
             return subSlice(state.slots[0] as Slice, token.start, token.end - token.start);
           }),
-          peek: method('peek', optionalOf(resultSlice), (state, equal) => {
-            const token = tokenPeek(state, equal);
+          peek: method('peek', optionalOf(resultSlice), (state, equal, spend) => {
+            const token = tokenPeek(state, equal, spend);
             if (!token) return NULL;
             return subSlice(state.slots[0] as Slice, token.start, token.end - token.start);
           }),
-          rest: method('rest', resultSlice, (state, equal) => {
-            const buffer = elements(state.slots[0]);
+          rest: method('rest', resultSlice, (state, equal, spend) => {
+            const buffer = state.slots[0] as Slice;
             let index = Number(state.slots[1] as bigint);
-            while (index < buffer.length && isDelimiter(buffer, index, state.slots[2], equal))
+            while (index < buffer.length && isDelimiter(buffer, index, state.slots[2], equal, spend))
               index += delimiterLength(state.slots[2]);
             return subSlice(state.slots[0] as Slice, index, buffer.length - index);
           }),
@@ -325,7 +338,7 @@ function iteratorFactory(name: string, kind: 'split' | 'token', delimiter: Delim
         : constSlice(sema, delimiterArg, type);
     const iterator = iteratorType(kind, delimiter, type);
     return computed(iterator, [buffer, delimiterValue], call.span, ([value, separator]) => {
-      if (delimiter === 'sequence' && elements(separator).length === 0) panic('reached unreachable code');
+      if (delimiter === 'sequence' && (separator as Slice).length === 0) panic('reached unreachable code');
       return new ZStruct([value, 0n, separator]);
     });
   });

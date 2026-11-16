@@ -3201,3 +3201,144 @@ test('custom formatting requires a public format method', () => {
   const source = `const std=@import("std");const P=struct{fn format(_:P,w:*std.Io.Writer)std.Io.Writer.Error!void{try w.writeAll("x");}};pub fn main()void{std.debug.print("{f}",.{P{}});}`;
   expect(executeProgram('zig', source).kind).toBe('compileError');
 });
+
+test.each([
+  'const n=if(get()) |_| @as(u8,3) else |_| unreachable;',
+  'const n:u16=if(get()) |_| @as(u8,3) else |_| unreachable;',
+  'const n=(if(get()) |_| @as(u8,2) else |_| unreachable)+1;',
+  'const n=@as(u16,if(get()) |_| @as(u8,3) else |_| unreachable);',
+])('constant result facts remain available after required effects: %s', (declaration) => {
+  const source = `const std=@import("std");fn get()error{}!u8{std.debug.print("call|",.{});return 1;}pub fn main()void{${declaration}const a:[n]u8=@splat(7);std.debug.print("{any}",.{a});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'call|{ 7, 7, 7 }',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['3.5', '3'],
+  ['-3.5', '-3'],
+  ['-0.0', '0'],
+])('intFromFloat converts %s to an exact comptime integer', (value, output) => {
+  const source = `const std=@import("std");pub fn main()void{const x=@as(comptime_int,@intFromFloat(${value}));std.debug.print("{}",.{x});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: output,
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['std.math.inf(f64)', 'std.math.nan(f64)'])(
+  'intFromFloat rejects nonfinite comptime integer input %s',
+  (value) => {
+    expect(
+      executeProgram(
+        'zig',
+        `const std=@import("std");pub fn main()void{const x=@as(comptime_int,@intFromFloat(${value}));std.debug.print("{}",.{x});}`
+      ).kind
+    ).toBe('compileError');
+  }
+);
+
+test('truncate distinguishes unbounded comptime integers from fixed-width wrapping', () => {
+  const source = `const std=@import("std");pub fn main()void{const a:comptime_int=@truncate(400);const b:comptime_int=@truncate(-7);const c:u8=@truncate(300);std.debug.print("{} {} {}",.{a,b,c});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '400 -7 44',
+    uncaughtException: undefined,
+  });
+});
+
+test('floatCast preserves exact source values when targeting comptime_float', () => {
+  const source = `const std=@import("std");pub fn main()void{const a:comptime_float=@floatCast(@as(f16,0.1));const b:comptime_float=@floatCast(@as(f64,1.5));const c:comptime_float=@floatCast(3.5);std.debug.print("{d} {d} {d}",.{a,b,c});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '0.0999755859375 1.5 3.5',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['u8', '3', 'comptime_int', '@truncate'],
+  ['u8', '3', 'comptime_float', '@floatFromInt'],
+  ['f64', '3.5', 'comptime_float', '@floatCast'],
+  ['f64', '3.5', 'comptime_int', '@intFromFloat'],
+])('%s runtime values cannot supply %s casts to %s', (sourceType, value, target, builtin) => {
+  const source = `const std=@import("std");pub fn main()void{var v:${sourceType}=${value};_=&v;const x:${target}=${builtin}(v);std.debug.print("{any}",.{x});}`;
+  expect(executeProgram('zig', source).kind).toBe('compileError');
+});
+
+test('list constructors preserve exact lengths of zero-sized virtual capacity views', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a:std.ArrayList(void)=.empty;try a.append(init.gpa,{});const b=std.ArrayList(void).initBuffer(a.allocatedSlice());const c=std.ArrayList(void).fromOwnedSlice(a.unusedCapacitySlice());std.debug.print("{} {} {}",.{b.capacity,c.capacity,c.items.len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '18446744073709551615 18446744073709551614 18446744073709551614',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  '',
+  String.raw`\x7f\xbf`,
+  String.raw`\x1f\x80\x80`,
+  String.raw`\x7f\x80\x80\x80`,
+  String.raw`\xf0\x90\x80\x80a`,
+])('unicode decode panics on invalid sequence shape %s', (bytes) => {
+  const source = `const std=@import("std");pub fn main()void{const c=std.unicode.utf8Decode("${bytes}") catch 0;std.debug.print("{}",.{c});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '',
+    uncaughtException: expect.stringContaining('reached unreachable code'),
+  });
+});
+
+test('unicode decode retains valid sequences and recoverable encoding errors', () => {
+  const source = String.raw`const std=@import("std");pub fn main()void{std.debug.print("{}|",.{std.unicode.utf8Decode("\xc2\x80") catch 0});_=std.unicode.utf8Decode("\xc2x") catch |err|{std.debug.print("{s}|",.{@errorName(err)});};_=std.unicode.utf8Decode("\xc0\x80") catch |err|{std.debug.print("{s}",.{@errorName(err)});};}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '128|Utf8ExpectedContinuation|Utf8OverlongEncoding',
+    uncaughtException: undefined,
+  });
+});
+
+test('width formatting does not add a positive sign to unbounded integer magnitudes', () => {
+  const source = `const std=@import("std");pub fn main()void{std.debug.print("[{d:5}] [{d:5}] [{d:5}] [{d:5}] [{d:5}]",.{3,-3,18446744073709551616,123456789012345678901234567890,@as(i64,3)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '[    3] [   -3] [18446744073709551616] [123456789012345678901234567890] [   +3]',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['next', 'peek', 'rest'])(
+  'tokenizeSequence %s avoids repeated oversized delimiter copies and meters scanning',
+  (method) => {
+    const source = `const std=@import("std");pub fn main()void{var it=std.mem.tokenizeSequence(u8,"${'a'.repeat(100_000)}","${'b'.repeat(100_001)}");const token=it.${method}();std.debug.print("{}",.{${method === 'rest' ? 'token.len' : 'token.?.len'}});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '100000',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([
+  ['i8', '-128', '128'],
+  ['i64', '-9223372036854775808', '9223372036854775808'],
+])('constant %s division overflow reports the mathematical result', (type, value, result) => {
+  const source = `pub fn main()void{const x=@as(${type},${value})/(-1);_=x;}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: expect.stringContaining(result) }],
+  });
+});
+
+test('constant results select control-flow branches without erasing condition effects', () => {
+  const source = `const std=@import("std");fn get()error{}!u8{std.debug.print("c",.{});return 1;}pub fn main()void{if((if(get()) |_| @as(u8,3) else |_| unreachable)==3){std.debug.print("i",.{});}else{const bad:u8=300;_=bad;}switch(if(get()) |_| @as(u8,3) else |_| unreachable){3=>std.debug.print("s",.{}),else=>{const bad:u8=300;_=bad;}}while((if(get()) |_| @as(u8,3) else |_| unreachable)==4){const bad:u8=300;_=bad;}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'cicsc',
+    uncaughtException: undefined,
+  });
+});

@@ -765,16 +765,13 @@ export function printInt(
   upper: boolean,
   options: Options
 ): void {
-  let signed: boolean;
-  signed = type.kind === 'comptime_int' ? !(value >= 0n && value < 1n << 64n) : type.kind === 'int' && type.signed;
+  const signed = type.kind === 'int' && type.signed;
   const magnitude = value < 0n ? -value : value;
   let digits = magnitude.toString(base);
   if (upper) digits = digits.toUpperCase();
   let text = digits;
-  if (signed) {
-    if (value < 0n) text = `-${digits}`;
-    else if (options.width !== undefined && options.width !== 0) text = `+${digits}`;
-  }
+  if (value < 0n) text = `-${digits}`;
+  else if (signed && options.width !== undefined && options.width !== 0) text = `+${digits}`;
   alignBuffer(out, utf8(text), options);
 }
 

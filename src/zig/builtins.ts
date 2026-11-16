@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 642 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 662 -- The file holds one layer of the compiler, whose parts share its private state.
 import {
   checkShiftAmount,
   divCeil,
@@ -32,6 +32,7 @@ import {
   roundTo,
   signBit,
   toNumber,
+  truncateToBigInt,
 } from './floats';
 import { sizeOf } from './layout';
 import { importStd } from './library/std';
@@ -45,6 +46,7 @@ import {
   knownLengthOf,
   newArray,
   runtime,
+  staticResultOf,
   type TExpr,
 } from './semaBase';
 import {
@@ -202,6 +204,12 @@ const ARGUMENT_COUNTS: Record<string, number> = {
   '@splat': 1,
 };
 
+interface CastTargets {
+  int: IntType | { readonly kind: 'comptime_int' };
+  float: FloatType | { readonly kind: 'comptime_float' };
+  enum: EnumType;
+}
+
 export abstract class BuiltinCompiler extends ExpressionCompiler {
   protected compileBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
     const { name, args } = expression;
@@ -239,11 +247,12 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         return this.intCastBuiltin(args[0], this.castTarget(expression, resultType, 'int'), expression);
       }
       case '@truncate': {
-        const target = this.castTarget(expression, resultType, 'int') as IntType;
+        const target = this.castTarget(expression, resultType, 'int');
         const operand = this.compile(args[0]);
         if (operand.type.kind !== 'int' && operand.type.kind !== 'comptime_int') {
           this.error(args[0], `@truncate は整数にだけ使えます（${typeName(operand.type)} 型です）。`);
         }
+        if (target.kind === 'comptime_int') return this.coerce(this.comptimeOperand(operand), target, expression);
         if (operand.type.kind === 'int' && operand.type.signed !== target.signed) {
           this.error(
             args[0],
@@ -259,11 +268,13 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         return this.derived(operand, target, (value) => wrapInt(value as bigint, target));
       }
       case '@floatCast': {
-        const target = this.castTarget(expression, resultType, 'float') as FloatType;
+        const target = this.castTarget(expression, resultType, 'float');
         const operand = this.compile(args[0]);
         if (operand.type.kind !== 'float' && operand.type.kind !== 'comptime_float') {
           this.error(args[0], `@floatCast は浮動小数点数にだけ使えます（${typeName(operand.type)} 型です）。`);
         }
+        if (target.kind === 'comptime_float')
+          return this.derived(this.comptimeOperand(operand), target, (value) => asBigFloat(value as AnyFloat));
         return this.derived(operand, target, (value) => convertFloat(value as AnyFloat, target.bits));
       }
       case '@floatFromInt': {
@@ -273,7 +284,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
           this.error(args[0], `@floatFromInt は整数にだけ使えます（${typeName(operand.type)} 型です）。`);
         }
         const bits: FloatBits = target.kind === 'float' ? target.bits : 128;
-        return this.derived(operand, target, (value) => {
+        const source = target.kind === 'comptime_float' ? this.comptimeOperand(operand) : operand;
+        return this.derived(source, target, (value) => {
           const converted = floatFromBigInt(value as bigint, bits);
           return target.kind === 'comptime_float' ? asBigFloat(converted) : converted;
         });
@@ -284,6 +296,13 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         if (operand.type.kind !== 'float' && operand.type.kind !== 'comptime_float') {
           this.error(args[0], `@intFromFloat は浮動小数点数にだけ使えます（${typeName(operand.type)} 型です）。`);
         }
+        if (target.kind === 'comptime_int') {
+          return this.derived(this.comptimeOperand(operand), target, (source) => {
+            const value = asBigFloat(source as AnyFloat);
+            if (value.kind !== 'finite') return this.error(expression, '有限でない値は comptime_int 型にできません。');
+            return truncateToBigInt(value);
+          });
+        }
         if (operand.known && target.kind === 'int') {
           const value = operand.value as AnyFloat;
           if (isNaNFloat(value)) this.error(expression, `NaN は ${typeName(target)} 型にできません。`);
@@ -293,7 +312,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
             return this.error(expression, `浮動小数点数の整数部分が ${typeName(target)} 型に入りません。`);
           }
         }
-        return this.derived(operand, target, (value) => intFromFloat(value as AnyFloat, target as IntType));
+        return this.derived(operand, target, (value) => intFromFloat(value as AnyFloat, target));
       }
       case '@intFromBool': {
         const operand = this.coerce(this.compile(args[0], BOOL), BOOL, args[0]);
@@ -377,7 +396,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         return { ...operand, type: type.tagType as IntType, place: undefined };
       }
       case '@enumFromInt': {
-        const target = this.castTarget(expression, resultType, 'enum') as EnumType;
+        const target = this.castTarget(expression, resultType, 'enum');
         const fields = this.enumFields(target);
         const tagType = target.tagType as IntType;
         const operand = this.compile(args[0], tagType);
@@ -511,11 +530,11 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
   }
 
   /** The type that a cast builtin converts to: its result type. */
-  private castTarget(
+  private castTarget<K extends keyof CastTargets>(
     expression: ExpressionOf<'builtinCall'>,
     resultType: Type | undefined,
-    kind: 'int' | 'float' | 'enum'
-  ): Type {
+    kind: K
+  ): CastTargets[K] {
     let target = resultType;
     while (target?.kind === 'optional' || target?.kind === 'error_union')
       target = target.kind === 'optional' ? target.child : target.payload;
@@ -532,16 +551,20 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
           ? target.kind === 'float' || target.kind === 'comptime_float'
           : target.kind === 'enum';
     if (!accepted) this.error(expression, `${expression.name} の結果の型として ${typeName(target)} 型は使えません。`);
-    return target;
+    return target as CastTargets[K];
   }
 
-  private intCastBuiltin(arg: Expression, target: Type, span: Span): TExpr {
+  private comptimeOperand(operand: TExpr): TExpr {
+    return staticResultOf(operand) ? operand : known(operand.type, this.knownValue(operand, '値'), operand.span);
+  }
+
+  private intCastBuiltin(arg: Expression, target: CastTargets['int'], span: Span): TExpr {
     const operand = this.compile(arg);
     if (operand.type.kind !== 'int' && operand.type.kind !== 'comptime_int') {
       return this.error(arg, `@intCast は整数にだけ使えます（${typeName(operand.type)} 型です）。`);
     }
-    if (target.kind === 'comptime_int') return this.coerce(operand, target, span);
-    const int = target as IntType;
+    if (target.kind === 'comptime_int') return this.coerce(this.comptimeOperand(operand), target, span);
+    const int = target;
     if (operand.known) {
       if (!fitsInt(operand.value as bigint, int)) {
         this.error(span, `${typeName(int)} 型では、整数 ${operand.value as bigint} を表せません。`);
@@ -929,18 +952,20 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
 
   /** An expression computed from others, known when they all are. */
   protected combine(operands: readonly TExpr[], type: Type, compute: (values: Value[]) => Value, span: Span): TExpr {
-    if (operands.every((operand) => operand.known)) {
+    const facts = operands.map(staticResultOf);
+    let result: { value: Value } | undefined;
+    if (facts.every((fact) => fact !== undefined)) {
       try {
-        return known(type, compute(operands.map((operand) => operand.value)), span);
+        result = { value: compute(facts.map((fact) => fact.value)) };
       } catch (error) {
-        // Zig reports the safety check that known operands fail as a compile error.
         if (error instanceof ZigPanic)
-          this.error(span, `値が決まっている計算が、実行時のエラー（${error.text}）になります。`);
+          return this.error(span, `値が決まっている計算が、実行時のエラー（${error.text}）になります。`);
         throw error;
       }
     }
+    if (operands.every((operand) => operand.known)) return known(type, result?.value, span);
     const evaluators = operands.map((operand) => operand.eval);
-    return runtime(type, (frame) => compute(evaluators.map((evaluate) => evaluate(frame))), span);
+    return { ...runtime(type, (frame) => compute(evaluateHeld(frame, evaluators)), span), staticResult: result };
   }
 }
 

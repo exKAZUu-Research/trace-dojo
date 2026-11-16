@@ -91,8 +91,11 @@ function sequenceLength(first: number): number | undefined {
 }
 
 /** Decodes one UTF-8 sequence as `utf8Decode` does, or names its error. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionNcss 31 -- Keeps sequence-shape assertions and recoverable decode errors together.
 function decode(bytes: number[]): number | string {
+  if (bytes.length === 0 || bytes.length > 4) panic(PANIC.unreachable);
+  if (bytes.length > 1 && bytes[0] >> (7 - bytes.length) !== ((1 << bytes.length) - 1) << 1) panic(PANIC.unreachable);
   switch (bytes.length) {
     case 1: {
       return bytes[0];

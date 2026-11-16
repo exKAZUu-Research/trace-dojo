@@ -47,6 +47,7 @@ import {
   type Place,
   runtime,
   SemaBase,
+  staticResultOf,
   type TExpr,
 } from './semaBase';
 import {
@@ -112,6 +113,14 @@ class Constant {
     this.slots = [value];
   }
 }
+
+const rawArithmeticOperations: Partial<Record<ExpressionOf<'binary'>['operator'], (a: bigint, b: bigint) => bigint>> = {
+  '+': (a, b) => a + b,
+  '-': (a, b) => a - b,
+  '*': (a, b) => a * b,
+  '/': (a, b) => a / b,
+  '%': (a, b) => a % b,
+};
 
 export abstract class ExpressionCompiler extends SemaBase {
   private readonly constants = new Map<string, Constant>();
@@ -930,7 +939,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- Keeps one operation of the interpreter in one place.
-  // code-gauge-allow functionNcss 41 -- Keeps operand coercion and comparison validation together.
+  // code-gauge-allow functionNcss 43 -- Keeps operand coercion and comparison validation together.
   private comparison(expression: ExpressionOf<'binary'>): TExpr {
     const { operator } = expression;
     let left = this.compile(expression.left);
@@ -976,17 +985,23 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     const compare = this.comparator(type, ordered, expression);
     const test = comparisonTest(operator);
-    if (left.known && right.known) return known(BOOL, test(compare(left.value, right.value)), expression);
+    const a = staticResultOf(left),
+      b = staticResultOf(right);
+    const result = a && b ? { value: test(compare(a.value, b.value)) } : undefined;
+    if (left.known && right.known) return known(BOOL, result?.value, expression);
     const evaluateLeft = left.eval;
     const evaluateRight = right.eval;
-    return runtime(
-      BOOL,
-      (frame) => {
-        const [left, right] = evaluateHeld(frame, [evaluateLeft, evaluateRight]);
-        return test(compare(left, right));
-      },
-      expression
-    );
+    return {
+      ...runtime(
+        BOOL,
+        (frame) => {
+          const [left, right] = evaluateHeld(frame, [evaluateLeft, evaluateRight]);
+          return test(compare(left, right));
+        },
+        expression
+      ),
+      staticResult: result,
+    };
   }
 
   /** A function comparing two values of a type: negative, zero, or positive, or NaN when unordered. */
@@ -1035,8 +1050,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps numeric peer-type checks, budget checks, and evaluation together.
-  // code-gauge-allow functionNcss 33 -- Keeps numeric operand coercion and evaluation together.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps numeric peer-type checks, budget checks, and evaluation together.
+  // code-gauge-allow functionNcss 37 -- Keeps numeric operand coercion and evaluation together.
   private arithmetic(expression: ExpressionOf<'binary'>, resultType: Type | undefined): TExpr {
     const { operator } = expression;
     // Zig gives the operands of arithmetic no result type, so `@floatFromInt(x) / 2` is an error.
@@ -1068,14 +1083,28 @@ export abstract class ExpressionCompiler extends SemaBase {
     const operation = this.operation(operator, type, expression);
     // A float of a fixed type divided by zero gives an infinity or NaN, as at run time.
     const dividesByZero =
-      (operator === '/' || operator === '%') && right.known && isZero(right.value) && type.kind !== 'float';
+      (operator === '/' || operator === '%') &&
+      staticResultOf(right) !== undefined &&
+      isZero(staticResultOf(right)?.value) &&
+      type.kind !== 'float';
     if (dividesByZero) this.error(expression, '0 で割っています。');
-    if (left.known && right.known) {
-      return known(type, this.foldArithmetic(operation, left.value, right.value, type, expression), expression);
-    }
+    const a = staticResultOf(left),
+      b = staticResultOf(right);
+    const result = a && b ? { value: this.foldArithmetic(operation, a.value, b.value, type, expression) } : undefined;
+    if (left.known && right.known) return known(type, result?.value, expression);
     const evaluateLeft = left.eval;
     const evaluateRight = right.eval;
-    return runtime(type, (frame) => operation(evaluateLeft(frame), evaluateRight(frame)), expression);
+    return {
+      ...runtime(
+        type,
+        (frame) => {
+          const [a, b] = evaluateHeld(frame, [evaluateLeft, evaluateRight]);
+          return operation(a, b);
+        },
+        expression
+      ),
+      staticResult: result,
+    };
   }
 
   private foldArithmetic(operation: (a: Value, b: Value) => Value, a: Value, b: Value, type: Type, span: Span): Value {
@@ -1091,22 +1120,8 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   private rawArithmetic(expression: ExpressionOf<'binary'>, a: Value, b: Value): string {
-    const x = a as bigint;
-    const y = b as bigint;
-    switch (expression.operator) {
-      case '+': {
-        return String(x + y);
-      }
-      case '-': {
-        return String(x - y);
-      }
-      case '*': {
-        return String(x * y);
-      }
-      default: {
-        return '?';
-      }
-    }
+    const compute = rawArithmeticOperations[expression.operator];
+    return compute ? String(compute(a as bigint, b as bigint)) : '?';
   }
 
   /** Zig rejects dividing a `comptime_int` and a `comptime_float` unless the quotient is an integer. */

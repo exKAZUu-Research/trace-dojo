@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 917 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 924 -- The file holds one layer of the compiler, whose parts share its private state.
 // code-gauge-allow-file duplicateLines 18 -- Undefined and zero initializers share aggregate shapes but differ in scalar and optional values.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
@@ -21,7 +21,7 @@ import {
   truncateToBigInt,
 } from './floats';
 import type { FunctionInstance } from './functions';
-import type { Frame } from './runtime';
+import { type Frame, ZigPanic } from './runtime';
 import {
   arrayOf,
   BOOL,
@@ -980,17 +980,31 @@ export abstract class SemaBase implements SemaApi {
 
   /** An expression of another type whose value a function computes from the original's. */
   protected derived(expression: TExpr, type: Type, convert: (value: Value) => Value, allocates = false): TExpr {
-    if (expression.known) return known(type, convert(expression.value), expression.span);
+    const sourceResult = staticResultOf(expression);
+    let result: { value: Value } | undefined;
+    if (sourceResult) {
+      try {
+        result = { value: convert(sourceResult.value) };
+      } catch (error) {
+        if (error instanceof ZigPanic)
+          return this.error(expression.span, `コンパイルのときの計算が失敗しました: ${error.text}`);
+        throw error;
+      }
+    }
+    if (expression.known) return known(type, result?.value, expression.span);
     const evaluate = expression.eval;
-    return runtime(
-      type,
-      (frame) => {
-        const value = evaluate(frame);
-        if (allocates) frame.runtime.reserveStorage(valueSlots(type));
-        return convert(value);
-      },
-      expression.span
-    );
+    return {
+      ...runtime(
+        type,
+        (frame) => {
+          const value = evaluate(frame);
+          if (allocates) frame.runtime.reserveStorage(valueSlots(type));
+          return convert(value);
+        },
+        expression.span
+      ),
+      staticResult: result,
+    };
   }
 
   // Peer types ------------------------------------------------------------------------------------------------------
@@ -1042,7 +1056,7 @@ export abstract class SemaBase implements SemaApi {
         (expression) =>
           expression.type.kind !== 'int' ||
           intWidens(expression.type, selected) ||
-          (expression.known && fitsInt(expression.value as bigint, selected))
+          (staticResultOf(expression) !== undefined && fitsInt(staticResultOf(expression)?.value as bigint, selected))
       );
       return fits ? selected : undefined;
     }
@@ -1204,6 +1218,10 @@ export function withSentinel(values: Value[], sentinel: Value | undefined): Valu
 /** A new array of the elements, followed by the sentinel of a sentinel-terminated array type. */
 export function newArray(values: Value[], sentinel: Value | undefined): ZArray {
   return new ZArray(withSentinel(values, sentinel), 0, values.length, sentinel !== undefined);
+}
+
+export function staticResultOf(expression: TExpr): { value: Value } | undefined {
+  return expression.known ? { value: expression.value } : expression.staticResult;
 }
 
 export function knownLengthOf(expression: TExpr): number | undefined {

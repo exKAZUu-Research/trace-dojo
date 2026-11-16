@@ -245,7 +245,7 @@ function defineMembers(type: StructType, child: Type): void {
         type,
         (frame) => {
           const slice = buffer.eval(frame) as Slice;
-          return new ZStruct([new Slice(slice.target, slice.start, 0), BigInt(slice.length), new ZStruct([0n])]);
+          return new ZStruct([new Slice(slice.target, slice.start, 0), slice.lengthValue, new ZStruct([0n])]);
         },
         call.span
       );
@@ -256,7 +256,7 @@ function defineMembers(type: StructType, child: Type): void {
         type,
         (frame) => {
           const value = slice.eval(frame) as Slice;
-          return new ZStruct([value, BigInt(value.length), new ZStruct([0n])]);
+          return new ZStruct([value, value.lengthValue, new ZStruct([0n])]);
         },
         call.span
       );
