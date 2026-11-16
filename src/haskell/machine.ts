@@ -1,11 +1,11 @@
 import { CONS_CON, NIL_CON } from './builtinTypes';
 import type { CaseCore, Core } from './core';
-import { constructorFieldType, slotDisplayType, typedSlot, UNKNOWN_TYPE } from './displayTypes';
+import type { TypeHint } from './displayTypeHints';
+import { constructorFieldHint, slotTypeHint, thunkTypeHint, typedSlot } from './displayTypes';
 import type { ConInfo } from './entities';
 import { type DoFrame, finishMatch, markTailSelfCall, runBlock, statementDone, unwindBlock } from './ioBlocks';
 import type { Primitive } from './primitives';
 import type { Runtime } from './runtime';
-import type { Type } from './types';
 import {
   Closure,
   ConValue,
@@ -35,7 +35,7 @@ export type Frame =
       target: Thunk | undefined;
     }
   | { k: 'apply'; args: Slot[] }
-  | { k: 'case'; core: CaseCore; env: Env; displayType: Type | undefined }
+  | { k: 'case'; core: CaseCore; env: Env; displayType: TypeHint | undefined }
   | { k: 'charCase'; core: Extract<Core, { k: 'charCase' }>; env: Env }
   | { k: 'method'; index: number }
   | { k: 'super'; index: number }
@@ -126,8 +126,7 @@ export class Machine {
 
   /** Creates the slot for an argument or binding: a value when it needs no evaluation, else a thunk. */
   makeSlot(code: Core, env: Env | undefined): Slot {
-    const slot = this.makeUntypedSlot(code, env);
-    return this.runtime.withDisplayTypes(slot, () => typedSlot(slot, code.displayType));
+    return typedSlot(this.makeUntypedSlot(code, env), code.displayType);
   }
 
   private makeUntypedSlot(code: Core, env: Env | undefined): Slot {
@@ -172,8 +171,7 @@ export class Machine {
     if (code.k === 'lit' || code.k === 'lam' || code.k === 'global' || code.k === 'prim' || code.k === 'iodo') {
       return this.makeSlot(code, env);
     }
-    const slot = new Thunk(code, env);
-    return this.runtime.withDisplayTypes<Slot>(slot, () => typedSlot(slot, code.displayType));
+    return typedSlot(new Thunk(code, env), code.displayType);
   }
 
   // code-gauge-allow functionNcss 35 -- The main loop dispatches on the machine mode and handles limits and exceptions in one place.
@@ -337,10 +335,10 @@ export class Machine {
   private squeezeUpdateFrame(entered: Thunk): void {
     const top = this.stack.at(-1);
     if (top?.k !== 'update') return;
-    if (this.runtime.steps.recorder && (entered.displayType || top.thunk.displayType))
-      top.thunk.displayType = this.runtime.withDisplayTypes(top.thunk.displayType, () =>
-        slotDisplayType(entered, top.thunk.displayType ?? UNKNOWN_TYPE)
-      );
+    if (this.runtime.steps.recorder) {
+      const hint = thunkTypeHint(top.thunk);
+      hint.value = slotTypeHint(entered, hint.value);
+    }
     top.thunk.redirect(entered);
     this.stack.pop();
   }
@@ -453,28 +451,24 @@ export class Machine {
     }
   }
 
-  private scrutineeDisplayType(code: Core, env: Env | undefined): Type | undefined {
+  private scrutineeDisplayType(code: Core, env: Env | undefined): TypeHint | undefined {
     if (!this.runtime.steps.recorder) return;
-    const type =
-      code.k === 'local'
-        ? this.runtime.withDisplayTypes(code.displayType, () =>
-            slotDisplayType((env as Env).at(code.depth).slots[code.index] as Slot, code.displayType ?? UNKNOWN_TYPE)
-          )
-        : code.displayType;
-    return type && (type.tag === 'tvar' || type.tag === 'tgen') ? undefined : type;
+    return code.k === 'local'
+      ? slotTypeHint((env as Env).at(code.depth).slots[code.index] as Slot, code.displayType)
+      : code.displayType;
   }
 
-  private selectAlternative(state: RunState, core: CaseCore, env: Env, type: Type | undefined): void {
+  private selectAlternative(state: RunState, core: CaseCore, env: Env, type: TypeHint | undefined): void {
     const scrutinee = state.value as ConValue;
-    if (core.bindIndex !== undefined)
-      env.slots[core.bindIndex] = this.runtime.withDisplayTypes<Slot>(scrutinee, () => typedSlot(scrutinee, type));
+    if (core.bindIndex !== undefined) env.slots[core.bindIndex] = typedSlot(scrutinee, type);
     const alt = core.alts.get(scrutinee.con.tag);
     if (alt) {
       const { slots } = alt;
       for (let index = 0; index < slots.length; index++) {
         if (slots[index] >= 0)
-          env.slots[slots[index]] = this.runtime.withDisplayTypes(scrutinee.fields[index], () =>
-            typedSlot(scrutinee.fields[index], type ? constructorFieldType(scrutinee.con, type, index) : undefined)
+          env.slots[slots[index]] = typedSlot(
+            scrutinee.fields[index],
+            type ? constructorFieldHint(scrutinee.con, type, index) : undefined
           );
       }
       state.evaluate(alt.body, env);

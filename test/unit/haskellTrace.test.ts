@@ -269,6 +269,41 @@ test.each([100, 200, 400])('aborted polymorphic displays leave repeated reads us
   expect(recording.traceItems).toHaveLength(4);
 });
 
+test.each([401, 800])('later call and pattern types survive prior metadata work: %i', (count) => {
+  const source = `data Box a=Box a
+shared=Box []
+f :: Int -> [a]
+f 0=[]
+f n=id(f(n-1))
+g x=print(1::Int)
+pass x=case x of y->g y
+unbox (Box x)=print(1::Int)
+main=do
+  let x=f ${count}
+  print(length x)
+  g(shared::Box String)
+  g(shared::Box [Int])
+  pass(Box (""::String))
+  pass(Box (0.1::Float))
+  unbox(Box (""::String))
+  unbox(Box (0.1::Float))`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.stdout).toBe('0\n1\n1\n1\n1\n1\n1\n');
+  expect(recording.uncaughtException).toBeUndefined();
+  const boxes = recording.traceItems
+    .map(({ referenceVars }) => referenceVars.x)
+    .filter((node) => node?.kind === 'object');
+  expect(boxes).toEqual([
+    { kind: 'object', entries: { 0: { kind: 'value', value: '' } } },
+    { kind: 'object', entries: { 0: { kind: 'array', entries: {} } } },
+    { kind: 'object', entries: { 0: { kind: 'value', value: '' } } },
+    { kind: 'object', entries: { 0: { kind: 'value', value: 0.1 } } },
+  ]);
+  const fields = recording.traceItems.map(({ vars }) => vars.x);
+  expect(fields).toContain('');
+  expect(fields).toContain(0.1);
+});
+
 test('recursive instance methods retain independent call frames', () => {
   const source = `class C a where c::a->IO ()
 instance C Int where

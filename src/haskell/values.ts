@@ -1,9 +1,9 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { Core, FunctionInfo, IODoCore, LamCore } from './core';
+import type { TypeHint, TypeHintRef } from './displayTypeHints';
 import type { ConInfo, InstanceInfo } from './entities';
 import type { RunNext, TailCall } from './machine';
 import type { Primitive } from './primitives';
-import type { Type } from './types';
 
 /**
  * A value in weak head normal form: an integer (`Int` and `Integer` as bigints), a floating-point number, a
@@ -16,7 +16,7 @@ export type Slot = Value | Thunk | TypedSlot;
 export class TypedSlot {
   constructor(
     readonly slot: Slot,
-    readonly type: Type
+    readonly type: TypeHint
   ) {}
 }
 
@@ -90,7 +90,7 @@ export type FunValue = Closure | PrimFn | Partial;
 export type ThunkState = 'pending' | 'evaluating' | 'done';
 
 export class Thunk {
-  displayType: Type | undefined;
+  displayType: TypeHintRef | undefined;
   state: ThunkState = 'pending';
   value: Value | undefined;
   /** Another thunk whose value this one takes, set when the evaluator drops this thunk's update frame. */
@@ -102,7 +102,7 @@ export class Thunk {
     /** Computes the value natively, for thunks the evaluator builds itself (such as a string's rest). */
     public native?: () => Slot | TailCall
   ) {
-    this.displayType = code?.displayType;
+    this.displayType = code?.displayType ? { tag: 'hint', value: code.displayType } : undefined;
   }
 
   /** Stores the computed value, dropping what computed it. */

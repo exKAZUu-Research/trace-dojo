@@ -1,39 +1,67 @@
-import { IO_TYPE } from './builtinTypes';
+import { type TypeHint, type TypeHintRef, UNKNOWN_TYPE } from './displayTypeHints';
 import type { ConInfo } from './entities';
 import { mapGraph, mapGraphPairs } from './typeGraph';
 import { instantiateType, prune, splitApp, type Type, typeChildren } from './types';
-import { chargeTypeWork } from './typeWorkBudget';
 import { type Slot, Thunk, TypedSlot, untypedSlot } from './values';
 
-export const UNKNOWN_TYPE: Type = { tag: 'tgen', index: -1 };
+export { UNKNOWN_TYPE } from './displayTypeHints';
+
 const concreteTypes = new WeakSet<Type>();
 
-export function typedSlot(slot: Slot, type: Type | undefined): Slot {
-  if (!type) return slot;
-  const actual = prune(type);
-  if (actual.tag === 'tvar' || actual.tag === 'tgen') return slot;
-  const { head } = splitApp(actual);
-  if (head.tag === 'tcon' && (head.entity.special === 'function' || head.entity === IO_TYPE)) return slot;
-  return new TypedSlot(untypedSlot(slot), slotDisplayType(slot, type));
+export function typedSlot(slot: Slot, type: TypeHint | undefined): Slot {
+  return type ? new TypedSlot(untypedSlot(slot), slotTypeHint(slot, type)) : slot;
 }
 
 export function slotDisplayType(slot: Slot, fallback: Type = UNKNOWN_TYPE): Type {
-  let result = fallback;
-  let seen: Set<Thunk> | undefined;
-  while (!isConcreteType(result) && (slot instanceof TypedSlot || slot instanceof Thunk)) {
-    chargeTypeWork();
-    if (slot instanceof TypedSlot) {
-      result = refineType(result, slot.type);
-      slot = slot.slot;
-      continue;
+  if (isConcreteType(fallback)) return fallback;
+  return resolveHint(slotTypeHint(slot, fallback));
+}
+
+export function slotTypeHint(slot: Slot, fallback: TypeHint = UNKNOWN_TYPE): TypeHint {
+  const actual = slot instanceof TypedSlot ? slot.type : slot instanceof Thunk ? thunkTypeHint(slot) : undefined;
+  if (!actual || actual === fallback) return fallback;
+  return { tag: 'refinement', template: fallback, actual };
+}
+
+export function thunkTypeHint(thunk: Thunk): TypeHintRef {
+  return (thunk.displayType ??= { tag: 'hint', value: UNKNOWN_TYPE });
+}
+
+export function constructorFieldHint(con: ConInfo, parent: TypeHint, position: number): TypeHint {
+  return { tag: 'fieldType', con, parent, position };
+}
+
+function resolveHint(hint: TypeHint): Type {
+  return mapGraph<TypeHint, Type>(
+    hint,
+    (node) => node,
+    hintChildren,
+    (node, mapped) => {
+      switch (node.tag) {
+        case 'hint': {
+          return mapped[0];
+        }
+        case 'refinement': {
+          return mapped.length === 1 ? mapped[0] : refineType(mapped[0], mapped[1]);
+        }
+        case 'fieldType': {
+          return constructorFieldType(node.con, mapped[0], node.position);
+        }
+        default: {
+          return prune(node);
+        }
+      }
     }
-    if (slot.displayType) result = refineType(result, slot.displayType);
-    if (!slot.target || seen?.has(slot)) break;
-    seen ??= new Set<Thunk>();
-    seen.add(slot);
-    slot = slot.target;
-  }
-  return result;
+  );
+}
+
+function hintChildren(hint: TypeHint): TypeHint[] {
+  if (hint.tag === 'hint') return [hint.value];
+  if (hint.tag === 'fieldType') return [hint.parent];
+  if (hint.tag !== 'refinement') return [];
+  const template = hint.template;
+  const known = template.tag !== 'hint' && template.tag !== 'fieldType' && template.tag !== 'refinement';
+  return known && isConcreteType(template) ? [template] : [template, hint.actual];
 }
 
 function isConcreteType(type: Type): boolean {
