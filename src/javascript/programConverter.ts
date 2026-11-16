@@ -1,5 +1,3 @@
-import type { Node } from '@willbooster/web-tree-sitter';
-
 import type {
   Block,
   CatchClause,
@@ -25,6 +23,7 @@ import {
   namedChildren,
   namedField,
   nameOf,
+  type Node,
   optionalNameOf,
   rowOf,
   unsupported,
@@ -33,7 +32,7 @@ import {
 import { ExpressionConverter, patternSuspends } from './expressionConverter';
 import { isConstantExpression } from './stepRules';
 
-type StatementConverter = (node: Node) => Statement;
+export type StatementConverter = (node: Node) => Statement;
 
 const loopTypes = new Set(['for_statement', 'for_in_statement', 'while_statement', 'do_statement']);
 const declarationTypes = new Set([
@@ -49,7 +48,7 @@ export class ProgramConverter extends ExpressionConverter {
   /** Whether the class being converted extends another, which lets its constructor call `super()`. */
   private derivedConstructor = false;
 
-  private readonly statementConverters: Record<string, StatementConverter> = {
+  protected readonly statementConverters: Record<string, StatementConverter> = {
     expression_statement: (node) =>
       this.steppable(node, {
         kind: 'expression',

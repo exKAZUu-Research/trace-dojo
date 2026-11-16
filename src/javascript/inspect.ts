@@ -55,6 +55,8 @@ interface Context {
   /** As `util.inspect`'s option: how many inner levels may share a line, or `false` for one entry per line. */
   compact: number | boolean;
   maxArrayLength: number;
+  /** As `util.inspect`'s option, which `%o` sets: an array also shows its `[length]`. */
+  showHidden: boolean;
 }
 
 /** The `util.inspect` options `console.dir` takes. */
@@ -63,6 +65,7 @@ export interface InspectOptions {
   breakLength?: number;
   compact?: number | boolean;
   maxArrayLength?: number;
+  showHidden?: boolean;
 }
 
 /**
@@ -96,6 +99,7 @@ export function inspectValue(
     breakLength: options.breakLength ?? BREAK_LENGTH,
     compact: options.compact ?? COMPACT,
     maxArrayLength: Math.max(0, options.maxArrayLength ?? MAX_ARRAY_LENGTH),
+    showHidden: options.showHidden ?? false,
   };
   return formatCharged(ctx, value, 0);
 }
@@ -179,7 +183,8 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   const { runtime } = ctx;
   const constructor = constructorName(runtime, value);
   const keys = enumerableKeys(runtime, value);
-  const frame = frameOf(ctx, value, constructor, keys.length > 0 || value.promise !== undefined);
+  const showsLength = ctx.showHidden && value instanceof JsArray;
+  const frame = frameOf(ctx, value, constructor, keys.length > 0 || value.promise !== undefined || showsLength);
   if (typeof frame === 'string') return frame;
   if (recurseTimes > ctx.depth) {
     const name = prefixOf(constructor, value instanceof JsArray ? 'Array' : 'Object').slice(0, -1);
@@ -191,6 +196,7 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   const output =
     value instanceof JsArray ? formatArray(ctx, value, recurseTimes) : formatCollection(ctx, value, recurseTimes);
   if (value.promise) output.push(promiseEntry(ctx, value.promise, recurseTimes));
+  if (showsLength) output.push(`[length]: ${formatNumber((value as JsArray).elements.length)}`);
   for (const key of keys) output.push(formatProperty(ctx, value, recurseTimes, key));
   runtime.scan(output.length);
   const reference = ctx.circular.get(value);
@@ -554,7 +560,7 @@ function groupArrayElements(ctx: Context, output: string[], array: JsArray): str
  * control characters and marks, two for East Asian wide and fullwidth characters and emoji shown as emoji, and one
  * otherwise.
  */
-function stringWidth(text: string): number {
+export function stringWidth(text: string): number {
   let width = 0;
   for (const character of text.normalize('NFC')) width += columnWidth(character.codePointAt(0) ?? 0, character);
   return width;

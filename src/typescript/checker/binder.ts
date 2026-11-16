@@ -1,0 +1,280 @@
+import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
+
+import { Scope, type Sym } from './scopes';
+import { named, patternIdentifiers } from './syntax';
+
+const functionLikeTypes = new Set([
+  'function_declaration',
+  'function_expression',
+  'arrow_function',
+  'method_definition',
+  'function_signature',
+  'method_signature',
+  'abstract_method_signature',
+  'class_static_block',
+  'call_signature',
+  'construct_signature',
+  'function_type',
+  'constructor_type',
+]);
+const blockTypes = new Set(['statement_block', 'for_statement', 'for_in_statement', 'switch_body', 'catch_clause']);
+const typeParameterOwners = new Set([
+  'interface_declaration',
+  'type_alias_declaration',
+  'class_declaration',
+  'abstract_class_declaration',
+  'class',
+]);
+
+/** The scopes of a program: which names each node can see, as values and as types. */
+export class Binder {
+  private readonly scopes = new Map<number, Scope>();
+  /** The identifiers that name what an assignment changes, to find the variables a program reassigns. */
+  readonly assignedIdentifiers: TreeNode[] = [];
+  readonly moduleScope: Scope;
+
+  constructor(
+    root: TreeNode,
+    readonly globalScope: Scope
+  ) {
+    this.moduleScope = new Scope('module', globalScope, root);
+    this.scopes.set(root.id, this.moduleScope);
+    this.bindChildren(root, this.moduleScope);
+  }
+
+  /** The scope a node sees names in. */
+  scopeOf(node: TreeNode): Scope {
+    for (let current: TreeNode | null = node; current; current = current.parent) {
+      const scope = this.scopes.get(current.id);
+      if (scope) return scope;
+    }
+    return this.moduleScope;
+  }
+
+  /** The scope a scope-creating node itself creates. */
+  ownScope(node: TreeNode): Scope | undefined {
+    return this.scopes.get(node.id);
+  }
+
+  private bindChildren(node: TreeNode, scope: Scope): void {
+    for (const child of node.namedChildren) if (child) this.bind(child, scope);
+  }
+
+  private newScope(node: TreeNode, kind: Scope['kind'], parent: Scope): Scope {
+    const scope = new Scope(kind, parent, node);
+    this.scopes.set(node.id, scope);
+    return scope;
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of declaration, as the binder must see each.
+  private bind(node: TreeNode, scope: Scope): void {
+    switch (node.type) {
+      case 'lexical_declaration':
+      case 'variable_declaration': {
+        const kind =
+          node.type === 'variable_declaration' ? 'var' : (node.childForFieldName('kind')?.text as 'let' | 'const');
+        const target = kind === 'var' ? scope.functionScope : scope;
+        for (const declarator of named(node)) {
+          if (declarator.type !== 'variable_declarator') continue;
+          const name = declarator.childForFieldName('name');
+          if (name)
+            for (const identifier of patternIdentifiers(name)) target.declareValue(identifier.text, kind, declarator);
+          this.bindChildren(declarator, scope);
+        }
+        return;
+      }
+      case 'function_declaration':
+      case 'function_signature': {
+        const name = node.childForFieldName('name');
+        if (name) scope.declareValue(name.text, 'function', node);
+        this.bindFunction(node, scope);
+        return;
+      }
+      case 'class_declaration':
+      case 'abstract_class_declaration': {
+        const name = node.childForFieldName('name');
+        if (name) {
+          scope.declareValue(name.text, 'class', node);
+          scope.declareType(name.text, 'class', node);
+        }
+        this.bindClass(node, scope);
+        return;
+      }
+      case 'class': {
+        this.bindClass(node, scope);
+        return;
+      }
+      case 'interface_declaration': {
+        const name = node.childForFieldName('name');
+        if (name) scope.declareType(name.text, 'interface', node);
+        this.bindTypeParameterOwner(node, scope);
+        return;
+      }
+      case 'type_alias_declaration': {
+        const name = node.childForFieldName('name');
+        if (name) scope.declareType(name.text, 'alias', node);
+        this.bindTypeParameterOwner(node, scope);
+        return;
+      }
+      case 'ambient_declaration': {
+        this.bindAmbient(node, scope);
+        return;
+      }
+      case 'assignment_expression':
+      case 'augmented_assignment_expression': {
+        const left = node.childForFieldName('left');
+        if (left) this.noteAssigned(left);
+        this.bindChildren(node, scope);
+        return;
+      }
+      case 'update_expression': {
+        const argument = node.childForFieldName('argument');
+        if (argument) this.noteAssigned(argument);
+        this.bindChildren(node, scope);
+        return;
+      }
+      default: {
+        break;
+      }
+    }
+    if (functionLikeTypes.has(node.type)) {
+      this.bindFunction(node, scope);
+      return;
+    }
+    if (node.type === 'for_in_statement') {
+      const blockScope = this.newScope(node, 'block', scope);
+      const header = node.childForFieldName('header') ?? node;
+      const left = header.childForFieldName('left');
+      const kind = header.childForFieldName('kind')?.text as 'let' | 'const' | 'var' | undefined;
+      if (left && kind) {
+        const target = kind === 'var' ? scope.functionScope : blockScope;
+        for (const identifier of patternIdentifiers(left)) target.declareValue(identifier.text, kind, node);
+      } else if (left) {
+        this.noteAssigned(left);
+      }
+      this.bindChildren(node, blockScope);
+      return;
+    }
+    if (node.type === 'catch_clause') {
+      const blockScope = this.newScope(node, 'block', scope);
+      const parameter = node.childForFieldName('parameter');
+      if (parameter)
+        for (const identifier of patternIdentifiers(parameter)) blockScope.declareValue(identifier.text, 'catch', node);
+      this.bindChildren(node, blockScope);
+      return;
+    }
+    if (blockTypes.has(node.type) && !this.isFunctionBody(node)) {
+      this.bindChildren(node, this.newScope(node, 'block', scope));
+      return;
+    }
+    if (typeParameterOwners.has(node.type)) {
+      this.bindTypeParameterOwner(node, scope);
+      return;
+    }
+    this.bindChildren(node, scope);
+  }
+
+  private isFunctionBody(node: TreeNode): boolean {
+    const { parent } = node;
+    return parent !== null && functionLikeTypes.has(parent.type) && parent.childForFieldName('body')?.id === node.id;
+  }
+
+  private noteAssigned(target: TreeNode): void {
+    let current = target;
+    while (current.type === 'parenthesized_expression' || current.type === 'non_null_expression') {
+      const inner = current.namedChildren[0];
+      if (!inner) return;
+      current = inner;
+    }
+    if (current.type === 'identifier') this.assignedIdentifiers.push(current);
+    else if (
+      current.type === 'array_pattern' ||
+      current.type === 'object_pattern' ||
+      current.type === 'array' ||
+      current.type === 'object'
+    )
+      for (const identifier of patternIdentifiers(current)) this.assignedIdentifiers.push(identifier);
+  }
+
+  private bindFunction(node: TreeNode, scope: Scope): void {
+    const functionScope = this.newScope(node, 'function', scope);
+    this.declareTypeParameters(node, functionScope);
+    // A named function expression sees its own name.
+    if (node.type === 'function_expression') {
+      const name = node.childForFieldName('name');
+      if (name) functionScope.declareValue(name.text, 'function', node);
+    }
+    const parameters = node.childForFieldName('parameters');
+    if (parameters) {
+      for (const parameter of named(parameters)) {
+        const pattern = parameter.childForFieldName('pattern') ?? parameter;
+        if (pattern.type === 'this') continue;
+        for (const identifier of patternIdentifiers(pattern))
+          functionScope.declareValue(identifier.text, 'parameter', parameter);
+      }
+    }
+    const single = node.childForFieldName('parameter');
+    if (single) functionScope.declareValue(single.text, 'parameter', single);
+    for (const child of named(node)) {
+      if (child.type === 'statement_block') this.bindChildren(child, functionScope);
+      else this.bind(child, functionScope);
+    }
+  }
+
+  private bindClass(node: TreeNode, scope: Scope): void {
+    const classScope = this.newScope(node, 'class', scope);
+    this.declareTypeParameters(node, classScope);
+    // A class expression sees its own name.
+    if (node.type === 'class') {
+      const name = node.childForFieldName('name');
+      if (name) {
+        classScope.declareValue(name.text, 'class', node);
+        classScope.declareType(name.text, 'class', node);
+      }
+    }
+    this.bindChildren(node, classScope);
+  }
+
+  private bindTypeParameterOwner(node: TreeNode, scope: Scope): void {
+    const ownerScope = this.newScope(node, 'block', scope);
+    this.declareTypeParameters(node, ownerScope);
+    this.bindChildren(node, ownerScope);
+  }
+
+  private bindAmbient(node: TreeNode, scope: Scope): void {
+    for (const child of named(node)) {
+      switch (child.type) {
+        case 'variable_declaration':
+        case 'lexical_declaration': {
+          for (const declarator of named(child)) {
+            const name = declarator.childForFieldName('name');
+            if (name) scope.declareValue(name.text, 'declared', declarator);
+          }
+          break;
+        }
+        case 'function_signature': {
+          const name = child.childForFieldName('name');
+          if (name) scope.declareValue(name.text, 'function', child);
+          this.bindFunction(child, scope);
+          break;
+        }
+        default: {
+          this.bind(child, scope);
+        }
+      }
+    }
+  }
+
+  private declareTypeParameters(node: TreeNode, scope: Scope): void {
+    const parameters = node.childForFieldName('type_parameters');
+    if (!parameters) return;
+    for (const parameter of named(parameters)) {
+      const name = parameter.childForFieldName('name');
+      if (name) scope.declareType(name.text, 'typeParameter', parameter);
+    }
+  }
+}
+
+export function symbolDeclaredBy(scope: Scope, name: string): Sym | undefined {
+  return scope.values.get(name);
+}

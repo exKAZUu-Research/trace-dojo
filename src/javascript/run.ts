@@ -7,11 +7,15 @@ import { parseJavaScript } from './parse';
 import { Runtime } from './runtime';
 import { JsThrow, Scope } from './values';
 
-// code-gauge-allow duplicateLines 15 -- Each language's runner wraps its own parser and runtime.
 export function executeJavaScriptProgram(source: string, input?: ProgramInput): ProgramExecution {
+  return executeParsedProgram(() => parseJavaScript(source), input);
+}
+
+/** Parses a program with `parse`, which throws a `CompileError` to reject it, and runs it. */
+export function executeParsedProgram(parse: () => Program, input?: ProgramInput): ProgramExecution {
   let program: Program;
   try {
-    program = parseJavaScript(source);
+    program = parse();
   } catch (error) {
     if (error instanceof CompileError) return { kind: 'compileError', diagnostics: error.diagnostics };
     throw error;

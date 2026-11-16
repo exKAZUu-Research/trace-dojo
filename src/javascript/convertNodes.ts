@@ -1,7 +1,21 @@
-import type { Node } from '@willbooster/web-tree-sitter';
-
 import { CompileError } from '../interpreter/diagnostics';
 import type { Expression, PropertyName } from './ast';
+
+/**
+ * The parts of a tree-sitter node that converting reads, which a view of another grammar's tree can also provide.
+ */
+export interface Node {
+  readonly type: string;
+  readonly text: string;
+  readonly isNamed: boolean;
+  readonly startIndex: number;
+  readonly endIndex: number;
+  readonly startPosition: { row: number; column: number };
+  readonly children: Node[];
+  readonly namedChildren: Node[];
+  childForFieldName(fieldName: string): Node | null;
+  childrenForFieldName(fieldName: string): Node[];
+}
 
 export function namedChildren(node: Node): Node[] {
   return node.namedChildren.filter((child) => child.type !== 'comment');

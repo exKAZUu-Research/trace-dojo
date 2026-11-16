@@ -1,5 +1,3 @@
-import type { Node } from '@willbooster/web-tree-sitter';
-
 import type { Argument, Expression, ObjectMember, Pattern, PropertyName } from './ast';
 import { ConverterBase } from './converterBase';
 import {
@@ -13,6 +11,7 @@ import {
   nameAnonymous,
   namedChildren,
   nameOf,
+  type Node,
   optionalNameOf,
   rowOf,
   unsupported,

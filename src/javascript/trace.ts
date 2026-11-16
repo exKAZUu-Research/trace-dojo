@@ -3,6 +3,7 @@ import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
+import type { Program } from './ast';
 import { parseJavaScript } from './parse';
 import { dateValueOf, inspectDate } from './realmDate';
 import { runProgram } from './run';
@@ -24,9 +25,17 @@ import {
 
 // code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceJavaScriptProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
-  const parsed = parseJavaScript(program, trace);
+  return recordProgram(parseJavaScript(program, trace), input);
+}
+
+/**
+ * Runs a program parsed for tracing, recording its steps.
+ *
+ * @param showsStatics Shows the static fields of the program's classes after a step's variables, as Java does.
+ */
+export function recordProgram(parsed: Program, input?: ProgramInput, showsStatics = false): ProgramRecording {
   const runtime = new Runtime(input);
-  const snapshotter = new Snapshotter(runtime);
+  const snapshotter = new Snapshotter(runtime, showsStatics);
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.isAtomic,
     variablesOf: (frame) => snapshotter.variablesOf(frame.scope, true),
@@ -41,15 +50,41 @@ export function traceJavaScriptProgram(program: string, trace: TraceOptions, inp
 }
 
 class Snapshotter {
-  constructor(private readonly runtime: Runtime) {}
+  constructor(
+    private readonly runtime: Runtime,
+    private readonly showsStatics: boolean
+  ) {}
 
-  /** The variables visible from `scope`, followed by the fields of `this` when `withThis`. */
+  /** The variables visible from `scope`, followed by static fields and the fields of `this` when `withThis`. */
   variablesOf(scope: Scope, withThis: boolean): Variables {
     const variables: Variables = { vars: {}, referenceVars: {} };
     for (const [name, value] of this.visibleBindings(scope)) addVariable(variables, name, value);
+    if (withThis && this.showsStatics) this.addStatics(variables, scope);
     const thisValue = scope.nearestFunctionFrame()?.thisValue;
     if (withThis && thisValue instanceof JsObject && !(thisValue instanceof JsFunction)) addThis(variables, thisValue);
     return variables;
+  }
+
+  /** The static fields of the classes the program declares at its top level, as `Class.field`. */
+  private addStatics(variables: Variables, scope: Scope): void {
+    let top: Scope | undefined = scope;
+    while (top?.parent && top.parent !== this.runtime.realm.globals) top = top.parent;
+    if (!top) return;
+    for (const [className, binding] of top.bindings) {
+      const cls = binding.value;
+      if (!(cls instanceof JsFunction) || cls.behavior.kind !== 'class') continue;
+      for (const [key, property] of cls.properties) {
+        if (
+          typeof key !== 'string' ||
+          !property.enumerable ||
+          isAccessor(property) ||
+          property.value instanceof JsFunction
+        )
+          continue;
+        const scalar = scalarOf(property.value, new Set());
+        if (scalar !== NOT_SCALAR) variables.vars[`${className}.${key}`] = scalar;
+      }
+    }
   }
 
   /** The bindings that `scope` sees, ordered by function from the innermost, and by declaration within one. */

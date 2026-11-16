@@ -1,9 +1,7 @@
-import type { Node } from '@willbooster/web-tree-sitter';
-
 import { CompileError } from '../interpreter/diagnostics';
 import { misplacedAtomicMessage, type TraceOptions } from '../interpreter/traceAnnotations';
 import type { ClassNode, DeclarationKind, Expression, FunctionKind, FunctionNode, ScopeDeclarations } from './ast';
-import { fail, rowOf } from './convertNodes';
+import { fail, type Node, rowOf } from './convertNodes';
 
 interface ScopeBuilder {
   declarations: ScopeDeclarations;

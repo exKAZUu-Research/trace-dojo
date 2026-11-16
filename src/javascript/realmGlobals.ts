@@ -1,5 +1,6 @@
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { formatLogArguments } from './consoleFormat';
+import { formatTable } from './consoleTable';
 import { inspect, inspectValue } from './inspect';
 import type { ErrorName, RealmBuilder } from './realm';
 import { dateValueOf } from './realmDate';
@@ -481,6 +482,20 @@ function defineConsole(builder: RealmBuilder): void {
     const label = labelOf(runtime, args[0]);
     if (counts.has(label)) counts.set(label, 0);
     else write(runtime, 'stderr', `Count for '${label}' does not exist`);
+    return;
+  });
+  builder.method(console, 'table', 1, ({ runtime, args }) => {
+    write(runtime, 'stdout', formatTable(runtime, args[0], args[1]) ?? formatLogArguments(runtime, args.slice(0, 1)));
+    return;
+  });
+  builder.method(console, 'dirxml', 0, ({ runtime, args }) => {
+    write(runtime, 'stdout', formatLogArguments(runtime, args));
+    return;
+  });
+  // Clearing does nothing when the output is not a terminal, as here.
+  builder.method(console, 'clear', 0, () => {});
+  builder.method(console, 'trace', 0, ({ runtime, args }) => {
+    write(runtime, 'stderr', `Trace${args.length > 0 ? `: ${formatLogArguments(runtime, args)}` : ''}`);
     return;
   });
   builder.method(console, 'assert', 0, ({ runtime, args }) => {

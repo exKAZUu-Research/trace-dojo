@@ -17,6 +17,9 @@ import { tracePythonProgram } from '../python/trace';
 import { findRubyTraceAnnotations } from '../ruby/parse';
 import { executeRubyProgram } from '../ruby/run';
 import { traceRubyProgram } from '../ruby/trace';
+import { findTypeScriptTraceAnnotations } from '../typescript/parse';
+import { executeTypeScriptProgram } from '../typescript/run';
+import { traceTypeScriptProgram } from '../typescript/trace';
 import type { SourceDiagnostic } from './diagnostics';
 import type { ExecutionLimitError } from './limits';
 import type { ProgramInput, ProgramOutput } from './programIo';
@@ -77,6 +80,11 @@ const interpreters = {
     execute: executeRubyProgram,
   },
   c: { findTraceAnnotations: findCTraceAnnotations, record: traceCProgram, execute: executeCProgram },
+  typescript: {
+    findTraceAnnotations: findTypeScriptTraceAnnotations,
+    record: traceTypeScriptProgram,
+    execute: executeTypeScriptProgram,
+  },
 } satisfies Record<string, Interpreter>;
 
 /**
