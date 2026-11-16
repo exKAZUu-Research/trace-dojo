@@ -484,10 +484,10 @@ function* matches(value: Value, args: Value[], block: RProc | undefined): Gen<bo
 }
 
 for (const name of ['all?', 'any?', 'none?', 'one?'])
-  // code-gauge-allow functionCognitiveComplexity 23 -- Quantified predicates share traversal while retaining their distinct short-circuit thresholds.
   defineIterationMethods(
     name,
     [0, 1],
+    // code-gauge-allow functionCognitiveComplexity 23 -- Quantified predicates share traversal while retaining their distinct short-circuit thresholds.
     ({ iterate }) =>
       function* (self, args, block) {
         let count = 0;
