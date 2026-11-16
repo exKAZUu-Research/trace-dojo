@@ -1,3 +1,4 @@
+// oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8');
 
@@ -73,8 +74,8 @@ export function utf8Length(bytes: string, index: number): number {
 /** Encodes a code point as UTF-8 bytes. */
 export function codePointBytes(codePoint: number): string {
   if (codePoint < 0x80) return String.fromCharCode(codePoint);
-  if (codePoint < 0x800) return String.fromCharCode(0xc0 | (codePoint >> 6), 0x80 | (codePoint & 0x3f));
-  if (codePoint < 0x10000) {
+  if (codePoint < 0x8_00) return String.fromCharCode(0xc0 | (codePoint >> 6), 0x80 | (codePoint & 0x3f));
+  if (codePoint < 0x1_00_00) {
     return String.fromCharCode(0xe0 | (codePoint >> 12), 0x80 | ((codePoint >> 6) & 0x3f), 0x80 | (codePoint & 0x3f));
   }
   return String.fromCharCode(

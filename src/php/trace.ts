@@ -88,6 +88,7 @@ type Scalar = TraceItemVariable[string];
 function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }): Scalar | typeof NOT_SCALAR {
   if (budget.remaining-- <= 0) throw new ExecutionLimitError('trace');
   rt().spend();
+  // oxlint-disable-next-line unicorn/no-null -- The trace format shows null as null.
   if (value === null) return null;
   switch (typeof value) {
     case 'bigint': {

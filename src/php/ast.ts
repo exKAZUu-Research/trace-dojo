@@ -65,7 +65,7 @@ export type Expr = { row: number } & (
   | { k: 'bin'; op: string; l: Expr; r: Expr }
   | { k: 'unary'; op: string; e: Expr }
   | { k: 'incdec'; inc: boolean; prefix: boolean; target: Expr }
-  | { k: 'cond'; test: Expr; then?: Expr; else: Expr }
+  | { k: 'cond'; test: Expr; consequent?: Expr; alternate: Expr }
   | { k: 'cast'; type: string; e: Expr }
   | { k: 'silence'; e: Expr }
   | { k: 'clone'; e: Expr; with?: Expr }
@@ -102,7 +102,7 @@ export type Stmt = { row: number } & (
   | { k: 'expr'; e: Expr; onlyCalls: boolean }
   | { k: 'echo'; args: Expr[] }
   | { k: 'inline'; text: string }
-  | { k: 'if'; cond: Expr; then: Stmt[]; else?: Stmt[] }
+  | { k: 'if'; cond: Expr; consequent: Stmt[]; alternate?: Stmt[] }
   | { k: 'while'; cond: Expr; body: Stmt[] }
   | { k: 'do'; body: Stmt[]; cond: Expr }
   | { k: 'for'; init: Expr[]; cond: Expr[]; update: Expr[]; body: Stmt[] }

@@ -1,4 +1,6 @@
 // code-gauge-allow-file fileNcss 1200 -- One converter of every grammar node kind, which share the namespace and scope state.
+// oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+// oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -111,7 +113,12 @@ export class Converter {
     }
     this.checkGotos(this.fn, body);
     validateReads(body);
-    return { body, strictTypes: this.strictTypes, hasGoto: this.fn.gotos.length > 0, mainVars: [...collectMainVars(body)] };
+    return {
+      body,
+      strictTypes: this.strictTypes,
+      hasGoto: this.fn.gotos.length > 0,
+      mainVars: [...collectMainVars(body)],
+    };
   }
 
   // Errors ------------------------------------------------------------------------------------------------------------
@@ -238,7 +245,9 @@ export class Converter {
         return [{ k: 'expr', e, onlyCalls: onlyCalls(e), row }];
       }
       case 'echo_statement': {
-        const args = node.namedChildren.filter((child) => child.type !== 'comment').flatMap((child) => this.sequence(child));
+        const args = node.namedChildren
+          .filter((child) => child.type !== 'comment')
+          .flatMap((child) => this.sequence(child));
         return [{ k: 'echo', args, row }];
       }
       case 'empty_statement': {
@@ -317,7 +326,10 @@ export class Converter {
         const key = lower(decl.name);
         if (topLevel) {
           if (this.declaredFunctions.has(key)) {
-            this.error(node, `関数 ${decl.name}() は、すでに宣言されています（Cannot redeclare function ${decl.name}()）。`);
+            this.error(
+              node,
+              `関数 ${decl.name}() は、すでに宣言されています（Cannot redeclare function ${decl.name}()）。`
+            );
           }
           this.declaredFunctions.set(key, row);
         }
@@ -343,7 +355,8 @@ export class Converter {
       }
       case 'named_label_statement': {
         const name = this.nameText(node.namedChildren[0]);
-        if (this.fn.labels.has(name)) this.error(node, `ラベル「${name}」は、すでに使われています（Label '${name}' already defined）。`);
+        if (this.fn.labels.has(name))
+          this.error(node, `ラベル「${name}」は、すでに使われています（Label '${name}' already defined）。`);
         this.fn.labels.add(name);
         return [{ k: 'label', name, row }];
       }
@@ -364,7 +377,9 @@ export class Converter {
       }
       case 'exit_statement': {
         const argument = node.namedChildren.find((child) => child.type !== 'comment');
-        return [{ k: 'expr', e: { k: 'exit', e: argument ? this.expr(argument) : undefined, row }, onlyCalls: false, row }];
+        return [
+          { k: 'expr', e: { k: 'exit', e: argument ? this.expr(argument) : undefined, row }, onlyCalls: false, row },
+        ];
       }
       case 'comment': {
         return [];
@@ -417,10 +432,9 @@ export class Converter {
   private ifStatement(node: Node): Stmt {
     const row = node.startPosition.row;
     const cond = this.condition(node);
-    const then = this.blockOf(node.childrenForFieldName('body'));
-    const alternatives = node.childrenForFieldName('alternative');
-    const elseBody = this.alternatives(alternatives);
-    return { k: 'if', cond, then, else: elseBody, row };
+    const consequent = this.blockOf(node.childrenForFieldName('body'));
+    const alternate = this.alternatives(node.childrenForFieldName('alternative'));
+    return { k: 'if', cond, consequent, alternate, row };
   }
 
   private alternatives(alternatives: Node[]): Stmt[] | undefined {
@@ -429,8 +443,8 @@ export class Converter {
     const row = first.startPosition.row;
     if (first.type === 'else_clause') return this.blockOf(first.childrenForFieldName('body'));
     const cond = this.condition(first);
-    const then = this.blockOf(first.childrenForFieldName('body'));
-    return [{ k: 'if', cond, then, else: this.alternatives(rest), row }];
+    const consequent = this.blockOf(first.childrenForFieldName('body'));
+    return [{ k: 'if', cond, consequent, alternate: this.alternatives(rest), row }];
   }
 
   private foreachStatement(node: Node): Stmt {
@@ -469,7 +483,11 @@ export class Converter {
           const value = child.childForFieldName('value');
           if (child.type === 'default_statement') {
             defaults++;
-            if (defaults > 1) this.error(child, 'switch に default が2つあります（Switch statements may only contain one default clause）。');
+            if (defaults > 1)
+              this.error(
+                child,
+                'switch に default が2つあります（Switch statements may only contain one default clause）。'
+              );
           }
           const statements = child.namedChildren.filter((part) => part.id !== value?.id && part.type !== 'comment');
           return {
@@ -487,12 +505,19 @@ export class Converter {
     const argument = node.namedChildren.find((child) => child.type !== 'comment');
     let depth = 1;
     if (argument) {
-      if (argument.type !== 'integer') this.error(node, `'${kind}' の後には正の整数しか書けません（'${kind}' operator with non-integer operand is no longer supported）。`);
+      if (argument.type !== 'integer')
+        this.error(
+          node,
+          `'${kind}' の後には正の整数しか書けません（'${kind}' operator with non-integer operand is no longer supported）。`
+        );
       depth = Number(parseIntegerLiteral(argument.text));
       if (depth < 1) this.error(node, `'${kind}' operator accepts only positive integers`);
     }
     if (this.loop.depth === 0) {
-      this.error(node, `'${kind}' は、ループか switch の中でしか使えません（'${kind}' not in the 'loop' or 'switch' context）。`);
+      this.error(
+        node,
+        `'${kind}' は、ループか switch の中でしか使えません（'${kind}' not in the 'loop' or 'switch' context）。`
+      );
     }
     if (depth > this.loop.depth) {
       this.error(node, `${depth} 段の '${kind}' はできません（Cannot '${kind}' ${depth} levels）。`);
@@ -513,7 +538,10 @@ export class Converter {
       }
     }
     if (type && !argument && !(type.k === 'named' && type.name === 'void')) {
-      this.error(node, '戻り値の型を宣言した関数は、値を返してください（A function with return type must return a value）。');
+      this.error(
+        node,
+        '戻り値の型を宣言した関数は、値を返してください（A function with return type must return a value）。'
+      );
     }
     return { k: 'return', e: argument ? this.expr(argument) : undefined, row };
   }
@@ -528,7 +556,9 @@ export class Converter {
         const typeList = child.childForFieldName('type') as Node;
         const types = typeList.namedChildren
           .filter((type) => type.type !== 'comment')
-          .map((type) => this.resolveClassName(this.nameText(type.type === 'named_type' ? type.namedChildren[0] : type)));
+          .map((type) =>
+            this.resolveClassName(this.nameText(type.type === 'named_type' ? type.namedChildren[0] : type))
+          );
         const nameNode = child.childForFieldName('name');
         catches.push({
           types,
@@ -548,11 +578,20 @@ export class Converter {
       const key = lower(directive.child(0)?.text ?? '');
       const valueNode = directive.namedChildren.find((child) => child.type !== 'comment') as Node;
       if (key === 'strict_types') {
-        if (!topLevel || node.namedChildren.some((child) => child.type !== 'declare_directive' && child.type !== 'comment')) {
-          this.error(node, 'strict_types は、ファイルの最初の文として、ブロックなしで書いてください（strict_types declaration must be the very first statement in the script）。');
+        if (
+          !topLevel ||
+          node.namedChildren.some((child) => child.type !== 'declare_directive' && child.type !== 'comment')
+        ) {
+          this.error(
+            node,
+            'strict_types は、ファイルの最初の文として、ブロックなしで書いてください（strict_types declaration must be the very first statement in the script）。'
+          );
         }
         if (valueNode.text !== '0' && valueNode.text !== '1') {
-          this.error(node, 'strict_types の値は 0 か 1 です（strict_types declaration must have 0 or 1 as its value）。');
+          this.error(
+            node,
+            'strict_types の値は 0 か 1 です（strict_types declaration must have 0 or 1 as its value）。'
+          );
         }
         this.strictTypes = valueNode.text === '1';
       } else if (key !== 'ticks' && key !== 'encoding') {
@@ -594,7 +633,9 @@ export class Converter {
     for (const clause of clauses) {
       const clauseKind = clause.childForFieldName('type');
       const effective = clauseKind ? lower(clauseKind.text) : kind;
-      const target = clause.namedChildren.find((child) => child.type === 'name' || child.type === 'qualified_name') as Node;
+      const target = clause.namedChildren.find(
+        (child) => child.type === 'name' || child.type === 'qualified_name'
+      ) as Node;
       const raw = this.nameText(target).replace(/^\\/, '');
       const full = prefix ? `${prefix}\\${raw}` : raw;
       const aliasNode = clause.childForFieldName('alias');
@@ -603,7 +644,10 @@ export class Converter {
       else if (effective === 'const') this.constImports.set(alias, full);
       else {
         if (this.classImports.has(lower(alias)) || (this.namespace === '' && false)) {
-          this.error(node, `名前「${alias}」は、すでに use で使われています（Cannot use ${full} as ${alias} because the name is already in use）。`);
+          this.error(
+            node,
+            `名前「${alias}」は、すでに use で使われています（Cannot use ${full} as ${alias} because the name is already in use）。`
+          );
         }
         this.classImports.set(lower(alias), full);
       }
@@ -612,9 +656,13 @@ export class Converter {
 
   private checkGotos(context: FunctionContext, body: Stmt[]): void {
     for (const { label, row } of context.gotos) {
-      if (!context.labels.has(label)) this.error(row, `goto の行き先のラベル「${label}」がありません（'goto' to undefined label '${label}'）。`);
+      if (!context.labels.has(label))
+        this.error(row, `goto の行き先のラベル「${label}」がありません（'goto' to undefined label '${label}'）。`);
       if (labelInsideLoop(body, label, false)) {
-        this.error(row, `goto でループや switch の中には入れません（'goto' into loop or switch statement is disallowed）。`);
+        this.error(
+          row,
+          `goto でループや switch の中には入れません（'goto' into loop or switch statement is disallowed）。`
+        );
       }
     }
   }
@@ -702,7 +750,8 @@ export class Converter {
       const nameNode = child.childForFieldName('name') as Node;
       const name = this.variableName(nameNode);
       if (name === 'this') this.error(child, '$this は引数の名前に使えません（Cannot use $this as parameter）。');
-      if (seen.has(name)) this.error(child, `引数の名前 $${name} が重なっています（Redefinition of parameter $${name}）。`);
+      if (seen.has(name))
+        this.error(child, `引数の名前 $${name} が重なっています（Redefinition of parameter $${name}）。`);
       seen.add(name);
       const typeNode = child.childForFieldName('type');
       const type = typeNode ? this.typeDecl(typeNode) : undefined;
@@ -730,7 +779,10 @@ export class Converter {
       }
       if (child.type === 'property_promotion_parameter') {
         if (lower(functionName) !== '__construct' || className === undefined) {
-          this.error(child, 'プロパティの昇格は、コンストラクタの引数にしか書けません（Cannot declare promoted property outside a constructor）。');
+          this.error(
+            child,
+            'プロパティの昇格は、コンストラクタの引数にしか書けません（Cannot declare promoted property outside a constructor）。'
+          );
         }
         const modifiers = child.namedChildren;
         const visibilityNode = modifiers.find((part) => part.type === 'visibility_modifier');
@@ -793,10 +845,16 @@ export class Converter {
       }
       case 'union_type':
       case 'disjunctive_normal_form_type': {
-        return { k: 'union', types: node.namedChildren.filter((child) => child.type !== 'comment').map((child) => this.typeDecl(child)) };
+        return {
+          k: 'union',
+          types: node.namedChildren.filter((child) => child.type !== 'comment').map((child) => this.typeDecl(child)),
+        };
       }
       case 'intersection_type': {
-        return { k: 'inter', types: node.namedChildren.filter((child) => child.type !== 'comment').map((child) => this.typeDecl(child)) };
+        return {
+          k: 'inter',
+          types: node.namedChildren.filter((child) => child.type !== 'comment').map((child) => this.typeDecl(child)),
+        };
       }
       case 'type_list': {
         return { k: 'union', types: node.namedChildren.map((child) => this.typeDecl(child)) };
@@ -834,18 +892,25 @@ export class Converter {
       const raw = this.nameText(nameNode as Node);
       const word = lower(raw);
       if (BUILTIN_TYPES.has(word) || ['self', 'parent', 'static'].includes(word)) {
-        this.error(node, `「${raw}」はクラスの名前に使えません（Cannot use '${raw}' as class name as it is reserved）。`);
+        this.error(
+          node,
+          `「${raw}」はクラスの名前に使えません（Cannot use '${raw}' as class name as it is reserved）。`
+        );
       }
       name = this.qualify(raw);
     }
     const modifiers = node.children;
     const base = node.namedChildren.find((child) => child.type === 'base_clause');
     const baseNames = base
-      ? base.namedChildren.filter((child) => child.type !== 'comment').map((child) => this.resolveClassName(this.nameText(child)))
+      ? base.namedChildren
+          .filter((child) => child.type !== 'comment')
+          .map((child) => this.resolveClassName(this.nameText(child)))
       : [];
     const implementsClause = node.namedChildren.find((child) => child.type === 'class_interface_clause');
     let interfaces = implementsClause
-      ? implementsClause.namedChildren.filter((child) => child.type !== 'comment').map((child) => this.resolveClassName(this.nameText(child)))
+      ? implementsClause.namedChildren
+          .filter((child) => child.type !== 'comment')
+          .map((child) => this.resolveClassName(this.nameText(child)))
       : [];
     let parent: string | undefined;
     if (kind === 'interface') interfaces = baseNames;
@@ -885,7 +950,10 @@ export class Converter {
             const method = this.methodDecl(member, decl);
             const key = lower(method.fn.name);
             if (memberNames.has(key)) {
-              this.error(member, `メソッド ${name}::${method.fn.name}() は、すでに宣言されています（Cannot redeclare ${name}::${method.fn.name}()）。`);
+              this.error(
+                member,
+                `メソッド ${name}::${method.fn.name}() は、すでに宣言されています（Cannot redeclare ${name}::${method.fn.name}()）。`
+              );
             }
             memberNames.add(key);
             decl.methods.push(method);
@@ -917,9 +985,16 @@ export class Converter {
       for (const param of constructor.fn.params) {
         if (!param.promote) continue;
         if (decl.props.some((prop) => prop.name === param.name)) {
-          this.error(param.row, `プロパティ ${name}::$${param.name} は、すでに宣言されています（Cannot redeclare ${name}::$${param.name}）。`);
+          this.error(
+            param.row,
+            `プロパティ ${name}::$${param.name} は、すでに宣言されています（Cannot redeclare ${name}::$${param.name}）。`
+          );
         }
-        if (param.variadic) this.error(param.row, '可変長引数はプロパティに昇格できません（Cannot declare variadic promoted property）。');
+        if (param.variadic)
+          this.error(
+            param.row,
+            '可変長引数はプロパティに昇格できません（Cannot declare variadic promoted property）。'
+          );
         decl.props.push({
           name: param.name,
           visibility: param.promote.visibility,
@@ -947,10 +1022,13 @@ export class Converter {
     isVar: boolean;
   } {
     const children = member.children;
-    const visibilityNode = children.find((child) => child.type === 'visibility_modifier');
+    const visibilityNodes = children.filter((child) => child.type === 'visibility_modifier');
+    // `public private(set)` names the read visibility and the write visibility separately.
+    const setNode = visibilityNodes.find((child) => this.setVisibilityOf(child) !== undefined);
+    const getNode = visibilityNodes.find((child) => child !== setNode);
     return {
-      visibility: visibilityNode ? (lower(visibilityNode.text.split('(')[0].trim()) as Visibility) : undefined,
-      setVisibility: visibilityNode ? this.setVisibilityOf(visibilityNode) : undefined,
+      visibility: getNode ? (lower(getNode.text.trim()) as Visibility) : setNode ? 'public' : undefined,
+      setVisibility: setNode ? this.setVisibilityOf(setNode) : undefined,
       isStatic: children.some((child) => child.type === 'static_modifier'),
       isAbstract: children.some((child) => child.type === 'abstract_modifier'),
       isFinal: children.some((child) => child.type === 'final_modifier'),
@@ -967,9 +1045,16 @@ export class Converter {
     for (const element of member.namedChildren.filter((child) => child.type === 'const_element')) {
       const [nameNode, valueNode] = element.namedChildren.filter((part) => part.type !== 'comment');
       const name = this.nameText(nameNode);
-      if (lower(name) === 'class') this.error(element, 'class という名前の定数は宣言できません（A class constant must not be called \'class\'; it is reserved for class name fetching）。');
+      if (lower(name) === 'class')
+        this.error(
+          element,
+          "class という名前の定数は宣言できません（A class constant must not be called 'class'; it is reserved for class name fetching）。"
+        );
       if (decl.consts.some((constant) => constant.name === name)) {
-        this.error(element, `定数 ${decl.name}::${name} は、すでに宣言されています（Cannot redefine class constant ${decl.name}::${name}）。`);
+        this.error(
+          element,
+          `定数 ${decl.name}::${name} は、すでに宣言されています（Cannot redefine class constant ${decl.name}::${name}）。`
+        );
       }
       if (kind === 'interface' && modifiers.visibility && modifiers.visibility !== 'public') {
         this.error(element, 'インターフェースの定数は public にしてください。');
@@ -990,25 +1075,38 @@ export class Converter {
     const attributes = member.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
     if (kind === 'interface' && !member.namedChildren.some((child) => child.type === 'property_hook_list')) {
-      this.error(member, 'インターフェースにはプロパティを宣言できません（Interfaces may only include hooked properties）。');
+      this.error(
+        member,
+        'インターフェースにはプロパティを宣言できません（Interfaces may only include hooked properties）。'
+      );
     }
     const modifiers = this.memberModifiers(member);
     const typeNode = member.childForFieldName('type');
     const type = typeNode ? this.typeDecl(typeNode) : undefined;
     const isReadonly = modifiers.isReadonly || decl.isReadonly;
     if (isReadonly && !type && !modifiers.isStatic) {
-      this.error(member, `readonly のプロパティには型が必要です（Readonly property ${decl.name}::$... must have type）。`);
+      this.error(
+        member,
+        `readonly のプロパティには型が必要です（Readonly property ${decl.name}::$... must have type）。`
+      );
     }
-    if (isReadonly && modifiers.isStatic) this.error(member, 'static のプロパティは readonly にできません（Static property cannot be readonly）。');
+    if (isReadonly && modifiers.isStatic)
+      this.error(member, 'static のプロパティは readonly にできません（Static property cannot be readonly）。');
     const hookList = member.namedChildren.find((child) => child.type === 'property_hook_list');
     for (const element of member.namedChildren.filter((child) => child.type === 'property_element')) {
       const name = this.variableName(element.childForFieldName('name') as Node);
       if (decl.props.some((prop) => prop.name === name)) {
-        this.error(element, `プロパティ ${decl.name}::$${name} は、すでに宣言されています（Cannot redeclare ${decl.name}::$${name}）。`);
+        this.error(
+          element,
+          `プロパティ ${decl.name}::$${name} は、すでに宣言されています（Cannot redeclare ${decl.name}::$${name}）。`
+        );
       }
       const defaultNode = element.childForFieldName('default_value');
       if (defaultNode && isReadonly) {
-        this.error(element, `readonly のプロパティには初期値を書けません（Readonly property ${decl.name}::$${name} cannot have default value）。`);
+        this.error(
+          element,
+          `readonly のプロパティには初期値を書けません（Readonly property ${decl.name}::$${name} cannot have default value）。`
+        );
       }
       const prop: PropertyDeclAst = {
         name,
@@ -1042,7 +1140,16 @@ export class Converter {
         let params: ParamDecl[] = [];
         if (paramsNode) params = this.params(paramsNode, `$${prop.name}::${kind}`, className);
         if (kind === 'set' && params.length === 0) {
-          params = [{ name: 'value', type: prop.type, byRef: false, variadic: false, optional: false, row: hook.startPosition.row }];
+          params = [
+            {
+              name: 'value',
+              type: prop.type,
+              byRef: false,
+              variadic: false,
+              optional: false,
+              row: hook.startPosition.row,
+            },
+          ];
         }
         let statements: Stmt[] = [];
         let arrowBody: Expr | undefined;
@@ -1057,7 +1164,13 @@ export class Converter {
                 k: 'expr',
                 e: {
                   k: 'assign',
-                  target: { k: 'prop', obj: { k: 'var', name: 'this', row: body.startPosition.row }, name: prop.name, nullsafe: false, row: body.startPosition.row },
+                  target: {
+                    k: 'prop',
+                    obj: { k: 'var', name: 'this', row: body.startPosition.row },
+                    name: prop.name,
+                    nullsafe: false,
+                    row: body.startPosition.row,
+                  },
                   value: arrowBody,
                   row: body.startPosition.row,
                 },
@@ -1088,7 +1201,11 @@ export class Converter {
         else if (kind === 'set') {
           hooks.set = fn;
           hooks.setParam = params[0]?.name;
-        } else this.error(hook, `プロパティフック「${kind}」はありません（Unknown hook "${kind}" for property ${className}::$${prop.name}）。`);
+        } else
+          this.error(
+            hook,
+            `プロパティフック「${kind}」はありません（Unknown hook "${kind}" for property ${className}::$${prop.name}）。`
+          );
       } finally {
         this.fn = outerFn;
       }
@@ -1103,19 +1220,34 @@ export class Converter {
     const body = member.childForFieldName('body');
     const isAbstract = modifiers.isAbstract || (decl.kind === 'interface' && !body);
     if (decl.kind === 'interface' && body) {
-      this.error(member, `インターフェースのメソッド ${decl.name}::${fn.name}() には本体を書けません（Interface function ${decl.name}::${fn.name}() cannot contain body）。`);
+      this.error(
+        member,
+        `インターフェースのメソッド ${decl.name}::${fn.name}() には本体を書けません（Interface function ${decl.name}::${fn.name}() cannot contain body）。`
+      );
     }
     if (modifiers.isAbstract && body) {
-      this.error(member, `abstract のメソッド ${decl.name}::${fn.name}() には本体を書けません（Abstract function ${decl.name}::${fn.name}() cannot contain body）。`);
+      this.error(
+        member,
+        `abstract のメソッド ${decl.name}::${fn.name}() には本体を書けません（Abstract function ${decl.name}::${fn.name}() cannot contain body）。`
+      );
     }
     if (!isAbstract && !body) {
-      this.error(member, `メソッド ${decl.name}::${fn.name}() に本体がありません（Non-abstract method ${decl.name}::${fn.name}() must contain body）。`);
+      this.error(
+        member,
+        `メソッド ${decl.name}::${fn.name}() に本体がありません（Non-abstract method ${decl.name}::${fn.name}() must contain body）。`
+      );
     }
     if (modifiers.isAbstract && !decl.isAbstract && decl.kind === 'class' && !decl.isAnonymous) {
-      this.error(member, `abstract のメソッドを持つクラス ${decl.name} は abstract にしてください（Class ${decl.name} declares abstract method ${fn.name}() and must therefore be declared abstract）。`);
+      this.error(
+        member,
+        `abstract のメソッドを持つクラス ${decl.name} は abstract にしてください（Class ${decl.name} declares abstract method ${fn.name}() and must therefore be declared abstract）。`
+      );
     }
     if (modifiers.isAbstract && modifiers.visibility === 'private' && decl.kind !== 'trait') {
-      this.error(member, `abstract のメソッドは private にできません（Abstract function ${decl.name}::${fn.name}() cannot be declared private）。`);
+      this.error(
+        member,
+        `abstract のメソッドは private にできません（Abstract function ${decl.name}::${fn.name}() cannot be declared private）。`
+      );
     }
     fn.isStatic = modifiers.isStatic;
     return {
@@ -1208,7 +1340,7 @@ export class Converter {
       case 'call':
       case 'mcall':
       case 'scall': {
-        this.error(node, '関数の戻り値には代入できません（Can\'t use function return value in write context）。');
+        this.error(node, "関数の戻り値には代入できません（Can't use function return value in write context）。");
         break;
       }
       default: {
@@ -1276,13 +1408,23 @@ export class Converter {
       }
       case 'subscript_expression': {
         const [baseNode, indexNode] = node.namedChildren.filter((child) => child.type !== 'comment');
-        if (node.text.trimEnd().endsWith('}')) this.error(node, '文字列の添字に {} は使えません（Array and string offset access syntax with curly braces is no longer supported）。');
+        if (node.text.trimEnd().endsWith('}'))
+          this.error(
+            node,
+            '文字列の添字に {} は使えません（Array and string offset access syntax with curly braces is no longer supported）。'
+          );
         return { k: 'idx', base: this.expr(baseNode), index: indexNode ? this.expr(indexNode) : undefined, row };
       }
       case 'member_access_expression':
       case 'nullsafe_member_access_expression': {
         const obj = this.expr(node.childForFieldName('object') as Node);
-        return { k: 'prop', obj, name: this.memberName(node.childForFieldName('name') as Node), nullsafe: node.type.startsWith('nullsafe'), row };
+        return {
+          k: 'prop',
+          obj,
+          name: this.memberName(node.childForFieldName('name') as Node),
+          nullsafe: node.type.startsWith('nullsafe'),
+          row,
+        };
       }
       case 'member_call_expression':
       case 'nullsafe_member_call_expression': {
@@ -1324,7 +1466,12 @@ export class Converter {
         const left = node.childForFieldName('left') as Node;
         const right = node.childForFieldName('right') as Node;
         const target = left.type === 'list_literal' ? this.listLiteral(left) : this.writable(left);
-        if (target.k === 'idx' && target.index === undefined && target.base.k === 'var' && target.base.name === 'this') {
+        if (
+          target.k === 'idx' &&
+          target.index === undefined &&
+          target.base.k === 'var' &&
+          target.base.name === 'this'
+        ) {
           this.error(node, '$this には代入できません（Cannot use $this as array）。');
         }
         return { k: 'assign', target, value: this.expr(right), row };
@@ -1333,13 +1480,20 @@ export class Converter {
         const target = this.writable(node.childForFieldName('left') as Node);
         const sourceNode = node.childForFieldName('right') as Node;
         const source = this.expr(sourceNode);
-        if (source.k === 'new') this.error(node, 'new の結果は参照で代入できません（Cannot assign reference to non referenceable value）。');
+        if (source.k === 'new')
+          this.error(node, 'new の結果は参照で代入できません（Cannot assign reference to non referenceable value）。');
         return { k: 'assignRef', target, source, row };
       }
       case 'augmented_assignment_expression': {
         const target = this.writable(node.childForFieldName('left') as Node);
         const operator = (node.childForFieldName('operator') as Node).type;
-        return { k: 'assignOp', op: operator.slice(0, -1), target, value: this.expr(node.childForFieldName('right') as Node), row };
+        return {
+          k: 'assignOp',
+          op: operator.slice(0, -1),
+          target,
+          value: this.expr(node.childForFieldName('right') as Node),
+          row,
+        };
       }
       case 'binary_expression': {
         return this.binary(node);
@@ -1366,14 +1520,19 @@ export class Converter {
         const alternative = this.expr(node.childForFieldName('alternative') as Node);
         const conditionNode = node.childForFieldName('condition') as Node;
         if (conditionNode.type === 'conditional_expression' && !conditionNode.text.startsWith('(')) {
-          this.error(node, '括弧のない三項演算子の入れ子は使えません（Unparenthesized `a ? b : c ? d : e` is not supported）。');
+          this.error(
+            node,
+            '括弧のない三項演算子の入れ子は使えません（Unparenthesized `a ? b : c ? d : e` is not supported）。'
+          );
         }
-        return { k: 'cond', test, then: body ? this.expr(body) : undefined, else: alternative, row };
+        return { k: 'cond', test, consequent: body ? this.expr(body) : undefined, alternate: alternative, row };
       }
       case 'cast_expression': {
         const type = lower((node.childForFieldName('type') as Node).text.replaceAll(/[\s()]/g, ''));
-        if (type === 'unset') this.error(node, '(unset) のキャストは使えません（The (unset) cast is no longer supported）。');
-        if (type === 'real') this.error(node, '(real) のキャストは使えません（The (real) cast has been removed, use (float) instead）。');
+        if (type === 'unset')
+          this.error(node, '(unset) のキャストは使えません（The (unset) cast is no longer supported）。');
+        if (type === 'real')
+          this.error(node, '(real) のキャストは使えません（The (real) cast has been removed, use (float) instead）。');
         if (type === 'binary') {
           return { k: 'cast', type: 'string', e: this.expr(node.childForFieldName('value') as Node), row };
         }
@@ -1526,28 +1685,56 @@ export class Converter {
       }
       if (child.type !== 'argument') continue;
       const nameNode = child.childForFieldName('name');
-      const valueNode = child.namedChildren.filter((part) => part.id !== nameNode?.id && part.type !== 'reference_modifier').at(-1) as Node;
-      if (valueNode.type === 'argument_placeholder') this.error(child, '書き方に誤りがあります（syntax error, unexpected token "?"）。');
+      const valueNode = child.namedChildren.findLast(
+        (part) => part.id !== nameNode?.id && part.type !== 'reference_modifier'
+      ) as Node;
+      if (valueNode.type === 'argument_placeholder')
+        this.error(child, '書き方に誤りがあります（syntax error, unexpected token "?"）。');
       if (child.childForFieldName('reference_modifier')) this.error(child, '呼び出しの引数に & は書けません。');
       if (valueNode.type === 'variadic_unpacking') {
-        if (named) this.error(child, '名前付き引数の後に ... は書けません（Cannot use argument unpacking after named arguments）。');
+        if (named)
+          this.error(
+            child,
+            '名前付き引数の後に ... は書けません（Cannot use argument unpacking after named arguments）。'
+          );
         args.push({ e: this.expr(valueNode.namedChildren[0]), spread: true });
         continue;
       }
       if (nameNode) {
         named = true;
         const name = this.nameText(nameNode);
-        if (args.some((arg) => arg.name === name)) this.error(child, `名前付き引数 $${name} が重なっています（Named parameter $${name} overwrites previous argument）。`);
+        if (args.some((arg) => arg.name === name))
+          this.error(
+            child,
+            `名前付き引数 $${name} が重なっています（Named parameter $${name} overwrites previous argument）。`
+          );
         args.push({ e: this.expr(valueNode), spread: false, name });
       } else {
-        if (named) this.error(child, '名前付き引数の後に位置の引数は書けません（Cannot use positional argument after named argument）。');
+        if (named)
+          this.error(
+            child,
+            '名前付き引数の後に位置の引数は書けません（Cannot use positional argument after named argument）。'
+          );
         if (args.some((arg) => arg.spread)) {
-          this.error(child, '... の後に位置の引数は書けません（Cannot use positional argument after argument unpacking）。');
+          this.error(
+            child,
+            '... の後に位置の引数は書けません（Cannot use positional argument after argument unpacking）。'
+          );
         }
-        args.push({ e: alias(valueNode.type === 'name' && valueNode.parent?.type === 'argument' && ['self', 'parent', 'static'].includes(lower(valueNode.text)) ? this.constant(valueNode) : this.expr(valueNode)), spread: false });
+        args.push({
+          e: alias(
+            valueNode.type === 'name' &&
+              valueNode.parent?.type === 'argument' &&
+              ['self', 'parent', 'static'].includes(lower(valueNode.text))
+              ? this.constant(valueNode)
+              : this.expr(valueNode)
+          ),
+          spread: false,
+        });
       }
     }
-    if (fcc && args.length > 0) this.error(node, '書き方に誤りがあります（Cannot combine partial application and unpacking）。');
+    if (fcc && args.length > 0)
+      this.error(node, '書き方に誤りがあります（Cannot combine partial application and unpacking）。');
     return { args, fcc };
   }
 
@@ -1601,7 +1788,10 @@ export class Converter {
     const fn = this.functionDecl(node, true);
     for (const use of uses) {
       if (fn.params.some((param) => param.name === use.name)) {
-        this.error(node, `use の変数 $${use.name} が引数と重なっています（Cannot use lexical variable $${use.name} as a parameter name）。`);
+        this.error(
+          node,
+          `use の変数 $${use.name} が引数と重なっています（Cannot use lexical variable $${use.name} as a parameter name）。`
+        );
       }
     }
     return { k: 'closure', fn, uses, isStatic, row };
@@ -1623,7 +1813,8 @@ export class Converter {
         });
       } else if (arm.type === 'match_default_expression') {
         defaults++;
-        if (defaults > 1) this.error(arm, 'match に default が2つあります（Match expressions may only contain one default arm）。');
+        if (defaults > 1)
+          this.error(arm, 'match に default が2つあります（Match expressions may only contain one default arm）。');
         arms.push({ body: this.expr(arm.childForFieldName('return_expression') as Node), row: arm.startPosition.row });
       }
     }
@@ -1649,9 +1840,13 @@ export class Converter {
         items.push({ key, value: this.writable(valueNode.namedChildren[0]), byRef: true, spread: false });
       } else items.push({ key, value: this.expr(valueNode), byRef: false, spread: false });
     }
-    if (node.text.trimEnd().endsWith(',)') || /,\s*,/.test(node.text)) {
-      // Trailing commas are allowed; empty elements are not.
-      if (/,\s*,/.test(node.text.replaceAll(/(['"]).*?\1/g, ''))) this.error(node, '配列の要素が空です（Cannot use empty array elements in arrays）。');
+    // A trailing comma is allowed; an empty element between commas is not.
+    let expectingElement = true;
+    for (const child of node.children) {
+      if (child.type === ',') {
+        if (expectingElement) this.error(node, '配列の要素が空です（Cannot use empty array elements in arrays）。');
+        expectingElement = true;
+      } else if (child.type === 'array_element_initializer') expectingElement = false;
     }
     return items;
   }
@@ -1688,9 +1883,13 @@ export class Converter {
       pendingKey = undefined;
       expectingItem = false;
     }
-    if (items.every((item) => item === undefined)) this.error(node, '空の list() は使えません（Cannot use empty list）。');
+    if (items.every((item) => item === undefined))
+      this.error(node, '空の list() は使えません（Cannot use empty list）。');
     if (keyed && items.some((item) => item && item.key === undefined)) {
-      this.error(node, 'キーのある要素とない要素を混ぜられません（Cannot mix keyed and unkeyed array entries in assignments）。');
+      this.error(
+        node,
+        'キーのある要素とない要素を混ぜられません（Cannot mix keyed and unkeyed array entries in assignments）。'
+      );
     }
     return { k: 'list', items, keyed, row };
   }
@@ -1724,7 +1923,10 @@ export class Converter {
       .map((line) => {
         const leading = /^[ \t]*/.exec(line)?.[0] ?? '';
         if (leading.length < indent && line.trim() !== '') {
-          this.error(end, `ヒアドキュメントの行の字下げが、終わりの印より浅くなっています（Invalid body indentation level (expecting an indentation level of at least ${indent})）。`);
+          this.error(
+            end,
+            `ヒアドキュメントの行の字下げが、終わりの印より浅くなっています（Invalid body indentation level (expecting an indentation level of at least ${indent})）。`
+          );
         }
         return line.slice(Math.min(indent, leading.length));
       })
@@ -1764,7 +1966,8 @@ export class Converter {
     let braced = false;
     for (const child of children) {
       if (child.startIndex < cursor || child.endIndex > limit) continue;
-      if (child.type === 'string_content' || child.type === 'string_value' || child.type === 'escape_sequence') continue;
+      if (child.type === 'string_content' || child.type === 'string_value' || child.type === 'escape_sequence')
+        continue;
       if (!child.isNamed && child.type !== '{' && child.type !== '}') continue;
       if (child.type === '{' || child.type === '}') {
         if (child.type === '{') {
@@ -1813,7 +2016,10 @@ export class Converter {
         if (index === 0 && !atLineStart) return line;
         const leading = /^[ \t]*/.exec(line)?.[0] ?? '';
         if (leading.length < indent && line.trim() !== '' && !(index === lines.length - 1 && line === leading)) {
-          this.error(end, `ヒアドキュメントの行の字下げが、終わりの印より浅くなっています（Invalid body indentation level (expecting an indentation level of at least ${indent})）。`);
+          this.error(
+            end,
+            `ヒアドキュメントの行の字下げが、終わりの印より浅くなっています（Invalid body indentation level (expecting an indentation level of at least ${indent})）。`
+          );
         }
         return line.slice(Math.min(indent, leading.length));
       })
@@ -1833,7 +2039,8 @@ function onlyCalls(e: Expr): boolean {
 
 /** Whether an expression only creates objects (`new`, or an array literal of them), whose constructors' steps show it. */
 function isObjectCreation(e: Expr): boolean {
-  if (e.k === 'array') return e.items.length > 0 && e.items.every((item) => !item.spread && !item.byRef && isObjectCreation(item.value));
+  if (e.k === 'array')
+    return e.items.length > 0 && e.items.every((item) => !item.spread && !item.byRef && isObjectCreation(item.value));
   return e.k === 'new' || e.k === 'newAnon';
 }
 
@@ -1872,7 +2079,7 @@ const SIMPLE_ESCAPES: Record<string, string> = {
 /** Decodes one escape sequence of a double-quoted string or heredoc, as bytes. */
 function decodeEscape(text: string, doubleQuoted: boolean): string {
   const body = text.slice(1);
-  if (body === '"') return doubleQuoted ? '"' : '\\"';
+  if (body === '"') return doubleQuoted ? '"' : String.raw`\"`;
   if (body in SIMPLE_ESCAPES) return SIMPLE_ESCAPES[body];
   if (/^[0-7]{1,3}$/.test(body)) return String.fromCharCode(Number.parseInt(body, 8) & 0xff);
   if (/^x[0-9A-Fa-f]{1,2}$/.test(body)) return String.fromCharCode(Number.parseInt(body.slice(1), 16));
@@ -1892,21 +2099,17 @@ function decodeLiteral(raw: string, doubleQuoted: boolean): string {
   return result + enc(raw.slice(last));
 }
 
-/** Decodes the escapes left in a raw part of a double-quoted string. */
-function decodeDoubleQuoted(raw: string, doubleQuoted: boolean): string {
-  return raw.replaceAll(/\\(u\{[0-9A-Fa-f]+\}|x[0-9A-Fa-f]{1,2}|[0-7]{1,3}|[ntrvef\\$"])/g, (match) => {
-    const decoded = decodeEscape(match, doubleQuoted);
-    // Decoded bytes must survive the later UTF-8 encoding of the part, so code points above 0x7F stay escaped.
-    return [...decoded].some((char) => char.charCodeAt(0) > 0x7f) ? match : decoded;
-  });
-}
-
 /** Whether a hook body refers to the property it belongs to through `$this->name`. */
 function referencesProperty(node: Node, name: string): boolean {
   if (node.type === 'member_access_expression' || node.type === 'nullsafe_member_access_expression') {
     const object = node.childForFieldName('object');
     const member = node.childForFieldName('name');
-    if (object?.type === 'variable_name' && object.text === '$this' && member?.type === 'name' && member.text === name) {
+    if (
+      object?.type === 'variable_name' &&
+      object.text === '$this' &&
+      member?.type === 'name' &&
+      member.text === name
+    ) {
       return true;
     }
   }
@@ -1954,7 +2157,12 @@ function labelInsideLoop(statements: Stmt[], label: string, inLoop: boolean): bo
 export function nestedBodies(statement: Stmt): [Stmt[], boolean][] {
   switch (statement.k) {
     case 'if': {
-      return statement.else ? [[statement.then, false], [statement.else, false]] : [[statement.then, false]];
+      return statement.alternate
+        ? [
+            [statement.consequent, false],
+            [statement.alternate, false],
+          ]
+        : [[statement.consequent, false]];
     }
     case 'while':
     case 'do':
@@ -1969,7 +2177,10 @@ export function nestedBodies(statement: Stmt): [Stmt[], boolean][] {
       return [[statement.body, false]];
     }
     case 'try': {
-      const bodies: [Stmt[], boolean][] = [[statement.body, false], ...statement.catches.map((item): [Stmt[], boolean] => [item.body, false])];
+      const bodies: [Stmt[], boolean][] = [
+        [statement.body, false],
+        ...statement.catches.map((item): [Stmt[], boolean] => [item.body, false]),
+      ];
       if (statement.fin) bodies.push([statement.fin, false]);
       return bodies;
     }
@@ -2023,7 +2234,9 @@ function validateReads(body: Stmt[]): void {
     switch (node.k) {
       case 'idx': {
         if (node.index === undefined && !writing) {
-          throw new CompileError([{ row: node.row ?? 0, message: '[] で読み出すことはできません（Cannot use [] for reading）。' }]);
+          throw new CompileError([
+            { row: node.row ?? 0, message: '[] で読み出すことはできません（Cannot use [] for reading）。' },
+          ]);
         }
         visit(node.base, writing);
         visit(node.index, false);
@@ -2079,7 +2292,9 @@ function validateReads(body: Stmt[]): void {
       case 'unset': {
         for (const target of node.targets as { k: string; index?: unknown; row: number }[]) {
           if (target.k === 'idx' && target.index === undefined) {
-            throw new CompileError([{ row: target.row, message: '[] で unset することはできません（Cannot use [] for unsetting）。' }]);
+            throw new CompileError([
+              { row: target.row, message: '[] で unset することはできません（Cannot use [] for unsetting）。' },
+            ]);
           }
           visit(target, true);
         }

@@ -1,6 +1,7 @@
+// oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+import { createObject } from './classes';
 // code-gauge-allow-file fileNcss 600 -- The SPL data structures, each a small class of its own.
 import { debugType } from './conversions';
-import { createObject } from './classes';
 import { throwError, warn } from './errors';
 import { callCallback, callMethod, iterate } from './interp';
 import { defineClass, type NativeMethod } from './native';
@@ -47,7 +48,10 @@ function arrayInput(value: Value | undefined, name: string): PhpArray {
     for (const [key, item] of iterate(value)) array.set(toKey(key), item);
     return array;
   }
-  throwError('TypeError', `${name}::__construct(): Argument #1 ($array) must be of type array, ${debugType(value)} given`);
+  throwError(
+    'TypeError',
+    `${name}::__construct(): Argument #1 ($array) must be of type array, ${debugType(value)} given`
+  );
 }
 
 function arrayMethods(name: string): NativeMethod[] {
@@ -91,7 +95,10 @@ function arrayMethods(name: string): NativeMethod[] {
         return null;
       },
     },
-    { signature: 'append(mixed $value): void', impl: ({ thisObj, args }) => (storageOf(thisObj).writable().append(share(args[0])), null) },
+    {
+      signature: 'append(mixed $value): void',
+      impl: ({ thisObj, args }) => (storageOf(thisObj).writable().append(share(args[0])), null),
+    },
     { signature: 'count(): int', impl: ({ thisObj }) => BigInt(storageOf(thisObj).array.size) },
     {
       signature: 'getArrayCopy(): array',
@@ -120,24 +127,29 @@ function arrayMethods(name: string): NativeMethod[] {
   ];
 }
 
-
 function sortStorage(object: PhpObject, comparator: (a: [Key, Value], b: [Key, Value]) => number): true {
   const storage = storageOf(object);
-  const entries = [...storage.writable().entries()].sort(comparator);
+  const entries = [...storage.writable().entries()].toSorted(comparator);
   const array = new PhpArray();
   for (const [key, value] of entries) array.set(key, value);
   storage.array = array;
   return true;
 }
 
+function keyAt(storage: ArrayStorage): Key | undefined {
+  return storage.array.keys()[storage.position];
+}
+
 function iteratorMethods(): NativeMethod[] {
-  const keyAt = (storage: ArrayStorage): Key | undefined => [...storage.array.map.keys()][storage.position];
   return [
-    { signature: 'current(): mixed', impl: ({ thisObj }) => {
-      const storage = storageOf(thisObj);
-      const key = keyAt(storage);
-      return key === undefined ? null : (storage.array.get(key) as Value);
-    } },
+    {
+      signature: 'current(): mixed',
+      impl: ({ thisObj }) => {
+        const storage = storageOf(thisObj);
+        const key = keyAt(storage);
+        return key === undefined ? null : (storage.array.get(key) as Value);
+      },
+    },
     { signature: 'key(): string|int|null', impl: ({ thisObj }) => keyAt(storageOf(thisObj)) ?? null },
     { signature: 'next(): void', impl: ({ thisObj }) => ((storageOf(thisObj).position += 1), null) },
     { signature: 'rewind(): void', impl: ({ thisObj }) => ((storageOf(thisObj).position = 0), null) },
@@ -147,7 +159,8 @@ function iteratorMethods(): NativeMethod[] {
       impl: ({ thisObj, args }) => {
         const storage = storageOf(thisObj);
         const offset = Number(args[0]);
-        if (offset < 0 || offset >= storage.array.size) throwError('OutOfBoundsException', `Seek position ${offset} is out of range`);
+        if (offset < 0 || offset >= storage.array.size)
+          throwError('OutOfBoundsException', `Seek position ${offset} is out of range`);
         storage.position = offset;
         return null;
       },
@@ -183,7 +196,6 @@ defineClass({
 function createNative(name: string): PhpObject {
   return createObject(rt().classes.get(name.toLowerCase()) as never);
 }
-
 
 // Doubly linked lists, stacks, and queues ----------------------------------------------------------------------------
 
@@ -223,7 +235,10 @@ function emptyError(kind: string, operation: string): never {
 }
 
 const listMethods: NativeMethod[] = [
-  { signature: 'push(mixed $value): void', impl: ({ thisObj, args }) => (listOf(thisObj).items.push(share(args[0])), null) },
+  {
+    signature: 'push(mixed $value): void',
+    impl: ({ thisObj, args }) => (listOf(thisObj).items.push(share(args[0])), null),
+  },
   {
     signature: 'pop(): mixed',
     impl: ({ thisObj }) => {
@@ -240,7 +255,10 @@ const listMethods: NativeMethod[] = [
       return list.items.shift() as Value;
     },
   },
-  { signature: 'unshift(mixed $value): void', impl: ({ thisObj, args }) => (listOf(thisObj).items.unshift(share(args[0])), null) },
+  {
+    signature: 'unshift(mixed $value): void',
+    impl: ({ thisObj, args }) => (listOf(thisObj).items.unshift(share(args[0])), null),
+  },
   {
     signature: 'top(): mixed',
     impl: ({ thisObj }) => {
@@ -272,7 +290,8 @@ const listMethods: NativeMethod[] = [
     impl: ({ thisObj, args }) => {
       const list = listOf(thisObj);
       const index = Number(args[0]);
-      if (index < 0 || index >= list.items.length) throwError('OutOfRangeException', 'SplDoublyLinkedList::offsetGet(): Argument #1 ($index) is out of range');
+      if (index < 0 || index >= list.items.length)
+        throwError('OutOfRangeException', 'SplDoublyLinkedList::offsetGet(): Argument #1 ($index) is out of range');
       return list.items[index];
     },
   },
@@ -283,7 +302,8 @@ const listMethods: NativeMethod[] = [
       if (args[0] === null) list.items.push(share(args[1]));
       else {
         const index = Number(args[0]);
-        if (index < 0 || index >= list.items.length) throwError('OutOfRangeException', 'SplDoublyLinkedList::offsetSet(): Argument #1 ($index) is out of range');
+        if (index < 0 || index >= list.items.length)
+          throwError('OutOfRangeException', 'SplDoublyLinkedList::offsetSet(): Argument #1 ($index) is out of range');
         list.items[index] = share(args[1]);
       }
       return null;
@@ -294,7 +314,8 @@ const listMethods: NativeMethod[] = [
     impl: ({ thisObj, args }) => {
       const list = listOf(thisObj);
       const index = Number(args[0]);
-      if (index < 0 || index >= list.items.length) throwError('OutOfRangeException', 'SplDoublyLinkedList::offsetUnset(): Argument #1 ($index) is out of range');
+      if (index < 0 || index >= list.items.length)
+        throwError('OutOfRangeException', 'SplDoublyLinkedList::offsetUnset(): Argument #1 ($index) is out of range');
       list.items.splice(index, 1);
       return null;
     },
@@ -329,7 +350,10 @@ defineClass({
   name: 'SplQueue',
   parent: 'SplDoublyLinkedList',
   methods: [
-    { signature: 'enqueue(mixed $value): void', impl: ({ thisObj, args }) => (listOf(thisObj).items.push(share(args[0])), null) },
+    {
+      signature: 'enqueue(mixed $value): void',
+      impl: ({ thisObj, args }) => (listOf(thisObj).items.push(share(args[0])), null),
+    },
     {
       signature: 'dequeue(): mixed',
       impl: ({ thisObj }) => {
@@ -375,7 +399,7 @@ const heapOf = (object: PhpObject): HeapStorage => object.internal as HeapStorag
 /** Sorts a heap's values so that the next to extract comes first, as the heap's compare method orders them. */
 function heapOrder(object: PhpObject): Value[] {
   const heap = heapOf(object);
-  return [...heap.items].sort((a, b) => Number(callMethod(object, 'compare', [b, a])) || 0);
+  return heap.items.toSorted((a, b) => Number(callMethod(object, 'compare', [b, a])) || 0);
 }
 
 function heapMethods(): NativeMethod[] {
@@ -408,7 +432,10 @@ function heapMethods(): NativeMethod[] {
     { signature: 'isEmpty(): bool', impl: ({ thisObj }) => heapOf(thisObj).items.length === 0 },
     { signature: 'rewind(): void', impl: () => null },
     { signature: 'valid(): bool', impl: ({ thisObj }) => heapOf(thisObj).items.length > 0 },
-    { signature: 'current(): mixed', impl: ({ thisObj }) => (heapOf(thisObj).items.length === 0 ? null : heapOrder(thisObj)[0]) },
+    {
+      signature: 'current(): mixed',
+      impl: ({ thisObj }) => (heapOf(thisObj).items.length === 0 ? null : heapOrder(thisObj)[0]),
+    },
     { signature: 'key(): int', impl: ({ thisObj }) => BigInt(heapOf(thisObj).items.length - 1) },
     {
       signature: 'next(): void',
@@ -428,24 +455,46 @@ defineClass({
   name: 'SplHeap',
   isAbstract: true,
   interfaces: ['Iterator', 'Countable'],
-  methods: [...heapMethods(), { signature: 'compare(mixed $value1, mixed $value2): int', impl: () => 0n, isAbstract: true, visibility: 'protected' }],
+  methods: [
+    ...heapMethods(),
+    {
+      signature: 'compare(mixed $value1, mixed $value2): int',
+      impl: () => 0n,
+      isAbstract: true,
+      visibility: 'protected',
+    },
+  ],
   createInternal: () => new HeapStorage(),
 });
 defineClass({
   name: 'SplMinHeap',
   parent: 'SplHeap',
-  methods: [{ signature: 'compare(mixed $value1, mixed $value2): int', impl: ({ args }) => BigInt(compare(args[1], args[0])), visibility: 'protected' }],
+  methods: [
+    {
+      signature: 'compare(mixed $value1, mixed $value2): int',
+      impl: ({ args }) => BigInt(compare(args[1], args[0])),
+      visibility: 'protected',
+    },
+  ],
 });
 defineClass({
   name: 'SplMaxHeap',
   parent: 'SplHeap',
-  methods: [{ signature: 'compare(mixed $value1, mixed $value2): int', impl: ({ args }) => BigInt(compare(args[0], args[1])), visibility: 'protected' }],
+  methods: [
+    {
+      signature: 'compare(mixed $value1, mixed $value2): int',
+      impl: ({ args }) => BigInt(compare(args[0], args[1])),
+      visibility: 'protected',
+    },
+  ],
 });
 
 /** Orders a priority queue's entries, highest priority first and earlier insertions first among equals. */
 function priorityOrder(object: PhpObject): HeapStorage['priorities'] {
   const heap = heapOf(object);
-  return [...heap.priorities].sort((a, b) => Number(callMethod(object, 'compare', [b.priority, a.priority])) || a.serial - b.serial);
+  return heap.priorities.toSorted(
+    (a, b) => Number(callMethod(object, 'compare', [b.priority, a.priority])) || a.serial - b.serial
+  );
 }
 
 function extractPriority(object: PhpObject): Value {
@@ -476,14 +525,23 @@ defineClass({
         return priorityOrder(thisObj)[0].value;
       },
     },
-    { signature: 'compare(mixed $priority1, mixed $priority2): int', impl: ({ args }) => BigInt(compare(args[0], args[1])) },
+    {
+      signature: 'compare(mixed $priority1, mixed $priority2): int',
+      impl: ({ args }) => BigInt(compare(args[0], args[1])),
+    },
     { signature: 'count(): int', impl: ({ thisObj }) => BigInt(heapOf(thisObj).priorities.length) },
     { signature: 'isEmpty(): bool', impl: ({ thisObj }) => heapOf(thisObj).priorities.length === 0 },
     { signature: 'rewind(): void', impl: () => null },
     { signature: 'valid(): bool', impl: ({ thisObj }) => heapOf(thisObj).priorities.length > 0 },
-    { signature: 'current(): mixed', impl: ({ thisObj }) => (heapOf(thisObj).priorities.length === 0 ? null : priorityOrder(thisObj)[0].value) },
+    {
+      signature: 'current(): mixed',
+      impl: ({ thisObj }) => (heapOf(thisObj).priorities.length === 0 ? null : priorityOrder(thisObj)[0].value),
+    },
     { signature: 'key(): int', impl: ({ thisObj }) => BigInt(heapOf(thisObj).priorities.length - 1) },
-    { signature: 'next(): void', impl: ({ thisObj }) => (heapOf(thisObj).priorities.length > 0 ? extractPriority(thisObj) : null, null) },
+    {
+      signature: 'next(): void',
+      impl: ({ thisObj }) => (heapOf(thisObj).priorities.length > 0 ? extractPriority(thisObj) : null, null),
+    },
   ],
   createInternal: () => new HeapStorage(),
 });
@@ -516,7 +574,8 @@ function fixedIndex(object: PhpObject, index: Value, method: string): number {
     throwError('TypeError', `Cannot access offset of type ${debugType(index)} on SplFixedArray`);
   }
   const position = Number(index);
-  if (position < 0 || position >= fixedOf(object).items.length) throwError('RuntimeException', 'Index invalid or out of range');
+  if (position < 0 || position >= fixedOf(object).items.length)
+    throwError('RuntimeException', 'Index invalid or out of range');
   void method;
   return position;
 }
@@ -529,13 +588,23 @@ defineClass({
       signature: '__construct(int $size = 0)',
       impl: ({ thisObj, args }) => {
         const size = Number(args[0] ?? 0n);
-        if (size < 0) throwError('ValueError', 'SplFixedArray::__construct(): Argument #1 ($size) must be greater than or equal to 0');
+        if (size < 0)
+          throwError(
+            'ValueError',
+            'SplFixedArray::__construct(): Argument #1 ($size) must be greater than or equal to 0'
+          );
         fixedOf(thisObj).items = Array.from({ length: size }, () => null);
         return null;
       },
     },
-    { signature: 'offsetExists($index): bool', impl: ({ thisObj, args }) => Number(args[0]) >= 0 && Number(args[0]) < fixedOf(thisObj).items.length },
-    { signature: 'offsetGet($index): mixed', impl: ({ thisObj, args }) => fixedOf(thisObj).items[fixedIndex(thisObj, args[0], 'offsetGet')] },
+    {
+      signature: 'offsetExists($index): bool',
+      impl: ({ thisObj, args }) => Number(args[0]) >= 0 && Number(args[0]) < fixedOf(thisObj).items.length,
+    },
+    {
+      signature: 'offsetGet($index): mixed',
+      impl: ({ thisObj, args }) => fixedOf(thisObj).items[fixedIndex(thisObj, args[0], 'offsetGet')],
+    },
     {
       signature: 'offsetSet($index, mixed $value): void',
       impl: ({ thisObj, args }) => {
@@ -622,7 +691,11 @@ class ObjectStorage {
 const objectStorageOf = (object: PhpObject): ObjectStorage => object.internal as ObjectStorage;
 
 function storageKey(value: Value): PhpObject {
-  if (!(value instanceof PhpObject)) throwError('TypeError', `SplObjectStorage::offsetExists(): Argument #1 ($object) must be of type object, ${debugType(value)} given`);
+  if (!(value instanceof PhpObject))
+    throwError(
+      'TypeError',
+      `SplObjectStorage::offsetExists(): Argument #1 ($object) must be of type object, ${debugType(value)} given`
+    );
   return value;
 }
 
@@ -630,10 +703,22 @@ defineClass({
   name: 'SplObjectStorage',
   interfaces: ['Countable', 'Iterator', 'ArrayAccess'],
   methods: [
-    { signature: 'attach(object $object, mixed $info = null): void', impl: ({ thisObj, args }) => (objectStorageOf(thisObj).entries.set(args[0] as PhpObject, args[1] ?? null), null) },
-    { signature: 'detach(object $object): void', impl: ({ thisObj, args }) => (objectStorageOf(thisObj).entries.delete(args[0] as PhpObject), null) },
-    { signature: 'contains(object $object): bool', impl: ({ thisObj, args }) => objectStorageOf(thisObj).entries.has(args[0] as PhpObject) },
-    { signature: 'offsetExists($object): bool', impl: ({ thisObj, args }) => objectStorageOf(thisObj).entries.has(storageKey(args[0])) },
+    {
+      signature: 'attach(object $object, mixed $info = null): void',
+      impl: ({ thisObj, args }) => (objectStorageOf(thisObj).entries.set(args[0] as PhpObject, args[1] ?? null), null),
+    },
+    {
+      signature: 'detach(object $object): void',
+      impl: ({ thisObj, args }) => (objectStorageOf(thisObj).entries.delete(args[0] as PhpObject), null),
+    },
+    {
+      signature: 'contains(object $object): bool',
+      impl: ({ thisObj, args }) => objectStorageOf(thisObj).entries.has(args[0] as PhpObject),
+    },
+    {
+      signature: 'offsetExists($object): bool',
+      impl: ({ thisObj, args }) => objectStorageOf(thisObj).entries.has(storageKey(args[0])),
+    },
     {
       signature: 'offsetGet($object): mixed',
       impl: ({ thisObj, args }) => {
@@ -643,15 +728,33 @@ defineClass({
         return storage.entries.get(key) as Value;
       },
     },
-    { signature: 'offsetSet($object, mixed $info = null): void', impl: ({ thisObj, args }) => (objectStorageOf(thisObj).entries.set(storageKey(args[0]), args[1] ?? null), null) },
-    { signature: 'offsetUnset($object): void', impl: ({ thisObj, args }) => (objectStorageOf(thisObj).entries.delete(storageKey(args[0])), null) },
-    { signature: 'count(int $mode = COUNT_NORMAL): int', impl: ({ thisObj }) => BigInt(objectStorageOf(thisObj).entries.size) },
+    {
+      signature: 'offsetSet($object, mixed $info = null): void',
+      impl: ({ thisObj, args }) => (objectStorageOf(thisObj).entries.set(storageKey(args[0]), args[1] ?? null), null),
+    },
+    {
+      signature: 'offsetUnset($object): void',
+      impl: ({ thisObj, args }) => (objectStorageOf(thisObj).entries.delete(storageKey(args[0])), null),
+    },
+    {
+      signature: 'count(int $mode = COUNT_NORMAL): int',
+      impl: ({ thisObj }) => BigInt(objectStorageOf(thisObj).entries.size),
+    },
     { signature: 'rewind(): void', impl: ({ thisObj }) => ((objectStorageOf(thisObj).position = 0), null) },
-    { signature: 'valid(): bool', impl: ({ thisObj }) => objectStorageOf(thisObj).position < objectStorageOf(thisObj).entries.size },
+    {
+      signature: 'valid(): bool',
+      impl: ({ thisObj }) => objectStorageOf(thisObj).position < objectStorageOf(thisObj).entries.size,
+    },
     { signature: 'key(): int', impl: ({ thisObj }) => BigInt(objectStorageOf(thisObj).position) },
-    { signature: 'current(): object', impl: ({ thisObj }) => [...objectStorageOf(thisObj).entries.keys()][objectStorageOf(thisObj).position] ?? null },
+    {
+      signature: 'current(): object',
+      impl: ({ thisObj }) => [...objectStorageOf(thisObj).entries.keys()][objectStorageOf(thisObj).position] ?? null,
+    },
     { signature: 'next(): void', impl: ({ thisObj }) => ((objectStorageOf(thisObj).position += 1), null) },
-    { signature: 'getInfo(): mixed', impl: ({ thisObj }) => [...objectStorageOf(thisObj).entries.values()][objectStorageOf(thisObj).position] ?? null },
+    {
+      signature: 'getInfo(): mixed',
+      impl: ({ thisObj }) => [...objectStorageOf(thisObj).entries.values()][objectStorageOf(thisObj).position] ?? null,
+    },
     {
       signature: 'setInfo(mixed $info): void',
       impl: ({ thisObj, args }) => {

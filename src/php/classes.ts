@@ -1,5 +1,6 @@
 // code-gauge-allow-file fileNcss 700 -- Class linking, objects, properties, and methods share PHP's visibility rules.
-import type { ClassDecl, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
+// oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
 import { lower } from './bytes';
 import { type ArgValue, functionDisplayName, invoke } from './calls';
 import { debugType, toBool } from './conversions';
@@ -24,9 +25,9 @@ import {
 } from './values';
 
 /** Evaluates a constant expression of a class in that class's scope, which the interpreter provides. */
-let evaluateInClass: (e: import('./ast').Expr, cls: PhpClass) => Value = () => null;
+let evaluateInClass: (e: Expr, cls: PhpClass) => Value = () => null;
 
-export function setClassEvaluator(run: (e: import('./ast').Expr, cls: PhpClass) => Value): void {
+export function setClassEvaluator(run: (e: Expr, cls: PhpClass) => Value): void {
   evaluateInClass = run;
 }
 
@@ -46,7 +47,7 @@ export function canDeclareEarly(decl: ClassDecl, declared: Set<string>): boolean
   if (decl.kind === 'interface' || decl.kind === 'trait') return decl.interfaces.length === 0;
   if (!decl.parent) return true;
   const parent = lower(decl.parent);
-  return declared.has(parent) || (findClass(parent)?.isUser === false);
+  return declared.has(parent) || findClass(parent)?.isUser === false;
 }
 
 // Declaration ----------------------------------------------------------------------------------------------------------
@@ -77,7 +78,8 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
   if (decl.parent) {
     const parent = findClass(decl.parent);
     if (!parent) throwError('Error', `Class "${decl.parent}" not found`);
-    if (parent.kind === 'interface') throw new FatalError(`Class ${decl.name} cannot extend interface ${parent.name}`, row);
+    if (parent.kind === 'interface')
+      throw new FatalError(`Class ${decl.name} cannot extend interface ${parent.name}`, row);
     if (parent.kind === 'trait') throw new FatalError(`Class ${decl.name} cannot extend trait ${parent.name}`, row);
     if (parent.isFinal) throw new FatalError(`Class ${decl.name} cannot extend final class ${parent.name}`, row);
     if (parent.isReadonly !== decl.isReadonly) {
@@ -111,7 +113,8 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
     for (const name of use.names) {
       const trait = findClass(name);
       if (!trait) throwError('Error', `Trait "${name}" not found`);
-      if (trait.kind !== 'trait') throw new FatalError(`${decl.name} cannot use ${trait.name} - it is not a trait`, use.row);
+      if (trait.kind !== 'trait')
+        throw new FatalError(`${decl.name} cannot use ${trait.name} - it is not a trait`, use.row);
       cls.traits.push(trait);
     }
   }
@@ -144,7 +147,10 @@ function inherit(cls: PhpClass, parent: PhpClass): void {
 function addConst(cls: PhpClass, ast: ClassDecl['consts'][number]): void {
   const inherited = cls.consts.get(ast.name);
   if (inherited?.isFinal && inherited.cls !== cls) {
-    throw new FatalError(`${cls.name}::${ast.name} cannot override final constant ${inherited.cls.name}::${ast.name}`, ast.row);
+    throw new FatalError(
+      `${cls.name}::${ast.name} cannot override final constant ${inherited.cls.name}::${ast.name}`,
+      ast.row
+    );
   }
   const constant: ClassConst = {
     name: ast.name,
@@ -180,10 +186,16 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst, row: number, fromTrait
       );
     }
     if (inherited.type && (!ast.type || typeToString(inherited.type) !== typeToString(ast.type))) {
-      throw new FatalError(`Type of ${cls.name}::$${ast.name} must be ${typeToString(inherited.type)} (as in class ${inherited.cls.name})`, ast.row);
+      throw new FatalError(
+        `Type of ${cls.name}::$${ast.name} must be ${typeToString(inherited.type)} (as in class ${inherited.cls.name})`,
+        ast.row
+      );
     }
     if (!inherited.type && ast.type) {
-      throw new FatalError(`Type of ${cls.name}::$${ast.name} must not be defined (as in class ${inherited.cls.name})`, ast.row);
+      throw new FatalError(
+        `Type of ${cls.name}::$${ast.name} must not be defined (as in class ${inherited.cls.name})`,
+        ast.row
+      );
     }
   }
   const decl: PropDecl = {
@@ -307,7 +319,10 @@ function applyTraits(cls: PhpClass, decl: ClassDecl): void {
     const traits = rule.trait ? [findClass(rule.trait) as PhpClass] : cls.traits;
     const source = traits.find((trait) => trait && allTraitMethods(trait).has(lower(rule.method)));
     if (!source) {
-      throw new FatalError(`An alias was defined for ${rule.trait ? `${rule.trait}::` : ''}${rule.method} but this method does not exist`, decl.row);
+      throw new FatalError(
+        `An alias was defined for ${rule.trait ? `${rule.trait}::` : ''}${rule.method} but this method does not exist`,
+        decl.row
+      );
     }
     const method = allTraitMethods(source).get(lower(rule.method)) as Method;
     if (rule.alias) {
@@ -377,7 +392,10 @@ function checkInheritance(cls: PhpClass, row: number): void {
 
 function checkOverride(cls: PhpClass, method: Method, parent: Method): void {
   if (parent.isFinal && method.cls === cls && !parent.cls.decl?.isAnonymous) {
-    throw new FatalError(`Cannot override final method ${parent.cls.name}::${parent.name}()`, method.fn.kind === 'user' ? method.fn.decl.row : 0);
+    throw new FatalError(
+      `Cannot override final method ${parent.cls.name}::${parent.name}()`,
+      method.fn.kind === 'user' ? method.fn.decl.row : 0
+    );
   }
   const row = method.fn.kind === 'user' ? method.fn.decl.row : 0;
   if (parent.isStatic !== method.isStatic) {
@@ -412,9 +430,7 @@ function signatureCompatible(child: Callable, parent: Callable): boolean {
     const own = childParams[index] ?? (childParams.at(-1)?.variadic ? childParams.at(-1) : undefined);
     if (!own) return false;
     if (param.byRef !== own.byRef) return false;
-    if (own.type && !param.type) {
-      if (!(own.type.k === 'named' && own.type.name === 'mixed')) return false;
-    }
+    if (own.type && !param.type && !(own.type.k === 'named' && own.type.name === 'mixed')) return false;
   }
   const parentReturn = parent.kind === 'user' ? parent.decl.returnType : parent.returnType;
   const childReturn = child.kind === 'user' ? child.decl.returnType : child.returnType;
@@ -434,7 +450,8 @@ function signatureText(method: Method): string {
       if (param.variadic) text += '...';
       text += `$${param.name}`;
       if (param.optional && !param.variadic) {
-        const defaultExpr = fn.kind === 'user' ? fn.decl.params.find((other) => other.name === param.name)?.defaultExpr : undefined;
+        const defaultExpr =
+          fn.kind === 'user' ? fn.decl.params.find((other) => other.name === param.name)?.defaultExpr : undefined;
         text += ` = ${defaultExpr ? defaultText(defaultExpr) : '<default>'}`;
       }
       return text;
@@ -444,7 +461,7 @@ function signatureText(method: Method): string {
   return `${method.scope.name}::${method.name}(${params})${returnType ? `: ${typeToString(returnType)}` : ''}`;
 }
 
-function defaultText(e: import('./ast').Expr): string {
+function defaultText(e: Expr): string {
   if (e.k === 'lit') {
     if (e.v === null) return 'null';
     if (typeof e.v === 'string') return `'${e.v}'`;
@@ -492,7 +509,11 @@ export function instantiate(cls: PhpClass, args: ArgValue[], callRow: number, sc
         `Call to ${constructor.visibility} ${constructor.scope.name}::__construct() from ${scope ? `scope ${scope.name}` : 'global scope'}`
       );
     }
-    invoke({ fn: constructor.fn, thisObj: object, scope: constructor.scope, staticClass: cls, method: constructor }, args, callRow);
+    invoke(
+      { fn: constructor.fn, thisObj: object, scope: constructor.scope, staticClass: cls, method: constructor },
+      args,
+      callRow
+    );
   }
   return object;
 }
@@ -589,12 +610,17 @@ export function readProp(object: PhpObject, name: string, scope: PhpClass | unde
   if (decl && !decl.isStatic) {
     if (!canAccessProp(decl, scope)) {
       const magic = object.cls.findMethod('__get');
-      if (magic && !object.guards?.has(`get:${name}`)) return guarded(object, `get:${name}`, () => callMagic(object, magic, [name]));
+      if (magic && !object.guards?.has(`get:${name}`))
+        return guarded(object, `get:${name}`, () => callMagic(object, magic, [name]));
       throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
     }
     if (decl.hooks?.get && !object.guards?.has(`hook:${name}`)) {
       return guarded(object, `hook:${name}`, () =>
-        invoke({ fn: decl.hooks?.get as Callable, thisObj: object, scope: decl.cls, staticClass: object.cls }, [], rt().row)
+        invoke(
+          { fn: decl.hooks?.get as Callable, thisObj: object, scope: decl.cls, staticClass: object.cls },
+          [],
+          rt().row
+        )
       );
     }
     if (decl.isVirtual && decl.hooks && !decl.hooks.get) {
@@ -620,7 +646,8 @@ export function readProp(object: PhpObject, name: string, scope: PhpClass | unde
   const slot = object.props.get(name);
   if (slot !== undefined && slot !== UNINIT) return slot instanceof Ref ? slot.v : slot;
   const magic = object.cls.findMethod('__get');
-  if (magic && !object.guards?.has(`get:${name}`)) return guarded(object, `get:${name}`, () => callMagic(object, magic, [name]));
+  if (magic && !object.guards?.has(`get:${name}`))
+    return guarded(object, `get:${name}`, () => callMagic(object, magic, [name]));
   if (!quiet) warn(`Undefined property: ${object.cls.name}::$${name}`);
   return null;
 }
@@ -636,12 +663,17 @@ export function writeProp(object: PhpObject, name: string, value: Value, scope: 
         guarded(object, `set:${name}`, () => callMagic(object, magic, [name, value]));
         return;
       }
-      if (decl.isReadonly) throwError('Error', `Cannot modify protected readonly property ${object.cls.name}::$${name}`);
+      if (decl.isReadonly)
+        throwError('Error', `Cannot modify protected readonly property ${object.cls.name}::$${name}`);
       throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
     }
     if (decl.hooks?.set && !object.guards?.has(`hook:${name}`)) {
       guarded(object, `hook:${name}`, () =>
-        invoke({ fn: decl.hooks?.set as Callable, thisObj: object, scope: decl.cls, staticClass: object.cls }, [{ v: value }], rt().row)
+        invoke(
+          { fn: decl.hooks?.set as Callable, thisObj: object, scope: decl.cls, staticClass: object.cls },
+          [{ v: value }],
+          rt().row
+        )
       );
       return;
     }
@@ -651,20 +683,27 @@ export function writeProp(object: PhpObject, name: string, value: Value, scope: 
     if (decl.isReadonly) {
       const current = object.props.get(decl.key);
       const initialized = current !== UNINIT && current !== undefined;
-      if (initialized && !object.cloning) throwError('Error', `Cannot modify readonly property ${object.cls.name}::$${name}`);
-      if (!canWriteProp(decl, scope) || (scope !== decl.cls && !object.cloning)) {
-        if (scope === undefined || !scope.isSubclassOf(decl.cls)) {
-          throwError('Error', `Cannot initialize readonly property ${object.cls.name}::$${name} from ${scope ? `scope ${scope.name}` : 'global scope'}`);
-        }
+      if (initialized && !object.cloning)
+        throwError('Error', `Cannot modify readonly property ${object.cls.name}::$${name}`);
+      const outsideScope = !canWriteProp(decl, scope) || (scope !== decl.cls && !object.cloning);
+      if (outsideScope && (scope === undefined || !scope.isSubclassOf(decl.cls))) {
+        throwError(
+          'Error',
+          `Cannot initialize readonly property ${object.cls.name}::$${name} from ${scope ? `scope ${scope.name}` : 'global scope'}`
+        );
       }
       if (object.cloning) {
         object.readonlyInit ??= new Set();
-        if (object.readonlyInit.has(decl.key)) throwError('Error', `Cannot modify readonly property ${object.cls.name}::$${name}`);
+        if (object.readonlyInit.has(decl.key))
+          throwError('Error', `Cannot modify readonly property ${object.cls.name}::$${name}`);
         object.readonlyInit.add(decl.key);
       }
     } else if (!canWriteProp(decl, scope)) {
       const visibility = decl.setVisibility ?? decl.visibility;
-      throwError('Error', `Cannot modify ${visibility}(set) property ${object.cls.name}::$${name} from ${scopeText(scope)}`);
+      throwError(
+        'Error',
+        `Cannot modify ${visibility}(set) property ${object.cls.name}::$${name} from ${scopeText(scope)}`
+      );
     }
     const coerced = decl.type ? coerceProperty(decl, value, object) : value;
     const slot = object.props.get(decl.key);
@@ -690,7 +729,9 @@ export function writeProp(object: PhpObject, name: string, value: Value, scope: 
 export function createDynamicProp(object: PhpObject, name: string): void {
   if (object.cls.isReadonly) throwError('Error', `Cannot create dynamic property ${object.cls.name}::$${name}`);
   if (object.cls.name !== 'stdClass' && !allowsDynamicProps(object.cls)) {
-    deprecated(`Creation of dynamic property ${object.cls.isAnonymous ? 'class@anonymous' : object.cls.name}::$${name} is deprecated`);
+    deprecated(
+      `Creation of dynamic property ${object.cls.isAnonymous ? 'class@anonymous' : object.cls.name}::$${name} is deprecated`
+    );
   }
 }
 
@@ -704,7 +745,12 @@ function allowsDynamicProps(cls: PhpClass): boolean {
 export function coerceProperty(decl: PropDecl, value: Value, object?: PhpObject): Value {
   const type = decl.type;
   if (!type) return value;
-  const coerced = coerce(value, type, { strict: rt().strictTypes, internal: false, scope: decl.cls, staticClass: object?.cls });
+  const coerced = coerce(value, type, {
+    strict: rt().strictTypes,
+    internal: false,
+    scope: decl.cls,
+    staticClass: object?.cls,
+  });
   if (coerced === NO_MATCH) {
     throwError(
       'TypeError',
@@ -723,7 +769,8 @@ export function propRef(object: PhpObject, name: string, scope: PhpClass | undef
   }
   if (decl?.isReadonly) {
     const slot = object.props.get(key);
-    if (slot !== UNINIT && slot !== undefined) throwError('Error', `Cannot modify readonly property ${object.cls.name}::$${name}`);
+    if (slot !== UNINIT && slot !== undefined)
+      throwError('Error', `Cannot modify readonly property ${object.cls.name}::$${name}`);
   }
   let slot = object.props.get(key);
   if (slot instanceof Ref) return slot;
@@ -820,7 +867,8 @@ export function declForKey(cls: PhpClass, key: string): PropDecl | undefined {
 }
 
 function findClassInChain(cls: PhpClass, name: string): PhpClass | undefined {
-  for (let current: PhpClass | undefined = cls; current; current = current.parent) if (current.name === name) return current;
+  for (let current: PhpClass | undefined = cls; current; current = current.parent)
+    if (current.name === name) return current;
   return undefined;
 }
 
@@ -862,18 +910,24 @@ export function classConstant(cls: PhpClass, name: string, scope: PhpClass | und
   if (constant.visibility !== 'public') {
     const allowed =
       scope !== undefined &&
-      (constant.visibility === 'private' ? scope === constant.cls : scope.isSubclassOf(constant.cls) || constant.cls.isSubclassOf(scope));
+      (constant.visibility === 'private'
+        ? scope === constant.cls
+        : scope.isSubclassOf(constant.cls) || constant.cls.isSubclassOf(scope));
     if (!allowed) throwError('Error', `Cannot access ${constant.visibility} constant ${cls.name}::${name}`);
   }
   if (constant.value === undefined) {
-    if (constant.evaluating) throwError('Error', `Cannot declare self-referencing constant ${constant.cls.name}::${name}`);
+    if (constant.evaluating)
+      throwError('Error', `Cannot declare self-referencing constant ${constant.cls.name}::${name}`);
     constant.evaluating = true;
     try {
       let value = (constant.evaluate as () => Value)();
       if (constant.type) {
         const coerced = coerce(value, constant.type, { strict: true, internal: false, scope: constant.cls });
         if (coerced === NO_MATCH) {
-          throwError('TypeError', `Cannot use ${debugType(value)} as value for class constant ${constant.cls.name}::${name} of type ${typeToString(constant.type)}`);
+          throwError(
+            'TypeError',
+            `Cannot use ${debugType(value)} as value for class constant ${constant.cls.name}::${name} of type ${typeToString(constant.type)}`
+          );
         }
         value = coerced;
       }

@@ -1,6 +1,9 @@
+// oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
 import { lower } from './bytes';
+import { throwError } from './errors';
+import { share } from './places';
 import { FatalError, Frame, rt, SCRIPT_PATH, setCallCapture } from './runtime';
 import { coerce, describeType, givenType, NO_MATCH, typeToString } from './types';
 import {
@@ -17,8 +20,6 @@ import {
   type UserFunction,
   type Value,
 } from './values';
-import { throwError } from './errors';
-import { share } from './places';
 
 /** An argument as a call passes it: its value, and the reference a by-reference parameter receives. */
 export interface ArgValue {
@@ -54,6 +55,18 @@ export function setBodyRunner(run: (decl: FunctionDecl, frame: Frame) => Value):
   runBody = run;
 }
 
+/** The fatal error PHP reports when endless recursion uses up its memory. */
+const MEMORY_EXHAUSTED = 'Allowed memory size of 134217728 bytes exhausted (tried to allocate 2097152 bytes)';
+
+/** Ends a run whose recursion used up the host's stack, which PHP reports as running out of memory. */
+export class HostStackExhaustion {
+  readonly message = MEMORY_EXHAUSTED;
+  record: CallRecord | undefined;
+  row: number | undefined;
+}
+
+let hostStackExhaustion = new HostStackExhaustion();
+
 /** The calls running, innermost last, for stack traces. */
 export const callStack: CallRecord[] = [];
 setCallCapture(() => callStack.toReversed());
@@ -63,6 +76,7 @@ let nativeDepth = 0;
 const nativeMarks: number[] = [];
 
 export function resetCallStack(): void {
+  hostStackExhaustion = new HostStackExhaustion();
   callStack.length = 0;
   nativeDepth = 0;
   nativeMarks.length = 0;
@@ -111,10 +125,8 @@ function recordFor(target: CallTarget, args: Value[], row: number | undefined): 
  * @param callRow The row of the call, or undefined for a call native code makes.
  */
 export function invoke(target: CallTarget, args: ArgValue[], callRow: number | undefined): Value {
-  const runtime = rt();
-  const row = callRow === undefined ? undefined : callRow;
-  if (target.fn.kind === 'native') return invokeNative(target, target.fn, args, row);
-  return invokeUser(target, target.fn, args, row);
+  if (target.fn.kind === 'native') return invokeNative(target, target.fn, args, callRow);
+  return invokeUser(target, target.fn, args, callRow);
 }
 
 function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], row: number | undefined): Value {
@@ -179,8 +191,7 @@ function bindNative(
       }
       break;
     }
-    let arg: ArgValue | undefined = positional[index];
-    if (arg === undefined) arg = args.find((candidate) => candidate.name === param.name);
+    const arg = positional.at(index) ?? args.find((candidate) => candidate.name === param.name);
     if (arg === undefined) {
       if (!param.optional) {
         throwError('ArgumentCountError', `${name}(): Argument #${index + 1} ($${param.name}) not passed`);
@@ -205,7 +216,14 @@ function bindNative(
   return { values, refs, named };
 }
 
-function coerceArg(fn: NativeFunction, param: Param, index: number, value: Value, strict: boolean, name: string): Value {
+function coerceArg(
+  fn: NativeFunction,
+  param: Param,
+  index: number,
+  value: Value,
+  strict: boolean,
+  name: string
+): Value {
   if (!param.type) return value;
   const coerced = coerce(value, param.type, {
     strict,
@@ -215,7 +233,10 @@ function coerceArg(fn: NativeFunction, param: Param, index: number, value: Value
   });
   if (coerced === NO_MATCH) {
     if (param.type.k === 'named' && param.type.name === 'callable') {
-      throwError('TypeError', `${name}(): Argument #${index + 1} ($${param.name}) must be a valid callback, ${callableProblem(value)}`);
+      throwError(
+        'TypeError',
+        `${name}(): Argument #${index + 1} ($${param.name}) must be a valid callback, ${callableProblem(value)}`
+      );
     }
     throwError(
       'TypeError',
@@ -255,7 +276,11 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
   const runtime = rt();
   const { decl } = fn;
   if (runtime.depth >= LIMITS.maxCallDepth) {
-    throw new FatalError('Allowed memory size of 134217728 bytes exhausted (tried to allocate 2097152 bytes)', runtime.row, true);
+    throw new FatalError(
+      'Allowed memory size of 134217728 bytes exhausted (tried to allocate 2097152 bytes)',
+      runtime.row,
+      true
+    );
   }
   const name = functionDisplayName(target);
   const caller = runtime.frame;
@@ -282,7 +307,11 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
   const positional = args.filter((arg) => arg.name === undefined);
   const params = fn.params;
   checkNamedArgs(params, args, positional.length);
-  const record = recordFor(target, positional.map((arg) => arg.ref?.v ?? arg.v), row);
+  const record = recordFor(
+    target,
+    positional.map((arg) => arg.ref?.v ?? arg.v),
+    row
+  );
   frame.args = positional.map((arg) => arg.ref?.v ?? arg.v);
   const savedRow = runtime.row;
   runtime.frames.push(frame);
@@ -294,7 +323,19 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
   try {
     runtime.row = decl.row;
     bindParams(frame, fn, args, positional, name, strict, row);
-    let result = runBody(decl, frame);
+    let result: Value;
+    try {
+      result = runBody(decl, frame);
+    } catch (error) {
+      // The host's stack may run out before the call depth limit under a smaller stack. Too little stack remains here
+      // to build an error, so a prepared one carries the innermost call out to where reporting it is safe.
+      if (error instanceof RangeError) {
+        hostStackExhaustion.record ??= callStack.at(-1);
+        hostStackExhaustion.row ??= runtime.row;
+        throw hostStackExhaustion;
+      }
+      throw error;
+    }
     if (decl.returnType) result = checkReturn(result, decl.returnType, name, frame);
     else if (decl.byRefReturn === false) result = share(result);
     runtime.lastReturnRef = decl.byRefReturn ? frame.returnRef : undefined;
@@ -431,7 +472,8 @@ function checkReturn(value: Value, type: TypeDecl, name: string, frame: Frame): 
     staticClass: frame.staticClass,
   });
   if (coerced !== NO_MATCH) return share(coerced);
-  const display = type.k === 'named' && type.name === 'static' && frame.staticClass ? 'static' : describeType(type, frame.scope);
+  const display =
+    type.k === 'named' && type.name === 'static' && frame.staticClass ? 'static' : describeType(type, frame.scope);
   throwError('TypeError', `${name}(): Return value must be of type ${display}, ${givenType(value)} returned`);
 }
 
@@ -439,7 +481,10 @@ function checkReturn(value: Value, type: TypeDecl, name: string, frame: Frame): 
 export function paramIsByRef(fn: Callable, index: number, name?: string): boolean {
   const params = fn.params;
   if (name !== undefined) {
-    return params.find((param) => param.name === name)?.byRef ?? (params.at(-1)?.byRef === true && params.at(-1)?.variadic === true);
+    return (
+      params.find((param) => param.name === name)?.byRef ??
+      (params.at(-1)?.byRef === true && params.at(-1)?.variadic === true)
+    );
   }
   if (index < params.length) return params[index].byRef;
   const last = params.at(-1);
@@ -452,7 +497,10 @@ export function parseSignature(signature: string): { name: string; params: Param
   const close = signature.lastIndexOf(')');
   const name = signature.slice(0, open).trim();
   const inside = signature.slice(open + 1, close).trim();
-  const returnText = signature.slice(close + 1).replace(/^\s*:\s*/, '').trim();
+  const returnText = signature
+    .slice(close + 1)
+    .replace(/^\s*:\s*/, '')
+    .trim();
   const params: Param[] = [];
   if (inside) {
     for (const part of splitParams(inside)) {
@@ -498,7 +546,24 @@ function splitParams(text: string): string[] {
 export function parseTypeText(text: string): TypeDecl {
   if (text.includes('|')) return { k: 'union', types: text.split('|').map((part) => parseTypeText(part)) };
   if (text.startsWith('?')) return { k: 'named', name: lower(text.slice(1)), nullable: true };
-  const builtin = ['int', 'float', 'string', 'bool', 'array', 'callable', 'iterable', 'object', 'mixed', 'void', 'null', 'never', 'false', 'true', 'static', 'self'];
+  const builtin = [
+    'int',
+    'float',
+    'string',
+    'bool',
+    'array',
+    'callable',
+    'iterable',
+    'object',
+    'mixed',
+    'void',
+    'null',
+    'never',
+    'false',
+    'true',
+    'static',
+    'self',
+  ];
   return { k: 'named', name: builtin.includes(lower(text)) ? lower(text) : text };
 }
 

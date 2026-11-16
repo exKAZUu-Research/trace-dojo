@@ -1,4 +1,5 @@
 // code-gauge-allow-file fileNcss 600 -- PCRE translation and the preg functions share the compiled pattern state.
+// oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { dec, enc } from './bytes';
 import { throwError, warn } from './errors';
 import { callCallback } from './interp';
@@ -86,7 +87,11 @@ function translate(pattern: string): Compiled {
     }
   }
   if (end === -1) {
-    throw new PatternError(closing === delimiter ? `No ending delimiter '${delimiter}' found` : `No ending matching delimiter '${closing}' found`);
+    throw new PatternError(
+      closing === delimiter
+        ? `No ending delimiter '${delimiter}' found`
+        : `No ending matching delimiter '${closing}' found`
+    );
   }
   const body = trimmed.slice(1, end);
   const modifiers = trimmed.slice(end + 1);
@@ -168,15 +173,19 @@ const POSIX_CLASSES: Record<string, string> = {
   alnum: 'A-Za-z0-9',
   upper: 'A-Z',
   lower: 'a-z',
-  space: ' \\t\\n\\r\\v\\f',
-  blank: ' \\t',
+  space: String.raw` \t\n\r\v\f`,
+  blank: String.raw` \t`,
   punct: '!-\\/:-@\\[-`{-~',
   xdigit: '0-9A-Fa-f',
-  word: '\\w',
-  cntrl: '\\x00-\\x1f\\x7f',
+  word: String.raw`\w`,
+  cntrl: String.raw`\x00-\x1f\x7f`,
   print: ' -~',
   graph: '!-~',
 };
+
+function unsupported(what: string): never {
+  throw new UnsupportedFeatureError(`正規表現の${what}`);
+}
 
 /** Rewrites PCRE syntax that JavaScript spells differently, rejecting what JavaScript cannot express. */
 // code-gauge-allow functionCognitiveComplexity 60 -- Walks the pattern once, translating each PCRE construct.
@@ -184,38 +193,34 @@ function convertSyntax(source: string, options: SyntaxOptions): string {
   let result = '';
   let index = 0;
   let inClass = false;
-  const unsupported = (what: string): never => {
-    throw new UnsupportedFeatureError(`正規表現の${what}`);
-  };
   while (index < source.length) {
     const char = source[index];
     if (char === '\\') {
       const next = source[index + 1] ?? '';
       index += 2;
       if (inClass) {
-        if (next === 'h') result += ' \\t';
-        else result += `\\${next}`;
+        result += next === 'h' ? String.raw` \t` : `\\${next}`;
         continue;
       }
       switch (next) {
         case 'A': {
-          result += '(?<![\\s\\S])';
+          result += String.raw`(?<![\s\S])`;
           break;
         }
         case 'z': {
-          result += '(?![\\s\\S])';
+          result += String.raw`(?![\s\S])`;
           break;
         }
         case 'Z': {
-          result += '(?=\\n?(?![\\s\\S]))';
+          result += String.raw`(?=\n?(?![\s\S]))`;
           break;
         }
         case 'h': {
-          result += '[ \\t]';
+          result += String.raw`[ \t]`;
           break;
         }
         case 'R': {
-          result += '(?:\\r\\n|\\n|\\r)';
+          result += String.raw`(?:\r\n|\n|\r)`;
           break;
         }
         case 'G':
@@ -225,7 +230,7 @@ function convertSyntax(source: string, options: SyntaxOptions): string {
         }
         case 'g': {
           const reference = /^\{?(-?\d+|\w+)\}?/.exec(source.slice(index));
-          if (!reference) unsupported('\\g');
+          if (!reference) unsupported(String.raw`\g`);
           index += (reference as RegExpExecArray)[0].length;
           const target = (reference as RegExpExecArray)[1];
           result += /^\d+$/.test(target) ? `\\${target}` : `\\k<${target}>`;
@@ -248,7 +253,7 @@ function convertSyntax(source: string, options: SyntaxOptions): string {
         }
       }
       if (char === ']') inClass = false;
-      result += char === '[' ? '\\[' : char;
+      result += char === '[' ? String.raw`\[` : char;
       index++;
       continue;
     }
@@ -272,13 +277,17 @@ function convertSyntax(source: string, options: SyntaxOptions): string {
           index++;
         }
         if (source[index] === ']') {
-          result += '\\]';
+          result += String.raw`\]`;
           index++;
         }
         continue;
       }
       case '$': {
-        result += options.multiline ? '$' : options.dollarEndOnly ? '(?![\\s\\S])' : '(?=\\n?(?![\\s\\S]))';
+        result += options.multiline
+          ? '$'
+          : options.dollarEndOnly
+            ? String.raw`(?![\s\S])`
+            : String.raw`(?=\n?(?![\s\S]))`;
         index++;
         continue;
       }
@@ -323,7 +332,7 @@ function convertSyntax(source: string, options: SyntaxOptions): string {
       case '{': {
         const quantifier = /^\{\d+(,\d*)?\}/.exec(source.slice(index));
         if (!quantifier) {
-          result += '\\{';
+          result += String.raw`\{`;
           index++;
           continue;
         }
@@ -333,7 +342,7 @@ function convertSyntax(source: string, options: SyntaxOptions): string {
         continue;
       }
       case '}': {
-        result += '\\}';
+        result += String.raw`\}`;
         index++;
         continue;
       }
@@ -402,7 +411,10 @@ function* matchesOf(compiled: Compiled, subject: string, offset = 0): Generator<
     for (const value of result) texts.push(value === undefined ? undefined : compiled.utf8 ? enc(value) : value);
     yield { starts, ends, texts };
     const matchEnd = result.index + result[0].length;
-    position = result[0].length === 0 ? matchEnd + (compiled.utf8 && (text.codePointAt(matchEnd) ?? 0) > 0xff_ff ? 2 : 1) : matchEnd;
+    position =
+      result[0].length === 0
+        ? matchEnd + (compiled.utf8 && (text.codePointAt(matchEnd) ?? 0) > 0xff_ff ? 2 : 1)
+        : matchEnd;
   }
 }
 
@@ -455,13 +467,19 @@ function withIndices(compiled: Compiled): Compiled {
 }
 
 /** Builds the array a match fills: by group number, with named groups before their numbers. */
-function matchArray(compiled: Compiled, match: Match, offsetCapture: boolean, unmatchedAsNull: boolean, trim: boolean): PhpArray {
+function matchArray(
+  compiled: Compiled,
+  match: Match,
+  offsetCapture: boolean,
+  unmatchedAsNull: boolean,
+  trim: boolean
+): PhpArray {
   const array = new PhpArray();
   let last = match.texts.length - 1;
   if (trim && !unmatchedAsNull) while (last > 0 && match.texts[last] === undefined) last--;
   for (let group = 0; group <= last; group++) {
     const text = match.texts[group];
-    const value: Value = text === undefined ? (unmatchedAsNull ? null : '') : text;
+    const value: Value = text ?? (unmatchedAsNull ? null : '');
     const entry = offsetCapture ? PhpArray.list([value, BigInt(match.starts[group])]) : value;
     const name = compiled.names[group];
     if (name !== undefined) array.set(name, entry);
@@ -470,62 +488,75 @@ function matchArray(compiled: Compiled, match: Match, offsetCapture: boolean, un
   return array;
 }
 
-defineFunction('preg_match(string $pattern, string $subject, &$matches = null, int $flags = 0, int $offset = 0): int|false', ({ args, refs }) => {
-  const compiled = compile('preg_match', args[0] as string);
-  if (!compiled) return false;
-  rt().lastPregError = 0;
-  const flags = (args[3] as bigint | undefined) ?? 0n;
-  const offset = Number((args[4] as bigint | undefined) ?? 0n);
-  const subject = args[1] as string;
-  const start = offset < 0 ? Math.max(subject.length + offset, 0) : offset;
-  const first = matchesOf(withIndices(compiled), subject, start).next();
-  if (refs[2]) {
-    refs[2].v = first.done ? new PhpArray() : matchArray(compiled, first.value, (flags & 256n) !== 0n, (flags & 512n) !== 0n, true);
-  }
-  if (rt().lastPregError === 4) {
-    if (refs[2]) refs[2].v = new PhpArray();
-    return false;
-  }
-  return first.done ? 0n : 1n;
-});
-defineFunction('preg_match_all(string $pattern, string $subject, &$matches = null, int $flags = 0, int $offset = 0): int|false', ({ args, refs }) => {
-  const compiled = compile('preg_match_all', args[0] as string);
-  if (!compiled) return false;
-  rt().lastPregError = 0;
-  let flags = (args[3] as bigint | undefined) ?? 0n;
-  if ((flags & 3n) === 0n) flags |= 1n;
-  const offsetCapture = (flags & 256n) !== 0n;
-  const unmatchedAsNull = (flags & 512n) !== 0n;
-  const matches = [...matchesOf(withIndices(compiled), args[1] as string, Number((args[4] as bigint | undefined) ?? 0n))];
-  if (refs[2]) {
-    const result = new PhpArray();
-    if ((flags & 2n) !== 0n) {
-      for (const match of matches) result.append(matchArray(compiled, match, offsetCapture, unmatchedAsNull, true));
-    } else {
-      for (let group = 0; group <= compiled.groupCount; group++) {
-        const column = new PhpArray();
-        for (const match of matches) {
-          const text = match.texts[group];
-          const value: Value = text === undefined ? (unmatchedAsNull ? null : '') : text;
-          column.append(offsetCapture ? PhpArray.list([value, BigInt(match.starts[group])]) : value);
-        }
-        const name = compiled.names[group];
-        if (name !== undefined) result.set(name, column);
-        result.set(BigInt(group), name !== undefined ? column.copy() : column);
-      }
+defineFunction(
+  'preg_match(string $pattern, string $subject, &$matches = null, int $flags = 0, int $offset = 0): int|false',
+  ({ args, refs }) => {
+    const compiled = compile('preg_match', args[0] as string);
+    if (!compiled) return false;
+    rt().lastPregError = 0;
+    const flags = (args[3] as bigint | undefined) ?? 0n;
+    const offset = Number((args[4] as bigint | undefined) ?? 0n);
+    const subject = args[1] as string;
+    const start = offset < 0 ? Math.max(subject.length + offset, 0) : offset;
+    const first = matchesOf(withIndices(compiled), subject, start).next();
+    if (refs[2]) {
+      refs[2].v = first.done
+        ? new PhpArray()
+        : matchArray(compiled, first.value, (flags & 256n) !== 0n, (flags & 512n) !== 0n, true);
     }
-    refs[2].v = result;
+    if (rt().lastPregError === 4) {
+      if (refs[2]) refs[2].v = new PhpArray();
+      return false;
+    }
+    return first.done ? 0n : 1n;
   }
-  return BigInt(matches.length);
-});
+);
+defineFunction(
+  'preg_match_all(string $pattern, string $subject, &$matches = null, int $flags = 0, int $offset = 0): int|false',
+  ({ args, refs }) => {
+    const compiled = compile('preg_match_all', args[0] as string);
+    if (!compiled) return false;
+    rt().lastPregError = 0;
+    let flags = (args[3] as bigint | undefined) ?? 0n;
+    if ((flags & 3n) === 0n) flags |= 1n;
+    const offsetCapture = (flags & 256n) !== 0n;
+    const unmatchedAsNull = (flags & 512n) !== 0n;
+    const matches = [
+      ...matchesOf(withIndices(compiled), args[1] as string, Number((args[4] as bigint | undefined) ?? 0n)),
+    ];
+    if (refs[2]) {
+      const result = new PhpArray();
+      if ((flags & 2n) !== 0n) {
+        for (const match of matches) result.append(matchArray(compiled, match, offsetCapture, unmatchedAsNull, true));
+      } else {
+        for (let group = 0; group <= compiled.groupCount; group++) {
+          const column = new PhpArray();
+          for (const match of matches) {
+            const text = match.texts[group];
+            const value: Value = text ?? (unmatchedAsNull ? null : '');
+            column.append(offsetCapture ? PhpArray.list([value, BigInt(match.starts[group])]) : value);
+          }
+          const name = compiled.names[group];
+          if (name !== undefined) result.set(name, column);
+          result.set(BigInt(group), name !== undefined ? column.copy() : column);
+        }
+      }
+      refs[2].v = result;
+    }
+    return BigInt(matches.length);
+  }
+);
 
 /** Expands `$1`, `\1`, and `${1}` in a replacement. */
 function expandReplacement(replacement: string, match: Match): string {
-  return replacement.replaceAll(/\\\\|\\(\d{1,2})|\$(\d{1,2})|\$\{(\d{1,2})\}/g, (token, a?: string, b?: string, c?: string) => {
-    if (token === '\\\\') return '\\';
-    const group = Number(a ?? b ?? c);
-    return match.texts[group] ?? '';
-  });
+  return replacement.replaceAll(
+    /\\\\|\\(\d{1,2})|\$(\d{1,2})|\$\{(\d{1,2})\}/g,
+    (token, a?: string, b?: string, c?: string) => {
+      if (token === String.raw`\\`) return '\\';
+      const group = Number(a ?? b ?? c);
+      return match.texts[group] ?? '';
+    }
+  );
 }
 
 function replaceOne(
@@ -552,11 +583,17 @@ function replaceOne(
   return result + subject.slice(last);
 }
 
-function pregReplace(name: string, args: Value[], refs: (Ref | undefined)[], replacer: (pattern: number) => (match: Match) => string): Value {
+function pregReplace(
+  name: string,
+  args: Value[],
+  refs: (Ref | undefined)[],
+  replacer: (pattern: number) => (match: Match) => string
+): Value {
   rt().lastPregError = 0;
   const [patternValue, , subjectValue, limitValue] = args;
   const limit = limitValue === undefined ? -1 : Number(limitValue);
-  const patterns = patternValue instanceof PhpArray ? patternValue.values().map((item) => toStr(item)) : [toStr(patternValue)];
+  const patterns =
+    patternValue instanceof PhpArray ? patternValue.values().map((item) => toStr(item)) : [toStr(patternValue)];
   const count = { value: 0 };
   const replaceSubject = (subject: string): string | undefined => {
     let current: string | undefined = subject;
@@ -584,11 +621,17 @@ defineFunction(
   ({ args, refs }) => {
     const replacement = args[1];
     if (replacement instanceof PhpArray && !(args[0] instanceof PhpArray)) {
-      throwError('TypeError', 'preg_replace(): Argument #1 ($pattern) must be of type array when argument #2 ($replacement) is an array, string given');
+      throwError(
+        'TypeError',
+        'preg_replace(): Argument #1 ($pattern) must be of type array when argument #2 ($replacement) is an array, string given'
+      );
     }
     const replacements = replacement instanceof PhpArray ? replacement.values().map((item) => toStr(item)) : undefined;
-    return pregReplace('preg_replace', args, refs, (index) => (match) =>
-      expandReplacement(replacements ? (replacements[index] ?? '') : toStr(replacement), match)
+    return pregReplace(
+      'preg_replace',
+      args,
+      refs,
+      (index) => (match) => expandReplacement(replacements ? (replacements[index] ?? '') : toStr(replacement), match)
     );
   }
 );
@@ -597,50 +640,58 @@ defineFunction(
   ({ args, refs }) => {
     const flags = (args[5] as bigint | undefined) ?? 0n;
     return pregReplace('preg_replace_callback', args, refs, (index) => (match) => {
-      const compiled = compile('preg_replace_callback', toStr(args[0] instanceof PhpArray ? (args[0].values()[index] as Value) : args[0])) as Compiled;
-      return toStr(callCallback(args[1], [matchArray(compiled, match, (flags & 256n) !== 0n, (flags & 512n) !== 0n, true)]));
+      const compiled = compile(
+        'preg_replace_callback',
+        toStr(args[0] instanceof PhpArray ? (args[0].values()[index] as Value) : args[0])
+      ) as Compiled;
+      return toStr(
+        callCallback(args[1], [matchArray(compiled, match, (flags & 256n) !== 0n, (flags & 512n) !== 0n, true)])
+      );
     });
   }
 );
-defineFunction('preg_split(string $pattern, string $subject, int $limit = -1, int $flags = 0): array|false', ({ args }) => {
-  const compiled = compile('preg_split', args[0] as string);
-  if (!compiled) return false;
-  rt().lastPregError = 0;
-  const subject = args[1] as string;
-  let limit = args[2] === undefined || args[2] === null ? -1 : Number(args[2]);
-  if (limit === 0) limit = -1;
-  const flags = (args[3] as bigint | undefined) ?? 0n;
-  const noEmpty = (flags & 1n) !== 0n;
-  const delimCapture = (flags & 2n) !== 0n;
-  const offsetCapture = (flags & 4n) !== 0n;
-  const result = new PhpArray();
-  const add = (text: string, offset: number): void => {
-    result.append(offsetCapture ? PhpArray.list([text, BigInt(offset)]) : text);
-  };
-  let last = 0;
-  for (const match of matchesOf(withIndices(compiled), subject)) {
-    if (limit !== -1 && limit <= 1) break;
-    if (!noEmpty || match.starts[0] !== last) {
-      add(subject.slice(last, match.starts[0]), last);
-      if (limit !== -1) limit--;
-    }
-    if (delimCapture) {
-      for (let group = 1; group < match.texts.length; group++) {
-        const text = match.texts[group];
-        if (text !== undefined && !(noEmpty && text === '')) add(text, match.starts[group]);
+defineFunction(
+  'preg_split(string $pattern, string $subject, int $limit = -1, int $flags = 0): array|false',
+  ({ args }) => {
+    const compiled = compile('preg_split', args[0] as string);
+    if (!compiled) return false;
+    rt().lastPregError = 0;
+    const subject = args[1] as string;
+    let limit = args[2] === undefined || args[2] === null ? -1 : Number(args[2]);
+    if (limit === 0) limit = -1;
+    const flags = (args[3] as bigint | undefined) ?? 0n;
+    const noEmpty = (flags & 1n) !== 0n;
+    const delimCapture = (flags & 2n) !== 0n;
+    const offsetCapture = (flags & 4n) !== 0n;
+    const result = new PhpArray();
+    const add = (text: string, offset: number): void => {
+      result.append(offsetCapture ? PhpArray.list([text, BigInt(offset)]) : text);
+    };
+    let last = 0;
+    for (const match of matchesOf(withIndices(compiled), subject)) {
+      if (limit !== -1 && limit <= 1) break;
+      if (!noEmpty || match.starts[0] !== last) {
+        add(subject.slice(last, match.starts[0]), last);
+        if (limit !== -1) limit--;
       }
+      if (delimCapture) {
+        for (let group = 1; group < match.texts.length; group++) {
+          const text = match.texts[group];
+          if (text !== undefined && !(noEmpty && text === '')) add(text, match.starts[group]);
+        }
+      }
+      last = match.ends[0];
     }
-    last = match.ends[0];
+    if (!noEmpty || last < subject.length) add(subject.slice(last), last);
+    return result;
   }
-  if (!noEmpty || last < subject.length) add(subject.slice(last), last);
-  return result;
-});
+);
 defineFunction('preg_quote(string $str, ?string $delimiter = null): string', ({ args }) => {
   const delimiter = (args[1] as string | null | undefined) ?? '';
   let result = '';
   for (const char of args[0] as string) {
-    if ('.\\+*?[^]$(){}=!<>|:-#/'.includes(char) && (char !== '/' || delimiter === '/')) result += `\\${char}`;
-    else if (char === '\0') result += '\\000';
+    if (String.raw`.\+*?[^]$(){}=!<>|:-#/`.includes(char) && (char !== '/' || delimiter === '/')) result += `\\${char}`;
+    else if (char === '\0') result += String.raw`\000`;
     else if (delimiter !== '' && char === delimiter[0]) result += `\\${char}`;
     else result += char;
   }
@@ -659,7 +710,14 @@ defineFunction('preg_grep(string $pattern, array $array, int $flags = 0): array|
 });
 defineFunction('preg_last_error(): int', () => BigInt(rt().lastPregError));
 defineFunction('preg_last_error_msg(): string', () => {
-  const messages = ['No error', 'Internal error', 'Backtrack limit exhausted', 'Recursion limit exhausted', 'Malformed UTF-8 characters, possibly incorrectly encoded', 'The offset did not correspond to the beginning of a valid UTF-8 code point', 'JIT stack limit exhausted'];
+  const messages = [
+    'No error',
+    'Internal error',
+    'Backtrack limit exhausted',
+    'Recursion limit exhausted',
+    'Malformed UTF-8 characters, possibly incorrectly encoded',
+    'The offset did not correspond to the beginning of a valid UTF-8 code point',
+    'JIT stack limit exhausted',
+  ];
   return messages[rt().lastPregError] ?? 'Internal error';
 });
-

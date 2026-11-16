@@ -1,3 +1,4 @@
+// oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { randomInt } from 'node:crypto';
 
 import { debugType, formatFloat } from './conversions';
@@ -25,7 +26,7 @@ const MATH_CONSTANTS: [string, number][] = [
   ['M_SQRT3', Math.sqrt(3)],
   ['M_SQRT1_2', Math.SQRT1_2],
   ['M_LNPI', Math.log(Math.PI)],
-  ['M_EULER', 0.577_215_664_901_532_9],
+  ['M_EULER', 0.5772156649015329],
 ];
 for (const [name, value] of MATH_CONSTANTS) defineConstant(name, value);
 defineConstant('PHP_ROUND_HALF_UP', 1n);
@@ -42,23 +43,27 @@ function num(value: Value): bigint | number {
 
 defineFunction('abs(int|float $num): int|float', ({ args }) => {
   const value = num(args[0]);
-  if (typeof value === 'bigint') return value === -9_223_372_036_854_775_808n ? -Number(value) : value < 0n ? -value : value;
+  if (typeof value === 'bigint')
+    return value === -9_223_372_036_854_775_808n ? -Number(value) : value < 0n ? -value : value;
   return Math.abs(value);
 });
 defineFunction('ceil(int|float $num): float', ({ args }) => Math.ceil(Number(num(args[0]))));
 defineFunction('floor(int|float $num): float', ({ args }) => Math.floor(Number(num(args[0]))));
-defineFunction('round(int|float $num, int $precision = 0, int|RoundingMode $mode = PHP_ROUND_HALF_UP): float', ({ args }) => {
-  const value = num(args[0]);
-  const places = Number(args[1] ?? 0n);
-  const modes: Record<string, RoundMode> = { '1': 'halfUp', '2': 'halfDown', '3': 'halfEven', '4': 'halfOdd' };
-  const mode = modes[String(args[2] ?? 1n)];
-  if (!mode) throwError('ValueError', 'round(): Argument #3 ($mode) must be a valid rounding mode (RoundingMode::*)');
-  if (typeof value === 'bigint') {
-    if (places >= 0) return Number(value);
-    return phpRound(Number(value), places, mode);
+defineFunction(
+  'round(int|float $num, int $precision = 0, int|RoundingMode $mode = PHP_ROUND_HALF_UP): float',
+  ({ args }) => {
+    const value = num(args[0]);
+    const places = Number(args[1] ?? 0n);
+    const modes: Record<string, RoundMode> = { '1': 'halfUp', '2': 'halfDown', '3': 'halfEven', '4': 'halfOdd' };
+    const mode = modes[String(args[2] ?? 1n)];
+    if (!mode) throwError('ValueError', 'round(): Argument #3 ($mode) must be a valid rounding mode (RoundingMode::*)');
+    if (typeof value === 'bigint') {
+      if (places >= 0) return Number(value);
+      return phpRound(Number(value), places, mode);
+    }
+    return phpRound(value, places, mode);
   }
-  return phpRound(value, places, mode);
-});
+);
 defineFunction('sqrt(float $num): float', ({ args }) => Math.sqrt(args[0] as number));
 defineFunction('pow(mixed $num, mixed $exponent): mixed', ({ args }) => {
   return arithmetic('**', args[0], args[1]);
@@ -66,7 +71,8 @@ defineFunction('pow(mixed $num, mixed $exponent): mixed', ({ args }) => {
 defineFunction('intdiv(int $num1, int $num2): int', ({ args }) => {
   const [a, b] = args as [bigint, bigint];
   if (b === 0n) throwError('DivisionByZeroError', 'Division by zero');
-  if (a === -9_223_372_036_854_775_808n && b === -1n) throwError('ArithmeticError', 'Division of PHP_INT_MIN by -1 is not an integer');
+  if (a === -9_223_372_036_854_775_808n && b === -1n)
+    throwError('ArithmeticError', 'Division of PHP_INT_MIN by -1 is not an integer');
   return a / b;
 });
 defineFunction('fmod(float $num1, float $num2): float', ({ args }) => (args[0] as number) % (args[1] as number));
@@ -93,7 +99,25 @@ function extreme(name: string, args: Value[], direction: number): Value {
 }
 
 defineFunction('pi(): float', () => Math.PI);
-for (const name of ['sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh', 'exp', 'log10', 'log2', 'expm1', 'log1p'] as const) {
+for (const name of [
+  'sin',
+  'cos',
+  'tan',
+  'asin',
+  'acos',
+  'atan',
+  'sinh',
+  'cosh',
+  'tanh',
+  'asinh',
+  'acosh',
+  'atanh',
+  'exp',
+  'log10',
+  'log2',
+  'expm1',
+  'log1p',
+] as const) {
   defineFunction(`${name}(float $num): float`, ({ args }) => Math[name](args[0] as number));
 }
 defineFunction('atan2(float $y, float $x): float', ({ args }) => Math.atan2(args[0] as number, args[1] as number));
@@ -156,8 +180,10 @@ defineFunction('bindec(string $binary_string): int|float', ({ args }) => fromBas
 defineFunction('octdec(string $octal_string): int|float', ({ args }) => fromBase('octdec', args[0] as string, 8));
 defineFunction('base_convert(string $num, int $frombase, int $tobase): string', ({ args }) => {
   const [text, from, to] = args as [string, bigint, bigint];
-  if (from < 2n || from > 36n) throwError('ValueError', 'base_convert(): Argument #2 ($from_base) must be between 2 and 36 (inclusive)');
-  if (to < 2n || to > 36n) throwError('ValueError', 'base_convert(): Argument #3 ($to_base) must be between 2 and 36 (inclusive)');
+  if (from < 2n || from > 36n)
+    throwError('ValueError', 'base_convert(): Argument #2 ($from_base) must be between 2 and 36 (inclusive)');
+  if (to < 2n || to > 36n)
+    throwError('ValueError', 'base_convert(): Argument #3 ($to_base) must be between 2 and 36 (inclusive)');
   const value = fromBase('base_convert', text.toLowerCase(), Number(from));
   if (typeof value === 'number') return Math.trunc(value).toString(Number(to));
   return (value as bigint).toString(Number(to));
@@ -168,7 +194,12 @@ defineFunction('base_convert(string $num, int $frombase, int $tobase): string', 
 defineFunction(
   'number_format(float $num, int $decimals = 0, ?string $decimal_separator = ".", ?string $thousands_separator = ","): string',
   ({ args }) => {
-    const [value, decimalsArg = 0n, point = '.', separator = ','] = args as [number, bigint?, (string | null)?, (string | null)?];
+    const [value, decimalsArg = 0n, point = '.', separator = ','] = args as [
+      number,
+      bigint?,
+      (string | null)?,
+      (string | null)?,
+    ];
     const decimals = Math.max(Number(decimalsArg), 0);
     const rounded = phpRound(value, Number(decimalsArg));
     if (!Number.isFinite(rounded)) return formatFloat(rounded);
@@ -193,7 +224,8 @@ defineFunction('mt_rand(int $min = UNKNOWN, int $max = UNKNOWN): int', ({ args }
   if (args.length === 0) return BigInt(rt().mt.next() >>> 1);
   if (args.length === 1) throwError('ArgumentCountError', 'mt_rand() expects exactly 2 arguments, 1 given');
   const [min, max] = args as [bigint, bigint];
-  if (max < min) throwError('ValueError', 'mt_rand(): Argument #2 ($max) must be greater than or equal to argument #1 ($min)');
+  if (max < min)
+    throwError('ValueError', 'mt_rand(): Argument #2 ($max) must be greater than or equal to argument #1 ($min)');
   return rt().mt.range(min, max);
 });
 defineFunction('rand(int $min = UNKNOWN, int $max = UNKNOWN): int', ({ args }) => {
@@ -207,7 +239,8 @@ defineFunction('mt_getrandmax(): int', () => 2_147_483_647n);
 defineAlias('getrandmax', 'mt_getrandmax');
 defineFunction('random_int(int $min, int $max): int', ({ args }) => {
   const [min, max] = args as [bigint, bigint];
-  if (min > max) throwError('ValueError', 'random_int(): Argument #1 ($min) must be less than or equal to argument #2 ($max)');
+  if (min > max)
+    throwError('ValueError', 'random_int(): Argument #1 ($min) must be less than or equal to argument #2 ($max)');
   const span = max - min;
   if (span < 2n ** 48n - 1n) return min + BigInt(randomInt(0, Number(span) + 1));
   return min + (BigInt(randomInt(0, 2 ** 47)) * span) / 2n ** 47n;

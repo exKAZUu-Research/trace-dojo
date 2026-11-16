@@ -1,8 +1,8 @@
-import { debugType, numericPrefix, floatFitsInt, formatFloat } from './conversions';
+import { debugType, floatFitsInt, formatFloat, numericPrefix } from './conversions';
 import { deprecated, throwError } from './errors';
 import { formatFloatForMessage, toStr } from './operators';
 import { rt } from './runtime';
-import { PhpArray, PhpClass, PhpObject, type TypeDecl, type Value } from './values';
+import { PhpArray, type PhpClass, PhpObject, type TypeDecl, type Value } from './values';
 
 /** Checks whether a value is callable, which the interpreter provides. */
 let isCallableValue: (value: Value) => boolean = () => false;
@@ -23,7 +23,22 @@ export function typeToString(type: TypeDecl): string {
   return sortUnion(parts).join('|');
 }
 
-const BUILTIN_ORDER = ['object', 'array', 'string', 'int', 'float', 'iterable', 'callable', 'bool', 'false', 'true', 'void', 'null', 'never', 'mixed'];
+const BUILTIN_ORDER = [
+  'object',
+  'array',
+  'string',
+  'int',
+  'float',
+  'iterable',
+  'callable',
+  'bool',
+  'false',
+  'true',
+  'void',
+  'null',
+  'never',
+  'mixed',
+];
 
 function sortUnion(parts: string[]): string[] {
   const classes = parts.filter((part) => !BUILTIN_ORDER.includes(part));
@@ -59,7 +74,7 @@ export function coerce(value: Value, type: TypeDecl, context: CoercionContext): 
   if (value === null) {
     if (context.internal && context.nullDeprecation && scalarTarget(type)) {
       deprecated(context.nullDeprecation());
-      return coerceScalar(value, type, { ...context, strict: false });
+      return coerceScalar(value, type);
     }
     return NO_MATCH;
   }
@@ -67,7 +82,7 @@ export function coerce(value: Value, type: TypeDecl, context: CoercionContext): 
     if (typeof value === 'bigint' && acceptsName(type, 'float')) return Number(value);
     return NO_MATCH;
   }
-  return coerceScalar(value, type, context);
+  return coerceScalar(value, type);
 }
 
 export { NO_MATCH };
@@ -85,7 +100,7 @@ function acceptsName(type: TypeDecl, name: string): boolean {
 }
 
 // code-gauge-allow functionCognitiveComplexity 30 -- Follows PHP's order of scalar coercions for unions.
-function coerceScalar(value: Value, type: TypeDecl, context: CoercionContext): Value | typeof NO_MATCH {
+function coerceScalar(value: Value, type: TypeDecl): Value | typeof NO_MATCH {
   if (value instanceof PhpArray) return NO_MATCH;
   if (value instanceof PhpObject) {
     if (acceptsName(type, 'string') && value.cls.findMethod('__tostring')) return toStr(value);
@@ -154,7 +169,11 @@ function coerceScalar(value: Value, type: TypeDecl, context: CoercionContext): V
 
 /** Whether a value has a declared type exactly, without coercion. */
 // code-gauge-allow functionCognitiveComplexity 30 -- One case per builtin type name.
-export function matches(value: Value, type: TypeDecl, context: Pick<CoercionContext, 'scope' | 'staticClass'>): boolean {
+export function matches(
+  value: Value,
+  type: TypeDecl,
+  context: Pick<CoercionContext, 'scope' | 'staticClass'>
+): boolean {
   if (type.k === 'union') return type.types.some((part) => matches(value, part, context));
   if (type.k === 'inter') return type.types.every((part) => matches(value, part, context));
   if (value === null && type.nullable) return true;

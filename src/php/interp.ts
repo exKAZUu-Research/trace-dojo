@@ -1,9 +1,11 @@
 // code-gauge-allow-file fileNcss 1500 -- One evaluator of every statement and expression kind, which share the frame and places.
+// oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import type { Arg, ClassRef, Expr, FunctionDecl, ListItem, Program, Stmt } from './ast';
+import type { Arg, ClassDecl, ClassRef, Expr, FunctionDecl, ListItem, Program, Stmt } from './ast';
 import { lower } from './bytes';
 import {
   type ArgValue,
+  callStack,
   type CallTarget,
   closureFunction,
   invoke,
@@ -36,7 +38,7 @@ import * as classesModule from './classes';
 import * as conversionsModule from './conversions';
 import { debugType, toBool } from './conversions';
 import { nestedBodies } from './converter';
-import { deprecated, emitError, E_DEPRECATED, E_WARNING, notice, throwError, warn } from './errors';
+import { deprecated, E_DEPRECATED, E_WARNING, emitError, notice, throwError, warn } from './errors';
 import { collectGarbage, setDestructor } from './garbage';
 import {
   arithmetic,
@@ -46,12 +48,12 @@ import {
   concat,
   looseEquals,
   negate,
+  setObjectConversions,
   strictEquals,
   toFloat,
   toInt,
   toKey,
   toStr,
-  setObjectConversions,
   unaryPlus,
 } from './operators';
 import {
@@ -75,6 +77,7 @@ import {
   PhpArray,
   type PhpClass,
   PhpObject,
+  type PropDecl,
   Ref,
   UNINIT,
   type UserFunction,
@@ -220,8 +223,8 @@ function execStmt(statement: Stmt, seek?: string): Completion {
         return undefined;
       }
       case 'if': {
-        if (toBool(ev(statement.cond))) return execList(statement.then);
-        return statement.else ? execList(statement.else) : undefined;
+        if (toBool(ev(statement.cond))) return execList(statement.consequent);
+        return statement.alternate ? execList(statement.alternate) : undefined;
       }
       case 'while': {
         for (;;) {
@@ -268,7 +271,8 @@ function execStmt(statement: Stmt, seek?: string): Completion {
       }
       case 'global': {
         for (const nameExpr of statement.names) {
-          const name = nameExpr.k === 'var' ? nameExpr.name : toStr(ev((nameExpr as Extract<Expr, { k: 'varvar' }>).name));
+          const name =
+            nameExpr.k === 'var' ? nameExpr.name : toStr(ev((nameExpr as Extract<Expr, { k: 'varvar' }>).name));
           new VarPlace(frame, name).bind(runtime.globalRef(name));
         }
         return undefined;
@@ -316,8 +320,9 @@ function seekInto(statement: Stmt, label: string): Completion {
       return undefined;
     }
     case 'if': {
-      if (statement.then.some((inner) => containsLabel(inner, label))) return execList(statement.then, label);
-      return execList(statement.else as Stmt[], label);
+      if (statement.consequent.some((inner) => containsLabel(inner, label)))
+        return execList(statement.consequent, label);
+      return execList(statement.alternate as Stmt[], label);
     }
     case 'block': {
       return execList(statement.body, label);
@@ -437,7 +442,10 @@ function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Co
   const inFinally = seek !== undefined && statement.fin?.some((inner) => containsLabel(inner, seek));
   if (!inFinally) {
     try {
-      const inCatch = seek === undefined ? undefined : statement.catches.find((item) => item.body.some((inner) => containsLabel(inner, seek)));
+      const inCatch =
+        seek === undefined
+          ? undefined
+          : statement.catches.find((item) => item.body.some((inner) => containsLabel(inner, seek)));
       completion = inCatch ? execList(inCatch.body, seek) : execList(statement.body, seek);
     } catch (error) {
       if (!(error instanceof PhpThrow)) {
@@ -452,9 +460,9 @@ function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Co
             runtime.row = handler.row;
             if (handler.varName !== undefined) new VarPlace(runtime.frame, handler.varName).set(error.object);
             completion = execList(handler.body);
-          } catch (inner) {
-            if (!statement.fin) throw inner;
-            pending = inner;
+          } catch (error_) {
+            if (!statement.fin) throw error_;
+            pending = error_;
             failed = true;
           }
         } else if (statement.fin) {
@@ -526,7 +534,11 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
   return undefined;
 }
 
-function foreachIteration(statement: Extract<Stmt, { k: 'foreach' }>, key: Key | Value, value: Value): 'next' | Completion {
+function foreachIteration(
+  statement: Extract<Stmt, { k: 'foreach' }>,
+  key: Key | Value,
+  value: Value
+): 'next' | Completion {
   const runtime = rt();
   runtime.row = statement.row;
   if (statement.value.k === 'list') destructure(statement.value, value);
@@ -593,7 +605,10 @@ export function iteratorOf(object: PhpObject): PhpObject | undefined {
     if (!current.cls.isSubclassOf(aggregate)) return depth === 0 ? undefined : current;
     const next = callMethod(current, 'getIterator', []);
     if (!(next instanceof PhpObject) || !next.cls.isSubclassOf(runtime.classes.get('traversable') as PhpClass)) {
-      throwError('Exception', `Objects returned by ${current.cls.name}::getIterator() must be traversable or implement interface Iterator`);
+      throwError(
+        'Exception',
+        `Objects returned by ${current.cls.name}::getIterator() must be traversable or implement interface Iterator`
+      );
     }
     current = next;
   }
@@ -683,13 +698,16 @@ function evChain(e: Expr): Chain {
       return magicConstant(e.name);
     }
     case 'call': {
-      return keepingResult(() => callExpression(e));
+      const mark = runtime.frame.temporaries.length;
+      return keepResult(mark, callExpression(e));
     }
     case 'mcall': {
-      return keepingResult(() => methodCallExpression(e));
+      const mark = runtime.frame.temporaries.length;
+      return keepResult(mark, methodCallExpression(e));
     }
     case 'scall': {
-      return keepingResult(() => staticCallExpression(e));
+      const mark = runtime.frame.temporaries.length;
+      return keepResult(mark, staticCallExpression(e));
     }
     case 'new': {
       return keepingResult(() => {
@@ -697,7 +715,11 @@ function evChain(e: Expr): Chain {
         const cls = resolveClassRef(e.cls);
         checkInstantiable(cls);
         const constructor = cls.findMethod('__construct');
-        const args = evalArgs(e.args, constructor?.fn, constructor ? `${constructor.scope.name}::__construct` : undefined);
+        const args = evalArgs(
+          e.args,
+          constructor?.fn,
+          constructor ? `${constructor.scope.name}::__construct` : undefined
+        );
         runtime.row = e.row;
         return instantiate(cls, args, e.row, runtime.frame.scope);
       });
@@ -707,7 +729,11 @@ function evChain(e: Expr): Chain {
         runtime.row = e.row;
         const cls = anonymousClass(e.decl, e.row);
         const constructor = cls.findMethod('__construct');
-        const args = evalArgs(e.args, constructor?.fn, constructor ? `${constructor.scope.name}::__construct` : undefined);
+        const args = evalArgs(
+          e.args,
+          constructor?.fn,
+          constructor ? `${constructor.scope.name}::__construct` : undefined
+        );
         return instantiate(cls, args, e.row, runtime.frame.scope);
       });
     }
@@ -752,8 +778,8 @@ function evChain(e: Expr): Chain {
     }
     case 'cond': {
       const test = ev(e.test);
-      if (e.then === undefined) return toBool(test) ? test : ev(e.else);
-      return toBool(test) ? ev(e.then) : ev(e.else);
+      if (e.consequent === undefined) return toBool(test) ? test : ev(e.alternate);
+      return toBool(test) ? ev(e.consequent) : ev(e.alternate);
     }
     case 'cast': {
       return cast(e.type, ev(e.e));
@@ -849,9 +875,12 @@ function evChain(e: Expr): Chain {
  * only the result until the statement stores or drops it.
  */
 function keepingResult(run: () => Chain): Chain {
+  return keepResult(rt().frame.temporaries.length, run());
+}
+
+/** Releases the temporaries held since `mark`, keeping only a call's result, as {@link keepingResult} describes. */
+function keepResult(mark: number, result: Chain): Chain {
   const frame = rt().frame;
-  const mark = frame.temporaries.length;
-  const result = run();
   frame.temporaries.length = mark;
   if (result instanceof PhpObject || result instanceof PhpArray) frame.temporaries.push(result);
   return result;
@@ -1001,13 +1030,15 @@ function arrayLiteral(e: Extract<Expr, { k: 'array' }>): PhpArray {
       ref.isRef = true;
       ref.rc++;
       if (key === undefined) {
-        if (!array.append(ref)) throwError('Error', 'Cannot add element to the array as the next element is already occupied');
+        if (!array.append(ref))
+          throwError('Error', 'Cannot add element to the array as the next element is already occupied');
       } else array.setSlot(key, ref);
       continue;
     }
     const value = share(ev(item.value));
     if (key === undefined) {
-      if (!array.append(value)) throwError('Error', 'Cannot add element to the array as the next element is already occupied');
+      if (!array.append(value))
+        throwError('Error', 'Cannot add element to the array as the next element is already occupied');
     } else array.set(key, value);
     runtime.spend();
   }
@@ -1018,7 +1049,8 @@ function spreadInto(array: PhpArray, value: Value): void {
   if (value instanceof PhpArray) {
     for (const [key, item] of value.entries()) {
       if (typeof key === 'string') array.set(key, share(item));
-      else if (!array.append(share(item))) throwError('Error', 'Cannot add element to the array as the next element is already occupied');
+      else if (!array.append(share(item)))
+        throwError('Error', 'Cannot add element to the array as the next element is already occupied');
     }
     return;
   }
@@ -1141,7 +1173,7 @@ function classConstantOf(e: Extract<Expr, { k: 'cconst' }>): Value {
 
 const anonymousClasses = new WeakMap<object, PhpClass>();
 
-function anonymousClass(decl: import('./ast').ClassDecl, row: number): PhpClass {
+function anonymousClass(decl: ClassDecl, row: number): PhpClass {
   let cls = anonymousClasses.get(decl);
   if (!cls) {
     cls = declareClass(decl, row);
@@ -1155,8 +1187,20 @@ function cloneExpression(e: Extract<Expr, { k: 'clone' }>): Value {
   const value = ev(e.e);
   const withValue = e.with ? ev(e.with) : undefined;
   runtime.row = e.row;
-  if (!(value instanceof PhpObject)) throwError('Error', '__clone method called on non-object');
-  return cloneObject(value, withValue);
+  if (withValue === undefined) {
+    if (!(value instanceof PhpObject)) throwError('Error', '__clone method called on non-object');
+    return cloneObject(value);
+  }
+  // `clone($object, $with)` is a call of PHP 8.5's clone function, which stack traces show.
+  callStack.push({ name: 'clone', args: [value, withValue], row: e.row });
+  try {
+    if (!(value instanceof PhpObject)) {
+      throwError('TypeError', `clone(): Argument #1 ($object) must be of type object, ${debugType(value)} given`);
+    }
+    return cloneObject(value, withValue);
+  } finally {
+    callStack.pop();
+  }
 }
 
 export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
@@ -1164,10 +1208,10 @@ export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
   const scope = runtime.frame.scope;
   const cloneMethod = original.cls.findMethod('__clone');
   if (cloneMethod && !canCall(cloneMethod, scope)) {
-    throwError('Error', `Call to ${cloneMethod.visibility} ${original.cls.name}::__clone() from ${scope ? `scope ${scope.name}` : 'global scope'}`);
-  }
-  if (original.cls.name === 'Closure' || original.cls.name === 'Generator') {
-    if (original.cls.name === 'Generator') throwError('Error', 'Trying to clone an uncloneable object of class Generator');
+    throwError(
+      'Error',
+      `Call to ${cloneMethod.visibility} ${original.cls.name}::__clone() from ${scope ? `scope ${scope.name}` : 'global scope'}`
+    );
   }
   const copy = runtime.newObject(original.cls);
   runtime.frame.temporaries.push(copy);
@@ -1183,11 +1227,18 @@ export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
   copy.cloning = true;
   try {
     if (cloneMethod) {
-      invoke({ fn: cloneMethod.fn, thisObj: copy, scope: cloneMethod.scope, staticClass: copy.cls, method: cloneMethod }, [], runtime.row);
+      invoke(
+        { fn: cloneMethod.fn, thisObj: copy, scope: cloneMethod.scope, staticClass: copy.cls, method: cloneMethod },
+        [],
+        runtime.row
+      );
     }
     if (withValue !== undefined) {
       if (!(withValue instanceof PhpArray)) {
-        throwError('TypeError', `clone(): Argument #2 ($withProperties) must be of type array, ${debugType(withValue)} given`);
+        throwError(
+          'TypeError',
+          `clone(): Argument #2 ($withProperties) must be of type array, ${debugType(withValue)} given`
+        );
       }
       for (const [key, item] of withValue.entries()) {
         if (typeof key !== 'string') throwError('Error', 'Property name must be of type string, int given');
@@ -1272,7 +1323,7 @@ export function placeOf(e: Expr): Place {
 class StaticPlace extends RefPlace {
   constructor(
     target: Ref,
-    private readonly decl: import('./values').PropDecl | undefined
+    private readonly decl: PropDecl | undefined
   ) {
     super(target);
   }
@@ -1287,14 +1338,13 @@ class StaticPlace extends RefPlace {
   }
 }
 
-
 function propPlace(object: PhpObject, name: string): Place {
   const scope = rt().frame.scope;
   return {
     get: () => {
       if (!issetPropExists(object, name, scope)) {
         const magic = object.cls.findMethod('__get');
-        if (!magic) return undefined;
+        if (!magic) return;
       }
       return readProp(object, name, scope, true);
     },
@@ -1319,7 +1369,8 @@ function arrayAccessPlace(object: PhpObject, key: Value | undefined): Place {
     },
     ref: () => {
       const value = callMethod(object, 'offsetGet', [key ?? null]);
-      if (!(value instanceof PhpObject)) notice(`Indirect modification of overloaded element of ${object.cls.name} has no effect`);
+      if (!(value instanceof PhpObject))
+        notice(`Indirect modification of overloaded element of ${object.cls.name} has no effect`);
       return new Ref(value);
     },
     unset: () => {
@@ -1568,7 +1619,9 @@ function incDec(e: Extract<Expr, { k: 'incdec' }>): Value {
       updated = null;
     }
   } else if (typeof old === 'boolean') {
-    warn(`${e.inc ? 'Increment' : 'Decrement'} on type bool has no effect, this will change in the next major version of PHP`);
+    warn(
+      `${e.inc ? 'Increment' : 'Decrement'} on type bool has no effect, this will change in the next major version of PHP`
+    );
     updated = old;
   } else if (typeof old === 'string') {
     updated = incDecString(old, e.inc);
@@ -1600,7 +1653,6 @@ function incDecString(text: string, inc: boolean): Value {
   if (text === '') return '1';
   return incrementString(text);
 }
-
 
 function unsetTarget(target: Expr): void {
   const runtime = rt();
@@ -1676,7 +1728,19 @@ function isset(e: Expr): boolean {
     }
     case 'idx': {
       if (e.index === undefined) throwError('Error', 'Cannot use [] for reading');
-      if (!isset(e.base) && !(e.base.k === 'call' || e.base.k === 'mcall' || e.base.k === 'scall' || e.base.k === 'array' || e.base.k === 'lit' || e.base.k === 'const' || e.base.k === 'cconst')) return false;
+      if (
+        !isset(e.base) &&
+        !(
+          e.base.k === 'call' ||
+          e.base.k === 'mcall' ||
+          e.base.k === 'scall' ||
+          e.base.k === 'array' ||
+          e.base.k === 'lit' ||
+          e.base.k === 'const' ||
+          e.base.k === 'cconst'
+        )
+      )
+        return false;
       const base = evQuiet(e.base);
       const index = ev(e.index);
       if (base instanceof PhpArray) return (base.get(toKey(index)) ?? null) !== null;
@@ -1689,7 +1753,12 @@ function isset(e: Expr): boolean {
       return false;
     }
     case 'prop': {
-      const object = e.obj.k === 'var' || e.obj.k === 'idx' || e.obj.k === 'prop' ? (isset(e.obj) ? evQuiet(e.obj) : null) : ev(e.obj);
+      const object =
+        e.obj.k === 'var' || e.obj.k === 'idx' || e.obj.k === 'prop'
+          ? isset(e.obj)
+            ? evQuiet(e.obj)
+            : null
+          : ev(e.obj);
       if (!(object instanceof PhpObject)) return false;
       return issetProp(object, memberName(e.name), runtime.frame.scope);
     }
@@ -1728,8 +1797,7 @@ function binary(e: Extract<Expr, { k: 'bin' }>): Value {
       return toBool(ev(e.l)) !== toBool(ev(e.r));
     }
     case '??': {
-      const left = isset(e.l) ? evQuiet(e.l) : null;
-      return left === null ? ev(e.r) : left;
+      return (isset(e.l) ? evQuiet(e.l) : null) ?? ev(e.r);
     }
   }
   const left = ev(e.l);
@@ -1845,7 +1913,12 @@ function matchExpression(e: Extract<Expr, { k: 'match' }>): Value {
 
 function matchCaseText(value: Value): string {
   if (typeof value === 'string') {
-    const escaped = value.slice(0, 15).replaceAll(/[\\']/g, '\\$&').replaceAll('\n', '\\n').replaceAll('\r', '\\r').replaceAll('\t', '\\t');
+    const escaped = value
+      .slice(0, 15)
+      .replaceAll(/[\\']/g, String.raw`\$&`)
+      .replaceAll('\n', String.raw`\n`)
+      .replaceAll('\r', String.raw`\r`)
+      .replaceAll('\t', String.raw`\t`);
     return `'${escaped}${value.length > 15 ? '...' : ''}'`;
   }
   if (typeof value === 'bigint') return value.toString();
@@ -1906,7 +1979,8 @@ export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | u
         continue;
       }
       const label = name ?? fn?.name ?? '';
-      const paramIndex = arg.name === undefined ? index : (fn?.params.findIndex((param) => param.name === arg.name) ?? 0);
+      const paramIndex =
+        arg.name === undefined ? index : (fn?.params.findIndex((param) => param.name === arg.name) ?? 0);
       const paramName = fn?.params[Math.min(paramIndex, (fn?.params.length ?? 1) - 1)]?.name ?? '';
       throwError('Error', `${label}(): Argument #${paramIndex + 1} ($${paramName}) could not be passed by reference`);
     }
@@ -1922,7 +1996,9 @@ function callExpression(e: Extract<Expr, { k: 'call' }>): Value {
   runtime.row = e.row;
   if (!('k' in e.fn)) {
     const name = e.fn;
-    const fn = runtime.functions.get(lower(name.name)) ?? (name.fallback ? runtime.functions.get(lower(name.fallback)) : undefined);
+    const fn =
+      runtime.functions.get(lower(name.name)) ??
+      (name.fallback ? runtime.functions.get(lower(name.fallback)) : undefined);
     if (!fn) throwError('Error', `Call to undefined function ${name.name}()`);
     if (e.fcc) return closureFromCallable({ fn });
     const args = evalArgs(e.args, fn, fn.name);
@@ -1998,9 +2074,15 @@ function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>): Chain {
   }
   if (method) {
     if (method.isAbstract) throwError('Error', `Cannot call abstract method ${method.scope.name}::${method.name}()`);
-    throwError('Error', `Call to ${method.visibility} method ${object.cls.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`);
+    throwError(
+      'Error',
+      `Call to ${method.visibility} method ${object.cls.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`
+    );
   }
-  throwError('Error', `Call to undefined method ${object.cls.isAnonymous ? 'class@anonymous' : object.cls.name}::${methodName}()`);
+  throwError(
+    'Error',
+    `Call to undefined method ${object.cls.isAnonymous ? 'class@anonymous' : object.cls.name}::${methodName}()`
+  );
 }
 
 function argsArray(args: ArgValue[]): PhpArray {
@@ -2018,7 +2100,11 @@ function magicClosure(object: PhpObject, magic: Method, methodName: string): Php
     name: methodName,
     params: [{ name: 'args', byRef: false, variadic: true, optional: true }],
     impl: ({ args }) =>
-      invoke({ fn: magic.fn, thisObj: object, scope: magic.scope, staticClass: object.cls, method: magic }, [{ v: methodName }, { v: PhpArray.list(args) }], undefined),
+      invoke(
+        { fn: magic.fn, thisObj: object, scope: magic.scope, staticClass: object.cls, method: magic },
+        [{ v: methodName }, { v: PhpArray.list(args) }],
+        undefined
+      ),
   };
   return closureFromCallable({ fn: native, thisObj: object, scope: object.cls });
 }
@@ -2057,16 +2143,27 @@ function staticCallExpression(e: Extract<Expr, { k: 'scall' }>): Value {
     const magic = thisObj.cls.findMethod('__call');
     if (magic) {
       const args = evalArgs(e.args, undefined, undefined);
-      return invoke({ fn: magic.fn, thisObj, scope: magic.scope, staticClass: thisObj.cls, method: magic }, [{ v: methodName }, { v: argsArray(args) }], e.row);
+      return invoke(
+        { fn: magic.fn, thisObj, scope: magic.scope, staticClass: thisObj.cls, method: magic },
+        [{ v: methodName }, { v: argsArray(args) }],
+        e.row
+      );
     }
   }
   const magicStatic = cls.findMethod('__callstatic');
   if (magicStatic) {
     const args = evalArgs(e.args, undefined, undefined);
-    return invoke({ fn: magicStatic.fn, scope: magicStatic.scope, staticClass: cls, method: magicStatic }, [{ v: methodName }, { v: argsArray(args) }], e.row);
+    return invoke(
+      { fn: magicStatic.fn, scope: magicStatic.scope, staticClass: cls, method: magicStatic },
+      [{ v: methodName }, { v: argsArray(args) }],
+      e.row
+    );
   }
   if (method) {
-    throwError('Error', `Call to ${method.visibility} method ${cls.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`);
+    throwError(
+      'Error',
+      `Call to ${method.visibility} method ${cls.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`
+    );
   }
   throwError('Error', `Call to undefined method ${cls.name}::${methodName}()`);
 }
@@ -2086,7 +2183,13 @@ export function callMethod(object: PhpObject, name: string, args: Value[]): Valu
     throwError('Error', `Call to undefined method ${object.cls.name}::${name}()`);
   }
   return invoke(
-    { fn: method.fn, thisObj: method.isStatic ? undefined : object, scope: method.scope, staticClass: object.cls, method },
+    {
+      fn: method.fn,
+      thisObj: method.isStatic ? undefined : object,
+      scope: method.scope,
+      staticClass: object.cls,
+      method,
+    },
     args.map((v) => ({ v })),
     undefined
   );
@@ -2117,7 +2220,14 @@ export function callTargetOf(value: Value, forCall: boolean): CallTarget {
   if (value instanceof PhpObject) {
     if (isClosure(value)) return closureTarget(value);
     const invokeMethod = value.cls.findMethod('__invoke');
-    if (invokeMethod) return { fn: invokeMethod.fn, thisObj: value, scope: invokeMethod.scope, staticClass: value.cls, method: invokeMethod };
+    if (invokeMethod)
+      return {
+        fn: invokeMethod.fn,
+        thisObj: value,
+        scope: invokeMethod.scope,
+        staticClass: value.cls,
+        method: invokeMethod,
+      };
     if (forCall) throwError('Error', 'Object of type ' + value.cls.name + ' is not callable');
     throwError('Error', 'Object of type ' + value.cls.name + ' is not callable');
   }
@@ -2140,7 +2250,11 @@ export function callTargetOf(value: Value, forCall: boolean): CallTarget {
       }
       const magic = target.cls.findMethod('__call');
       if (magic) return magicTarget(target, magic, method);
-      if (found) throwError('Error', `Call to ${found.visibility} method ${target.cls.name}::${found.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`);
+      if (found)
+        throwError(
+          'Error',
+          `Call to ${found.visibility} method ${target.cls.name}::${found.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`
+        );
       throwError('Error', `Call to undefined method ${target.cls.name}::${method}()`);
     }
     if (typeof method === 'string' && typeof target === 'string') return staticCallable(target, method, scope);
@@ -2155,7 +2269,11 @@ function magicTarget(object: PhpObject, magic: Method, name: string): CallTarget
     name,
     params: [{ name: 'args', byRef: false, variadic: true, optional: true }],
     impl: ({ args }) =>
-      invoke({ fn: magic.fn, thisObj: object, scope: magic.scope, staticClass: object.cls, method: magic }, [{ v: name }, { v: PhpArray.list(args) }], undefined),
+      invoke(
+        { fn: magic.fn, thisObj: object, scope: magic.scope, staticClass: object.cls, method: magic },
+        [{ v: name }, { v: PhpArray.list(args) }],
+        undefined
+      ),
   };
   return { fn: native, thisObj: object };
 }
@@ -2166,7 +2284,12 @@ function staticCallable(className: string, methodName: string, scope: PhpClass |
   const word = lower(className);
   if (word === 'self' || word === 'static' || word === 'parent') {
     if (!frame.scope) throwError('Error', `Cannot use "${word}" when no class scope is active`);
-    cls = word === 'self' ? frame.scope : word === 'parent' ? (frame.scope.parent as PhpClass) : (frame.staticClass as PhpClass);
+    cls =
+      word === 'self'
+        ? frame.scope
+        : word === 'parent'
+          ? (frame.scope.parent as PhpClass)
+          : (frame.staticClass as PhpClass);
   } else cls = requireClass(className);
   const method = lookupMethod(cls, lower(methodName), scope);
   if (!method) {
@@ -2176,16 +2299,26 @@ function staticCallable(className: string, methodName: string, scope: PhpClass |
         kind: 'native',
         name: methodName,
         params: [{ name: 'args', byRef: false, variadic: true, optional: true }],
-        impl: ({ args }) => invoke({ fn: magic.fn, scope: magic.scope, staticClass: cls, method: magic }, [{ v: methodName }, { v: PhpArray.list(args) }], undefined),
+        impl: ({ args }) =>
+          invoke(
+            { fn: magic.fn, scope: magic.scope, staticClass: cls, method: magic },
+            [{ v: methodName }, { v: PhpArray.list(args) }],
+            undefined
+          ),
       };
       return { fn: native, staticClass: cls };
     }
     throwError('Error', `Call to undefined method ${cls.name}::${methodName}()`);
   }
-  if (!canCall(method, scope)) throwError('Error', `Call to ${method.visibility} method ${cls.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`);
+  if (!canCall(method, scope))
+    throwError(
+      'Error',
+      `Call to ${method.visibility} method ${cls.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`
+    );
   if (!method.isStatic) {
     const thisObj = frame.thisObj && frame.thisObj.cls.isSubclassOf(cls) ? frame.thisObj : undefined;
-    if (!thisObj) throwError('Error', `Non-static method ${method.scope.name}::${method.name}() cannot be called statically`);
+    if (!thisObj)
+      throwError('Error', `Non-static method ${method.scope.name}::${method.name}() cannot be called statically`);
     return { fn: method.fn, thisObj, scope: method.scope, staticClass: thisObj.cls, method };
   }
   return { fn: method.fn, scope: method.scope, staticClass: cls, method };
@@ -2207,7 +2340,11 @@ export function callValue(callable: Value, args: ArgValue[], row: number | undef
 /** Calls a callback from native code, such as `array_map`'s, whose frames show as `[internal function]`. */
 export function callCallback(callable: Value, args: Value[]): Value {
   const target = callTargetOf(callable, true);
-  return invoke(target, args.map((v) => ({ v })), undefined);
+  return invoke(
+    target,
+    args.map((v) => ({ v })),
+    undefined
+  );
 }
 
 /** Calls a callback with references for its by-reference parameters, as `array_walk` does. */
@@ -2302,17 +2439,36 @@ setBodyRunner(runBody);
 setDestructor((object) => {
   const destructor = object.cls.findMethod('__destruct');
   if (!destructor) return;
-  invoke({ fn: destructor.fn, thisObj: object, scope: destructor.scope, staticClass: object.cls, method: destructor }, [], undefined);
+  invoke(
+    { fn: destructor.fn, thisObj: object, scope: destructor.scope, staticClass: object.cls, method: destructor },
+    [],
+    undefined
+  );
 });
 setObjectConversions(
   (object) => {
     const method = object.cls.findMethod('__tostring');
-    if (!method) throwError('Error', `Object of class ${object.cls.isAnonymous ? 'class@anonymous' : object.cls.name} could not be converted to string`);
-    const result = invoke({ fn: method.fn, thisObj: object, scope: method.scope, staticClass: object.cls, method }, [], undefined);
-    if (typeof result !== 'string') throwError('Error', `${object.cls.name}::__toString(): Return value must be of type string, ${debugType(result)} returned`);
+    if (!method)
+      throwError(
+        'Error',
+        `Object of class ${object.cls.isAnonymous ? 'class@anonymous' : object.cls.name} could not be converted to string`
+      );
+    const result = invoke(
+      { fn: method.fn, thisObj: object, scope: method.scope, staticClass: object.cls, method },
+      [],
+      undefined
+    );
+    if (typeof result !== 'string')
+      throwError(
+        'Error',
+        `${object.cls.name}::__toString(): Return value must be of type string, ${debugType(result)} returned`
+      );
     return result;
   },
-  (object) => [...object.props].filter(([, slot]) => slot !== UNINIT).map(([key, slot]) => [key, slot instanceof Ref ? slot.v : (slot as Value)])
+  (object) =>
+    [...object.props]
+      .filter(([, slot]) => slot !== UNINIT)
+      .map(([key, slot]) => [key, slot instanceof Ref ? slot.v : (slot as Value)])
 );
 setDefaultEvaluator((decl, index) => {
   const param = decl.params[index];

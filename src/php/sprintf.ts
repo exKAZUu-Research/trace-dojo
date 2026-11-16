@@ -1,3 +1,4 @@
+// oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { notice, throwError } from './errors';
 import { toFloat, toInt, toStr } from './operators';
 import { exponentialText, fixedDigits, generalText } from './strings';
@@ -44,11 +45,12 @@ export function formatPrintf(name: string, format: string, args: Value[], fromAr
       while (/\d/.test(format[lookahead] ?? '')) lookahead++;
       if (format[lookahead] === '$') {
         const number = readNumber();
-        if (number <= 0) throwError('ValueError', 'Argument number specifier must be greater than zero and less than 2147483647');
+        if (number <= 0)
+          throwError('ValueError', 'Argument number specifier must be greater than zero and less than 2147483647');
         argIndex = number - 1;
         index++;
       } else argIndex = currentArg++;
-      for (;; index++) {
+      for (; ; index++) {
         const modifier = format[index];
         if (modifier === ' ' || modifier === '0') padding = modifier;
         else if (modifier === '-') alignLeft = true;
@@ -61,7 +63,8 @@ export function formatPrintf(name: string, format: string, args: Value[], fromAr
       if (format[index] === '*') {
         index++;
         const widthArg = args[currentArg++];
-        if (widthArg === undefined) throwError('ArgumentCountError', `${args.length + 1} arguments are required, ${args.length + 1} given`);
+        if (widthArg === undefined)
+          throwError('ArgumentCountError', `${args.length + 1} arguments are required, ${args.length + 1} given`);
         if (typeof widthArg !== 'bigint') throwError('ValueError', 'Width must be an integer');
         width = Number(widthArg);
         if (format[index] !== '.' && argIndex === currentArg - 2) argIndex = currentArg++;
@@ -87,7 +90,8 @@ export function formatPrintf(name: string, format: string, args: Value[], fromAr
     const specifier = format[index];
     if (specifier === undefined) throwError('ValueError', 'Missing format specifier at end of string');
     if (specifier !== '%' && argIndex >= args.length) {
-      if (fromArray) throwError('ValueError', `The arguments array must contain ${argIndex + 1} items, ${args.length} given`);
+      if (fromArray)
+        throwError('ValueError', `The arguments array must contain ${argIndex + 1} items, ${args.length} given`);
       throwError('ArgumentCountError', `${argIndex + 2} arguments are required, ${args.length + 1} given`);
     }
     const arg = args[argIndex];
@@ -116,7 +120,15 @@ export function formatPrintf(name: string, format: string, args: Value[], fromAr
       case 'G':
       case 'h':
       case 'H': {
-        result += formatFloatSpec(toFloat(arg), specifier, width, padding, alignLeft, hasPrecision ? precision : undefined, alwaysSign);
+        result += formatFloatSpec(
+          toFloat(arg),
+          specifier,
+          width,
+          padding,
+          alignLeft,
+          hasPrecision ? precision : undefined,
+          alwaysSign
+        );
         break;
       }
       case 'c': {
@@ -148,11 +160,19 @@ export function formatPrintf(name: string, format: string, args: Value[], fromAr
   return result;
 }
 
-function pad(text: string, width: number, padding: string, alignLeft: boolean, negative: boolean, alwaysSign: boolean): string {
+function pad(
+  text: string,
+  width: number,
+  padding: string,
+  alignLeft: boolean,
+  negative: boolean,
+  alwaysSign: boolean
+): string {
   const count = Math.max(width - text.length, 0);
   if (count === 0) return text;
   if (alignLeft) return text + padding.repeat(count);
-  if ((negative || alwaysSign) && padding === '0' && /^[+-]/.test(text)) return text[0] + '0'.repeat(count) + text.slice(1);
+  if ((negative || alwaysSign) && padding === '0' && /^[+-]/.test(text))
+    return text[0] + '0'.repeat(count) + text.slice(1);
   return padding.repeat(count) + text;
 }
 
@@ -193,7 +213,8 @@ function formatFloatSpec(
       body = generalText(Math.abs(value), precision === 0 ? 1 : precision, specifier === 'G' || specifier === 'H');
     }
   }
-  const isNegative = negative && (specifier === 'g' || specifier === 'G' || specifier === 'h' || specifier === 'H' ? value < 0 : true);
+  const isNegative =
+    negative && (specifier === 'g' || specifier === 'G' || specifier === 'h' || specifier === 'H' ? value < 0 : true);
   const text = isNegative ? `-${body}` : alwaysSign ? `+${body}` : body;
   return pad(text, width, padding, alignLeft, isNegative, alwaysSign);
 }

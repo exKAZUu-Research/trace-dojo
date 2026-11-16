@@ -1,4 +1,6 @@
 // code-gauge-allow-file fileNcss 900 -- The string functions, each a small closure of its own.
+// oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+// oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { createHash } from 'node:crypto';
 
 import { eastAsianWidth } from 'get-east-asian-width';
@@ -10,7 +12,7 @@ import { defineAlias, defineConstant, defineFunction } from './native';
 import { toStr } from './operators';
 import { rt } from './runtime';
 import { incrementString } from './strings';
-import { PhpArray, type Value } from './values';
+import { PhpArray, type Ref, type Value } from './values';
 
 defineConstant('STR_PAD_RIGHT', 1n);
 defineConstant('STR_PAD_LEFT', 0n);
@@ -46,7 +48,7 @@ defineFunction('strtoupper(string $string): string', ({ args }) => upper(s(args[
 defineFunction('strtolower(string $string): string', ({ args }) => lower(s(args[0])));
 defineFunction('ucfirst(string $string): string', ({ args }) => upper(s(args[0]).slice(0, 1)) + s(args[0]).slice(1));
 defineFunction('lcfirst(string $string): string', ({ args }) => lower(s(args[0]).slice(0, 1)) + s(args[0]).slice(1));
-defineFunction('ucwords(string $string, string $separators = " \\t\\r\\n\\f\\v"): string', ({ args }) => {
+defineFunction(String.raw`ucwords(string $string, string $separators = " \t\r\n\f\v"): string`, ({ args }) => {
   const separators = args[1] === undefined ? ' \t\r\n\f\v' : s(args[1]);
   let result = '';
   let capitalize = true;
@@ -87,32 +89,39 @@ function trimText(text: string, list: string | undefined, name: string, left: bo
   return text.slice(start, end);
 }
 
-defineFunction('trim(string $string, string $characters = " \\n\\r\\t\\v\\x00"): string', ({ args }) =>
+defineFunction(String.raw`trim(string $string, string $characters = " \n\r\t\v\x00"): string`, ({ args }) =>
   trimText(s(args[0]), args[1] as string | undefined, 'trim', true, true)
 );
-defineFunction('ltrim(string $string, string $characters = " \\n\\r\\t\\v\\x00"): string', ({ args }) =>
+defineFunction(String.raw`ltrim(string $string, string $characters = " \n\r\t\v\x00"): string`, ({ args }) =>
   trimText(s(args[0]), args[1] as string | undefined, 'ltrim', true, false)
 );
-defineFunction('rtrim(string $string, string $characters = " \\n\\r\\t\\v\\x00"): string', ({ args }) =>
+defineFunction(String.raw`rtrim(string $string, string $characters = " \n\r\t\v\x00"): string`, ({ args }) =>
   trimText(s(args[0]), args[1] as string | undefined, 'rtrim', false, true)
 );
 defineAlias('chop', 'rtrim');
 
-defineFunction('str_pad(string $string, int $length, string $pad_string = " ", int $pad_type = STR_PAD_RIGHT): string', ({ args }) => {
-  const text = s(args[0]);
-  const length = n(args[1]);
-  const pad = args[2] === undefined ? ' ' : s(args[2]);
-  const type = args[3] === undefined ? 1 : n(args[3]);
-  if (length <= text.length) return text;
-  if (pad === '') throwError('ValueError', 'str_pad(): Argument #3 ($pad_string) must be a non-empty string');
-  if (type < 0 || type > 2) throwError('ValueError', 'str_pad(): Argument #4 ($pad_type) must be STR_PAD_LEFT, STR_PAD_RIGHT, or STR_PAD_BOTH');
-  const total = length - text.length;
-  const fill = (count: number): string => pad.repeat(Math.ceil(count / pad.length)).slice(0, count);
-  if (type === 0) return fill(total) + text;
-  if (type === 1) return text + fill(total);
-  const left = Math.floor(total / 2);
-  return fill(left) + text + fill(total - left);
-});
+defineFunction(
+  'str_pad(string $string, int $length, string $pad_string = " ", int $pad_type = STR_PAD_RIGHT): string',
+  ({ args }) => {
+    const text = s(args[0]);
+    const length = n(args[1]);
+    const pad = args[2] === undefined ? ' ' : s(args[2]);
+    const type = args[3] === undefined ? 1 : n(args[3]);
+    if (length <= text.length) return text;
+    if (pad === '') throwError('ValueError', 'str_pad(): Argument #3 ($pad_string) must be a non-empty string');
+    if (type < 0 || type > 2)
+      throwError(
+        'ValueError',
+        'str_pad(): Argument #4 ($pad_type) must be STR_PAD_LEFT, STR_PAD_RIGHT, or STR_PAD_BOTH'
+      );
+    const total = length - text.length;
+    const fill = (count: number): string => pad.repeat(Math.ceil(count / pad.length)).slice(0, count);
+    if (type === 0) return fill(total) + text;
+    if (type === 1) return text + fill(total);
+    const left = Math.floor(total / 2);
+    return fill(left) + text + fill(total - left);
+  }
+);
 defineFunction('str_split(string $string, int $length = 1): array', ({ args }) => {
   const text = s(args[0]);
   const length = args[1] === undefined ? 1 : n(args[1]);
@@ -129,7 +138,8 @@ defineFunction('explode(string $separator, string $string, int $limit = PHP_INT_
   if (separator === '') throwError('ValueError', 'explode(): Argument #1 ($separator) cannot be empty');
   const parts = text.split(separator);
   if (limit > 0) {
-    if (parts.length > limit) return PhpArray.list([...parts.slice(0, limit - 1), parts.slice(limit - 1).join(separator)]);
+    if (parts.length > limit)
+      return PhpArray.list([...parts.slice(0, limit - 1), parts.slice(limit - 1).join(separator)]);
     return PhpArray.list(parts);
   }
   if (limit < 0) return PhpArray.list(parts.slice(0, limit));
@@ -139,7 +149,8 @@ defineFunction('implode(array|string $separator, ?array $array = null): string',
   let [separator, array] = args;
   if (array === undefined || array === null) {
     if (!(separator instanceof PhpArray)) {
-      if (array === null) throwError('TypeError', 'implode(): Argument #1 ($array) must be of type array, string given');
+      if (array === null)
+        throwError('TypeError', 'implode(): Argument #1 ($array) must be of type array, string given');
       throwError('TypeError', 'implode(): Argument #2 ($array) must be of type ?array, string given');
     }
     array = separator;
@@ -178,10 +189,20 @@ export function substring(text: string, offset: number, length: number | undefin
 }
 
 function offsetError(name: string, argument = 3, parameter = 'offset', haystack = 'haystack'): never {
-  throwError('ValueError', `${name}(): Argument #${argument} ($${parameter}) must be contained in argument #1 ($${haystack})`);
+  throwError(
+    'ValueError',
+    `${name}(): Argument #${argument} ($${parameter}) must be contained in argument #1 ($${haystack})`
+  );
 }
 
-function search(name: string, haystack: string, needle: string, offset: number, reverse: boolean, insensitive: boolean): Value {
+function search(
+  name: string,
+  haystack: string,
+  needle: string,
+  offset: number,
+  reverse: boolean,
+  insensitive: boolean
+): Value {
   const text = insensitive ? lower(haystack) : haystack;
   const target = insensitive ? lower(needle) : needle;
   if (offset > text.length || offset < -text.length) offsetError(name);
@@ -196,7 +217,10 @@ function search(name: string, haystack: string, needle: string, offset: number, 
     if (index < offset) return false;
   } else {
     const limit = text.length + offset;
-    index = text.lastIndexOf(target, limit + target.length - (target.length > 0 ? 1 : 0) > text.length ? text.length : limit);
+    index = text.lastIndexOf(
+      target,
+      limit + target.length - (target.length > 0 ? 1 : 0) > text.length ? text.length : limit
+    );
     if (index !== -1 && index > limit) index = text.lastIndexOf(target, limit);
   }
   return index === -1 ? false : BigInt(index);
@@ -215,10 +239,18 @@ defineFunction('strripos(string $haystack, string $needle, int $offset = 0): int
   search('strripos', s(args[0]), s(args[1]), args[2] === undefined ? 0 : n(args[2]), true, true)
 );
 defineFunction('str_contains(string $haystack, string $needle): bool', ({ args }) => s(args[0]).includes(s(args[1])));
-defineFunction('str_starts_with(string $haystack, string $needle): bool', ({ args }) => s(args[0]).startsWith(s(args[1])));
+defineFunction('str_starts_with(string $haystack, string $needle): bool', ({ args }) =>
+  s(args[0]).startsWith(s(args[1]))
+);
 defineFunction('str_ends_with(string $haystack, string $needle): bool', ({ args }) => s(args[0]).endsWith(s(args[1])));
 
-function replaceAll(subject: string, search: string, replace: string, insensitive: boolean, count: { value: number }): string {
+function replaceAll(
+  subject: string,
+  search: string,
+  replace: string,
+  insensitive: boolean,
+  count: { value: number }
+): string {
   if (search === '') return subject;
   if (!insensitive) {
     const parts = subject.split(search);
@@ -239,18 +271,26 @@ function replaceAll(subject: string, search: string, replace: string, insensitiv
   return checkLength(result + subject.slice(position));
 }
 
-function strReplace(args: Value[], refs: (import('./values').Ref | undefined)[], insensitive: boolean): Value {
+function strReplace(args: Value[], refs: (Ref | undefined)[], insensitive: boolean): Value {
   const [search, replace, subject] = args;
   const count = { value: 0 };
   const replaceOne = (text: string): string => {
     if (!(search instanceof PhpArray)) {
-      if (replace instanceof PhpArray) throwError('TypeError', `${insensitive ? 'str_ireplace' : 'str_replace'}(): Argument #2 ($replace) must be of type string when argument #1 ($search) is a string`);
+      if (replace instanceof PhpArray)
+        throwError(
+          'TypeError',
+          `${insensitive ? 'str_ireplace' : 'str_replace'}(): Argument #2 ($replace) must be of type string when argument #1 ($search) is a string`
+        );
       return replaceAll(text, toStr(search), toStr(replace), insensitive, count);
     }
     const replacements = replace instanceof PhpArray ? replace.values() : undefined;
     let result = text;
     for (const [index, item] of search.values().entries()) {
-      const replacement = replacements ? (index < replacements.length ? toStr(replacements[index]) : '') : toStr(replace);
+      const replacement = replacements
+        ? index < replacements.length
+          ? toStr(replacements[index])
+          : ''
+        : toStr(replace);
       result = replaceAll(result, toStr(item), replacement, insensitive, count);
     }
     return result;
@@ -275,22 +315,26 @@ defineFunction(
   'str_ireplace(array|string $search, array|string $replace, string|array $subject, &$count = null): string|array',
   ({ args, refs }) => strReplace(args, refs, true)
 );
-defineFunction('substr_count(string $haystack, string $needle, int $offset = 0, ?int $length = null): int', ({ args }) => {
-  const haystack = s(args[0]);
-  const needle = s(args[1]);
-  if (needle === '') throwError('ValueError', 'substr_count(): Argument #2 ($needle) cannot be empty');
-  let offset = args[2] === undefined ? 0 : n(args[2]);
-  if (offset < 0) offset += haystack.length;
-  if (offset < 0 || offset > haystack.length) offsetError('substr_count');
-  let end = haystack.length;
-  if (args[3] !== undefined && args[3] !== null) {
-    let length = n(args[3]);
-    if (length < 0) length += haystack.length - offset;
-    if (length < 0 || offset + length > haystack.length) throwError('ValueError', 'substr_count(): Argument #4 ($length) must be contained in argument #1 ($haystack)');
-    end = offset + length;
+defineFunction(
+  'substr_count(string $haystack, string $needle, int $offset = 0, ?int $length = null): int',
+  ({ args }) => {
+    const haystack = s(args[0]);
+    const needle = s(args[1]);
+    if (needle === '') throwError('ValueError', 'substr_count(): Argument #2 ($needle) cannot be empty');
+    let offset = args[2] === undefined ? 0 : n(args[2]);
+    if (offset < 0) offset += haystack.length;
+    if (offset < 0 || offset > haystack.length) offsetError('substr_count');
+    let end = haystack.length;
+    if (args[3] !== undefined && args[3] !== null) {
+      let length = n(args[3]);
+      if (length < 0) length += haystack.length - offset;
+      if (length < 0 || offset + length > haystack.length)
+        throwError('ValueError', 'substr_count(): Argument #4 ($length) must be contained in argument #1 ($haystack)');
+      end = offset + length;
+    }
+    return BigInt(haystack.slice(offset, end).split(needle).length - 1);
   }
-  return BigInt(haystack.slice(offset, end).split(needle).length - 1);
-});
+);
 defineFunction(
   'substr_replace(array|string $string, array|string $replace, array|int $offset, array|int|null $length = null): string|array',
   ({ args }) => {
@@ -303,7 +347,8 @@ defineFunction(
       if (start < 0) start = Math.max(subject.length + start, 0);
       if (start > subject.length) start = subject.length;
       let end = lengthValue === null || lengthValue === undefined ? subject.length : Number(lengthValue);
-      if (lengthValue !== null && lengthValue !== undefined) end = end < 0 ? Math.max(subject.length + end, start) : Math.min(start + end, subject.length);
+      if (lengthValue !== null && lengthValue !== undefined)
+        end = end < 0 ? Math.max(subject.length + end, start) : Math.min(start + end, subject.length);
       return subject.slice(0, start) + replacement + subject.slice(Math.max(end, start));
     };
     if (text instanceof PhpArray) {
@@ -315,7 +360,9 @@ defineFunction(
   }
 );
 defineFunction('strrev(string $string): string', ({ args }) => [...s(args[0])].toReversed().join(''));
-defineFunction('strcmp(string $string1, string $string2): int', ({ args }) => BigInt(compareBytes(s(args[0]), s(args[1]))));
+defineFunction('strcmp(string $string1, string $string2): int', ({ args }) =>
+  BigInt(compareBytes(s(args[0]), s(args[1])))
+);
 defineFunction('strcasecmp(string $string1, string $string2): int', ({ args }) =>
   BigInt(compareBytes(lower(s(args[0])), lower(s(args[1]))))
 );
@@ -329,16 +376,30 @@ defineFunction('strncasecmp(string $string1, string $string2, int $length): int'
   if (length < 0) throwError('ValueError', 'strncasecmp(): Argument #3 ($length) must be greater than or equal to 0');
   return BigInt(compareBytes(lower(s(args[0]).slice(0, length)), lower(s(args[1]).slice(0, length))));
 });
-defineFunction('strnatcmp(string $string1, string $string2): int', ({ args }) => BigInt(naturalCompare(s(args[0]), s(args[1]), false)));
-defineFunction('strnatcasecmp(string $string1, string $string2): int', ({ args }) => BigInt(naturalCompare(s(args[0]), s(args[1]), true)));
+defineFunction('strnatcmp(string $string1, string $string2): int', ({ args }) =>
+  BigInt(naturalCompare(s(args[0]), s(args[1]), false))
+);
+defineFunction('strnatcasecmp(string $string1, string $string2): int', ({ args }) =>
+  BigInt(naturalCompare(s(args[0]), s(args[1]), true))
+);
+
+/** The byte at `index`, or 0 past the end, as C reads a string's terminator. */
+function at(text: string, index: number): number {
+  return index < text.length ? text.charCodeAt(index) : 0;
+}
+
+function isDigit(code: number): boolean {
+  return code >= 48 && code <= 57;
+}
+
+function isSpace(code: number): boolean {
+  return code === 32 || (code >= 9 && code <= 13);
+}
 
 /** Compares strings in natural order, as PHP's strnatcmp_ex does. */
 // code-gauge-allow functionCognitiveComplexity 40 -- Transcribes PHP's strnatcmp_ex.
 export function naturalCompare(a: string, b: string, insensitive: boolean): number {
   if (a.length === 0 || b.length === 0) return a.length === b.length ? 0 : a.length > b.length ? 1 : -1;
-  const at = (text: string, index: number): number => (index < text.length ? text.charCodeAt(index) : 0);
-  const isDigit = (code: number): boolean => code >= 48 && code <= 57;
-  const isSpace = (code: number): boolean => code === 32 || (code >= 9 && code <= 13);
   let ap = 0;
   let bp = 0;
   let leading = true;
@@ -354,7 +415,7 @@ export function naturalCompare(a: string, b: string, insensitive: boolean): numb
       const fractional = ca === 48 || cb === 48;
       let result = 0;
       if (fractional) {
-        for (;; ap++, bp++) {
+        for (; ; ap++, bp++) {
           const da = ap < a.length && isDigit(at(a, ap));
           const db = bp < b.length && isDigit(at(b, bp));
           if (!da && !db) break;
@@ -373,7 +434,7 @@ export function naturalCompare(a: string, b: string, insensitive: boolean): numb
         }
       } else {
         let bias = 0;
-        for (;; ap++, bp++) {
+        for (; ; ap++, bp++) {
           const da = ap < a.length && isDigit(at(a, ap));
           const db = bp < b.length && isDigit(at(b, bp));
           if (!da && !db) {
@@ -420,9 +481,13 @@ function strstr(args: Value[], insensitive: boolean): Value {
   return args[2] === true ? haystack.slice(0, index) : haystack.slice(index);
 }
 
-defineFunction('strstr(string $haystack, string $needle, bool $before_needle = false): string|false', ({ args }) => strstr(args, false));
+defineFunction('strstr(string $haystack, string $needle, bool $before_needle = false): string|false', ({ args }) =>
+  strstr(args, false)
+);
 defineAlias('strchr', 'strstr');
-defineFunction('stristr(string $haystack, string $needle, bool $before_needle = false): string|false', ({ args }) => strstr(args, true));
+defineFunction('stristr(string $haystack, string $needle, bool $before_needle = false): string|false', ({ args }) =>
+  strstr(args, true)
+);
 defineFunction('strrchr(string $haystack, string $needle, bool $before_needle = false): string|false', ({ args }) => {
   const haystack = s(args[0]);
   const needle = s(args[1]);
@@ -434,7 +499,9 @@ defineFunction('strtr(string $string, string|array $from, ?string $to = null): s
   const text = s(args[0]);
   const from = args[1];
   if (from instanceof PhpArray) {
-    const pairs = [...from.entries()].map(([key, value]) => [String(key), toStr(value)] as const).filter(([key]) => key !== '');
+    const pairs = [...from.entries()]
+      .map(([key, value]) => [String(key), toStr(value)] as const)
+      .filter(([key]) => key !== '');
     if (pairs.length === 0) return text;
     const sorted = pairs.toSorted((x, y) => y[0].length - x[0].length);
     let result = '';
@@ -461,17 +528,27 @@ defineFunction('strtr(string $string, string|array $from, ?string $to = null): s
   for (let index = 0; index < length; index++) map.set(source[index], target[index]);
   return [...text].map((char) => map.get(char) ?? char).join('');
 });
-defineFunction('chr(int $codepoint): string', ({ args }) => String.fromCharCode(Number(BigInt.asUintN(8, args[0] as bigint))));
+defineFunction('chr(int $codepoint): string', ({ args }) =>
+  String.fromCharCode(Number(BigInt.asUintN(8, args[0] as bigint)))
+);
 defineFunction('ord(string $character): int', ({ args }) => BigInt(s(args[0]).charCodeAt(0) || 0));
-defineFunction('wordwrap(string $string, int $width = 75, string $break = "\\n", bool $cut_long_words = false): string', ({ args }) =>
-  wordwrap(s(args[0]), args[1] === undefined ? 75 : n(args[1]), args[2] === undefined ? '\n' : s(args[2]), args[3] === true)
+defineFunction(
+  String.raw`wordwrap(string $string, int $width = 75, string $break = "\n", bool $cut_long_words = false): string`,
+  ({ args }) =>
+    wordwrap(
+      s(args[0]),
+      args[1] === undefined ? 75 : n(args[1]),
+      args[2] === undefined ? '\n' : s(args[2]),
+      args[3] === true
+    )
 );
 
 // code-gauge-allow functionCognitiveComplexity 30 -- Transcribes PHP's wordwrap.
 function wordwrap(text: string, width: number, breakText: string, cut: boolean): string {
   if (text === '') return '';
   if (breakText === '') throwError('ValueError', 'wordwrap(): Argument #3 ($break) cannot be empty');
-  if (width === 0 && cut) throwError('ValueError', "wordwrap(): Argument #4 ($cut_long_words) cannot be true when argument #2 ($width) is 0");
+  if (width === 0 && cut)
+    throwError('ValueError', 'wordwrap(): Argument #4 ($cut_long_words) cannot be true when argument #2 ($width) is 0');
   const breakLength = breakText.length;
   let result = '';
   let lastStart = 0;
@@ -539,31 +616,43 @@ defineFunction(
     const flags = args[1] === undefined ? 11n : (args[1] as bigint);
     const doubleEncode = args[3] !== false;
     let text = s(args[0]);
-    text = doubleEncode ? text.replaceAll('&', '&amp;') : text.replaceAll(/&(?![A-Za-z]+;|#\d+;|#x[\dA-Fa-f]+;)/g, '&amp;');
+    text = doubleEncode
+      ? text.replaceAll('&', '&amp;')
+      : text.replaceAll(/&(?![A-Za-z]+;|#\d+;|#x[\dA-Fa-f]+;)/g, '&amp;');
     text = text.replaceAll('<', '&lt;').replaceAll('>', '&gt;');
     if (flags & 2n) text = text.replaceAll('"', '&quot;');
     if ((flags & 3n) === 3n) text = text.replaceAll("'", (flags & 48n) === 0n ? '&#039;' : '&apos;');
     return text;
   }
 );
-defineFunction('htmlspecialchars_decode(string $string, int $flags = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401): string', ({ args }) => {
-  const flags = args[1] === undefined ? 11n : (args[1] as bigint);
-  let text = s(args[0]).replaceAll('&lt;', '<').replaceAll('&gt;', '>');
-  if (flags & 2n) text = text.replaceAll('&quot;', '"');
-  if ((flags & 3n) === 3n) text = text.replaceAll('&#039;', "'").replaceAll('&#39;', "'").replaceAll('&apos;', "'");
-  return text.replaceAll('&amp;', '&');
-});
-defineFunction('addslashes(string $string): string', ({ args }) => s(args[0]).replaceAll(/["'\\\0]/g, (match) => (match === '\0' ? '\\0' : `\\${match}`)));
-defineFunction('stripslashes(string $string): string', ({ args }) => s(args[0]).replaceAll(/\\(.?)/gs, (_match, char: string) => (char === '0' ? '\0' : char)));
-defineFunction('chunk_split(string $string, int $length = 76, string $separator = "\\r\\n"): string', ({ args }) => {
-  const text = s(args[0]);
-  const length = args[1] === undefined ? 76 : n(args[1]);
-  const separator = args[2] === undefined ? '\r\n' : s(args[2]);
-  if (length < 1) throwError('ValueError', 'chunk_split(): Argument #2 ($length) must be greater than 0');
-  let result = '';
-  for (let index = 0; index < text.length; index += length) result += text.slice(index, index + length) + separator;
-  return result;
-});
+defineFunction(
+  'htmlspecialchars_decode(string $string, int $flags = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401): string',
+  ({ args }) => {
+    const flags = args[1] === undefined ? 11n : (args[1] as bigint);
+    let text = s(args[0]).replaceAll('&lt;', '<').replaceAll('&gt;', '>');
+    if (flags & 2n) text = text.replaceAll('&quot;', '"');
+    if ((flags & 3n) === 3n) text = text.replaceAll('&#039;', "'").replaceAll('&#39;', "'").replaceAll('&apos;', "'");
+    return text.replaceAll('&amp;', '&');
+  }
+);
+defineFunction('addslashes(string $string): string', ({ args }) =>
+  s(args[0]).replaceAll(/["'\\\0]/g, (match) => (match === '\0' ? String.raw`\0` : `\\${match}`))
+);
+defineFunction('stripslashes(string $string): string', ({ args }) =>
+  s(args[0]).replaceAll(/\\(.?)/gs, (_match, char: string) => (char === '0' ? '\0' : char))
+);
+defineFunction(
+  String.raw`chunk_split(string $string, int $length = 76, string $separator = "\r\n"): string`,
+  ({ args }) => {
+    const text = s(args[0]);
+    const length = args[1] === undefined ? 76 : n(args[1]);
+    const separator = args[2] === undefined ? '\r\n' : s(args[2]);
+    if (length < 1) throwError('ValueError', 'chunk_split(): Argument #2 ($length) must be greater than 0');
+    let result = '';
+    for (let index = 0; index < text.length; index += length) result += text.slice(index, index + length) + separator;
+    return result;
+  }
+);
 defineFunction('similar_text(string $string1, string $string2, &$percent = null): int', ({ args, refs }) => {
   const a = s(args[0]);
   const b = s(args[1]);
@@ -589,29 +678,34 @@ function similarChars(a: string, b: string): number {
     }
   }
   if (max === 0) return 0;
-  return max + similarChars(a.slice(0, posA), b.slice(0, posB)) + similarChars(a.slice(posA + max), b.slice(posB + max));
+  return (
+    max + similarChars(a.slice(0, posA), b.slice(0, posB)) + similarChars(a.slice(posA + max), b.slice(posB + max))
+  );
 }
 
-defineFunction('levenshtein(string $string1, string $string2, int $insertion_cost = 1, int $replacement_cost = 1, int $deletion_cost = 1): int', ({ args }) => {
-  const a = s(args[0]);
-  const b = s(args[1]);
-  const insert = args[2] === undefined ? 1 : n(args[2]);
-  const replace = args[3] === undefined ? 1 : n(args[3]);
-  const remove = args[4] === undefined ? 1 : n(args[4]);
-  if (a.length === 0) return BigInt(b.length * insert);
-  if (b.length === 0) return BigInt(a.length * remove);
-  let previous = Array.from({ length: b.length + 1 }, (_, index) => index * insert);
-  for (let i = 0; i < a.length; i++) {
-    rt().spend(Math.ceil(b.length / 16));
-    const current = [(i + 1) * remove];
-    for (let j = 0; j < b.length; j++) {
-      const cost = previous[j] + (a[i] === b[j] ? 0 : replace);
-      current.push(Math.min(cost, previous[j + 1] + remove, current[j] + insert));
+defineFunction(
+  'levenshtein(string $string1, string $string2, int $insertion_cost = 1, int $replacement_cost = 1, int $deletion_cost = 1): int',
+  ({ args }) => {
+    const a = s(args[0]);
+    const b = s(args[1]);
+    const insert = args[2] === undefined ? 1 : n(args[2]);
+    const replace = args[3] === undefined ? 1 : n(args[3]);
+    const remove = args[4] === undefined ? 1 : n(args[4]);
+    if (a.length === 0) return BigInt(b.length * insert);
+    if (b.length === 0) return BigInt(a.length * remove);
+    let previous = Array.from({ length: b.length + 1 }, (_, index) => index * insert);
+    for (let i = 0; i < a.length; i++) {
+      rt().spend(Math.ceil(b.length / 16));
+      const current = [(i + 1) * remove];
+      for (let j = 0; j < b.length; j++) {
+        const cost = previous[j] + (a[i] === b[j] ? 0 : replace);
+        current.push(Math.min(cost, previous[j + 1] + remove, current[j] + insert));
+      }
+      previous = current;
     }
-    previous = current;
+    return BigInt(previous[b.length]);
   }
-  return BigInt(previous[b.length]);
-});
+);
 defineFunction('soundex(string $string): string', ({ args }) => {
   const codes = '01230120022455012623010202';
   let result = '';
@@ -636,15 +730,17 @@ defineFunction('count_chars(string $string, int $mode = 0): array|string', ({ ar
   const mode = args[1] === undefined ? 0 : n(args[1]);
   const counts = Array.from({ length: 256 }, () => 0);
   for (let index = 0; index < text.length; index++) counts[text.charCodeAt(index)]++;
-  if (mode < 0 || mode > 4) throwError('ValueError', 'count_chars(): Argument #2 ($mode) must be between 0 and 4 (inclusive)');
+  if (mode < 0 || mode > 4)
+    throwError('ValueError', 'count_chars(): Argument #2 ($mode) must be between 0 and 4 (inclusive)');
   if (mode === 3 || mode === 4) {
     let result = '';
-    for (let code = 0; code < 256; code++) if ((counts[code] > 0) === (mode === 3)) result += String.fromCharCode(code);
+    for (let code = 0; code < 256; code++) if (counts[code] > 0 === (mode === 3)) result += String.fromCharCode(code);
     return result;
   }
   const array = new PhpArray();
   for (let code = 0; code < 256; code++) {
-    if (mode === 0 || (mode === 1 && counts[code] > 0) || (mode === 2 && counts[code] === 0)) array.set(BigInt(code), BigInt(counts[code]));
+    if (mode === 0 || (mode === 1 && counts[code] > 0) || (mode === 2 && counts[code] === 0))
+      array.set(BigInt(code), BigInt(counts[code]));
   }
   return array;
 });
@@ -657,8 +753,12 @@ defineFunction('str_shuffle(string $string): string', ({ args }) => {
   }
   return chars.join('');
 });
-defineFunction('md5(string $string, bool $binary = false): string', ({ args }) => hash('md5', s(args[0]), args[1] === true));
-defineFunction('sha1(string $string, bool $binary = false): string', ({ args }) => hash('sha1', s(args[0]), args[1] === true));
+defineFunction('md5(string $string, bool $binary = false): string', ({ args }) =>
+  hash('md5', s(args[0]), args[1] === true)
+);
+defineFunction('sha1(string $string, bool $binary = false): string', ({ args }) =>
+  hash('sha1', s(args[0]), args[1] === true)
+);
 defineFunction('crc32(string $string): int', ({ args }) => BigInt(crc32(s(args[0]))));
 defineFunction('hash(string $algo, string $data, bool $binary = false, array $options = []): string', ({ args }) => {
   const algorithm = lower(s(args[0]));
@@ -697,20 +797,30 @@ defineFunction('hex2bin(string $string): string|false', ({ args }) => {
     return false;
   }
   let result = '';
-  for (let index = 0; index < text.length; index += 2) result += String.fromCharCode(Number.parseInt(text.slice(index, index + 2), 16));
+  for (let index = 0; index < text.length; index += 2)
+    result += String.fromCharCode(Number.parseInt(text.slice(index, index + 2), 16));
   return result;
 });
 defineFunction('str_increment(string $string): string', ({ args }) => {
   const text = s(args[0]);
   if (text === '') throwError('ValueError', 'str_increment(): Argument #1 ($string) cannot be empty');
-  if (!/^[A-Za-z\d]+$/.test(text)) throwError('ValueError', 'str_increment(): Argument #1 ($string) must be composed only of alphanumeric ASCII characters');
+  if (!/^[A-Za-z\d]+$/.test(text))
+    throwError(
+      'ValueError',
+      'str_increment(): Argument #1 ($string) must be composed only of alphanumeric ASCII characters'
+    );
   return incrementString(text);
 });
 defineFunction('str_decrement(string $string): string', ({ args }) => {
   const text = s(args[0]);
   if (text === '') throwError('ValueError', 'str_decrement(): Argument #1 ($string) cannot be empty');
-  if (!/^[A-Za-z\d]+$/.test(text)) throwError('ValueError', 'str_decrement(): Argument #1 ($string) must be composed only of alphanumeric ASCII characters');
-  if (/^(a|A|0)$/.test(text)) throwError('ValueError', `str_decrement(): Argument #1 ($string) "${text}" is out of decrement range`);
+  if (!/^[A-Za-z\d]+$/.test(text))
+    throwError(
+      'ValueError',
+      'str_decrement(): Argument #1 ($string) must be composed only of alphanumeric ASCII characters'
+    );
+  if (/^(a|A|0)$/.test(text))
+    throwError('ValueError', `str_decrement(): Argument #1 ($string) "${text}" is out of decrement range`);
   const chars = [...text];
   for (let index = chars.length - 1; index >= 0; index--) {
     const char = chars[index];
@@ -721,7 +831,13 @@ defineFunction('str_decrement(string $string): string', ({ args }) => {
     chars[index] = String.fromCharCode(char.charCodeAt(0) - 1);
     break;
   }
-  if (chars.length > 1 && /[azAZ09]/.test(text[0]) && /^(a|A|0)/.test(text) && chars[0] !== text[0] && ['z', 'Z', '9'].includes(chars[0])) {
+  if (
+    chars.length > 1 &&
+    /[azAZ09]/.test(text[0]) &&
+    /^(a|A|0)/.test(text) &&
+    chars[0] !== text[0] &&
+    ['z', 'Z', '9'].includes(chars[0])
+  ) {
     chars.shift();
   }
   return chars.join('');
@@ -734,13 +850,16 @@ defineFunction('strcspn(string $string, string $characters, int $offset = 0, ?in
 );
 
 function span(args: Value[], inSet: boolean): bigint {
-  const text = substring(s(args[0]), args[2] === undefined ? 0 : n(args[2]), args[3] === undefined || args[3] === null ? undefined : n(args[3]));
+  const text = substring(
+    s(args[0]),
+    args[2] === undefined ? 0 : n(args[2]),
+    args[3] === undefined || args[3] === null ? undefined : n(args[3])
+  );
   const set = s(args[1]);
   let count = 0;
   while (count < text.length && set.includes(text[count]) === inSet) count++;
   return BigInt(count);
 }
-
 
 // Character classes --------------------------------------------------------------------------------------------------
 
@@ -761,10 +880,14 @@ for (const [name, pattern] of [
     let [value] = args;
     if (typeof value === 'bigint') {
       deprecated(`${name}(): Argument of type int will be interpreted as string in the future`);
-      if (value >= -128n && value <= 255n) value = String.fromCharCode(Number(value < 0n ? value + 256n : value));
-      else value = value.toString();
+      value =
+        value >= -128n && value <= 255n
+          ? String.fromCharCode(Number(value < 0n ? value + 256n : value))
+          : value.toString();
     } else if (typeof value !== 'string') {
-      deprecated(`${name}(): Argument of type ${typeof value === 'number' ? 'float' : value === null ? 'null' : typeof value === 'boolean' ? 'bool' : 'array'} will be interpreted as string in the future`);
+      deprecated(
+        `${name}(): Argument of type ${typeof value === 'number' ? 'float' : value === null ? 'null' : typeof value === 'boolean' ? 'bool' : 'array'} will be interpreted as string in the future`
+      );
       return false;
     }
     return pattern.test(value);
@@ -776,20 +899,27 @@ for (const [name, pattern] of [
 const chars = (value: Value): string[] => utf8Chars(s(value));
 
 defineFunction('mb_strlen(string $string, ?string $encoding = null): int', ({ args }) => BigInt(chars(args[0]).length));
-defineFunction('mb_substr(string $string, int $start, ?int $length = null, ?string $encoding = null): string', ({ args }) => {
-  const list = chars(args[0]);
-  let start = n(args[1]);
-  if (start < 0) start = Math.max(list.length + start, 0);
-  if (start > list.length) return '';
-  let end = list.length;
-  if (args[2] !== undefined && args[2] !== null) {
-    const length = n(args[2]);
-    end = length < 0 ? Math.max(list.length + length, start) : Math.min(start + length, list.length);
+defineFunction(
+  'mb_substr(string $string, int $start, ?int $length = null, ?string $encoding = null): string',
+  ({ args }) => {
+    const list = chars(args[0]);
+    let start = n(args[1]);
+    if (start < 0) start = Math.max(list.length + start, 0);
+    if (start > list.length) return '';
+    let end = list.length;
+    if (args[2] !== undefined && args[2] !== null) {
+      const length = n(args[2]);
+      end = length < 0 ? Math.max(list.length + length, start) : Math.min(start + length, list.length);
+    }
+    return list.slice(start, end).join('');
   }
-  return list.slice(start, end).join('');
-});
-defineFunction('mb_strtoupper(string $string, ?string $encoding = null): string', ({ args }) => enc(dec(s(args[0])).toUpperCase()));
-defineFunction('mb_strtolower(string $string, ?string $encoding = null): string', ({ args }) => enc(dec(s(args[0])).toLowerCase()));
+);
+defineFunction('mb_strtoupper(string $string, ?string $encoding = null): string', ({ args }) =>
+  enc(dec(s(args[0])).toUpperCase())
+);
+defineFunction('mb_strtolower(string $string, ?string $encoding = null): string', ({ args }) =>
+  enc(dec(s(args[0])).toLowerCase())
+);
 defineFunction('mb_str_split(string $string, int $length = 1, ?string $encoding = null): array', ({ args }) => {
   const list = chars(args[0]);
   const length = args[1] === undefined ? 1 : n(args[1]);
@@ -809,36 +939,52 @@ function mbSearch(args: Value[], reverse: boolean, insensitive: boolean, name: s
   const matchesAt = (index: number): boolean => needle.every((char, at) => haystack[index + at] === char);
   if (!reverse) {
     if (offset < 0) offset += haystack.length;
-    for (let index = offset; index + needle.length <= haystack.length; index++) if (matchesAt(index)) return BigInt(index);
+    for (let index = offset; index + needle.length <= haystack.length; index++)
+      if (matchesAt(index)) return BigInt(index);
     return false;
   }
-  const start = offset >= 0 ? offset : 0;
+  const start = Math.max(offset, 0);
   const limit = offset < 0 ? haystack.length + offset : haystack.length - needle.length;
-  for (let index = Math.min(limit, haystack.length - needle.length); index >= start; index--) if (matchesAt(index)) return BigInt(index);
+  for (let index = Math.min(limit, haystack.length - needle.length); index >= start; index--)
+    if (matchesAt(index)) return BigInt(index);
   return false;
 }
 
-defineFunction('mb_strpos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false', ({ args }) => mbSearch(args, false, false, 'mb_strpos'));
-defineFunction('mb_strrpos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false', ({ args }) => mbSearch(args, true, false, 'mb_strrpos'));
-defineFunction('mb_stripos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false', ({ args }) => mbSearch(args, false, true, 'mb_stripos'));
+defineFunction(
+  'mb_strpos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false',
+  ({ args }) => mbSearch(args, false, false, 'mb_strpos')
+);
+defineFunction(
+  'mb_strrpos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false',
+  ({ args }) => mbSearch(args, true, false, 'mb_strrpos')
+);
+defineFunction(
+  'mb_stripos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false',
+  ({ args }) => mbSearch(args, false, true, 'mb_stripos')
+);
 defineFunction('mb_substr_count(string $haystack, string $needle, ?string $encoding = null): int', ({ args }) => {
   if (s(args[1]) === '') throwError('ValueError', 'mb_substr_count(): Argument #2 ($needle) must not be empty');
   return BigInt(s(args[0]).split(s(args[1])).length - 1);
 });
-defineFunction('mb_str_pad(string $string, int $length, string $pad_string = " ", int $pad_type = STR_PAD_RIGHT, ?string $encoding = null): string', ({ args }) => {
-  const text = chars(args[0]);
-  const length = n(args[1]);
-  const pad = args[2] === undefined ? [' '] : chars(args[2]);
-  const type = args[3] === undefined ? 1 : n(args[3]);
-  if (pad.length === 0) throwError('ValueError', 'mb_str_pad(): Argument #3 ($pad_string) must be a non-empty string');
-  if (length <= text.length) return text.join('');
-  const total = length - text.length;
-  const fill = (count: number): string => Array.from({ length: count }, (_, index) => pad[index % pad.length]).join('');
-  if (type === 0) return fill(total) + text.join('');
-  if (type === 1) return text.join('') + fill(total);
-  const left = Math.floor(total / 2);
-  return fill(left) + text.join('') + fill(total - left);
-});
+defineFunction(
+  'mb_str_pad(string $string, int $length, string $pad_string = " ", int $pad_type = STR_PAD_RIGHT, ?string $encoding = null): string',
+  ({ args }) => {
+    const text = chars(args[0]);
+    const length = n(args[1]);
+    const pad = args[2] === undefined ? [' '] : chars(args[2]);
+    const type = args[3] === undefined ? 1 : n(args[3]);
+    if (pad.length === 0)
+      throwError('ValueError', 'mb_str_pad(): Argument #3 ($pad_string) must be a non-empty string');
+    if (length <= text.length) return text.join('');
+    const total = length - text.length;
+    const fill = (count: number): string =>
+      Array.from({ length: count }, (_, index) => pad[index % pad.length]).join('');
+    if (type === 0) return fill(total) + text.join('');
+    if (type === 1) return text.join('') + fill(total);
+    const left = Math.floor(total / 2);
+    return fill(left) + text.join('') + fill(total - left);
+  }
+);
 defineFunction('mb_strwidth(string $string, ?string $encoding = null): int', ({ args }) => {
   let width = 0;
   for (const char of dec(s(args[0]))) width += eastAsianWidth(char.codePointAt(0) as number) === 2 ? 2 : 1;
@@ -849,9 +995,16 @@ defineFunction('mb_convert_case(string $string, int $mode, ?string $encoding = n
   const mode = n(args[1]);
   if (mode === 0 || mode === 4) return enc(text.toUpperCase());
   if (mode === 1 || mode === 5) return enc(text.toLowerCase());
-  return enc(text.toLowerCase().replaceAll(/(^|[^\p{L}\p{N}'])(\p{L})/gu, (_match, before: string, letter: string) => before + letter.toUpperCase()));
+  return enc(
+    text
+      .toLowerCase()
+      .replaceAll(
+        /(^|[^\p{L}\p{N}'])(\p{L})/gu,
+        (_match, before: string, letter: string) => before + letter.toUpperCase()
+      )
+  );
 });
-defineFunction('mb_internal_encoding(?string $encoding = null): string|bool', ({ args }) => (args[0] ? true : 'UTF-8'));
+defineFunction('mb_internal_encoding(?string $encoding = null): string|bool', ({ args }) => (args[0] ? true : 'utf8'));
 defineFunction('mb_ucfirst(string $string, ?string $encoding = null): string', ({ args }) => {
   const list = chars(args[0]);
   if (list.length === 0) return '';
@@ -886,7 +1039,6 @@ defineFunction('mb_ord(string $string, ?string $encoding = null): int|false', ({
   if (text === '') throwError('ValueError', 'mb_ord(): Argument #1 ($string) must not be empty');
   return BigInt(text.codePointAt(0) as number);
 });
-
 
 // Paths, which these functions handle as strings without touching any file ------------------------------------------
 

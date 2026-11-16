@@ -1,4 +1,5 @@
 // code-gauge-allow-file fileNcss 700 -- The core builtin functions, each a small closure of its own.
+// oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { lower } from './bytes';
 import { callStack, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
@@ -25,15 +26,23 @@ import {
   throwError,
   warn,
 } from './errors';
-import { callCallback, callTargetOf, callValue, cast, constantKey, defineConstant as defineUserConstant, iterate } from './interp';
+import {
+  callCallback,
+  callTargetOf,
+  callValue,
+  cast,
+  constantKey,
+  defineConstant as defineUserConstant,
+  iterate,
+} from './interp';
 import { defineAlias, defineConstant, defineFunction } from './native';
 import { toFloat, toInt, toStr } from './operators';
 import { printR, varDump, varExport } from './output';
 import { rt } from './runtime';
 import { formatPrintf } from './sprintf';
 import { setCallableCheck } from './types';
-import { type ClosureData, isClosure, PhpArray, PhpClass, PhpObject, UNINIT, type Value } from './values';
 import { UnsupportedFeatureError } from './unsupported';
+import { type ClosureData, isClosure, PhpArray, PhpClass, PhpObject, UNINIT, type Value } from './values';
 
 // Constants ------------------------------------------------------------------------------------------------------------
 
@@ -134,7 +143,9 @@ defineFunction('is_numeric(mixed $value): bool', ({ args }) => {
 });
 defineFunction('is_scalar(mixed $value): bool', ({ args }) => {
   const [value] = args;
-  return typeof value === 'bigint' || typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean';
+  return (
+    typeof value === 'bigint' || typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean'
+  );
 });
 defineFunction('is_iterable(mixed $value): bool', ({ args }) => {
   const [value] = args;
@@ -220,9 +231,13 @@ function parseIntBase(text: string, base: number): bigint {
 // Constants and functions --------------------------------------------------------------------------------------------
 
 defineFunction('define(string $constant_name, mixed $value, bool $case_insensitive = false): bool', ({ args }) => {
-  if (args[2] === true) warn('define(): Argument #3 ($case_insensitive) is ignored since declaration of case-insensitive constants is no longer supported');
+  if (args[2] === true)
+    warn(
+      'define(): Argument #3 ($case_insensitive) is ignored since declaration of case-insensitive constants is no longer supported'
+    );
   const name = args[0] as string;
-  if (name.includes('::')) throwError('ValueError', 'define(): Argument #1 ($constant_name) cannot be a class constant');
+  if (name.includes('::'))
+    throwError('ValueError', 'define(): Argument #1 ($constant_name) cannot be a class constant');
   return defineUserConstant(name.replace(/^\\/, ''), args[1], false);
 });
 defineFunction('defined(string $constant_name): bool', ({ args }) => {
@@ -246,7 +261,6 @@ defineFunction('constant(string $name): mixed', ({ args }) => {
   if (value === undefined) throwError('Error', `Undefined constant "${name}"`);
   return value;
 });
-
 
 defineFunction('function_exists(string $function): bool', ({ args }) =>
   rt().functions.has(lower((args[0] as string).replace(/^\\/, '')))
@@ -275,7 +289,10 @@ defineFunction(
     const values = currentArgs();
     const position = Number(args[0]);
     if (position < 0 || position >= values.length) {
-      throwError('ValueError', 'func_get_arg(): Argument #1 ($position) must be less than the number of the arguments passed to the currently executed function');
+      throwError(
+        'ValueError',
+        'func_get_arg(): Argument #1 ($position) must be less than the number of the arguments passed to the currently executed function'
+      );
     }
     return values[position];
   },
@@ -309,7 +326,8 @@ defineFunction('call_user_func_array(callable $callback, array $args): mixed', (
   for (const [key, v] of array.entries()) {
     if (typeof key === 'string') argValues.push({ v, name: key });
     else {
-      if (argValues.some((arg) => arg.name !== undefined)) throwError('Error', 'Cannot use positional argument after named argument during unpacking');
+      if (argValues.some((arg) => arg.name !== undefined))
+        throwError('Error', 'Cannot use positional argument after named argument during unpacking');
       argValues.push({ v });
     }
   }
@@ -391,7 +409,11 @@ defineFunction('get_object_vars(object $object): array', ({ args }) => {
 });
 defineFunction('get_class_methods(object|string $object_or_class): array', ({ args }) => {
   const cls = classOf(args[0]);
-  if (!cls) throwError('TypeError', `get_class_methods(): Argument #1 ($object_or_class) must be an object or a valid class name, string given`);
+  if (!cls)
+    throwError(
+      'TypeError',
+      `get_class_methods(): Argument #1 ($object_or_class) must be an object or a valid class name, string given`
+    );
   const names: string[] = [];
   const seen = new Set<string>();
   const scope = rt().frame.scope;
@@ -420,9 +442,18 @@ defineFunction('class_exists(string $class, bool $autoload = true): bool', ({ ar
   const cls = findClass(args[0] as string);
   return cls !== undefined && cls.kind === 'class';
 });
-defineFunction('interface_exists(string $interface, bool $autoload = true): bool', ({ args }) => findClass(args[0] as string)?.kind === 'interface');
-defineFunction('trait_exists(string $trait, bool $autoload = true): bool', ({ args }) => findClass(args[0] as string)?.kind === 'trait');
-defineFunction('enum_exists(string $enum, bool $autoload = true): bool', ({ args }) => findClass(args[0] as string)?.kind === 'enum');
+defineFunction(
+  'interface_exists(string $interface, bool $autoload = true): bool',
+  ({ args }) => findClass(args[0] as string)?.kind === 'interface'
+);
+defineFunction(
+  'trait_exists(string $trait, bool $autoload = true): bool',
+  ({ args }) => findClass(args[0] as string)?.kind === 'trait'
+);
+defineFunction(
+  'enum_exists(string $enum, bool $autoload = true): bool',
+  ({ args }) => findClass(args[0] as string)?.kind === 'enum'
+);
 defineFunction('is_a(mixed $object_or_class, string $class, bool $allow_string = false): bool', ({ args }) => {
   const [value, className, allowString] = args;
   const target = findClass(className as string);
@@ -463,7 +494,8 @@ defineFunction('iterator_to_array(Traversable|array $iterator, bool $preserve_ke
   const array = new PhpArray();
   for (const [key, value] of iterate(iterable)) {
     if (preserveKeys === true) {
-      if (typeof key !== 'bigint' && typeof key !== 'string') throwError('TypeError', 'Cannot access offset of type ' + debugType(key) + ' on array');
+      if (typeof key !== 'bigint' && typeof key !== 'string')
+        throwError('TypeError', 'Cannot access offset of type ' + debugType(key) + ' on array');
       array.set(normalizeKeyString(String(key)), value);
     } else array.append(value);
   }
@@ -471,20 +503,21 @@ defineFunction('iterator_to_array(Traversable|array $iterator, bool $preserve_ke
 });
 defineFunction('iterator_count(Traversable|array $iterator): int', ({ args }) => {
   let count = 0n;
-  for (const _ of iterate(args[0])) count++;
+  for (const entry of iterate(args[0])) if (entry) count++;
   return count;
 });
 defineFunction('iterator_apply(Traversable $iterator, callable $callback, ?array $args = null): int', ({ args }) => {
   let count = 0n;
   const extra = args[2] instanceof PhpArray ? args[2].values() : [];
-  for (const _ of iterate(args[0])) {
+  for (const entry of iterate(args[0])) {
+    if (!entry) continue;
     count++;
     if (callCallback(args[1], extra) !== true) break;
   }
   return count;
 });
 
-function classOf(value: Value): import('./values').PhpClass | undefined {
+function classOf(value: Value): PhpClass | undefined {
   if (value instanceof PhpObject) return value.cls;
   if (typeof value === 'string') return findClass(value);
   return undefined;
@@ -495,9 +528,16 @@ function classOf(value: Value): import('./values').PhpClass | undefined {
 defineFunction('trigger_error(string $message, int $error_level = E_USER_NOTICE): true', ({ args }) => {
   const level = (args[1] as bigint | undefined) ?? E_USER_NOTICE;
   if (![E_USER_ERROR, E_USER_WARNING, E_USER_NOTICE, E_USER_DEPRECATED].includes(level)) {
-    throwError('ValueError', 'trigger_error(): Argument #2 ($error_level) must be one of E_USER_ERROR, E_USER_WARNING, E_USER_NOTICE, or E_USER_DEPRECATED');
+    throwError(
+      'ValueError',
+      'trigger_error(): Argument #2 ($error_level) must be one of E_USER_ERROR, E_USER_WARNING, E_USER_NOTICE, or E_USER_DEPRECATED'
+    );
   }
-  if (level === E_USER_ERROR) emitError(E_DEPRECATED, 'Passing E_USER_ERROR to trigger_error() is deprecated since 8.4, throw an exception or call exit with a string message instead');
+  if (level === E_USER_ERROR)
+    emitError(
+      E_DEPRECATED,
+      'Passing E_USER_ERROR to trigger_error() is deprecated since 8.4, throw an exception or call exit with a string message instead'
+    );
   emitError(level, args[0] as string);
   return true;
 });
@@ -528,10 +568,13 @@ defineFunction('error_reporting(?int $error_level = null): int', ({ args }) => {
   if (args[0] !== undefined && args[0] !== null) runtime.errorReporting = args[0] as bigint;
   return previous;
 });
-defineFunction('error_log(string $message, int $message_type = 0, ?string $destination = null, ?string $additional_headers = null): bool', ({ args }) => {
-  rt().echoError(`${args[0] as string}\n`);
-  return true;
-});
+defineFunction(
+  'error_log(string $message, int $message_type = 0, ?string $destination = null, ?string $additional_headers = null): bool',
+  ({ args }) => {
+    rt().echoError(`${args[0] as string}\n`);
+    return true;
+  }
+);
 
 // Miscellaneous ------------------------------------------------------------------------------------------------------
 
@@ -544,7 +587,14 @@ defineFunction('gc_enable(): void', () => null);
 defineFunction('gc_disable(): void', () => null);
 defineFunction('debug_print_backtrace(int $options = 0, int $limit = 0): void', () => {
   const records = callStack.toReversed().slice(1);
-  rt().echo(records.map((record, index) => `#${index} ${record.row === undefined ? '[internal function]' : `/main.php(${record.row + 1})`}: ${record.className ? `${record.className}${record.type}` : ''}${record.name}()\n`).join(''));
+  rt().echo(
+    records
+      .map(
+        (record, index) =>
+          `#${index} ${record.row === undefined ? '[internal function]' : `/main.php(${record.row + 1})`}: ${record.className ? `${record.className}${record.type}` : ''}${record.name}()\n`
+      )
+      .join('')
+  );
   return null;
 });
 
@@ -572,7 +622,8 @@ for (const [name, id] of streams) {
 }
 
 function writeStream(stream: Value, text: string, name: string): Value {
-  if (!isStream(stream)) throwError('TypeError', `${name}(): Argument #1 ($stream) must be of type resource, ${debugType(stream)} given`);
+  if (!isStream(stream))
+    throwError('TypeError', `${name}(): Argument #1 ($stream) must be of type resource, ${debugType(stream)} given`);
   if (stream.internal === 'STDOUT') rt().echo(text);
   else if (stream.internal === 'STDERR') rt().echoError(text);
   else throw new UnsupportedFeatureError('標準入力への書き込み');

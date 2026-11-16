@@ -1,5 +1,7 @@
+// oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+// oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { ProgramIO, type ProgramInput } from '../interpreter/programIo';
+import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { FunctionDecl, Program } from './ast';

@@ -1,3 +1,5 @@
+// oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+// oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { codePointBytes, utf8Length } from './bytes';
 import { canAccessProp, createObject, declForKey, propNameOf } from './classes';
 import * as conversionsModule from './conversions';
@@ -5,8 +7,8 @@ import { formatFloatRepr } from './conversions';
 import { newThrowable, throwError } from './errors';
 import { callMethod } from './interp';
 import { defineConstant, defineFunction } from './native';
-import { rt, PhpThrow } from './runtime';
-import { PhpArray, type PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
+import { PhpThrow, rt } from './runtime';
+import { PhpArray, type PhpClass, type PhpObject, Ref, UNINIT, type Value } from './values';
 
 const FLAGS: [string, bigint][] = [
   ['JSON_HEX_TAG', 1n],
@@ -66,7 +68,8 @@ defineFunction('json_encode(mixed $value, int $flags = 0, int $depth = 512): str
     return text;
   } catch (error) {
     if (!(error instanceof JsonError)) throw error;
-    if (has(flags, 4_194_304n)) throw new PhpThrow(newThrowable('JsonException', MESSAGES[error.code], BigInt(error.code)));
+    if (has(flags, 4_194_304n))
+      throw new PhpThrow(newThrowable('JsonException', MESSAGES[error.code], BigInt(error.code)));
     runtime.lastJsonError = error.code;
     return false;
   }
@@ -105,7 +108,12 @@ function encode(value: Value, flags: bigint, level: number, maxDepth: number, ac
       const asList = value.isList() && !has(flags, 16n);
       const entries = [...value.entries()];
       return wrap(
-        asList ? entries.map(([, item]) => encode(item, flags, level + 1, maxDepth, active)) : entries.map(([key, item]) => `${encodeString(String(key), flags)}:${has(flags, 128n) ? ' ' : ''}${encode(item, flags, level + 1, maxDepth, active)}`),
+        asList
+          ? entries.map(([, item]) => encode(item, flags, level + 1, maxDepth, active))
+          : entries.map(
+              ([key, item]) =>
+                `${encodeString(String(key), flags)}:${has(flags, 128n) ? ' ' : ''}${encode(item, flags, level + 1, maxDepth, active)}`
+            ),
         asList ? '[' : '{',
         asList ? ']' : '}',
         flags,
@@ -135,14 +143,15 @@ function encode(value: Value, flags: bigint, level: number, maxDepth: number, ac
       const decl = declForKey(object.cls, key);
       if (decl && !canAccessProp(decl, undefined)) continue;
       const item = slot instanceof Ref ? slot.v : slot;
-      parts.push(`${encodeString(propNameOf(key), flags)}:${has(flags, 128n) ? ' ' : ''}${encode(item, flags, level + 1, maxDepth, active)}`);
+      parts.push(
+        `${encodeString(propNameOf(key), flags)}:${has(flags, 128n) ? ' ' : ''}${encode(item, flags, level + 1, maxDepth, active)}`
+      );
     }
     return wrap(parts, '{', '}', flags, level);
   } finally {
     active.delete(object);
   }
 }
-
 
 function wrap(parts: string[], open: string, close: string, flags: bigint, level: number): string {
   if (parts.length === 0) return open + close;
@@ -165,7 +174,7 @@ function encodeString(text: string, flags: bigint): string {
           continue;
         }
         if (has(flags, 2_097_152n)) {
-          result += has(flags, 256n) ? 'ï¿½' : '\\ufffd';
+          result += has(flags, 256n) ? 'ï¿½' : String.raw`\ufffd`;
           index++;
           continue;
         }
@@ -187,51 +196,51 @@ function encodeString(text: string, flags: bigint): string {
     const char = text[index++];
     switch (char) {
       case '"': {
-        result += has(flags, 8n) ? '\\u0022' : '\\"';
+        result += has(flags, 8n) ? String.raw`\u0022` : String.raw`\"`;
         break;
       }
       case '\\': {
-        result += '\\\\';
+        result += String.raw`\\`;
         break;
       }
       case '/': {
-        result += has(flags, 64n) ? '/' : '\\/';
+        result += has(flags, 64n) ? '/' : String.raw`\/`;
         break;
       }
       case '\b': {
-        result += '\\b';
+        result += String.raw`\b`;
         break;
       }
       case '\f': {
-        result += '\\f';
+        result += String.raw`\f`;
         break;
       }
       case '\n': {
-        result += '\\n';
+        result += String.raw`\n`;
         break;
       }
       case '\r': {
-        result += '\\r';
+        result += String.raw`\r`;
         break;
       }
       case '\t': {
-        result += '\\t';
+        result += String.raw`\t`;
         break;
       }
       case '<': {
-        result += has(flags, 1n) ? '\\u003C' : '<';
+        result += has(flags, 1n) ? String.raw`\u003C` : '<';
         break;
       }
       case '>': {
-        result += has(flags, 1n) ? '\\u003E' : '>';
+        result += has(flags, 1n) ? String.raw`\u003E` : '>';
         break;
       }
       case '&': {
-        result += has(flags, 2n) ? '\\u0026' : '&';
+        result += has(flags, 2n) ? String.raw`\u0026` : '&';
         break;
       }
       case "'": {
-        result += has(flags, 4n) ? '\\u0027' : "'";
+        result += has(flags, 4n) ? String.raw`\u0027` : "'";
         break;
       }
       default: {
@@ -245,33 +254,43 @@ function encodeString(text: string, flags: bigint): string {
 function decodePoint(bytes: string): number {
   const lead = bytes.charCodeAt(0);
   if (bytes.length === 2) return ((lead & 0x1f) << 6) | (bytes.charCodeAt(1) & 0x3f);
-  if (bytes.length === 3) return ((lead & 0x0f) << 12) | ((bytes.charCodeAt(1) & 0x3f) << 6) | (bytes.charCodeAt(2) & 0x3f);
-  return ((lead & 0x07) << 18) | ((bytes.charCodeAt(1) & 0x3f) << 12) | ((bytes.charCodeAt(2) & 0x3f) << 6) | (bytes.charCodeAt(3) & 0x3f);
+  if (bytes.length === 3)
+    return ((lead & 0x0f) << 12) | ((bytes.charCodeAt(1) & 0x3f) << 6) | (bytes.charCodeAt(2) & 0x3f);
+  return (
+    ((lead & 0x07) << 18) |
+    ((bytes.charCodeAt(1) & 0x3f) << 12) |
+    ((bytes.charCodeAt(2) & 0x3f) << 6) |
+    (bytes.charCodeAt(3) & 0x3f)
+  );
 }
 
 // Decoding -----------------------------------------------------------------------------------------------------------
 
-defineFunction('json_decode(string $json, ?bool $associative = null, int $depth = 512, int $flags = 0): mixed', ({ args }) => {
-  const text = args[0] as string;
-  let flags = (args[3] as bigint | undefined) ?? 0n;
-  const associative = args[1] === true || (args[1] !== false && has(flags, 1n));
-  const depth = Number((args[2] as bigint | undefined) ?? 512n);
-  if (depth <= 0) throwError('ValueError', 'json_decode(): Argument #3 ($depth) must be greater than 0');
-  const runtime = rt();
-  try {
-    if (text === '') throw new JsonError(4);
-    const parser = new JsonParser(text, associative, depth, flags);
-    const value = parser.parseDocument();
-    runtime.lastJsonError = 0;
-    return value;
-  } catch (error) {
-    if (!(error instanceof JsonError)) throw error;
-    if (has(flags, 4_194_304n)) throw new PhpThrow(newThrowable('JsonException', MESSAGES[error.code], BigInt(error.code)));
-    runtime.lastJsonError = error.code;
-    flags = 0n;
-    return null;
+defineFunction(
+  'json_decode(string $json, ?bool $associative = null, int $depth = 512, int $flags = 0): mixed',
+  ({ args }) => {
+    const text = args[0] as string;
+    let flags = (args[3] as bigint | undefined) ?? 0n;
+    const associative = args[1] === true || (args[1] !== false && has(flags, 1n));
+    const depth = Number((args[2] as bigint | undefined) ?? 512n);
+    if (depth <= 0) throwError('ValueError', 'json_decode(): Argument #3 ($depth) must be greater than 0');
+    const runtime = rt();
+    try {
+      if (text === '') throw new JsonError(4);
+      const parser = new JsonParser(text, associative, depth, flags);
+      const value = parser.parseDocument();
+      runtime.lastJsonError = 0;
+      return value;
+    } catch (error) {
+      if (!(error instanceof JsonError)) throw error;
+      if (has(flags, 4_194_304n))
+        throw new PhpThrow(newThrowable('JsonException', MESSAGES[error.code], BigInt(error.code)));
+      runtime.lastJsonError = error.code;
+      flags = 0n;
+      return null;
+    }
   }
-});
+);
 defineFunction('json_last_error(): int', () => BigInt(rt().lastJsonError));
 defineFunction('json_last_error_msg(): string', () => MESSAGES[rt().lastJsonError]);
 defineFunction('json_validate(string $json, int $depth = 512, int $flags = 0): bool', ({ args }) => {
@@ -405,14 +424,23 @@ class JsonParser {
         continue;
       }
       const escape = this.text[this.index++];
-      const simple: Record<string, string> = { '"': '"', '\\': '\\', '/': '/', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' };
+      const simple: Record<string, string> = {
+        '"': '"',
+        '\\': '\\',
+        '/': '/',
+        b: '\b',
+        f: '\f',
+        n: '\n',
+        r: '\r',
+        t: '\t',
+      };
       if (escape in simple) {
         result += simple[escape];
         continue;
       }
       if (escape !== 'u') throw new JsonError(4);
       let point = this.hex4();
-      if (point >= 0xd8_00 && point <= 0xdb_ff && this.text.startsWith('\\u', this.index)) {
+      if (point >= 0xd8_00 && point <= 0xdb_ff && this.text.startsWith(String.raw`\u`, this.index)) {
         this.index += 2;
         const low = this.hex4();
         if (low >= 0xdc_00 && low <= 0xdf_ff) point = 0x1_00_00 + ((point - 0xd8_00) << 10) + (low - 0xdc_00);
@@ -443,4 +471,3 @@ class JsonParser {
     return Number(match[0]);
   }
 }
-

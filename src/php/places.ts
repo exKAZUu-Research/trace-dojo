@@ -1,3 +1,4 @@
+// oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { deprecated, throwError, warn } from './errors';
 import { toKey } from './operators';
 import type { Frame } from './runtime';

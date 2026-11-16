@@ -1,3 +1,4 @@
+// oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { declForKey, propNameOf } from './classes';
 import { formatFloat, formatFloatRepr } from './conversions';
 import { callMethod } from './interp';
@@ -9,7 +10,8 @@ import { type ClosureData, isClosure, PhpArray, PhpObject, Ref, type Slot, UNINI
 function debugEntries(object: PhpObject): [string | bigint, Slot, string][] {
   if (object.cls.findMethod('__debuginfo')) {
     const info = callMethod(object, '__debugInfo', []);
-    if (info instanceof PhpArray) return [...info.entries()].map(([key, value]) => [key, value, typeof key === 'string' ? `"${key}"` : `${key}`]);
+    if (info instanceof PhpArray)
+      return [...info.entries()].map(([key, value]) => [key, value, typeof key === 'string' ? `"${key}"` : `${key}`]);
   }
   if (isClosure(object)) return closureDebug(object);
   const internal = object.internal as { debugEntries?: () => [string | bigint, Value][] } | undefined;
@@ -33,7 +35,11 @@ function closureDebug(object: PhpObject): [string, Value, string][] {
   const entries: [string, Value, string][] = [];
   const fn = data.fn;
   if (fn.kind === 'user' && fn.decl.isClosure) {
-    entries.push(['name', `{closure:/main.php:${fn.decl.row + 1}}`, '"name"'], ['file', '/main.php', '"file"'], ['line', BigInt(fn.decl.row + 1), '"line"']);
+    entries.push(
+      ['name', `{closure:/main.php:${fn.decl.row + 1}}`, '"name"'],
+      ['file', '/main.php', '"file"'],
+      ['line', BigInt(fn.decl.row + 1), '"line"']
+    );
   } else {
     entries.push(['function', data.method ? `${data.method.scope.name}::${data.method.name}` : fn.name, '"function"']);
   }
@@ -44,7 +50,8 @@ function closureDebug(object: PhpObject): [string, Value, string][] {
   if (data.thisObj) entries.push(['this', data.thisObj, '"this"']);
   if (fn.params.length > 0) {
     const params = new PhpArray();
-    for (const param of fn.params) params.set(`${param.byRef ? '&' : ''}$${param.name}`, param.optional ? '<optional>' : '<required>');
+    for (const param of fn.params)
+      params.set(`${param.byRef ? '&' : ''}$${param.name}`, param.optional ? '<optional>' : '<required>');
     entries.push(['parameter', params, '"parameter"']);
   }
   return entries;
@@ -178,7 +185,7 @@ export function varExport(value: Value): string {
 }
 
 function quoteExport(text: string): string {
-  return `'${text.replaceAll(/['\\]/g, '\\$&').replaceAll('\0', `' . "\\0" . '`)}'`;
+  return `'${text.replaceAll(/['\\]/g, String.raw`\$&`).replaceAll('\0', `' . "\\0" . '`)}'`;
 }
 
 function exportValue(value: Value, level: number, active: Set<object>): string {

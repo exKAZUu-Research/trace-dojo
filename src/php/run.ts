@@ -1,11 +1,12 @@
+// oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import { bootstrap } from './bootstrap';
-import { type CallRecord, invoke, resetCallStack } from './calls';
+import { type CallRecord, HostStackExhaustion, invoke, resetCallStack } from './calls';
 import { throwableText, traceText } from './exceptions';
-import { holderCounts, mark } from './garbage';
+import { holderCounts } from './garbage';
 import { callValue, runStatements } from './interp';
 import { type ParsedProgram, parsePhp } from './parse';
 import { ExitSignal, FatalError, type Frame, PhpThrow, Runtime, SCRIPT_PATH, withRuntime } from './runtime';
@@ -83,11 +84,18 @@ function report(runtime: Runtime, error: unknown): string | undefined {
       try {
         callValue(handler, [{ v: error.object }], undefined);
         return undefined;
-      } catch (inner) {
-        return report(runtime, inner);
+      } catch (error_) {
+        return report(runtime, error_);
       }
     }
     return printUncaught(runtime, error.object);
+  }
+  if (error instanceof HostStackExhaustion) {
+    const trace = traceText(error.record ? [error.record] : []);
+    restoreStack(runtime);
+    const message = `Fatal error: ${error.message} in ${SCRIPT_PATH} on line ${(error.row ?? 0) + 1}\nStack trace:\n${trace}`;
+    runtime.echo(`\n${message}\n`);
+    return message;
   }
   if (error instanceof FatalError) {
     const records = error.calls as CallRecord[];
@@ -132,7 +140,11 @@ function shutdown(runtime: Runtime): string | undefined {
       object.destructed = true;
       if (!destructor) continue;
       runtime.destructibles--;
-      invoke({ fn: destructor.fn, thisObj: object, scope: destructor.scope, staticClass: object.cls, method: destructor }, [], undefined);
+      invoke(
+        { fn: destructor.fn, thisObj: object, scope: destructor.scope, staticClass: object.cls, method: destructor },
+        [],
+        undefined
+      );
     }
     runtime.shuttingDown = true;
   });

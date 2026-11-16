@@ -1,12 +1,13 @@
+// oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
-import { invoke } from './calls';
-import { callTargetOf, closureFromCallable, closureTarget } from './interp';
 import { lower } from './bytes';
+import { invoke } from './calls';
 import { requireClass } from './classes';
 import { debugType } from './conversions';
 import { throwError } from './errors';
-import { defineClass, installNatives } from './native';
 import { collectGarbage } from './garbage';
+import { callTargetOf, closureFromCallable, closureTarget } from './interp';
+import { defineClass, installNatives, type NativeMethod } from './native';
 import { rt, type Runtime } from './runtime';
 import { type ClosureData, PhpObject, type Value } from './values';
 
@@ -103,7 +104,11 @@ defineClass({
         const [newThis, ...rest] = args;
         const object = newThis as PhpObject;
         const target = closureTarget(thisObj);
-        return invoke({ ...target, thisObj: object, scope: object.cls, staticClass: object.cls }, rest.map((v) => ({ v })), undefined);
+        return invoke(
+          { ...target, thisObj: object, scope: object.cls, staticClass: object.cls },
+          rest.map((v) => ({ v })),
+          undefined
+        );
       },
     },
     {
@@ -117,7 +122,12 @@ defineClass({
     },
     {
       signature: '__invoke(mixed ...$args): mixed',
-      impl: ({ thisObj, args }) => invoke(closureTarget(thisObj), args.map((v) => ({ v })), undefined),
+      impl: ({ thisObj, args }) =>
+        invoke(
+          closureTarget(thisObj),
+          args.map((v) => ({ v })),
+          undefined
+        ),
     },
   ],
 });
@@ -128,8 +138,8 @@ function turtleOf(object: PhpObject): TurtleState {
   return state;
 }
 
-function defineTurtleMethods(): import('./native').NativeMethod[] {
-  const methods: import('./native').NativeMethod[] = [
+function defineTurtleMethods(): NativeMethod[] {
+  const methods: NativeMethod[] = [
     {
       signature: '__construct(int $x = 0, int $y = 0, ?string $color = null)',
       impl: ({ thisObj, args }) => {

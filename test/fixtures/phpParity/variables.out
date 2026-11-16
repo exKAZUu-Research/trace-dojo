@@ -1,0 +1,65 @@
+2 2
+Array
+(
+    [0] => 2
+    [1] => 4
+    [2] => 6
+)
+34
+123
+1111
+22
+dynamic dynamic
+unsetnE
+5none
+default
+Array
+(
+    [a] => Array
+        (
+            [b] => Array
+                (
+                    [0] => 1
+                    [1] => 2
+                )
+
+        )
+
+)
+Helloo5
+7 12
+13
+XY
+BA
+21
+Array
+(
+    [0] => 9
+    [1] => 2
+)
+Array
+(
+    [0] => 1
+    [1] => 2
+)
+integerdoublestringbooleanarrayNULLobject
+int(12)
+float(3.5)
+bool(false)
+bool(false)
+bool(true)
+string(0) ""
+array(1) {
+  [0]=>
+  string(1) "x"
+}
+int(26)
+int(10)
+int(5)
+float(9.223372036854776E+18)
+float(-9.223372036854776E+18)
+bool(false)
+int(5)
+int(1)
+hi42dhi
+25

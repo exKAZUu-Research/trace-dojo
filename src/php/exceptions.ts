@@ -1,3 +1,4 @@
+// oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { type CallRecord, callStack } from './calls';
 import { createObject, findClass, readProp } from './classes';
 import { formatFloatRepr } from './conversions';
@@ -68,9 +69,18 @@ function traceArrayText(trace: Value): string {
     const line = frame.get('line');
     const where = file === undefined ? '[internal function]' : `${toStr(file)}(${toStr(line ?? null)})`;
     const className = frame.get('class');
-    const name = className === undefined ? toStr(frame.get('function') ?? '') : `${toStr(className)}${toStr(frame.get('type') ?? '')}${toStr(frame.get('function') ?? '')}`;
+    const name =
+      className === undefined
+        ? toStr(frame.get('function') ?? '')
+        : `${toStr(className)}${toStr(frame.get('type') ?? '')}${toStr(frame.get('function') ?? '')}`;
     const args = frame.get('args');
-    const argsText = args instanceof PhpArray ? args.values().map((arg) => traceArg(arg)).join(', ') : '';
+    const argsText =
+      args instanceof PhpArray
+        ? args
+            .values()
+            .map((arg) => traceArg(arg))
+            .join(', ')
+        : '';
     lines.push(`#${index++} ${where}: ${name}(${argsText})`);
   }
   lines.push(`#${index} {main}`);
@@ -107,7 +117,7 @@ export function throwableText(object: PhpObject): string {
 function defaultThrowableText(object: PhpObject): string {
   const parts: string[] = [];
   const chain: PhpObject[] = [];
-  for (let current: Value = object; current instanceof PhpObject && chain.length < 64; ) {
+  for (let current: Value = object; current instanceof PhpObject && chain.length < 64;) {
     if (chain.includes(current)) break;
     chain.push(current);
     current = current.props.get(privateKey(current, 'previous')) as Value;
@@ -137,7 +147,11 @@ function callUserHandler(handler: Value, level: bigint, message: string, row: nu
   // The handler runs without itself, so that an error inside it reaches the default handling.
   runtime.errorHandlers = [];
   try {
-    const result = callValue(handler, [{ v: level }, { v: message }, { v: SCRIPT_PATH }, { v: BigInt(row + 1) }], undefined);
+    const result = callValue(
+      handler,
+      [{ v: level }, { v: message }, { v: SCRIPT_PATH }, { v: BigInt(row + 1) }],
+      undefined
+    );
     return result !== false;
   } finally {
     runtime.errorHandlers = saved;
@@ -159,7 +173,11 @@ const throwableMethods = (base: string): NativeMethod[] => [
   },
   { signature: 'getMessage(): string', isFinal: true, impl: ({ thisObj }) => slotValue(thisObj, 'message') },
   { signature: 'getCode()', isFinal: true, impl: ({ thisObj }) => slotValue(thisObj, 'code') },
-  { signature: 'getPrevious(): ?Throwable', isFinal: true, impl: ({ thisObj }) => slotValue(thisObj, `\0${base}\0previous`) },
+  {
+    signature: 'getPrevious(): ?Throwable',
+    isFinal: true,
+    impl: ({ thisObj }) => slotValue(thisObj, `\0${base}\0previous`),
+  },
   { signature: 'getFile(): string', isFinal: true, impl: ({ thisObj }) => slotValue(thisObj, 'file') },
   { signature: 'getLine(): int', isFinal: true, impl: ({ thisObj }) => slotValue(thisObj, 'line') },
   { signature: 'getTrace(): array', isFinal: true, impl: ({ thisObj }) => slotValue(thisObj, `\0${base}\0trace`) },

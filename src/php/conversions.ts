@@ -1,5 +1,5 @@
 import { lower } from './bytes';
-import { INT_MAX, INT_MIN, type Key, PhpArray, PhpObject, type Value } from './values';
+import { INT_MAX, INT_MIN, type Key, PhpArray, type PhpObject, type Value } from './values';
 
 /** Formats a float as PHP's `echo` does, with 14 significant digits (`precision=14`). */
 export function formatFloat(value: number, precision = 14): string {
@@ -58,7 +58,7 @@ function layoutDigits(
 
 /** Whether a number is a whole float in the integer range, which converts to an int without loss. */
 export function floatFitsInt(value: number): boolean {
-  return Number.isFinite(value) && value >= -9.223_372_036_854_776e18 && value < 9.223_372_036_854_776e18;
+  return Number.isFinite(value) && value >= -9.223372036854776e18 && value < 9.223372036854776e18;
 }
 
 /** Converts a float to an int as PHP does since 8.1: out of range or non-finite values become 0 on 64-bit... */

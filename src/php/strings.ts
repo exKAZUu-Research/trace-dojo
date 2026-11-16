@@ -1,3 +1,4 @@
+// oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 /** The next string in PHP's alphanumeric increment (`"a"` → `"b"`, `"Az"` → `"Ba"`, `"zz"` → `"aaa"`). */
 export function incrementString(text: string): string {
   const chars = [...text];
@@ -25,8 +26,8 @@ export function exactDecimal(value: number): { digits: string; point: number } {
   const view = new DataView(new ArrayBuffer(8));
   view.setFloat64(0, Math.abs(value));
   const bits = view.getBigUint64(0);
-  const exponentBits = Number((bits >> 52n) & 0x7ffn);
-  let mantissa = bits & 0xf_ffff_ffff_ffffn;
+  const exponentBits = Number((bits >> 52n) & 0x7_ffn);
+  let mantissa = bits & 0xf_ff_ff_ff_ff_ff_ffn;
   let exponent: number;
   if (exponentBits === 0) exponent = -1074;
   else {
@@ -124,7 +125,15 @@ function intPow10(power: number): number {
   return POWERS_OF_TEN[power];
 }
 
-export type RoundMode = 'halfUp' | 'halfDown' | 'halfEven' | 'halfOdd' | 'awayFromZero' | 'towardsZero' | 'ceiling' | 'floor';
+export type RoundMode =
+  | 'halfUp'
+  | 'halfDown'
+  | 'halfEven'
+  | 'halfOdd'
+  | 'awayFromZero'
+  | 'towardsZero'
+  | 'ceiling'
+  | 'floor';
 
 /** Rounds a float to `places` decimals as PHP 8.4's `round` does. */
 export function phpRound(value: number, places: number, mode: RoundMode = 'halfUp'): number {
@@ -148,7 +157,9 @@ export function phpRound(value: number, places: number, mode: RoundMode = 'halfU
 function roundHelper(integral: number, value: number, exponent: number, places: number, mode: RoundMode): number {
   const valueAbs = Math.abs(value);
   const edge = (): number =>
-    places > 0 ? Math.abs((integral + Math.sign(integral || value) * 0.5) / exponent) : Math.abs((integral + Math.sign(integral || value) * 0.5) * exponent);
+    places > 0
+      ? Math.abs((integral + Math.sign(integral || value) * 0.5) / exponent)
+      : Math.abs((integral + Math.sign(integral || value) * 0.5) * exponent);
   const away = (): number => integral + Math.sign(integral || value);
   switch (mode) {
     case 'halfUp': {

@@ -1,4 +1,5 @@
-import { LIMITS, ExecutionLimitError } from '../interpreter/limits';
+// oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   compareBytes,
   compareNumbers,
@@ -6,9 +7,9 @@ import {
   floatFitsInt,
   formatFloat,
   intOrFloat,
+  normalizeKeyString,
   numericPrefix,
   numericValue,
-  normalizeKeyString,
   toBool,
 } from './conversions';
 import { deprecated, throwError, warn } from './errors';
@@ -226,7 +227,12 @@ export function bitwise(op: string, left: Value, right: Value): Value {
   if ((op === '&' || op === '|' || op === '^') && typeof left === 'string' && typeof right === 'string') {
     return bytewise(op, left, right);
   }
-  if (left instanceof PhpArray || right instanceof PhpArray || left instanceof PhpObject || right instanceof PhpObject) {
+  if (
+    left instanceof PhpArray ||
+    right instanceof PhpArray ||
+    left instanceof PhpObject ||
+    right instanceof PhpObject
+  ) {
     unsupportedOperands(op, left, right);
   }
   const a = bitwiseOperand(left, op, left, right);

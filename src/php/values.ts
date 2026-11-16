@@ -1,3 +1,4 @@
+// oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDecl, FunctionDecl } from './ast';
 
@@ -305,7 +306,7 @@ export class PhpClass {
   }
 
   findMethod(lname: string): Method | undefined {
-    for (let cls: PhpClass | undefined = this; cls; cls = cls.parent) {
+    for (const cls of lineage(this)) {
       const method = cls.methods.get(lname);
       if (method) return method;
     }
@@ -318,7 +319,7 @@ export class PhpClass {
   }
 
   findConst(name: string): ClassConst | undefined {
-    for (let cls: PhpClass | undefined = this; cls; cls = cls.parent) {
+    for (const cls of lineage(this)) {
       const constant = cls.consts.get(name);
       if (constant) return constant;
     }
@@ -330,7 +331,7 @@ export class PhpClass {
   }
 
   findStatic(name: string): { ref: Ref; decl: PropDecl } | undefined {
-    for (let cls: PhpClass | undefined = this; cls; cls = cls.parent) {
+    for (const cls of lineage(this)) {
       const prop = cls.staticProps.get(name);
       if (prop) return prop;
     }
@@ -342,6 +343,11 @@ export class PhpClass {
     for (let cls: PhpClass | undefined = this.parent; cls; cls = cls.parent) if (cls === other) return true;
     return this.interfaces.includes(other);
   }
+}
+
+/** A class and its ancestors, the class first. */
+function* lineage(start: PhpClass): Generator<PhpClass> {
+  for (let cls: PhpClass | undefined = start; cls; cls = cls.parent) yield cls;
 }
 
 export class PhpObject {

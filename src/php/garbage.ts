@@ -73,7 +73,8 @@ export function mark(runtime: Runtime): Set<PhpObject> {
   for (const cls of runtime.classes.values()) {
     for (const { ref } of cls.staticProps.values()) pending.push(ref);
     for (const constant of cls.consts.values()) if (constant.value !== undefined) pending.push(constant.value);
-    for (const method of cls.methods.values()) if (method.fn.kind === 'user') pending.push(...method.fn.statics.values());
+    for (const method of cls.methods.values())
+      if (method.fn.kind === 'user') pending.push(...method.fn.statics.values());
   }
   for (const value of runtime.constants.values()) pending.push(value);
   pending.push(...runtime.held, runtime.exceptionHandler);
@@ -128,7 +129,11 @@ function pushObject(object: PhpObject, pending: unknown[]): void {
 function freeable(garbage: PhpObject[]): PhpObject[] {
   const set = new Set(garbage);
   const edges = new Map<PhpObject, PhpObject[]>();
-  for (const object of garbage) edges.set(object, referencedObjects(object).filter((target) => set.has(target)));
+  for (const object of garbage)
+    edges.set(
+      object,
+      referencedObjects(object).filter((target) => set.has(target))
+    );
   // Tarjan's strongly connected components finds the objects on cycles.
   let index = 0;
   const indices = new Map<PhpObject, number>();
@@ -251,7 +256,8 @@ export function holderCounts(runtime: Runtime): Map<PhpObject, number> {
     for (const value of [...frame.temporaries, ...frame.args]) count(value);
   }
   for (const cls of runtime.classes.values()) for (const { ref } of cls.staticProps.values()) count(ref);
-  for (const fn of runtime.functions.values()) if (fn.kind === 'user') for (const ref of fn.statics.values()) count(ref);
+  for (const fn of runtime.functions.values())
+    if (fn.kind === 'user') for (const ref of fn.statics.values()) count(ref);
   for (const value of runtime.held) count(value);
   while (pending.length > 0) {
     const item = pending.pop();
