@@ -208,3 +208,43 @@ test.each([
     uncaughtException: 'Prelude.undefined',
   });
 });
+
+test('generic RealFloat formatting preserves wrapper instances', () => {
+  const source =
+    'import Data.Ord\nimport Numeric\nmain=print(showEFloat Nothing (Down 0::Down Float) "",showFFloat (Just 2) (Down 0::Down Double) "",showEFloat Nothing (Down 1::Down Float) "")';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '("0.0e0","0.00","-',
+    uncaughtException: 'Char.intToDigit: not a digit -1',
+  });
+});
+
+test('numeric boundary operations preserve GHC rounding and exponent bounds', () => {
+  const source =
+    'import Data.Bits\nmain=do\n  print(exp(-0.212::Float),sin(0.095::Float))\n  print(scaleFloat minBound (1::Float),scaleFloat maxBound (1e100::Double))\n  print(shift (1::Integer) minBound,shift (7::Word) minBound,shift (7::Int) minBound)';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(0.80896467,9.485717e-2)\n(0.0,Infinity)\n(1,7,7)\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('decimal reads handle huge floating exponents and preserve exact Rational conversion', () => {
+  const source =
+    'import Numeric\nimport Data.Ratio\nmain=do\n  print(read "1e1000000"::Double,read "1e-1000000"::Float)\n  print(fst(head(readFloat "1e1000000000"::[(Double,String)])),fst(head(readFloat "1e-1000000000"::[(Double,String)])))\n  print(fst(head(readFloat "1e400"::[(Rational,String)])) == 10^400 % 1)';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(Infinity,0.0)\n(Infinity,0.0)\nTrue\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('zero block buffering errors preserve numeric precedence', () => {
+  expect(
+    executeProgram('haskell', 'import System.IO\nmain=hSetBuffering stdout (BlockBuffering(Just 0))')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: 'hSetBuffering: invalid argument (illegal buffer size 0)',
+  });
+});

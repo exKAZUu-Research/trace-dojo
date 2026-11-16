@@ -106,7 +106,7 @@ const PRELUDE: PublicModule = {
     ['Num', 'all'],
     ['Real', 'all'],
     ['Integral', 'all'],
-    ['Fractional', 'all'],
+    ['Fractional', ['/', 'recip', 'fromRational']],
     ['Floating', 'all'],
     ['RealFrac', 'all'],
     ['RealFloat', 'all'],

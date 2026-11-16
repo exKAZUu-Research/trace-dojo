@@ -58,6 +58,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   private readonly globals = new Map<GlobalDef, Slot>();
   private readonly dictCache = new Map<InstanceInfo, Dict>();
   private allocated = 0;
+  private gcMilliseconds = 0;
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
@@ -141,8 +142,21 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   /** Removes the turtles that nothing the program can still use reaches. */
   collectGarbage(): void {
     this.beforeCollect?.();
-    const reached = markReachable(this);
-    this.world.retain((turtle) => reached.has(turtle));
+    if (!this.world.hasTurtles) return;
+    this.budget.excludingTime(() => {
+      const started = performance.now();
+      const deadline = started + LIMITS.maxMilliseconds - this.gcMilliseconds;
+      const checkTime = (): void => {
+        if (performance.now() > deadline) throw new ExecutionLimitError('trace');
+      };
+      try {
+        const reached = markReachable(this, checkTime);
+        this.world.retain((turtle) => reached.has(turtle));
+        checkTime();
+      } finally {
+        this.gcMilliseconds += performance.now() - started;
+      }
+    });
   }
 }
 

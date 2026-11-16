@@ -134,11 +134,42 @@ asciiTab = ["NUL", "SOH", "STX", "ETX", "EOT", "ENQ", "ACK", "BEL",
 
 data FFFormat = FFExponent | FFFixed | FFGeneric
 
-primFloatDigits :: Bool -> a -> ([Int], Int)
-primFloatDigits isFloat x = if isFloat then primitive "floatDigits" x else primitive "doubleDigits" x
-
 floatToDigits10 :: RealFloat a => a -> ([Int], Int)
-floatToDigits10 x = primFloatDigits (floatDigits x == 24) x
+floatToDigits10 0 = ([0],0)
+floatToDigits10 x = (map fromInteger (reverse digits), k)
+  where
+    (f0,e0) = decodeFloat x
+    (minExp0,_) = floatRange x
+    p = floatDigits x
+    b = floatRadix x
+    minExp = minExp0 - p
+    adjustment = minExp - e0
+    (f,e) = if adjustment > 0 then (f0 ${BT}quot${BT} (b ^ adjustment), e0 + adjustment) else (f0,e0)
+    (r,s,up,down) =
+      if e >= 0 then
+        let be = b ^ e in
+        if f == b ^ (p-1) then (f*be*b*2,2*b,be*b,be) else (f*be*2,2,be,be)
+      else if e > minExp && f == b ^ (p-1) then (f*b*2,b ^ (negate e+1)*2,b,1)
+      else (f*2,b ^ negate e*2,1,1)
+    estimate = if b == 2 then
+      let lx = p-1+e0
+          k1 = (lx*8651) ${BT}quot${BT} 28738
+      in if lx >= 0 then k1+1 else k1
+      else ceiling ((log (fromInteger (f+1) :: Float) + fromIntegral e * log (fromInteger b)) / log 10)
+    fixup n = if (if n >= 0 then r+up <= 10^n*s else 10^(negate n)*(r+up) <= s)
+      then n else fixup (n+1)
+    k = fixup estimate
+    generate ds rn sn un dn =
+      let (digit,rest) = (rn*10) ${BT}quotRem${BT} sn
+          un' = un*10
+          dn' = dn*10
+      in case (rest < dn',rest+un' > sn) of
+        (True,False) -> digit:ds
+        (False,True) -> (digit+1):ds
+        (True,True) -> (if rest*2 < sn then digit else digit+1):ds
+        (False,False) -> generate (digit:ds) rest sn un' dn'
+    digits = if k >= 0 then generate [] r (s*10^k) up down
+      else let scale = 10^(negate k) in generate [] (r*scale) s (up*scale) (down*scale)
 
 formatRealFloat :: RealFloat a => FFFormat -> Maybe Int -> a -> String
 formatRealFloat fmt decs x = formatRealFloatAlt fmt decs False x
@@ -458,7 +489,7 @@ convFractional tok = case tok of
   _ -> case convBased tok of
     Just n -> Just (fromInteger n)
     Nothing -> case tok of
-      (c:_) -> if isDigit c then (let (n, d) = readFloatText tok in Just (fromRational (n :% d))) else Nothing
+      (c:_) -> if isDigit c then Just (fromDecimalText tok) else Nothing
       _ -> Nothing
 
 instance Read Int where

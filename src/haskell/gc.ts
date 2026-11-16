@@ -22,16 +22,29 @@ const freeCache = new WeakMap<Core, LocalRef[]>();
 
 /** The variables a piece of code reads from its environment, relative to the frame it runs in. */
 export function freeVarsOf(code: Core): LocalRef[] {
-  const cached = freeCache.get(code);
-  if (cached) return cached;
+  const pending: { code: Core; visited: boolean }[] = [{ code, visited: false }];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (freeCache.has(current.code)) continue;
+    const children = childCodes(current.code);
+    if (!current.visited) {
+      pending.push({ code: current.code, visited: true });
+      for (const [child] of children) if (!freeCache.has(child)) pending.push({ code: child, visited: false });
+      continue;
+    }
+    freeCache.set(current.code, cachedNodeReferences(current.code, children));
+  }
+  return freeCache.get(code)!;
+}
+
+function cachedNodeReferences(code: Core, children: [Core, boolean][]): LocalRef[] {
   const refs = new Map<string, LocalRef>();
   const add = (ref: LocalRef): void => {
     refs.set(`${ref.depth}:${ref.index}`, ref);
   };
   if (code.k === 'local') add({ depth: code.depth, index: code.index });
-  for (const [child, inner] of childCodes(code)) {
-    // A lambda's body runs one frame deeper, so the variables it reads from outside are one level further out.
-    for (const ref of freeVarsOf(child)) {
+  for (const [child, inner] of children) {
+    for (const ref of freeCache.get(child)!) {
       if (!inner) add(ref);
       else if (ref.depth > 0) add({ depth: ref.depth - 1, index: ref.index });
     }
@@ -40,9 +53,7 @@ export function freeVarsOf(code: Core): LocalRef[] {
     for (const stmt of code.stmts)
       for (const visible of stmt.visible) add({ depth: visible.depth, index: visible.index });
   }
-  const result = [...refs.values()];
-  freeCache.set(code, result);
-  return result;
+  return [...refs.values()];
 }
 
 /** The code nested in a node, each telling whether it runs in a frame of its own. */
@@ -118,7 +129,7 @@ function liveAfter(block: IODoCore, index: number): LocalRef[] {
 }
 
 /** The turtles that the program's live variables and pending computations reach. */
-export function markReachable(runtime: Runtime): Set<TurtleState> {
+export function markReachable(runtime: Runtime, checkTime: () => void): Set<TurtleState> {
   const reached = new Set<TurtleState>();
   const seen = new Set<object>();
   const pending: Slot[] = [];
@@ -130,7 +141,7 @@ export function markReachable(runtime: Runtime): Set<TurtleState> {
     const value = pending.pop() as Slot;
     if (typeof value !== 'object' || seen.has(value)) continue;
     seen.add(value);
-    runtime.spend();
+    checkTime();
     if (value instanceof TurtleValue) reached.add(value.turtle);
     else pushReferences(value, push);
   }

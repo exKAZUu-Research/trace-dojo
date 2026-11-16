@@ -209,3 +209,18 @@ main = do
     { line: 5, count: 1 },
   ]);
 });
+
+test('tracing modest loops does not charge garbage collection to program operations', () => {
+  const source =
+    'import Control.Monad\nmain=do\n  let xs=[1..500::Int]\n  forM_ xs $ \\x -> do\n    let y=x*2\n    when(y `mod` 100 == 0)(print y)';
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.stdout).toBe('100\n200\n300\n400\n500\n600\n700\n800\n900\n1000\n');
+  expect(recording.traceItems.length).toBeGreaterThan(1000);
+});
+
+test('tracing lazy long literals with a turtle uses no host recursion', () => {
+  const source = `main=do\n  t <- newTurtle\n  let xs=[${Array.from({ length: 30_000 }, () => 1).join(',')}]\n  print 1\n  print(head xs)\n  forward t`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.stdout).toBe('1\n1\n');
+  expect(recording.traceItems.at(-1)?.line).toBe(6);
+});

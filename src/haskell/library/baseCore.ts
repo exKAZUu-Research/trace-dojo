@@ -336,6 +336,8 @@ class Num a => Fractional a where
   (/) :: a -> a -> a
   recip :: a -> a
   fromRational :: Rational -> a
+  fromDecimalText :: String -> a
+  fromDecimalText text = let (n,d) = readFloatText text in fromRational (n :% d)
   recip x = fromInteger 1 / x
   x / y = x * recip y
 
@@ -391,8 +393,10 @@ class (RealFrac a, Floating a) => RealFloat a where
     where (m, n) = decodeFloat x
   significand x = encodeFloat m (negate (floatDigits x))
     where (m, _) = decodeFloat x
-  scaleFloat k x = if k == 0 || x == fromInteger 0 || isNaN x || isInfinite x then x else encodeFloat m (n + k)
+  scaleFloat k x = if k == 0 || x == fromInteger 0 || isNaN x || isInfinite x then x else encodeFloat m (n + max (negate bound) (min bound k))
     where (m, n) = decodeFloat x
+          (low, high) = floatRange x
+          bound = high - low + 4 * floatDigits x
 
 subtract :: Num a => a -> a -> a
 subtract x y = y - x
@@ -538,6 +542,7 @@ instance Fractional Double where
   (/) = primitive "doubleDiv"
   recip x = 1.0 / x
   fromRational (n :% d) = primDoubleFromRational n d
+  fromDecimalText = primitive "readDoubleText"
 
 primDoubleFromRational :: Integer -> Integer -> Double
 primDoubleFromRational = primitive "doubleFromRational"
@@ -614,6 +619,7 @@ instance Fractional Float where
   (/) = primitive "floatDiv"
   recip x = 1.0 / x
   fromRational (n :% d) = primFloatFromRational n d
+  fromDecimalText = primitive "readFloatValueText"
 
 primFloatFromRational :: Integer -> Integer -> Float
 primFloatFromRational = primitive "floatFromRational"

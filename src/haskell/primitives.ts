@@ -1,9 +1,9 @@
-// code-gauge-allow-file fileNcss 498 -- The primitive table lists every built-in operation the Haskell library calls.
+// code-gauge-allow-file fileNcss 504 -- The primitive table lists every built-in operation the Haskell library calls.
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { CONS_CON, tupleCon, UNIT_CON } from './builtinTypes';
 import type { ConInfo } from './entities';
 import { cons, NIL, nullary, type PrimResult, unpackString } from './machine';
-import { platformPower } from './platformMath';
+import { platformPower, platformUnary } from './platformMath';
 import type { Runtime } from './runtime';
 import {
   ConValue,
@@ -277,24 +277,25 @@ function defineFloating(prefix: 'double' | 'float', round: (value: number) => nu
   strict(`${prefix}Le`, 2, ([a, b]) => bool((a as number) <= (b as number)));
   strict(`${prefix}Gt`, 2, ([a, b]) => bool((a as number) > (b as number)));
   strict(`${prefix}Ge`, 2, ([a, b]) => bool((a as number) >= (b as number)));
-  const unary: Record<string, (value: number) => number> = {
-    Exp: Math.exp,
-    Log: Math.log,
-    Sqrt: Math.sqrt,
-    Sin: Math.sin,
-    Cos: Math.cos,
-    Tan: Math.tan,
-    Asin: Math.asin,
-    Acos: Math.acos,
-    Atan: Math.atan,
-    Sinh: Math.sinh,
-    Cosh: Math.cosh,
-    Tanh: Math.tanh,
-    Asinh: Math.asinh,
-    Acosh: Math.acosh,
-    Atanh: Math.atanh,
-  };
-  for (const [name, op] of Object.entries(unary)) strict(`${prefix}${name}`, 1, ([a]) => round(op(a as number)));
+  const unary = [
+    'Exp',
+    'Log',
+    'Sqrt',
+    'Sin',
+    'Cos',
+    'Tan',
+    'Asin',
+    'Acos',
+    'Atan',
+    'Sinh',
+    'Cosh',
+    'Tanh',
+    'Asinh',
+    'Acosh',
+    'Atanh',
+  ];
+  for (const name of unary)
+    strict(`${prefix}${name}`, 1, ([a]) => platformUnary(name, a as number, prefix === 'float'));
   strict(`${prefix}Pow`, 2, ([a, b]) => platformPower(a as number, b as number, prefix === 'float'));
   strict(`${prefix}IsNaN`, 1, ([a]) => bool(Number.isNaN(a)));
   strict(`${prefix}IsInfinite`, 1, ([a]) => bool(a === Number.POSITIVE_INFINITY || a === Number.NEGATIVE_INFINITY));
@@ -637,15 +638,42 @@ strict('toTitle', 1, ([a]) => {
 
 define('readDecimal', 1, [], ([text], runtime) => BigInt(forceString(text, runtime)));
 define('readFloatText', 1, [], ([text], runtime) => {
-  // A lexeme `lex` accepted as a number: digits, a fraction, an exponent.
-  const source = forceString(text, runtime);
-  const match = /^(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(source);
-  if (!match) return tuple(0n, 1n);
-  const digits = BigInt(`${match[1]}${match[2] ?? ''}`);
-  const exponent = (match[3] ? Number(match[3]) : 0) - (match[2]?.length ?? 0);
-  runtime.spend(Math.abs(exponent));
-  return exponent >= 0 ? tuple(digits * 10n ** BigInt(exponent), 1n) : tuple(digits, 10n ** BigInt(-exponent));
+  const parts = decimalParts(forceString(text, runtime));
+  return tuple(...decimalRatio(parts, runtime));
 });
+for (const [name, convert] of [
+  ['readDoubleText', rationalToDouble],
+  ['readFloatValueText', rationalToFloat],
+] as const) {
+  define(name, 1, [], ([text], runtime) => {
+    const parts = decimalParts(forceString(text, runtime));
+    if (parts.digits.length === 0) return 0;
+    const order = parts.digits.length + parts.exponent;
+    if (order > 400) return Number.POSITIVE_INFINITY;
+    if (order < -400) return 0;
+    return convert(...decimalRatio(parts, runtime));
+  });
+}
+
+interface DecimalParts {
+  digits: string;
+  exponent: number;
+}
+
+function decimalParts(source: string): DecimalParts {
+  const match = /^(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(source);
+  if (!match) return { digits: '', exponent: 0 };
+  const digits = `${match[1]}${match[2] ?? ''}`.replace(/^0+/, '');
+  return { digits, exponent: (match[3] ? Number(match[3]) : 0) - (match[2]?.length ?? 0) };
+}
+
+function decimalRatio({ digits, exponent }: DecimalParts, runtime: Runtime): [bigint, bigint] {
+  if (digits.length === 0) return [0n, 1n];
+  runtime.spend(Math.abs(exponent));
+  const numerator = BigInt(digits);
+  return exponent >= 0 ? [numerator * 10n ** BigInt(exponent), 1n] : [numerator, 10n ** BigInt(-exponent)];
+}
+
 define('readHexText', 1, [], ([text], runtime) => BigInt(`0x${forceString(text, runtime)}`));
 define('readOctText', 1, [], ([text], runtime) => BigInt(`0o${forceString(text, runtime)}`));
 
@@ -762,7 +790,7 @@ define(
             const count = runtime.machine.force(size.fields[0]) as bigint;
             if (count <= 0n)
               throw new HaskellException(
-                `hSetBuffering: invalid argument (illegal buffer size (${count}))`,
+                `hSetBuffering: invalid argument (illegal buffer size ${showSignedInt(count)})`,
                 'IOException'
               );
           }

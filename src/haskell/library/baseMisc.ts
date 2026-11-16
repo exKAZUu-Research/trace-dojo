@@ -574,7 +574,7 @@ class Eq a => Bits a where
   rotateR x n = rotate x (negate n)
   unsafeShiftL = shiftL
   unsafeShiftR = shiftR
-  shift x n = if n >= 0 then shiftL x n else shiftR x (negate n)
+  shift x n = if n >= 0 then shiftL x n else if negate n < 0 then x else shiftR x (negate n)
 
 instance Bits Int where
   rotate = primitive "intRotate"
@@ -737,6 +737,7 @@ instance Fractional a => Fractional (Down a) where
   Down x / Down y = Down (x / y)
   recip (Down x) = Down (recip x)
   fromRational x = Down (fromRational x)
+  fromDecimalText text = Down (fromDecimalText text)
 
 instance RealFrac a => RealFrac (Down a) where
   properFraction (Down x) = let (i,f) = properFraction x in (i,Down f)
