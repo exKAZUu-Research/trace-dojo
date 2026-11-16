@@ -348,20 +348,13 @@ export class RClass extends RBasic {
     }
     const cache = this.methodCache.map;
     if (cache.has(name)) return cache.get(name);
-    let found: RMethod | undefined;
-    let visibility: Visibility | undefined;
-    for (const occurrence of this.hierarchy().entries) {
-      const method = occurrence.table.get(name);
-      if (method) {
-        if (method.body.kind === 'visibility') visibility ??= method.visibility;
-        else {
-          found = method.body.kind === 'undefined' ? undefined : locatedMethod(method, occurrence, visibility);
-          break;
-        }
-      }
-    }
+    const found = lookupMethod(name, this.hierarchy().entries);
     cache.set(name, found);
     return found;
+  }
+
+  findMethodFromOrigin(name: string): RMethod | undefined {
+    return lookupMethod(name, hierarchyEntries(this, true));
   }
 
   findSuperMethod(name: string, owner: RClass, occurrence?: HierarchyEntry): RMethod | undefined {
@@ -393,6 +386,22 @@ export class RClass extends RBasic {
     this.hierarchyCache = { version: hierarchyVersion.value, entries, list, positions };
     return this.hierarchyCache;
   }
+}
+
+function lookupMethod(name: string, entries: Iterable<HierarchyEntry>): RMethod | undefined {
+  let found: RMethod | undefined;
+  let visibility: Visibility | undefined;
+  for (const occurrence of entries) {
+    const method = occurrence.table.get(name);
+    if (method) {
+      if (method.body.kind === 'visibility') visibility ??= method.visibility;
+      else {
+        found = method.body.kind === 'undefined' ? undefined : locatedMethod(method, occurrence, visibility);
+        break;
+      }
+    }
+  }
+  return found;
 }
 
 function locatedMethod(method: RMethod, occurrence: HierarchyEntry, visibility = method.visibility): RMethod {

@@ -824,9 +824,12 @@ function matchData(state: MatchState): RObject {
   return match;
 }
 
-export function matchSnapshot(source: RString): RString {
-  if (source.frozen) return source;
-  const snapshot = new RString(source.cls, source.s);
+export type MatchSnapshotPolicy = 'preserveClass' | 'plainString' | 'plainCopy';
+
+export function matchSnapshot(source: RString, policy: MatchSnapshotPolicy = 'preserveClass'): RString {
+  const cls = policy === 'preserveClass' ? source.cls : rt().c.String;
+  if (source.frozen && policy !== 'plainCopy' && source.cls === cls) return source;
+  const snapshot = new RString(cls, source.s);
   snapshot.binary = source.binary;
   snapshot.usAscii = source.usAscii;
   snapshot.rawBytes = source.rawBytes;
@@ -877,14 +880,20 @@ export function setLastMatch(state: MatchState | undefined): Value {
   return match;
 }
 
-export function setLiteralMatch(source: RString, text: string, target: string, from: number): MatchState | undefined {
+export function setLiteralMatch(
+  source: RString,
+  text: string,
+  target: string,
+  from: number,
+  policy: MatchSnapshotPolicy = 'plainString'
+): MatchState | undefined {
   if (from < 0) {
     setLastMatch(undefined);
     return undefined;
   }
   const state: MatchState = {
     text,
-    snapshot: matchSnapshot(source),
+    snapshot: matchSnapshot(source, policy),
     literal: true,
     groups: [[from, from + target.length]],
     names: [],
@@ -1519,7 +1528,7 @@ def('MatchData', 'values_at', [0, -1], function* (self: RObject, args) {
         undefined,
         true
       )) as RArray;
-      values.push(...selected.items);
+      for (const item of selected.items) values.push(item);
     } else values.push(yield* matchIndex(self, arg));
   }
   return arr(values);
@@ -1686,7 +1695,7 @@ function* substituteRegexp(
 ): Gen<{ value: RString; matched: boolean }> {
   replacement = yield* regexpReplacement(replacement);
   const replacementText = replacement instanceof RString ? replacement : undefined;
-  const cursor = new RegexpCursor(regexp, self);
+  const cursor = new RegexpCursor(regexp, self, mode === 'sub' ? 'plainCopy' : 'preserveClass');
   const global = mode === 'gsub' || mode === 'gsub!';
   const chunks: RString[] = [cursor.slice(0, 0)];
   let length = 0;

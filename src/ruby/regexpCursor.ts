@@ -1,5 +1,12 @@
 import { rubyError } from './errors';
-import { execAt, matchSnapshot, type MatchState, validateRegexpByteView, validateRegexpSubject } from './libRegexp';
+import {
+  execAt,
+  matchSnapshot,
+  type MatchSnapshotPolicy,
+  type MatchState,
+  validateRegexpByteView,
+  validateRegexpSubject,
+} from './libRegexp';
 import type { RObject, RString } from './objects';
 import { charIndex, regexpByteIndex, regexpByteUnit } from './regexpPositions';
 import { rt } from './runtime';
@@ -12,9 +19,10 @@ export class RegexpCursor {
 
   constructor(
     private readonly regexp: RObject,
-    private readonly subject: RString
+    private readonly subject: RString,
+    private readonly snapshotPolicy: MatchSnapshotPolicy = 'preserveClass'
   ) {
-    this.snapshot = matchSnapshot(subject);
+    this.snapshot = matchSnapshot(subject, this.snapshotPolicy);
     this.bytes = stringBytes(this.snapshot);
     this.length = this.bytes.length;
     validateRegexpSubject(regexp, subject);
@@ -85,7 +93,7 @@ export class RegexpCursor {
     const bytes = stringBytes(subject);
     if (bytes.length !== this.length) throw rubyError(rt().c.RuntimeError, 'string modified');
     validateRegexpSubject(this.regexp, subject);
-    this.snapshot = matchSnapshot(subject);
+    this.snapshot = matchSnapshot(subject, this.snapshotPolicy);
     this.bytes = bytes;
   }
 

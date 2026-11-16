@@ -27,8 +27,9 @@ export function initializeHierarchy(value: RClass): void {
   });
 }
 
-export function* hierarchyEntries(value: RClass): Generator<HierarchyEntry> {
-  for (let entry: HierarchyEntry | undefined = hierarchyOf(value).head; entry; entry = entry.next) {
+export function* hierarchyEntries(value: RClass, fromOrigin = false): Generator<HierarchyEntry> {
+  const head = hierarchyOf(value).head;
+  for (let entry: HierarchyEntry | undefined = fromOrigin ? originOf(head) : head; entry; entry = entry.next) {
     rt().spend();
     yield entry;
   }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 485 -- Record layout and initialization share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 486 -- Record layout and initialization share representation and state; splitting registration by size would scatter that concern.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   addressOf,
@@ -392,6 +392,7 @@ def(
 );
 def('Struct', 'members', 0, (self: RObject) => arr([...layoutOf(self.cls).memberSymbols]));
 def('Struct', ['to_a', 'deconstruct', 'values'], 0, (self: RObject) => arr([...valuesOf(self)]));
+// code-gauge-allow functionCognitiveComplexity 18 -- Struct selection preserves range coercion, integer bounds and roots in one traversal; elementwise appends avoid host argument limits.
 def('Struct', 'values_at', [0, -1], function* (self: RObject, args) {
   const values = valuesOf(self);
   const selected: Value[] = [];
@@ -409,7 +410,7 @@ def('Struct', 'values_at', [0, -1], function* (self: RObject, args) {
           undefined,
           true
         )) as RArray;
-        selected.push(...expanded.items);
+        for (const item of expanded.items) selected.push(item);
         continue;
       }
       const index = yield* toInt(argument);

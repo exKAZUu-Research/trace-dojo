@@ -18514,3 +18514,769 @@ test.each(superMissingDispatchCases)(
     expect(run(source)).toMatchObject(expected);
   }
 );
+
+test.each([
+  ['Struct.new(:a,:b).new(1,2)', '[200001, [1, 2, nil, nil], [nil, nil]]\n'],
+  ['/([a])(b)/.match("ab")', '[200001, ["ab", "a", "b", nil], [nil, nil]]\n'],
+])('large values_at ranges stay within the interpreter limits: %s', (receiver, stdout) => {
+  expect(run(`v=${receiver}.values_at(0..200000);p [v.size,v.first(4),v.last(2)]`)).toMatchObject({ stdout });
+});
+
+const nativeMatchSourceCases = [
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.scan("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];nil};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.sub("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.gsub("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.sub!("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.gsub!("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.scan(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];nil};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.sub(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.gsub(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.sub!(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.gsub!(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.scan(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];nil};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.sub(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.gsub(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.sub!(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.gsub!(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.scan(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];nil};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.sub(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.gsub(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.sub!(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.gsub!(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.scan("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];nil};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, true, true, #<Encoding:UTF-8>, true]]\n[String, true]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.sub("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.gsub("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, true, true, #<Encoding:UTF-8>, true]]\n[String, true]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.sub!("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    'FrozenError\n[]\n[nil, nil]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.gsub!("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    'FrozenError\n[]\n[nil, nil]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.scan(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];nil};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, true, true, #<Encoding:UTF-8>, true]]\n[String, true]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.sub(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.gsub(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, true, true, #<Encoding:UTF-8>, true]]\n[String, true]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.sub!(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    'FrozenError\n[]\n[nil, nil]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.gsub!(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    'FrozenError\n[]\n[nil, nil]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.scan(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];nil};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, true, true, #<Encoding:UTF-8>, true], [String, true, true, #<Encoding:UTF-8>, true], [String, true, true, #<Encoding:UTF-8>, true], [String, true, true, #<Encoding:UTF-8>, true]]\n[String, true]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.sub(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.gsub(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, true, true, #<Encoding:UTF-8>, true], [String, true, true, #<Encoding:UTF-8>, true], [String, true, true, #<Encoding:UTF-8>, true], [String, true, true, #<Encoding:UTF-8>, true]]\n[String, true]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.sub!(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    'FrozenError\n[]\n[nil, nil]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.gsub!(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    'FrozenError\n[]\n[nil, nil]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.scan(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];nil};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, true, true, #<Encoding:UTF-8>, true], [String, true, true, #<Encoding:UTF-8>, true], [String, true, true, #<Encoding:UTF-8>, true], [String, true, true, #<Encoding:UTF-8>, true]]\n[String, true]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.sub(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.gsub(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, true, true, #<Encoding:UTF-8>, true], [String, true, true, #<Encoding:UTF-8>, true], [String, true, true, #<Encoding:UTF-8>, true], [String, true, true, #<Encoding:UTF-8>, true]]\n[String, true]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.sub!(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    'FrozenError\n[]\n[nil, nil]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.gsub!(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    'FrozenError\n[]\n[nil, nil]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.scan("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];nil};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.sub("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.gsub("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.sub!("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.gsub!("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.scan(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];nil};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[S, false, true, #<Encoding:UTF-8>, false]]\n[S, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.sub(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.gsub(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[S, false, true, #<Encoding:UTF-8>, false]]\n[S, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.sub!(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[S, false, true, #<Encoding:UTF-8>, false]]\n[S, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.gsub!(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[S, false, true, #<Encoding:UTF-8>, false]]\n[S, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.scan(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];nil};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.sub(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.gsub(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.sub!(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.gsub!(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.scan(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];nil};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[S, false, true, #<Encoding:UTF-8>, false], [S, false, true, #<Encoding:UTF-8>, false], [S, false, true, #<Encoding:UTF-8>, false], [S, false, true, #<Encoding:UTF-8>, false]]\n[S, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.sub(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.gsub(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[S, false, true, #<Encoding:UTF-8>, false], [S, false, true, #<Encoding:UTF-8>, false], [S, false, true, #<Encoding:UTF-8>, false], [S, false, true, #<Encoding:UTF-8>, false]]\n[S, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.sub!(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[S, false, true, #<Encoding:UTF-8>, false]]\n[S, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);a=[];begin;s.gsub!(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[S, false, true, #<Encoding:UTF-8>, false], [S, false, true, #<Encoding:UTF-8>, false], [S, false, true, #<Encoding:UTF-8>, false], [S, false, true, #<Encoding:UTF-8>, false]]\n[S, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.scan("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];nil};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.sub("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.gsub("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.sub!("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    'FrozenError\n[]\n[nil, nil]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.gsub!("b"){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    'FrozenError\n[]\n[nil, nil]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.scan(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];nil};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[S, true, true, #<Encoding:UTF-8>, true]]\n[S, true]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.sub(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.gsub(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[S, true, true, #<Encoding:UTF-8>, true]]\n[S, true]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.sub!(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    'FrozenError\n[]\n[nil, nil]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.gsub!(/b/){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    'FrozenError\n[]\n[nil, nil]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.scan(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];nil};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.sub(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.gsub(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false], [String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.sub!(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    'FrozenError\n[]\n[nil, nil]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.gsub!(""){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    'FrozenError\n[]\n[nil, nil]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.scan(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];nil};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[S, true, true, #<Encoding:UTF-8>, true], [S, true, true, #<Encoding:UTF-8>, true], [S, true, true, #<Encoding:UTF-8>, true], [S, true, true, #<Encoding:UTF-8>, true]]\n[S, true]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.sub(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[String, false, true, #<Encoding:UTF-8>, false]]\n[String, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.gsub(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    '[[S, true, true, #<Encoding:UTF-8>, true], [S, true, true, #<Encoding:UTF-8>, true], [S, true, true, #<Encoding:UTF-8>, true], [S, true, true, #<Encoding:UTF-8>, true]]\n[S, true]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.sub!(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    'FrozenError\n[]\n[nil, nil]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("abc");s.instance_variable_set(:@x,1);s.freeze;a=[];begin;s.gsub!(//){|v|m=$~;a<<[m.string.class,m.string.equal?(s),m.string.frozen?,m.string.encoding,m.string.instance_variable_defined?(:@x)];"B"};rescue=>e;p e.class;end;p a;p [$~&.string&.class,$~&.string&.equal?(s)]',
+    'FrozenError\n[]\n[nil, nil]\n',
+  ],
+] as const;
+
+test.each(nativeMatchSourceCases)(
+  'match source snapshots preserve operation-specific class and freeze rules: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ stdout });
+  }
+);
+
+const nativeMatchSourceIdentityCases = [
+  [
+    'class S<String;end;s=String.new("aa");a=[];s.scan("a"){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("aa");a=[];s.gsub("a"){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("aa");a=[];s.scan(/a/){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("aa");a=[];s.gsub(/a/){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("aa");a=[];s.scan(""){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String, String], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("aa");a=[];s.gsub(""){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String, String], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("aa");a=[];s.scan(//){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String, String], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("aa");a=[];s.gsub(//){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String, String], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("aa").freeze;a=[];s.scan("a"){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String], true, true]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("aa").freeze;a=[];s.gsub("a"){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String], true, true]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("aa").freeze;a=[];s.scan(/a/){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String], true, true]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("aa").freeze;a=[];s.gsub(/a/){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String], true, true]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("aa").freeze;a=[];s.scan(""){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String, String], true, true]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("aa").freeze;a=[];s.gsub(""){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String, String], true, true]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("aa").freeze;a=[];s.scan(//){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String, String], true, true]\n',
+  ],
+  [
+    'class S<String;end;s=String.new("aa").freeze;a=[];s.gsub(//){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String, String], true, true]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("aa");a=[];s.scan("a"){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("aa");a=[];s.gsub("a"){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("aa");a=[];s.scan(/a/){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[S, S], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("aa");a=[];s.gsub(/a/){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[S, S], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("aa");a=[];s.scan(""){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String, String], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("aa");a=[];s.gsub(""){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String, String], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("aa");a=[];s.scan(//){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[S, S, S], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("aa");a=[];s.gsub(//){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[S, S, S], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("aa").freeze;a=[];s.scan("a"){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("aa").freeze;a=[];s.gsub("a"){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("aa").freeze;a=[];s.scan(/a/){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[S, S], true, true]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("aa").freeze;a=[];s.gsub(/a/){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[S, S], true, true]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("aa").freeze;a=[];s.scan(""){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String, String], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("aa").freeze;a=[];s.gsub(""){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[String, String, String], false, false]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("aa").freeze;a=[];s.scan(//){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[S, S, S], true, true]\n',
+  ],
+  [
+    'class S<String;end;s=S.new("aa").freeze;a=[];s.gsub(//){a<<$~.string;"b"};p [a.map(&:class),a[0].equal?(a[1]),a[0].equal?(s)]',
+    '[[S, S, S], true, true]\n',
+  ],
+] as const;
+
+test.each(nativeMatchSourceIdentityCases)(
+  'successive MatchData sources preserve native identity: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ stdout });
+  }
+);
+
+const nativeVisibilityOriginCases = [
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;;prepend M;begin;private :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;;include N;prepend M;begin;private :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;;prepend M;prepend N;begin;private :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:n\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;;prepend M;begin;private :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;;include N;prepend M;begin;private :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;;prepend M;prepend N;begin;private :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:n\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;def x;:own;end;prepend M;begin;private :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;def x;:own;end;include N;prepend M;begin;private :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;def x;:own;end;prepend M;prepend N;begin;private :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:n\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;def x;:own;end;prepend M;begin;private :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;def x;:own;end;include N;prepend M;begin;private :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;def x;:own;end;prepend M;prepend N;begin;private :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:n\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;def x;:own;end;undef_method :x;prepend M;begin;private :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;def x;:own;end;undef_method :x;include N;prepend M;begin;private :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;def x;:own;end;undef_method :x;prepend M;prepend N;begin;private :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:n\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;def x;:own;end;undef_method :x;prepend M;begin;private :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;def x;:own;end;undef_method :x;include N;prepend M;begin;private :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;def x;:own;end;undef_method :x;prepend M;prepend N;begin;private :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:n\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;;prepend M;begin;protected :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;;include N;prepend M;begin;protected :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;;prepend M;prepend N;begin;protected :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:n\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;;prepend M;begin;protected :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;;include N;prepend M;begin;protected :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;;prepend M;prepend N;begin;protected :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:n\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;def x;:own;end;prepend M;begin;protected :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;def x;:own;end;include N;prepend M;begin;protected :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;def x;:own;end;prepend M;prepend N;begin;protected :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:n\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;def x;:own;end;prepend M;begin;protected :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;def x;:own;end;include N;prepend M;begin;protected :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;def x;:own;end;prepend M;prepend N;begin;protected :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:n\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;def x;:own;end;undef_method :x;prepend M;begin;protected :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;def x;:own;end;undef_method :x;include N;prepend M;begin;protected :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;def x;:own;end;undef_method :x;prepend M;prepend N;begin;protected :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:n\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;def x;:own;end;undef_method :x;prepend M;begin;protected :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;def x;:own;end;undef_method :x;include N;prepend M;begin;protected :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;def x;:own;end;undef_method :x;prepend M;prepend N;begin;protected :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:n\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;;prepend M;begin;public :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;;include N;prepend M;begin;public :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;;prepend M;prepend N;begin;public :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:n\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;;prepend M;begin;public :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;;include N;prepend M;begin;public :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;;prepend M;prepend N;begin;public :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:n\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;def x;:own;end;prepend M;begin;public :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;def x;:own;end;include N;prepend M;begin;public :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;def x;:own;end;prepend M;prepend N;begin;public :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:n\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;def x;:own;end;prepend M;begin;public :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;def x;:own;end;include N;prepend M;begin;public :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;def x;:own;end;prepend M;prepend N;begin;public :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    '[true, false, false]\n:n\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;def x;:own;end;undef_method :x;prepend M;begin;public :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;def x;:own;end;undef_method :x;include N;prepend M;begin;public :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C;def x;:own;end;undef_method :x;prepend M;prepend N;begin;public :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:n\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;def x;:own;end;undef_method :x;prepend M;begin;public :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;def x;:own;end;undef_method :x;include N;prepend M;begin;public :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;class P;def x;:p;end;end;class C<P;def x;:own;end;undef_method :x;prepend M;prepend N;begin;public :x;rescue=>e;p e.class;end;end;p [C.public_method_defined?(:x),C.protected_method_defined?(:x),C.private_method_defined?(:x)];p C.new.x',
+    'NameError\n[true, false, false]\n:n\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module A;prepend M;begin;private :x;rescue=>e;p e.class;end;end;p [A.public_method_defined?(:x),A.protected_method_defined?(:x),A.private_method_defined?(:x)]',
+    'NameError\n[true, false, false]\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module A;prepend M;begin;protected :x;rescue=>e;p e.class;end;end;p [A.public_method_defined?(:x),A.protected_method_defined?(:x),A.private_method_defined?(:x)]',
+    'NameError\n[true, false, false]\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module A;prepend M;begin;public :x;rescue=>e;p e.class;end;end;p [A.public_method_defined?(:x),A.protected_method_defined?(:x),A.private_method_defined?(:x)]',
+    'NameError\n[true, false, false]\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;module A;;prepend M;begin;module_function :x;rescue=>e;p e.class;end;end;module M;def x;:new;end;end;class C;include A;end;begin;p C.new.send(:x);rescue=>e;p e.class;end;begin;p A.x;rescue=>e;p e.class;end',
+    'NameError\n:new\nNoMethodError\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;module A;;include M;begin;module_function :x;rescue=>e;p e.class;end;end;module M;def x;:new;end;end;class C;include A;end;begin;p C.new.send(:x);rescue=>e;p e.class;end;begin;p A.x;rescue=>e;p e.class;end',
+    ':new\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;module A;;include N;prepend M;begin;module_function :x;rescue=>e;p e.class;end;end;module M;def x;:new;end;end;class C;include A;end;begin;p C.new.send(:x);rescue=>e;p e.class;end;begin;p A.x;rescue=>e;p e.class;end',
+    ':new\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;module A;def x;:own;end;prepend M;begin;module_function :x;rescue=>e;p e.class;end;end;module M;def x;:new;end;end;class C;include A;end;begin;p C.new.send(:x);rescue=>e;p e.class;end;begin;p A.x;rescue=>e;p e.class;end',
+    ':new\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;module A;def x;:own;end;include M;begin;module_function :x;rescue=>e;p e.class;end;end;module M;def x;:new;end;end;class C;include A;end;begin;p C.new.send(:x);rescue=>e;p e.class;end;begin;p A.x;rescue=>e;p e.class;end',
+    ':own\n:own\n',
+  ],
+  [
+    'module M;def x;:m;end;end;module N;def x;:n;end;end;module A;def x;:own;end;include N;prepend M;begin;module_function :x;rescue=>e;p e.class;end;end;module M;def x;:new;end;end;class C;include A;end;begin;p C.new.send(:x);rescue=>e;p e.class;end;begin;p A.x;rescue=>e;p e.class;end',
+    ':new\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;class C;singleton_class.prepend M;begin;private_class_method :x;rescue=>e;p e.class;end;end;p C.x',
+    'NameError\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;class C;singleton_class.prepend M;begin;public_class_method :x;rescue=>e;p e.class;end;end;p C.x',
+    'NameError\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;o=Object.new;o.singleton_class.prepend M;s=o.singleton_class;begin;s.send(:private,:x);rescue=>e;p e.class;end;p [s.public_method_defined?(:x),s.protected_method_defined?(:x),s.private_method_defined?(:x)];p o.send(:x)',
+    'NameError\n[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;o=Object.new;o.singleton_class.prepend M;o=o.clone;s=o.singleton_class;begin;s.send(:private,:x);rescue=>e;p e.class;end;p [s.public_method_defined?(:x),s.protected_method_defined?(:x),s.private_method_defined?(:x)];p o.send(:x)',
+    '[false, false, true]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;o=Object.new;o.singleton_class.prepend M;s=o.singleton_class;begin;s.send(:protected,:x);rescue=>e;p e.class;end;p [s.public_method_defined?(:x),s.protected_method_defined?(:x),s.private_method_defined?(:x)];p o.send(:x)',
+    'NameError\n[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;o=Object.new;o.singleton_class.prepend M;o=o.clone;s=o.singleton_class;begin;s.send(:protected,:x);rescue=>e;p e.class;end;p [s.public_method_defined?(:x),s.protected_method_defined?(:x),s.private_method_defined?(:x)];p o.send(:x)',
+    '[false, true, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;o=Object.new;o.singleton_class.prepend M;s=o.singleton_class;begin;s.send(:public,:x);rescue=>e;p e.class;end;p [s.public_method_defined?(:x),s.protected_method_defined?(:x),s.private_method_defined?(:x)];p o.send(:x)',
+    'NameError\n[true, false, false]\n:m\n',
+  ],
+  [
+    'module M;def x;:m;end;end;o=Object.new;o.singleton_class.prepend M;o=o.clone;s=o.singleton_class;begin;s.send(:public,:x);rescue=>e;p e.class;end;p [s.public_method_defined?(:x),s.protected_method_defined?(:x),s.private_method_defined?(:x)];p o.send(:x)',
+    '[true, false, false]\n:m\n',
+  ],
+] as const;
+
+test.each(nativeVisibilityOriginCases)('visibility changes search from the native origin: %s', (source, stdout) => {
+  expect(run(source)).toMatchObject({ stdout });
+});

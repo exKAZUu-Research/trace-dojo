@@ -1279,6 +1279,7 @@ function* substitute(
   mutating = false
 ): Gen<{ value: RString; matched: boolean }> {
   const [pattern, replacement] = args;
+  const snapshotPolicy = !global && !mutating ? 'plainCopy' : 'plainString';
   regexpUnsupported(pattern);
   const target = yield* patternText(pattern, 'regexp', self);
   if (replacement === undefined && !block) {
@@ -1314,7 +1315,7 @@ function* substitute(
     matched = true;
     lastFound = found;
     lastSearchStartByte = positionByte;
-    lastState = setLiteralMatch(self, text, target, found);
+    lastState = setLiteralMatch(self, text, target, found, snapshotPolicy);
     const piece = yield* substitutionPiece(self, target, replacement, block, text, found, foundByte);
     if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
     const modified = (global || mutating) && self.s !== text;
@@ -1458,7 +1459,7 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
 });
 
 function* scanEmpty(self: RString, block: RProc | undefined): Gen<Value> {
-  const cursor = new RegexpCursor(makeRegexp('', { sourceBinary: self.binary }), self);
+  const cursor = new RegexpCursor(makeRegexp('', { sourceBinary: self.binary }), self, 'plainString');
   const found: Value[] = [];
   let lastByte = 0;
   for (let offset = 0; offset <= cursor.length;) {

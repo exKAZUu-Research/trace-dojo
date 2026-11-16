@@ -845,7 +845,7 @@ function* setVisibility(self: RClass, args: Value[], visibility: Visibility): Ge
   for (const arg of args)
     for (const value of arg instanceof RArray ? arg.items : [arg]) {
       const name = yield* symbolName(value);
-      const method = self.findMethod(name);
+      const method = self.findMethodFromOrigin(name);
       if (!method) {
         throw nameError(
           `undefined method '${name}' for ${self.isModule ? 'module' : 'class'} '${self.name}'`,
@@ -878,10 +878,10 @@ def(
       return NIL;
     }
     for (const name of yield* symbolNames(args)) {
+      yield* setVisibility(self, [RSymbol.fromKey(name)], 'private');
       const method = self.findMethod(name);
       if (!method) throw nameError(`undefined method '${name}' for module '${self.name}'`, self, name);
       addMethod(singletonClassOf(self), { ...method, owner: singletonClassOf(self), visibility: 'public' });
-      addMethod(self, { ...method, visibility: 'private' });
     }
     return args.length === 1 ? args[0] : arr(args);
   },
