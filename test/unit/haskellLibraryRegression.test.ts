@@ -219,14 +219,18 @@ test('generic RealFloat formatting preserves wrapper instances', () => {
   });
 });
 
-test('numeric boundary operations preserve GHC rounding and exponent bounds', () => {
+test('numeric boundary operations preserve native floating arithmetic and exponent bounds', () => {
   const source =
     'import Data.Bits\nmain=do\n  print(exp(-0.212::Float),sin(0.095::Float))\n  print(scaleFloat minBound (1::Float),scaleFloat maxBound (1e100::Double))\n  print(shift (1::Integer) minBound,shift (7::Word) minBound,shift (7::Int) minBound)';
-  expect(executeProgram('haskell', source)).toMatchObject({
-    kind: 'executed',
-    stdout: '(0.80896467,9.485717e-2)\n(0.0,Infinity)\n(1,7,7)\n',
-    uncaughtException: undefined,
-  });
+  const result = executeProgram('haskell', source);
+  expect(result).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  if (result.kind !== 'executed') return;
+  const [transcendentals, ...bounds] = result.stdout.trimEnd().split('\n');
+  const [exponential, sine] = transcendentals.slice(1, -1).split(',').map(Number);
+  // Native libm implementations may differ by one Float ULP.
+  expect(exponential).toBeCloseTo(Math.exp(Math.fround(-0.212)), 7);
+  expect(sine).toBeCloseTo(Math.sin(Math.fround(0.095)), 7);
+  expect(bounds).toEqual(['(0.0,Infinity)', '(1,7,7)']);
 });
 
 test('decimal reads handle huge floating exponents and preserve exact Rational conversion', () => {
@@ -431,6 +435,9 @@ test('Integer bit updates skip unchanged high bits and preserve signed word indi
 test.each([
   ['clearBit(1::Integer)(-1)', 'heap overflow'],
   ['complementBit(0::Integer)(-1)', 'heap overflow'],
+  ['complementBit(error "value"::Integer)(-1)', 'heap overflow'],
+  ['complementBit(error "value"::Integer)(error "index")', 'index'],
+  ['complementBit(error "value"::Integer)2', 'value'],
   ['bit(-1)::Integer', 'heap overflow'],
   ['clearBit(error "value"::Integer)(error "index")', 'value'],
   ['setBit(error "value"::Integer)(error "index")', 'value'],

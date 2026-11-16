@@ -2,7 +2,7 @@
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { CONS_CON, tupleCon, UNIT_CON } from './builtinTypes';
 import type { ConInfo } from './entities';
-import { changeIntegerBit, makeIntegerBit, testIntegerBit } from './integerBits';
+import { changeIntegerBit, complementIntegerBit, makeIntegerBit, testIntegerBit } from './integerBits';
 import { cons, NIL, nullary, type PrimResult, unpackString } from './machine';
 import { platformPower, platformUnary } from './platformMath';
 import type { Runtime } from './runtime';
@@ -268,7 +268,9 @@ for (const [name, change, identity] of [
     a === identity ? a : changeIntegerBit(a as bigint, runtime.machine.force(b) as bigint, change, runtime)
   );
 }
-strict('integerComplementBit', 2, ([a, b], runtime) => changeIntegerBit(a as bigint, b as bigint, 'toggle', runtime));
+define('integerComplementBit', 2, [1], ([a, b], runtime) =>
+  complementIntegerBit(() => runtime.machine.force(a) as bigint, b as bigint, runtime)
+);
 strict('integerPopCount', 1, ([a]) => {
   const value = a as bigint;
   const count = countOnes(value < 0n ? -value : value);

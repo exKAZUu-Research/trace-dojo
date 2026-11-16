@@ -698,13 +698,19 @@ class Renamer {
     for (const binding of raw) {
       if (binding.kind !== 'fun') throw compileError(binding.span, 'インスタンスの中では、パターンで束縛できません。');
       const name = binding.names[0];
-      const method = cls.methods.find((candidate) => candidate.name === name.name);
-      if (!method) throw compileError(name.span, `${name.name} は、クラス ${cls.name} のメソッドではありません。`);
-      const visible =
-        this.scope.values.get(method.name).includes(method) ||
-        [...this.scope.qualifiedValues.values()].some((values) => values.get(method.name).includes(method));
-      if (!visible)
+      const candidates = [...cls.methods, ...(cls.exportedMethods ?? [])].filter(
+        (candidate) => candidate.name === name.name
+      );
+      if (candidates.length === 0)
+        throw compileError(name.span, `${name.name} は、クラス ${cls.name} のメソッドではありません。`);
+      const method = candidates.find(
+        (candidate) =>
+          this.scope.values.get(candidate.name).includes(candidate) ||
+          [...this.scope.qualifiedValues.values()].some((values) => values.get(candidate.name).includes(candidate))
+      );
+      if (!method)
         throw compileError(name.span, `${name.name} は、クラス ${cls.name} の見えるメソッドではありません。`);
+      if (method.unsupported) throw unsupportedError(name.span, method.unsupported);
       bindings.push(this.renameFunBinding(binding, { kind: 'global', entity: method }, new LocalScope()));
     }
     this.instances.push({ cls, type, context, bindings, span: decl.span });

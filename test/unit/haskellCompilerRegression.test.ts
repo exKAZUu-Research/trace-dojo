@@ -447,3 +447,76 @@ test.each([false, true])(
     });
   }
 );
+
+test.each([
+  '  import Data.List\n  main=print(1::Int)',
+  'module Main where\n  import Data.List\n  main=print(1::Int)',
+  'main=do\n{ print(1::Int) }',
+  'main=case 1 of\n{ 1->print(1::Int); _->print(2::Int) }',
+  'main=print x where\n{ x=1::Int }',
+  'main=print(let\n{ x=1::Int } in x)',
+  'class C a where\n{ m::a->Int }\ninstance C Int where\n{ m _=1 }\nmain=print(m(0::Int))',
+  'module Main where\n{ main::IO (); main=print(1::Int) }\n-- trailing comment\n',
+  'module Main(main,) where\nimport Data.List(sort,)\nmain=print(head(sort[1::Int]))',
+])('grammar releases preserve valid module and block layouts: %s', (source) => {
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  '  import Data.List\nmain=print(1::Int)',
+  'module Main where { main=print(1::Int)',
+  'main=print[1,2,3,]',
+  'main=case [1::Int] of { [a,]->print a }',
+  'data T=T { a::Int,b::Int, } deriving Show\nmain=print(T 1 2)',
+  'main=print(let [x,y,]=[1,2::Int] in x)',
+  'main=print[(x,y)|x<-[1,2::Int],y<-[3,],True]',
+])('grammar releases reject malformed module and comma syntax: %s', (source) => {
+  expect(executeProgram('haskell', source).kind).toBe('compileError');
+});
+
+test.each([
+  ['Text.Read', 'Read', 'readPrec'],
+  ['Text.Read', 'Read', 'readListPrec'],
+  ['Text.Printf', 'PrintfArg', 'formatArg'],
+  ['Text.Printf', 'PrintfArg', 'parseFormat'],
+  ['qualified Text.Read', 'Read', 'readPrec'],
+])('known instance methods retain unsupported diagnostics: %s.%s.%s', (module, cls, method) => {
+  const result = executeProgram(
+    'haskell',
+    `import ${module}\ndata T=T\ninstance ${cls} T where ${method}=undefined\nmain=print(1::Int)`
+  );
+  expect(result).toMatchObject({
+    kind: 'compileError',
+    diagnostics: expect.arrayContaining([
+      expect.objectContaining({ message: expect.stringContaining('この採点環境では使えません') }),
+    ]),
+  });
+  if (result.kind === 'compileError')
+    expect(result.diagnostics.some(({ message }) => message.includes(method))).toBe(true);
+});
+
+test('implemented Read instance methods preserve dictionary slots', () => {
+  expect(
+    executeProgram(
+      'haskell',
+      'import Text.Read\ndata T=T deriving Show\ninstance Read T where readsPrec _ _=[(T,"")]\nmain=print(read "ignored"::T)'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'T\n', uncaughtException: undefined });
+});
+
+test('hidden instance methods remain unavailable', () => {
+  const result = executeProgram(
+    'haskell',
+    'import Text.Read hiding (readPrec)\ndata T=T\ninstance Read T where readPrec=undefined\nmain=print(1::Int)'
+  );
+  expect(result).toMatchObject({
+    kind: 'compileError',
+    diagnostics: expect.arrayContaining([
+      expect.objectContaining({ message: expect.stringContaining('見えるメソッドではありません') }),
+    ]),
+  });
+});

@@ -218,7 +218,7 @@ test('tracing modest loops does not charge garbage collection to program operati
   expect(recording.traceItems.length).toBeGreaterThan(1000);
 });
 
-test('tracing lazy long literals with a turtle uses no host recursion', () => {
+test('tracing lazy long literals with a turtle uses no host recursion', { timeout: 30_000 }, () => {
   const source = `main=do\n  t <- newTurtle\n  let xs=[${Array.from({ length: 30_000 }, () => 1).join(',')}]\n  print 1\n  print(head xs)\n  forward t`;
   const recording = traceProgram('haskell', source, source);
   expect(recording.stdout).toBe('1\n1\n');

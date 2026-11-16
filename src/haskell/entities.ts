@@ -85,6 +85,7 @@ export interface ClassEntity {
   tyvarKind: Kind;
   supers: ClassEntity[];
   methods: ValueEntity[];
+  exportedMethods?: ValueEntity[];
   /** The default implementation of each method, taking the class's dictionary, or undefined. */
   defaults: (ValueEntity | undefined)[];
   span?: Span;

@@ -248,6 +248,8 @@ function attachKnownClassMethods(exports: ExportTable): void {
       const value = exports.values.get(method);
       return value ? [value] : [];
     });
+    const cls = entry.entity.entity;
+    cls.exportedMethods = [...new Set([...(cls.exportedMethods ?? []), ...entry.children])];
   }
 }
 
