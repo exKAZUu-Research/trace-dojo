@@ -10,8 +10,8 @@ import { bufferedBytes, bufferingWriter, WRITER, type WriterState, writeTo } fro
 
 export type CompiledPrint = (frame: Frame, destination?: WriterState) => number[];
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Checks the complete format against its argument types.
-// code-gauge-allow functionNcss 38 -- Keeps format checking and the resulting formatter together.
+// code-gauge-allow functionCognitiveComplexity 20 -- Checks the complete format against its argument types.
+// code-gauge-allow functionNcss 39 -- Keeps format checking and the resulting formatter together.
 export function compilePrint(sema: SemaApi, formatArg: Expression, argsArg: Expression, span: Span): CompiledPrint {
   const format = sema.compile(formatArg, CONST_U8_SLICE);
   if (!format.known)
@@ -49,13 +49,14 @@ export function compilePrint(sema: SemaApi, formatArg: Expression, argsArg: Expr
     }
   }
   const evaluate = args.eval;
-  return (frame, destination = bufferingWriter()) => {
+  return (frame, suppliedDestination) => {
+    const destination = suppliedDestination ?? bufferingWriter();
     const args = evaluate(frame) as ZStruct;
     return withHeldValues(frame, [args], () => {
       appendSegments(frame, destination, segments, fields, args, info, (arg, value) =>
         (formatMethods.get(arg) as FormatMethod)(frame, value, destination)
       );
-      return bufferedBytes(destination);
+      return suppliedDestination ? [] : bufferedBytes(destination);
     });
   };
 }

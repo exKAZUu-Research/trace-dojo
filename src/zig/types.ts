@@ -269,7 +269,7 @@ export function primitiveType(name: string): Type | undefined {
       return F128;
     }
     case 'c_longdouble': {
-      return F128;
+      return F64;
     }
     case 'bool': {
       return BOOL;

@@ -1088,3 +1088,69 @@ pub fn main(init:std.process.Init)!void{
     )
   ).toMatchObject({ kind: 'executed', stderr: '4 1 3 2 ', uncaughtException: undefined });
 });
+
+test('hexadecimal zero precision is bounded before allocating padding', () => {
+  for (const value of ['0.0', '-0.0']) {
+    const source = `const std = @import("std"); pub fn main() void { std.debug.print("{x:.999999999999}", .{@as(f128, ${value})}); }`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'output' });
+  }
+});
+
+test('repeated prints into a large fixed writer stay within the execution budget', () => {
+  const source = `const std = @import("std"); pub fn main() !void {
+    var buffer: [50000]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    for (0..50000) |_| try writer.print("x", .{});
+    std.debug.print("{}", .{writer.buffered().len});
+}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '50000',
+    uncaughtException: undefined,
+  });
+});
+
+test('rejects known out-of-bounds arrays and slices before execution', () => {
+  for (const body of [
+    'var a = [_]u8{1, 2, 3}; _ = &a; _ = a[4..];',
+    'const s: []const u8 = "abc"; _ = s[4];',
+    'const s: []const u8 = "abc"; _ = s[0..4];',
+    'const s = "abc"; _ = s[4..];',
+  ])
+    expect(executeProgram('zig', `pub fn main() void { ${body} }`).kind).toBe('compileError');
+  expect(
+    executeProgram(
+      'zig',
+      `const std = @import("std"); pub fn main() void {
+    const s: []const u8 = "abc"; std.debug.print("{s}", .{s[1..]});
+  }`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: 'bc', uncaughtException: undefined });
+});
+
+test('rejects statically unequal copy lengths before executing earlier output', () => {
+  for (const builtin of ['@memcpy', '@memmove']) {
+    const source = `const std = @import("std"); pub fn main() void {
+      var destination: [2]u8 = undefined;
+      const source = [_]u8{1};
+      std.debug.print("before", .{});
+      ${builtin}(&destination, &source);
+    }`;
+    expect(executeProgram('zig', source).kind).toBe('compileError');
+  }
+});
+
+test('multiline literals preserve empty lines, UTF-8, and literal backslashes', () => {
+  const source = String.raw`const std = @import("std");
+const banner =
+    \\first
+    \\
+    \\日本語\n
+;
+pub fn main() void { std.debug.print("{s}", .{banner}); }`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'first\n\n日本語\\n',
+    uncaughtException: undefined,
+  });
+});

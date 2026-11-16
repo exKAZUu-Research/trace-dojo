@@ -1,5 +1,5 @@
 import { checkOutputSize } from './allocation';
-// code-gauge-allow-file fileNcss 718 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 719 -- The file holds one layer of the compiler, whose parts share its private state.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
@@ -912,6 +912,7 @@ function printFloatHex(out: number[], value: AnyFloat, bits: FloatBits, upper: b
   if (big.kind === 'nan') text += upper ? 'NAN' : 'nan';
   else if (big.kind === 'inf') text += upper ? 'INF' : 'inf';
   else if (big.isZero) {
+    checkOutputSize(options.precision ?? 0);
     const zeros =
       options.precision === undefined ? '.0' : options.precision > 0 ? `.${'0'.repeat(options.precision)}` : '';
     text += `0x0${zeros}p0`;

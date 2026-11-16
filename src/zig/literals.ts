@@ -18,6 +18,18 @@ export function decodeIdentifier(node: Node): string {
 
 /** A string literal's bytes, with its escapes decoded as `std.zig.string_literal` does. */
 export function decodeString(node: Node): number[] {
+  if (node.type === 'multiline_string') {
+    const bytes: number[] = [];
+    let first = true;
+    for (const line of node.text.split(/\r?\n/)) {
+      const match = /^[ \t]*\\\\(.*)$/.exec(line);
+      if (!match) continue;
+      if (!first) bytes.push(10);
+      first = false;
+      appendText(bytes, match[1]);
+    }
+    return bytes;
+  }
   return decodeQuoted(node);
 }
 
@@ -25,17 +37,20 @@ function decodeQuoted(node: Node): number[] {
   const bytes: number[] = [];
   for (const part of node.namedChildren) {
     if (part.type === 'string') return decodeQuoted(part);
-    if (part.text.length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
-    const decoded =
-      part.type === 'string_content'
-        ? new TextEncoder().encode(part.text)
-        : part.type === 'escape_sequence'
-          ? escapeBytes(part.text, part, true)
-          : [];
-    if (bytes.length + decoded.length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
-    for (const byte of decoded) bytes.push(byte);
+    if (part.type === 'string_content') appendText(bytes, part.text);
+    else if (part.type === 'escape_sequence') appendBytes(bytes, escapeBytes(part.text, part, true));
   }
   return bytes;
+}
+
+function appendText(bytes: number[], text: string): void {
+  if (text.length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+  appendBytes(bytes, new TextEncoder().encode(text));
+}
+
+function appendBytes(bytes: number[], decoded: readonly number[] | Uint8Array): void {
+  if (bytes.length + decoded.length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+  for (const byte of decoded) bytes.push(byte);
 }
 
 /** A character literal's code point. */

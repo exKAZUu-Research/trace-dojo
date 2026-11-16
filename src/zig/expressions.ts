@@ -525,7 +525,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     const child = indexableChild(type);
     if (!child) return this.error(expression, `${typeName(type)} 型には、添字が使えません。`);
-    const length = staticLength(type);
+    const length =
+      staticLength(type) ?? (object.known && object.value instanceof Slice ? object.value.length : undefined);
     if (
       index.known &&
       length !== undefined &&
@@ -622,6 +623,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     } else {
       return this.error(expression, `${typeName(type)} 型はスライスできません。`);
     }
+    const fromArray = staticLen !== undefined;
+    if (staticLen === undefined && base.known && base.value instanceof Slice) staticLen = base.value.length;
     const sentinel = expression.sentinel ? this.sentinelValue(expression.sentinel, child) : undefined;
     const limitOf = (length: number): number => length + (sourceSentinel === undefined ? 0 : 1);
     if (start.known && end?.known && (start.value as bigint) > (end.value as bigint)) {
@@ -632,6 +635,13 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     if (staticLen !== undefined && end?.known && (end.value as bigint) > BigInt(limitOf(staticLen))) {
       this.error(expression, `スライスの終わり ${end.value as bigint} は、長さ ${staticLen} の範囲の外です。`);
+    }
+    if (
+      staticLen !== undefined &&
+      start.known &&
+      (start.value as bigint) > BigInt(end ? limitOf(staticLen) : staticLen)
+    ) {
+      this.error(expression, `スライスの始まり ${start.value as bigint} は、長さ ${staticLen} の範囲の外です。`);
     }
     const resultLength =
       start.known && (end ? end.known : staticLen !== undefined)
@@ -644,7 +654,6 @@ export abstract class ExpressionCompiler extends SemaBase {
     const evaluateBase = base.eval;
     const evaluateStart = start.eval;
     const evaluateEnd = end?.eval;
-    const fromArray = staticLen !== undefined;
     const compute = (frame: Frame): { target: Slots; from: number; to: number } => {
       const value = evaluateBase(frame);
       let target: Slots;

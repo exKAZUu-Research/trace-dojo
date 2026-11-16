@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 620 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 623 -- The file holds one layer of the compiler, whose parts share its private state.
 import {
   divCeil,
   divExact,
@@ -844,6 +844,11 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       return this.error(expression.args[0], `${name} の書き込み先には、変更できる配列やスライスを指定してください。`);
     if (!from) return this.error(expression.args[1], `${name} の読み込み元には、配列やスライスを指定してください。`);
     if (!inMemoryCoercible(from.child, target.child)) this.error(expression, `${name} の要素の型が一致しません。`);
+    const destinationLength =
+      target.staticLength ?? (destination.known ? target.view(destination.value).length : undefined);
+    const sourceLength = from.staticLength ?? (source.known ? from.view(source.value).length : undefined);
+    if (destinationLength !== undefined && sourceLength !== undefined && destinationLength !== sourceLength)
+      this.error(expression, `コピー先の長さ ${destinationLength} と、コピー元の長さ ${sourceLength} が一致しません。`);
     const evaluateDestination = destination.eval;
     const evaluateSource = source.eval;
     return runtime(
@@ -928,6 +933,7 @@ function elementAccessor(type: Type):
   | {
       child: Type;
       isConst: boolean;
+      staticLength?: number;
       view: (value: Value) => { slots: { slots: Value[] }; start: number; length: number };
     }
   | undefined {
@@ -944,6 +950,7 @@ function elementAccessor(type: Type):
   if (type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array') {
     return {
       child: type.child.child,
+      staticLength: type.child.length,
       isConst: type.isConst,
       view: (value) => {
         const array = (value as Pointer).load() as ZArray;

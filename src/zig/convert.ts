@@ -473,12 +473,9 @@ export function expression(node: Node): Expression {
     case 'character': {
       return { kind: 'character', ...span, value: decodeCharacter(node) };
     }
-    case 'string': {
-      return { kind: 'string', ...span, bytes: decodeString(node) };
-    }
+    case 'string':
     case 'multiline_string': {
-      unavailable(node, String.raw`複数行の文字列リテラル（\\）`);
-      break;
+      return { kind: 'string', ...span, bytes: decodeString(node) };
     }
     case 'boolean': {
       return { kind: 'bool', ...span, value: node.text === 'true' };
