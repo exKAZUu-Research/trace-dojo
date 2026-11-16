@@ -8,8 +8,8 @@ import {
 import { type Token, tokenize } from 'oniguruma-parser/tokenizer';
 
 import { ExecutionLimitError } from '../interpreter/limits';
-import { regexpCommentEnd, regexpLineCommentEnd } from './regexpCaptureNames';
 import { decodeRegexpByteEscape, regexpByteEscape, RegexpEncodingError } from './regexpEscapes';
+import { regexpLexicalSource } from './regexpLexicalSource';
 import { regexpPropertyNames } from './regexpProperties';
 import { UnsupportedFeatureError } from './runtime';
 
@@ -217,16 +217,12 @@ function validateSourceReferences(root: SourceNode): void {
 }
 
 function normalizeRubyRegexpEscapes(source: string, extended: boolean, binary = false): string {
+  source = regexpLexicalSource(source, extended);
   let result = '';
   let inClass = false;
   for (let index = 0; index < source.length; index++) {
     const char = source[index];
-    if (!inClass && (source.startsWith('(?#', index) || (extended && char === '#'))) {
-      const end = char === '#' ? regexpLineCommentEnd(source, index) : regexpCommentEnd(source, index + 3);
-      if (end < 0) return result + source.slice(index);
-      result += source.slice(index, end + 1);
-      index = end;
-    } else if (char === '\\') {
+    if (char === '\\') {
       const escape = normalizedRegexpEscape(source, index, inClass, binary);
       result += escape.text;
       index += escape.length - 1;

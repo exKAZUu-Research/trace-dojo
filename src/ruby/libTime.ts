@@ -464,8 +464,10 @@ function strftime(data: TimeData, format: string): string {
       };
       const width = widthText ? Number(widthText) : undefined;
       const flag = /([-_0])[^-_0]*$/.exec(flags)?.[1] ?? '';
+      const renderFlag = width !== undefined && 'YCymdejwuUWVGgHkIlMSs'.includes(directive) ? '-' : flag;
       const rendered =
-        calendarDirective(data, date, directive, flag) ?? clockDirective(data, date, directive, flag, colons, whole);
+        calendarDirective(data, date, directive, renderFlag) ??
+        clockDirective(data, date, directive, renderFlag, colons, whole);
       if (rendered === undefined) return finish(whole);
       if (width !== undefined && width > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
       if (directive === 'Z' && colons) return finish(whole);

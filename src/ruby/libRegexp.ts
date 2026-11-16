@@ -45,14 +45,10 @@ import {
   RSymbol,
   type Value,
 } from './objects';
-import {
-  regexpCaptureNames,
-  regexpCommentEnd,
-  regexpHasNumberedBackref,
-  regexpLineCommentEnd,
-} from './regexpCaptureNames';
+import { regexpCaptureNames, regexpHasNumberedBackref } from './regexpCaptureNames';
 import { RegexpCursor } from './regexpCursor';
 import { decodeRegexpByteEscape, regexpByteEscape, RegexpEncodingError } from './regexpEscapes';
+import { regexpLexicalSource } from './regexpLexicalSource';
 import { charIndex, regexpByteIndex, unitIndex } from './regexpPositions';
 import {
   hasRegexpProperty,
@@ -178,9 +174,10 @@ export function translate(
   ascii = false,
   ignoreCase = false
 ): string {
-  validateRegexpSourceSyntax(source, extended, ascii);
+  source = regexpLexicalSource(source, extended);
+  validateRegexpSourceSyntax(source, false, ascii);
   const classes = ascii ? ASCII_POSIX_CLASSES : POSIX_CLASSES;
-  for (const name of captureNamesForValidation(source, extended))
+  for (const name of captureNamesForValidation(source))
     if ((/^[\p{ID_Start}_]/u.test(name) || /^\\u(?:[\dA-Fa-f]{4}|\{[\dA-Fa-f]+\})/.test(name)) && /[-\\]/.test(name))
       throw unsupportedSyntax('特殊なキャプチャ名');
   let out = '';
@@ -193,16 +190,9 @@ export function translate(
   const casefoldStack: boolean[] = [];
   let dotall = multiline;
   let casefold = ignoreCase;
-  const namedCaptures = regexpCaptureNames(source, extended).length > 0;
+  const namedCaptures = regexpCaptureNames(source).length > 0;
   for (let index = 0; index < source.length; index++) {
     const char = source[index];
-    if (extended && inClass === 0) {
-      if (/[ \t\n\r\f]/.test(char)) continue;
-      if (char === '#') {
-        index = regexpLineCommentEnd(source, index);
-        continue;
-      }
-    }
     if (char === '\\') {
       if (index === source.length - 1) throw new SyntaxError('trailing regexp escape');
       if (inClass === 0) atomStart = out.length;
@@ -312,10 +302,8 @@ export function translate(
       if (scoped) {
         const enabled = scoped[1];
         const disabled = scoped[2] ?? '';
-        if (enabled.includes('x') || (extended && disabled.includes('x')))
-          throw unsupportedSyntax('中のオプションの指定（(?x:...)）');
-        const on = enabled.replaceAll('m', 's').replaceAll('x', '');
-        const off = disabled.replaceAll('m', 's').replaceAll('x', '');
+        const on = enabled.replaceAll('m', 's');
+        const off = disabled.replaceAll('m', 's');
         groupStarts.push(out.length);
         dotallStack.push(dotall);
         casefoldStack.push(casefold);
@@ -328,12 +316,6 @@ export function translate(
         continue;
       }
       if (/^[imx-]+[:)]/.test(rest)) throw unsupportedSyntax('中のオプションの指定（(?i) など）');
-      if (rest.startsWith('#')) {
-        const end = regexpCommentEnd(source, index + 3);
-        if (end === -1) throw new SyntaxError('end pattern in group');
-        index = end;
-        continue;
-      }
     }
     if (inClass === 0 && char === '(' && source[index + 1] !== '?' && namedCaptures) {
       groupStarts.push(out.length);
@@ -399,7 +381,7 @@ export function translate(
   return out;
 }
 
-function* captureNamesForValidation(source: string, extended: boolean): Generator<string> {
+function* captureNamesForValidation(source: string): Generator<string> {
   let start = -1;
   let inClass = false;
   for (let index = 0; index < source.length; index++) {
@@ -414,15 +396,7 @@ function* captureNamesForValidation(source: string, extended: boolean): Generato
       index++;
       continue;
     }
-    if (!inClass && source.startsWith('(?#', index)) {
-      index = regexpCommentEnd(source, index + 3);
-      if (index < 0) break;
-      continue;
-    }
-    if (extended && !inClass && source[index] === '#') {
-      index = regexpLineCommentEnd(source, index);
-      continue;
-    }
+
     if (source[index] === '[') inClass = true;
     else if (source[index] === ']') inClass = false;
     else if (!inClass && source.startsWith('(?<', index)) start = index + 3;
@@ -630,13 +604,9 @@ export function makeRegexp(source: string, options: RegexpOptions): RObject {
 }
 
 function hasNonAsciiRegexpEscape(source: string, extended: boolean): boolean {
+  source = regexpLexicalSource(source, extended);
   let inClass = false;
   for (let index = 0; index < source.length; index++) {
-    if (!inClass && source.startsWith('(?#', index)) {
-      index = regexpCommentEnd(source, index + 3);
-      if (index < 0) break;
-      continue;
-    }
     const posixLength = inClass ? (/^\[:\^?\w+:\]/.exec(source.slice(index))?.[0].length ?? 0) : 0;
     if (posixLength > 0) {
       index += posixLength - 1;
@@ -644,10 +614,7 @@ function hasNonAsciiRegexpEscape(source: string, extended: boolean): boolean {
     }
     if (source[index] === '[') inClass = true;
     if (source[index] === ']') inClass = false;
-    if (extended && !inClass && source[index] === '#') {
-      index = regexpLineCommentEnd(source, index);
-      continue;
-    }
+
     if (source[index] !== '\\') continue;
     if (nonAsciiRegexpEscapeAt(source, index)) return true;
     index++;

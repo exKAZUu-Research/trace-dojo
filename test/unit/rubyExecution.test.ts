@@ -11257,3 +11257,68 @@ end
     uncaughtException: undefined,
   });
 });
+
+test('Extended regexp composition shares scoped lexical rules with source analysis', () => {
+  expect(
+    run(String.raw`r=/a b/x
+p Regexp.union(r,/c/).match?('ab'), /#{r}/.match?('ab')
+p Regexp.union(/a \# b # comment
+ c/x,/d/).match?('a#bc')
+p /(?x:a b(?-x: c d)e f)/.match?('ab c def')
+p /(?x:a[ #]b)/.match?('a b'), /(?x:a[ #]b)/.match?('a#b')
+p /(?x:a # (?<fake>x) \p{NotAProperty}
+ (?<real>b))/.names
+p /(?x:a # (?<fake>x)
+ (?<real>b))/.match('ab').captures
+p /(?x:a(?: b )c) d/.match?('abc d')
+p /(?x:a(?-x:# )b)/.match?('a# b')
+p /(?x:a\ b)/.match?('a b')
+p /a(?x) b/.match?('ab')
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\ntrue\ntrue\ntrue\ntrue\ntrue\n["real"]\n["b"]\ntrue\ntrue\ntrue\ntrue\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Defined receiver probes recurse through literal aggregates without changing interpolation or assignment', () => {
+  expect(
+    run(String.raw`p defined?([$missing][0]),defined?([1,$missing].size),defined?({a:$missing}[:a]),defined?({a:$missing}.values[0])
+p defined?([@missing,[1,$missing]].size),defined?({$missing=>1}.size)
+p defined?([1][0]),defined?("#{$missing}x"[0]),defined?(1..$missing)
+p defined?(($g=2).abs),$g
+class C
+ p defined?([@@missing].size),defined?({a:@@missing}.size)
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'nil\nnil\nnil\nnil\nnil\nnil\n"method"\n"method"\n"expression"\n"method"\n2\nnil\nnil\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Explicit numeric strftime widths replace default field padding', () => {
+  expect(
+    run(String.raw`t=Time.utc(24,2,3,1,5,9)
+%w[Y C y m d e j u w U W V G g H k I l M S s].each do |d|
+ p [d,t.strftime("%1#{d}|%2#{d}|%_1#{d}|%03#{d}|%-4#{d}")]
+end
+p t.strftime('%1F|%1T|%0N|%1L|%_1z')
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '["Y", "24|24|24|024|24"]\n["C", "0|00|0|000|0"]\n["y", "24|24|24|024|24"]\n["m", "2|02|2|002|2"]\n["d", "3|03|3|003|3"]\n["e", "3| 3|3|003|3"]\n["j", "34|34|34|034|34"]\n["u", "6|06|6|006|6"]\n["w", "6|06|6|006|6"]\n["U", "4|04|4|004|4"]\n["W", "5|05|5|005|5"]\n["V", "5|05|5|005|5"]\n["G", "24|24|24|024|24"]\n["g", "24|24|24|024|24"]\n["H", "1|01|1|001|1"]\n["k", "1| 1|1|001|1"]\n["I", "1|01|1|001|1"]\n["l", "1| 1|1|001|1"]\n["M", "5|05|5|005|5"]\n["S", "9|09|9|009|9"]\n["s", "-61406981691|-61406981691|-61406981691|-61406981691|-61406981691"]\n"0024-02-03|01:05:09|000000000|0| +000"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Extended lexical scopes preserve negated class boundaries', () => {
+  expect(run(String.raw`p /(?x:[^^] a)/.match?('ba'), /(?x:[^^] a)/.match?('^a')`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\nfalse\n',
+    uncaughtException: undefined,
+  });
+});

@@ -1270,7 +1270,7 @@ function* definedText(e: Expr, frame: Frame): Gen {
       for (const arg of e.args) if ((yield* definedText(arg, frame)) === NIL) return NIL;
       let recv: Value = frame.self;
       if (e.recv) {
-        if (yield* undefinedVariableReceiver(e.recv, frame)) return NIL;
+        if (yield* undefinedReceiver(e.recv, frame)) return NIL;
         try {
           recv = yield* ev(e.recv, frame);
         } catch (error) {
@@ -1370,9 +1370,12 @@ function* definedText(e: Expr, frame: Frame): Gen {
   }
 }
 
-function* undefinedVariableReceiver(e: Expr, frame: Frame): Gen<boolean> {
-  if (e.k === 'call' && e.recv) return yield* undefinedVariableReceiver(e.recv, frame);
-  return (e.k === 'ivar' || e.k === 'gvar' || e.k === 'cvar') && (yield* definedText(e, frame)) === NIL;
+function* undefinedReceiver(e: Expr, frame: Frame): Gen<boolean> {
+  if (e.k === 'call' && e.recv) return yield* undefinedReceiver(e.recv, frame);
+  return (
+    (e.k === 'ivar' || e.k === 'gvar' || e.k === 'cvar' || e.k === 'array' || e.k === 'hash') &&
+    (yield* definedText(e, frame)) === NIL
+  );
 }
 
 function* evalFor(e: Extract<Expr, { k: 'for' }>, frame: Frame): Gen {
