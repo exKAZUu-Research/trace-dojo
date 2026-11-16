@@ -456,13 +456,14 @@ export function parseSignature(signature: string): { name: string; params: Param
   const params: Param[] = [];
   if (inside) {
     for (const part of splitParams(inside)) {
-      const match = /^(?:([^$&.]+?)\s+)?(&)?(\.\.\.)?\$(\w+)(\s*=\s*(.+))?$/.exec(part.trim());
+      const match = /^(?:([^$&.]+?)\s+)?(&~?)?(\.\.\.)?\$(\w+)(\s*=\s*(.+))?$/.exec(part.trim());
       if (!match) throw new Error(`Bad signature part: ${part} in ${signature}`);
       const [, typeText, ref, dots, paramName, defaultPart] = match;
       params.push({
         name: paramName,
         type: typeText ? parseTypeText(typeText.trim()) : undefined,
-        byRef: ref === '&',
+        byRef: ref !== undefined,
+        preferRef: ref === '&~',
         variadic: dots === '...',
         optional: defaultPart !== undefined || dots === '...',
       });

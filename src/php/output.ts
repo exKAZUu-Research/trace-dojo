@@ -73,6 +73,7 @@ function printRValue(value: Value, indent: number, active: Set<object>): string 
       active.delete(value);
     }
   }
+  if (value instanceof PhpObject && value.cls.name === '(stream)') return `Resource id #${value.id}`;
   if (value instanceof PhpObject) {
     const header = `${value.cls.isAnonymous ? 'class@anonymous' : value.cls.name} Object\n`;
     if (active.has(value)) return `${header} *RECURSION*`;
@@ -143,6 +144,7 @@ function dumpValue(value: Value, level: number, active: Set<object>): string {
     }
   }
   const object = value as PhpObject;
+  if (object.cls.name === '(stream)') return `${pad}resource(${object.id}) of type (stream)\n`;
   if (active.has(object)) return `${pad}*RECURSION*\n`;
   active.add(object);
   try {

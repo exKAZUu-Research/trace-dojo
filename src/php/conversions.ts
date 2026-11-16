@@ -173,7 +173,7 @@ export function getType(value: Value): string {
     }
   }
   if (value instanceof PhpArray) return 'array';
-  return 'object';
+  return (value as PhpObject).cls.name === '(stream)' ? 'resource' : 'object';
 }
 
 /** The type name in error messages and `get_debug_type`. */
@@ -195,6 +195,7 @@ export function debugType(value: Value): string {
   }
   if (value instanceof PhpArray) return 'array';
   const object = value as PhpObject;
+  if (object.cls.name === '(stream)') return 'resource (stream)';
   return object.cls.isAnonymous ? anonymousDebugName(object) : object.cls.name;
 }
 

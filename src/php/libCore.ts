@@ -32,7 +32,7 @@ import { printR, varDump, varExport } from './output';
 import { rt } from './runtime';
 import { formatPrintf } from './sprintf';
 import { setCallableCheck } from './types';
-import { type ClosureData, isClosure, PhpArray, PhpObject, UNINIT, type Value } from './values';
+import { type ClosureData, isClosure, PhpArray, PhpClass, PhpObject, UNINIT, type Value } from './values';
 import { UnsupportedFeatureError } from './unsupported';
 
 // Constants ------------------------------------------------------------------------------------------------------------
@@ -550,3 +550,52 @@ defineFunction('debug_print_backtrace(int $options = 0, int $limit = 0): void', 
 
 export { declForKey, numericPrefix, propNameOf, UNINIT };
 export type { ClosureData };
+
+// Standard streams ---------------------------------------------------------------------------------------------------
+
+const streamClass = new PhpClass('(stream)');
+
+/** A standard stream, which PHP's CLI predefines as the resources STDIN, STDOUT, and STDERR. */
+export function isStream(value: Value): value is PhpObject {
+  return value instanceof PhpObject && value.cls === streamClass;
+}
+
+const streams: [string, number][] = [
+  ['STDIN', 1],
+  ['STDOUT', 2],
+  ['STDERR', 3],
+];
+for (const [name, id] of streams) {
+  const stream = new PhpObject(streamClass, id);
+  stream.internal = name;
+  defineConstant(name, stream);
+}
+
+function writeStream(stream: Value, text: string, name: string): Value {
+  if (!isStream(stream)) throwError('TypeError', `${name}(): Argument #1 ($stream) must be of type resource, ${debugType(stream)} given`);
+  if (stream.internal === 'STDOUT') rt().echo(text);
+  else if (stream.internal === 'STDERR') rt().echoError(text);
+  else throw new UnsupportedFeatureError('標準入力への書き込み');
+  return BigInt(text.length);
+}
+
+defineFunction('fwrite($stream, string $data, ?int $length = null): int|false', ({ args }) => {
+  const data = args[0] === undefined ? '' : (args[1] as string);
+  const length = args[2] === undefined || args[2] === null ? data.length : Number(args[2]);
+  return writeStream(args[0], data.slice(0, Math.max(length, 0)), 'fwrite');
+});
+defineAlias('fputs', 'fwrite');
+defineFunction('fprintf($stream, string $format, mixed ...$values): int', ({ args }) => {
+  const text = formatPrintf('fprintf', args[1] as string, args.slice(2));
+  writeStream(args[0], text, 'fprintf');
+  return BigInt(text.length);
+});
+defineFunction(
+  'get_defined_vars(): array',
+  () => {
+    const array = new PhpArray();
+    for (const [name, ref] of rt().frame.vars) array.set(normalizeKeyString(name), ref.v);
+    return array;
+  },
+  true
+);

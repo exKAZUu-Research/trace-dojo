@@ -373,7 +373,7 @@ defineFunction(
   true
 );
 defineFunction(
-  'extract(array &$array, int $flags = EXTR_OVERWRITE, string $prefix = ""): int',
+  'extract(array &~$array, int $flags = EXTR_OVERWRITE, string $prefix = ""): int',
   ({ args, refs }) => {
     const array = (refs[0]?.v ?? args[0]) as PhpArray;
     const flags = (args[1] as bigint | undefined) ?? 0n;
@@ -803,7 +803,7 @@ defineFunction('natsort(array &$array): true', (ctx) =>
 defineFunction('natcasesort(array &$array): true', (ctx) =>
   sortArray(ctx, 'natcasesort', (a, b) => naturalCompare(toStr(valueOf(a[1])), toStr(valueOf(b[1])), true), false)
 );
-defineFunction('array_multisort(&$array, &...$rest): bool', (ctx) => {
+defineFunction('array_multisort(&~$array, &~...$rest): bool', (ctx) => {
   const columns: { ref: Ref; order: number; flags: bigint }[] = [];
   for (const [index, value] of ctx.args.entries()) {
     if (value instanceof PhpArray) {

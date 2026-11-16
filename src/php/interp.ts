@@ -1087,7 +1087,8 @@ function magicConstant(name: Extract<Expr, { k: 'magic' }>['name']): Value {
       return decl.name;
     }
     case '__TRAIT__': {
-      return '';
+      const owner = decl?.className === undefined ? undefined : findClass(decl.className);
+      return owner?.kind === 'trait' ? owner.name : '';
     }
   }
 }
@@ -1894,6 +1895,11 @@ export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | u
         continue;
       }
       const value = ev(e);
+      const param = fn?.params[Math.min(position === -1 ? 0 : position, (fn?.params.length ?? 1) - 1)];
+      if (param?.preferRef) {
+        values.push({ v: value, name: arg.name });
+        continue;
+      }
       if (e.k === 'call' || e.k === 'mcall' || e.k === 'scall') {
         notice('Only variables should be passed by reference');
         values.push({ v: value, ref: new Ref(value), name: arg.name });

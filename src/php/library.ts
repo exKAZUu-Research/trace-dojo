@@ -6,3 +6,5 @@ import './libString';
 import './libArray';
 import './libJson';
 import './libSpl';
+import './libUnsupported';
+import './libRegex';

@@ -78,6 +78,8 @@ export class Converter {
   private declaredFunctions = new Map<string, number>();
   private anonymousClasses = 0;
   private currentClass?: string;
+  /** Whether the statement to convert follows `<?=`, which echoes it. */
+  private pendingEcho = false;
 
   constructor(
     private readonly source: string,
@@ -108,6 +110,7 @@ export class Converter {
       first = false;
     }
     this.checkGotos(this.fn, body);
+    validateReads(body);
     return { body, strictTypes: this.strictTypes, hasGoto: this.fn.gotos.length > 0, mainVars: [...collectMainVars(body)] };
   }
 
@@ -222,6 +225,10 @@ export class Converter {
   // code-gauge-allow functionCognitiveComplexity 60 -- One case per statement kind, each delegating where it grows.
   private statement(node: Node, topLevel: boolean): Stmt[] {
     const row = node.startPosition.row;
+    if (this.pendingEcho && node.type !== 'comment') {
+      this.pendingEcho = false;
+      return this.echoTagStatement(node);
+    }
     switch (node.type) {
       case 'expression_statement': {
         const expression = node.namedChildren.find((child) => child.type !== 'comment');
@@ -379,7 +386,8 @@ export class Converter {
     // PHP swallows the single newline that directly follows a closing tag.
     if (text.startsWith('\r\n')) text = text.slice(2);
     else if (text.startsWith('\n')) text = text.slice(1);
-    if (tag?.text === '<?=') this.unsupported(tag, '文の途中の <?=');
+    // `<?=` echoes the expression statement that follows it.
+    if (tag?.text === '<?=') this.pendingEcho = true;
     return enc(text);
   }
 
@@ -1998,4 +2006,91 @@ function collectMainVars(body: Stmt[]): Set<string> {
   };
   visit(body);
   return found;
+}
+
+/**
+ * Rejects `$a[]` where a value is read, which PHP reports before running: it only appends in writes such as
+ * assignments, references, foreach targets, and arguments a function may take by reference.
+ */
+function validateReads(body: Stmt[]): void {
+  const visit = (value: unknown, writing: boolean): void => {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, writing);
+      return;
+    }
+    const node = value as Record<string, unknown> & { k?: string; row?: number };
+    switch (node.k) {
+      case 'idx': {
+        if (node.index === undefined && !writing) {
+          throw new CompileError([{ row: node.row ?? 0, message: '[] で読み出すことはできません（Cannot use [] for reading）。' }]);
+        }
+        visit(node.base, writing);
+        visit(node.index, false);
+        return;
+      }
+      case 'assign':
+      case 'assignOp': {
+        visit(node.target, true);
+        visit(node.value, false);
+        return;
+      }
+      case 'assignRef': {
+        visit(node.target, true);
+        visit(node.source, true);
+        return;
+      }
+      case 'incdec': {
+        visit(node.target, true);
+        return;
+      }
+      case 'foreach': {
+        visit(node.subject, Boolean(node.byRef));
+        visit(node.key, true);
+        visit(node.value, true);
+        visit(node.body, false);
+        return;
+      }
+      case 'list': {
+        for (const item of (node.items as ({ key?: unknown; target: unknown } | undefined)[]) ?? []) {
+          if (!item) continue;
+          visit(item.key, false);
+          visit(item.target, true);
+        }
+        return;
+      }
+      case 'call':
+      case 'mcall':
+      case 'scall':
+      case 'new': {
+        for (const [key, child] of Object.entries(node)) {
+          if (key === 'args') for (const arg of child as { e: unknown }[]) visit(arg.e, true);
+          else if (key !== 'row') visit(child, false);
+        }
+        return;
+      }
+      case 'array': {
+        for (const item of node.items as { key?: unknown; value: unknown; byRef: boolean }[]) {
+          visit(item.key, false);
+          visit(item.value, item.byRef);
+        }
+        return;
+      }
+      case 'unset': {
+        for (const target of node.targets as { k: string; index?: unknown; row: number }[]) {
+          if (target.k === 'idx' && target.index === undefined) {
+            throw new CompileError([{ row: target.row, message: '[] で unset することはできません（Cannot use [] for unsetting）。' }]);
+          }
+          visit(target, true);
+        }
+        return;
+      }
+      default: {
+        for (const [key, child] of Object.entries(node)) {
+          if (key !== 'row') visit(child, false);
+        }
+      }
+    }
+  };
+  visit(body, false);
 }

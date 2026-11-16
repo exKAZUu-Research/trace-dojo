@@ -179,6 +179,8 @@ export interface Param {
   name: string;
   type?: TypeDecl;
   byRef: boolean;
+  /** Whether a by-reference parameter of a builtin also accepts a value that is no variable. */
+  preferRef?: boolean;
   variadic: boolean;
   optional: boolean;
   /** Whether a null default makes the type nullable implicitly, as `int $x = null` does. */

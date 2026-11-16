@@ -47,6 +47,7 @@ export function toStr(value: Value): string {
     warn('Array to string conversion');
     return 'Array';
   }
+  if (value.cls.name === '(stream)') return `Resource id #${value.id}`;
   return objectToString(value);
 }
 

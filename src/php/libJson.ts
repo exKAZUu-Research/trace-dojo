@@ -6,7 +6,7 @@ import { newThrowable, throwError } from './errors';
 import { callMethod } from './interp';
 import { defineConstant, defineFunction } from './native';
 import { rt, PhpThrow } from './runtime';
-import { PhpArray, type PhpClass, type PhpObject, Ref, UNINIT, type Value } from './values';
+import { PhpArray, type PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
 
 const FLAGS: [string, bigint][] = [
   ['JSON_HEX_TAG', 1n],
@@ -335,10 +335,15 @@ class JsonParser {
   private object(depth: number): Value {
     this.index++;
     const array = new PhpArray();
-    const object = this.associative ? undefined : createObject(rt().classes.get('stdclass') as PhpClass);
+    let object: PhpObject | undefined;
+    // PHP's parser creates an object once it has parsed the first member's value.
+    const createIfNeeded = (): void => {
+      if (!this.associative && !object) object = createObject(rt().classes.get('stdclass') as PhpClass);
+    };
     this.skipSpace();
     if (this.text[this.index] === '}') {
       this.index++;
+      createIfNeeded();
       return object ?? array;
     }
     for (;;) {
@@ -349,6 +354,7 @@ class JsonParser {
       if (this.text[this.index] !== ':') throw new JsonError(4);
       this.index++;
       const value = this.value(depth);
+      createIfNeeded();
       if (object) object.props.set(key, value);
       else array.set(conversionsModule.normalizeKeyString(key), value);
       this.skipSpace();
