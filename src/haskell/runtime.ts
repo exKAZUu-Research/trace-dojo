@@ -76,12 +76,12 @@ export class Runtime implements TracedRuntime<TraceFrame> {
 
   /** Runs evaluation for a trace's display, which stops with `DisplayAbort` after `operations`. */
   withDisplayBudget<T>(operations: number, run: () => T): T {
-    const saved = this.displayRemaining;
+    if (this.displayRemaining !== undefined) return run();
     this.displayRemaining = operations;
     try {
       return this.budget.excludingTime(run);
     } finally {
-      this.displayRemaining = saved;
+      this.displayRemaining = undefined;
     }
   }
 

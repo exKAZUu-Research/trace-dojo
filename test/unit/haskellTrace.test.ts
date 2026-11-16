@@ -224,3 +224,25 @@ test('tracing lazy long literals with a turtle uses no host recursion', () => {
   expect(recording.stdout).toBe('1\n1\n');
   expect(recording.traceItems.at(-1)?.line).toBe(6);
 });
+
+test.each([2, 3])('cyclic constructors with %i children display truncated references', (arity) => {
+  const source = `data T=T ${Array.from({ length: arity }, () => 'T').join(' ')}\nmain=do\n  let x=T ${Array.from({ length: arity }, () => 'x').join(' ')}\n  print 1`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.stdout).toBe('1\n');
+  expect(recording.traceItems.find((item) => item.referenceVars.x)?.referenceVars.x).toEqual({
+    kind: 'object',
+    entries: Object.fromEntries(
+      Array.from({ length: arity }, (_, index) => [String(index), { kind: 'value', value: '…' }])
+    ),
+  });
+});
+
+test('shared acyclic constructor graphs use one cumulative display allowance', () => {
+  const source = 'data T=Leaf|T T T\ngrow x=T x x\nmain=do\n  let x=iterate grow Leaf !! 30\n  print 1\n  print 2';
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.stdout).toBe('1\n2\n');
+  expect(recording.traceItems.find((item) => item.referenceVars.x)?.referenceVars.x).toEqual({
+    kind: 'value',
+    value: '…',
+  });
+});

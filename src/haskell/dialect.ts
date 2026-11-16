@@ -1,6 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { compileError } from './errors';
+import { sourceColumns } from './sourceCoordinates';
 import type { Span } from './syntax';
 
 const reservedNames = new Set(
@@ -8,6 +9,7 @@ const reservedNames = new Set(
     ' '
   )
 );
+const blockArguments = new Set(['conditional', 'case', 'do', 'let_in', 'lambda']);
 const layoutNodes = new Set([
   'declarations',
   'imports',
@@ -40,7 +42,7 @@ class DialectValidator {
   // code-gauge-allow functionCognitiveComplexity 16 -- Traversal tracks implicit layout and explicit brace contexts.
   private visit(node: Node, context?: Layout): void {
     if (isComment(node)) return;
-    if (node.type === 'variable' && reservedNames.has(node.text)) fail(node);
+    validateSyntaxNode(node);
     const children = node.children.filter((child): child is Node => child !== null);
     if (children.length === 0) {
       this.checkToken(node, context);
@@ -82,14 +84,11 @@ class DialectValidator {
   }
 }
 
-function sourceColumns(source: string): Uint32Array {
-  const columns = new Uint32Array(source.length + 1);
-  for (let index = 0; index < source.length; index++) {
-    const previous = columns[index]!;
-    columns[index + 1] =
-      source[index] === '\n' ? 0 : source[index] === '\t' ? previous + 8 - (previous % 8) : previous + 1;
-  }
-  return columns;
+function validateSyntaxNode(node: Node): void {
+  if (node.type === 'variable' && reservedNames.has(node.text)) fail(node);
+  if (node.type !== 'apply') return;
+  const argument = node.childForFieldName('argument');
+  if (argument && blockArguments.has(argument.type)) fail(argument);
 }
 
 function layoutItems(node: Node, children: Node[]): Node[] {

@@ -90,7 +90,7 @@ function readChars(body: string, span: Span, isString: boolean): { chars: string
   while (index < body.length) {
     const char = String.fromCodePoint(body.codePointAt(index) as number);
     if (char !== '\\') {
-      chars.push(char);
+      chars.push(graphicChar(char, span));
       index += char.length;
       continue;
     }
@@ -115,6 +115,11 @@ function readChars(body: string, span: Span, isString: boolean): { chars: string
     index += length;
   }
   return { chars, end: index };
+}
+
+function graphicChar(char: string, span: Span): string {
+  if (!/^[\p{L}\p{M}\p{N}\p{P}\p{S}\p{Zs}]$/u.test(char)) throw syntaxError(span, '文字の書き方に誤りがあります。');
+  return char;
 }
 
 // code-gauge-allow functionCognitiveComplexity 23 -- One branch per escape form of the Haskell report.

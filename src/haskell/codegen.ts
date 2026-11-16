@@ -474,16 +474,13 @@ export class Codegen {
           const fieldSlot = this.frame.alloc();
           return { k: 'newtype', slot, fieldSlot, inner: this.planPattern(pat.args[0], fieldSlot, visible) };
         }
-        const fieldSlots: number[] = [];
+        const fieldSlots = Array.from({ length: pat.args.length }, () => -1);
         const fields: Plan[] = [];
-        for (const arg of pat.args) {
-          if (arg.k === 'wild') {
-            fieldSlots.push(-1);
-            fields.push({ k: 'any' });
-            continue;
-          }
+        for (const index of pat.order ?? pat.args.keys()) {
+          const arg = pat.args[index];
+          if (arg.k === 'wild') continue;
           const fieldSlot = this.frame.alloc();
-          fieldSlots.push(fieldSlot);
+          fieldSlots[index] = fieldSlot;
           fields.push(this.planPattern(arg, fieldSlot, visible));
         }
         return { k: 'con', con: pat.con, slot, fieldSlots, fields };

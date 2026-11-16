@@ -1060,7 +1060,7 @@ class Renamer {
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- One short case per pattern kind.
-  // code-gauge-allow functionNcss 44 -- One short case per pattern kind.
+  // code-gauge-allow functionNcss 32 -- One short case per pattern kind.
   private renamePatCore(pat: Pat, binders: Map<string, LocalVar>): RPat {
     const { span } = pat;
     switch (pat.kind) {
@@ -1101,20 +1101,7 @@ class Renamer {
         return { k: 'as', local, pat: this.renamePat(pat.pat, binders), span };
       }
       case 'precord': {
-        const con = this.lookupCon(pat.con);
-        const args: RPat[] = Array.from({ length: con.arity }, () => ({ k: 'wild', span }) as RPat);
-        const seen = new Set<string>();
-        for (const fieldPat of pat.fields) {
-          const field = this.lookupField(fieldPat.field);
-          const position = field.positions.get(con);
-          if (position === undefined) {
-            throw compileError(fieldPat.span, `構成子 ${con.name} には、フィールド ${field.name} がありません。`);
-          }
-          if (seen.has(field.name)) throw compileError(fieldPat.span, `フィールド ${field.name} が重複しています。`);
-          seen.add(field.name);
-          args[position] = this.renamePat(fieldPat.pat, binders);
-        }
-        return { k: 'con', con, args, span };
+        return this.renameRecordPattern(pat, binders);
       }
       case 'pchain': {
         return this.renamePat(
@@ -1123,6 +1110,26 @@ class Renamer {
         );
       }
     }
+  }
+
+  private renameRecordPattern(pat: Extract<Pat, { kind: 'precord' }>, binders: Map<string, LocalVar>): RPat {
+    const { span } = pat;
+    const con = this.lookupCon(pat.con);
+    const args: RPat[] = Array.from({ length: con.arity }, () => ({ k: 'wild', span }) as RPat);
+    const seen = new Set<string>();
+    const order: number[] = [];
+    for (const fieldPat of pat.fields) {
+      const field = this.lookupField(fieldPat.field);
+      const position = field.positions.get(con);
+      if (position === undefined) {
+        throw compileError(fieldPat.span, `構成子 ${con.name} には、フィールド ${field.name} がありません。`);
+      }
+      if (seen.has(field.name)) throw compileError(fieldPat.span, `フィールド ${field.name} が重複しています。`);
+      seen.add(field.name);
+      args[position] = this.renamePat(fieldPat.pat, binders);
+      order.push(position);
+    }
+    return { k: 'con', con, args, order, span };
   }
 
   private bindPatVar(name: Name, binders: Map<string, LocalVar>): LocalVar {

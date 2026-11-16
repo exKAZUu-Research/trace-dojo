@@ -73,7 +73,7 @@ export type RPat = (
       num?: Evidence;
       type?: Type;
     }
-  | { k: 'con'; con: ConInfo; args: RPat[]; span: Span }
+  | { k: 'con'; con: ConInfo; args: RPat[]; order?: number[]; span: Span }
   | { k: 'as'; local: LocalVar; pat: RPat; span: Span }
 ) & { surface?: Pat };
 

@@ -1,9 +1,10 @@
 // code-gauge-allow-file fileNcss 800 -- The syntax-tree conversion covers every node kind of the grammar in one pass.
-import type { Node } from '@willbooster/web-tree-sitter';
+import type { Node, Tree } from '@willbooster/web-tree-sitter';
 
 import type { CompileError } from '../interpreter/diagnostics';
 import { compileError as syntaxError, unsupportedError } from './errors';
 import { parseCharLiteral, parseFloatLiteral, parseIntegerLiteral, parseStringLiteral } from './literals';
+import { sourceColumns } from './sourceCoordinates';
 import type {
   Alt,
   ChainItem,
@@ -126,12 +127,19 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   import_level: 'Template Haskell の段階を指定した import',
 };
 
+const columnsByTree = new WeakMap<Tree, Uint32Array>();
+
 export function spanOf(node: Node): Span {
+  let columns = columnsByTree.get(node.tree);
+  if (!columns) {
+    columns = sourceColumns(node.tree.rootNode.text);
+    columnsByTree.set(node.tree, columns);
+  }
   return {
     row: node.startPosition.row,
-    col: node.startPosition.column,
+    col: columns[node.startIndex]!,
     endRow: node.endPosition.row,
-    endCol: node.endPosition.column,
+    endCol: columns[node.endIndex]!,
   };
 }
 

@@ -50,25 +50,40 @@ function variablesOf(runtime: Runtime, frame: TraceFrame): TraceVariables {
   for (const visible of context.visible) {
     const slot = context.env.at(visible.depth).slots[visible.index];
     if (slot === undefined) continue;
-    const value = forceForDisplay(runtime, slot);
+    const value = displayAttempt(runtime, () => {
+      const forced = forceForDisplay(runtime, slot);
+      if (forced !== undefined) addVariable(runtime, variables, visible.name, forced, visible.type);
+      return forced;
+    });
     if (value === undefined) continue;
-    addVariable(runtime, variables, visible.name, value, visible.type);
     if (visible.name === 'this') self = value;
   }
-  // A record named `this` shows its fields after the locals, as Java shows `this.x`.
-  if (self instanceof ConValue && self.con.fieldNames) {
-    for (const [index, field] of self.fields.entries()) {
-      const forced = forceForDisplay(runtime, field);
-      if (forced === undefined) continue;
-      const scalar = scalarOf(runtime, forced, { tag: 'tgen', index: -1 } as Type, 0);
-      if (scalar !== NOT_SCALAR) variables.vars[`this.${self.con.fieldNames[index]}`] = scalar;
-    }
-  }
+  addSelfFields(runtime, variables, self);
   return variables;
+}
+
+function addSelfFields(runtime: Runtime, variables: TraceVariables, self: Value | undefined): void {
+  if (!(self instanceof ConValue) || !self.con.fieldNames) return;
+  for (const [index, field] of self.fields.entries()) {
+    const scalar = displayAttempt(runtime, () => {
+      const forced = forceForDisplay(runtime, field);
+      return forced === undefined ? NOT_SCALAR : scalarOf(runtime, forced, { tag: 'tgen', index: -1 } as Type, 0);
+    });
+    if (scalar !== undefined && scalar !== NOT_SCALAR) variables.vars[`this.${self.con.fieldNames[index]}`] = scalar;
+  }
 }
 
 /** The limit of the work that showing one variable may do, which a variable bound to a long computation exceeds. */
 const DISPLAY_OPERATIONS = 20_000;
+
+function displayAttempt<T>(runtime: Runtime, work: () => T): T | undefined {
+  try {
+    return runtime.withDisplayBudget(DISPLAY_OPERATIONS, work);
+  } catch (error) {
+    if (error instanceof DisplayAbort) return;
+    throw error;
+  }
+}
 
 /** Evaluates a value for display, leaving it unevaluated when that fails or takes too long. */
 function forceForDisplay(runtime: Runtime, slot: Slot): Value | undefined {
@@ -93,8 +108,13 @@ function addVariable(runtime: Runtime, variables: TraceVariables, name: string, 
   if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
   // Lists also appear as references so that learners can expand their elements.
   if (scalar !== NOT_SCALAR && !isListValue(value, type)) return;
-  const node = displayNodeOf(runtime, value, type, 0);
-  if (node) variables.referenceVars[name] = node;
+  try {
+    const node = new DisplayNodes(runtime).build(value, type, 0);
+    if (node) variables.referenceVars[name] = node;
+  } catch (error) {
+    if (!(error instanceof DisplayAbort)) throw error;
+    variables.referenceVars[name] = { kind: 'value', value: '…' };
+  }
 }
 
 /** Functions, actions, and `()` are not variables to learners. */
@@ -136,6 +156,7 @@ function listItems(runtime: Runtime, value: ConValue): Value[] | undefined {
   const items: Value[] = [];
   let current: Value | undefined = value;
   while (current instanceof ConValue && current.con === CONS_CON) {
+    runtime.spend();
     if (items.length >= MAX_ELEMENTS) return undefined;
     const head = forceForDisplay(runtime, current.fields[0]);
     if (head === undefined) return undefined;
@@ -155,8 +176,9 @@ function traceInt(value: bigint): number | bigint {
 }
 
 // code-gauge-allow functionCognitiveComplexity 26 -- One branch per kind of value shown as a scalar.
-// code-gauge-allow functionNcss 34 -- Scalar formatting handles primitive values and library abstract values together.
+// code-gauge-allow functionNcss 35 -- Scalar formatting handles primitive values and library abstract values together.
 function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Scalar | typeof NOT_SCALAR {
+  runtime.spend();
   if (depth > 20) return NOT_SCALAR;
   if (typeof value === 'bigint') return traceInt(value);
   if (typeof value === 'number' || typeof value === 'string') return value;
@@ -191,105 +213,114 @@ function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Sc
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows Nothing as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
-// code-gauge-allow functionCognitiveComplexity 25 -- One branch per kind of value shown as a node.
-// code-gauge-allow functionNcss 32 -- Node formatting dispatches on each supported value representation.
-function displayNodeOf(runtime: Runtime, value: Value, type: Type, depth: number): DisplayNode | undefined {
-  if (depth > 20) return { kind: 'value', value: '…' };
-  if (typeof value === 'bigint') return { kind: 'value', value: traceInt(value) };
-  if (typeof value === 'number' || typeof value === 'string') return { kind: 'value', value };
-  if (value instanceof TurtleValue) {
-    if (!value.turtle.isAlive) return undefined;
-    return {
-      kind: 'object',
-      entries: { x: { kind: 'value', value: value.turtle.x }, y: { kind: 'value', value: value.turtle.y } },
-    };
-  }
-  if (!(value instanceof ConValue) || isHidden(value, type)) return undefined;
-  const container = containerKind(value);
-  if (container) return containerNodeOf(runtime, value, type, depth, container);
-  if (value.con.type.module === 'Base' && value.con.type.name === 'Ratio') {
-    const scalar = scalarOf(runtime, value, type, depth);
-    return typeof scalar === 'string' ? { kind: 'value', value: scalar } : undefined;
-  }
-  const con = value.con;
-  if (con.type.name === 'Bool' && con.type.module === 'Base') return { kind: 'value', value: con.tag === 1 };
-  if (con === CONS_CON || con === NIL_CON) return listNodeOf(runtime, value, type, depth);
-  if (con.type.name === 'Maybe' && con.type.module === 'Base') {
-    // A Maybe shows as what it holds, or as null, as a Java reference does.
-    if (con.name === 'Nothing') return NULL_NODE;
-    const inner = forceForDisplay(runtime, value.fields[0]);
-    return inner === undefined ? undefined : displayNodeOf(runtime, inner, elementType(type, 0), depth + 1);
-  }
-  if (value.fields.length === 0) return { kind: 'value', value: con.name };
-  return dataNodeOf(runtime, value, type, depth);
-}
-
 function containerKind(value: ConValue): 'map' | 'set' | undefined {
   if (value.con.type.module === 'Data.Map.Internal') return 'map';
   if (value.con.type.module === 'Data.Set.Internal') return 'set';
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- One bounded in-order walk handles the shared Set and Map tree representation.
-function containerNodeOf(
-  runtime: Runtime,
-  value: ConValue,
-  type: Type,
-  depth: number,
-  kind: 'map' | 'set'
-): DisplayNode {
-  const entries: Record<string, DisplayNode> = {};
-  let count = 0;
-  const visit = (slot: Slot): boolean => {
-    const node = forceForDisplay(runtime, slot);
-    if (!(node instanceof ConValue)) return false;
-    if (node.fields.length === 0) return true;
-    const left = kind === 'map' ? 3 : 2;
-    if (!visit(node.fields[left]) || count >= MAX_ELEMENTS) return false;
-    const key = forceForDisplay(runtime, node.fields[1]);
-    if (key === undefined) return false;
-    const keyNode = displayNodeOf(runtime, key, elementType(type, 0), depth + 1) ?? NULL_NODE;
-    if (kind === 'map') {
-      const item = forceForDisplay(runtime, node.fields[2]);
-      entries[count++] = {
-        kind: 'array',
-        entries: {
-          0: keyNode,
-          1:
-            item === undefined
-              ? NULL_NODE
-              : (displayNodeOf(runtime, item, elementType(type, 1), depth + 1) ?? NULL_NODE),
-        },
+class DisplayNodes {
+  private readonly ancestors = new Set<ConValue>();
+  constructor(private readonly runtime: Runtime) {}
+
+  build(value: Value, type: Type, depth: number): DisplayNode | undefined {
+    this.runtime.spend();
+    if (!(value instanceof ConValue)) return this.nodeOf(value, type, depth);
+    if (this.ancestors.has(value)) return { kind: 'value', value: '…' };
+    this.ancestors.add(value);
+    try {
+      return this.nodeOf(value, type, depth);
+    } finally {
+      this.ancestors.delete(value);
+    }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 25 -- One branch per kind of value shown as a node.
+  // code-gauge-allow functionNcss 32 -- Node formatting dispatches on each supported value representation.
+  private nodeOf(value: Value, type: Type, depth: number): DisplayNode | undefined {
+    if (depth > 20) return { kind: 'value', value: '…' };
+    if (typeof value === 'bigint') return { kind: 'value', value: traceInt(value) };
+    if (typeof value === 'number' || typeof value === 'string') return { kind: 'value', value };
+    if (value instanceof TurtleValue) {
+      if (!value.turtle.isAlive) return undefined;
+      return {
+        kind: 'object',
+        entries: { x: { kind: 'value', value: value.turtle.x }, y: { kind: 'value', value: value.turtle.y } },
       };
-    } else entries[count++] = keyNode;
-    return visit(node.fields[left + 1]);
-  };
-  return visit(value) ? { kind: 'array', entries } : { kind: 'value', value: '…' };
-}
-
-function listNodeOf(runtime: Runtime, value: ConValue, type: Type, depth: number): DisplayNode {
-  const items = listItems(runtime, value);
-  if (!items) return { kind: 'value', value: '…' };
-  if (isStringType(type, value)) return { kind: 'value', value: charsOf(items) };
-  const entries: Record<string, DisplayNode> = {};
-  for (const [index, item] of items.entries()) {
-    entries[index] = displayNodeOf(runtime, item, elementType(type, 0), depth + 1) ?? NULL_NODE;
+    }
+    if (!(value instanceof ConValue) || isHidden(value, type)) return undefined;
+    const container = containerKind(value);
+    if (container) return this.containerNodeOf(value, type, depth, container);
+    if (value.con.type.module === 'Base' && value.con.type.name === 'Ratio') {
+      const scalar = scalarOf(this.runtime, value, type, depth);
+      return typeof scalar === 'string' ? { kind: 'value', value: scalar } : undefined;
+    }
+    const con = value.con;
+    if (con.type.name === 'Bool' && con.type.module === 'Base') return { kind: 'value', value: con.tag === 1 };
+    if (con === CONS_CON || con === NIL_CON) return this.listNodeOf(value, type, depth);
+    if (con.type.name === 'Maybe' && con.type.module === 'Base') {
+      // A Maybe shows as what it holds, or as null, as a Java reference does.
+      if (con.name === 'Nothing') return NULL_NODE;
+      const inner = forceForDisplay(this.runtime, value.fields[0]);
+      return inner === undefined ? undefined : this.build(inner, elementType(type, 0), depth + 1);
+    }
+    if (value.fields.length === 0) return { kind: 'value', value: con.name };
+    return this.dataNodeOf(value, type, depth);
   }
-  return { kind: 'array', entries };
-}
 
-/** A tuple shows as an array, and a constructor with fields as an object of them, by name in a record. */
-function dataNodeOf(runtime: Runtime, value: ConValue, type: Type, depth: number): DisplayNode {
-  const { con } = value;
-  const entries: Record<string, DisplayNode> = {};
-  const isTuple = con.type.special === 'tuple';
-  if (!isTuple && con.type.cons.length > 1) entries['<constructor>'] = { kind: 'value', value: con.name };
-  for (const [index, field] of value.fields.entries()) {
-    const forced = forceForDisplay(runtime, field);
-    if (forced === undefined) continue;
-    const fieldType = isTuple ? elementType(type, index) : ({ tag: 'tgen', index: -1 } as Type);
-    const node = displayNodeOf(runtime, forced, fieldType, depth + 1);
-    if (node) entries[con.fieldNames?.[index] ?? String(index)] = node;
+  // code-gauge-allow functionCognitiveComplexity 18 -- One bounded in-order walk handles the shared Set and Map tree representation.
+  private containerNodeOf(value: ConValue, type: Type, depth: number, kind: 'map' | 'set'): DisplayNode {
+    const entries: Record<string, DisplayNode> = {};
+    let count = 0;
+    const visit = (slot: Slot): boolean => {
+      this.runtime.spend();
+      const node = forceForDisplay(this.runtime, slot);
+      if (!(node instanceof ConValue)) return false;
+      if (node.fields.length === 0) return true;
+      const left = kind === 'map' ? 3 : 2;
+      if (!visit(node.fields[left]) || count >= MAX_ELEMENTS) return false;
+      const key = forceForDisplay(this.runtime, node.fields[1]);
+      if (key === undefined) return false;
+      const keyNode = this.build(key, elementType(type, 0), depth + 1) ?? NULL_NODE;
+      if (kind === 'map') {
+        const item = forceForDisplay(this.runtime, node.fields[2]);
+        entries[count++] = {
+          kind: 'array',
+          entries: {
+            0: keyNode,
+            1: item === undefined ? NULL_NODE : (this.build(item, elementType(type, 1), depth + 1) ?? NULL_NODE),
+          },
+        };
+      } else entries[count++] = keyNode;
+      return visit(node.fields[left + 1]);
+    };
+    return visit(value) ? { kind: 'array', entries } : { kind: 'value', value: '…' };
   }
-  return { kind: isTuple ? 'array' : 'object', entries };
+
+  private listNodeOf(value: ConValue, type: Type, depth: number): DisplayNode {
+    const items = listItems(this.runtime, value);
+    if (!items) return { kind: 'value', value: '…' };
+    if (isStringType(type, value)) return { kind: 'value', value: charsOf(items) };
+    const entries: Record<string, DisplayNode> = {};
+    for (const [index, item] of items.entries()) {
+      entries[index] = this.build(item, elementType(type, 0), depth + 1) ?? NULL_NODE;
+    }
+    return { kind: 'array', entries };
+  }
+
+  /** A tuple shows as an array, and a constructor with fields as an object of them, by name in a record. */
+  private dataNodeOf(value: ConValue, type: Type, depth: number): DisplayNode {
+    const { con } = value;
+    const entries: Record<string, DisplayNode> = {};
+    const isTuple = con.type.special === 'tuple';
+    if (!isTuple && con.type.cons.length > 1) entries['<constructor>'] = { kind: 'value', value: con.name };
+    for (const [index, field] of value.fields.entries()) {
+      const forced = forceForDisplay(this.runtime, field);
+      if (forced === undefined) continue;
+      const fieldType = isTuple ? elementType(type, index) : ({ tag: 'tgen', index: -1 } as Type);
+      const node = this.build(forced, fieldType, depth + 1);
+      if (node) entries[con.fieldNames?.[index] ?? String(index)] = node;
+    }
+    return { kind: isTuple ? 'array' : 'object', entries };
+  }
 }

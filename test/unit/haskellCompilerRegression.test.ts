@@ -290,3 +290,54 @@ test('indented import continuations remain valid', () => {
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  'f R{b=0,a=0}=1\nf _=2\nmain=print(f(R(error "a")1))',
+  'main=print(case R(error "a")1 of R{b=0,a=0}->1;_->2)',
+  'main=print(let R{b=0,a=x}=R(error "a")1 in x)',
+])('record patterns match fields in their written order: %s', (body) => {
+  const result = executeProgram('haskell', `data R=R {a::Int,b::Int}\n${body}`);
+  if (body.startsWith('main=print(let'))
+    expect(result).toMatchObject({
+      kind: 'executed',
+      stdout: '',
+      uncaughtException: expect.stringContaining('Non-exhaustive patterns'),
+    });
+  else expect(result).toMatchObject({ kind: 'executed', stdout: '2\n', uncaughtException: undefined });
+});
+
+test.each(['\t', '\r', '\u007F', '\u0085', '\u200B', '\u2028'])(
+  'raw nongraphic characters are rejected in literals: %j',
+  (char) => {
+    expect(executeProgram('haskell', `main=print "a${char}b"`).kind).toBe('compileError');
+    expect(executeProgram('haskell', `main=print '${char}'`).kind).toBe('compileError');
+  }
+);
+
+test.each([
+  ['main=putStr "😀" >> print(case [] of x:_->x::Int)', '😀', 'Main.hs:1:26-47: Non-exhaustive patterns in case'],
+  ['main\t= print(case [] of x:_->x::Int)', '', 'Main.hs:1:17-38: Non-exhaustive patterns in case'],
+  ['main=print(let [x]=("😀" `seq` []) in (x::Int))', '', 'Main.hs:1:16-33: Non-exhaustive patterns in [x]'],
+  ['main = do\n\tprint (let [x]=[] in (x::Int))', '', 'Main.hs:2:20-25: Non-exhaustive patterns in [x]'],
+])('source spans count code points and tab stops: %s', (source, stdout, uncaughtException) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException });
+});
+
+test.each([
+  ['if True then 1 else 2', '1\n'],
+  ['case True of {True->1;False->2}', '1\n'],
+  ['do 1', '1\n'],
+  ['let x=1 in x', '1\n'],
+])('block arguments require parentheses or an infix operator: %s', (expression, stdout) => {
+  expect(executeProgram('haskell', `main=print ${expression}`).kind).toBe('compileError');
+  expect(executeProgram('haskell', `main=print(${expression})`)).toMatchObject({
+    kind: 'executed',
+    stdout,
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('haskell', `main=print $ ${expression}`)).toMatchObject({
+    kind: 'executed',
+    stdout,
+    uncaughtException: undefined,
+  });
+});
