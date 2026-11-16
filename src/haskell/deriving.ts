@@ -99,6 +99,7 @@ class Builder {
   }
 
   str(value: string): RExpr {
+    // oxlint-disable-next-line typescript/no-misused-spread -- Haskell Char values require code-point iteration.
     return { k: 'lit', lit: { kind: 'string', value: [...value] }, span: this.span };
   }
 

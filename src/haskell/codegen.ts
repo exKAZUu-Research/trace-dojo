@@ -966,6 +966,7 @@ export class Codegen {
                 k: 'app',
                 fn: this.methodOf(stmt.fail, support.monadFail(), 'fail'),
                 args: [
+                  // oxlint-disable-next-line typescript/no-misused-spread -- Haskell Char values require code-point iteration.
                   { k: 'str', value: [...`Pattern match failure in 'do' block at ${sourceSpanText(stmt.pat.span)}`] },
                 ],
               }
