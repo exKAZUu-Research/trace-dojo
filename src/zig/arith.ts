@@ -31,7 +31,6 @@ export const PANIC = {
   forLengths: 'for loop over objects with non-equal lengths',
   memcpyLengths: 'source and destination arguments have non-equal lengths',
   memcpyAlias: '@memcpy arguments alias',
-  invalidErrorCode: 'invalid error code',
   noreturnReturned: "'noreturn' function returned",
 } as const;
 

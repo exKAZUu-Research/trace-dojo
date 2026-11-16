@@ -414,7 +414,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
           type: target,
           eval: (frame) => {
             const value = operand.eval(frame);
-            if (value instanceof ErrorValue && names && !names.has(value.name)) panic(PANIC.invalidErrorCode);
+            if (value instanceof ErrorValue && names && !names.has(value.name))
+              panic(`unexpected error code, found error.${value.name}`);
             return value;
           },
           known: false,

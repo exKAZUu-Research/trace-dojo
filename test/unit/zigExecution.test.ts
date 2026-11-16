@@ -1919,3 +1919,33 @@ test('meta equality compares slice backing locations through aggregate views', (
     uncaughtException: undefined,
   });
 });
+
+test('undefined optional presence follows Debug poison tags through conditional initialization', () => {
+  const source = `const std=@import("std");const S=struct{value:?i32,bytes:[2]u8};fn inspect(fill:bool)void{var s:S=undefined;if(fill)s.value=3;std.debug.print("{} {}|",.{s.value orelse 9,s.bytes[0]});}pub fn main()void{inspect(false);inspect(true);}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '9 170|3 170|',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['false', '@as(u8,1)>2'])(
+  'known false assertions retain earlier output before their runtime panic: %s',
+  (condition) => {
+    const source = `const std=@import("std");pub fn main()void{std.debug.print("checking",.{});std.debug.assert(${condition});std.debug.print("after",.{});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'checking',
+      uncaughtException: 'panic: reached unreachable code',
+    });
+  }
+);
+
+test('narrow error casts report the rejected error name', () => {
+  const source = `const std=@import("std");const A=error{One,Two};const B=error{One,Three};fn cast(value:A)B{return @errorCast(value);}pub fn main()void{std.debug.print("before|",.{});_=cast(A.Two);}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'before|',
+    uncaughtException: 'panic: unexpected error code, found error.Two',
+  });
+});

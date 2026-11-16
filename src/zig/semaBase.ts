@@ -1269,7 +1269,7 @@ function buildUndefinedValue(type: Type): Value {
       return new ZStruct((type.fields ?? []).map((field) => buildUndefinedValue(field.type)));
     }
     case 'optional': {
-      return buildUndefinedValue(type.child);
+      return type.child.kind === 'pointer' ? buildUndefinedValue(type.child) : NULL;
     }
     case 'error_union': {
       return buildUndefinedValue(type.payload);

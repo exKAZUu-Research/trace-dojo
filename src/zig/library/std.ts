@@ -149,7 +149,6 @@ const DEBUG = nativeStruct('std.debug', {
   }),
   assert: fnMember('std.debug.assert', (sema, call) => {
     const [ok] = compileArgs(sema, expectArgs(sema, call, 1, 'std.debug.assert'), [BOOL]);
-    if (ok.known && ok.value === false) sema.error(call.span, 'std.debug.assert の条件が false です。');
     return nativeCall(VOID, [ok], call.span, ([value]) => {
       if (value !== true) panic('reached unreachable code');
       return;
