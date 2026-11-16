@@ -191,6 +191,7 @@ export interface Call {
 }
 
 export interface Program {
+  warnings?: { row: number; message: string }[];
   frozenStringLiterals?: boolean;
   body: Body;
   locals: string[];

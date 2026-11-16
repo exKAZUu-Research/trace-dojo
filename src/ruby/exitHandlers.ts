@@ -9,7 +9,7 @@ def(
   'at_exit',
   0,
   (_self, _args, block) => {
-    const proc = requireBlock(block);
+    const proc = requireBlock(block, rt().c.ArgumentError, 'called without a block');
     rt().atExit.push(proc);
     return proc;
   },

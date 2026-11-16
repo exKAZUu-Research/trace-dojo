@@ -55,8 +55,8 @@ import {
   hasRegexpProperty,
   regexpSyntaxReason,
   supportsRegexpByteView,
+  validateRegexpSourceSyntax,
   validateRegexpStructure,
-  validateSourceRanges,
 } from './regexpStructure';
 import { type Frame, rt, UnsupportedFeatureError } from './runtime';
 import { arr, asciiString, newHash, realClassOf, str, stringBytes, stringFromBytes, sym, truthy } from './values';
@@ -175,7 +175,7 @@ export function translate(
   ascii = false,
   ignoreCase = false
 ): string {
-  validateSourceRanges(source, extended);
+  validateRegexpSourceSyntax(source, extended, ascii);
   const classes = ascii ? ASCII_POSIX_CLASSES : POSIX_CLASSES;
   for (const name of captureNamesForValidation(source, extended))
     if ((/^[\p{ID_Start}_]/u.test(name) || /^\\u(?:[\dA-Fa-f]{4}|\{[\dA-Fa-f]+\})/.test(name)) && /[-\\]/.test(name))
@@ -451,7 +451,10 @@ function translateEscape(
       return inClass ? '0-9a-fA-F' : '[0-9a-fA-F]';
     }
     case 'H': {
-      if (inClass) throw unsupportedClassEscape(String.raw`\H`);
+      if (inClass) {
+        addNegatedClass('0-9a-fA-F');
+        return '';
+      }
       return '[^0-9a-fA-F]';
     }
     case 'w': {
@@ -498,7 +501,10 @@ function translateEscape(
       return inClass ? String.raw` \t\r\n\f\v` : String.raw`[ \t\r\n\f\v]`;
     }
     case 'S': {
-      if (inClass) throw unsupportedClassEscape(String.raw`\S`);
+      if (inClass) {
+        addNegatedClass(String.raw` \t\r\n\f\v`);
+        return '';
+      }
       return String.raw`[^ \t\r\n\f\v]`;
     }
     case 'p':
@@ -1345,8 +1351,17 @@ function captureNameSymbol(regexp: RObject, name: string): RSymbol {
 function namedCaptureGroup(state: MatchState, key: RString | RSymbol): number {
   const symbol = key instanceof RSymbol ? key : RSymbol.of(key.s, key.binary, key.usAscii, stringBytes(key));
   const name = state.names.find((candidate) => captureNameSymbol(state.regexp, candidate) === symbol);
-  if (name === undefined)
-    throw indexError(`undefined group name reference: ${key instanceof RSymbol ? key.name : key.s}`);
+  if (name === undefined) {
+    const text = key instanceof RSymbol ? symbolString(key) : key;
+    const shown = inspectStringEncoding(text, true)
+      .slice(1, -1)
+      .replaceAll(/\\(["\\#])/g, '$1');
+    const message = `undefined group name reference: ${shown}`;
+    throw rubyError(
+      rt().c.IndexError,
+      stringFromBytes(new TextEncoder().encode(message), /^[\u0000-\u007F]*$/.test(shown))
+    );
+  }
   return state.namedGroups[name];
 }
 
@@ -1632,18 +1647,25 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
   };
   let position = 0;
   let bytePosition = 0;
-  for (const match of replacement.s.matchAll(/\\(k<([\p{ID_Start}_][\p{ID_Continue}_]*)>|[0-9&+\\`'])/gu)) {
+  for (const match of replacement.s.matchAll(/\\(k<([^>]*)(>)?|[0-9&+\\`'])/gu)) {
     rt().spend(1);
     if (match.index > position) {
       const byteEnd = bytePosition + textByteLengthOf(replacement, replacement.s.slice(position, match.index));
       appendLiteral(bytePosition, byteEnd);
       bytePosition = byteEnd;
     }
-    const [, code, name] = match;
+    const [, code, name, closing] = match;
     let part: RString;
     if (name !== undefined) {
-      const group = state.namedGroups[name];
-      if (group === undefined) throw indexError(`undefined group name reference: ${name}`);
+      if (closing === undefined)
+        throw rubyError(
+          rt().c.RuntimeError,
+          stringFromBytes(new TextEncoder().encode('invalid group name reference format'), true)
+        );
+      const group = namedCaptureGroup(
+        state,
+        sliceStringEncoding(replacement, match.index + 3, match.index + 3 + name.length)
+      );
       const value = groupText(state, group);
       part = value === NIL ? str('') : (value as RString);
     } else {

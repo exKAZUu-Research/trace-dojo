@@ -5,21 +5,27 @@ import {
   type Node as SourceNode,
   parse as parseOniguruma,
 } from 'oniguruma-parser/parser';
-import { tokenize } from 'oniguruma-parser/tokenizer';
+import { type Token, tokenize } from 'oniguruma-parser/tokenizer';
 
 import { ExecutionLimitError } from '../interpreter/limits';
 import { regexpCommentEnd, regexpLineCommentEnd } from './regexpCaptureNames';
-import { decodeRegexpByteEscape, regexpByteEscape } from './regexpEscapes';
+import { decodeRegexpByteEscape, regexpByteEscape, RegexpEncodingError } from './regexpEscapes';
 import { regexpPropertyNames } from './regexpProperties';
 import { UnsupportedFeatureError } from './runtime';
 
-export function validateRegexpSourceSyntax(source: string, extended: boolean): void {
+export function validateRegexpSourceSyntax(source: string, extended: boolean, binary = false): void {
   let root: SourceNode;
   try {
-    root = parseSourceRegexp(source, extended);
+    root = parseSourceRegexp(source, extended, binary);
     validateSourceReferences(root);
   } catch (error) {
-    if (error instanceof RangeError || (error instanceof Error && /unsupported/i.test(error.message)))
+    if (error instanceof RegexpEncodingError || error instanceof UnsupportedFeatureError) throw error;
+    if (
+      error instanceof RangeError ||
+      (error instanceof Error &&
+        /unsupported/i.test(error.message) &&
+        onigurumaSyntaxReason(source, extended) === undefined)
+    )
       throw new UnsupportedFeatureError('正規表現の構文の検証');
     throw new SyntaxError('invalid regexp source');
   }
@@ -41,19 +47,22 @@ function propertyNode(node: SourceNode): boolean {
   return 'body' in node && node.body.some(propertyNode);
 }
 
-function parseSourceRegexp(source: string, extended: boolean): SourceNode {
-  const normalized = normalizeRubyRegexpEscapes(source, extended);
-  validateSourceTokens(normalized, extended);
-  return parseOniguruma(normalized, {
+function parseSourceRegexp(source: string, extended: boolean, binary = false): SourceNode {
+  const normalized = normalizeRubyRegexpEscapes(source, extended, binary);
+  const tokens = tokenize(normalized, { flags: extended ? 'x' : '' }).tokens;
+  validateSourceTokens(tokens);
+  const root = parseOniguruma(quantifiableAssertionSource(tokens), {
     flags: extended ? 'x' : '',
     skipLookbehindValidation: true,
     skipBackrefValidation: true,
     skipPropertyNameValidation: true,
   });
+  if (hasZeroWidthRepeat(root)) throw new UnsupportedFeatureError('正規表現の量指定されたゼロ幅表明');
+  return root;
 }
 
-function validateSourceTokens(source: string, extended: boolean): void {
-  for (const token of tokenize(source, { flags: extended ? 'x' : '' }).tokens) {
+function validateSourceTokens(tokens: Token[]): void {
+  for (const token of tokens) {
     if (token.type === 'Quantifier') {
       const bounds = /^\{(\d+),(\d+)\}/.exec(token.raw);
       if (bounds && Number(bounds[1]) > Number(bounds[2])) throw new SyntaxError('invalid reversed quantifier range');
@@ -63,6 +72,39 @@ function validateSourceTokens(source: string, extended: boolean): void {
       if (!regexpPropertyNames.has(name)) throw new SyntaxError('invalid character property name');
     }
   }
+}
+
+// code-gauge-allow functionCognitiveComplexity 19 -- Source assertions are wrapped for AST parsing while group balance remains checked before recursive parsing.
+function quantifiableAssertionSource(tokens: Token[]): string {
+  const parts: string[] = [];
+  const assertions: boolean[] = [];
+  for (const token of tokens) {
+    if (token.type === 'Assertion' || (token.type === 'Directive' && token.kind === 'keep'))
+      parts.push(`(?:${token.raw})`);
+    else if (token.type === 'GroupOpen') {
+      const assertion = token.kind === 'lookahead' || token.kind === 'lookbehind';
+      assertions.push(assertion);
+      parts.push(`${assertion ? '(?:' : ''}${token.raw}`);
+    } else if (token.type === 'GroupClose') {
+      if (assertions.length === 0) throw new SyntaxError('unmatched close parenthesis');
+      parts.push(assertions.pop() ? '))' : ')');
+    } else parts.push(token.raw);
+  }
+  if (assertions.length > 0) throw new SyntaxError('end pattern with unmatched parenthesis');
+  return parts.join('');
+}
+
+function hasZeroWidthRepeat(node: SourceNode): boolean {
+  if (node.type === 'Quantifier') return zeroWidthSource(node.body) || hasZeroWidthRepeat(node.body);
+  return 'body' in node && node.body.some(hasZeroWidthRepeat);
+}
+
+function zeroWidthSource(node: SourceNode): boolean {
+  if (node.type === 'Assertion' || node.type === 'LookaroundAssertion' || node.type === 'Directive') return true;
+  if (node.type === 'Quantifier') return node.max === 0 || zeroWidthSource(node.body);
+  if (node.type === 'Group' || node.type === 'CapturingGroup' || node.type === 'Alternative')
+    return node.body.every(zeroWidthSource);
+  return false;
 }
 
 export function supportsRegexpByteView(source: string, extended: boolean): boolean {
@@ -84,17 +126,6 @@ function byteViewNode(node: SourceNode, inClass: boolean): boolean {
   if (node.type === 'Quantifier') return byteViewNode(node.body, inClass);
   if ('body' in node) return node.body.every((child) => byteViewNode(child, inClass || node.type === 'CharacterClass'));
   return true;
-}
-
-export function validateSourceRanges(source: string, extended: boolean): void {
-  if (!source.includes('[')) return;
-  try {
-    parseSourceRegexp(source, extended);
-  } catch (error) {
-    if (error instanceof RangeError) return;
-    if (error instanceof Error && error.message === 'Invalid character class range')
-      throw new SyntaxError(onigurumaSyntaxReason(source, extended));
-  }
 }
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Source and host AST validation distinguish invalid patterns, unsupported forms, and exhausted budgets.
@@ -201,9 +232,7 @@ function validateSourceReferences(root: SourceNode): void {
   if (references.some((reference) => !captures.has(reference))) throw new SyntaxError('invalid backref number');
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Ruby escape decoding preserves class and comment context before source AST parsing.
-// code-gauge-allow functionNcss 35 -- The source normalization pass retains byte, Unicode and quoted-escape boundaries.
-function normalizeRubyRegexpEscapes(source: string, extended: boolean): string {
+function normalizeRubyRegexpEscapes(source: string, extended: boolean, binary = false): string {
   let result = '';
   let inClass = false;
   for (let index = 0; index < source.length; index++) {
@@ -214,30 +243,9 @@ function normalizeRubyRegexpEscapes(source: string, extended: boolean): string {
       result += source.slice(index, end + 1);
       index = end;
     } else if (char === '\\') {
-      const next = source[index + 1];
-      const byte =
-        next === 'x' ||
-        next === '0' ||
-        (inClass && /^[1-7]$/.test(next ?? '')) ||
-        (/^[1-7]$/.test(next ?? '') && /^[0-7]/.test(source[index + 2] ?? ''))
-          ? regexpByteEscape(source, index)
-          : undefined;
-      const unicode = /^\\u\{([\dA-Fa-f\s]+)\}/.exec(source.slice(index));
-      if (byte) {
-        const decoded = decodeRegexpByteEscape(source, index, byte);
-        result += `\\x{${decoded.value.toString(16)}}`;
-        index += decoded.length - 1;
-      } else if (unicode) {
-        result += unicode[1]
-          .trim()
-          .split(/\s+/)
-          .map((point) => `\\x{${point}}`)
-          .join('');
-        index += unicode[0].length - 1;
-      } else {
-        result += char + (next ?? '');
-        index++;
-      }
+      const escape = normalizedRegexpEscape(source, index, inClass, binary);
+      result += escape.text;
+      index += escape.length - 1;
     } else {
       if (char === '[') inClass = true;
       else if (char === ']') inClass = false;
@@ -245,6 +253,37 @@ function normalizeRubyRegexpEscapes(source: string, extended: boolean): string {
     }
   }
   return result;
+}
+
+function normalizedRegexpEscape(
+  source: string,
+  start: number,
+  inClass: boolean,
+  binary: boolean
+): { text: string; length: number } {
+  const next = source[start + 1];
+  const byte =
+    next === 'x' ||
+    next === '0' ||
+    (inClass && /^[1-7]$/.test(next ?? '')) ||
+    (/^[1-7]$/.test(next ?? '') && /^[0-7]/.test(source[start + 2] ?? ''))
+      ? regexpByteEscape(source, start)
+      : undefined;
+  if (byte) {
+    const decoded = binary ? byte : decodeRegexpByteEscape(source, start, byte);
+    return { text: `\\x{${decoded.value.toString(16)}}`, length: decoded.length };
+  }
+  const unicode = /^\\u\{([\dA-Fa-f\s]+)\}/.exec(source.slice(start));
+  if (unicode)
+    return {
+      text: unicode[1]
+        .trim()
+        .split(/\s+/)
+        .map((point) => `\\x{${point}}`)
+        .join(''),
+      length: unicode[0].length,
+    };
+  return { text: source.slice(start, start + 2), length: Math.min(2, source.length - start) };
 }
 
 function captureAlwaysParticipates(capture: AST.CapturingGroup, reference: AST.Backreference): boolean {

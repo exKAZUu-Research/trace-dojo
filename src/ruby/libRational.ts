@@ -354,9 +354,9 @@ function* rationalOf(value: Value, raise: boolean): Gen<RObject | undefined> {
 
 function parseRationalText(text: string, exact: boolean): RObject | undefined {
   const digits = String.raw`\d(?:_?\d)*`;
-  const component = `(?:${digits}(?:\\.${digits})?|\\.${digits})`;
+  const component = `(?:${digits}(?:\\.(?:${digits})?)?|\\.(?:${digits})?)`;
   const pattern = new RegExp(
-    `^([+-]?)(${component})(?:[eE]([+-]?${digits}))?(?:/(${component})(?:[eE]([+-]?${digits}))?)?`
+    `^([+-]?)(${component})(?:(?<!\\.)[eE]([+-]?${digits}))?(?:/(${component})(?:(?<!\\.)[eE]([+-]?${digits}))?)?`
   );
   const match = pattern.exec(text);
   if (!match || (exact && match[0].length !== text.length)) return undefined;

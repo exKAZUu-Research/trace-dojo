@@ -2254,7 +2254,7 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
         options.keywords,
         proc.isLambda || options.lambdaArgs ? 'lambda' : 'proc'
       );
-      if (hasParams(def.params)) {
+      if (hasParams(def.params) && !options.method) {
         runtime.currentRow = def.row;
         runtime.steps.stepBinding(def.row, storesAnswers(def.params, frame));
       }
@@ -2296,8 +2296,12 @@ export function callBlock(block: RProc, args: Value[], used = true): Gen {
 }
 
 /** Raises when a native method that needs a block received none. */
-export function requireBlock(block: RProc | undefined): RProc {
-  if (!block) throw rubyError(rt().c.LocalJumpError, 'no block given (yield)');
+export function requireBlock(
+  block: RProc | undefined,
+  exception = rt().c.LocalJumpError,
+  message = 'no block given (yield)'
+): RProc {
+  if (!block) throw rubyError(exception, message);
   return block;
 }
 

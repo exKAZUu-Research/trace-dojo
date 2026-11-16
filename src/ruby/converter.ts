@@ -25,7 +25,6 @@ import type {
 import { decodeDoubleQuoted, decodeSingleQuoted } from './escapes';
 import { translate } from './libRegexp';
 import { regexpCaptureNames, regexpHasNumberedBackref } from './regexpCaptureNames';
-import { validateRegexpSourceSyntax } from './regexpStructure';
 import { UnsupportedFeatureError } from './runtime';
 
 /** The local variables of one scope; a block's scope sees its parents' variables. */
@@ -149,6 +148,7 @@ export class Converter {
 
   /** The rows of the `# atomic` annotations that a method definition claimed. */
   readonly claimedAtomicRows = new Set<number>();
+  private readonly warnings: { row: number; message: string }[] = [];
 
   convertProgram(root: Node): Program {
     const { encoding, frozen } = sourceDirectives(this.source);
@@ -168,6 +168,7 @@ export class Converter {
     return {
       body,
       locals: this.ctx.scope.names,
+      warnings: this.warnings,
       frozenStringLiterals: frozen,
       data: data ? data.text.replace(/^\r?\n/, '') : undefined,
       dataFile: data ? this.source : undefined,
@@ -528,6 +529,7 @@ export class Converter {
       }
       case 'end_block': {
         if (!statement) this.fail(node, 'END は文としてのみ書けます。');
+        if (this.ctx.inDef) this.warnings.push({ row: node.startPosition.row, message: 'END in method; use at_exit' });
         const outer = this.ctx;
         const scope = new LocalScope('end', outer.scope);
         this.ctx = { ...outer, scope, inBlock: true, inLoop: false };
@@ -720,12 +722,6 @@ export class Converter {
     )
       this.fail(node, '名前付きキャプチャと番号付き後方参照は一緒に使えません。');
     try {
-      validateRegexpSourceSyntax(source, flags.includes('x'));
-    } catch (error) {
-      if (error instanceof UnsupportedFeatureError) this.unsupported(node, '正規表現の構文の検証');
-      this.fail(node, '正規表現の書き方に誤りがあります。');
-    }
-    try {
       new RegExp(translate(source, flags.includes('x'), flags.includes('m')), 'u');
     } catch (error) {
       if (!(error instanceof UnsupportedFeatureError)) {
@@ -911,6 +907,7 @@ export class Converter {
     let form = node;
     while (form.type === 'parenthesized_statements' && namedChildren(form).length === 1) form = namedChildren(form)[0];
     if (form.type === 'range') this.unsupported(form, 'フリップフロップ');
+    if (form.type === 'regex') this.unsupported(form, '条件式内の正規表現リテラル（$_ の暗黙の参照）');
     if (form.type === 'unary' && ['!', 'not'].includes(form.childForFieldName('operator')?.text ?? ''))
       this.checkFlipFlopCondition(required(form.childForFieldName('operand')));
     if (form.type === 'binary' && LOGICAL_OPERATORS.has(form.childForFieldName('operator')?.text ?? '')) {
@@ -1225,6 +1222,7 @@ export class Converter {
   private unary(node: Node): Expr {
     const operator = required(node.childForFieldName('operator')).text;
     const operandNode = required(node.childForFieldName('operand'));
+    if (operator === '!' || operator === 'not') this.checkFlipFlopCondition(operandNode);
     if (operator === 'defined?') {
       if (
         operandNode.type === 'parenthesized_statements' &&

@@ -452,11 +452,10 @@ function pad(value: number, width: number, flag: string): string {
 
 function strftime(data: TimeData, format: string): string {
   if (format.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
-  if (/%[-_0^#]*\d*:{0,3}$/.test(format.replaceAll('%%', ''))) throw argumentError(`invalid format: ${format}`);
   const date = data.fields();
   let outputLength = format.length;
-  const result = format.replaceAll(
-    /%([-_0^#]*)(\d*)(:{0,3})([a-zA-Z%+])/g,
+  const result = formatTimeDirectives(
+    format,
     (whole, flags: string, widthText: string, colons: string, directive: string) => {
       const finish = (value: string): string => {
         outputLength += value.length - whole.length;
@@ -464,11 +463,11 @@ function strftime(data: TimeData, format: string): string {
         return value;
       };
       const width = widthText ? Number(widthText) : undefined;
-      if (width !== undefined && width > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
       const flag = /([-_0])[^-_0]*$/.exec(flags)?.[1] ?? '';
       const rendered =
         calendarDirective(data, date, directive, flag) ?? clockDirective(data, date, directive, flag, colons, whole);
       if (rendered === undefined) return finish(whole);
+      if (width !== undefined && width > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
       if (directive === 'Z' && colons) return finish(whole);
       if (directive === 'Z' && zoneName(data) === NIL) return finish('');
       if (colons && directive !== 'z') throw new UnsupportedFeatureError(`Time#strftime(${whole})`);
@@ -490,6 +489,84 @@ function strftime(data: TimeData, format: string): string {
   );
   if (result.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
   return result;
+}
+
+interface StrftimeDirective {
+  end: number;
+  flags: string;
+  width: string;
+  colons: string;
+  directive: string;
+}
+
+function formatTimeDirectives(
+  format: string,
+  render: (whole: string, flags: string, width: string, colons: string, directive: string) => string
+): string {
+  const parts: string[] = [];
+  let position = 0;
+  while (position < format.length) {
+    const start = format.indexOf('%', position);
+    if (start === -1) {
+      parts.push(format.slice(position));
+      break;
+    }
+    parts.push(format.slice(position, start));
+    const token = readTimeDirective(format, start);
+    rt().spend(Math.ceil((token.end - start) / 64));
+    parts.push(render(format.slice(start, token.end), token.flags, token.width, token.colons, token.directive));
+    position = token.end;
+  }
+  return parts.join('');
+}
+
+// code-gauge-allow functionCognitiveComplexity 30 -- Native directive lexing preserves flag order, widths, locale modifiers and colon fallback boundaries.
+// code-gauge-allow functionNcss 44 -- One lexer state machine consumes a complete directive before formatting.
+function readTimeDirective(format: string, start: number): StrftimeDirective {
+  let cursor = start + 1;
+  let flags = '';
+  let width = '';
+  let colons = '';
+  let directive: string;
+  for (;;) {
+    if (cursor >= format.length) throw argumentError(`invalid format: ${format}`);
+    const char = format[cursor];
+    if ('-_0^#'.includes(char) && char !== '0') {
+      if (Number(width) > 0) {
+        directive = char;
+        cursor++;
+        break;
+      }
+      flags += char;
+      cursor++;
+    } else if (/\d/.test(char)) {
+      if (char === '0') flags += '0';
+      const begin = cursor;
+      while (/\d/.test(format[cursor] ?? '')) cursor++;
+      width = format.slice(begin, cursor);
+    } else if (
+      (char === 'E' && 'cCxXyY'.includes(format[cursor + 1] ?? '\0')) ||
+      (char === 'O' && 'deHkIlmMSuUVwWy'.includes(format[cursor + 1] ?? '\0'))
+    ) {
+      cursor++;
+    } else if (char === ':') {
+      let count = 1;
+      while (count < 4 && format[cursor + count] === ':') count++;
+      if (count < 4 && format[cursor + count] !== 'z') {
+        directive = ':';
+        cursor++;
+        break;
+      }
+      colons = ':'.repeat(count);
+      cursor += count;
+    } else {
+      directive = char;
+      cursor++;
+      break;
+    }
+  }
+
+  return { end: cursor, flags, width, colons, directive };
 }
 
 function chargePrecision(digits: number): void {
@@ -514,7 +591,7 @@ function caseText(rendered: string, directive: string, flags: string): string {
 }
 
 function defaultSpacePad(directive: string): boolean {
-  return 'eklaAbBh pPZcvrn tTXRDxF'.includes(directive);
+  return 'eklaAbBh pPZcvrn tTXRDxF%'.includes(directive);
 }
 
 function padOffset(value: string, width: number | undefined, flag: string): string {

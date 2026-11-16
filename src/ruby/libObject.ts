@@ -24,6 +24,7 @@ import { curry, makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { writeStderrLine } from './libIo';
 import { identifierSymbol } from './libMeta';
 import { kernelFloat, kernelInteger } from './libNumeric';
+import { identifierKeyString } from './libString';
 import { copyStructLayout } from './libStruct';
 import {
   invalidateMethodCaches,
@@ -44,7 +45,6 @@ import {
 import { rt, RubyError, ThrowSignal, UnsupportedFeatureError } from './runtime';
 import {
   arr,
-  asciiString,
   classOf,
   frozenCoreString,
   isA,
@@ -665,12 +665,12 @@ def('Module', ['name'], 0, (self: RClass) => {
   const name = self.name;
   if (name === undefined) return NIL;
   if (self.nameString?.text === name) return self.nameString.value;
-  const value = /^[\u0000-\u007F]*$/.test(name) ? asciiString(name) : str(name);
+  const value = identifierKeyString(name);
   value.frozen = true;
   self.nameString = { text: name, value };
   return value;
 });
-def('Module', ['to_s', 'inspect'], 0, (self: RClass) => str(className(self)));
+def('Module', ['to_s', 'inspect'], 0, (self: RClass) => identifierKeyString(className(self)));
 def('Module', '===', 1, (self: RClass, [value]) => isA(value, self));
 def('Module', '==', 1, (self, [other]) => self === other);
 def('Module', 'hash', 0, (self: RClass) => BigInt(self.id));

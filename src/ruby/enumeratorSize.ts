@@ -1,8 +1,8 @@
-import { toIndexExact, tryImplicitConversion } from './conversions';
-import { argumentError, typeError } from './errors';
+import { compareValues, toIndexExact, tryImplicitConversion } from './conversions';
+import { argumentError } from './errors';
 import { callMethod, type Gen } from './interp';
-import { isRubyFloat, NIL, type RObject, RString, type Value } from './objects';
-import { truthy } from './values';
+import { floorDiv } from './libNumeric';
+import { isRubyFloat, NIL, type RObject, type Value } from './objects';
 
 export function* customReceiverSize(recv: RObject): Gen<Value> {
   return (yield* tryImplicitConversion(recv, 'size')) ?? NIL;
@@ -12,19 +12,22 @@ export function* windowSize(base: Value, method: 'each_slice' | 'each_cons', req
   const slice = method === 'each_slice';
   const count = (yield* toIndexExact(requested)).integer;
   if (count <= 0n) throw argumentError(slice ? 'invalid slice size' : 'invalid size');
-  if (typeof base === 'bigint') return slice ? (base + count - 1n) / count : base >= count ? base - count + 1n : 0n;
-  if (isRubyFloat(base) && Number(base) === Infinity) return base;
-  if (base instanceof RString) throw typeError('no implicit conversion of Integer into String');
-  if (slice) return yield* callMethod(yield* callMethod(base, '/', [count]), 'ceil', []);
-  const size = yield* callMethod(yield* callMethod(base, '-', [count]), '+', [1n]);
-  return truthy(yield* callMethod(size, '<', [0n])) ? 0n : size;
+  if (typeof base === 'bigint') {
+    if (!slice) return base >= count ? base - count + 1n : 0n;
+    const numerator = base + count - 1n;
+    return floorDiv(numerator, count);
+  }
+  if (slice && isRubyFloat(base) && Math.abs(Number(base)) === Infinity) return base;
+  const adjusted = yield* callMethod(base, '+', [slice ? count - 1n : 1n - count]);
+  if (slice) return yield* callMethod(adjusted, 'div', [count]);
+  return (yield* compareValues(adjusted, 0n)) < 0 ? 0n : adjusted;
 }
 
-export function* cycleSize(base: Value, requested?: Value): Gen<Value> {
-  if (base === NIL) return NIL;
-  if (base === 0n) return 0n;
+export function* cycleSize(getSize: () => Gen<Value>, requested?: Value): Gen<Value> {
   const count = requested === undefined || requested === NIL ? undefined : (yield* toIndexExact(requested)).integer;
-  if (count !== undefined && count <= 0n) return 0n;
-  if (count === undefined) return base === 0n ? 0n : Number.POSITIVE_INFINITY;
+  const base = yield* getSize();
+  if (base === NIL || base === 0n) return base;
+  if (count === undefined) return Number.POSITIVE_INFINITY;
+  if (count <= 0n) return 0n;
   return typeof base === 'bigint' ? base * count : yield* callMethod(base, '*', [count]);
 }

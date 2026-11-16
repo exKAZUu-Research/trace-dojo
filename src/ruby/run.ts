@@ -53,6 +53,8 @@ export function executeRubyProgram(source: string, input?: ProgramInput): Progra
 export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: Frame) => void): ProgramRun {
   return withRuntime(runtime, () => {
     bootstrap(runtime);
+    for (const warning of program.warnings ?? [])
+      runtime.io.stderr.write(`main.rb:${warning.row + 1}: warning: ${warning.message}\n`);
     runtime.frozenStringLiterals = program.frozenStringLiterals ?? false;
     const frame = new Frame('main', runtime.mainObject, new Scope(), [runtime.c.Object], undefined, false, false, {});
     frame.defaultVisibility = 'private';

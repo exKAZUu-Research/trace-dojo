@@ -96,9 +96,9 @@ function* bindKeywords(params: Params, frame: Frame, keywords: RHash | undefined
     for (const [slot, entry] of keywords.map) {
       if (
         entry.key instanceof RSymbol &&
-        params.keywords.some((keyword) => keyword.name === (entry.key as RSymbol).name)
+        params.keywords.some((keyword) => keyword.name === (entry.key as RSymbol).key)
       ) {
-        given.set(entry.key.name, entry.value);
+        given.set(entry.key.key, entry.value);
       } else {
         yield* hashSetStored(extra, slot, entry);
       }

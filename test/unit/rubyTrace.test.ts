@@ -1033,3 +1033,17 @@ test('Yielder Proc retains its consumer and captured turtles', () => {
   const program = 'def make;t=Turtle.new;y=Enumerator::Yielder.new{|x|t.forward};y.to_proc;end;p=make;x=1;p.call(1)';
   expect(traceProgram('ruby', program, program).finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
 });
+
+test.each([
+  ['def twice(n)', 'define_method(:twice) do |n|', 'C.new.twice(1)'],
+  ['def self.twice(n)', 'define_singleton_method(:twice) do |n|', 'C.twice(1)'],
+])('dynamic method bodies use the same trace entry rule as %s', (definition, dynamic, call) => {
+  const program = (declaration: string): string => `class C\n ${declaration}\n  r=n*2\n  r\n end\nend\na=${call}`;
+  const expected = methodBodySteps(program(definition));
+  expect(expected).toHaveLength(1);
+  expect(methodBodySteps(program(dynamic))).toEqual(expected);
+});
+
+function methodBodySteps(source: string): TraceItem[] {
+  return rubyTrace(source).filter(({ callLines }) => callLines.length > 0);
+}

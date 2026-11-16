@@ -35,8 +35,20 @@ import { hashDefault, hashGet, stringKeyEquals, stringKeyHash } from './hashes';
 import { callBlock, callMethod, type Gen, invoke, nativeProc, requireBlock } from './interp';
 import { makeEnumerator } from './libEnumerator';
 import { parseFloatLenient, parseIntegerLenient } from './libNumeric';
-import { type MatchState, setLastMatch, setLiteralMatch } from './libRegexp';
-import { NIL, RArray, RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
+import { makeRegexp, type MatchState, setLastMatch, setLiteralMatch } from './libRegexp';
+import {
+  decodeSymbolKey,
+  NIL,
+  RArray,
+  RHash,
+  RObject,
+  type RProc,
+  RRange,
+  RString,
+  RSymbol,
+  type Value,
+} from './objects';
+import { RegexpCursor } from './regexpCursor';
 import { regexpByteIndex, regexpByteUnit } from './regexpPositions';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { successorBytes, transformInvalid } from './stringTransforms';
@@ -1436,25 +1448,26 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
 });
 
 function* scanEmpty(self: RString, block: RProc | undefined): Gen<Value> {
-  const sourceLength = stringBytes(self).length;
+  const cursor = new RegexpCursor(makeRegexp('', { sourceBinary: self.binary }), self);
   const found: Value[] = [];
-  let lastIndex = 0;
-  for (let offset = 0; offset <= sourceLength;) {
-    const bytes = stringBytes(self);
-    const first = bytes[offset];
-    const width = self.binary || first < 0xc2 || first >= 0xf5 ? 1 : first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
+  let lastByte = 0;
+  for (let offset = 0; offset <= cursor.length;) {
+    const state = cursor.match(offset)!;
+    state.literal = true;
+    const next = cursor.next(state);
+    lastByte = offset;
     const match = textResult(self, '');
-    lastIndex = textIndexAtByte(self.s, offset, stringTextMode(self));
-    setLiteralMatch(self, self.s, '', lastIndex);
+    setLastMatch(state);
     if (block) {
       yield* callBlock(block, [match], false);
-      if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
+      cursor.refresh();
     } else found.push(match);
-    if (offset === sourceLength) break;
-    offset += width;
+    offset = next;
     rt().spend();
   }
-  setLiteralMatch(self, self.s, '', lastIndex);
+  const last = cursor.match(lastByte)!;
+  last.literal = true;
+  setLastMatch(last);
   return block ? self : arr(found);
 }
 
@@ -1914,8 +1927,16 @@ export function symbolProc(name: string): Value {
 }
 
 export function symbolString(self: RSymbol): RString {
-  if (self.binary || self.usAscii) return stringFromBytes(self.bytes as Uint8Array, self.binary, self.usAscii);
-  return /^[\u0000-\u007F]*$/.test(self.name) ? asciiString(self.name) : str(self.name);
+  return encodedNameString(self);
+}
+
+export function identifierKeyString(key: string): RString {
+  return encodedNameString(decodeSymbolKey(key));
+}
+
+function encodedNameString(name: Pick<RSymbol, 'name' | 'binary' | 'usAscii' | 'bytes'>): RString {
+  if (name.binary || name.usAscii) return stringFromBytes(name.bytes as Uint8Array, name.binary, name.usAscii);
+  return /^[\u0000-\u007F]*$/.test(name.name) ? asciiString(name.name) : str(name.name);
 }
 
 export { requireBlock, rangeCovers, typeError };

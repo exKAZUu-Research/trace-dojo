@@ -4,7 +4,6 @@ import {
   caseEquals,
   compareValues,
   comparisonFailed,
-  inspect,
   rEquals,
   spaceship,
   toFloat,
@@ -12,7 +11,7 @@ import {
   toIndexExact,
   tryImplicitConversion,
 } from './conversions';
-import { def } from './define';
+import { def, isCoreMethod } from './define';
 import { argumentCountError, argumentError, runtimeError, typeError } from './errors';
 import { eachEntryUntil, hashGetOrInsert, hashSet, hashUpdateEntry } from './hashes';
 import { callBlock, callMethod, callProc, flattenGenerator, type Gen, nativeProc, respondsTo } from './interp';
@@ -25,6 +24,7 @@ import {
   receiverSize,
   sizedEnumerator,
 } from './libEnumerator';
+import { methodKeyOf } from './libMeta';
 import { isRational } from './libRational';
 import {
   isRubyFloat,
@@ -35,7 +35,6 @@ import {
   RObject,
   type RProc,
   RRange,
-  RString,
   RSymbol,
   type Value,
 } from './objects';
@@ -86,7 +85,8 @@ export function* iterate(collection: Value, visit: Visit, args: Value[] = []): G
     yield* args.length === 0 &&
     collection instanceof RObject &&
     collection.cls.isSubclassOf(runtime.c.Enumerator) &&
-    collection.cls !== runtime.c['Enumerator::Lazy']
+    collection.cls !== runtime.c['Enumerator::Lazy'] &&
+    isCoreMethod((collection.singleton ?? collection.cls).findMethod('each'), runtime.c.Enumerator, 'each')
       ? iterateEnumerator(collection, function* (value) {
           runtime.spend();
           if ((yield* visit(value)) === STOP) throw signal;
@@ -330,15 +330,7 @@ export function* inject(self: Value, args: Value[], block: RProc | undefined): G
 }
 
 function* operatorName(value: Value): Gen<string> {
-  if (value instanceof RSymbol) return value.name;
-  if (value instanceof RString) return value.s;
-  const converted = yield* tryImplicitConversion(value, 'to_str');
-  if (converted instanceof RString) return converted.s;
-  if (converted !== undefined && converted !== NIL)
-    throw typeError(
-      `can't convert ${realClassOf(value).name} to String (${realClassOf(value).name}#to_str gives ${realClassOf(converted).name})`
-    );
-  throw typeError(`${yield* inspect(value)} is not a symbol nor a string`);
+  return yield* methodKeyOf(value);
 }
 
 function* fastOperator(left: Value, operator: string, right: Value): Gen {
@@ -1252,13 +1244,12 @@ def('Enumerable', 'chain', [0, -1], (self, others) => {
   });
   enumerator.cls = rt().c['Enumerator::Chain'];
   (enumerator.data as EnumeratorSource).size = function* () {
-    let total: bigint | number = 0n;
+    let total: Value = 0n;
     for (const source of sources) {
       const size = yield* receiverSize(source);
-      if (size === NIL) return NIL;
-      if (size === Number.POSITIVE_INFINITY) return size;
-      total =
-        typeof size === 'number' || typeof total === 'number' ? Number(total) + Number(size) : total + (size as bigint);
+      if (size === NIL || (isRubyFloat(size) && Math.abs(Number(size)) === Infinity)) return size;
+      if (typeof size !== 'bigint') return NIL;
+      total = yield* callMethod(total, '+', [size]);
     }
     return total;
   };

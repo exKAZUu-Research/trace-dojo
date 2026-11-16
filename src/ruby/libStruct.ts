@@ -97,11 +97,12 @@ export function structEntriesOf(value: RObject): [string, Value][] | undefined {
 function* memberIndex(self: RObject, key: Value): Gen<number> {
   const { members, memberSymbols } = layoutOf(self.cls);
   if (key instanceof RSymbol || key instanceof RString) {
-    const name = key instanceof RSymbol ? key.name : key.s;
     const symbol = key instanceof RSymbol ? key : RSymbol.of(key.s, key.binary, key.usAscii, stringBytes(key));
     const index = memberSymbols.indexOf(symbol);
     if (index === -1) {
-      throw nameError(`no member '${name}' in struct`, self, name);
+      const error = nameError(`no member '${symbol.key}' in struct`, self, symbol.key);
+      error.exception.internal!.set('name', key);
+      throw error;
     }
     return index;
   }

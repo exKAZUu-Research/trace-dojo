@@ -579,7 +579,7 @@ def(
   [0, -1],
   function* (self, args, block, keywords, used) {
     const definee = singletonDefinitionClass(self);
-    return yield* callProc(requireBlock(block), args, {
+    return yield* callProc(requireBlock(block, rt().c.LocalJumpError, 'no block given'), args, {
       self,
       definee,
       keywords,
@@ -597,7 +597,12 @@ def(
   ['class_exec', 'module_exec'],
   [0, -1],
   function* (self: RClass, args, block, keywords, used) {
-    return yield* callProc(requireBlock(block), args, { self, definee: self, keywords, used });
+    return yield* callProc(requireBlock(block, rt().c.LocalJumpError, 'no block given'), args, {
+      self,
+      definee: self,
+      keywords,
+      used,
+    });
   },
   { keywords: true }
 );
@@ -612,7 +617,10 @@ def('Kernel', 'define_singleton_method', [1, 2], function* (self, args, block) {
 function* defineMethodFrom(owner: RClass, args: Value[], block: RProc | undefined, visibility: Visibility): Gen {
   const name = yield* methodKeyOf(args[0]);
   if (!owner.isSingleton && PRIVATE_METHOD_NAMES.has(name)) visibility = 'private';
-  const body = args.length > 1 ? args[1] : requireBlock(block);
+  const body =
+    args.length > 1
+      ? args[1]
+      : requireBlock(block, rt().c.ArgumentError, 'tried to create Proc object without a block');
   let method: RMethod;
   if (body instanceof RProc) {
     method = { name, owner, visibility, body: { kind: 'proc', proc: body } };
@@ -757,7 +765,7 @@ def(
   [1, -1],
   (self, [name]) => {
     const reason = rt().frame.home.extra.missingReason;
-    methodMissing(self, (name as RSymbol).name, { vcall: reason === 'vcall' }, reason === 'vcall' ? undefined : reason);
+    methodMissing(self, (name as RSymbol).key, { vcall: reason === 'vcall' }, reason === 'vcall' ? undefined : reason);
   },
   { visibility: 'private' }
 );
@@ -817,7 +825,7 @@ function* constantName(value: Value): Gen<string> {
   const name = symbol.name;
   const valid = symbol.binary ? /^[A-Z][\w\P{ASCII}]*$/u : /^[\p{Uppercase}\p{Lt}][\w\P{ASCII}]*$/u;
   if (!valid.test(name)) throw nameError(`wrong constant name ${symbol.key}`, NIL, symbol.key);
-  return name;
+  return symbol.key;
 }
 
 function reflectedConstant(module: RClass, name: string, inherit: boolean, nested: boolean): Value | undefined {
@@ -846,7 +854,7 @@ def('Module', 'const_get', [1, 2], function* (self: RClass, args) {
         part,
         input.binary,
         input.usAscii,
-        input.binary ? Uint8Array.from(part, (char) => char.codePointAt(0)!) : undefined
+        input.binary || input.usAscii ? Uint8Array.from(part, (char) => char.codePointAt(0)!) : undefined
       )
     );
     const value: Value | undefined =
@@ -884,7 +892,7 @@ def('Module', 'const_defined?', [1, 2], function* (self: RClass, args) {
         part,
         input.binary,
         input.usAscii,
-        input.binary ? Uint8Array.from(part, (char) => char.codePointAt(0)!) : undefined
+        input.binary || input.usAscii ? Uint8Array.from(part, (char) => char.codePointAt(0)!) : undefined
       )
     );
     const value = reflectedConstant(module, constant, inherit, index > 0);

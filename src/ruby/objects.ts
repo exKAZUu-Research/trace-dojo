@@ -34,13 +34,8 @@ export class RSymbol {
   }
 
   static fromKey(key: string): RSymbol {
-    if (!/[\uDC80-\uDCFF\uDD80-\uDDFF]/u.test(key)) return RSymbol.of(key);
-    const usAscii = /[\uDD80-\uDDFF]/u.test(key);
-    const bytes = Uint8Array.from(key, (char) => char.codePointAt(0)! & 255);
-    const name = Array.from(bytes, (byte) => String.fromCodePoint(usAscii && byte >= 128 ? 0xdc_00 + byte : byte)).join(
-      ''
-    );
-    return RSymbol.of(name, !usAscii, usAscii, bytes);
+    const name = decodeSymbolKey(key);
+    return RSymbol.of(name.name, name.binary, name.usAscii, name.bytes);
   }
 
   static of(name: string, binary = false, usAscii = false, sourceBytes?: Uint8Array): RSymbol {
@@ -60,6 +55,16 @@ export class RSymbol {
     }
     return symbol;
   }
+}
+
+export function decodeSymbolKey(key: string): { name: string; binary: boolean; usAscii: boolean; bytes?: Uint8Array } {
+  if (!/[\uDC80-\uDCFF\uDD80-\uDDFF]/u.test(key)) return { name: key, binary: false, usAscii: false };
+  const usAscii = /[\uDD80-\uDDFF]/u.test(key);
+  const bytes = Uint8Array.from(key, (char) => char.codePointAt(0)! & 255);
+  const name = Array.from(bytes, (byte) => String.fromCodePoint(usAscii && byte >= 128 ? 0xdc_00 + byte : byte)).join(
+    ''
+  );
+  return { name, binary: !usAscii, usAscii, bytes };
 }
 
 let nextObjectId = 8;

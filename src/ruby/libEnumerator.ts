@@ -150,11 +150,12 @@ function* enumeratorSize(recv: Value, method: string, args: Value[], keywords?: 
       return distance < 0n ? 0n : distance + 1n;
     }
   }
+  if (method === 'cycle')
+    return recv instanceof RArray && recv.items.length === 0 ? 0n : yield* cycleSize(() => receiverSize(recv), args[0]);
   const base = yield* receiverSize(recv);
   if ((method === 'each_slice' || method === 'each_cons') && args[0] !== undefined && base !== NIL) {
     return yield* windowSize(base, method, args[0]);
   }
-  if (method === 'cycle' && base !== NIL) return yield* cycleSize(base, args[0]);
   if (FIXED_SIZE_METHODS.has(method)) return base;
   return NIL;
 }
@@ -968,7 +969,7 @@ def('Enumerator::Yielder', 'to_proc', 0, (self: RObject) => {
   return proc;
 });
 sdef('Enumerator', 'produce', [0, 1], function* (_self, args, block) {
-  const step = requireBlock(block);
+  const step = requireBlock(block, rt().c.ArgumentError, 'no block given');
   const runtime = rt();
   const generator = new RObject(runtime.c['Enumerator::Generator']);
   const producer = nativeProc(1, function* ([yielder]) {
@@ -1028,27 +1029,22 @@ function lazyIterationSource(source: Value, args: Value[], displayArgs: Value[])
 function* lazySize(self: RObject): Gen {
   const { source, steps } = self.data as LazyData;
   let size = (yield* tryImplicitConversion(source, 'size')) ?? NIL;
-  for (const step of steps) size = nextLazySize(size, step);
+  for (const step of steps) size = yield* nextLazySize(size, step);
   return size;
 }
 
-function nextLazySize(size: Value, step: LazyStep): Value {
+function* nextLazySize(size: Value, step: LazyStep): Gen<Value> {
   if (size === NIL) return NIL;
-  if (step.kind === 'take') {
-    if (typeof size === 'bigint') return size < step.exactCount ? size : step.exactCount;
-    if (isRubyFloat(size)) return Number(size) < step.count ? size : step.exactCount;
-    return size;
-  }
-  if (step.kind === 'drop') {
-    if (typeof size === 'bigint') return size > step.exactCount ? size - step.exactCount : 0n;
-    if (isRubyFloat(size)) return Math.max(0, Number(size) - step.count);
-    return size;
-  }
-  if (step.kind === 'each_slice' && typeof size === 'bigint') return (size + step.exactCount - 1n) / step.exactCount;
-  if (step.kind === 'each_cons' && typeof size === 'bigint')
-    return size >= step.exactCount ? size - step.exactCount + 1n : 0n;
-  if ((step.kind === 'each_slice' || step.kind === 'each_cons') && isRubyFloat(size) && Number(size) === Infinity)
-    return size;
+  const smallInteger = typeof size === 'bigint' && size >= -(1n << 62n) && size < 1n << 62n;
+  if (step.kind === 'take') return smallInteger && size < step.exactCount ? size : step.exactCount;
+  if (step.kind === 'drop')
+    return smallInteger
+      ? size > step.exactCount
+        ? size - step.exactCount
+        : 0n
+      : yield* callMethod(size, '-', [step.exactCount]);
+  if (step.kind === 'each_slice' || step.kind === 'each_cons')
+    return yield* windowSize(size, step.kind, step.exactCount);
   return ['map', 'with_index', 'zip', 'each_entry', 'each_with_object'].includes(step.kind) ? size : NIL;
 }
 

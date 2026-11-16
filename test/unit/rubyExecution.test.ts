@@ -32,15 +32,17 @@ test('unterminated heredoc rejects the program before execution', () => {
   expect(run('puts "start"\nx = <<~EOS\n  text\n')).toMatchObject({ kind: 'compileError' });
 });
 
-test('unsupported regexp syntax fails explicitly', () => {
+test('Regexp supports negated class shorthands and rejects unavailable syntax', () => {
   expect(run(String.raw`p "a".match?(/\X/)`)).toMatchObject({
     uncaughtException: String.raw`正規表現の\X は、この採点環境では使えません。`,
   });
   expect(run(String.raw`p "g".match?(/[\H]/)`)).toMatchObject({
-    uncaughtException: String.raw`正規表現の文字クラス内の\H は、この採点環境では使えません。`,
+    stdout: 'true\n',
+    uncaughtException: undefined,
   });
   expect(run(String.raw`p "g".match?(/[\S]/)`)).toMatchObject({
-    uncaughtException: String.raw`正規表現の文字クラス内の\S は、この採点環境では使えません。`,
+    stdout: 'true\n',
+    uncaughtException: undefined,
   });
 });
 
@@ -10802,5 +10804,242 @@ e=Enumerator.new{|y|y<<1;y<<2};e.freeze;p e.each.to_a`)
     kind: 'executed',
     stdout: 'FrozenError\n'.repeat(12) + '[1, 2]\n',
     uncaughtException: undefined,
+  });
+});
+
+test('Enumerable sizes preserve native numeric and receiver protocols', () => {
+  expect(
+    run(String.raw`class E
+ include Enumerable
+ def initialize(size);@size=size;end
+ def each;yield 1;end
+ def size;@size;end
+end
+class Count
+ def to_int;puts :converted;2;end
+end
+[0,nil,3].each do |size|
+ begin; puts :query; p E.new(size).cycle(Count.new).size; rescue=>e;p e.class,e.message;end
+end
+[0,3,3.5,Rational(7,2),Rational(1,2),'3',nil,Float::INFINITY,-Float::INFINITY].each do |size|
+ e=E.new(size);p size
+ [:take,:drop,:each_slice,:each_cons].each do |method|
+  begin;p e.lazy.send(method,2).size;rescue=>x;p x.class,x.message;end
+ end
+ p e.chain([1,2]).size
+end
+class External < Enumerator
+ def initialize;super{|y|y<<1};end
+ def each;yield 42;end
+end
+p External.new.map{|x|x},External.new.select{true},External.new.to_a
+class Overridden < Enumerator
+ def initialize;end
+ def each;yield 42;end
+end
+p Overridden.new.map{|x|x}
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'query\nconverted\n0\nquery\nconverted\nnil\nquery\nconverted\n6\n0\n0\n0\n0\n0\n2\n3\n2\n1\n2\n2\n5\n3.5\n2\n1.5\n2\n2.5\nnil\n(7/2)\n2\n(3/2)\n2\n(5/2)\nnil\n(1/2)\n2\n(-3/2)\n0\n0\nnil\n"3"\n2\nNoMethodError\n"undefined method \'-\' for an instance of String"\nTypeError\n"no implicit conversion of Integer into String"\nTypeError\n"no implicit conversion of Integer into String"\nnil\nnil\nnil\nnil\nnil\nnil\nnil\nInfinity\n2\nInfinity\nInfinity\nInfinity\nInfinity\n-Infinity\n2\n-Infinity\n-Infinity\n0\n-Infinity\n[42]\n[42]\n[42]\n[42]\n',
+    stderr: '',
+    uncaughtException: undefined,
+  });
+});
+
+test('Encoded identifiers remain distinct across reflection, patterns and reductions', () => {
+  expect(
+    run(String.raw`class Missing
+ def method_missing(n,*a);super;end
+end
+[233.chr.to_sym,('x'+255.chr).to_sym].each do |n|
+ begin;Missing.new.send(n);rescue NoMethodError=>e;p e.name==n,e.message.encoding;end
+end
+module Constants;end
+n=('A'+255.chr).to_sym;Constants.const_set(n,1);Constants.const_set(:Aÿ,2)
+p Constants.const_get(n),Constants.const_get(:Aÿ),Constants.const_defined?(n)
+h={233.chr.to_sym=>1,'é'.to_sym=>2};h => {"é":v,**rest};p v,rest
+s=Struct.new(:a).new(1)
+[233.chr.to_sym,233.chr].each do |name|
+ begin;s[name];rescue NameError=>e;p e.name.class,e.name==name,e.message.encoding;end
+ begin;s[name]=1;rescue NameError=>e;p e.name.class,e.name==name,e.message.encoding;end
+end
+class Reduction;end
+n=('x'+255.chr).to_sym
+Reduction.define_method(n){|x|42};Reduction.define_method(:xÿ){|x|24}
+p [Reduction.new,1].inject(n),[Reduction.new,1].reduce(n.to_s)
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'true\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\n1\n2\ntrue\n2\n{"\\xE9": 1}\nSymbol\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\nSymbol\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\nString\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\nString\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\n42\n42\n',
+    stderr: '',
+    uncaughtException: undefined,
+  });
+});
+
+test('Reflected class names preserve binary and US-ASCII identifier bytes', () => {
+  expect(
+    run(String.raw`module C;end
+['ASCII-8BIT','US-ASCII'].each do |encoding|
+ s=String.new('A'+255.chr,encoding:encoding);n=:"#{s}"
+ begin;C.const_set(n,Class.new);p C.const_get(n).name.bytes,C.const_get(n).name.encoding,C.const_defined?(n);rescue=>e;p e.class,e.message;end
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[67, 58, 58, 65, 255]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[67, 58, 58, 65, 255]\n#<Encoding:US-ASCII>\ntrue\n',
+    stderr: '',
+    uncaughtException: undefined,
+  });
+});
+
+test('Block-requiring natives report their operation-specific errors', () => {
+  expect(
+    run(String.raw`[proc{Class.new.define_method(:x)},proc{Object.new.define_singleton_method(:x)},proc{Enumerator.new},proc{Enumerator.produce(1)},proc{1.instance_exec},proc{Class.new.class_exec},proc{at_exit}].each do |call|
+ begin;call.call;rescue=>e;p e.class,e.message;end
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'ArgumentError\n"tried to create Proc object without a block"\nArgumentError\n"tried to create Proc object without a block"\nArgumentError\n"tried to create Proc object without a block"\nArgumentError\n"no block given"\nLocalJumpError\n"no block given"\nLocalJumpError\n"no block given"\nArgumentError\n"called without a block"\n',
+    stderr: '',
+    uncaughtException: undefined,
+  });
+});
+
+test('Rational text preserves trailing-dot component and exponent boundaries', () => {
+  expect(
+    run(String.raw`['1.','1./2','1/2.','1_0.','1.e2','1.e-2','1./2.e2','1._2','1..2','1.e','1./2._3','.','1./.2'].each do |text|
+ begin;p Rational(text);rescue=>e;p e.class,e.message;end
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '(1/1)\n(1/2)\n(1/2)\n(10/1)\nArgumentError\n"invalid value for convert(): \\"1.e2\\""\nArgumentError\n"invalid value for convert(): \\"1.e-2\\""\nArgumentError\n"invalid value for convert(): \\"1./2.e2\\""\nArgumentError\n"invalid value for convert(): \\"1._2\\""\nArgumentError\n"invalid value for convert(): \\"1..2\\""\nArgumentError\n"invalid value for convert(): \\"1.e\\""\nArgumentError\n"invalid value for convert(): \\"1./2._3\\""\n(0/1)\n(5/1)\n',
+    stderr: '',
+    uncaughtException: undefined,
+  });
+});
+
+test('Named replacements preserve encoded names and validate every reference', () => {
+  expect(
+    run(String.raw`[233.chr,255.chr,'é'].each do |capture|
+ r=Regexp.new('(?<'+capture+'>a)')
+ ['é',233.chr,'ÿ',255.chr].each do |reference|
+  [:sub,:gsub].each do |operation|
+   begin;p 'a'.send(operation,r,'\\k<'+reference+'>');rescue=>e;p e.class,e.message,e.message.encoding;end
+  end
+ end
+end
+['\\k<no!>','\\k<>','\\k<1>','\\k<foo','\\k<','\\k','\\kX','\\\\k<foo>'].each do |replacement|
+ begin;p 'a'.gsub(/(a)/,replacement);rescue=>e;p e.class,e.message;end
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'IndexError\n"undefined group name reference: é"\n#<Encoding:UTF-8>\nIndexError\n"undefined group name reference: é"\n#<Encoding:UTF-8>\n"a"\n"a"\nIndexError\n"undefined group name reference: ÿ"\n#<Encoding:UTF-8>\nIndexError\n"undefined group name reference: ÿ"\n#<Encoding:UTF-8>\nIndexError\n"undefined group name reference: \\\\xFF"\n#<Encoding:BINARY (ASCII-8BIT)>\nIndexError\n"undefined group name reference: \\\\xFF"\n#<Encoding:BINARY (ASCII-8BIT)>\nIndexError\n"undefined group name reference: é"\n#<Encoding:UTF-8>\nIndexError\n"undefined group name reference: é"\n#<Encoding:UTF-8>\nIndexError\n"undefined group name reference: \\\\xE9"\n#<Encoding:BINARY (ASCII-8BIT)>\nIndexError\n"undefined group name reference: \\\\xE9"\n#<Encoding:BINARY (ASCII-8BIT)>\nIndexError\n"undefined group name reference: ÿ"\n#<Encoding:UTF-8>\nIndexError\n"undefined group name reference: ÿ"\n#<Encoding:UTF-8>\n"a"\n"a"\n"a"\n"a"\nIndexError\n"undefined group name reference: \\\\xE9"\n#<Encoding:BINARY (ASCII-8BIT)>\nIndexError\n"undefined group name reference: \\\\xE9"\n#<Encoding:BINARY (ASCII-8BIT)>\nIndexError\n"undefined group name reference: ÿ"\n#<Encoding:UTF-8>\nIndexError\n"undefined group name reference: ÿ"\n#<Encoding:UTF-8>\nIndexError\n"undefined group name reference: \\\\xFF"\n#<Encoding:BINARY (ASCII-8BIT)>\nIndexError\n"undefined group name reference: \\\\xFF"\n#<Encoding:BINARY (ASCII-8BIT)>\nIndexError\n"undefined group name reference: no!"\nIndexError\n"undefined group name reference: "\nIndexError\n"undefined group name reference: 1"\nRuntimeError\n"invalid group name reference format"\nRuntimeError\n"invalid group name reference format"\n"\\\\k"\n"\\\\kX"\n"\\\\k<foo>"\n',
+    stderr: '',
+    uncaughtException: undefined,
+  });
+});
+
+test('Empty literal scans retain interior-byte match contexts after mutation', () => {
+  expect(
+    run(`['é','あ','😀'].each do |ch|
+ s='a'+ch;n=0
+ s.scan(''){p [$~.begin(0),$\`.bytes,$'.bytes];n+=1;s[0,2]=ch+'a' if n==1}
+ p [$~.begin(0),$\`.bytes,$'.bytes]
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[0, [], [97, 195, 169]]\n[1, [195], [169, 97]]\n[1, [195, 169], [97]]\n[2, [195, 169, 97], []]\n[2, [195, 169, 97], []]\n[0, [], [97, 227, 129, 130]]\n[1, [227], [129, 130, 97]]\n[2, [227, 129], [130, 97]]\n[1, [227, 129, 130], [97]]\n[2, [227, 129, 130, 97], []]\n[2, [227, 129, 130, 97], []]\n[0, [], [97, 240, 159, 152, 128]]\n[1, [240], [159, 152, 128, 97]]\n[2, [240, 159], [152, 128, 97]]\n[3, [240, 159, 152], [128, 97]]\n[1, [240, 159, 152, 128], [97]]\n[2, [240, 159, 152, 128, 97], []]\n[2, [240, 159, 152, 128, 97], []]\n',
+    stderr: '',
+    uncaughtException: undefined,
+  });
+});
+
+test('strftime parses modifiers, widths and terminal percent tokens', () => {
+  expect(
+    run(String.raw`t=Time.utc(2024,2,29,13,5,9)
+['%Ec|%Od|%Oe|%EY','%-%','%_%','%0%','%^%','%#%','%-10%','%010%','%_10%','%10%','%EOY','%OEY','%EN','%ON','%Eq','%Oq','%E%','%O%','%E%abc','%O%abc','%E','%O','%10E','%:','%::','%:::','%::::','tail%','%1','%_','%---','%%%','%%%%','%Ok','%Ol'].each do |format|
+ begin;p [format,t.strftime(format)];rescue=>e;p [format,e.class,e.message];end
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '["%Ec|%Od|%Oe|%EY", "Thu Feb 29 13:05:09 2024|29|29|2024"]\n["%-%", "%"]\n["%_%", "%"]\n["%0%", "%"]\n["%^%", "%"]\n["%#%", "%"]\n["%-10%", "%"]\n["%010%", "000000000%"]\n["%_10%", "         %"]\n["%10%", "         %"]\n["%EOY", "%EOY"]\n["%OEY", "%OEY"]\n["%EN", "%EN"]\n["%ON", "%ON"]\n["%Eq", "%Eq"]\n["%Oq", "%Oq"]\n["%E%", ArgumentError, "invalid format: %E%"]\n["%O%", ArgumentError, "invalid format: %O%"]\n["%E%abc", "%EThubc"]\n["%O%abc", "%OThubc"]\n["%E", "%E"]\n["%O", "%O"]\n["%10E", "%10E"]\n["%:", "%:"]\n["%::", "%::"]\n["%:::", "%:::"]\n["%::::", ArgumentError, "invalid format: %::::"]\n["tail%", ArgumentError, "invalid format: tail%"]\n["%1", ArgumentError, "invalid format: %1"]\n["%_", ArgumentError, "invalid format: %_"]\n["%---", ArgumentError, "invalid format: %---"]\n["%%%", ArgumentError, "invalid format: %%%"]\n["%%%%", "%%"]\n["%Ok", "13"]\n["%Ol", " 1"]\n',
+    stderr: '',
+    uncaughtException: undefined,
+  });
+});
+
+test('END warnings precede execution even in uncalled methods', () => {
+  expect(
+    run(String.raw`def unused
+ END{puts :first}
+end
+class WithEnd
+ def unused
+  END{puts :second}
+ end
+end
+puts :now
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'now\n',
+    stderr: 'main.rb:2: warning: END in method; use at_exit\nmain.rb:6: warning: END in method; use at_exit\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Quantified zero-width forms fail explicitly instead of producing host-regexp capture semantics', () => {
+  const assertions = [
+    '$',
+    String.raw`\A`,
+    String.raw`\z`,
+    String.raw`\Z`,
+    '(?=a)',
+    '(?!a)',
+    '(?<=a)',
+    '(?<!a)',
+    '(?:(?=(a)))',
+    '()',
+  ];
+  for (const assertion of assertions) {
+    for (const quantifier of ['+', '?', '{0}', '{1,2}']) {
+      expect(run(`puts :before;Regexp.new(${JSON.stringify(assertion + quantifier)})`)).toMatchObject({
+        kind: 'executed',
+        stdout: 'before\n',
+        uncaughtException: '正規表現の量指定されたゼロ幅表明は、この採点環境では使えません。',
+      });
+    }
+  }
+  expect(run(String.raw`p /(?:^a)?/.match?('a'), /(?=(a))/.match('a').captures`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\n["a"]\n',
+  });
+});
+
+test.each([
+  'if /x/;puts :bad;end',
+  'unless /x/;puts :bad;end',
+  'x=/x/ ? 1 : 2',
+  'while /x/ && false;end',
+  'p !/x/',
+  'p not(/x/)',
+])('implicit regexp conditions fail explicitly: %s', (source) => {
+  expect(run(source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: '条件式内の正規表現リテラル（$_ の暗黙の参照）は、この採点環境では使えません。' }],
   });
 });
