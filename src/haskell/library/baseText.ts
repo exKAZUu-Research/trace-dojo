@@ -369,7 +369,15 @@ isSingle :: Char -> Bool
 isSingle c = c ${BT}elem${BT} ",;()[]{}${BT}"
 
 isSym :: Char -> Bool
-isSym c = c ${BT}elem${BT} "!@#$%&*+./<=>?\\^|:-~"
+isSym c = not (isSingle c) && case generalCategory c of
+  MathSymbol -> True
+  CurrencySymbol -> True
+  ModifierSymbol -> True
+  OtherSymbol -> True
+  DashPunctuation -> True
+  OtherPunctuation -> c /= '\'' && c /= '"'
+  ConnectorPunctuation -> c /= '_'
+  _ -> False
 
 isIdChar :: Char -> Bool
 isIdChar c = isAlphaNum c || c ${BT}elem${BT} "_'"

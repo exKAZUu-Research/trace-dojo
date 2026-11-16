@@ -583,3 +583,22 @@ test.each(['-2', '0', '1'])('Numeric base validation precedes number and digit d
     uncaughtException: `GHC.Internal.Numeric.showIntAtBase: applied to unsupported base ${base}`,
   });
 });
+
+test('derived readers round-trip Unicode and ASCII symbolic constructors', () => {
+  const source = String.raw`data T=Int :⊕ Int | Int :★ Int | Int :— Int | Int :‿ Int | Int :· Int | Int :€ Int | Int :¨ Int | Int :+ Int deriving(Show,Read)
+main=mapM_ (\value -> print(read(show value)::T)) [1 :⊕ 2,1 :★ 2,1 :— 2,1 :‿ 2,1 :· 2,1 :€ 2,1 :¨ 2,1 :+ 2]`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1 :⊕ 2\n1 :★ 2\n1 :— 2\n1 :‿ 2\n1 :· 2\n1 :€ 2\n1 :¨ 2\n1 :+ 2\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('lex preserves Unicode operator boundaries and excludes identifier and punctuation characters', () => {
+  const source = 'main=mapM_ (print.lex) [":⊕rest","_name","[★]","‘rest","﹙rest"]';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[(":\\8853","rest")]\n[("_name","")]\n[("[","\\9733]")]\n[]\n[]\n',
+    uncaughtException: undefined,
+  });
+});
