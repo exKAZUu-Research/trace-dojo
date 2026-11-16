@@ -559,3 +559,27 @@ main=do
     uncaughtException: undefined,
   });
 });
+
+test.each(['showHex', 'showOct', 'showBin'])(
+  'Numeric.%s retains the negative argument in diagnostics',
+  (conversion) => {
+    for (const value of ['-1', '-123456789012345678901234567890']) {
+      expect(
+        executeProgram('haskell', `import Numeric\nmain=putStrLn(${conversion}(${value}::Integer) "")`)
+      ).toMatchObject({
+        kind: 'executed',
+        stdout: '',
+        uncaughtException: `GHC.Internal.Numeric.showIntAtBase: applied to negative number ${value}`,
+      });
+    }
+  }
+);
+
+test.each(['-2', '0', '1'])('Numeric base validation precedes number and digit demand: %s', (base) => {
+  const source = `import Numeric\nmain=putStrLn(showIntAtBase (${base}::Int) (error "digit") (error "number") "")`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: `GHC.Internal.Numeric.showIntAtBase: applied to unsupported base ${base}`,
+  });
+});

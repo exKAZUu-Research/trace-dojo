@@ -271,8 +271,8 @@ showGFloatAlt d x = showString (formatRealFloatAlt FFGeneric d True x)
 
 showIntAtBase :: Integral a => a -> (Int -> Char) -> a -> ShowS
 showIntAtBase base toChr n0 r0 =
-  if base <= fromInteger 1 then errorWithoutStackTrace "Numeric.showIntAtBase: applied to unsupported base"
-  else if n0 < fromInteger 0 then errorWithoutStackTrace "Numeric.showIntAtBase: applied to negative number"
+  if base <= fromInteger 1 then numericError ("showIntAtBase: applied to unsupported base " ++ show (toInteger base))
+  else if n0 < fromInteger 0 then numericError ("showIntAtBase: applied to negative number " ++ show (toInteger n0))
   else showIt (quotRem n0 base) r0
   where
     showIt (n, d) r = let c = toChr (fromIntegral d)
@@ -289,7 +289,10 @@ showBin :: Integral a => a -> ShowS
 showBin = showIntAtBase (fromInteger 2) intToDigit
 
 showInt :: Integral a => a -> ShowS
-showInt n r = if n < fromInteger 0 then errorWithoutStackTrace "Numeric.showInt: can't show negative numbers" else integerShow (toInteger n) ++ r
+showInt n r = if n < fromInteger 0 then numericError "showInt: can't show negative numbers" else integerShow (toInteger n) ++ r
+
+numericError :: String -> a
+numericError message = errorWithoutStackTrace ("GHC.Internal.Numeric." ++ message)
 
 showSigned :: Real a => (a -> ShowS) -> Int -> a -> ShowS
 showSigned showPos p x = if x < fromInteger 0 then showParen (p > 6) (showChar '-' . showPos (negate x)) else showPos x
