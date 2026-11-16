@@ -2,7 +2,7 @@
 import { createObject } from './classes';
 // code-gauge-allow-file fileNcss 600 -- The SPL data structures, each a small class of its own.
 import { debugType } from './conversions';
-import { throwError, warn } from './errors';
+import { deprecated, throwError, warn } from './errors';
 import { callCallback, callMethod, iterate } from './interp';
 import { defineClass, type NativeMethod } from './native';
 import { compare, toKey } from './operators';
@@ -575,7 +575,7 @@ function fixedIndex(object: PhpObject, index: Value, method: string): number {
   }
   const position = Number(index);
   if (position < 0 || position >= fixedOf(object).items.length)
-    throwError('RuntimeException', 'Index invalid or out of range');
+    throwError('OutOfBoundsException', 'Index invalid or out of range');
   void method;
   return position;
 }
@@ -608,7 +608,7 @@ defineClass({
     {
       signature: 'offsetSet($index, mixed $value): void',
       impl: ({ thisObj, args }) => {
-        if (args[0] === null) throwError('RuntimeException', 'Index invalid or out of range');
+        if (args[0] === null) throwError('OutOfBoundsException', 'Index invalid or out of range');
         fixedOf(thisObj).items[fixedIndex(thisObj, args[0], 'offsetSet')] = share(args[1]);
         return null;
       },
@@ -690,6 +690,11 @@ class ObjectStorage {
 
 const objectStorageOf = (object: PhpObject): ObjectStorage => object.internal as ObjectStorage;
 
+/** Reports a method PHP 8.5 deprecates in favor of its ArrayAccess counterpart. */
+function deprecatedMethod(name: string, replacement: string): void {
+  deprecated(`Method SplObjectStorage::${name}() is deprecated since 8.5, use method SplObjectStorage::${replacement}() instead`);
+}
+
 function storageKey(value: Value): PhpObject {
   if (!(value instanceof PhpObject))
     throwError(
@@ -705,15 +710,26 @@ defineClass({
   methods: [
     {
       signature: 'attach(object $object, mixed $info = null): void',
-      impl: ({ thisObj, args }) => (objectStorageOf(thisObj).entries.set(args[0] as PhpObject, args[1] ?? null), null),
+      impl: ({ thisObj, args }) => {
+        deprecatedMethod('attach', 'offsetSet');
+        objectStorageOf(thisObj).entries.set(args[0] as PhpObject, args[1] ?? null);
+        return null;
+      },
     },
     {
       signature: 'detach(object $object): void',
-      impl: ({ thisObj, args }) => (objectStorageOf(thisObj).entries.delete(args[0] as PhpObject), null),
+      impl: ({ thisObj, args }) => {
+        deprecatedMethod('detach', 'offsetUnset');
+        objectStorageOf(thisObj).entries.delete(args[0] as PhpObject);
+        return null;
+      },
     },
     {
       signature: 'contains(object $object): bool',
-      impl: ({ thisObj, args }) => objectStorageOf(thisObj).entries.has(args[0] as PhpObject),
+      impl: ({ thisObj, args }) => {
+        deprecatedMethod('contains', 'offsetExists');
+        return objectStorageOf(thisObj).entries.has(args[0] as PhpObject);
+      },
     },
     {
       signature: 'offsetExists($object): bool',

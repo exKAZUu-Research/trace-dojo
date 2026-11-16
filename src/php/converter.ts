@@ -489,6 +489,14 @@ export class Converter {
                 'switch に default が2つあります（Switch statements may only contain one default clause）。'
               );
           }
+          const separator = child.children.find((part) => part.type === ':' || part.type === ';');
+          if (separator?.type === ';') {
+            this.notices.push({
+              level: 'Deprecated',
+              message: 'Case statements followed by a semicolon (;) are deprecated, use a colon (:) instead',
+              row: child.startPosition.row,
+            });
+          }
           const statements = child.namedChildren.filter((part) => part.id !== value?.id && part.type !== 'comment');
           return {
             test: value ? this.expr(value) : undefined,

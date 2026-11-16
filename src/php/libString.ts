@@ -723,7 +723,7 @@ defineFunction('soundex(string $string): string', ({ args }) => {
     }
     if (result.length === 4) break;
   }
-  return result === '' ? '' : result.padEnd(4, '0');
+  return result.padEnd(4, '0');
 });
 defineFunction('count_chars(string $string, int $mode = 0): array|string', ({ args }) => {
   const text = s(args[0]);
@@ -1004,7 +1004,10 @@ defineFunction('mb_convert_case(string $string, int $mode, ?string $encoding = n
       )
   );
 });
-defineFunction('mb_internal_encoding(?string $encoding = null): string|bool', ({ args }) => (args[0] ? true : 'utf8'));
+defineFunction('mb_internal_encoding(?string $encoding = null): string|bool', ({ args }) =>
+  // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- PHP returns the encoding's name as `UTF-8`.
+  args[0] ? true : 'UTF-8'
+);
 defineFunction('mb_ucfirst(string $string, ?string $encoding = null): string', ({ args }) => {
   const list = chars(args[0]);
   if (list.length === 0) return '';

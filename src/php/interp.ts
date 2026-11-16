@@ -39,7 +39,7 @@ import * as conversionsModule from './conversions';
 import { debugType, toBool } from './conversions';
 import { nestedBodies } from './converter';
 import { deprecated, E_DEPRECATED, E_WARNING, emitError, notice, throwError, warn } from './errors';
-import { collectGarbage, setDestructor } from './garbage';
+import { collectBeforeAllocation, collectGarbage, setDestructor } from './garbage';
 import {
   arithmetic,
   bitwise,
@@ -67,6 +67,7 @@ import {
   writableContainer,
 } from './places';
 import { ExitSignal, FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
+import { UnsupportedFeatureError } from './unsupported';
 import { incrementString } from './strings';
 import {
   type Callable,
@@ -458,6 +459,9 @@ function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Co
         if (handler) {
           try {
             runtime.row = handler.row;
+            // Unwinding released the values the throwing code held, which PHP frees before it binds the exception.
+            runtime.frame.temporaries.push(error.object);
+            collectBeforeAllocation(runtime);
             if (handler.varName !== undefined) new VarPlace(runtime.frame, handler.varName).set(error.object);
             completion = execList(handler.body);
           } catch (error_) {
@@ -1088,8 +1092,33 @@ export function* iterate(value: Value): Generator<[Value, Value]> {
   }
 }
 
+/** The constants that describe the machine running PHP, which differ between this grader and a learner's PHP. */
+const ENVIRONMENT_CONSTANTS = new Set([
+  'PHP_OS',
+  'PHP_OS_FAMILY',
+  'PHP_BINARY',
+  'PHP_BINDIR',
+  'PHP_LIBDIR',
+  'PHP_DATADIR',
+  'PHP_EXTENSION_DIR',
+  'PHP_CONFIG_FILE_PATH',
+  'PHP_CONFIG_FILE_SCAN_DIR',
+  'PHP_SHLIB_SUFFIX',
+  'PHP_PREFIX',
+  'PHP_MANDIR',
+  'PHP_SYSCONFDIR',
+  'PHP_LOCALSTATEDIR',
+  'DEFAULT_INCLUDE_PATH',
+  'PEAR_INSTALL_DIR',
+  'PEAR_EXTENSION_DIR',
+]);
+
 function readConstant(name: string, fallback: string | undefined): Value {
   const runtime = rt();
+  const global = fallback ?? name;
+  if (ENVIRONMENT_CONSTANTS.has(global) && !runtime.constants.has(constantKey(name))) {
+    throw new UnsupportedFeatureError(`実行環境の情報（${global}）`);
+  }
   const value = runtime.constants.get(constantKey(name));
   if (value !== undefined) return value;
   if (fallback !== undefined) {

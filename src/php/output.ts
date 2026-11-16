@@ -16,7 +16,7 @@ function debugEntries(object: PhpObject): [string | bigint, Slot, string][] {
   if (isClosure(object)) return closureDebug(object);
   const internal = object.internal as { debugEntries?: () => [string | bigint, Value][] } | undefined;
   if (internal?.debugEntries) {
-    return internal.debugEntries().map(([key, value]) => [key, value, typeof key === 'string' ? `"${key}"` : `${key}`]);
+    return internal.debugEntries().map(([key, value]) => [typeof key === 'string' ? propNameOf(key) : key, value, debugLabel(key)]);
   }
   const entries: [string | bigint, Slot, string][] = [];
   for (const [key, slot] of object.props) {
@@ -28,6 +28,15 @@ function debugEntries(object: PhpObject): [string | bigint, Slot, string][] {
     entries.push([name, slot, label]);
   }
   return entries;
+}
+
+/** The label `var_dump` shows for a key of a debug table, unmangling a private or protected property name. */
+function debugLabel(key: string | bigint): string {
+  if (typeof key === 'bigint') return `${key}`;
+  if (!key.startsWith('\0')) return `"${key}"`;
+  const owner = key.slice(1, key.indexOf('\0', 1));
+  const name = propNameOf(key);
+  return owner === '*' ? `"${name}":protected` : `"${name}":"${owner}":private`;
 }
 
 function closureDebug(object: PhpObject): [string, Value, string][] {

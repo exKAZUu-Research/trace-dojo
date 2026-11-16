@@ -454,9 +454,10 @@ function checkParam(
   if (coerced !== NO_MATCH) return coerced;
   const where = callRow === undefined ? '' : `, called in ${SCRIPT_PATH} on line ${callRow + 1}`;
   const typeText = param.implicitNullable && type.k === 'named' ? `?${type.name}` : describeType(type, frame.scope);
+  const label = param.variadic ? '' : ` ($${param.name})`;
   throwError(
     'TypeError',
-    `${name}(): Argument #${index + 1} ($${param.name}) must be of type ${typeText}, ${givenType(value)} given${where}`
+    `${name}(): Argument #${index + 1}${label} must be of type ${typeText}, ${givenType(value)} given${where}`
   );
 }
 

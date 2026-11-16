@@ -18,6 +18,11 @@ export function typeToString(type: TypeDecl): string {
     return type.name;
   }
   if (type.k === 'inter') return type.types.map((part) => typeToString(part)).join('&');
+  // A union of one type and null reads as a nullable type.
+  const others = type.types.filter((part) => !(part.k === 'named' && part.name === 'null'));
+  if (others.length === 1 && others.length < type.types.length && others[0].k === 'named' && others[0].name !== 'mixed') {
+    return `?${typeToString(others[0])}`;
+  }
   const parts = type.types.map((part) => (part.k === 'inter' ? `(${typeToString(part)})` : typeToString(part)));
   // PHP lists class types first, then the builtin types in a fixed order, with null last.
   return sortUnion(parts).join('|');
@@ -242,8 +247,18 @@ export function isTraversable(object: PhpObject): boolean {
 
 /** Resolves `self` and `static` in a type for messages, as PHP prints the class names. */
 export function describeType(type: TypeDecl, scope?: PhpClass): string {
-  if (type.k === 'named' && type.name === 'self' && scope) return (type.nullable ? '?' : '') + scope.name;
-  return typeToString(type);
+  return typeToString(resolveSelf(type, scope));
+}
+
+/** Writes `self` and `parent` in a type as the class names they stand for, as PHP's messages do. */
+function resolveSelf(type: TypeDecl, scope: PhpClass | undefined): TypeDecl {
+  if (!scope) return type;
+  if (type.k === 'named') {
+    if (type.name === 'self') return { ...type, name: scope.name };
+    if (type.name === 'parent' && scope.parent) return { ...type, name: scope.parent.name };
+    return type;
+  }
+  return { ...type, types: type.types.map((part) => resolveSelf(part, scope)) };
 }
 
 export function givenType(value: Value): string {

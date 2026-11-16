@@ -434,7 +434,10 @@ export function strictEquals(a: Value, b: Value): boolean {
 export function toKey(value: Value): Key {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'string') return normalizeKeyString(value);
-  if (value === null) return '';
+  if (value === null) {
+    deprecated('Using null as an array offset is deprecated, use an empty string instead');
+    return '';
+  }
   if (typeof value === 'boolean') return value ? 1n : 0n;
   if (typeof value === 'number') {
     if (!Number.isFinite(value) || !floatFitsInt(value)) {

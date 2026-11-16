@@ -85,6 +85,7 @@ defineConstant('DIRECTORY_SEPARATOR', '/');
 defineConstant('PATH_SEPARATOR', ':');
 defineConstant('PHP_MAXPATHLEN', 1024n);
 defineConstant('PHP_DEBUG', 0n);
+defineConstant('PHP_SAPI', 'cli');
 defineConstant('PHP_ZTS', 0n);
 
 // Output -------------------------------------------------------------------------------------------------------------
