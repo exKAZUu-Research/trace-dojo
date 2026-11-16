@@ -336,8 +336,7 @@ export function customEnumerator(recv: Value, method: string, held: Value[], ite
 
 function sourceOf(self: RObject): EnumeratorSource {
   if (self.cls === rt().c['Enumerator::Lazy']) {
-    const data = self.data as LazyData | undefined;
-    if (!data) throw argumentError('uninitialized enumerator');
+    const data = lazyDataOf(self);
     data.enumerator ??= {
       recv: self,
       method: 'each',
@@ -644,7 +643,7 @@ for (const name of ['==', '===', 'eql?'])
   });
 // code-gauge-allow functionCognitiveComplexity 30 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 // code-gauge-allow functionNcss 33 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
-def('Enumerator', ['inspect', 'to_s'], 0, function* (self: RObject) {
+def('Enumerator', 'inspect', 0, function* (self: RObject) {
   if (self.data === undefined) return str(`#<${className(realClassOf(self))}: uninitialized>`);
   const source = sourceOf(self);
   if (self.cls === rt().c['Enumerator::Chain']) {
@@ -870,7 +869,7 @@ def('Enumerator', 'rewind', 0, function* (self: RObject) {
   const receiver = sourceOf(self).recv;
   if (receiver !== self) yield* tryImplicitConversion(receiver, 'rewind');
   if (self.cls === rt().c['Enumerator::Lazy']) {
-    const data = self.data as LazyData;
+    const data = lazyDataOf(self);
     if (data.steps.every((step) => step.kind === 'each_entry')) yield* tryImplicitConversion(data.source, 'rewind');
   }
   sourceOf(self).cursor = undefined;
@@ -907,8 +906,10 @@ def(
   'Enumerator',
   'initialize',
   [0, 1],
-  // code-gauge-allow functionCognitiveComplexity 19 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
+  // code-gauge-allow functionCognitiveComplexity 20 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
   function* (self: RObject, args, block) {
+    if (self.cls.isSubclassOf(rt().c['Enumerator::Lazy']))
+      throw new UnsupportedFeatureError('Enumerator::Lazy#initialize');
     if (!block) throw argumentError('tried to create Proc object without a block');
     const producer = block;
     const [size] = args;
@@ -948,6 +949,9 @@ function assertMutableEnumerator(self: RObject): void {
   if (self.frozen) throw frozenError(self, runToEnd(inspect(self)));
 }
 
+def('Enumerator::Lazy', 'initialize', [0, -1], unavailableMethod('Enumerator::Lazy#initialize'), {
+  visibility: 'private',
+});
 sdef('Enumerator::Lazy', 'new', [0, -1], () => {
   throw new UnsupportedFeatureError('Enumerator::Lazy.new');
 });
@@ -1076,6 +1080,12 @@ interface LazyData {
   copy(): LazyData;
 }
 
+function lazyDataOf(self: RObject): LazyData {
+  const data = self.data as LazyData | undefined;
+  if (!data) throw argumentError('uninitialized enumerator');
+  return data;
+}
+
 function lazyIterationSource(source: Value, args: Value[], displayArgs: Value[]): RObject {
   const enumerator = makeEnumerator(source, 'each', args);
   setLazyDisplaySource(enumerator, source, displayArgs);
@@ -1083,7 +1093,7 @@ function lazyIterationSource(source: Value, args: Value[], displayArgs: Value[])
 }
 
 function* lazySize(self: RObject): Gen {
-  const { source, steps } = self.data as LazyData;
+  const { source, steps } = lazyDataOf(self);
   let size = (yield* tryImplicitConversion(source, 'size')) ?? NIL;
   for (const step of steps) size = yield* nextLazySize(size, step);
   return size;
@@ -1105,8 +1115,12 @@ function* nextLazySize(size: Value, step: LazyStep): Gen<Value> {
 }
 
 function lazyPipeline(self: RObject): Pick<LazyData, 'source' | 'steps'> {
-  const data = self.data as LazyData;
+  const data = lazyDataOf(self);
   return data.steps.length === 0 ? { source: self, steps: [] } : data;
+}
+
+function lazyAdapterPipeline(self: RObject): Pick<LazyData, 'source' | 'steps'> {
+  return self.data === undefined ? { source: self, steps: [] } : lazyPipeline(self);
 }
 
 function makeLazy(source: Value, steps: LazyStep[]): RObject {
@@ -1153,7 +1167,6 @@ for (const kind of [
   'find_all',
 ] as const) {
   def('Enumerator::Lazy', kind, 0, (self: RObject, _args, block) => {
-    const data = lazyPipeline(self);
     const normalized =
       kind === 'collect'
         ? 'map'
@@ -1163,6 +1176,7 @@ for (const kind of [
             ? 'flat_map'
             : kind;
     if (!block) throw argumentError(`tried to call lazy ${normalized} without a block`);
+    const data = lazyPipeline(self);
     return makeLazy(data.source, [...data.steps, { kind: normalized, block, label: kind }]);
   });
 }
@@ -1180,7 +1194,7 @@ for (const kind of ['each_slice', 'each_cons'] as const) {
   def('Enumerator::Lazy', kind, 1, function* (self: RObject, [count], block) {
     const { number: size, integer: exactCount } = yield* toIndexExact(count);
     if (size <= 0) throw argumentError(kind === 'each_cons' ? 'invalid size' : 'invalid slice size');
-    const data = lazyPipeline(self);
+    const data = lazyAdapterPipeline(self);
     const lazy = makeLazy(data.source, [...data.steps, { kind, count: size, exactCount, args: [count] }]);
     if (!block) return lazy;
     yield* runLazy(lazy, (value) => callProc(block, [value], { used: false }));
@@ -1188,7 +1202,7 @@ for (const kind of ['each_slice', 'each_cons'] as const) {
   });
 }
 def('Enumerator::Lazy', 'each_entry', [0, -1], function* (self: RObject, args, block) {
-  const data = lazyPipeline(self);
+  const data = lazyAdapterPipeline(self);
   const source = args.length > 0 ? lazyIterationSource(data.source, args, []) : data.source;
   const lazy = makeLazy(source, [...data.steps, { kind: 'each_entry', args }]);
   if (!block) return lazy;
@@ -1201,7 +1215,7 @@ for (const name of ['each_with_object', 'with_object']) {
       yield* runLazy(self, (value) => callProc(block, [value, memo], { used: false }));
       return memo;
     }
-    const data = lazyPipeline(self);
+    const data = lazyAdapterPipeline(self);
     return makeLazy(data.source, [...data.steps, { kind: 'each_with_object', memo, label: name, args: [memo] }]);
   });
 }
@@ -1271,7 +1285,7 @@ function* runLazy(
   visit: (value: Value, yielded?: Value[]) => Gen<IterationResult>,
   args: Value[] = []
 ): Gen {
-  const data = self.data as LazyData;
+  const data = lazyDataOf(self);
   const states: LazyState[] = data.steps.map((step) => ({
     seen: 0,
     dropping: true,
@@ -1531,11 +1545,10 @@ function* streamFlattened(
 }
 
 def('Enumerator::Lazy', 'each', [0, -1], function* (self: RObject, args, block) {
-  if (args.length > 0 && hasExecutionContext((self.data as LazyData).enumerator?.cursor))
-    throw typeError("can't copy execution context");
+  const data = lazyDataOf(self);
+  if (args.length > 0 && hasExecutionContext(data.enumerator?.cursor)) throw typeError("can't copy execution context");
   if (!block) {
     if (args.length === 0) return self;
-    const data = self.data as LazyData;
     const last = data.steps.at(-1);
     const steps =
       last?.kind === 'each_entry'
@@ -1588,8 +1601,9 @@ def('Enumerator::Lazy', 'first', [0, 1], function* (self: RObject, args) {
 def('Enumerator::Lazy', 'eager', 0, function (self: RObject) {
   return makeEnumerator(self, 'each', []);
 });
-def('Enumerator::Lazy', ['inspect', 'to_s'], 0, function* (self: RObject) {
-  const data = self.data as LazyData;
+def('Enumerator::Lazy', 'inspect', 0, function* (self: RObject) {
+  if (self.data === undefined) return str(`#<${className(realClassOf(self))}: uninitialized>`);
+  const data = lazyDataOf(self);
   const source = lazyDisplaySource(data.source);
   const description = yield* lazySourceDescription(data.source);
   let text =

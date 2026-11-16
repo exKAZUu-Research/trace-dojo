@@ -194,7 +194,9 @@ function* matchHash(pattern: Extract<Pattern, { k: 'hash' }>, value: Value, fram
     });
   }
   const keys =
-    pattern.rest === undefined && pattern.pairs.length > 0 ? arr(pattern.pairs.map((pair) => sym(pair.key))) : NIL;
+    pattern.rest === 'any' || (pattern.rest === undefined && pattern.pairs.length > 0)
+      ? arr(pattern.pairs.map((pair) => sym(pair.key)))
+      : NIL;
   const hash = yield* callMethod(value, 'deconstruct_keys', [keys]);
   if (!(hash instanceof RHash)) throw typeError('deconstruct_keys must return Hash');
   rt().held.push(hash);

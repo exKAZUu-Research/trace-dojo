@@ -15150,3 +15150,167 @@ test.each(nativeCopyBoundaryCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const allocationAndPatternKeyCases = [
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e;rescue=>x;p x.class,x.message;end',
+    '#<Enumerator::Lazy: uninitialized>\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.inspect;rescue=>x;p x.class,x.message;end',
+    '"#<Enumerator::Lazy: uninitialized>"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.eager;rescue=>x;p x.class,x.message;end',
+    '#<Enumerator: #<Enumerator::Lazy: uninitialized>:each>\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.size;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.next;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.force;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each(1);rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.map{|x|x};rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_entry;rescue=>x;p x.class,x.message;end',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: uninitialized>:each_entry>\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.with_object(1);rescue=>x;p x.class,x.message;end',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: uninitialized>:with_object(1)>\n',
+  ],
+  ['class L<Enumerator::Lazy;end;e=L.allocate;begin;p e;rescue=>x;p x.class,x.message;end', '#<L: uninitialized>\n'],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.inspect;rescue=>x;p x.class,x.message;end',
+    '"#<L: uninitialized>"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.eager;rescue=>x;p x.class,x.message;end',
+    '#<Enumerator: #<L: uninitialized>:each>\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.size;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.next;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.force;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each(1);rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.map{|x|x};rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_entry;rescue=>x;p x.class,x.message;end',
+    '#<Enumerator::Lazy: #<L: uninitialized>:each_entry>\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.with_object(1);rescue=>x;p x.class,x.message;end',
+    '#<Enumerator::Lazy: #<L: uninitialized>:with_object(1)>\n',
+  ],
+  [
+    'class DK;def deconstruct_keys(keys);p keys;{a:1,b:2};end;end;obj=DK.new;case obj;in {a:};p :matched;else;p :missed;end',
+    '[:a]\n:matched\n',
+  ],
+  ['class DK;def deconstruct_keys(keys);p keys;{a:1,b:2};end;end;obj=DK.new;p((obj in {a:}))', '[:a]\ntrue\n'],
+  [
+    'class DK;def deconstruct_keys(keys);p keys;{a:1,b:2};end;end;obj=DK.new;case obj;in {a:, **};p :matched;else;p :missed;end',
+    '[:a]\n:matched\n',
+  ],
+  ['class DK;def deconstruct_keys(keys);p keys;{a:1,b:2};end;end;obj=DK.new;p((obj in {a:, **}))', '[:a]\ntrue\n'],
+  [
+    'class DK;def deconstruct_keys(keys);p keys;{a:1,b:2};end;end;obj=DK.new;case obj;in {a:, b:, **};p :matched;else;p :missed;end',
+    '[:a, :b]\n:matched\n',
+  ],
+  [
+    'class DK;def deconstruct_keys(keys);p keys;{a:1,b:2};end;end;obj=DK.new;p((obj in {a:, b:, **}))',
+    '[:a, :b]\ntrue\n',
+  ],
+  [
+    'class DK;def deconstruct_keys(keys);p keys;{a:1,b:2};end;end;obj=DK.new;case obj;in {**};p :matched;else;p :missed;end',
+    '[]\n:matched\n',
+  ],
+  ['class DK;def deconstruct_keys(keys);p keys;{a:1,b:2};end;end;obj=DK.new;p((obj in {**}))', '[]\ntrue\n'],
+  [
+    'class DK;def deconstruct_keys(keys);p keys;{a:1,b:2};end;end;obj=DK.new;case obj;in {};p :matched;else;p :missed;end',
+    'nil\n:missed\n',
+  ],
+  ['class DK;def deconstruct_keys(keys);p keys;{a:1,b:2};end;end;obj=DK.new;p((obj in {}))', 'nil\nfalse\n'],
+  [
+    'class DK;def deconstruct_keys(keys);p keys;{a:1,b:2};end;end;obj=DK.new;case obj;in {a:, **rest};p :matched;else;p :missed;end',
+    'nil\n:matched\n',
+  ],
+  ['class DK;def deconstruct_keys(keys);p keys;{a:1,b:2};end;end;obj=DK.new;p((obj in {a:, **rest}))', 'nil\ntrue\n'],
+  [
+    'class DK;def deconstruct_keys(keys);p keys;{a:1,b:2};end;end;obj=DK.new;case obj;in {a:, **nil};p :matched;else;p :missed;end',
+    'nil\n:missed\n',
+  ],
+  ['class DK;def deconstruct_keys(keys);p keys;{a:1,b:2};end;end;obj=DK.new;p((obj in {a:, **nil}))', 'nil\nfalse\n'],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;p e.to_s.class,e.inspect',
+    'String\n"#<Enumerator::Lazy: uninitialized>"\n',
+  ],
+  ['class L<Enumerator::Lazy;end;e=L.allocate;p e.to_s.class,e.inspect', 'String\n"#<L: uninitialized>"\n'],
+  [
+    'class DK;def deconstruct_keys(keys);p keys;values={a:1,b:2};keys ? keys.each_with_object({}){|k,h|h[k]=values[k]} : values;end;end;case DK.new;in {a:,**};p a;end;p((DK.new in {**}));case DK.new;in {a:,**rest};p [a,rest];end;p((DK.new in {}))',
+    '[:a]\n1\n[]\ntrue\nnil\n[1, {b: 2}]\nnil\nfalse\n',
+  ],
+] as const;
+
+test.each(allocationAndPatternKeyCases)(
+  'Allocated Lazy states and hash-pattern key requests match native protocols: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
+
+test('Enumerator string conversion stays inherited while inspect handles allocated states', () => {
+  expect(
+    run(
+      'e=Enumerator::Lazy.allocate;p e.to_s==Kernel.instance_method(:to_s).bind(e).call;p e.to_s==e.inspect;p e.method(:to_s).owner;class Enumerator;def to_s;"parent";end;end;p e.to_s'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\nfalse\nKernel\n"parent"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'e=Enumerator::Lazy.allocate;e.send(:initialize,[1]){|y,x|y<<x}',
+  'e=Enumerator::Lazy.allocate;Enumerator.instance_method(:initialize).bind(e).call(1){|y|y<<1};p e.inspect',
+])('Custom Lazy initialization cannot install an incompatible Enumerator payload: %s', (source) => {
+  expect(run(source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'Enumerator::Lazy#initialize は、この採点環境では使えません。',
+  });
+});
