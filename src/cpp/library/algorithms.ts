@@ -25,7 +25,7 @@ import {
 import { CObject, Ptr, type Store, type Value } from '../values';
 import { pairClass } from './associative';
 import type { SequenceValue } from './containerValues';
-import { comparatorOf, elementOperations, equalTo, lessThan, truthy } from './elements';
+import { comparatorOf, elementOperations, equalTo, lessThan, moveValue, truthy } from './elements';
 import type { EngineValue } from './random';
 import { uniformInteger } from './random';
 import type { Library } from './registry';
@@ -139,36 +139,36 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     functions.set(name, [...(functions.get(name) ?? []), generic(name, instantiate)]);
   };
   /** The comparison an algorithm uses: the argument at `index`, or `<`. */
-  const lessOf = (args: Expr[], index: number, element: Type): ((frame: Frame) => Less) | undefined => {
-    const arg = args[index];
+  const lessOf = (args: Expr[], index: number, element: Type): ((frame: Frame) => Less) | undefined =>
+    orderOf(args[index], [unqualified(element), unqualified(element)]);
+  /** The comparison `arg` makes between values of the two types, or `<` without it. */
+  const orderOf = (arg: Expr | undefined, types: Type[]): ((frame: Frame) => Less) | undefined => {
     if (!arg) {
-      const less = lessThan(unqualified(element));
+      const less = lessThan(types[0]);
       if (!less) return undefined;
       return () => (a, b) => less(a, b) < 0;
     }
-    const call = comparatorOf(
-      compiler(),
-      unqualified(arg.type),
-      arg.functions?.candidates,
-      unqualified(element),
-      arg.row
-    );
+    const call = comparatorOf(compiler(), unqualified(arg.type), arg.functions?.candidates, types, arg.row);
     if (!call) return undefined;
     return (frame) => (a, b) => truthy(call(frame, undefined, a, b));
   };
+  /** A predicate or an operation argument, for `arity` elements or for arguments of the types `element` lists. */
   const predicateOf = (
     arg: Expr | undefined,
-    element: Type,
+    element: Type | Type[],
     arity = 1
   ): ((frame: Frame, ...values: Value[]) => Value) | undefined => {
     if (!arg) return undefined;
+    const types = Array.isArray(element)
+      ? element.map((type) => unqualified(type))
+      : Array.from({ length: arity }, () => unqualified(element));
     if (arg.functions) {
-      const call = comparatorOf(compiler(), VOID, arg.functions.candidates, unqualified(element), arg.row, arity);
+      const call = comparatorOf(compiler(), VOID, arg.functions.candidates, types, arg.row);
       return call ? (frame, ...values) => call(frame, undefined, ...values) : undefined;
     }
     const type = unqualified(arg.type);
     if (type.kind === 'class' && type.cls.library?.kind === 'functor') {
-      const operation = type.cls.library.apply?.(unqualified(element));
+      const operation = type.cls.library.apply?.(types[0]);
       return operation ? (_frame, a, b) => operation(a, b) : undefined;
     }
     return undefined;
@@ -336,16 +336,22 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     define(name, (args) => {
       const info = rangeAt(args, 0);
       if (!info || args.length < 3 || args.length > 4) return;
-      const less = lessOf(args, 3, info.element);
-      if (!less) return;
       const valueType = params(args)[2];
+      // A comparator may take the element and the value in different types: (element, value) for lower_bound and
+      // (value, element) for upper_bound.
+      const elementType = unqualified(info.element);
+      const searched = unqualified(valueType.kind === 'reference' ? valueType.to : valueType);
+      const elementFirst = name !== 'upper_bound' ? orderOf(args[3], [elementType, searched]) : undefined;
+      const valueFirst = name !== 'lower_bound' ? orderOf(args[3], [searched, elementType]) : undefined;
+      if ((name !== 'upper_bound' && !elementFirst) || (name !== 'lower_bound' && !valueFirst)) return;
       return native(
         name,
         params(args),
         name === 'binary_search' ? BOOL : unqualified(args[0].type),
         ([first, last, value], { frame }) => {
           const values = range(first, last, info);
-          const compare = less(frame);
+          const elementLess = elementFirst?.(frame) as Less;
+          const valueLess = valueFirst?.(frame) as Less;
           const target = readArg(value, valueType);
           const upper = name === 'upper_bound';
           let low = 0;
@@ -353,13 +359,13 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
           while (count > 0) {
             const step = Math.floor(count / 2);
             const middle = low + step;
-            const goesRight = upper ? !compare(target, values.get(middle)) : compare(values.get(middle), target);
+            const goesRight = upper ? !valueLess(target, values.get(middle)) : elementLess(values.get(middle), target);
             if (goesRight) {
               low = middle + 1;
               count -= step + 1;
             } else count = step;
           }
-          if (name === 'binary_search') return low < values.length && !compare(target, values.get(low)) ? 1 : 0;
+          if (name === 'binary_search') return low < values.length && !valueLess(target, values.get(low)) ? 1 : 0;
           return values.iterator(low);
         }
       );
@@ -367,18 +373,27 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   }
   define('equal', (args) => {
     const info = rangeAt(args, 0);
-    if (!info || (args.length !== 3 && args.length !== 4)) return;
-    const other = iteratorInfo(unqualified(args[2].type));
+    if (!info || args.length < 3 || args.length > 5) return;
+    const other = iteratorInfo(decayed(args[2].type));
     if (!other) return;
+    // equal(first1, last1, first2[, last2][, pred]): a fourth argument is the end of the second range or a predicate.
+    const hasEnd = args.length === 5 || (args.length === 4 && rangeAt(args, 2) !== undefined);
+    const predicateArg = args[hasEnd ? 4 : 3];
+    const predicate = predicateArg ? predicateOf(predicateArg, info.element, 2) : undefined;
     const equal = equalTo(unqualified(info.element));
-    if (!equal) return;
-    return native('equal', params(args), BOOL, ([first, last, start, end]) => {
+    if (predicateArg ? !predicate : !equal) return;
+    const same = (frame: Frame, a: Value, b: Value): boolean =>
+      predicate ? truthy(predicate(frame, a, b)) : (equal as (x: Value, y: Value) => boolean)(a, b);
+    // libc++ compares the lengths first only when both ranges are random access.
+    const random = isRandomAccess(decayed(args[0].type)) && isRandomAccess(decayed(args[2].type));
+    return native('equal', params(args), BOOL, ([first, last, start, end], { frame }) => {
       const values = range(first, last, info);
-      const length = end === undefined ? values.length : range(start, end, other).length;
-      if (length !== values.length) return 0;
+      const otherLength = hasEnd ? range(start, end, other).length : values.length;
+      if (random && otherLength !== values.length) return 0;
+      const length = Math.min(values.length, otherLength);
       const others = range(start, (start as Ptr).offset(other.isReverse ? -length : length), other);
-      for (let index = 0; index < values.length; index++) if (!equal(values.get(index), others.get(index))) return 0;
-      return 1;
+      for (let index = 0; index < length; index++) if (!same(frame, values.get(index), others.get(index))) return 0;
+      return values.length === otherLength ? 1 : 0;
     });
   });
 
@@ -466,18 +481,18 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
             ? truthy(predicate(frame, previous, item))
             : (equal as (a: Value, b: Value) => boolean)(previous, item));
       }
+      const element = unqualified(info.element);
       return native(name, params(args), unqualified(args[0].type), ([first, last, value], { frame }) => {
         const values = range(first, last, info);
         frame.pending.push(value as Value);
         try {
+          // The kept elements move forward, leaving moved-from elements behind them.
           let out = 0;
-          let previous: Value | undefined;
           for (let index = 0; index < values.length; index++) {
             const item = values.get(index);
-            if (keep(frame, item, previous)) {
-              if (out !== index) values.set(out, item);
+            if (keep(frame, item, out === 0 ? undefined : values.get(out - 1))) {
+              if (out !== index) values.set(out, moveValue(frame, element, values.get(out), item));
               out++;
-              previous = item;
             }
           }
           return values.iterator(out);
@@ -641,14 +656,21 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('inner_product', (args) => {
     const info = rangeAt(args, 0);
     const other = args[2] ? iteratorInfo(unqualified(args[2].type)) : undefined;
-    if (!info || !other || args.length !== 4) return;
+    if (!info || !other || (args.length !== 4 && args.length !== 6)) return;
     const sumType = unqualified(args[3].type);
-    const product = accumulateStep(compiler(), unqualified(info.element), other.element, args[0].row, '*');
-    const add = product ? accumulateStep(compiler(), sumType, unqualified(info.element), args[0].row) : undefined;
+    // inner_product(first1, last1, first2, init, op1, op2) sums with op1 the products op2 makes.
+    const product =
+      args.length === 6
+        ? predicateOf(args[5], [info.element, other.element])
+        : accumulateStep(compiler(), unqualified(info.element), other.element, args[0].row, '*');
+    const add =
+      args.length === 6
+        ? predicateOf(args[4], [sumType, sumType])
+        : product && accumulateStep(compiler(), sumType, unqualified(info.element), args[0].row);
     if (!product || !add) return;
     return native(
       'inner_product',
-      [...params(args).slice(0, 3), sumType],
+      [...params(args).slice(0, 3), sumType, ...params(args).slice(4)],
       sumType,
       ([first, last, start, initial], { frame }) => {
         const values = range(first, last, info);
@@ -663,8 +685,10 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('partial_sum', (args) => {
     const info = rangeAt(args, 0);
     const output = outputOf(args[2]);
-    if (!info || !output || args.length !== 3) return;
-    const add = accumulateStep(compiler(), unqualified(info.element), info.element, args[0].row);
+    if (!info || !output || (args.length !== 3 && args.length !== 4)) return;
+    const add = args[3]
+      ? predicateOf(args[3], info.element, 2)
+      : accumulateStep(compiler(), unqualified(info.element), info.element, args[0].row);
     if (!add) return;
     const ops = elementOperations(compiler(), unqualified(output.element), args[2].row);
     return native('partial_sum', params(args), unqualified(args[2].type), ([first, last, start], { frame }) => {
@@ -702,53 +726,56 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   }
 
   // min, max, clamp ------------------------------------------------------------------------------------------------
-  for (const name of ['min', 'max']) {
+  /** The order of min, max, minmax, or clamp: the comparator argument at `index`, or `<`. */
+  const extremumOrder = (args: Expr[], index: number, type: Type): ((frame: Frame) => Less) | undefined =>
+    orderOf(args[index], [type, type]);
+  for (const name of ['min', 'max', 'minmax']) {
     define(name, (args, templateArgs) => {
-      if (args.length === 1 && args[0].braced) return listExtremum(compiler(), name, args[0], templateArgs);
+      if (args[0]?.braced && args.length <= 2) {
+        const elements = args[0].braced.children.map((node) => compiler().compileExpression(node));
+        const type = listElementType(elements, templateArgs);
+        const less = type ? extremumOrder(args, 1, type) : undefined;
+        if (!type || !less) return;
+        const result = name === 'minmax' ? pairClass(library, type, type) : undefined;
+        return listExtremum(compiler(), name, elements, type, less, params(args).slice(1), result);
+      }
       if (args.length !== 2 && args.length !== 3) return;
       const type = templateArgs?.[0] ?? commonDeduced(args[0], args[1]);
-      if (!type) return;
-      const less = args[2] ? predicateOf(args[2], type, 2) : undefined;
-      const order = lessThan(type);
-      if (!less && !order) return;
+      const less = type ? extremumOrder(args, 2, type) : undefined;
+      if (!type || !less) return;
       const types = [constRef(type), constRef(type), ...params(args).slice(2)];
+      if (name === 'minmax') {
+        const result = pairClass(library, referenceTo(withConst(type)), referenceTo(withConst(type)));
+        return native('minmax', types, classType(result), ([a, b], { frame }) =>
+          less(frame)((b as Ptr).read(), (a as Ptr).read())
+            ? new CObject(result, [b as Ptr, a as Ptr])
+            : new CObject(result, [a as Ptr, b as Ptr])
+        );
+      }
       return native(name, types, referenceTo(withConst(type)), ([a, b], { frame }) => {
         const x = (a as Ptr).read();
         const y = (b as Ptr).read();
-        // min returns the first of equal values, max the first too (C++20 [alg.min.max]).
-        const bLessA = less ? truthy(less(frame, y, x)) : (order as (p: Value, q: Value) => number)(y, x) < 0;
-        const aLessB = less ? truthy(less(frame, x, y)) : (order as (p: Value, q: Value) => number)(x, y) < 0;
-        if (name === 'min') return bLessA ? b : a;
-        return aLessB ? b : a;
+        // Both return the first of equal values (C++20 [alg.min.max]).
+        if (name === 'min') return less(frame)(y, x) ? b : a;
+        return less(frame)(x, y) ? b : a;
       });
     });
   }
-  define('minmax', (args) => {
-    if (args.length !== 2) return;
-    const type = commonDeduced(args[0], args[1]);
-    const order = type ? lessThan(type) : undefined;
-    if (!type || !order) return;
-    const result = pairClass(library, referenceTo(withConst(type)), referenceTo(withConst(type)));
-    return native('minmax', [constRef(type), constRef(type)], classType(result), ([a, b]) =>
-      order((b as Ptr).read(), (a as Ptr).read()) < 0
-        ? new CObject(result, [b as Ptr, a as Ptr])
-        : new CObject(result, [a as Ptr, b as Ptr])
-    );
-  });
   define('clamp', (args) => {
-    if (args.length !== 3) return;
+    if (args.length !== 3 && args.length !== 4) return;
     const type = commonDeduced(args[0], args[1]);
     if (!type || typeName(type) !== typeName(commonDeduced(args[1], args[2]) ?? VOID)) return;
-    const order = lessThan(type);
-    if (!order) return;
+    const less = extremumOrder(args, 3, type);
+    if (!less) return;
     return native(
       'clamp',
-      [constRef(type), constRef(type), constRef(type)],
+      [constRef(type), constRef(type), constRef(type), ...params(args).slice(3)],
       referenceTo(withConst(type)),
-      ([v, low, high]) => {
+      ([v, low, high], { frame }) => {
+        const compare = less(frame);
         const value = (v as Ptr).read();
-        if (order(value, (low as Ptr).read()) < 0) return low;
-        if (order((high as Ptr).read(), value) < 0) return high;
+        if (compare(value, (low as Ptr).read())) return low;
+        if (compare((high as Ptr).read(), value)) return high;
         return v;
       }
     );
@@ -964,36 +991,71 @@ function accumulateStep(
   }
 }
 
-/** `std::min({...})` and `std::max({...})`, which return a copy of the least or the greatest value of a list. */
+/** The element type of a braced list argument: the template argument, or the type all the elements have. */
+function listElementType(elements: Expr[], templateArgs: Type[] | undefined): Type | undefined {
+  if (elements.length === 0) return undefined;
+  if (templateArgs?.[0]) return templateArgs[0];
+  const type = decayed(elements[0].type);
+  return elements.every((element) => typeName(decayed(element.type)) === typeName(type)) ? type : undefined;
+}
+
+/**
+ * `std::min({...})`, `std::max({...})`, and `std::minmax({...})`, which return copies of the least and the greatest
+ * values of a list, as `min_element`, `max_element`, and `minmax_element` find them. `result` is minmax's pair.
+ */
 function listExtremum(
   compiler: ExpressionCompiler,
   name: string,
-  list: Expr,
-  templateArgs: Type[] | undefined
-): FunctionInfo | undefined {
-  const elements = (list.braced?.children ?? []).map((node) => compiler.compileExpression(node));
-  if (elements.length === 0) return undefined;
-  const type =
-    templateArgs?.[0] ??
-    unqualified(elements[0].type.kind === 'array' ? { kind: 'pointer', to: elements[0].type.of } : elements[0].type);
-  if (!elements.every((element) => typeName(unqualified(element.type)) === typeName(type)) && !templateArgs)
-    return undefined;
-  const order = lessThan(type);
-  if (!order) return undefined;
+  elements: Expr[],
+  type: Type,
+  less: (frame: Frame) => Less,
+  comparatorParams: Type[],
+  result: ClassInfo | undefined
+): FunctionInfo {
   const values = elements.map((element) => compiler.convert(element, type, element.row).run);
-  const fn = native(name, [], type, (_args, { frame }) => {
-    let best = values[0](frame) as Value;
-    for (const value of values.slice(1)) {
-      const item = value(frame) as Value;
-      if (name === 'min' ? order(item, best) < 0 : order(best, item) < 0) best = item;
-    }
-    return best;
-  });
+  const ops = elementOperations(compiler, type, elements[0].row);
   // The list itself is the argument, which the function evaluates element by element.
-  return {
-    ...fn,
-    params: [{ name: 'list', type: { kind: 'function', ret: VOID, params: [] }, row: -1, isOptional: true }],
-  };
+  const listParam: Type = { kind: 'function', ret: VOID, params: [] };
+  return native(name, [listParam, ...comparatorParams], result ? classType(result) : type, (_args, { frame }) => {
+    const items = values.map((value) => value(frame) as Value);
+    const compare = less(frame);
+    if (result) {
+      const [low, high] = minmaxPositions(items, compare);
+      return new CObject(result, [ops.copy(frame, items[low]), ops.copy(frame, items[high])]);
+    }
+    let best = 0;
+    for (let index = 1; index < items.length; index++) {
+      if (name === 'min' ? compare(items[index], items[best]) : compare(items[best], items[index])) best = index;
+    }
+    return items[best];
+  });
+}
+
+/** libc++'s `__minmax_element_impl`: the first least and the last greatest, comparing the values in pairs. */
+function minmaxPositions(items: Value[], less: Less): [number, number] {
+  const length = items.length;
+  let low = 0;
+  let high = 0;
+  if (length < 2) return [low, high];
+  let first = 1;
+  if (less(items[first], items[low])) low = first;
+  else high = first;
+  while (++first !== length) {
+    const index = first;
+    if (++first === length) {
+      if (less(items[index], items[low])) low = index;
+      else if (!less(items[index], items[high])) high = index;
+      return [low, high];
+    }
+    if (less(items[first], items[index])) {
+      if (less(items[first], items[low])) low = first;
+      if (!less(items[index], items[high])) high = index;
+    } else {
+      if (less(items[index], items[low])) low = index;
+      if (!less(items[first], items[high])) high = first;
+    }
+  }
+  return [low, high];
 }
 
 // libc++'s std::sort ------------------------------------------------------------------------------------------------
@@ -1305,5 +1367,10 @@ function permute(values: Range, less: Less): boolean {
     }
   }
 }
+
+/** Whether an iterator type is random access: a pointer, or an iterator of a string, a vector, a deque, or an array. */
+const isRandomAccess = (type: Type): boolean =>
+  type.kind === 'pointer' ||
+  (type.kind === 'class' && !/^std::(list|set|multiset|map|multimap|unordered_\w+)</.test(type.cls.name));
 
 const decayed = (type: Type): Type => (type.kind === 'array' ? { kind: 'pointer', to: type.of } : unqualified(type));

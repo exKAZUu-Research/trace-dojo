@@ -1,7 +1,7 @@
 import type { DisplayNode } from '../../problems/trace';
 import { byteAt } from '../bytes';
 import { CppRuntimeError } from '../errors';
-import type { Eval, Frame } from '../runtime';
+import type { Frame } from '../runtime';
 import {
   BOOL,
   ClassInfo,
@@ -20,9 +20,9 @@ import { CObject, Ptr, type Value } from '../values';
 import { keyText, pairClass } from './associative';
 import { MapValue } from './containerValues';
 import { type ElementOperations, elementOperations, equalTo } from './elements';
+import { addRangeMembers, emplacementCall, type EntryTable, insertCopy } from './emplacement';
 import { randomAccessIterator } from './iterators';
 import type { Library } from './registry';
-import { constructElement } from './sequences';
 import type { StringValue } from './string';
 import { addMethod, constRef, native, nativeConstructor, throwLibrary } from './support';
 import { typeKey } from './templates';
@@ -318,6 +318,31 @@ export class HashValue extends MapValue {
     return node.value;
   }
 
+  /**
+   * Becomes a copy of another table holding `values` in place of its nodes' values: the same bucket count and the same
+   * order, as libc++'s copy constructor and copy assignment make.
+   */
+  copyStructure(other: HashValue, values: Value[]): void {
+    const count = other.size === 0 ? 0 : other.bucketCount;
+    this.maxLoadFactor = other.maxLoadFactor;
+    this.buckets = Array.from({ length: count });
+    this.head.next = undefined;
+    let own = this.head;
+    let current = -1;
+    for (const [index, node] of other.nodes().entries()) {
+      const copy: HashNode = { next: undefined, hash: node.hash, value: values[index] };
+      const bucket = constrain(node.hash, count);
+      if (bucket !== current) {
+        this.buckets[bucket] = own;
+        current = bucket;
+      }
+      own.next = copy;
+      own = copy;
+    }
+    this.size = other.size;
+    this.ordered = undefined;
+  }
+
   swap(other: HashValue): void {
     const headsOf = (value: HashValue): number[] =>
       value.buckets.flatMap((before, index) => (before === value.head ? [index] : []));
@@ -448,13 +473,17 @@ export function unorderedClass(
     if (destroy) for (const entry of entries) destroy(frame, entry);
   };
   const insertResult = pairClass(library, iterator, BOOL);
-  const copyInto = (frame: Frame, source: HashValue): HashValue => {
-    const target = make();
-    target.maxLoadFactor = source.maxLoadFactor;
-    target.rehash(source.bucketCount);
-    for (const node of source.nodes()) target.insert(ops().copy(frame, node.value));
-    return target;
+  const table: EntryTable<HashValue> = {
+    keyOf,
+    lookup: (self, key) => self.find(key),
+    insert: (frame, self, entry) => {
+      frame.runtime.reserve(3);
+      return self.insert(entry);
+    },
+    ops,
   };
+  const insertionResult = (self: HashValue, at: number, inserted: boolean): Value =>
+    new CObject(insertResult, [new Ptr(self, at), inserted ? 1 : 0]);
   cls.library = {
     kind,
     args,
@@ -507,42 +536,43 @@ export function unorderedClass(
         },
       };
     },
-    memberCall: (compiler_, object, member, callArgs, row) => {
-      if (member !== 'emplace' && member !== 'try_emplace') return;
-      const self = compiler_.objectOf(object);
-      let makeEntry: Eval<Value>;
-      if (member === 'try_emplace' || (isMap && callArgs.length === 2)) {
-        const keyValue = constructElement(compiler_, unqualified(keyType), [callArgs[0]], row);
-        const mappedValue = constructElement(compiler_, valueType as Type, callArgs.slice(1), row);
-        makeEntry = (frame) =>
-          new CObject((entryType as Extract<Type, { kind: 'class' }>).cls, [keyValue(frame), mappedValue(frame)]);
-      } else {
-        makeEntry = constructElement(compiler_, unqualified(entryType), callArgs, row);
-      }
-      return {
-        type: classType(insertResult),
-        isLvalue: false,
-        row,
+    memberCall: (compiler_, object, member, callArgs, row) =>
+      emplacementCall(compiler_, object, member, callArgs, row, {
+        types: { keyType, entryType, valueType },
+        table,
+        resultType: classType(insertResult),
         isTemporaryObject: true,
-        run: (frame) => {
-          const target = (self(frame) as Ptr).read() as HashValue;
-          const entry = makeEntry(frame);
-          frame.runtime.reserve(3);
-          const [at, inserted] = target.insert(entry);
-          if (!inserted) ops().destroy?.(frame, entry);
-          return new CObject(insertResult, [new Ptr(target, at), inserted ? 1 : 0]);
-        },
-      };
-    },
+        result: insertionResult,
+      }),
     constructingMembers: isMap ? ['emplace', 'try_emplace'] : ['emplace'],
   };
   cls.operations = {
-    copy: (frame, source) => copyInto(frame, source as HashValue),
+    copy: (frame, source) => {
+      const from = source as HashValue;
+      const target = make();
+      target.copyStructure(
+        from,
+        from.nodes().map((node) => ops().copy(frame, node.value))
+      );
+      return target;
+    },
     assign: (frame, target, source) => {
       const to = target as HashValue;
-      if (to === source) return;
-      destroyAll(frame, to.clear());
-      for (const node of (source as HashValue).nodes()) to.insert(ops().copy(frame, node.value));
+      const from = source as HashValue;
+      if (to === from) return;
+      to.maxLoadFactor = from.maxLoadFactor;
+      if (from.size === 0) {
+        destroyAll(frame, to.clear());
+        return;
+      }
+      // Copy assignment assigns to the nodes it has, in order, and destroys or adds the rest.
+      const own = to.nodes().map((node) => node.value);
+      const others = from.nodes().map((node) => node.value);
+      const reused = Math.min(own.length, others.length);
+      const values = others.slice(0, reused).map((value, index) => ops().assign(frame, own[index], value));
+      destroyAll(frame, own.slice(reused));
+      for (const value of others.slice(reused)) values.push(ops().copy(frame, value));
+      to.copyStructure(from, values);
     },
     destroy: (frame, value) =>
       destroyAll(
@@ -551,6 +581,7 @@ export function unorderedClass(
       ),
   };
   cls.constructors = [nativeConstructor(cls, [], () => make())];
+  addRangeMembers(compiler, cls, entryType, table, make);
   const method = (
     memberName: string,
     params: Type[],
@@ -613,13 +644,9 @@ export function unorderedClass(
   method('cend', [], constIterator, (self) => new Ptr(self, self.size), true);
   method('count', [constRef(keyType)], SIZE_T, (self, [k]) => (self.find(keyArg(k)) >= 0 ? 1n : 0n), true);
   method('contains', [constRef(keyType)], BOOL, (self, [k]) => (self.find(keyArg(k)) >= 0 ? 1 : 0), true);
-  method('insert', [constRef(unqualified(entryType))], classType(insertResult), (self, [entry], frame) => {
-    const value = ops().copy(frame, (entry as Ptr).read());
-    frame.runtime.reserve(3);
-    const [at, inserted] = self.insert(value);
-    if (!inserted) ops().destroy?.(frame, value);
-    return new CObject(insertResult, [new Ptr(self, at), inserted ? 1 : 0]);
-  });
+  method('insert', [constRef(unqualified(entryType))], classType(insertResult), (self, [entry], frame) =>
+    insertionResult(self, ...insertCopy(table, frame, self, (entry as Ptr).read()))
+  );
   method('erase', [constRef(keyType)], SIZE_T, (self, [k], frame) => {
     const at = self.find(keyArg(k));
     if (at < 0) return 0n;

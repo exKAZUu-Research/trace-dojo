@@ -1,3 +1,4 @@
+import { CompileError } from '../../interpreter/diagnostics';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
@@ -7,6 +8,7 @@ import {
   BOOL,
   ClassInfo,
   classType,
+  type FunctionInfo,
   isConstType,
   pointerTo,
   referenceTo,
@@ -19,15 +21,33 @@ import {
 } from '../types';
 import { Ptr, type Value } from '../values';
 import { SequenceValue } from './containerValues';
-import { type ElementOperations, elementOperations, equalTo, lessThan } from './elements';
+import {
+  comparatorOf,
+  type ElementOperations,
+  elementOperations,
+  equalTo,
+  lessThan,
+  locationOf,
+  truthy,
+} from './elements';
 import { elementLocation, randomAccessIterator } from './iterators';
 import type { Library } from './registry';
+import { listSort, SequenceEditor, type Source } from './sequenceEdits';
 import { addMethod, asNumber, constRef, native, nativeConstructor, throwLibrary } from './support';
 import { typeKey } from './templates';
 
 export type SequenceKind = 'vector' | 'deque' | 'array' | 'list';
 
 const MAX_ELEMENTS = 1_000_000;
+
+/** The type of a library parameter that takes a braced list or a callable as the call wrote it. */
+const AS_WRITTEN: Type = { kind: 'function', ret: VOID, params: [] };
+
+/**
+ * The element initializers of the lists that `sequenceList` compiled, by the evaluation it gave, so that `v = {...}`
+ * assigns the elements as `operator=(initializer_list)` does instead of assigning a container made of them.
+ */
+const listElements = new WeakMap<Eval<unknown>, Eval<Value>[]>();
 
 /** `std::vector<T>`, `std::deque<T>`, `std::list<T>`, or `std::array<T, N>`, whose objects are `SequenceValue`s. */
 export function sequenceClass(library: Library, kind: SequenceKind, element: Type, fixedLength?: number): ClassInfo {
@@ -64,35 +84,19 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
     value.capacity = items.length;
     return value;
   };
-  /** Grows a vector's storage as libc++ does, copying and destroying the elements when that has effects. */
-  const grow = (frame: Frame, sequence: SequenceValue, size: number, beforeMove?: () => void): void => {
-    if (kind !== 'vector' || size <= sequence.capacity) {
-      beforeMove?.();
-      return;
-    }
-    sequence.capacity = Math.max(2 * sequence.capacity, size);
-    beforeMove?.();
-    const { hasEffects, copy, destroy } = ops();
-    if (!hasEffects) return;
-    const old = sequence.items;
-    sequence.items = old.map((item) => copy(frame, item));
-    if (destroy) for (const item of old) destroy(frame, item);
-  };
-  const destroyAll = (frame: Frame, items: Value[]): void => {
-    const destroy = ops().destroy;
-    if (destroy) for (let index = items.length - 1; index >= 0; index--) destroy(frame, items[index]);
-  };
+  // std::array destroys its elements as a built-in array does, from the last.
+  const editor = new SequenceEditor(kind === 'array' ? 'vector' : kind, ops);
   cls.library = {
     kind,
     args: [element],
     size: kind === 'array' ? 0 : kind === 'deque' ? 48 : 24,
     align: 8,
     operator: (compiler, operator, operands, row) =>
-      sequenceOperator(compiler, cls, element, kind, operator, operands, row),
+      sequenceOperator(compiler, cls, element, kind, operator, operands, row, editor, ops),
     listInitializer: (compiler, elements, row) =>
       sequenceList(compiler, element, elements, row, make, fixedLength, ops),
     memberCall: (compiler, object, member, args, row) =>
-      emplacement(compiler, library, object, member, args, row, element, kind, ops, grow),
+      emplacement(compiler, library, object, member, args, row, element, editor),
     constructingMembers:
       kind === 'array'
         ? []
@@ -110,12 +114,14 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
       const to = target as SequenceValue;
       const from = source as SequenceValue;
       if (to === from) return;
-      const old = to.items;
-      if (kind === 'vector' && from.items.length > to.capacity) to.capacity = from.items.length;
-      to.items = from.items.map((item) => ops().copy(frame, item));
-      destroyAll(frame, old);
+      if (kind === 'array') {
+        to.items = to.items.map((item, index) => ops().assign(frame, item, from.items[index]));
+        return;
+      }
+      reserve(frame, Math.max(0, from.items.length - to.items.length));
+      editor.assignRange(frame, to, { values: from.items, construct: ops().copy, isSameType: true });
     },
-    destroy: (frame, value) => destroyAll(frame, (value as SequenceValue).items),
+    destroy: (frame, value) => editor.destroy(frame, (value as SequenceValue).items),
   };
   if (kind === 'array') {
     cls.memberTypes.set('size_type', SIZE_T);
@@ -149,17 +155,22 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
         const source = (value as Ptr).read();
         return make(Array.from({ length: n }, () => ops().copy(frame, source)));
       }),
-      nativeConstructor(cls, [classType(constIterator), classType(constIterator)], ([first, last], { frame }) => {
-        const from = first as Ptr;
-        const to = last as Ptr;
-        if (from.store !== to.store || from.index > to.index) throw new CppRuntimeError('invalidRange');
-        const items: Value[] = [];
-        for (let index = from.index; index < to.index; index++) items.push(ops().copy(frame, from.store?.get(index)));
-        return make(items);
-      }),
+      {
+        ...nativeConstructor(cls, [], () => {}),
+        instantiate: (args) => {
+          const range = args.length === 2 ? iteratorRange(library.compiler, args, element, ops) : undefined;
+          if (!range) return;
+          return nativeConstructor(cls, range.params, ([first, last], { frame }) => {
+            const source = range.read(first, last);
+            reserve(frame, source.values.length);
+            return make(source.values.map((value) => source.construct(frame, value)));
+          });
+        },
+        isTemplate: true,
+      },
     ];
   }
-  sequenceMethods(library, cls, element, kind, ops, make, grow, reserve, outOfRange, destroyAll, fixedLength);
+  sequenceMethods(library, cls, element, kind, ops, editor, outOfRange, fixedLength);
   return cls;
 }
 
@@ -168,6 +179,91 @@ const reserve = (frame: Frame, count: number): void => {
   frame.runtime.reserve(count);
 };
 
+/** The iterators of a range, with what `read` needs to take the elements between two of them. */
+interface IteratorRange {
+  params: Type[];
+  /** Whether the iterators only go forward, as those of the unordered containers do. */
+  isForwardOnly: boolean;
+  read: (first: unknown, last: unknown) => Source;
+}
+
+/**
+ * The iterator pair of a range constructor, `assign`, or `insert`: pointers or iterators of any container whose
+ * elements can construct the container's elements, or undefined when the arguments are not such a pair.
+ */
+export function iteratorRange(
+  compiler: ExpressionCompiler,
+  [first, last]: Expr[],
+  element: Type,
+  ops: () => ElementOperations
+): IteratorRange | undefined {
+  const params = [first, last].map((arg) =>
+    arg.type.kind === 'array' ? pointerTo(arg.type.of) : unqualified(arg.type)
+  );
+  const [from, to] = params.map((type) => iteratorElement(type));
+  if (!from || !to || typeName(params[0]).replace('const_', '') !== typeName(params[1]).replace('const_', '')) return;
+  const type = params[0];
+  const isReverse = type.kind === 'class' && type.cls.library?.isReverse === true;
+  const target = unqualified(element);
+  const isSameType =
+    typeName(unqualified(from)) === typeName(target) &&
+    (target.kind !== 'class' || (from.kind === 'class' && from.cls === target.cls));
+  let construct: Source['construct'] = (frame, value) => ops().copy(frame, value);
+  if (!isSameType) {
+    const slot: Expr = { type: from, isLvalue: true, row: first.row, run: (frame) => frame.pending.at(-1) as Ptr };
+    let run: Eval<Value>;
+    try {
+      run = constructElement(compiler, target, [slot], first.row);
+    } catch (error) {
+      if (error instanceof CompileError) return;
+      throw error;
+    }
+    construct = (frame, value) => {
+      frame.pending.push(locationOf(value));
+      try {
+        return run(frame);
+      } finally {
+        frame.pending.pop();
+      }
+    };
+  }
+  return {
+    params,
+    isForwardOnly: type.kind === 'class' && type.cls.name.startsWith('std::unordered_'),
+    read: (a, b) => ({ values: rangeValues(a as Ptr, b as Ptr, isReverse), construct, isSameType }),
+  };
+}
+
+function iteratorElement(type: Type): Type | undefined {
+  if (type.kind === 'pointer' && type.to.kind !== 'void' && type.to.kind !== 'function') return type.to;
+  if (type.kind === 'class' && type.cls.library?.kind === 'iterator') return type.cls.library.args[0];
+  return undefined;
+}
+
+/** The values between two iterators of a sequence, a container, or an array. */
+function rangeValues(first: Ptr, last: Ptr, isReverse: boolean): Value[] {
+  const store = first.target();
+  if (last.store !== store) throw new CppRuntimeError('invalidRange');
+  const values: Value[] = [];
+  if (isReverse) {
+    if (first.index < last.index) throw new CppRuntimeError('invalidRange');
+    for (let index = first.index - 1; index >= last.index; index--) values.push(store.get(index));
+  } else {
+    if (first.index > last.index) throw new CppRuntimeError('invalidRange');
+    for (let index = first.index; index < last.index; index++) values.push(store.get(index));
+  }
+  return values;
+}
+
+/** A member function template, such as `insert(position, first, last)`, whose instance the call's arguments decide. */
+function addTemplateMethod(
+  cls: ClassInfo,
+  name: string,
+  instantiate: (args: Expr[]) => FunctionInfo | undefined
+): void {
+  addMethod(cls, { ...native(name, [], VOID, () => {}), instantiate, isTemplate: true });
+}
+
 // code-gauge-allow functionNcss 150 -- The member functions of the sequence containers, which share their storage.
 function sequenceMethods(
   library: Library,
@@ -175,22 +271,17 @@ function sequenceMethods(
   element: Type,
   kind: SequenceKind,
   ops: () => ElementOperations,
-  make: (items: Value[]) => SequenceValue,
-  grow: (frame: Frame, sequence: SequenceValue, size: number, beforeMove?: () => void) => void,
-  reserve: (frame: Frame, count: number) => void,
+  editor: SequenceEditor,
   outOfRange: (frame: Frame) => never,
-  destroyAll: (frame: Frame, items: Value[]) => void,
   fixedLength: number | undefined
 ): void {
   const type = classType(cls);
-  const iterator = classType(cls.memberTypes.get('iterator') as never as ClassInfo) as never as Type;
   const types = {
     iterator: cls.memberTypes.get('iterator') as Type,
     constIterator: cls.memberTypes.get('const_iterator') as Type,
     reverseIterator: cls.memberTypes.get('reverse_iterator') as Type,
     constReverseIterator: cls.memberTypes.get('const_reverse_iterator') as Type,
   };
-  void iterator;
   const method = (
     name: string,
     params: Type[],
@@ -203,6 +294,13 @@ function sequenceMethods(
       native(name, params, ret, (args, { self, frame }) => run(self as SequenceValue, args, frame), options)
     );
   };
+  const instance = (
+    name: string,
+    params: Type[],
+    ret: Type,
+    run: (self: SequenceValue, args: unknown[], frame: Frame) => unknown
+  ): FunctionInfo =>
+    native(name, params, ret, (args, { self, frame }) => run(self as SequenceValue, args, frame), { owner: cls });
   method('size', [], SIZE_T, (self) => BigInt(self.items.length), { isConst: true });
   method(
     'max_size',
@@ -281,27 +379,14 @@ function sequenceMethods(
     });
     return;
   }
-  method('clear', [], VOID, (self, _args, frame) => {
-    const old = self.items;
-    self.items = [];
-    destroyAll(frame, old);
-  });
-  const pushBack = (self: SequenceValue, value: Value, frame: Frame): void => {
-    reserve(frame, 1);
-    grow(frame, self, self.items.length + 1);
-    self.items.push(value);
-  };
+  method('clear', [], VOID, (self, _args, frame) => editor.truncate(frame, self, 0));
   method('push_back', [constRef(element)], VOID, (self, [value], frame) => {
-    const copy = ops().copy(frame, (value as Ptr).read());
-    if (kind === 'vector' && self.items.length + 1 > self.capacity) {
-      grow(frame, self, self.items.length + 1);
-      self.items.push(copy);
-    } else pushBack(self, copy, frame);
+    reserve(frame, 1);
+    editor.append(frame, self, 1, () => ops().copy(frame, (value as Ptr).read()));
   });
   method('pop_back', [], VOID, (self, _args, frame) => {
     nonEmpty(self);
-    const removed = self.items.pop() as Value;
-    ops().destroy?.(frame, removed);
+    editor.truncate(frame, self, self.items.length - 1);
   });
   if (kind === 'deque' || kind === 'list') {
     method('push_front', [constRef(element)], VOID, (self, [value], frame) => {
@@ -334,92 +419,127 @@ function sequenceMethods(
       self.capacity = self.items.length;
     });
   }
-  if (kind !== 'list') {
-    // operator[] is an operator; the members below take positions and iterators.
-  }
-  const insertAt = (self: SequenceValue, index: number, values: Value[], frame: Frame): Ptr => {
-    reserve(frame, values.length);
-    grow(frame, self, self.items.length + values.length);
-    self.items.splice(index, 0, ...values);
+  method('insert', [types.constIterator, constRef(element)], types.iterator, (self, [at, value], frame) => {
+    const index = positionOf(self, at);
+    reserve(frame, 1);
+    editor.insert(frame, self, index, value as Ptr);
     return new Ptr(self, index);
-  };
-  method('insert', [types.constIterator, constRef(element)], types.iterator, (self, [at, value], frame) =>
-    insertAt(self, positionOf(self, at), [ops().copy(frame, (value as Ptr).read())], frame)
-  );
+  });
   method(
     'insert',
     [types.constIterator, SIZE_T, constRef(element)],
     types.iterator,
     (self, [at, count, value], frame) => {
-      const source = (value as Ptr).read();
+      const index = positionOf(self, at);
       const n = asNumber(count);
       reserve(frame, n);
-      return insertAt(
-        self,
-        positionOf(self, at),
-        Array.from({ length: n }, () => ops().copy(frame, source)),
-        frame
-      );
+      editor.insertCopies(frame, self, index, n, value as Ptr);
+      return new Ptr(self, index);
     }
   );
-  method(
-    'insert',
-    [types.constIterator, types.constIterator, types.constIterator],
-    types.iterator,
-    (self, [at, first, last], frame) => {
-      const from = first as Ptr;
-      const to = last as Ptr;
-      if (from.store !== to.store || from.index > to.index) throw new CppRuntimeError('invalidRange');
-      const values: Value[] = [];
-      for (let index = from.index; index < to.index; index++) values.push(ops().copy(frame, from.store?.get(index)));
-      return insertAt(self, positionOf(self, at), values, frame);
+  addTemplateMethod(cls, 'insert', (args) => {
+    if (args.length === 2 && args[1].braced) {
+      const list = initializerList(library.compiler, element, args[1].braced, ops);
+      return instance('insert', [types.constIterator, AS_WRITTEN], types.iterator, (self, [at], frame) => {
+        const index = positionOf(self, at);
+        list(frame, (source) => {
+          reserve(frame, source.values.length);
+          editor.insertRange(frame, self, index, source, false);
+        });
+        return new Ptr(self, index);
+      });
     }
-  );
+    const range = args.length === 3 ? iteratorRange(library.compiler, args.slice(1), element, ops) : undefined;
+    if (!range) return;
+    return instance(
+      'insert',
+      [types.constIterator, ...range.params],
+      types.iterator,
+      (self, [at, first, last], frame) => {
+        const index = positionOf(self, at);
+        const source = range.read(first, last);
+        reserve(frame, source.values.length);
+        editor.insertRange(frame, self, index, source, range.isForwardOnly);
+        return new Ptr(self, index);
+      }
+    );
+  });
   method('erase', [types.constIterator], types.iterator, (self, [at], frame) => {
     const index = positionOf(self, at);
     if (index >= self.items.length) throw new CppRuntimeError('invalidIterator');
-    const [removed] = self.items.splice(index, 1);
-    ops().destroy?.(frame, removed);
+    editor.erase(frame, self, index, index + 1);
     return new Ptr(self, index);
   });
   method('erase', [types.constIterator, types.constIterator], types.iterator, (self, [first, last], frame) => {
     const from = positionOf(self, first);
     const to = positionOf(self, last);
     if (from > to) throw new CppRuntimeError('invalidRange');
-    const removed = self.items.splice(from, to - from);
-    destroyAll(frame, removed);
+    editor.erase(frame, self, from, to);
     return new Ptr(self, from);
   });
   method('resize', [SIZE_T], VOID, (self, [count], frame) => {
     const n = asNumber(count);
-    if (n < self.items.length) destroyAll(frame, self.items.splice(n));
-    else {
-      reserve(frame, n - self.items.length);
-      grow(frame, self, n);
-      while (self.items.length < n) self.items.push(ops().make(frame));
-    }
+    reserve(frame, Math.max(0, n - self.items.length));
+    editor.resize(frame, self, n, () => ops().make(frame));
   });
   method('resize', [SIZE_T, constRef(element)], VOID, (self, [count, value], frame) => {
     const n = asNumber(count);
-    const source = (value as Ptr).read();
-    if (n < self.items.length) destroyAll(frame, self.items.splice(n));
-    else {
-      reserve(frame, n - self.items.length);
-      grow(frame, self, n);
-      while (self.items.length < n) self.items.push(ops().copy(frame, source));
-    }
+    reserve(frame, Math.max(0, n - self.items.length));
+    editor.resize(frame, self, n, () => ops().copy(frame, (value as Ptr).read()));
   });
   method('assign', [SIZE_T, constRef(element)], VOID, (self, [count, value], frame) => {
     const n = asNumber(count);
     reserve(frame, n);
-    const source = (value as Ptr).read();
-    const old = self.items;
-    if (kind === 'vector' && n > self.capacity) self.capacity = n;
-    self.items = Array.from({ length: n }, () => ops().copy(frame, source));
-    destroyAll(frame, old);
+    editor.assignCopies(frame, self, n, value as Ptr);
   });
-  if (kind === 'list') listMethods(cls, element, ops, method, destroyAll);
-  void make;
+  addTemplateMethod(cls, 'assign', (args) => {
+    if (args.length === 1 && args[0].braced) {
+      const list = initializerList(library.compiler, element, args[0].braced, ops);
+      return instance('assign', [AS_WRITTEN], VOID, (self, _args, frame) =>
+        list(frame, (source) => {
+          reserve(frame, source.values.length);
+          editor.assignRange(frame, self, source);
+        })
+      );
+    }
+    const range = args.length === 2 ? iteratorRange(library.compiler, args, element, ops) : undefined;
+    if (!range) return;
+    return instance('assign', range.params, VOID, (self, [first, last], frame) => {
+      const source = range.read(first, last);
+      reserve(frame, source.values.length);
+      editor.assignRange(frame, self, source);
+    });
+  });
+  if (kind === 'list') listMethods(library, cls, element, method, editor);
+}
+
+/**
+ * The elements of a braced list argument, such as the `{1, 2}` of `v.insert(p, {1, 2})`, which `use` gets as the
+ * elements of an `std::initializer_list`: temporaries that end their lifetime afterward, the last first.
+ */
+function initializerList(
+  compiler: ExpressionCompiler,
+  element: Type,
+  list: Syntax,
+  ops: () => ElementOperations
+): (frame: Frame, use: (source: Source) => void) => void {
+  return listElementsOf(
+    list.children.map((node) => compiler.elementInitializer(element, node)),
+    ops
+  );
+}
+
+function listElementsOf(
+  inits: Eval<Value>[],
+  ops: () => ElementOperations
+): (frame: Frame, use: (source: Source) => void) => void {
+  return (frame, use) =>
+    holdAll(frame, inits, (values) => {
+      const temporaries = values as Value[];
+      use({ values: temporaries, construct: ops().copy, isSameType: true });
+      const destroy = ops().destroy;
+      if (destroy) for (let index = temporaries.length - 1; index >= 0; index--) destroy(frame, temporaries[index]);
+    });
 }
 
 const nonEmpty = (self: SequenceValue): void => {
@@ -434,9 +554,9 @@ const positionOf = (self: SequenceValue, at: unknown): number => {
 };
 
 function listMethods(
+  library: Library,
   cls: ClassInfo,
   element: Type,
-  ops: () => ElementOperations,
   method: (
     name: string,
     params: Type[],
@@ -444,7 +564,7 @@ function listMethods(
     run: (self: SequenceValue, args: unknown[], frame: Frame) => unknown,
     options?: { isConst?: boolean }
   ) => void,
-  destroyAll: (frame: Frame, items: Value[]) => void
+  editor: SequenceEditor
 ): void {
   const less = lessThan(element);
   const equal = equalTo(element);
@@ -454,7 +574,7 @@ function listMethods(
     const kept = self.items.filter((item) => !equal(item, target));
     const removed = self.items.filter((item) => equal(item, target));
     self.items = kept;
-    destroyAll(frame, removed);
+    editor.destroy(frame, removed);
     return BigInt(removed.length);
   });
   method('reverse', [], VOID, (self) => {
@@ -462,29 +582,71 @@ function listMethods(
   });
   method('sort', [], VOID, (self) => {
     if (!less) throw new CppRuntimeError('custom', `${typeName(element)} の値は < で比べられません。`);
-    // list::sort is a stable merge sort.
-    self.items = self.items
-      .map((item, index): { item: Value; index: number } => ({ item, index }))
-      .toSorted((a, b) => less(a.item, b.item) || a.index - b.index)
-      .map(({ item }) => item);
+    self.items = listSort(self.items, (a, b) => less(a, b) < 0);
   });
-  method('unique', [], SIZE_T, (self, _args, frame) => {
-    if (!equal) throw new CppRuntimeError('custom', `${typeName(element)} の値は == で比べられません。`);
+  const unique = (self: SequenceValue, frame: Frame, same: (a: Value, b: Value) => boolean): bigint => {
     const kept: Value[] = [];
     const removed: Value[] = [];
+    let first: Value;
     for (const item of self.items) {
-      if (kept.length > 0 && equal(kept.at(-1), item)) removed.push(item);
-      else kept.push(item);
+      if (kept.length > 0 && same(first, item)) removed.push(item);
+      else {
+        kept.push(item);
+        first = item;
+      }
     }
     self.items = kept;
-    destroyAll(frame, removed);
+    editor.destroy(frame, removed);
     return BigInt(removed.length);
+  };
+  method('unique', [], SIZE_T, (self, _args, frame) => {
+    if (!equal) throw new CppRuntimeError('custom', `${typeName(element)} の値は == で比べられません。`);
+    return unique(self, frame, equal);
   });
-  void cls;
-  void ops;
+  /** A comparator or predicate argument, given as a function's name or a function object. */
+  const callable = (args: Expr[]): ((frame: Frame, a: Value, b: Value) => boolean) | undefined => {
+    const [arg] = args;
+    if (args.length !== 1) return;
+    const call = comparatorOf(
+      library.compiler,
+      unqualified(arg.type),
+      arg.functions?.candidates,
+      unqualified(element),
+      arg.row
+    );
+    return call ? (frame, a, b) => truthy(call(frame, undefined, a, b)) : undefined;
+  };
+  addTemplateMethod(cls, 'sort', (args) => {
+    const compare = callable(args);
+    if (!compare) return;
+    return native(
+      'sort',
+      callableParams(args),
+      VOID,
+      (_args, { self, frame }) => {
+        const list = self as SequenceValue;
+        list.items = listSort(list.items, (a, b) => compare(frame, a, b));
+      },
+      { owner: cls }
+    );
+  });
+  addTemplateMethod(cls, 'unique', (args) => {
+    const same = callable(args);
+    if (!same) return;
+    return native(
+      'unique',
+      callableParams(args),
+      SIZE_T,
+      (_args, { self, frame }) => unique(self as SequenceValue, frame, (a, b) => same(frame, a, b)),
+      { owner: cls }
+    );
+  });
 }
 
-/** The operators of the sequence containers: `[]`, `=` from a list, and the comparisons. */
+/** The parameter of a member function taking a comparator or a predicate, as a function's name or an object. */
+const callableParams = (args: Expr[]): Type[] => [args[0].functions ? AS_WRITTEN : unqualified(args[0].type)];
+
+/** The operators of the sequence containers: `[]`, `=` from a list or a temporary, and the comparisons. */
 function sequenceOperator(
   compiler: ExpressionCompiler,
   cls: ClassInfo,
@@ -492,7 +654,9 @@ function sequenceOperator(
   kind: SequenceKind,
   operator: string,
   operands: Expr[],
-  row: number
+  row: number,
+  editor: SequenceEditor,
+  ops: () => ElementOperations
 ): Expr | undefined {
   const [left, right] = operands;
   const isSelf = (expr: Expr | undefined): boolean => expr?.type.kind === 'class' && expr.type.cls === cls;
@@ -511,6 +675,9 @@ function sequenceOperator(
         return new Ptr(target, at);
       },
     };
+  }
+  if (operator === '=' && kind !== 'array' && isSelf(left)) {
+    return assignment(compiler, left, right, row, isSelf(right), editor, ops);
   }
   if (['==', '!=', '<', '<=', '>', '>='].includes(operator) && isSelf(left) && isSelf(right)) {
     const compare = operator === '==' || operator === '!=' ? equalTo(element) : lessThan(element);
@@ -532,6 +699,54 @@ function sequenceOperator(
     };
   }
   return undefined;
+}
+
+/**
+ * `v = {...}`, which assigns the list's elements over the existing ones as `assign` does, and `v = temporary`, which
+ * moves the temporary's elements as the move assignment operator does. Gives undefined for a copy assignment.
+ */
+function assignment(
+  compiler: ExpressionCompiler,
+  left: Expr,
+  right: Expr,
+  row: number,
+  isSameClass: boolean,
+  editor: SequenceEditor,
+  ops: () => ElementOperations
+): Expr | undefined {
+  const listInits = listElements.get(right.run);
+  if (!listInits && !(isSameClass && right.isTemporaryObject)) return undefined;
+  compiler.checkAssignable(left, row, '=');
+  const target = left.run;
+  // C++17 evaluates the right operand of an assignment first.
+  if (listInits) {
+    const list = listElementsOf(listInits, ops);
+    return {
+      type: left.type,
+      isLvalue: true,
+      row,
+      run: (frame) => {
+        let place: Ptr | undefined;
+        list(frame, (source) => {
+          place = target(frame) as Ptr;
+          editor.assignRange(frame, place.read() as SequenceValue, source);
+        });
+        return place as Ptr;
+      },
+    };
+  }
+  const source = compiler.materialize(right).run;
+  return {
+    type: left.type,
+    isLvalue: true,
+    row,
+    run: (frame) => {
+      const from = (source(frame) as Ptr).read() as SequenceValue;
+      const place = target(frame) as Ptr;
+      editor.moveAssign(frame, place.read() as SequenceValue, from);
+      return place;
+    },
+  };
 }
 
 function compareSequences(operator: string, a: Value[], b: Value[], element: Type): boolean {
@@ -595,7 +810,7 @@ function sequenceList(
     if (elements.length > 0 && elements.length <= 2) return undefined;
     throw error;
   }
-  return (frame) =>
+  const run: Eval<Value> = (frame) =>
     holdAll(frame, inits, (values) => {
       const temporaries = values as Value[];
       const { hasEffects, copy, destroy } = ops();
@@ -605,6 +820,8 @@ function sequenceList(
       if (destroy) for (let index = temporaries.length - 1; index >= 0; index--) destroy(frame, temporaries[index]);
       return result;
     });
+  listElements.set(run, inits);
+  return run;
 }
 
 /** `emplace_back(args...)` and the like, which construct an element in place from constructor arguments. */
@@ -616,9 +833,7 @@ function emplacement(
   args: Expr[],
   row: number,
   element: Type,
-  kind: SequenceKind,
-  ops: () => ElementOperations,
-  grow: (frame: Frame, sequence: SequenceValue, size: number, beforeMove?: () => void) => void
+  editor: SequenceEditor
 ): Expr | undefined {
   if (!['emplace_back', 'emplace_front', 'emplace'].includes(member)) return undefined;
   if (isConstType(object.type))
@@ -650,11 +865,17 @@ function emplacement(
     row,
     run: (frame) => {
       const sequence = (self(frame) as Ptr).read() as SequenceValue;
-      const at = position ? (position(frame) as Ptr).index : member === 'emplace_front' ? 0 : sequence.items.length;
-      const made = value(frame);
       frame.runtime.reserve(1);
-      grow(frame, sequence, sequence.items.length + 1);
-      sequence.items.splice(at, 0, made);
+      if (member === 'emplace_front') {
+        sequence.items.unshift(value(frame));
+        return new Ptr(sequence, 0);
+      }
+      if (member === 'emplace_back') {
+        editor.append(frame, sequence, 1, () => value(frame));
+        return new Ptr(sequence, sequence.items.length - 1);
+      }
+      const at = positionOf(sequence, (position as Eval)(frame));
+      editor.emplace(frame, sequence, at, () => value(frame));
       return new Ptr(sequence, at);
     },
   };
