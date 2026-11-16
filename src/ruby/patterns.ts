@@ -238,6 +238,9 @@ function* matchHash(pattern: Extract<Pattern, { k: 'hash' }>, value: Value, fram
 
 function restOf(hash: RHash, pairs: { key: string }[]): RHash {
   const rest = newHash();
+  rest.cls = hash.cls;
+  rest.ivars = hash.ivars ? new Map(hash.ivars) : undefined;
+  rt().chargeSlots(rest.ivars?.size ?? 0);
   rest.byIdentity = hash.byIdentity;
   rest.defaultValue = hash.defaultValue;
   rest.defaultProc = hash.defaultProc;

@@ -5,9 +5,16 @@ import { isAsciiText } from './unicodeText';
 import { asciiString, stringBytes } from './values';
 
 const encodingNames = new WeakMap<RObject, RString>();
+const builtinEncodings = new WeakMap<Runtime, Map<string, RObject>>();
+
+export function builtinEncoding(name: string): RObject {
+  return builtinEncodings.get(rt())!.get(name)!;
+}
 
 export function installEncodings(runtime: Runtime): void {
   const encoding = runtime.c.Encoding;
+  const builtins = new Map<string, RObject>();
+  builtinEncodings.set(runtime, builtins);
   for (const [constant, name] of [
     // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby names the encoding this way.
     ['UTF_8', 'UTF-8'],
@@ -16,8 +23,9 @@ export function installEncodings(runtime: Runtime): void {
     ['US_ASCII', 'US-ASCII'],
   ] as const) {
     const existing = [...encoding.constants.values()].find((value) => value instanceof RObject && value.data === name);
-    if (existing) {
+    if (existing instanceof RObject) {
       encoding.constants.set(constant, existing);
+      builtins.set(constant, existing);
       continue;
     }
     const object = new RObject(encoding);
@@ -27,6 +35,7 @@ export function installEncodings(runtime: Runtime): void {
     nameString.frozen = true;
     encodingNames.set(object, nameString);
     encoding.constants.set(constant, object);
+    builtins.set(constant, object);
   }
   for (const [alias, constant] of [
     // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- This is a case-sensitive Ruby constant.
@@ -41,21 +50,11 @@ def('Encoding', ['to_s', 'name'], 0, (self: RObject) => encodingNames.get(self) 
 def('Encoding', 'inspect', 0, (self: RObject) =>
   asciiString(self.data === 'ASCII-8BIT' ? '#<Encoding:BINARY (ASCII-8BIT)>' : `#<Encoding:${self.data as string}>`)
 );
-def(
-  'String',
-  'encoding',
-  0,
-  (self: RString) =>
-    rt().c.Encoding.constants.get(self.binary ? 'ASCII_8BIT' : self.usAscii ? 'US_ASCII' : 'UTF_8') as Value
+def('String', 'encoding', 0, (self: RString) =>
+  builtinEncoding(self.binary ? 'ASCII_8BIT' : self.usAscii ? 'US_ASCII' : 'UTF_8')
 );
-def(
-  'Symbol',
-  'encoding',
-  0,
-  (self: RSymbol) =>
-    rt().c.Encoding.constants.get(
-      self.binary ? 'ASCII_8BIT' : self.usAscii || isAsciiText(self.name) ? 'US_ASCII' : 'UTF_8'
-    ) as Value
+def('Symbol', 'encoding', 0, (self: RSymbol) =>
+  builtinEncoding(self.binary ? 'ASCII_8BIT' : self.usAscii || isAsciiText(self.name) ? 'US_ASCII' : 'UTF_8')
 );
 export function validStringEncoding(self: RString): boolean {
   if (self.usAscii) return stringBytes(self).every((byte) => byte < 0x80);

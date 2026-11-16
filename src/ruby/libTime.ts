@@ -1,8 +1,9 @@
-// code-gauge-allow-file fileNcss 667 -- Ruby calendar fields and formatting share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 675 -- Ruby calendar fields and formatting share representation and state; splitting registration by size would scatter that concern.
 // code-gauge-allow-file duplicateLines 15 -- English calendar names mirror the C interpreter because both expose the same fixed calendar vocabulary.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   compareValues,
+  comparisonSign,
   inspectValue,
   supportsImplicitConversion,
   toFloat,
@@ -111,12 +112,15 @@ function nowNanoseconds(): bigint {
   return BigInt(Math.round((Date.now() + (runtime.slept ?? 0) * 1000) * 1e6));
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Time argument forms have different field order and coercion contracts.
-function* fieldArgs(args: Value[]): Gen<{ fields: number[]; seconds: number }> {
+// code-gauge-allow functionCognitiveComplexity 29 -- Time argument forms have different field order and coercion contracts.
+function* fieldArgs(
+  args: Value[]
+): Gen<{ fields: number[]; seconds: number; exactSeconds: number | bigint | RObject }> {
   const fields: number[] = [];
   for (const [index, arg] of args.slice(0, 5).entries()) fields.push(yield* fieldValue(arg, index));
   while (fields.length < 5) fields.push(fields.length < 3 ? 1 : 0);
-  const seconds = args.length > 5 ? yield* secondsValue(args[5]) : 0;
+  const exactSeconds = args.length > 5 ? yield* secondsValue(args[5]) : 0;
+  const seconds = typeof exactSeconds === 'number' ? exactSeconds : yield* toFloat(exactSeconds);
   if (!Number.isFinite(seconds))
     throw floatDomainError(Number.isNaN(seconds) ? 'NaN' : seconds > 0 ? 'Infinity' : '-Infinity');
   for (const [index, width] of [16, 32, 32, 64].entries())
@@ -127,7 +131,7 @@ function* fieldArgs(args: Value[]): Gen<{ fields: number[]; seconds: number }> {
   if (fields[3] > 24) throw argumentError('hour out of range');
   if (fields[4] > 59 || (fields[3] === 24 && fields[4] > 0)) throw argumentError('min out of range');
   if (seconds >= 61 || (fields[3] === 24 && seconds >= 1)) throw argumentError('sec out of range');
-  return { fields, seconds };
+  return { fields, seconds, exactSeconds };
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- Calendar fields distinguish symbolic names, integer conversion and range errors.
@@ -170,10 +174,10 @@ function escapedCalendarByte(byte: number): string {
   return String.fromCodePoint(byte);
 }
 
-function* secondsValue(arg: Value): Gen<number> {
+function* secondsValue(arg: Value): Gen<number | bigint | RObject> {
   if (arg === NIL) return 0;
   if (arg instanceof RString) return yield* fieldValue(arg, 5);
-  return yield* toFloat(arg);
+  return yield* exactNumber(arg);
 }
 
 function* exactNumber(value: Value): Gen<number | bigint | RObject> {
@@ -199,7 +203,15 @@ function* exactRational(value: Value): Gen<bigint | RObject | undefined> {
   return rational;
 }
 
-function* parseOffset(value: Value): Gen<number> {
+function* parseOffset(value: Value): Gen<{ offset: number; zone: TimeData['zone']; exact?: Value }> {
+  const converted =
+    value === NIL || typeof value === 'bigint' || isRubyFloat(value) || isRational(value)
+      ? value
+      : yield* toStrValue(value);
+  return { offset: yield* offsetValue(converted), zone: zoneFromOffset(converted), exact: exactOffset(converted) };
+}
+
+function* offsetValue(value: Value): Gen<number> {
   if (value === NIL) return LOCAL_OFFSET;
   if (typeof value === 'bigint' || isRubyFloat(value) || isRational(value)) {
     if (typeof value === 'bigint' || isRational(value)) {
@@ -254,7 +266,7 @@ function* buildTime(
   microseconds?: Value,
   exact?: Value
 ): Gen<RObject> {
-  const { fields, seconds } = yield* fieldArgs(args);
+  const { fields, seconds, exactSeconds: convertedSeconds } = yield* fieldArgs(args);
   const [year, month, day, hour, minute] = fields;
   const whole = Math.floor(seconds);
   const date = new Date(0);
@@ -262,14 +274,7 @@ function* buildTime(
   date.setUTCHours(hour, minute, whole);
   if (Number.isNaN(date.getTime())) throw new UnsupportedFeatureError('JavaScript の日付範囲外の Time');
   const localNanoseconds = BigInt(date.getTime()) * 1_000_000n;
-  const secondPart = args[5];
-  const exactSeconds = offsetFraction(
-    secondPart !== undefined &&
-      (typeof secondPart === 'bigint' || typeof secondPart === 'number' || isRational(secondPart))
-      ? secondPart
-      : seconds,
-    0
-  );
+  const exactSeconds = offsetFraction(convertedSeconds, 0);
   const fraction = exactSeconds.numerator - BigInt(whole) * exactSeconds.denominator;
   const hasMicroseconds = microseconds !== undefined && microseconds !== NIL;
   const microsecondsValue = !hasMicroseconds
@@ -345,15 +350,10 @@ function* initializeTime(cls: RClass, args: Value[], keywords: RHash | undefined
         `can't convert ${realClassOf(args[0]).name} to String (${realClassOf(args[0]).name}#to_str gives ${realClassOf(input).name})`
       );
   }
-  if (args.length === 7 && args[6] !== NIL)
-    return yield* buildTime(
-      cls,
-      args.slice(0, 6),
-      yield* parseOffset(args[6]),
-      zoneFromOffset(args[6]),
-      undefined,
-      exactOffset(args[6])
-    );
+  if (args.length === 7 && args[6] !== NIL) {
+    const zone = yield* parseOffset(args[6]);
+    return yield* buildTime(cls, args.slice(0, 6), zone.offset, zone.zone, undefined, zone.exact);
+  }
   return yield* buildTime(cls, args, LOCAL_OFFSET, 'local');
 }
 
@@ -902,31 +902,23 @@ def('Time', ['getutc', 'getgm'], 0, (self: RObject) => {
 def('Time', ['utc', 'gmtime'], 0, (self: RObject) => changeZone(self, 0, 'utc'));
 def('Time', 'getlocal', [0, 1], function* (self: RObject, args) {
   const data = dataOf(self);
-  return args.length > 0 && args[0] !== NIL
-    ? makeTime(
-        realClassOf(self),
-        data.nanoseconds,
-        yield* parseOffset(args[0]),
-        zoneFromOffset(args[0]),
-        exactOffset(args[0]),
-        data.remainderNumerator,
-        data.remainderDenominator
-      )
-    : makeTime(
-        realClassOf(self),
-        data.nanoseconds,
-        LOCAL_OFFSET,
-        'local',
-        undefined,
-        data.remainderNumerator,
-        data.remainderDenominator
-      );
+  const zone =
+    args.length > 0 && args[0] !== NIL
+      ? yield* parseOffset(args[0])
+      : { offset: LOCAL_OFFSET, zone: 'local' as const, exact: undefined };
+  return makeTime(
+    realClassOf(self),
+    data.nanoseconds,
+    zone.offset,
+    zone.zone,
+    zone.exact,
+    data.remainderNumerator,
+    data.remainderDenominator
+  );
 });
 def('Time', 'localtime', [0, 1], function* (self: RObject, args) {
   if (args.length === 0 || args[0] === NIL) return changeZone(self, LOCAL_OFFSET, 'local');
-  const offset = yield* parseOffset(args[0]);
-  const zone = zoneFromOffset(args[0]);
-  const exact = exactOffset(args[0]);
+  const { offset, zone, exact } = yield* parseOffset(args[0]);
   if (self.frozen && !(dataOf(self).zone === 'utc' && zone === 'utc' && offset === 0 && exact === undefined))
     throw frozenError(self, timeText(dataOf(self), true));
   return changeZone(self, offset, zone, exact);
@@ -1014,8 +1006,12 @@ def('Time', '-', 1, function* (self: RObject, [other]) {
     data.exactOffset
   );
 });
-def('Time', '<=>', 1, (self: RObject, [other]) => {
-  if (!(other instanceof RObject && other.data instanceof TimeData)) return NIL;
+def('Time', '<=>', 1, function* (self: RObject, [other]) {
+  if (!(other instanceof RObject && other.data instanceof TimeData)) {
+    const result = yield* callMethod(other, '<=>', [self]);
+    const sign = yield* comparisonSign(result);
+    return sign === undefined ? NIL : BigInt(-sign);
+  }
   const left = dataOf(self);
   const right = other.data;
   const a = left.exactNumerator() * right.remainderDenominator;
@@ -1024,14 +1020,15 @@ def('Time', '<=>', 1, (self: RObject, [other]) => {
 });
 def(
   'Time',
-  ['==', 'eql?'],
+  'eql?',
   1,
-  (self: RObject, [other]) =>
-    other instanceof RObject &&
-    other.data instanceof TimeData &&
-    other.data.exactNumerator() * dataOf(self).remainderDenominator ===
-      dataOf(self).exactNumerator() * other.data.remainderDenominator
+  (self: RObject, [other]) => other instanceof RObject && other.data instanceof TimeData && sameInstant(self, other)
 );
+function sameInstant(self: RObject, other: RObject): boolean {
+  const left = dataOf(self),
+    right = dataOf(other);
+  return right.exactNumerator() * left.remainderDenominator === left.exactNumerator() * right.remainderDenominator;
+}
 def('Time', 'hash', 0, (self: RObject) => {
   const data = dataOf(self);
   return (data.exactNumerator() ^ data.remainderDenominator) % 1_000_000_007n;

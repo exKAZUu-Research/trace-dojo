@@ -22,7 +22,7 @@ import { validateKeywords } from './exceptionOption';
 import { digest, hashDefault, hashGet, hashSet, stringKeyEquals, stringKeyHash } from './hashes';
 import { callBlock, callMethod, type Gen, invoke } from './interp';
 import { tryAry } from './libArray';
-import { validStringEncoding } from './libEncoding';
+import { builtinEncoding, validStringEncoding } from './libEncoding';
 import { makeEnumerator } from './libEnumerator';
 import {
   copyStringEncoding,
@@ -675,6 +675,7 @@ export interface MatchState {
 }
 
 // code-gauge-allow functionParameterCount 7 -- Search callers select shared subject state, validation and anchoring without rebuilding snapshots.
+// code-gauge-allow functionNcss 31 -- One match boundary retains bounded captures and source snapshots.
 // code-gauge-allow functionCognitiveComplexity 27 -- Match execution retains encoding, bounded forward/reverse searches and numbered/named capture state.
 export function execAt(
   regexp: RObject,
@@ -708,6 +709,7 @@ export function execAt(
       : (result?.index ?? text.length) - startUnit;
   rt().spend(Math.ceil(work / 64));
   if (!result?.indices) return undefined;
+  rt().chargeSlots(result.indices.length * 3);
   const names: string[] = [];
   const namedGroups: Record<string, number> = Object.create(null) as Record<string, number>;
   const nameOrder = (data.captureNames ??= hostRegexpCaptureNames(js.source));
@@ -1237,18 +1239,14 @@ def('Regexp', 'options', 0, (self: RObject) => {
       (data.encoding !== 'US-ASCII' ? 16 : 0)
   );
 });
-def(
-  'Regexp',
-  'encoding',
-  0,
-  (self: RObject) =>
-    rt().c.Encoding.constants.get(
-      dataOf(self).encoding === 'BINARY (ASCII-8BIT)'
-        ? 'ASCII_8BIT'
-        : dataOf(self).encoding === RUBY_UTF8
-          ? 'UTF_8'
-          : 'US_ASCII'
-    ) as Value
+def('Regexp', 'encoding', 0, (self: RObject) =>
+  builtinEncoding(
+    dataOf(self).encoding === 'BINARY (ASCII-8BIT)'
+      ? 'ASCII_8BIT'
+      : dataOf(self).encoding === RUBY_UTF8
+        ? 'UTF_8'
+        : 'US_ASCII'
+  )
 );
 def('Regexp', 'casefold?', 0, (self: RObject) => dataOf(self).ignoreCase);
 def('Regexp', ['==', 'eql?'], 1, (self: RObject, [other]) => {
@@ -1317,18 +1315,18 @@ function matchAt(regexp: RObject, subject: RString, offset: number): MatchState 
 }
 
 def('Regexp', 'match', [1, 2], function* (self: RObject, args, block) {
+  const start = args.length > 1 ? yield* toIndex(args[1]) : 0;
   const subject = yield* subjectText(args[0]);
   if (subject === undefined) return setLastMatch(undefined);
-  const start = args.length > 1 ? yield* toIndex(args[1]) : 0;
   const match = setLastMatch(matchAt(self, subject, start));
   if (block && match !== NIL) return yield* callBlock(block, [match]);
   return match;
 });
 def('Regexp', 'match?', [1, 2], function* (self: RObject, args) {
+  const start = args.length > 1 ? yield* toIndex(args[1]) : 0;
   const subject = yield* subjectText(args[0]);
   if (subject === undefined) return false;
   const text = subject.s;
-  const start = args.length > 1 ? yield* toIndex(args[1]) : 0;
   return execAt(self, text, start < 0 ? start + charIndex(text, text.length) : start, subject) !== undefined;
 });
 def('Regexp', '=~', 1, function* (self: RObject, [value]) {
@@ -1374,7 +1372,14 @@ function* matchIndex(match: RObject, key: Value): Gen {
 def('MatchData', '[]', [1, 2], function* (self: RObject, args) {
   if (args.length === 2 || args[0] instanceof RRange) {
     const state = stateOf(self);
-    return yield* callMethod(arr(state.groups.map((_range, group) => groupText(state, group))), '[]', args);
+    return yield* invoke(
+      coreMethod(rt().c.Array, '[]'),
+      arr(state.groups.map((_range, group) => groupText(state, group))),
+      args,
+      undefined,
+      undefined,
+      true
+    );
   }
   return yield* matchIndex(self, args[0]);
 });
@@ -1487,7 +1492,14 @@ def('MatchData', 'values_at', [0, -1], function* (self: RObject, args) {
     if (arg instanceof RRange) {
       const state = stateOf(self);
       const all = arr(state.groups.map((_range, group) => groupText(state, group)));
-      const selected = (yield* callMethod(all, 'values_at', [arg])) as RArray;
+      const selected = (yield* invoke(
+        coreMethod(rt().c.Array, 'values_at'),
+        all,
+        [arg],
+        undefined,
+        undefined,
+        true
+      )) as RArray;
       values.push(...selected.items);
     } else values.push(yield* matchIndex(self, arg));
   }
@@ -1660,8 +1672,8 @@ function* substituteRegexp(
   block: RProc | undefined,
   mode: 'sub' | 'sub!' | 'gsub' | 'gsub!'
 ): Gen<{ value: RString; matched: boolean }> {
-  const replacementText =
-    replacement === undefined || replacement instanceof RHash ? undefined : yield* toStrValue(replacement);
+  replacement = yield* regexpReplacement(replacement);
+  const replacementText = replacement instanceof RString ? replacement : undefined;
   const cursor = new RegexpCursor(regexp, self);
   const global = mode === 'gsub' || mode === 'gsub!';
   const chunks: RString[] = [cursor.slice(0, 0)];
@@ -1704,6 +1716,17 @@ function* substituteRegexp(
   else if ((!block && !(replacement instanceof RHash)) || !last) setLastMatch(last);
   append(cursor.slice(position));
   return { value: concatRegexpPieces(chunks, LIMITS.maxStringLength), matched: last !== undefined };
+}
+
+function* regexpReplacement(value: Value | undefined): Gen<RHash | RString | undefined> {
+  if (value === undefined || value instanceof RHash) return value;
+  const hash = yield* tryImplicitConversion(value, 'to_hash');
+  if (hash === undefined || hash === NIL) return yield* toStrValue(value);
+  if (!(hash instanceof RHash))
+    throw typeError(
+      `can't convert ${realClassOf(value).name} to Hash (${realClassOf(value).name}#to_hash gives ${realClassOf(hash).name})`
+    );
+  return hash;
 }
 
 function concatRegexpPieces(parts: RString[], limit: number): RString {
@@ -1808,10 +1831,10 @@ wrapFirst('split', function* (self, args, block) {
   while (search <= cursor.length) {
     if (limit > 0 && fields === limit - 1) break;
     const state = cursor.match(search);
+    setLastMatch(state);
     if (!state) break;
     const [from, to] = cursor.range(state)!;
     const next = cursor.next(state);
-    if (from === to && from >= cursor.length) break;
     if (from === to && from === position && position === 0) {
       search = next;
       continue;
@@ -1946,7 +1969,7 @@ wrapFirst(
   function* (self, args, block, previous, used) {
     for (const arg of args) {
       if (isRegexp(arg)) {
-        const state = execAt(arg, self.s, 0, self);
+        const state = execAt(arg, self.s, 0, self, undefined, false, true);
         const prefix = state && (state.groups[0] as readonly [number, number])[0] === 0 ? state : undefined;
         setLastMatch(prefix);
         if (prefix) {

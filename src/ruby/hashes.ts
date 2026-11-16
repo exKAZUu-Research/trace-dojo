@@ -3,7 +3,7 @@ import { isCoreMethod } from './define';
 import { frozenError, runtimeError } from './errors';
 import { callMethod, callProc, type Gen, isGenerator, runToEnd } from './interp';
 import { type HashEntry, RArray, RBasic, RHash, RRange, RString, RSymbol, type Value } from './objects';
-import { rt } from './runtime';
+import { rt, UnsupportedFeatureError } from './runtime';
 import { classOf, sameIdentity, snapshot, str, stringBytes, truthy } from './values';
 
 interface HashTraversal {
@@ -120,6 +120,8 @@ export function stringKeyEquals(left: RString, other: Value): boolean {
 /** Finds the entry for `key`, checking equality even when distinct keys have the same hash. */
 function* findEntry(hash: RHash, key: Value): Gen<{ base: string; slot: string; entry: HashEntry | undefined }> {
   if (hash.byIdentity) {
+    if (typeof key === 'bigint' && (key < -(1n << 62n) || key >= 1n << 62n))
+      throw new UnsupportedFeatureError('大きな Integer のオブジェクト同一性');
     const identity =
       key instanceof RBasic || key instanceof RSymbol
         ? `o${key.id}`

@@ -12194,3 +12194,200 @@ test('Large regexp call graphs fail explicitly within the analysis budget', () =
     uncaughtException: '複雑な再帰構造の正規表現は、この採点環境では使えません。',
   });
 });
+
+test('Irrelevant Unicode folds permit exact searches', () => {
+  expect(run('p /a/i.match?("straße");p /cat/i.match?("cat ß")')).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\ntrue\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Record factories call inherited before definition blocks', () => {
+  expect(
+    run(
+      'class << Struct;def inherited(c);puts :child;end;end;S=Struct.new(:x){puts :block};p S.new(1);class << Data;def inherited(c);puts :data;end;end;D=Data.define(:x){puts :block};p D.new(2)'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'child\nblock\n#<struct S x=1>\ndata\nblock\n#<data D x=2>\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Record and match slicing bypass Array overrides', () => {
+  expect(
+    run(
+      'class Array;def [](*a);:wrong;end;def values_at(*a);[:wrong];end;end;p /a(b)/.match("ab")[0,2];p /a(b)/.match("ab").values_at(0..1);p Struct.new(:a,:b).new(1,2).values_at(0..1)'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '["ab", "b"]\n["ab", "b"]\n[1, 2]\n', uncaughtException: undefined });
+});
+
+test('Struct selection reads members independently of each', () => {
+  expect(
+    run('class S<Struct.new(:a,:b);def each;yield 99;end;end;p S.new(1,2).select{|x|x>1};p S.new(1,2).filter{|x|x>1}')
+  ).toMatchObject({ kind: 'executed', stdout: '[2]\n[2]\n', uncaughtException: undefined });
+});
+
+test('Rational exponents use custom coercion', () => {
+  expect(run('class E;def coerce(x);[x,2];end;end;p Rational(2,3)**E.new')).toMatchObject({
+    kind: 'executed',
+    stdout: '(4/9)\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Regexp offsets convert before optional subjects', () => {
+  expect(run('o=Object.new;def o.to_int;puts :converted;0;end;p /a/.match(nil,o);p /a/.match?(nil,o)')).toMatchObject({
+    kind: 'executed',
+    stdout: 'converted\nnil\nconverted\nfalse\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Time comparison uses reciprocal protocols', () => {
+  expect(
+    run(
+      'class X;def <=>(t);puts :called;1;end;def ==(t);true;end;end;p(Time.at(0)<=>X.new);p(Time.at(0)==X.new);p Time.at(0).eql?(X.new)'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'called\n-1\ncalled\nfalse\nfalse\n', uncaughtException: undefined });
+});
+
+test('External iterator returns stop at their execution context', () => {
+  expect(
+    run(
+      'def f;e=Enumerator.new{|y|return :escaped};begin;e.next;rescue LocalJumpError=>x;p x.class,x.message;end;:normal;end;p f'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'LocalJumpError\n"unexpected return"\n:normal\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Lazy pipelines preserve root each and size overrides', () => {
+  expect(run('l=[1,2].lazy;def l.each;yield 9;end;def l.size;99;end;m=l.map{|x|x*2};p m.force,m.size')).toMatchObject({
+    kind: 'executed',
+    stdout: '[18]\n99\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Hash rest bindings preserve subclass metadata', () => {
+  expect(
+    run(
+      'class H<Hash;end;h=H[:a,1,:b,2];h.instance_variable_set(:@tag,7);case h;in {a:,**rest};p [rest.class,rest.instance_variable_get(:@tag),rest];end'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '[H, 7, {b: 2}]\n', uncaughtException: undefined });
+});
+
+test('Converted zone names retain UTC mode', () => {
+  expect(run('class O;def to_str;"UTC";end;end;t=Time.at(0).getlocal(O.new);p [t.to_s,t.zone,t.utc?]')).toMatchObject({
+    kind: 'executed',
+    stdout: '["1970-01-01 00:00:00 UTC", "UTC", true]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Regexp prefix matching stays anchored', () => {
+  expect(run('s="x"+"b"*100+"!";10.times{p s.start_with?(/(b|bb)+$/)}')).toMatchObject({
+    kind: 'executed',
+    stdout: 'false\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Calendar seconds retain exact conversion', () => {
+  expect(
+    run(
+      'class N;def to_int;puts :integer;2;end;end;p Time.local(2000,1,1,0,0,N.new).sec;class F<Numeric;def to_f;0.5;end;def to_r;Rational(1,3);end;end;p Time.utc(2000,1,1,0,0,F.new).nsec'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'integer\n2\n333333333\n', uncaughtException: undefined });
+});
+
+test('Terminal regexp split separators retain empty fields', () => {
+  expect(run(String.raw`p "aba".split(//,-1);p "a".split(/\b/,2)`)).toMatchObject({
+    kind: 'executed',
+    stdout: '["a", "b", "a", ""]\n["a", ""]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Regexp replacement mappings convert before strings', () => {
+  expect(run('class R;def to_hash;puts :hash;{"a"=>"x"};end;end;p "aba".gsub(/a/,R.new)')).toMatchObject({
+    kind: 'executed',
+    stdout: 'hash\n"xbx"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Unrepresentable heap Integer identity fails explicitly', () => {
+  expect(run('a=10**20;b=10**20;h={}.compare_by_identity;h[a]=:a;h[b]=:b;p h.size,h.values')).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: '大きな Integer のオブジェクト同一性は、この採点環境では使えません。',
+  });
+});
+
+test('Split blocks observe current separator matches', () => {
+  expect(run('"abc".split(/(b)/){|v|p [v,$1]}')).toMatchObject({
+    kind: 'executed',
+    stdout: '["a", "b"]\n["b", "b"]\n["c", nil]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Forwarding parameters reject invalid following arguments before execution', () => {
+  expect(run('p :before;def f(...,a);end')).toMatchObject({ kind: 'compileError' });
+});
+
+test('Enumerator argument copies reject suspended contexts', () => {
+  expect(run('e=[1,2].each;p e.next;begin;e.each(3);puts :accepted;rescue=>x;p x.class,x.message;end')).toMatchObject({
+    kind: 'executed',
+    stdout: '1\nTypeError\n"can\'t copy execution context"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Encoding identities survive constant reassignment', () => {
+  expect(run("Encoding::UTF_8=123;p 'hello'.encoding")).toMatchObject({
+    kind: 'executed',
+    stdout: '#<Encoding:UTF-8>\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Record member storage obeys the shared slot limit', () => {
+  expect(
+    run('S=Struct.new(*Array.new(2000){|i|"f#{i}".to_sym});a=Array.new(1000){S.new};p a.size,a[0].size')
+  ).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+});
+
+test('Retained lazy stage vectors obey the shared slot limit', () => {
+  expect(run('l=[1].lazy;a=[];2000.times{l=l.map{|x|x};a<<l};puts a.length')).toMatchObject({
+    kind: 'limitExceeded',
+    limit: 'storage',
+  });
+});
+
+test('Retained match captures obey the shared slot limit', () => {
+  expect(run('r=Regexp.new("(a)"*2000);s="a"*2000;a=Array.new(1000){r.match(s)};p a.size,a[0].size')).toMatchObject({
+    kind: 'limitExceeded',
+    limit: 'storage',
+  });
+});
+
+test('Rational normalization checks the budget throughout Euclidean reduction', () => {
+  expect(
+    run(`def fib(n)
+  return [0,1] if n==0
+  a,b=fib(n/2)
+  c=a*(2*b-a)
+  d=a*a+b*b
+  n.even? ? [c,d] : [d,c+d]
+end
+a,b=fib(1200000)
+Rational(a,b)
+puts :done`)
+  ).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});

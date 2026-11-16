@@ -6,7 +6,7 @@ import { exceptionOption } from './exceptionOption';
 import { exactDecimal } from './floatFormat';
 import { bigintRatio } from './floatMath';
 import { digest } from './hashes';
-import { chargeIntegerResult, integerBits } from './integerBudget';
+import { chargeIntegerResult, integerBits, integerGcd } from './integerBudget';
 import { callMethod, type Gen } from './interp';
 import { isRubyFloat, NIL, RArray, RObject, RString, RSymbol, type Value } from './objects';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
@@ -17,15 +17,6 @@ interface Fraction {
   numerator: bigint;
   denominator: bigint;
   hashKey(): string;
-}
-
-function gcd(a: bigint, b: bigint): bigint {
-  let x = a < 0n ? -a : a;
-  let y = b < 0n ? -b : b;
-  const bits = Math.max(integerBits(x), integerBits(y));
-  rt().spend(Math.ceil((bits * Math.log2(bits + 1)) / 256));
-  while (y !== 0n) [x, y] = [y, x % y];
-  return x;
 }
 
 function boundedMultiply(left: bigint, right: bigint): bigint {
@@ -46,7 +37,7 @@ export function makeRational(numerator: bigint, denominator: bigint): RObject {
   if (denominator === 0n) throw zeroDivisionError();
   chargeIntegerResult(Math.max(integerBits(numerator), integerBits(denominator)), 0);
   const sign = denominator < 0n ? -1n : 1n;
-  const divisor = gcd(numerator, denominator) || 1n;
+  const divisor = integerGcd(numerator, denominator) || 1n;
   const rational = new RObject(rt().c.Rational);
   const fraction: Fraction = {
     numerator: (sign * numerator) / divisor,
@@ -187,7 +178,7 @@ function* numericRemainder(self: RObject, other: Value): Gen {
   return yield* callMethod(remainder, '-', [right]);
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- The ordered cases for exact Rational coercion and rounding share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity 30 -- Exact powers, fractional domains and custom coercion retain Ruby numeric dispatch order.
 def('Rational', '**', 1, function* (self: RObject, [exponent]) {
   const { numerator, denominator } = fractionOf(self);
   if (isRational(exponent) && fractionOf(exponent).denominator === 1n) exponent = fractionOf(exponent).numerator;
@@ -206,8 +197,11 @@ def('Rational', '**', 1, function* (self: RObject, [exponent]) {
       .reduce((total, value) => total + value.toString(2).length, 0);
     rt().spend(Math.ceil((bits * Number(magnitude)) / 256));
     if (exponent >= 0n) return makeRational(numerator ** exponent, denominator ** exponent);
-    if (numerator === 0n) throw zeroDivisionError();
     return makeRational(denominator ** -exponent, numerator ** -exponent);
+  }
+  if (!isRubyFloat(exponent) && !isRational(exponent)) {
+    const [left, right] = yield* coercePair(self, exponent);
+    return yield* callMethod(left, '**', [right]);
   }
   const power = yield* toFloat(exponent);
   if (numerator < 0n && !Number.isInteger(power)) throw new UnsupportedFeatureError('複素数（Rational の小数乗）');

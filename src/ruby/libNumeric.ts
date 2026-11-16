@@ -28,7 +28,7 @@ import {
   roundedDouble,
 } from './floatMath';
 import { exactFloatPower } from './floatPower';
-import { chargeIntegerResult, integerBits } from './integerBudget';
+import { chargeIntegerResult, integerBits, integerGcd } from './integerBudget';
 import { callBlock, callMethod, type Gen } from './interp';
 import { type EnumeratorSource, makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { isRational, makeRational } from './libRational';
@@ -594,31 +594,20 @@ def('Integer', 'digits', [0, 1], function* (self: bigint, args) {
 });
 def('Integer', 'gcd', 1, (self: bigint, [other]) => {
   if (typeof other !== 'bigint') throw typeError('not an integer');
-  return gcd(self, other);
+  return integerGcd(self, other);
 });
 def('Integer', 'lcm', 1, (self: bigint, [other]) => {
   if (typeof other !== 'bigint') throw typeError('not an integer');
   if (self === 0n || other === 0n) return 0n;
-  const result = (self * other) / gcd(self, other);
+  const result = (self * other) / integerGcd(self, other);
   return result < 0n ? -result : result;
 });
 def('Integer', 'gcdlcm', 1, (self: bigint, [other]) => {
   if (typeof other !== 'bigint') throw typeError('not an integer');
-  const divisor = gcd(self, other);
+  const divisor = integerGcd(self, other);
   const multiple = self === 0n || other === 0n ? 0n : (self * other) / divisor;
   return arr([divisor, multiple < 0n ? -multiple : multiple]);
 });
-
-function gcd(a: bigint, b: bigint): bigint {
-  let x = a < 0n ? -a : a;
-  let y = b < 0n ? -b : b;
-  const cost = 1 + Math.ceil(Math.max(integerBits(x), integerBits(y)) / 4096);
-  while (y !== 0n) {
-    rt().spend(cost);
-    [x, y] = [y, x % y];
-  }
-  return x;
-}
 
 def('Integer', ['allbits?'], 1, function* (self: bigint, [mask]) {
   const value = yield* toInt(mask);

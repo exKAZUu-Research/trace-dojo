@@ -37,6 +37,7 @@ import {
   undefinedMethodError,
 } from './errors';
 import { hashGet, hashSet, hashSetStored } from './hashes';
+import { builtinEncoding } from './libEncoding';
 import { aliasedMethod } from './libMeta';
 import { makeRational } from './libRational';
 import {
@@ -469,7 +470,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
       return NIL;
     }
     case 'encoding': {
-      return constInModule(rt().c.Encoding, 'UTF_8');
+      return builtinEncoding('UTF_8');
     }
     case 'regex': {
       const staticLiteral = e.parts.every((part) => typeof part === 'string' || 'text' in part);
@@ -1456,7 +1457,8 @@ function returnTarget(frame: Frame): Frame {
   let target = frame;
   while (target.kind === 'block' && !target.extra.isLambda) target = target.extra.outer as Frame;
   if (target.kind === 'class') throw rubyError(rt().c.LocalJumpError, 'unexpected return');
-  if (target.extra.finished) throw rubyError(rt().c.LocalJumpError, 'unexpected return');
+  if (target.extra.finished || target.executionContext !== rt().activeCursor)
+    throw rubyError(rt().c.LocalJumpError, 'unexpected return');
   return target;
 }
 

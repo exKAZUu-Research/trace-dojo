@@ -1483,6 +1483,8 @@ export class Converter {
         }
         case 'forward_parameter': {
           if (this.ctx.inBlock) this.fail(child, 'ブロックの引数には ... を書けません。');
+          if (phase > 1) this.fail(child, '引数の並び順に誤りがあります。');
+          advance(child, 7);
           params.rest = FORWARD_REST;
           params.keywordRest = FORWARD_KEYWORDS;
           params.block = FORWARD_BLOCK;

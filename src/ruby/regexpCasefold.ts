@@ -114,7 +114,10 @@ const expandingFolds: ReadonlyMap<string, string> = new Map(
 );
 
 export function regexpHasExpandingCasefold(source: string, subject: string): boolean {
-  if (codePointCharacters(subject).some((char) => expandingFolds.has(char))) return true;
+  const subjectFolds = codePointCharacters(subject).flatMap((char) => {
+    const fold = expandingFolds.get(char);
+    return fold === undefined ? [] : [fold];
+  });
   const upper = subject.toUpperCase();
   const lower = subject.toLowerCase();
   const candidates = [...expandingFolds]
@@ -125,11 +128,17 @@ export function regexpHasExpandingCasefold(source: string, subject: string): boo
     const pattern = new RegExpParser().parsePattern(source, 0, source.length, { unicode: true });
     const characterSet = (start: number, end: number): void => {
       const matcher = new RegExp(`^(?:${source.slice(start, end)})$`, 'iu');
-      if (candidates.some((char) => matcher.test(char))) expanding = true;
+      if (
+        candidates.some((char) => matcher.test(char)) ||
+        subjectFolds.some((fold) => codePointCharacters(fold).some((char) => matcher.test(char)))
+      )
+        expanding = true;
     };
     visitRegExpAST(pattern, {
       onCharacterEnter(node) {
-        if (expandingFolds.has(String.fromCodePoint(node.value))) expanding = true;
+        const char = String.fromCodePoint(node.value);
+        if (expandingFolds.has(char) || subjectFolds.some((fold) => fold.includes(char.toLowerCase())))
+          expanding = true;
       },
       onCharacterClassEnter(node) {
         characterSet(node.start, node.end);

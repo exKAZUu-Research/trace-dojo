@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 458 -- Record layout and initialization share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 474 -- Record layout and initialization share representation and state; splitting registration by size would scatter that concern.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   addressOf,
@@ -69,14 +69,18 @@ function layoutFor(cls: RClass): Layout | undefined {
 }
 
 class StructValues {
-  constructor(readonly values: Value[]) {}
+  readonly values: Value[];
+  constructor(values: readonly Value[] | number) {
+    rt().chargeSlots(typeof values === 'number' ? values : values.length);
+    this.values = typeof values === 'number' ? Array.from({ length: values }, () => NIL) : [...values];
+  }
 
   held(): Value[] {
     return this.values;
   }
 
   copy(): StructValues {
-    return new StructValues([...this.values]);
+    return new StructValues(this.values);
   }
 
   /** The values whose keys make the struct's key in a Hash, with its class's. */
@@ -169,6 +173,7 @@ function* newStructClass(
   const members = memberSymbols.map((member) => member.name);
   const cls = new RClass(rt().c.Class, undefined, superclass, false);
   cls.isUserDefined = true;
+  yield* callMethod(superclass, 'inherited', [cls], undefined, undefined, { fcall: true, used: false });
   cls.instanceKind = 'record';
   layouts.set(cls, { ...layout, members, memberSymbols });
   defineAccessors(
@@ -208,13 +213,12 @@ function* newStructClass(
       takesKeywords: false,
     },
   });
-  yield* [];
   return cls;
 }
 
 export function allocateStruct(cls: RClass): RObject {
   const object = new RObject(cls);
-  object.data = new StructValues(layoutOf(cls).members.map(() => NIL));
+  object.data = new StructValues(layoutOf(cls).members.length);
   return object;
 }
 
@@ -363,9 +367,14 @@ def('Struct', 'values_at', [0, -1], function* (self: RObject, args) {
       if (argument instanceof RRange) {
         const begin = argument.begin === NIL ? NIL : (yield* toIndexExact(argument.begin)).integer;
         const end = argument.end === NIL ? NIL : (yield* toIndexExact(argument.end)).integer;
-        const expanded = (yield* callMethod(arr([...values]), 'values_at', [
-          range(begin, end, argument.exclusive),
-        ])) as RArray;
+        const expanded = (yield* invoke(
+          coreMethod(rt().c.Array, 'values_at'),
+          arr([...values]),
+          [range(begin, end, argument.exclusive)],
+          undefined,
+          undefined,
+          true
+        )) as RArray;
         selected.push(...expanded.items);
         continue;
       }
@@ -397,6 +406,21 @@ def('Struct', ['each'], 0, function* (self: RObject, _args, block) {
   for (let index = 0; index < valuesOf(self).length; index++) yield* callBlock(block, [valuesOf(self)[index]], false);
   return self;
 });
+for (const name of ['select', 'filter'])
+  def('Struct', name, 0, function* (self: RObject, _args, block) {
+    if (!block) return sizedEnumerator(self, name, [], () => BigInt(valuesOf(self).length));
+    const selected: Value[] = [];
+    rt().heldArrays.push(selected);
+    try {
+      for (let index = 0; index < valuesOf(self).length; index++) {
+        const value = valuesOf(self)[index];
+        if (truthy(yield* callBlock(block, [value]))) selected.push(value);
+      }
+      return arr(selected);
+    } finally {
+      rt().heldArrays.pop();
+    }
+  });
 def('Struct', 'each_pair', 0, function* (self: RObject, _args, block) {
   if (!block) return sizedEnumerator(self, 'each_pair', [], () => BigInt(layoutOf(self.cls).members.length));
   for (const [index, name] of layoutOf(self.cls).memberSymbols.entries()) {

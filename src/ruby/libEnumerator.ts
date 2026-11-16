@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 1000 -- Enumerator lifecycle and lazy iteration share representation and state; splitting registration by size would scatter that concern.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   addressOf,
@@ -40,7 +39,7 @@ import {
   respondsTo,
   runToEnd,
 } from './interp';
-import { lazySourceDescription, setLazyDisplaySource } from './lazyDisplay';
+import { lazyDisplaySource, lazySourceDescription, setLazyDisplaySource } from './lazyDisplay';
 import { iterate, iterateYielded, STOP, zipCollections } from './libEnumerable';
 import { advertisesPublicMethod, respondsToName } from './libMeta';
 import { rangeSize } from './libRange';
@@ -381,6 +380,7 @@ function* runSource(source: EnumeratorSource, block: RProc, args: Value[] = []):
 def('Enumerator', 'each', [0, -1], function* (self: RObject, args, block) {
   const source = sourceOf(self);
   if (source.arithmetic && args.length > 0) throw argumentCountError(args.length, 0, 0);
+  if (args.length > 0 && source.cursor?.started) throw typeError("can't copy execution context");
   if (!block) {
     if (args.length === 0) return self;
     if (source.iterate) {
@@ -1071,7 +1071,13 @@ function* nextLazySize(size: Value, step: LazyStep): Gen<Value> {
   return ['map', 'with_index', 'zip', 'each_entry', 'each_with_object'].includes(step.kind) ? size : NIL;
 }
 
+function lazyPipeline(self: RObject): Pick<LazyData, 'source' | 'steps'> {
+  const data = self.data as LazyData;
+  return data.steps.length === 0 ? { source: self, steps: [] } : data;
+}
+
 function makeLazy(source: Value, steps: LazyStep[]): RObject {
+  rt().chargeSlots(steps.length);
   const lazy = new RObject(rt().c['Enumerator::Lazy']);
   const data: LazyData = {
     source,
@@ -1087,7 +1093,7 @@ function makeLazy(source: Value, steps: LazyStep[]): RObject {
     },
     copy() {
       if (this.enumerator?.cursor?.started) throw typeError("can't copy execution context");
-      return { ...this, steps: [...this.steps], enumerator: undefined };
+      return { ...this, enumerator: undefined };
     },
   };
   lazy.data = data;
@@ -1114,7 +1120,7 @@ for (const kind of [
   'find_all',
 ] as const) {
   def('Enumerator::Lazy', kind, 0, (self: RObject, _args, block) => {
-    const data = self.data as LazyData;
+    const data = lazyPipeline(self);
     const normalized =
       kind === 'collect'
         ? 'map'
@@ -1129,19 +1135,19 @@ for (const kind of [
 }
 for (const kind of ['grep', 'grep_v'] as const) {
   def('Enumerator::Lazy', kind, 1, (self: RObject, [pattern], block) => {
-    const data = self.data as LazyData;
+    const data = lazyPipeline(self);
     return makeLazy(data.source, [...data.steps, { kind, pattern, block, args: [pattern] }]);
   });
 }
 def('Enumerator::Lazy', 'uniq', 0, (self: RObject, _args, block) => {
-  const data = self.data as LazyData;
+  const data = lazyPipeline(self);
   return makeLazy(data.source, [...data.steps, { kind: 'uniq', block }]);
 });
 for (const kind of ['each_slice', 'each_cons'] as const) {
   def('Enumerator::Lazy', kind, 1, function* (self: RObject, [count], block) {
     const { number: size, integer: exactCount } = yield* toIndexExact(count);
     if (size <= 0) throw argumentError(kind === 'each_cons' ? 'invalid size' : 'invalid slice size');
-    const data = self.data as LazyData;
+    const data = lazyPipeline(self);
     const lazy = makeLazy(data.source, [...data.steps, { kind, count: size, exactCount, args: [count] }]);
     if (!block) return lazy;
     yield* runLazy(lazy, (value) => callProc(block, [value], { used: false }));
@@ -1149,7 +1155,7 @@ for (const kind of ['each_slice', 'each_cons'] as const) {
   });
 }
 def('Enumerator::Lazy', 'each_entry', [0, -1], function* (self: RObject, args, block) {
-  const data = self.data as LazyData;
+  const data = lazyPipeline(self);
   const source = args.length > 0 ? lazyIterationSource(data.source, args, []) : data.source;
   const lazy = makeLazy(source, [...data.steps, { kind: 'each_entry', args }]);
   if (!block) return lazy;
@@ -1162,7 +1168,7 @@ for (const name of ['each_with_object', 'with_object']) {
       yield* runLazy(self, (value) => callProc(block, [value, memo], { used: false }));
       return memo;
     }
-    const data = self.data as LazyData;
+    const data = lazyPipeline(self);
     return makeLazy(data.source, [...data.steps, { kind: 'each_with_object', memo, label: name, args: [memo] }]);
   });
 }
@@ -1194,7 +1200,7 @@ def('Enumerator::Lazy', 'zip', [0, -1], function* (self: RObject, others, block)
         converted.push(other);
       else throw typeError(`wrong argument type ${realClassOf(other).name} (must respond to :each)`);
     }
-    const data = self.data as LazyData;
+    const data = lazyPipeline(self);
     return makeLazy(data.source, [...data.steps, { kind: 'zip', others: converted, args: others }]);
   } finally {
     rt().heldArrays.pop();
@@ -1202,24 +1208,24 @@ def('Enumerator::Lazy', 'zip', [0, -1], function* (self: RObject, others, block)
 });
 for (const kind of ['take', 'drop'] as const) {
   def('Enumerator::Lazy', kind, 1, function* (self: RObject, [count]) {
-    const data = self.data as LazyData;
+    const data = lazyPipeline(self);
     const { number: n, integer: exactCount } = yield* toIndexExact(count);
     if (n < 0) throw argumentError(`attempt to ${kind} negative size`);
     return makeLazy(data.source, [...data.steps, { kind, count: n, exactCount, args: [count] }]);
   });
 }
 def('Enumerator::Lazy', 'compact', 0, (self: RObject) => {
-  const data = self.data as LazyData;
+  const data = lazyPipeline(self);
   return makeLazy(data.source, [...data.steps, { kind: 'compact' }]);
 });
 def('Enumerator::Lazy', 'with_index', [0, 1], function* (self: RObject, args, block) {
-  const data = self.data as LazyData;
+  const data = lazyPipeline(self);
   const offset = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : 0n;
   return makeLazy(data.source, [...data.steps, { kind: 'with_index', offset, block, args: [offset] }]);
 });
 def('Enumerator::Lazy', 'each_with_index', 0, function* (self: RObject, _args, block) {
   if (!block) {
-    const data = self.data as LazyData;
+    const data = lazyPipeline(self);
     return makeLazy(data.source, [...data.steps, { kind: 'with_index', offset: 0n, label: 'each_with_index' }]);
   }
   let index = 0n;
@@ -1513,7 +1519,12 @@ def('Enumerator::Lazy', 'eager', 0, function (self: RObject) {
 });
 def('Enumerator::Lazy', ['inspect', 'to_s'], 0, function* (self: RObject) {
   const data = self.data as LazyData;
-  let text = `#<Enumerator::Lazy: ${yield* lazySourceDescription(data.source)}>`;
+  const source = lazyDisplaySource(data.source);
+  const description = yield* lazySourceDescription(data.source);
+  let text =
+    data.steps.length > 0 && source instanceof RObject && source.cls.isSubclassOf(rt().c['Enumerator::Lazy'])
+      ? description
+      : `#<Enumerator::Lazy: ${description}>`;
   for (const step of data.steps) {
     const argumentsText: string[] = [];
     for (const argument of step.args ?? []) argumentsText.push(yield* inspect(argument));

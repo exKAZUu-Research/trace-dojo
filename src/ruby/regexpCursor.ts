@@ -31,6 +31,7 @@ export class RegexpCursor {
     const view = str(head.s + tail.s);
     const state = execAt(this.regexp, view.s, charIndex(view.s, head.s.length), this.subject, this.snapshot, true);
     if (!state) return undefined;
+    rt().chargeSlots(state.groups.length * 3);
     const groups = state.groups.map(
       (range) => range && ([regexpByteIndex(view, range[0]), regexpByteIndex(view, range[1])] as const)
     );
@@ -40,6 +41,7 @@ export class RegexpCursor {
         range.every((offset) => regexpByteIndex(this.snapshot, regexpByteUnit(this.snapshot, offset)) === offset)
     );
     if (aligned) {
+      rt().chargeSlots(groups.length * 3);
       state.text = this.snapshot.s;
       state.groups = groups.map(
         (range) => range && [regexpByteUnit(this.snapshot, range[0]), regexpByteUnit(this.snapshot, range[1])]

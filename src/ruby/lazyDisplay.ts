@@ -9,6 +9,10 @@ export function setLazyDisplaySource(enumerator: RObject, source: Value, args: V
   displaySources.set(enumerator, { source: previous?.source ?? source, args: [...(previous?.args ?? []), ...args] });
 }
 
+export function lazyDisplaySource(source: Value): Value {
+  return (source instanceof RObject ? displaySources.get(source)?.source : undefined) ?? source;
+}
+
 export function* lazySourceDescription(source: Value): Gen<string> {
   const displayed = source instanceof RObject ? displaySources.get(source) : undefined;
   const name = yield* inspect(displayed?.source ?? source);

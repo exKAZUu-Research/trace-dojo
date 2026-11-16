@@ -44,6 +44,7 @@ export type FrameKind = 'main' | 'method' | 'block' | 'class';
 
 /** One activation on the call stack: the program, a method, a class body, or a block. */
 export class Frame implements TracedFrame {
+  readonly executionContext = rt().activeCursor;
   /** Values that only native code holds, which garbage collection must keep. */
   readonly temporaries: Value[] = [];
   private definitionMode: { visibility: Visibility; moduleFunction: boolean } = {
