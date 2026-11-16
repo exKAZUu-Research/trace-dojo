@@ -74,7 +74,8 @@ class DialectValidator {
     this.previousRow = node.endPosition.row;
     if (firstOnLine && context && node.startIndex !== context.itemStart && this.column(node) <= context.indent) {
       const permitsEqualIndent =
-        node.type === '{' || (node.parent?.type === 'conditional' && (node.type === 'then' || node.type === 'else'));
+        (node.type === '{' && (node.parent?.type === 'do' || layoutNodes.has(node.parent?.type ?? ''))) ||
+        (node.parent?.type === 'conditional' && (node.type === 'then' || node.type === 'else'));
       if (!permitsEqualIndent || this.column(node) < context.indent) fail(node);
     }
   }

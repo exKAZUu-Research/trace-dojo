@@ -9,7 +9,12 @@ import type { GlobalDef } from './core';
 import { type ClassEntity, type ConInfo, nextId, type TypeEntity, type ValueEntity } from './entities';
 import type { Builtins } from './infer';
 import { LIBRARY_SOURCES, PUBLIC_MODULES, UNSUPPORTED_MODULES, UNSUPPORTED_VALUES } from './library';
-import { KNOWN_LIBRARY_CLASS_METHODS, KNOWN_LIBRARY_TYPES, KNOWN_LIBRARY_VALUES } from './library/knownValues';
+import {
+  KNOWN_LIBRARY_CLASS_METHODS,
+  KNOWN_LIBRARY_TYPE_CHILDREN,
+  KNOWN_LIBRARY_TYPES,
+  KNOWN_LIBRARY_VALUES,
+} from './library/knownValues';
 import { type CompiledModuleInfo, emptyExports, type ExportTable, type TypeLike } from './modules';
 import { misplacedHaskellAtomicMessage, parseHaskell } from './parse';
 import { setPrimitiveTypes } from './primitives';
@@ -214,7 +219,7 @@ class LibraryCompiler {
           });
         }
       }
-      attachKnownClassMethods(exports);
+      attachKnownTypeChildren(exports);
       assertPublicExports(name, exports);
       modules.set(name, { name, exports, instances: [] });
     }
@@ -241,15 +246,19 @@ class LibraryCompiler {
   }
 }
 
-function attachKnownClassMethods(exports: ExportTable): void {
+function attachKnownTypeChildren(exports: ExportTable): void {
   for (const [typeName, entry] of exports.types) {
-    if (entry.entity.kind !== 'class') continue;
-    entry.children = (KNOWN_LIBRARY_CLASS_METHODS[typeName] ?? []).flatMap((method) => {
+    const names =
+      entry.entity.kind === 'class' ? KNOWN_LIBRARY_CLASS_METHODS[typeName] : KNOWN_LIBRARY_TYPE_CHILDREN[typeName];
+    if (!names) continue;
+    entry.children = names.flatMap((method) => {
       const value = exports.values.get(method);
       return value ? [value] : [];
     });
-    const cls = entry.entity.entity;
-    cls.exportedMethods = [...new Set([...(cls.exportedMethods ?? []), ...entry.children])];
+    if (entry.entity.kind === 'class') {
+      const cls = entry.entity.entity;
+      cls.exportedMethods = [...new Set([...(cls.exportedMethods ?? []), ...entry.children])];
+    }
   }
 }
 

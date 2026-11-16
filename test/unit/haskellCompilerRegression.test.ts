@@ -594,3 +594,44 @@ test.each(['inits1', 'tails1'])('NonEmpty-producing %s reports its missing API',
       expect(result.diagnostics.some(({ message }) => message.includes(name))).toBe(true);
   }
 });
+
+test.each([
+  'System.IO hiding (IOMode(ReadMode))',
+  'System.IO hiding (SeekMode(AbsoluteSeek))',
+  'System.IO hiding (NewlineMode(inputNL))',
+  'Text.Read hiding (Lexeme(Ident))',
+  'Text.Printf hiding (FieldFormat(fmtChar))',
+  'Text.Printf hiding (FormatParse(fpRest))',
+  'Control.Applicative hiding (Const(getConst))',
+  'Data.Tuple hiding (Solo(MkSolo))',
+  'Data.Bits hiding (And(getAnd))',
+  'Data.Set hiding (Intersection(getIntersection))',
+])('unsupported type children can be hidden: %s', (item) => {
+  expect(executeProgram('haskell', `import ${item}\nmain=print(1::Int)`)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['System.IO (IOMode(ReadMode))', 'Text.Read (Lexeme(Ident))', 'Text.Printf (FieldFormat(fmtChar))'])(
+  'selecting unsupported type children still rejects use: %s',
+  (item) => {
+    expect(executeProgram('haskell', `import ${item}\nmain=print(1::Int)`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: expect.arrayContaining([
+        expect.objectContaining({ message: expect.stringContaining('この採点環境では使えません') }),
+      ]),
+    });
+  }
+);
+
+test.each(['T', 't'])('record braces require continuation indentation: %s', (record) => {
+  const prefix = 'data T=T {a::Int} deriving Show\nmain=do\n  let t=T 1\n';
+  expect(executeProgram('haskell', `${prefix}  print(${record}\n  {a=2})`).kind).toBe('compileError');
+  expect(executeProgram('haskell', `${prefix}  print(${record}\n   {a=2})`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'T {a = 2}\n',
+    uncaughtException: undefined,
+  });
+});
