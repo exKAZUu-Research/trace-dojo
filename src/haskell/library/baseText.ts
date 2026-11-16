@@ -364,13 +364,17 @@ lexLitChar :: ReadS String
 lexLitChar ('\\':s) = [('\\' : esc, t) | (esc, t) <- lexEsc s]
   where lexEsc (c:s') | c ${BT}elem${BT} "abfnrtv\\\"'" = [([c], s')]
         lexEsc s'@(d:_) | isDigit d = [span isDigit s']
+        lexEsc ('x':s') = [('x':ds, rest) | (ds, rest) <- [span isHexDigit s'], not (null ds)]
+        lexEsc ('o':s') = [('o':ds, rest) | (ds, rest) <- [span (\c -> c >= '0' && c <= '7') s'], not (null ds)]
         lexEsc ('^':c:s') | c >= '@' && c <= '_' = [(['^', c], s')]
-        lexEsc s' = [(name, drop (length name) s') | name <- escapeNames, take (length name) s' == name]
+        lexEsc s' = case sortBy (\a b -> compare (length b) (length a)) [name | name <- escapeNames, take (length name) s' == name] of
+          (name:_) -> [(name, drop (length name) s')]
+          [] -> []
 lexLitChar (c:s) = [([c], s)]
 lexLitChar "" = []
 
 escapeNames :: [String]
-escapeNames = ["DEL", "SOH"] ++ asciiTab
+escapeNames = "DEL" : asciiTab
 
 readLitChar :: ReadS Char
 readLitChar s = [(c, t) | (lexeme, t) <- lexLitChar s, Just c <- [decodeLitChar lexeme]]
@@ -390,10 +394,16 @@ decodeLitChar ('\\':rest) = case rest of
   "'" -> Just '\''
   "DEL" -> Just '\DEL'
   ['^', c] -> Just (chr (ord c - 64))
-  _ -> if all isDigit rest && not (null rest) then (let n = read rest :: Integer in if n > 1114111 then Nothing else Just (chr (fromInteger n)))
+  ('x':ds) -> decodeNumber 16 ds
+  ('o':ds) -> decodeNumber 8 ds
+  _ -> if all isDigit rest && not (null rest) then decodeNumber 10 rest
        else case [i | (i, name) <- zip [0..] asciiTab, name == rest] of
               (i:_) -> Just (chr (if rest == "SP" then 32 else i))
               [] -> Nothing
+  where decodeNumber base ds =
+          if null ds || any (\c -> not (isHexDigit c) || digitToInt c >= base) ds then Nothing
+          else let n = foldl (\n c -> n * toInteger base + toInteger (digitToInt c)) 0 ds
+               in if n > 1114111 then Nothing else Just (chr (fromInteger n))
 decodeLitChar _ = Nothing
 
 decodeString :: String -> Maybe String

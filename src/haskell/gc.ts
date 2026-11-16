@@ -147,11 +147,10 @@ function pushRefs(refs: readonly LocalRef[], env: Env | undefined, push: Push): 
 /** The roots: the variables each trace frame's running statement sees, and what the evaluator's stack holds. */
 function pushRoots(runtime: Runtime, push: Push): void {
   for (const frame of runtime.frames) {
-    // The running statement's variables are live, as a Java method's locals are. A block that waits for an inner
-    // block of the same call keeps only what its later statements use: a variable the inner block hides by a new
-    // one of the same name is as gone as one a Java assignment overwrote.
+    // Blocks sharing an environment can shadow a turtle like Java assignment; a local call has a separate
+    // environment and must keep its caller's locals alive even when the caller never reads them again.
     for (const [index, context] of frame.contexts.entries()) {
-      if (index === frame.contexts.length - 1 || !context.block || context.index === undefined) {
+      if (context.env !== frame.contexts[index + 1]?.env || !context.block || context.index === undefined) {
         for (const visible of context.visible) push(context.env.at(visible.depth).slots[visible.index]);
       } else {
         pushRefs(liveAfter(context.block, context.index), context.env, push);

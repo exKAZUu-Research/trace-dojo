@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 480 -- The primitive table lists every built-in operation the Haskell library calls.
+// code-gauge-allow-file fileNcss 486 -- The primitive table lists every built-in operation the Haskell library calls.
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { CONS_CON, tupleCon, UNIT_CON } from './builtinTypes';
 import type { ConInfo } from './entities';
@@ -323,7 +323,7 @@ function defineFloating(prefix: 'double' | 'float', round: (value: number) => nu
     const { mantissa, exponent } = decodeFloat(a as number, prefix === 'float');
     return tuple(mantissa, BigInt(exponent));
   });
-  strict(`${prefix}Encode`, 2, ([m, e]) => round(encodeFloat(m as bigint, Number(e))));
+  strict(`${prefix}Encode`, 2, ([m, e], runtime) => encodeFloat(m as bigint, Number(e), prefix === 'float', runtime));
   strict(`${prefix}FromRational`, 2, ([n, d]) =>
     prefix === 'float' ? rationalToFloat(n as bigint, d as bigint) : rationalToDouble(n as bigint, d as bigint)
   );
@@ -405,11 +405,18 @@ export function decodeFloat(value: number, isFloat: boolean): { mantissa: bigint
   return { mantissa: sign * fraction, exponent };
 }
 
-function encodeFloat(mantissa: bigint, exponent: number): number {
-  return rationalToDouble(
-    exponent >= 0 ? mantissa << BigInt(exponent) : mantissa,
-    exponent >= 0 ? 1n : 1n << BigInt(-exponent)
-  );
+function encodeFloat(mantissa: bigint, exponent: number, isFloat: boolean, runtime: Runtime): number {
+  if (mantissa === 0n) return 0;
+  const bits = (mantissa < 0n ? -mantissa : mantissa).toString(2).length;
+  const topExponent = exponent + bits - 1;
+  if (topExponent > (isFloat ? 128 : 1024)) {
+    return mantissa < 0n ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+  }
+  if (topExponent < (isFloat ? -150 : -1075)) return mantissa < 0n ? -0 : 0;
+  runtime.spend(Math.ceil((bits + Math.abs(exponent)) / 64));
+  const numerator = exponent >= 0 ? mantissa << BigInt(exponent) : mantissa;
+  const denominator = exponent >= 0 ? 1n : 1n << BigInt(-exponent);
+  return isFloat ? rationalToFloat(numerator, denominator) : rationalToDouble(numerator, denominator);
 }
 
 /** The double nearest to n/d, rounding half to even. */
@@ -732,15 +739,16 @@ define(
 define(
   'hPutStr',
   2,
-  [0],
+  [],
   ([handle, text], runtime) =>
     new IOPrim(
       'hPutStr',
       () => {
-        writeLazily(text, runtime, (handle as ConValue).con.tag === 0 ? 'stdout' : 'stderr', '');
+        const value = runtime.machine.force(handle) as ConValue;
+        writeLazily(text, runtime, value.con.tag === 0 ? 'stdout' : 'stderr', '');
         return unit();
       },
-      [text]
+      [handle, text]
     )
 );
 define('divZeroError', 0, [], () => {

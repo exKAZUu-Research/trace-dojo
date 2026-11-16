@@ -13,6 +13,7 @@ export function executeHaskellProgram(source: string, input?: ProgramInput): Pro
     compiled = compileProgram(source);
   } catch (error) {
     if (error instanceof CompileError) return { kind: 'compileError', diagnostics: error.diagnostics };
+    if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };
     throw error;
   }
   try {

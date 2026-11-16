@@ -1,4 +1,5 @@
-// code-gauge-allow-file fileNcss 847 -- The Core generator covers every construct of the language in one pass over shared state.
+// code-gauge-allow-file fileNcss 853 -- The Core generator covers every construct of the language in one pass over shared state.
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   CHAR_TYPE,
   CONS_CON,
@@ -1137,7 +1138,8 @@ export class Codegen {
   }
 
   /** A numeric literal: a constant for the standard types, else `fromInteger` or `fromRational` of it. */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Each branch is one literal kind with its overloaded or fixed type.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Each branch is one literal kind with its overloaded or fixed type.
+  // code-gauge-allow functionNcss 32 -- Literal lowering keeps numeric precision and overloaded evidence together.
   private literalCore(
     lit: Extract<RPat, { k: 'lit' }>['lit'],
     negative: boolean,
@@ -1164,6 +1166,9 @@ export class Codegen {
     }
     const value = negative ? -lit.value : lit.value;
     if (typeEntity === DOUBLE_TYPE) return { k: 'lit', value };
+    if (typeEntity === FLOAT_TYPE && (!Number.isFinite(value) || value === 0)) {
+      return { k: 'lit', value: Math.fround(value) };
+    }
     const { numerator, denominator } = exactRatio(lit.text, negative);
     if (typeEntity === FLOAT_TYPE) return { k: 'lit', value: rationalToFloat(numerator, denominator) };
     const ratio: Core = {
@@ -1360,12 +1365,13 @@ function patternText(pat: RPat): string {
 function exactRatio(text: string, negative: boolean): { numerator: bigint; denominator: bigint } {
   const match = /^(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(text) as RegExpExecArray;
   const digits = BigInt(`${match[1]}${match[2] ?? ''}`);
-  let exponent = (match[3] ? Number(match[3]) : 0) - (match[2]?.length ?? 0);
+  const exponent = (match[3] ? Number(match[3]) : 0) - (match[2]?.length ?? 0);
+  if (digits === 0n) return { numerator: 0n, denominator: 1n };
+  if (Math.abs(exponent) + text.length > LIMITS.maxStringLength) throw new ExecutionLimitError('operations');
   let numerator = digits;
   let denominator = 1n;
   if (exponent >= 0) numerator *= 10n ** BigInt(exponent);
   else denominator = 10n ** BigInt(-exponent);
-  exponent = 0;
   const divisor = gcd(numerator, denominator);
   numerator /= divisor;
   denominator /= divisor;

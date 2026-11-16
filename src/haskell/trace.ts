@@ -154,12 +154,21 @@ function traceInt(value: bigint): number | bigint {
   return Number.isSafeInteger(number) ? number : value;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- One branch per kind of value shown as a scalar.
+// code-gauge-allow functionCognitiveComplexity 26 -- One branch per kind of value shown as a scalar.
+// code-gauge-allow functionNcss 34 -- Scalar formatting handles primitive values and library abstract values together.
 function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Scalar | typeof NOT_SCALAR {
   if (depth > 20) return NOT_SCALAR;
   if (typeof value === 'bigint') return traceInt(value);
   if (typeof value === 'number' || typeof value === 'string') return value;
   if (!(value instanceof ConValue)) return NOT_SCALAR;
+  if (containerKind(value)) return NOT_SCALAR;
+  if (value.con.type.module === 'Base' && value.con.type.name === 'Ratio') {
+    const numerator = forceForDisplay(runtime, value.fields[0]);
+    const denominator = forceForDisplay(runtime, value.fields[1]);
+    return typeof numerator === 'bigint' && typeof denominator === 'bigint'
+      ? `${numerator} % ${denominator}`
+      : NOT_SCALAR;
+  }
   if (value.con.type.name === 'Bool' && value.con.type.module === 'Base') return value.con.tag === 1;
   if (value.con === CONS_CON || value.con === NIL_CON) {
     const items = listItems(runtime, value);
@@ -182,7 +191,8 @@ function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Sc
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows Nothing as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
-// code-gauge-allow functionCognitiveComplexity 20 -- One branch per kind of value shown as a node.
+// code-gauge-allow functionCognitiveComplexity 25 -- One branch per kind of value shown as a node.
+// code-gauge-allow functionNcss 32 -- Node formatting dispatches on each supported value representation.
 function displayNodeOf(runtime: Runtime, value: Value, type: Type, depth: number): DisplayNode | undefined {
   if (depth > 20) return { kind: 'value', value: '…' };
   if (typeof value === 'bigint') return { kind: 'value', value: traceInt(value) };
@@ -195,6 +205,12 @@ function displayNodeOf(runtime: Runtime, value: Value, type: Type, depth: number
     };
   }
   if (!(value instanceof ConValue) || isHidden(value, type)) return undefined;
+  const container = containerKind(value);
+  if (container) return containerNodeOf(runtime, value, type, depth, container);
+  if (value.con.type.module === 'Base' && value.con.type.name === 'Ratio') {
+    const scalar = scalarOf(runtime, value, type, depth);
+    return typeof scalar === 'string' ? { kind: 'value', value: scalar } : undefined;
+  }
   const con = value.con;
   if (con.type.name === 'Bool' && con.type.module === 'Base') return { kind: 'value', value: con.tag === 1 };
   if (con === CONS_CON || con === NIL_CON) return listNodeOf(runtime, value, type, depth);
@@ -206,6 +222,49 @@ function displayNodeOf(runtime: Runtime, value: Value, type: Type, depth: number
   }
   if (value.fields.length === 0) return { kind: 'value', value: con.name };
   return dataNodeOf(runtime, value, type, depth);
+}
+
+function containerKind(value: ConValue): 'map' | 'set' | undefined {
+  if (value.con.type.module === 'Data.Map.Internal') return 'map';
+  if (value.con.type.module === 'Data.Set.Internal') return 'set';
+  return undefined;
+}
+
+// code-gauge-allow functionCognitiveComplexity 18 -- One bounded in-order walk handles the shared Set and Map tree representation.
+function containerNodeOf(
+  runtime: Runtime,
+  value: ConValue,
+  type: Type,
+  depth: number,
+  kind: 'map' | 'set'
+): DisplayNode {
+  const entries: Record<string, DisplayNode> = {};
+  let count = 0;
+  const visit = (slot: Slot): boolean => {
+    const node = forceForDisplay(runtime, slot);
+    if (!(node instanceof ConValue)) return false;
+    if (node.fields.length === 0) return true;
+    const left = kind === 'map' ? 3 : 2;
+    if (!visit(node.fields[left]) || count >= MAX_ELEMENTS) return false;
+    const key = forceForDisplay(runtime, node.fields[1]);
+    if (key === undefined) return false;
+    const keyNode = displayNodeOf(runtime, key, elementType(type, 0), depth + 1) ?? NULL_NODE;
+    if (kind === 'map') {
+      const item = forceForDisplay(runtime, node.fields[2]);
+      entries[count++] = {
+        kind: 'array',
+        entries: {
+          0: keyNode,
+          1:
+            item === undefined
+              ? NULL_NODE
+              : (displayNodeOf(runtime, item, elementType(type, 1), depth + 1) ?? NULL_NODE),
+        },
+      };
+    } else entries[count++] = keyNode;
+    return visit(node.fields[left + 1]);
+  };
+  return visit(value) ? { kind: 'array', entries } : { kind: 'value', value: '…' };
 }
 
 function listNodeOf(runtime: Runtime, value: ConValue, type: Type, depth: number): DisplayNode {

@@ -149,10 +149,10 @@ formatOne spec@(Spec minus plus space zero alt width prec c) u = case u of
              else badChar
     badChar = perror ("bad formatting char " ++ show c)
     digitsMin ds = case prec of
-      Just p -> replicate (p - length ds) '0' ++ ds
+      Just p -> if p == 0 && ds == "0" then "" else replicate (p - length ds) '0' ++ ds
       Nothing -> ds
     unsigned n bound = if n < 0 && bound > 0 then bound + n else n
-    prefixAlt p ds = if alt then p ++ ds else ds
+    prefixAlt p ds = if alt && not (null ds) && ds /= "0" && not (p == "0" && head ds == '0') then p ++ ds else ds
     signed n ds = if n < 0 then '-' : ds else if plus then '+' : ds else if space then ' ' : ds else ds
     signedDouble d ds = if d < 0 || isNegativeZero d then '-' : ds else if plus then '+' : ds else if space then ' ' : ds else ds
     caseConvert = if isUpper c then map toUpper else id
@@ -160,12 +160,18 @@ formatOne spec@(Spec minus plus space zero alt width prec c) u = case u of
       'e' -> showEFloat prec x ""
       'f' -> if alt then showFFloatAlt prec x "" else showFFloat prec x ""
       _ -> if alt then showGFloatAlt prec x "" else showGFloat prec x ""
+    zeroPadding = case u of
+      UDouble _ -> True
+      UFloat _ -> True
+      _ -> case prec of
+        Nothing -> True
+        Just _ -> False
     pad numeric s = case width of
       Nothing -> s
       Just w -> let n = w - length s in
         if n <= 0 then s
         else if minus then s ++ replicate n ' '
-        else if zero && numeric then (case s of
+        else if zero && numeric && zeroPadding then (case s of
           (sign:rest) -> if sign ${BT}elem${BT} "+- " then sign : replicate n '0' ++ rest else replicate n '0' ++ s
           [] -> replicate n '0')
         else replicate n ' ' ++ s

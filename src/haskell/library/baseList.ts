@@ -427,14 +427,12 @@ scanl' f q ls = q ${BT}seq${BT} (q : (case ls of
 
 scanr :: (a -> b -> b) -> b -> [a] -> [b]
 scanr _ q0 [] = [q0]
-scanr f q0 (x:xs) = case scanr f q0 xs of
-  qs@(q:_) -> f x q : qs
+scanr f q0 (x:xs) = let qs = scanr f q0 xs in f x (head qs) : qs
 
 scanr1 :: (a -> a -> a) -> [a] -> [a]
 scanr1 _ [] = []
 scanr1 _ [x] = [x]
-scanr1 f (x:xs) = case scanr1 f xs of
-  qs@(q:_) -> f x q : qs
+scanr1 f (x:xs) = let qs = scanr1 f xs in f x (head qs) : qs
 
 iterate :: (a -> a) -> a -> [a]
 iterate f x = x : iterate f (f x)

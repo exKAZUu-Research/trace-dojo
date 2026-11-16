@@ -105,3 +105,128 @@ main = do
     expect(recording.traceItems.length).toBeGreaterThan(60);
   }
 );
+
+test('integer printf flags combine precision, prefixes and padding', () => {
+  const source = `import Text.Printf
+main = printf "%#x|%#o|%#.0x|%.0d|%08.3d|%#.3o\\n" (0::Int) (0::Int) (0::Int) (0::Int) (12::Int) (8::Int)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '0|0|||     012|010\n',
+  });
+});
+
+test('right scans produce lazy prefixes and finite suffix sums', () => {
+  const source =
+    'main = print (take 3 (scanr const 0 [1..]), take 3 (scanr1 const [1..]), scanr (+) 0 [1,2,3], scanr1 (+) [1,2,3])';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '([1,2,3],[1,2,3],[6,5,3,0],[6,5,3])\n',
+  });
+});
+
+test('Read round-trips every ASCII control character and string', () => {
+  const source = String.raw`import Data.Char
+main = print (all (\c -> (read (show c) :: Char) == c && (read (show [c]) :: String) == [c]) (map chr [0..127]))`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: 'True\n',
+  });
+});
+
+test('Read decodes numeric escapes and rejects out-of-range code points', () => {
+  const source = String.raw`main = do
+  print (read "'\\x41'" :: Char, read "\"\\o101\\x42\\67\"" :: String)
+  print (reads "'\\x110000'" :: [(Char,String)], reads "'\\o4200000'" :: [(Char,String)])`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '(\'A\',"ABC")\n([],[])\n',
+  });
+});
+
+test.each(['1e999999999999999999999', '1e-999999999999999999999'])(
+  'fractional expansion is bounded before BigInt allocation: %s',
+  (literal) => {
+    expect(executeProgram('haskell', `x :: Fractional a => a\nx = ${literal}\nmain = print (x :: Double)`)).toEqual({
+      kind: 'limitExceeded',
+      limit: 'operations',
+    });
+  }
+);
+
+test.each(['instance C [a] => C [a] where c _ = True', 'instance C (a,a) => C [a] where c _ = True'])(
+  'non-decreasing instance contexts are compile errors: %s',
+  (instance) => {
+    expect(
+      executeProgram('haskell', `class C a where c :: a -> Bool\n${instance}\nmain = print (c [1 :: Int])`).kind
+    ).toBe('compileError');
+  }
+);
+
+test('handle output actions remain lazy until executed', () => {
+  const source =
+    'import System.IO\nmain = hPutStr undefined "x" `seq` hPutStrLn undefined "y" `seq` hPrint undefined (1 :: Int) `seq` putStrLn "ok"';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: 'ok\n',
+  });
+  expect(executeProgram('haskell', 'import System.IO\nmain = hPutStr undefined "x"')).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'Prelude.undefined',
+    stdout: '',
+  });
+});
+
+test('encodeFloat handles extreme scaling and rounds directly to Float', () => {
+  const source = `main = do
+  print (encodeFloat 1 9223372036854775807 :: Double, encodeFloat 1 (-9223372036854775807) :: Double, encodeFloat (-1) (-9223372036854775807) :: Double)
+  print (encodeFloat 0 9223372036854775807 :: Float, encodeFloat 18014399583223809 0 :: Float, encodeFloat 1 (-149) :: Float)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '(Infinity,0.0,-0.0)\n(0.0,1.80144e16,1.0e-45)\n',
+  });
+});
+
+test('local IO calls retain caller turtles like top-level calls', () => {
+  const header = `main = do
+  t1 <- newTurtleAt 1 1
+  t2 <- newTurtleAt 3 3
+  walk t2
+  print 1
+`;
+  const local = `${header}  where walk t = 前に進む t`;
+  const top = `${header}\nwalk t = 前に進む t`;
+  const actual = traceProgram('haskell', local, local);
+  const expected = traceProgram('haskell', top, top);
+  expect(actual.finalTurtles).toEqual(expected.finalTurtles);
+  expect(actual.finalTurtles).toHaveLength(2);
+  expect(actual.traceItems.map((item) => item.turtles)).toEqual(expected.traceItems.map((item) => item.turtles));
+});
+
+test('abstract collections display ordered contents and ratios display their value', () => {
+  const source = `import qualified Data.Map as M
+import qualified Data.Set as S
+import Data.Ratio
+main = do
+  let m = M.fromList [("banana",5 :: Int),("apple",3)]
+      s = S.fromList "ih"
+      r = 6 % 8 :: Rational
+  print (m,s,r)`;
+  const last = traceProgram('haskell', source, source).traceItems.at(-1);
+  expect(last?.vars.r).toBe('3 % 4');
+  expect(last?.referenceVars).toMatchObject({
+    m: {
+      kind: 'array',
+      entries: {
+        0: { kind: 'array', entries: { 0: { kind: 'value', value: 'apple' }, 1: { kind: 'value', value: 3 } } },
+        1: { kind: 'array', entries: { 0: { kind: 'value', value: 'banana' }, 1: { kind: 'value', value: 5 } } },
+      },
+    },
+    s: { kind: 'array', entries: { 0: { kind: 'value', value: 'h' }, 1: { kind: 'value', value: 'i' } } },
+  });
+});

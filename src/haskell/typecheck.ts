@@ -277,8 +277,28 @@ function declareInstance(checker: Checker, decl: RInstanceDecl, moduleName: stri
     throw unsupportedError(decl.span, '型変数だけを型に書いたインスタンス');
   }
   const info = makeInstance(decl.cls, kinds.map(defaultKind), head, context, moduleName, decl.span);
+  validateInstanceTermination(info, decl.span);
   registerInstance(checker, info, decl.span);
   return { info, bindings: decl.bindings, span: decl.span };
+}
+
+function validateInstanceTermination(info: InstanceInfo, span: Span): void {
+  const headVars = new Map<number, number>();
+  const headSize = instanceTypeSize(info.head, headVars);
+  for (const pred of info.context) {
+    const vars = new Map<number, number>();
+    const size = instanceTypeSize(pred.type, vars);
+    if (size >= headSize || [...vars].some(([index, count]) => count > (headVars.get(index) ?? 0))) {
+      throw compileError(span, 'インスタンスの文脈は、定義する型より小さくなければなりません。');
+    }
+  }
+}
+
+function instanceTypeSize(type: Type, vars: Map<number, number>): number {
+  const current = prune(type);
+  if (current.tag === 'tgen') vars.set(current.index, (vars.get(current.index) ?? 0) + 1);
+  if (current.tag === 'tap') return instanceTypeSize(current.fn, vars) + instanceTypeSize(current.arg, vars);
+  return 1;
 }
 
 export function makeInstance(

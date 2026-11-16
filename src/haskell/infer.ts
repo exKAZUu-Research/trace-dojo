@@ -1,4 +1,5 @@
-// code-gauge-allow-file fileNcss 697 -- The type checker keeps its inference rules beside the substitution state they share.
+// code-gauge-allow-file fileNcss 705 -- The type checker keeps its inference rules beside the substitution state they share.
+import { LIMITS } from '../interpreter/limits';
 import { CHAR_TYPE, FUNCTION_TYPE, LIST_TYPE, tupleCon } from './builtinTypes';
 import { type ClassEnv, entailByGivens, hasConstructorHead, isSubclassOf, predsEqual } from './classEnv';
 import { dependencyOrder } from './dependencies';
@@ -89,6 +90,7 @@ export class Checker {
   wanted: EvidenceHole[] = [];
   /** The types of globals whose binding group is being inferred, before they have schemes. */
   readonly globalMono = new Map<ValueEntity, Type>();
+  private reductionsRemaining = LIMITS.maxOperations;
 
   constructor(
     readonly env: ClassEnv,
@@ -171,13 +173,19 @@ export class Checker {
    * Reduces the wanted constraints by instances until each has a type variable at its head, then splits them into
    * those about the binding being generalized (retained) and those about enclosing ones (deferred).
    */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Context reduction follows the steps of the Haskell report in one loop.
+  // code-gauge-allow functionCognitiveComplexity 26 -- Context reduction follows the steps of the Haskell report in one loop.
+  // code-gauge-allow functionNcss 34 -- Reduction and its depth/work guards operate on the same constraint queue.
   simplify(holes: EvidenceHole[], outerLevel: number): { retained: EvidenceHole[]; deferred: EvidenceHole[] } {
     const retained: EvidenceHole[] = [];
     const deferred: EvidenceHole[] = [];
     const work = [...holes];
+    const depths = new Map<EvidenceHole, number>();
     while (work.length > 0) {
       const hole = work.shift() as EvidenceHole;
+      const depth = depths.get(hole) ?? 0;
+      if (--this.reductionsRemaining < 0 || depth > 200) {
+        typeError(hole.span, '型クラスの制約の計算が上限を超えました。');
+      }
       if (hole.solution) continue;
       const pred = { cls: hole.pred.cls, type: zonk(hole.pred.type) };
       hole.pred = pred;
@@ -194,6 +202,7 @@ export class Checker {
             origin: hole.origin,
           }));
           hole.solution = { kind: 'instance', instance, args: sub.map((subHole) => ({ kind: 'hole', hole: subHole })) };
+          for (const child of sub) depths.set(child, depth + 1);
           work.push(...sub);
           continue;
         }
