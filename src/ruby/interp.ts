@@ -68,6 +68,7 @@ import {
 } from './objects';
 import { bindParams } from './params';
 import { type DeconstructionCache, guardFailed, matchPattern, noMatchingPattern } from './patterns';
+import { regexpLiteralEncoding } from './regexpLiteralEncoding';
 import {
   BreakSignal,
   Frame,
@@ -87,6 +88,7 @@ import { CORE_CLASSES, CORE_MODULES, UNSUPPORTED_CONSTANTS } from './unsupported
 import {
   arr,
   classOf,
+  internFrozenString,
   isA,
   newHash,
   range,
@@ -229,12 +231,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
       const value = yield* interpolateString(e.parts, frame);
       if (!rt().frozenStringLiterals || !e.parts.every((part) => typeof part === 'string' || 'text' in part))
         return value;
-      const key = `${value.binary}:${value.usAscii}:${value.s}`;
-      const previous = rt().frozenLiteralStrings.get(key);
-      if (previous) return previous;
-      value.frozen = true;
-      rt().frozenLiteralStrings.set(key, value);
-      return value;
+      return internFrozenString(value);
     }
     case 'sym': {
       return RSymbol.of(e.name);
@@ -483,10 +480,14 @@ export function* ev(e: Expr, frame: Frame): Gen {
         combine: (binary, ascii, part) => regexpPatternEncoding(binary, ascii, part, 'dynamic'),
         validate: validateRegexpInterpolation,
       });
+      const encoding = regexpLiteralEncoding(e.flags);
+      if (encoding !== undefined && encoding !== 'u')
+        throw new UnsupportedFeatureError('正規表現の文字コードオプション');
       const regexp = regexpFromString(source, {
         ignoreCase: e.flags.includes('i'),
         multiline: e.flags.includes('m'),
         extended: e.flags.includes('x'),
+        fixedEncoding: encoding === 'u',
       });
       regexp.frozen = true;
       if (staticLiteral) rt().regexpLiterals.set(e, regexp);

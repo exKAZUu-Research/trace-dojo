@@ -1,4 +1,5 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import { rationalSequenceLast, rationalSequenceSize } from './arithmeticSequence';
 import {
   addressOf,
   caseEquals,
@@ -42,7 +43,8 @@ import {
 import { lazyDisplaySource, lazySourceDescription, setLazyDisplaySource } from './lazyDisplay';
 import { iterate, iterateYielded, STOP, zipCollections } from './libEnumerable';
 import { advertisesPublicMethod, respondsToName } from './libMeta';
-import { rangeSize } from './libRange';
+import { isNumericRangeOperand, rangeSize } from './libRange';
+import { fractionOf, isRational } from './libRational';
 import { setSize } from './libSet';
 import {
   isRubyFloat,
@@ -90,9 +92,9 @@ export function makeEnumerator(
   const spec = method === 'step' || method === '%' ? arithmeticSpec(recv, args, keywords) : undefined;
   const arithmetic =
     spec !== undefined &&
-    (spec.end === NIL || isRubyNumber(spec.end)) &&
-    isRubyNumber(spec.step) &&
-    (isRubyNumber(recv) || (recv instanceof RRange && isRubyNumber(recv.begin)));
+    (spec.end === NIL || isNumericRangeOperand(spec.end)) &&
+    isNumericRangeOperand(spec.step) &&
+    (isNumericRangeOperand(recv) || (recv instanceof RRange && isNumericRangeOperand(recv.begin)));
   const enumerator = new RObject(arithmetic ? rt().c['Enumerator::ArithmeticSequence'] : rt().c.Enumerator);
   const source: EnumeratorSource = {
     recv,
@@ -222,7 +224,7 @@ function arraySelectionSize(length: number, method: string, requested: bigint | 
   return result;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- The ordered cases for Enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity 22 -- The ordered cases for Enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 function* stepSize(recv: Value, args: Value[], keywords?: RHash): Gen<Value> {
   const { start, end: originalEnd, step, exclusive } = arithmeticSpec(recv, args, keywords);
   const end =
@@ -232,14 +234,18 @@ function* stepSize(recv: Value, args: Value[], keywords?: RHash): Gen<Value> {
     (isRubyFloat(start) || isRubyFloat(step))
       ? yield* toStepFloat(originalEnd)
       : originalEnd;
-  if (!isRubyNumber(start) || (!isRubyNumber(end) && end !== NIL) || !isRubyNumber(step)) return NIL;
+  if (!isNumericRangeOperand(start) || (!isNumericRangeOperand(end) && end !== NIL) || !isNumericRangeOperand(step))
+    return NIL;
   if (end === NIL) return Number.POSITIVE_INFINITY;
   if (typeof start === 'bigint' && typeof end === 'bigint' && typeof step === 'bigint') {
     const distance = step > 0n ? end - start : start - end;
     const adjusted = distance - (exclusive ? 1n : 0n);
     return adjusted < 0n ? 0n : adjusted / (step > 0n ? step : -step) + 1n;
   }
-  const count = floatStepCount(Number(start), Number(end), Number(step), exclusive);
+  if ([start, end, step].some(isRational) && ![start, end, step].some(isRubyFloat)) {
+    return yield* rationalSequenceSize(start, end, step, exclusive);
+  }
+  const count = floatStepCount(yield* toStepFloat(start), yield* toStepFloat(end), yield* toStepFloat(step), exclusive);
   if (Number.isNaN(count)) throw floatDomainError('NaN');
   return Number.isFinite(count) ? BigInt(count) : Number.POSITIVE_INFINITY;
 }
@@ -437,14 +443,15 @@ def('Enumerator::ArithmeticSequence', 'exclude_end?', 0, (self: RObject) => {
   const source = sourceOf(self);
   return arithmeticSpec(source.recv, source.iterationArgs ?? source.args, source.keywords).exclusive;
 });
-// code-gauge-allow functionCognitiveComplexity 26 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity 27 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 def('Enumerator::ArithmeticSequence', 'first', [0, 1], function* (self: RObject, args) {
   const source = sourceOf(self);
   const { start, end, step } = arithmeticSpec(source.recv, source.iterationArgs ?? source.args, source.keywords);
   const floatSequence = isRubyFloat(start) || isRubyFloat(end) || isRubyFloat(step);
-  const first = floatSequence ? Number(start) : start;
+  const first = floatSequence ? yield* toStepFloat(start) : start;
+  const stepSign = isRational(step) ? fractionOf(step).numerator : Number(step);
   const order = yield* arithmeticFirstOrder(start, end, floatSequence, args.length === 0);
-  const empty = order !== undefined && ((Number(step) > 0 && order > 0) || (Number(step) < 0 && order < 0));
+  const empty = order !== undefined && ((stepSign > 0 && order > 0) || (stepSign < 0 && order < 0));
   if (args.length === 0) {
     if (isRubyFloat(step) && Number.isNaN(Number(step))) throw comparisonFailed(step, 0n);
     return empty ? NIL : start;
@@ -481,7 +488,7 @@ function* arithmeticFirstOrder(
   return yield* spaceship(start, customFloatEnd ? yield* toStepFloat(end) : end);
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity 17 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 def('Enumerator::ArithmeticSequence', 'last', [0, 1], function* (self: RObject, args) {
   const source = sourceOf(self);
   const { start, step, end, exclusive } = arithmeticSpec(
@@ -490,6 +497,7 @@ def('Enumerator::ArithmeticSequence', 'last', [0, 1], function* (self: RObject, 
     source.keywords
   );
   if (end === NIL) throw rangeError('cannot get the last element of endless arithmetic sequence');
+  if ([start, end, step].some(isRational)) return yield* rationalSequenceLast(start, end, step, exclusive, args);
   if (isRubyFloat(step) && Number.isNaN(Number(step))) throw floatDomainError('NaN');
   const index = arithmeticLastIndex(
     start as bigint | number,
@@ -596,10 +604,14 @@ function arithmeticLastValue(
 
 function canonicalNumber(value: Value): string {
   if (typeof value === 'bigint') return `i${value}`;
+  if (isRational(value)) {
+    const fraction = fractionOf(value);
+    return `q${fraction.numerator}/${fraction.denominator}`;
+  }
   return `f${Number(value) === 0 ? 0 : Number(value)}`;
 }
 for (const name of ['==', '===', 'eql?'])
-  def('Enumerator::ArithmeticSequence', name, 1, (self: RObject, [other]) => {
+  def('Enumerator::ArithmeticSequence', name, 1, function* (self: RObject, [other]) {
     if (!(other instanceof RObject) || other.cls !== rt().c['Enumerator::ArithmeticSequence']) return false;
     const left = sourceOf(self);
     const right = sourceOf(other);
@@ -607,11 +619,9 @@ for (const name of ['==', '===', 'eql?'])
     const b = arithmeticSpec(right.recv, right.iterationArgs ?? right.args, right.keywords);
     return (
       a.exclusive === b.exclusive &&
-      numericCompare(a.start as bigint | number, b.start as bigint | number) === 0 &&
-      (a.end === NIL
-        ? b.end === NIL
-        : b.end !== NIL && numericCompare(a.end as bigint | number, b.end as bigint | number) === 0) &&
-      numericCompare(a.step as bigint | number, b.step as bigint | number) === 0
+      (yield* spaceship(a.start, b.start)) === 0 &&
+      (a.end === NIL ? b.end === NIL : b.end !== NIL && (yield* spaceship(a.end, b.end)) === 0) &&
+      (yield* spaceship(a.step, b.step)) === 0
     );
   });
 // code-gauge-allow functionCognitiveComplexity 30 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.

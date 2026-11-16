@@ -4,6 +4,12 @@ import { ExecutionLimitError } from '../interpreter/limits';
 import { RegexpEncodingError } from './regexpEscapes';
 import { UnsupportedFeatureError } from './runtime';
 
+export function regexpHasCharacterMode(source: string, extended: boolean): boolean {
+  return regexpSourceTokens(source, extended).some(
+    (token) => (token.type === 'GroupOpen' || token.type === 'Directive') && /^\(\?[imxadu]*[adu]/.test(token.raw)
+  );
+}
+
 export function regexpLexicalSource(source: string, extended: boolean): string {
   return regexpSourceTokens(source, extended)
     .map((token) => sourceToken(token, source))
@@ -41,10 +47,10 @@ function sourceToken(token: Token, source: string): string {
     (token.type === 'GroupOpen' && token.kind === 'group') ||
     (token.type === 'Directive' && token.kind === 'flags')
   ) {
-    const options = /^\(\?([imx]*)(?:-([imx]*))?([:)])$/.exec(token.raw);
+    const options = /^\(\?([imxadu]*)(?:-([imx]*))?([:)])$/.exec(token.raw);
     if (options) {
       const disabled = new Set(options[2]);
-      const on = [...new Set(options[1])].filter((flag) => flag !== 'x' && !disabled.has(flag)).join('');
+      const on = [...new Set(options[1])].filter((flag) => !'xadu'.includes(flag) && !disabled.has(flag)).join('');
       const off = [...disabled].filter((flag) => flag !== 'x').join('');
       return on || off || options[3] === ':' ? `(?${on}${off ? `-${off}` : ''}${options[3]}` : '';
     }

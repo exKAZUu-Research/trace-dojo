@@ -12391,3 +12391,273 @@ Rational(a,b)
 puts :done`)
   ).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
+
+test('External enum_for and to_enum preserve keyword arguments', () => {
+  expect(
+    run('class C;def each(a:);yield a;end;end;p C.new.to_enum(:each,a:3).next;p C.new.enum_for(:each,a:4).next')
+  ).toMatchObject({ kind: 'executed', stdout: '3\n4\n', uncaughtException: undefined });
+});
+
+test('Rational steps expose native sequence sizes', () => {
+  expect(run('p (0..1).step(Rational(1,3)).size;p (0..Rational(5,3)).step(1).size')).toMatchObject({
+    kind: 'executed',
+    stdout: '4\n2\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Literal and Hash keys share frozen String identity', () => {
+  expect(
+    run(
+      '# frozen_string_literal: true\na="foo";h={String.new("foo")=>1};p a.equal?(h.keys[0]);h2={String.new("bar")=>1};p "bar".equal?(h2.keys[0])'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\n', uncaughtException: undefined });
+});
+
+test('UTF-8 regexp literal options preserve source and encoding', () => {
+  expect(run('puts :before;p /a/u.source,/a/u.encoding,/a/u.options;p /日本語/u.source')).toMatchObject({
+    kind: 'executed',
+    stdout: 'before\n"a"\n#<Encoding:UTF-8>\n16\n"日本語"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Rational arithmetic sequence metadata and last values match native protocols', () => {
+  expect(
+    run(
+      'a=(0..1).step(Rational(1,3));p a.class,a.begin,a.end,a.step,a.size,a.first(3),a.last,a.last(3);p (0..Rational(5,3)).step(1).class'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'Enumerator::ArithmeticSequence\n0\n1\n(1/3)\n4\n[0, (1/3), (2/3)]\n(1/1)\n[0.3333333333333333, 0.6666666666666666, 1.0]\nEnumerator::ArithmeticSequence\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Struct unknown String keywords use their unquoted text', () => {
+  expect(
+    run(
+      'S=Struct.new(:a,keyword_init:true);[{"x"=>3},{"y z"=>3},{1=>2,"b"=>3}].each{|h|begin;S.new(**h);rescue ArgumentError=>e;p e.message;end}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '"unknown keywords: x"\n"unknown keywords: y z"\n"unknown keywords: 1, b"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Frozen interning preserves encoding distinctions', () => {
+  expect(
+    run(
+      '# frozen_string_literal: true\na="abc";h={String.new("abc")=>1};f=String.new("abc").freeze;h2={f=>2};p a.equal?(h.keys[0]),f.equal?(h2.keys[0]),a.equal?(f)'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\nfalse\n', uncaughtException: undefined });
+});
+
+test('Native equality retains Rational values inside collections', () => {
+  expect(run('p [1].include?(Rational(1,1)),[0.5].include?(Rational(1,2));p [1.0]==[Rational(1,1)]')).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\ntrue\ntrue\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Literal encoding options honor the final encoding selector', () => {
+  expect(run('p /a/nu.encoding,/a/nu.options,/日本語/u.source')).toMatchObject({
+    kind: 'executed',
+    stdout: '#<Encoding:UTF-8>\n16\n"日本語"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Valid binary escapes retain encoding capability handling', () => {
+  expect(run(String.raw`puts :before;p /\xFF/n`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'before\n',
+    uncaughtException: '正規表現の文字コードオプションは、この採点環境では使えません。',
+  });
+});
+
+test('Struct unknown keyword text retains String bytes', () => {
+  expect(
+    run('S=Struct.new(:a,keyword_init:true);begin;S.new("é"=>1);rescue ArgumentError=>e;p e.message;end')
+  ).toMatchObject({ kind: 'executed', stdout: '"unknown keywords: \\xC3\\xA9"\n', uncaughtException: undefined });
+});
+
+test('Rational sequence boundary: e=(0...1).step(Rational(1,3))', () => {
+  expect(
+    run('e=(0...1).step(Rational(1,3));p [e.class,e.begin,e.end,e.step,e.size,e.first(3),e.last,e.last(2),e==e]')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[Enumerator::ArithmeticSequence, 0, 1, (1/3), 3, [0, (1/3), (2/3)], (2/3), [0.3333333333333333, 0.6666666666666666], true]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Rational sequence boundary: e=(0...1).step(Rational(-1,3))', () => {
+  expect(
+    run('e=(0...1).step(Rational(-1,3));p [e.class,e.begin,e.end,e.step,e.size,e.first(3),e.last,e.last(2),e==e]')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '[Enumerator::ArithmeticSequence, 0, 1, (-1/3), 0, [], nil, [], true]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Rational sequence boundary: e=(0...Rational(5,3)).step(Rational(1,3))', () => {
+  expect(
+    run(
+      'e=(0...Rational(5,3)).step(Rational(1,3));p [e.class,e.begin,e.end,e.step,e.size,e.first(3),e.last,e.last(2),e==e]'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[Enumerator::ArithmeticSequence, 0, (5/3), (1/3), 6, [0, (1/3), (2/3)], (4/3), [1.0, 1.3333333333333333], true]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Rational sequence boundary: e=(0..-1).step(Rational(1,3))', () => {
+  expect(
+    run('e=(0..-1).step(Rational(1,3));p [e.class,e.begin,e.end,e.step,e.size,e.first(3),e.last,e.last(2),e==e]')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '[Enumerator::ArithmeticSequence, 0, -1, (1/3), 0, [], nil, [], true]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Rational sequence boundary: e=(Rational(1,3)..1).step(0.5)', () => {
+  expect(
+    run('e=(Rational(1,3)..1).step(0.5);p [e.class,e.begin,e.end,e.step,e.size,e.first(3),e.last,e.last(2),e==e]')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[Enumerator::ArithmeticSequence, (1/3), 1, 0.5, 2, [0.3333333333333333, 0.8333333333333333], 0.8333333333333333, [0.33333333333333326, 0.8333333333333333], true]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Rational sequence boundary: e=(Rational(1,3)..Rational(5,3)).step(0.5)', () => {
+  expect(
+    run(
+      'e=(Rational(1,3)..Rational(5,3)).step(0.5);p [e.class,e.begin,e.end,e.step,e.size,e.first(3),e.last,e.last(2),e==e]'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[Enumerator::ArithmeticSequence, (1/3), (5/3), 0.5, 3, [0.3333333333333333, 0.8333333333333333, 1.3333333333333333], 1.3333333333333333, [0.8333333333333333, 1.3333333333333333], true]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Rational sequence boundary: e=(Rational(1,3)..2.0).step(0.5)', () => {
+  expect(
+    run('e=(Rational(1,3)..2.0).step(0.5);p [e.class,e.begin,e.end,e.step,e.size,e.first(3),e.last,e.last(2),e==e]')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[Enumerator::ArithmeticSequence, (1/3), 2.0, 0.5, 4, [0.3333333333333333, 0.8333333333333333, 1.3333333333333333], 1.8333333333333333, [1.3333333333333333, 1.8333333333333333], true]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Rational sequence boundary: e=(Rational(1,3)..-1).step(0.5)', () => {
+  expect(
+    run('e=(Rational(1,3)..-1).step(0.5);p [e.class,e.begin,e.end,e.step,e.size,e.first(3),e.last,e.last(2),e==e]')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '[Enumerator::ArithmeticSequence, (1/3), -1, 0.5, 0, [], nil, [], true]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Rational sequence boundary: e=(0.0..2.0).step(Rational(1,3))', () => {
+  expect(
+    run('e=(0.0..2.0).step(Rational(1,3));p [e.class,e.begin,e.end,e.step,e.size,e.first(3),e.last,e.last(2),e==e]')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[Enumerator::ArithmeticSequence, 0.0, 2.0, (1/3), 7, [0.0, 0.3333333333333333, 0.6666666666666666], 2.0, [1.6666666666666667, 2.0], true]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Rational sequence boundary: e=(2..Rational(5,3)).step(0.5)', () => {
+  expect(
+    run('e=(2..Rational(5,3)).step(0.5);p [e.class,e.begin,e.end,e.step,e.size,e.first(3),e.last,e.last(2),e==e]')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '[Enumerator::ArithmeticSequence, 2, (5/3), 0.5, 0, [], nil, [], true]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Rational sequence boundary: e=(2..-1).step(Rational(1,3))', () => {
+  expect(
+    run('e=(2..-1).step(Rational(1,3));p [e.class,e.begin,e.end,e.step,e.size,e.first(3),e.last,e.last(2),e==e]')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '[Enumerator::ArithmeticSequence, 2, -1, (1/3), 0, [], nil, [], true]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Rational sequence boundary: e=(2...-1).step(Rational(-1,3))', () => {
+  expect(
+    run('e=(2...-1).step(Rational(-1,3));p [e.class,e.begin,e.end,e.step,e.size,e.first(3),e.last,e.last(2),e==e]')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[Enumerator::ArithmeticSequence, 2, -1, (-1/3), 9, [2, (5/3), (4/3)], (-2/3), [-0.3333333333333333, -0.6666666666666666], true]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['a', 'd', 'u', 'adu', 'aa', 'a-imx'])('Ruby-valid regexp character modes fail explicitly: %s', (mode) => {
+  expect(run(`puts :before;p /(?${mode}:\\w)/`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'before\n',
+    uncaughtException: '正規表現の文字モードは、この採点環境では使えません。',
+  });
+});
+test.each(['(?-a:a)', '(?i-a:a)', '(?a-d:a)', '(?a:[)', '(?u:(', '(?d:a){2,1}'])(
+  'Invalid regexp modes and bodies reject before execution: %s',
+  (pattern) => {
+    expect(run(`puts :before;p /${pattern}/`)).toMatchObject({ kind: 'compileError' });
+  }
+);
+test.each(['e', 's', 'n'])('Non-UTF-8 literal options preserve runtime capability refusal: %s', (flag) => {
+  expect(run(`puts :before;p /a/${flag}`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'before\n',
+    uncaughtException: '正規表現の文字コードオプションは、この採点環境では使えません。',
+  });
+});
+test.each([
+  String.raw`/é/n`,
+  String.raw`/é/e`,
+  String.raw`/é/s`,
+  String.raw`/\u{e9}/e`,
+  String.raw`/\xFF/e`,
+  String.raw`/\x80/s`,
+  String.raw`/\xFF/u`,
+])('Literal encoding errors reject before execution: %s', (pattern) => {
+  expect(run(`puts :before;p ${pattern}`)).toMatchObject({ kind: 'compileError' });
+});
+test.each([String.raw`/\xA4\xA2/e`, String.raw`/\x82\xA0/s`])(
+  'Valid non-UTF-8 escaped patterns remain explicit capability failures: %s',
+  (pattern) => {
+    expect(run(`puts :before;p ${pattern}`)).toMatchObject({
+      kind: 'executed',
+      stdout: 'before\n',
+      uncaughtException: '正規表現の文字コードオプションは、この採点環境では使えません。',
+    });
+  }
+);
+
+test('Regexp literal encoding validates source characters even in extended comments', () => {
+  expect(run('puts :before;p /a # é/ex')).toMatchObject({ kind: 'compileError' });
+});

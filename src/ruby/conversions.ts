@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 657 -- Ruby value conversion and encoded inspection share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 658 -- Ruby value conversion and encoded inspection share representation and state; splitting registration by size would scatter that concern.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { isCoreMethod } from './define';
 import { argumentError, implicitConversionError, rangeError, rubyError, typeError } from './errors';
@@ -668,9 +668,9 @@ export function* rEquals(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = n
       if (b instanceof RFloat && isOverridden(b, '==')) return truthy(yield* callMethod(b, '==', [a]));
       return numericEquals(typeof a === 'bigint' ? a : Number(a), typeof b === 'bigint' ? b : Number(b));
     }
-    if (isOverridden(b, '==')) {
+    const equality = classOf(b).findMethod('==');
+    if (equality && equality.owner !== rt().c.BasicObject && equality.owner !== rt().c.Kernel)
       return truthy(yield* callMethod(b, '==', [a]));
-    }
     return false;
   }
   if (typeof a !== 'object' || a === NIL || a instanceof RSymbol) return false;

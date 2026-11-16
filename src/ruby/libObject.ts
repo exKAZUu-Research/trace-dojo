@@ -316,18 +316,24 @@ def('Kernel', 'display', [0, 1], function* (self, args) {
   yield* callMethod(stream, 'write', [self]);
   return NIL;
 });
-def('Kernel', ['to_enum', 'enum_for'], [0, -1], function* (self, args, block) {
-  const [method = sym('each'), ...rest] = args;
-  if (method instanceof RSymbol) return makeEnumerator(self, method.key, rest, undefined, { sizeBlock: block });
-  const converted = method instanceof RString ? method : yield* tryImplicitConversion(method, 'to_str');
-  if (converted instanceof RString)
-    return makeEnumerator(self, identifierSymbol(converted).key, rest, undefined, { sizeBlock: block });
-  if (converted !== undefined && converted !== NIL)
-    throw typeError(
-      `can't convert ${realClassOf(method).name} to String (${realClassOf(method).name}#to_str gives ${realClassOf(converted).name})`
-    );
-  throw typeError(`${yield* inspect(method)} is not a symbol nor a string`);
-});
+def(
+  'Kernel',
+  ['to_enum', 'enum_for'],
+  [0, -1],
+  function* (self, args, block, keywords) {
+    const [method = sym('each'), ...rest] = args;
+    if (method instanceof RSymbol) return makeEnumerator(self, method.key, rest, keywords, { sizeBlock: block });
+    const converted = method instanceof RString ? method : yield* tryImplicitConversion(method, 'to_str');
+    if (converted instanceof RString)
+      return makeEnumerator(self, identifierSymbol(converted).key, rest, keywords, { sizeBlock: block });
+    if (converted !== undefined && converted !== NIL)
+      throw typeError(
+        `can't convert ${realClassOf(method).name} to String (${realClassOf(method).name}#to_str gives ${realClassOf(converted).name})`
+      );
+    throw typeError(`${yield* inspect(method)} is not a symbol nor a string`);
+  },
+  { keywords: true }
+);
 
 // Kernel functions ----------------------------------------------------------------------------------------------------
 

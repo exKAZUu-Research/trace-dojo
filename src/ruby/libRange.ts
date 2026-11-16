@@ -523,7 +523,7 @@ for (const method of ['step', '%'])
     return yield* stepRange(self, step, block);
   });
 
-function isNumericRangeOperand(value: Value): boolean {
+export function isNumericRangeOperand(value: Value): boolean {
   return isRubyNumber(value) || isRational(value);
 }
 

@@ -35,6 +35,15 @@ export function asciiString(s: string): RString {
   return value;
 }
 
+export function internFrozenString(value: RString): RString {
+  const key = `${value.binary}:${value.usAscii}:${value.s}`;
+  const previous = rt().frozenStrings.get(key);
+  if (previous) return previous;
+  value.frozen = true;
+  rt().frozenStrings.set(key, value);
+  return value;
+}
+
 export function frozenCoreString(text: string): RString {
   const runtime = rt();
   let value = runtime.coreStrings.get(text);

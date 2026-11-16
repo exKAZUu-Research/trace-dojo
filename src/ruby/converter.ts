@@ -25,6 +25,7 @@ import type {
 import { decodeDoubleQuoted, decodeSingleQuoted } from './escapes';
 import { translate } from './libRegexp';
 import { regexpCaptureNames, regexpHasNumberedBackref } from './regexpCaptureNames';
+import { regexpLiteralEncoding, validateRegexpLiteralEncoding } from './regexpLiteralEncoding';
 import { UnsupportedFeatureError } from './runtime';
 
 /** The local variables of one scope; a block's scope sees its parents' variables. */
@@ -698,7 +699,7 @@ export class Converter {
   private regex(node: Node): Expr {
     const text = node.text;
     const flags = /[a-z]*$/.exec(text)?.[0] ?? '';
-    if (/[^imxo]/.test(flags)) this.unsupported(node, `正規表現のオプション（${flags}）`);
+    if (/[^imxounes]/.test(flags)) this.fail(node, '正規表現のオプションの書き方に誤りがあります。');
     if (flags.includes('o')) this.unsupported(node, '正規表現の o オプション');
     const parts: StrPart[] = [];
     let literal = '';
@@ -728,7 +729,9 @@ export class Converter {
     )
       this.fail(node, '名前付きキャプチャと番号付き後方参照は一緒に使えません。');
     try {
-      translate(source, flags.includes('x'), flags.includes('m'));
+      validateRegexpLiteralEncoding(source, flags);
+      const encoding = regexpLiteralEncoding(flags);
+      translate(source, flags.includes('x'), flags.includes('m'), false, encoding !== undefined && encoding !== 'u');
     } catch (error) {
       if (error instanceof UnsupportedFeatureError) {
         if (error.message.startsWith('重複する名前付きキャプチャ'))

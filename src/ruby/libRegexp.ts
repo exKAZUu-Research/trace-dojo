@@ -49,7 +49,7 @@ import { hostRegexpCaptureNames, regexpCaptureNames, regexpHasNumberedBackref } 
 import { regexpHasExpandingCasefold } from './regexpCasefold';
 import { RegexpCursor } from './regexpCursor';
 import { decodeRegexpByteEscape, regexpByteEscape, RegexpEncodingError } from './regexpEscapes';
-import { regexpLexicalSource } from './regexpLexicalSource';
+import { regexpHasCharacterMode, regexpLexicalSource } from './regexpLexicalSource';
 import { regexpOuterOptions } from './regexpOuterOptions';
 import { charIndex, regexpByteIndex, unitIndex } from './regexpPositions';
 import {
@@ -178,8 +178,10 @@ export function translate(
   ascii = false,
   ignoreCase = false
 ): string {
+  const characterMode = regexpHasCharacterMode(source, extended);
   source = regexpLexicalSource(source, extended);
   validateRegexpSourceSyntax(source, false, ascii);
+  if (characterMode) throw unsupportedSyntax('文字モード');
   const classes = ascii ? ASCII_POSIX_CLASSES : POSIX_CLASSES;
   for (const name of regexpCaptureNames(source))
     if (!/^[\p{ID_Start}_][\p{ID_Continue}_]*$/u.test(name)) throw unsupportedSyntax('特殊なキャプチャ名');

@@ -4,7 +4,7 @@ import { frozenError, runtimeError } from './errors';
 import { callMethod, callProc, type Gen, isGenerator, runToEnd } from './interp';
 import { type HashEntry, RArray, RBasic, RHash, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
-import { classOf, sameIdentity, snapshot, str, stringBytes, truthy } from './values';
+import { classOf, internFrozenString, sameIdentity, snapshot, str, stringBytes, truthy } from './values';
 
 interface HashTraversal {
   cycle: boolean;
@@ -278,16 +278,11 @@ function insertHashEntry(hash: RHash, base: string, slot: string, key: Value, va
 }
 
 function frozenCopy(key: RString): RString {
-  const id = `${key.binary}:${key.usAscii}:${key.s}`;
-  const cached = rt().frozenHashKeys.get(id);
-  if (cached) return cached;
   const copy = str(key.s);
   copy.binary = key.binary;
   copy.usAscii = key.usAscii;
   copy.rawBytes = key.rawBytes ? Uint8Array.from(key.rawBytes) : undefined;
-  copy.frozen = true;
-  rt().frozenHashKeys.set(id, copy);
-  return copy;
+  return internFrozenString(copy);
 }
 
 export function* hashDelete(hash: RHash, key: Value): Gen<HashEntry | undefined> {

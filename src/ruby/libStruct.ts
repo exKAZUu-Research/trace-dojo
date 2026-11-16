@@ -301,12 +301,14 @@ def(
         const bytes =
           entry.key instanceof RSymbol
             ? (entry.key.bytes ?? new TextEncoder().encode(entry.key.name))
-            : new TextEncoder().encode(yield* inspect(entry.key));
+            : entry.key instanceof RString
+              ? stringBytes(entry.key)
+              : new TextEncoder().encode(yield* inspect(entry.key));
         if (bytes.some((byte) => byte >= 0x80)) {
           const encoding =
-            entry.key instanceof RSymbol && entry.key.usAscii
+            (entry.key instanceof RSymbol || entry.key instanceof RString) && entry.key.usAscii
               ? 'US-ASCII'
-              : rubyEncodingName(entry.key instanceof RSymbol && entry.key.binary);
+              : rubyEncodingName((entry.key instanceof RSymbol || entry.key instanceof RString) && entry.key.binary);
           if (nonAsciiEncoding && nonAsciiEncoding !== encoding) incompatibleEncodings ??= [nonAsciiEncoding, encoding];
           nonAsciiEncoding ??= encoding;
         }
