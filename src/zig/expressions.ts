@@ -1,5 +1,4 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-// code-gauge-allow-file fileNcss 1000 -- The file holds one layer of the compiler, whose parts share its private state.
 import {
   checked,
   divExact,
@@ -954,6 +953,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps numeric peer-type checks, budget checks, and evaluation together.
+  // code-gauge-allow functionNcss 33 -- Keeps numeric operand coercion and evaluation together.
   private arithmetic(expression: ExpressionOf<'binary'>, resultType: Type | undefined): TExpr {
     const { operator } = expression;
     // Zig gives the operands of arithmetic no result type, so `@floatFromInt(x) / 2` is an error.

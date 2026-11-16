@@ -149,7 +149,6 @@ export interface SemaApi {
     span: Span
   ): { call: (frame: Frame, args: Value[]) => Value; params: readonly Type[]; returnType: Type };
   addressOf(expression: TExpr): TExpr;
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the field layout and default-value checks in one pass.
   structFields(type: StructType, span: Span): StructField[];
   /** The tuple type of fields, the same type for the same field types. */
   tupleType(fields: StructField[]): StructType;

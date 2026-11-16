@@ -1,4 +1,4 @@
-// code-gauge-allow-file duplicateLines 16 -- Library types repeat the same shape of method on purpose, each over its own state.
+// code-gauge-allow-file duplicateLines 18 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { PANIC, panic } from '../arith';
 /** `std.Random` with `DefaultPrng` (Xoshiro256), transcribed so that seeded sequences match Zig's. */
 import type { Span } from '../ast';

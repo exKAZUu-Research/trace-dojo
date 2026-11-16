@@ -1,8 +1,18 @@
+// code-gauge-allow-file duplicateLines 18 -- Native methods share argument evaluation and receiver handling.
 import { allocationSlots } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Span } from '../ast';
-import type { Frame } from '../runtime';
-import { copyForStorage, FnRef, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
+import { type Frame, withHeldValues } from '../runtime';
+import {
+  copyForStorage,
+  evaluateHeld,
+  FnRef,
+  known,
+  runtime,
+  type SemaApi,
+  type TExpr,
+  undefinedValue,
+} from '../semaBase';
 import {
   BOOL,
   CONST_U8_SLICE,
@@ -404,16 +414,14 @@ function priorityQueueType(
       const expected = allocator ? [ALLOCATOR, ...args] : args;
       const compiled = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
       const queue = queueState(sema, call.receiver, type, call.span);
-      const evaluators = compiled.slice(allocator ? 1 : 0).map((arg) => arg.eval);
+      const evaluators = compiled.map((arg) => arg.eval);
       return runtime(
         result,
         (frame) => {
           frame.runtime.spend();
-          return run(
-            frame,
-            queue(frame),
-            evaluators.map((evaluate) => evaluate(frame))
-          );
+          const received = queue(frame);
+          const values = evaluateHeld(frame, evaluators);
+          return withHeldValues(frame, values, () => run(frame, received, values.slice(allocator ? 1 : 0)));
         },
         call.span
       );

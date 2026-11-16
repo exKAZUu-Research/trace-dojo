@@ -78,12 +78,13 @@ function stringMapper(name: string, map: (c: number) => number): () => Member {
 function allocMapper(name: string, map: (c: number) => number): () => Member {
   return fnMember(name, (sema, call) => {
     const [allocatorArgument, inArg] = expectArgs(sema, call, 2, name);
-    allocatorArg(sema, allocatorArgument);
+    const allocator = allocatorArg(sema, allocatorArgument);
     const input = constSlice(sema, inArg, U8);
     const evaluate = input.eval;
     return runtime(
       allocating(sliceOf(U8, false)),
       (frame) => {
+        allocator.eval(frame);
         const source = bytes(evaluate(frame));
         if (!frame.runtime.canAllocate(source.length)) return ERROR_OUT_OF_MEMORY;
         frame.runtime.allocate(source.length);

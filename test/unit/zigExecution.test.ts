@@ -664,3 +664,70 @@ pub fn main() void {
     uncaughtException: undefined,
   });
 });
+
+test('hash maps find equal nested aggregate keys after independent construction', () => {
+  const program = `const std = @import("std");
+const Key = struct { parts: [2]u8 };
+pub fn main(init: std.process.Init) !void {
+    var map = std.AutoHashMap(Key, u8).init(init.gpa);
+    defer map.deinit();
+    try map.put(.{ .parts = .{ 1, 2 } }, 7);
+    const key: Key = .{ .parts = .{ 1, 2 } };
+    try map.put(key, 9);
+    std.debug.print("{} {}", .{map.get(.{ .parts = .{ 1, 2 } }).?, map.count()});
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: '9 1',
+    uncaughtException: undefined,
+  });
+});
+
+test('memory copy directions preserve aggregate values and destination pointers', () => {
+  const program = `const std = @import("std");
+const P = struct { x: [2]i32 };
+pub fn main() void {
+    var source = [_]P{ .{ .x = .{ 1, 2 } }, .{ .x = .{ 3, 4 } } };
+    var destination: [2]P = undefined;
+    const p = &destination[0].x[0];
+    std.mem.copyForwards(P, &destination, &source);
+    destination[0].x[0] = 9;
+    std.debug.print("{} {} {}|", .{source[0].x[0], destination[0].x[0], p.*});
+    var values = [_]P{ .{ .x = .{ 1, 2 } }, .{ .x = .{ 3, 4 } }, .{ .x = .{ 5, 6 } } };
+    std.mem.copyBackwards(P, values[1..3], values[0..2]);
+    std.debug.print("{} {} {}", .{values[0].x[0], values[1].x[0], values[2].x[0]});
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 9 9|1 1 3',
+    uncaughtException: undefined,
+  });
+});
+
+test('native allocation and I/O arguments execute once in source order', () => {
+  const program = `const std = @import("std");
+var calls: usize = 0;
+fn allocator(a: std.mem.Allocator) std.mem.Allocator { calls += 1; return a; }
+fn io(value: std.Io) std.Io { calls += 1; return value; }
+pub fn main(init: std.process.Init) !void {
+    var map: std.AutoHashMapUnmanaged(u8, u8) = .empty;
+    defer map.deinit(init.gpa);
+    try map.put(allocator(init.gpa), 1, 2);
+    const upper = try std.ascii.allocUpperString(allocator(init.gpa), "abc");
+    defer init.gpa.free(upper);
+    const joined = try std.mem.join(allocator(init.gpa), ":", &.{ "x", "y" });
+    defer init.gpa.free(joined);
+    var buffer: [8]u8 = undefined;
+    var writer = std.Io.File.stdout().writer(io(init.io), &buffer);
+    try writer.interface.writeAll("ok");
+    try writer.interface.flush();
+    try std.Io.File.stdout().writeStreamingAll(io(init.io), "!");
+    std.debug.print("{s} {s} {}", .{upper, joined, calls});
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'ok!',
+    stderr: 'ABC x:y 5',
+    uncaughtException: undefined,
+  });
+});

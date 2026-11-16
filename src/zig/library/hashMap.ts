@@ -3,7 +3,7 @@ import { allocationSlots } from '../allocation';
 import { panic } from '../arith';
 import type { Expression, Span } from '../ast';
 import type { Frame } from '../runtime';
-import { copyForStorage, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
+import { copyForStorage, evaluateHeld, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
   BOOL,
   CONST_U8_SLICE,
@@ -19,7 +19,7 @@ import {
   U32,
   VOID,
 } from '../types';
-import { ErrorValue, NativeHandle, NULL, Pointer, type Value, ZArray, ZStruct } from '../values';
+import { ErrorValue, NativeHandle, NULL, Pointer, Some, type Value, ZArray, ZStruct, ZUnion } from '../values';
 import { WeakValueMap } from '../weakValueMap';
 import { elements, equalValues } from './common';
 import { autoHashBytes, wyhash } from './hashing';
@@ -53,9 +53,13 @@ function keysEqual(a: Value, b: Value, kind: KeyKind): boolean {
     return x.length === y.length && x.every((value, index) => value === y[index]);
   }
   if (a instanceof ZStruct && b instanceof ZStruct)
-    return a.slots.every((value, index) => equalValues(value, b.slots[index]));
+    return (
+      a.slots.length === b.slots.length && a.slots.every((value, index) => keysEqual(value, b.slots[index], 'auto'))
+    );
   if (a instanceof ZArray && b instanceof ZArray)
-    return a.values().every((value, index) => equalValues(value, b.get(index)));
+    return a.length === b.length && a.values().every((value, index) => keysEqual(value, b.get(index), 'auto'));
+  if (a instanceof ZUnion && b instanceof ZUnion) return a.tag === b.tag && keysEqual(a.slots[0], b.slots[0], 'auto');
+  if (a instanceof Some && b instanceof Some) return keysEqual(a.value, b.value, 'auto');
   return equalValues(a, b);
 }
 
@@ -300,16 +304,14 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       const expected = takesAllocator ? [ALLOCATOR, ...options.args] : options.args;
       const args = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
       const state = stateOf(sema, call.receiver, map, call.span, options.mutable);
-      const evaluators = args.map((arg) => arg.eval).slice(takesAllocator ? 1 : 0);
+      const evaluators = args.map((arg) => arg.eval);
       return runtime(
         options.result,
         (frame) => {
           frame.runtime.spend();
-          return run(
-            state(frame),
-            evaluators.map((evaluate) => copyForStorage(evaluate(frame))),
-            frame
-          );
+          const received = state(frame);
+          const values = evaluateHeld(frame, evaluators, copyForStorage);
+          return run(received, values.slice(takesAllocator ? 1 : 0), frame);
         },
         call.span
       );

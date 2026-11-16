@@ -1,7 +1,7 @@
 import type { Expression, Span } from '../ast';
 import { BigFloat, compareFloats } from '../floats';
 import { ZigPanic } from '../runtime';
-import { known, runtime, type SemaApi, type TExpr } from '../semaBase';
+import { copyForStorage, known, runtime, type SemaApi, type TExpr } from '../semaBase';
 import {
   BOOL,
   type EnumType,
@@ -13,7 +13,7 @@ import {
   typeName,
   USIZE,
 } from '../types';
-import { NULL, Pointer, Slice, type Value, ZArray } from '../values';
+import { NULL, Pointer, Slice, storeInto, type Value, ZArray } from '../values';
 import { ALLOCATOR, ALLOCATOR_ERROR, nativeEnum } from './heap';
 import { compileArgs, expectArgs, fnMember, type Member } from './native';
 
@@ -52,7 +52,11 @@ export function tupleOf(sema: SemaApi, types: readonly Type[]): StructType {
 
 /** A new slice holding values. */
 export function newSlice(values: Value[]): Slice {
-  return new Slice(new ZArray(values, 0, values.length), 0, values.length);
+  return new Slice(new ZArray(values.map(copyForStorage), 0, values.length), 0, values.length);
+}
+
+export function storeSliceValue(slice: Slice, index: number, value: Value): void {
+  storeInto(slice.target, slice.start + index, value);
 }
 
 /** Part of a slice, sharing its elements. */

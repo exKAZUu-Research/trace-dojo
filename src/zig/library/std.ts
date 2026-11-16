@@ -204,13 +204,19 @@ function addIoMembers(): void {
     writerStreaming: fnMember('File.writerStreaming', (sema, call) => fileWriter(sema, call)),
     writeStreamingAll: fnMember('File.writeStreamingAll', (sema, call) => {
       const receiver = fileOf(sema, call);
-      const [, bytes] = compileArgs(sema, expectArgs(sema, call, 2, 'writeStreamingAll'), [IO, CONST_U8_SLICE]);
+      const [io, bytes] = compileArgs(sema, expectArgs(sema, call, 2, 'writeStreamingAll'), [IO, CONST_U8_SLICE]);
       const evaluate = receiver.eval;
-      return nativeCall(errorUnionOf(WRITE_ERROR, VOID), [bytes], call.span, ([value], frame) => {
-        const file = evaluate(frame) as NativeHandle;
-        frame.runtime.writeOutput(file.state.fd as number, byteValues(value).map(Number));
-        return;
-      });
+      return runtime(
+        errorUnionOf(WRITE_ERROR, VOID),
+        (frame) => {
+          const file = evaluate(frame) as NativeHandle;
+          io.eval(frame);
+          const value = bytes.eval(frame);
+          frame.runtime.writeOutput(file.state.fd as number, byteValues(value).map(Number));
+          return;
+        },
+        call.span
+      );
     }),
     reader: unavailableMember('標準入力やファイルからの読み込み'),
   });
@@ -385,7 +391,6 @@ function fileWriter(sema: SemaApi, call: NativeCall): TExpr {
   const file = fileOf(sema, call);
   const [, buffer] = expectArgs(sema, call, 2, 'writer');
   const [io] = compileArgs(sema, [call.args[0]], [IO]);
-  void io;
   const compiledBuffer = sema.compile(buffer, sliceOfU8());
   const slice = sema.coerce(compiledBuffer, sliceOfU8(), buffer);
   const evaluateFile = file.eval;
@@ -394,6 +399,7 @@ function fileWriter(sema: SemaApi, call: NativeCall): TExpr {
     FILE_WRITER,
     (frame) => {
       const target = evaluateFile(frame) as NativeHandle;
+      io.eval(frame);
       const buffer = evaluateBuffer(frame) as Slice;
       const capacity = buffer.length;
       const state: WriterState = { fd: target.state.fd as number, buffered: [], capacity, fixed: buffer };
