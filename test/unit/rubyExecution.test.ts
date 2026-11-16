@@ -18400,49 +18400,49 @@ const superMissingDispatchCases = [
   [
     'class BasicObject;undef_method :method_missing;end;class C;def method_missing(n,*a);super;end;def f;super;end;end;begin;C.new.f;rescue Exception=>e;p e.class,e.message;end',
     {
-      uncaughtException: '継承元がない method_missing の super は、この採点環境では使えません。',
+      uncaughtException: '既定ハンドラがない method_missing のフォールバックは、この採点環境では使えません。',
       stdout: '',
     },
   ],
   [
     'class BasicObject;undef_method :method_missing;end;class C;def method_missing(*a);super;end;private;def f;end;end;begin;C.new.zz(3);rescue Exception=>e;p e.class,e.message;end',
     {
-      uncaughtException: '継承元がない method_missing の super は、この採点環境では使えません。',
+      uncaughtException: '既定ハンドラがない method_missing のフォールバックは、この採点環境では使えません。',
       stdout: '',
     },
   ],
   [
     'class BasicObject;undef_method :method_missing;end;class C;def method_missing(*a);super;end;private;def f;end;end;begin;C.new.send(:method_missing,:f);rescue Exception=>e;p e.class,e.message;end',
     {
-      uncaughtException: '継承元がない method_missing の super は、この採点環境では使えません。',
+      uncaughtException: '既定ハンドラがない method_missing のフォールバックは、この採点環境では使えません。',
       stdout: '',
     },
   ],
   [
     'class BasicObject;undef_method :method_missing;end;class C;def method_missing(*a);super;end;private;def f;end;end;begin;C.new.f;rescue Exception=>e;p e.class,e.message;end',
     {
-      uncaughtException: '継承元がない method_missing の super は、この採点環境では使えません。',
+      uncaughtException: '既定ハンドラがない method_missing のフォールバックは、この採点環境では使えません。',
       stdout: '',
     },
   ],
   [
     'class BasicObject;undef_method :method_missing;end;class C;def method_missing(*a);super;end;private;def f;end;end;begin;C.new.send(:method_missing,"f");rescue Exception=>e;p e.class,e.message;end',
     {
-      uncaughtException: '継承元がない method_missing の super は、この採点環境では使えません。',
+      uncaughtException: '既定ハンドラがない method_missing のフォールバックは、この採点環境では使えません。',
       stdout: '',
     },
   ],
   [
     'class BasicObject;undef_method :method_missing;end;class C;def method_missing(*a);super;end;private;def f;end;end;begin;C.new.send(:method_missing,nil);rescue Exception=>e;p e.class,e.message;end',
     {
-      uncaughtException: '継承元がない method_missing の super は、この採点環境では使えません。',
+      uncaughtException: '既定ハンドラがない method_missing のフォールバックは、この採点環境では使えません。',
       stdout: '',
     },
   ],
   [
     'class BasicObject;undef_method :method_missing;end;class C;def method_missing(*a);super;end;private;def f;end;end;begin;C.new.send(:method_missing);rescue Exception=>e;p e.class,e.message;end',
     {
-      uncaughtException: '継承元がない method_missing の super は、この採点環境では使えません。',
+      uncaughtException: '既定ハンドラがない method_missing のフォールバックは、この採点環境では使えません。',
       stdout: '',
     },
   ],
@@ -19279,4 +19279,792 @@ const nativeVisibilityOriginCases = [
 
 test.each(nativeVisibilityOriginCases)('visibility changes search from the native origin: %s', (source, stdout) => {
   expect(run(source)).toMatchObject({ stdout });
+});
+
+const nativeMissingVisibilityCases = [
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.method_missing;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 0, expected 1+)"\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.method_missing(:foo);rescue=>e;p e.class,e.message;end',
+    '[:foo, [], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.method_missing(:foo,tag:1){|x|x+1};rescue=>e;p e.class,e.message;end',
+    '[:foo, [], {tag: 1}]\n8\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 0, expected 1+)"\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    '[:foo, [], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing,:foo,tag:1){|x|x+1};rescue=>e;p e.class,e.message;end',
+    '[:foo, [], {tag: 1}]\n8\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    '[:foo, [], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.public_send(:fallback,:foo);rescue=>e;p e.class,e.message;end',
+    '[:foo, [], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.fallback(:foo);rescue=>e;p e.class,e.message;end',
+    '[:foo, [], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.method_missing;rescue=>e;p e.class,e.message;end',
+    '[:method_missing, [], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.method_missing(:foo);rescue=>e;p e.class,e.message;end',
+    '[:method_missing, [:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.method_missing(:foo,tag:1){|x|x+1};rescue=>e;p e.class,e.message;end',
+    '[:method_missing, [:foo], {tag: 1}]\n8\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 0, expected 1+)"\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    '[:foo, [], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing,:foo,tag:1){|x|x+1};rescue=>e;p e.class,e.message;end',
+    '[:foo, [], {tag: 1}]\n8\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    '[:foo, [], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.public_send(:fallback,:foo);rescue=>e;p e.class,e.message;end',
+    '[:foo, [], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.fallback(:foo);rescue=>e;p e.class,e.message;end',
+    '[:fallback, [:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.method_missing;rescue=>e;p e.class,e.message;end',
+    '[:method_missing, [], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.method_missing(:foo);rescue=>e;p e.class,e.message;end',
+    '[:method_missing, [:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.method_missing(:foo,tag:1){|x|x+1};rescue=>e;p e.class,e.message;end',
+    '[:method_missing, [:foo], {tag: 1}]\n8\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 0, expected 1+)"\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    '[:foo, [], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing,:foo,tag:1){|x|x+1};rescue=>e;p e.class,e.message;end',
+    '[:foo, [], {tag: 1}]\n8\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    '[:foo, [], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.public_send(:fallback,:foo);rescue=>e;p e.class,e.message;end',
+    '[:foo, [], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k,&b);p [n,a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.fallback(:foo);rescue=>e;p e.class,e.message;end',
+    '[:fallback, [:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.method_missing;rescue=>e;p e.class,e.message;end',
+    '[[], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.method_missing(:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.method_missing(:foo,tag:1){|x|x+1};rescue=>e;p e.class,e.message;end',
+    '[[:foo], {tag: 1}]\n8\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing);rescue=>e;p e.class,e.message;end',
+    '[[], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing,:foo,tag:1){|x|x+1};rescue=>e;p e.class,e.message;end',
+    '[[:foo], {tag: 1}]\n8\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.public_send(:fallback,:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.fallback(:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.method_missing;rescue=>e;p e.class,e.message;end',
+    '[[:method_missing], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.method_missing(:foo);rescue=>e;p e.class,e.message;end',
+    '[[:method_missing, :foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.method_missing(:foo,tag:1){|x|x+1};rescue=>e;p e.class,e.message;end',
+    '[[:method_missing, :foo], {tag: 1}]\n8\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing);rescue=>e;p e.class,e.message;end',
+    '[[], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing,:foo,tag:1){|x|x+1};rescue=>e;p e.class,e.message;end',
+    '[[:foo], {tag: 1}]\n8\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.public_send(:fallback,:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.fallback(:foo);rescue=>e;p e.class,e.message;end',
+    '[[:fallback, :foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.method_missing;rescue=>e;p e.class,e.message;end',
+    '[[:method_missing], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.method_missing(:foo);rescue=>e;p e.class,e.message;end',
+    '[[:method_missing, :foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.method_missing(:foo,tag:1){|x|x+1};rescue=>e;p e.class,e.message;end',
+    '[[:method_missing, :foo], {tag: 1}]\n8\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing);rescue=>e;p e.class,e.message;end',
+    '[[], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing,:foo,tag:1){|x|x+1};rescue=>e;p e.class,e.message;end',
+    '[[:foo], {tag: 1}]\n8\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.public_send(:fallback,:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);p [a,k];p b.call(7) if b;:handled;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.fallback(:foo);rescue=>e;p e.class,e.message;end',
+    '[[:fallback, :foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.method_missing;rescue=>e;p e.class,e.message;end',
+    '[[], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.method_missing(:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.method_missing(:foo,tag:1){|x|x+1};rescue=>e;p e.class,e.message;end',
+    '[[:foo], {tag: 1}]\n8\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing);rescue=>e;p e.class,e.message;end',
+    '[[], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing,:foo,tag:1){|x|x+1};rescue=>e;p e.class,e.message;end',
+    '[[:foo], {tag: 1}]\n8\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.public_send(:fallback,:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;public :method_missing,:fallback;end;begin;p C.new.fallback(:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.method_missing;rescue=>e;p e.class,e.message;end',
+    '[[:method_missing], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.method_missing(:foo);rescue=>e;p e.class,e.message;end',
+    '[[:method_missing, :foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.method_missing(:foo,tag:1){|x|x+1};rescue=>e;p e.class,e.message;end',
+    '[[:method_missing, :foo], {tag: 1}]\n8\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing);rescue=>e;p e.class,e.message;end',
+    '[[], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing,:foo,tag:1){|x|x+1};rescue=>e;p e.class,e.message;end',
+    '[[:foo], {tag: 1}]\n8\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.public_send(:fallback,:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;private :method_missing,:fallback;end;begin;p C.new.fallback(:foo);rescue=>e;p e.class,e.message;end',
+    '[[:fallback, :foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.method_missing;rescue=>e;p e.class,e.message;end',
+    '[[:method_missing], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.method_missing(:foo);rescue=>e;p e.class,e.message;end',
+    '[[:method_missing, :foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.method_missing(:foo,tag:1){|x|x+1};rescue=>e;p e.class,e.message;end',
+    '[[:method_missing, :foo], {tag: 1}]\n8\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing);rescue=>e;p e.class,e.message;end',
+    '[[], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.public_send(:method_missing,:foo,tag:1){|x|x+1};rescue=>e;p e.class,e.message;end',
+    '[[:foo], {tag: 1}]\n8\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.public_send(:fallback,:foo);rescue=>e;p e.class,e.message;end',
+    '[[:foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;define_method(:method_missing){|*a,**k,&b|p [a,k];p b.call(7) if b;:handled};alias fallback method_missing;protected :method_missing,:fallback;end;begin;p C.new.fallback(:foo);rescue=>e;p e.class,e.message;end',
+    '[[:fallback, :foo], {}]\n:handled\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);super;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;C.new.method_missing(:foo);rescue=>e;p e.class,e.message,e.name;end',
+    'NoMethodError\n"private method \'method_missing\' called for an instance of C"\n:method_missing\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);super;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;C.new.public_send(:method_missing,:foo);rescue=>e;p e.class,e.message,e.name;end',
+    'NoMethodError\n"undefined method \'foo\' for an instance of C"\n:foo\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);super;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;C.new.fallback(:foo);rescue=>e;p e.class,e.message,e.name;end',
+    'NoMethodError\n"private method \'fallback\' called for an instance of C"\n:fallback\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);super;end;alias fallback method_missing;private :method_missing,:fallback;end;begin;C.new.public_send(:fallback,:foo);rescue=>e;p e.class,e.message,e.name;end',
+    'NoMethodError\n"undefined method \'foo\' for an instance of C"\n:foo\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);super;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;C.new.method_missing(:foo);rescue=>e;p e.class,e.message,e.name;end',
+    'NoMethodError\n"protected method \'method_missing\' called for an instance of C"\n:method_missing\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);super;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;C.new.public_send(:method_missing,:foo);rescue=>e;p e.class,e.message,e.name;end',
+    'NoMethodError\n"undefined method \'foo\' for an instance of C"\n:foo\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);super;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;C.new.fallback(:foo);rescue=>e;p e.class,e.message,e.name;end',
+    'NoMethodError\n"protected method \'fallback\' called for an instance of C"\n:fallback\n',
+  ],
+  [
+    'class C;def method_missing(*a,**k,&b);super;end;alias fallback method_missing;protected :method_missing,:fallback;end;begin;C.new.public_send(:fallback,:foo);rescue=>e;p e.class,e.message,e.name;end',
+    'NoMethodError\n"undefined method \'foo\' for an instance of C"\n:foo\n',
+  ],
+  [
+    'begin;Object.new.method_missing(:foo);rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"private method \'method_missing\' called for an instance of Object"\n',
+  ],
+  [
+    'begin;Object.new.method_missing;rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"private method \'method_missing\' called for an instance of Object"\n',
+  ],
+  [
+    'begin;Object.new.public_send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"undefined method \'foo\' for an instance of Object"\n',
+  ],
+  [
+    'begin;Object.new.public_send(:method_missing);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"no method name given"\n',
+  ],
+  [
+    'begin;Object.new.send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"undefined method \'foo\' for an instance of Object"\n',
+  ],
+  [
+    'class C;def method_missing(n,*a);n==:f ? public_send(:method_missing,:other) : super;end;def f;super;end;end;begin;C.new.f;rescue=>e;p e.message;end',
+    '"super: no superclass method \'other\' for an instance of C"\n',
+  ],
+  [
+    'class C;private;def x;end;end;begin;C.new.x;rescue;end;begin;Object.new.send(:method_missing,:after);rescue=>e;p e.message;end',
+    '"private method \'after\' called for an instance of Object"\n',
+  ],
+  [
+    'class C;private;def x;end;end;cursor=Enumerator.new{|y|begin;C.new.x;rescue;end;y<<1;begin;Object.new.send(:method_missing,:inside);rescue=>e;p e.message;end;y<<2};p cursor.next;begin;Object.new.send(:method_missing,:outside);rescue=>e;p e.message;end;p cursor.next',
+    '1\n"undefined method \'outside\' for an instance of Object"\n"private method \'inside\' called for an instance of Object"\n2\n',
+  ],
+  [
+    'class C;private;def x;end;end;cursor=Enumerator.new{|y|begin;C.new.x;rescue;end;y<<1;begin;Object.new.send(:method_missing,:inside);rescue=>e;p e.message;end;y<<2};cursor.each{|x|p x};begin;Object.new.send(:method_missing,:outside);rescue=>e;p e.message;end;',
+    '1\n"private method \'inside\' called for an instance of Object"\n2\n"private method \'outside\' called for an instance of Object"\n',
+  ],
+  [
+    'class C;def method_missing(*a);p a;end;define_method(:fallback,instance_method(:method_missing));private :fallback;end;C.new.public_send(:fallback,:foo)',
+    '[:foo]\n',
+  ],
+  [
+    'class C;def method_missing(*a);p a;end;define_method(:fallback,instance_method(:method_missing));protected :fallback;end;C.new.public_send(:fallback,:foo)',
+    '[:foo]\n',
+  ],
+  [
+    'class C;def method_missing(*a);p a;end;define_method(:fallback,instance_method(:method_missing));public :fallback;end;C.new.public_send(:fallback,:foo)',
+    '[:foo]\n',
+  ],
+] as const;
+
+test.each(nativeMissingVisibilityCases)(
+  'missing-method visibility and reflective calls preserve native dispatch: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ stdout });
+  }
+);
+
+const nativeWordBoundaryCases = [
+  [
+    String.raw`s="";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n[]\n[]\n""\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n[]\n[]\n""\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n[]\n[]\n""\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n[]\n[]\n""\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="a";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["a"]\n["", ""]\n"|a|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="a";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["a"]\n["", ""]\n"|a|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="a";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["a"]\n["", ""]\n"|a|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="a";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["a"]\n["", ""]\n"|a|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="0";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["0"]\n["", ""]\n"|0|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="0";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["0"]\n["", ""]\n"|0|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="0";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["0"]\n["", ""]\n"|0|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="0";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["0"]\n["", ""]\n"|0|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="_";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["_"]\n["", ""]\n"|_|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="_";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["_"]\n["", ""]\n"|_|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="_";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["_"]\n["", ""]\n"|_|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="_";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["_"]\n["", ""]\n"|_|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="²";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, false]\n["²"]\n["", ""]\n"|²|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="²";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, false]\n["²"]\n["", ""]\n"|²|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="²";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xC2\\xB2"]\n[]\n"\\xC2\\xB2"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="²";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xC2\\xB2"]\n[]\n"\\xC2\\xB2"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="³";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, false]\n["³"]\n["", ""]\n"|³|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="³";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, false]\n["³"]\n["", ""]\n"|³|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="³";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xC2\\xB3"]\n[]\n"\\xC2\\xB3"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="³";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xC2\\xB3"]\n[]\n"\\xC2\\xB3"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="¹";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, false]\n["¹"]\n["", ""]\n"|¹|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="¹";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, false]\n["¹"]\n["", ""]\n"|¹|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="¹";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xC2\\xB9"]\n[]\n"\\xC2\\xB9"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="¹";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xC2\\xB9"]\n[]\n"\\xC2\\xB9"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="¼";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, false]\n["¼"]\n["", ""]\n"|¼|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="¼";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, false]\n["¼"]\n["", ""]\n"|¼|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="¼";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xC2\\xBC"]\n[]\n"\\xC2\\xBC"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="¼";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xC2\\xBC"]\n[]\n"\\xC2\\xBC"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="½";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, false]\n["½"]\n["", ""]\n"|½|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="½";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, false]\n["½"]\n["", ""]\n"|½|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="½";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xC2\\xBD"]\n[]\n"\\xC2\\xBD"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="½";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xC2\\xBD"]\n[]\n"\\xC2\\xBD"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="¾";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, false]\n["¾"]\n["", ""]\n"|¾|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="¾";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, false]\n["¾"]\n["", ""]\n"|¾|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="¾";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xC2\\xBE"]\n[]\n"\\xC2\\xBE"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="¾";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xC2\\xBE"]\n[]\n"\\xC2\\xBE"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="é";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["é"]\n["", ""]\n"|é|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="é";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["é"]\n["", ""]\n"|é|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="é";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xC3\\xA9"]\n[]\n"\\xC3\\xA9"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="é";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xC3\\xA9"]\n[]\n"\\xC3\\xA9"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="́";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["́"]\n["", ""]\n"|́|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="́";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["́"]\n["", ""]\n"|́|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="́";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xCC\\x81"]\n[]\n"\\xCC\\x81"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="́";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xCC\\x81"]\n[]\n"\\xCC\\x81"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="‌";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["‌"]\n["", ""]\n"|‌|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="‌";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["‌"]\n["", ""]\n"|‌|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="‌";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xE2\\x80\\x8C"]\n[]\n"\\xE2\\x80\\x8C"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="‌";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xE2\\x80\\x8C"]\n[]\n"\\xE2\\x80\\x8C"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="‍";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["‍"]\n["", ""]\n"|‍|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="‍";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["‍"]\n["", ""]\n"|‍|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="‍";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xE2\\x80\\x8D"]\n[]\n"\\xE2\\x80\\x8D"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="‍";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xE2\\x80\\x8D"]\n[]\n"\\xE2\\x80\\x8D"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="⅓";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["⅓"]\n[]\n"⅓"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="⅓";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["⅓"]\n[]\n"⅓"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="⅓";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xE2\\x85\\x93"]\n[]\n"\\xE2\\x85\\x93"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="⅓";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xE2\\x85\\x93"]\n[]\n"\\xE2\\x85\\x93"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="Ⅰ";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["Ⅰ"]\n["", ""]\n"|Ⅰ|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="Ⅰ";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["Ⅰ"]\n["", ""]\n"|Ⅰ|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="Ⅰ";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xE2\\x85\\xA0"]\n[]\n"\\xE2\\x85\\xA0"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="Ⅰ";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xE2\\x85\\xA0"]\n[]\n"\\xE2\\x85\\xA0"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="①";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["①"]\n[]\n"①"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="①";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["①"]\n[]\n"①"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="①";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xE2\\x91\\xA0"]\n[]\n"\\xE2\\x91\\xA0"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="①";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xE2\\x91\\xA0"]\n[]\n"\\xE2\\x91\\xA0"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="𝟎";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["𝟎"]\n["", ""]\n"|𝟎|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="𝟎";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, true]\n["𝟎"]\n["", ""]\n"|𝟎|"\n0\n1\n',
+  ],
+  [
+    String.raw`s="𝟎";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xF0\\x9D\\x9F\\x8E"]\n[]\n"\\xF0\\x9D\\x9F\\x8E"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="𝟎";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xF0\\x9D\\x9F\\x8E"]\n[]\n"\\xF0\\x9D\\x9F\\x8E"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="😀";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["😀"]\n[]\n"😀"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="😀";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["😀"]\n[]\n"😀"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="😀";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xF0\\x9F\\x98\\x80"]\n[]\n"\\xF0\\x9F\\x98\\x80"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="😀";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xF0\\x9F\\x98\\x80"]\n[]\n"\\xF0\\x9F\\x98\\x80"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="x²y";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, true, false, true]\n["x²y"]\n["", ""]\n"|x²y|"\n0\n3\n',
+  ],
+  [
+    String.raw`s="x²y";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, true, false, true]\n["x²y"]\n["", ""]\n"|x²y|"\n0\n3\n',
+  ],
+  [
+    String.raw`s="x²y";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, true, true, true]\n["x", "\\xC2\\xB2", "y"]\n["", "", "", ""]\n"|x|\\xC2\\xB2|y|"\n0\n4\n',
+  ],
+  [
+    String.raw`s="x²y";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, true, true, true]\n["x", "\\xC2\\xB2", "y"]\n["", "", "", ""]\n"|x|\\xC2\\xB2|y|"\n0\n4\n',
+  ],
+  [
+    String.raw`s="x½y";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, true, false, true]\n["x½y"]\n["", ""]\n"|x½y|"\n0\n3\n',
+  ],
+  [
+    String.raw`s="x½y";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, true, false, true]\n["x½y"]\n["", ""]\n"|x½y|"\n0\n3\n',
+  ],
+  [
+    String.raw`s="x½y";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, true, true, true]\n["x", "\\xC2\\xBD", "y"]\n["", "", "", ""]\n"|x|\\xC2\\xBD|y|"\n0\n4\n',
+  ],
+  [
+    String.raw`s="x½y";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, true, true, true]\n["x", "\\xC2\\xBD", "y"]\n["", "", "", ""]\n"|x|\\xC2\\xBD|y|"\n0\n4\n',
+  ],
+  [
+    String.raw`s="² ½";b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, false]\n["²", " ", "½"]\n["", "", "", ""]\n"|²| |½|"\n0\n3\n',
+  ],
+  [
+    String.raw`s="² ½";b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[true, false, true, false]\n["²", " ", "½"]\n["", "", "", ""]\n"|²| |½|"\n0\n3\n',
+  ],
+  [
+    String.raw`s="² ½";s=String.new(s,encoding:"ASCII-8BIT");b=/\b/;n=/\B/;p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xC2\\xB2 \\xC2\\xBD"]\n[]\n"\\xC2\\xB2 \\xC2\\xBD"\nnil\nnil\n',
+  ],
+  [
+    String.raw`s="² ½";s=String.new(s,encoding:"ASCII-8BIT");b=Regexp.new("\\b");n=Regexp.new("\\B");p [b.match?(s),n.match?(s),/\b.\b/.match?(s),/[[:word:]]/.match?(s)];p s.split(b),s.scan(b),s.gsub(b,"|"),s.index(b),s.rindex(b)`,
+    '[false, true, false, false]\n["\\xC2\\xB2 \\xC2\\xBD"]\n[]\n"\\xC2\\xB2 \\xC2\\xBD"\nnil\nnil\n',
+  ],
+] as const;
+
+test.each(nativeWordBoundaryCases)(
+  'Unicode and binary boundaries preserve native word classification: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ stdout });
+  }
+);
+
+test.each([
+  'Object.new.method_missing(:foo)',
+  'Object.new.send(:method_missing,:foo)',
+  'Object.new.public_send(:method_missing,:foo)',
+  'Object.new.send(:method_missing,*[:foo])',
+])('missing root handlers fail explicitly instead of approximating VM arguments: %s', (call) => {
+  expect(run(`class BasicObject;undef_method :method_missing;end;${call}`)).toMatchObject({
+    stdout: '',
+    uncaughtException: '既定ハンドラがない method_missing のフォールバックは、この採点環境では使えません。',
+  });
 });

@@ -1875,7 +1875,12 @@ export function* callMethod(
   if (!method) return yield* callMethodMissing(recv, name, args, keywords, block, options);
   if (recv instanceof RClass && !recv.isModule && name === 'module_function' && method.owner === rt().c.Module)
     methodMissing(recv, name, options);
-  if (method.visibility !== 'public' && (options.publicOnly || (!options.fcall && !options.explicitSelf))) {
+  const reflectedMissing = options.publicOnly && (method.superName ?? method.name) === 'method_missing';
+  if (
+    !reflectedMissing &&
+    method.visibility !== 'public' &&
+    (options.publicOnly || (!options.fcall && !options.explicitSelf))
+  ) {
     if (method.visibility === 'private') {
       return yield* callMethodMissing(recv, name, args, keywords, block, options, 'private');
     }
@@ -1897,21 +1902,12 @@ function* callMethodMissing(
   options: CallOptions,
   reason: MissingReason | undefined = options.vcall ? 'vcall' : undefined
 ): Gen {
-  if (name === 'method_missing') {
-    if (reason === 'super') throw new UnsupportedFeatureError('継承元がない method_missing の super');
-    raiseMethodMissing(recv, args, reason);
-  }
+  rt().missingReason = reason;
   const handler = classOf(recv).findMethod('method_missing');
+  if (name === 'method_missing' && (reason === 'super' || !handler))
+    throw new UnsupportedFeatureError('既定ハンドラがない method_missing のフォールバック');
   if (handler && !isCoreMethod(handler, rt().c.BasicObject, 'method_missing'))
-    return yield* invoke(
-      handler,
-      recv,
-      [RSymbol.fromKey(name), ...args],
-      keywords,
-      block,
-      options.used ?? true,
-      reason
-    );
+    return yield* invoke(handler, recv, [RSymbol.fromKey(name), ...args], keywords, block, options.used ?? true);
   methodMissing(recv, name, options, reason);
 }
 
@@ -1924,6 +1920,7 @@ export function raiseMethodMissing(recv: Value, args: Value[], reason?: MissingR
 }
 
 export function methodMissing(recv: Value, name: string, options: CallOptions, reason?: MissingReason): never {
+  rt().missingReason = reason ?? (options.vcall ? 'vcall' : undefined);
   if (reason === 'private' || reason === 'protected')
     throw noMethodError(`${reason} method '${name}' called for ${receiverDescription(recv)}`, recv, name);
   if (reason === 'super')
@@ -1935,15 +1932,13 @@ export function methodMissing(recv: Value, name: string, options: CallOptions, r
 
 /** Calls a method that lookup found. */
 // code-gauge-allow functionNcss 51 -- Invocation dispatches native, accessor, and user methods with their distinct arity and root rules.
-// code-gauge-allow functionParameterCount 7 -- The call boundary keeps receiver, positional/keyword arguments, block and evaluation context explicit.
 export function* invoke(
   method: RMethod,
   recv: Value,
   args: Value[],
   keywords: RHash | undefined,
   block: RProc | undefined,
-  used: boolean,
-  missingReason?: MissingReason
+  used: boolean
 ): Gen {
   const runtime = rt();
   const { body } = method;
@@ -1988,7 +1983,7 @@ export function* invoke(
       return value as Value;
     }
     case 'user': {
-      return yield* invokeUser(method, body.def, body.cref, recv, args, keywords, block, used, missingReason);
+      return yield* invokeUser(method, body.def, body.cref, recv, args, keywords, block, used);
     }
     case 'proc': {
       runtime.userCallVersion++;
@@ -2000,7 +1995,6 @@ export function* invoke(
         method,
         callRow: rt().currentRow,
         lambdaArgs: true,
-        missingReason,
       });
     }
     case 'undefined': {
@@ -2012,7 +2006,7 @@ export function* invoke(
   }
 }
 
-// code-gauge-allow functionParameterCount 9 -- User calls need method metadata, receiver, arguments, keywords, block, call row, and result usage to build a frame.
+// code-gauge-allow functionParameterCount 8 -- User calls need method metadata, receiver, arguments, keywords, block, call row, and result usage to build a frame.
 function* invokeUser(
   method: RMethod,
   def: MethodDef,
@@ -2021,14 +2015,12 @@ function* invokeUser(
   args: Value[],
   keywords: RHash | undefined,
   block: RProc | undefined,
-  used: boolean,
-  missingReason?: MissingReason
+  used: boolean
 ): Gen {
   const runtime = rt();
   runtime.userCallVersion++;
   const frame = new Frame('method', recv, new Scope(), cref, runtime.currentRow, def.isAtomic, used, {
     method,
-    missingReason,
     def,
     block,
     args,
@@ -2100,10 +2092,9 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
     const superMethod = classOf(home.self).findSuperMethod(superName, method.owner, method.lookupOccurrence);
     const used = e.used === 1 || (e.used === 2 && frame.resultUsed);
     rt().currentRow = e.row;
-    const missingReason = method.name === 'method_missing' ? home.extra.missingReason : undefined;
     const dispatch = (): Gen =>
       superMethod
-        ? invoke(superMethod, home.self, args, keywords, block, used, missingReason)
+        ? invoke(superMethod, home.self, args, keywords, block, used)
         : callMethodMissing(home.self, superName, args, keywords, block, { used }, 'super');
     if (!e.block) return yield* dispatch();
     const proc = block as RProc;
@@ -2227,7 +2218,6 @@ export interface ProcCallOptions {
   definee?: RClass;
   /** The method a proc is the body of (`define_method`), which `super` in it continues. */
   method?: RMethod;
-  missingReason?: MissingReason;
   /** Whether the arguments bind strictly, as a method's do, for a proc that is a method's body. */
   lambdaArgs?: boolean;
   definitionTarget?: RClass;
@@ -2276,7 +2266,6 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
       isLambda,
       block: options.block,
       method: options.method ?? outer.home.extra.method,
-      missingReason: options.missingReason,
       def: outer.home.extra.def,
       definee: options.definitionTarget ? undefined : (options.definee ?? outer.extra.definee),
       definitionTarget: options.definee ? undefined : (options.definitionTarget ?? outer.extra.definitionTarget),

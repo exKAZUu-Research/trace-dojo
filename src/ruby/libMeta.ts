@@ -771,13 +771,9 @@ function assertMethodOwner(owner: RClass, target: Value, defining: boolean): voi
     );
   throw typeError(`bind argument must be ${defining ? 'a subclass' : 'an instance'} of ${className(owner)}`);
 }
-def(
-  'BasicObject',
-  'method_missing',
-  [0, -1],
-  (self, args) => raiseMethodMissing(self, args, rt().frame.home.extra.missingReason),
-  { visibility: 'private' }
-);
+def('BasicObject', 'method_missing', [0, -1], (self, args) => raiseMethodMissing(self, args, rt().missingReason), {
+  visibility: 'private',
+});
 def(
   'Module',
   'prepend_features',

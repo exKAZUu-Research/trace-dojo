@@ -60,7 +60,7 @@ import {
   RSymbol,
   type Value,
 } from './objects';
-import { type Frame, rt, RubyError, UnsupportedFeatureError } from './runtime';
+import { type Frame, type MissingReason, rt, RubyError, UnsupportedFeatureError } from './runtime';
 import { unavailableMethod } from './unavailableMethod';
 import { arr, isA, newHash, realClassOf, str, stringBytes, stringCharacterCount, sym, truthy } from './values';
 
@@ -745,6 +745,7 @@ interface Cursor {
   heldArrays: Value[][];
   catchTags: Value[];
   exception: Value;
+  missingReason?: MissingReason;
   peeked: Value[][];
   feed?: Value;
   feedSet: boolean;
@@ -809,10 +810,12 @@ function nextValues(self: RObject): Value[] {
   const callerHeld = [...runtime.held];
   const callerArrays = [...runtime.heldArrays];
   const callerException = runtime.globals.get('$!') ?? NIL;
+  const callerMissingReason = runtime.missingReason;
   runtime.heldSnapshots.push({ values: [...callerHeld, callerException], arrays: callerArrays });
   const row = runtime.currentRow;
   const callerTags = runtime.catchTags.splice(0);
   runtime.globals.set('$!', cursor.exception);
+  runtime.missingReason = cursor.missingReason;
   if (cursor.frames[0]?.callRow !== undefined) cursor.frames[0].callRow = row;
   for (const frame of cursor.frames) runtime.frames.push(frame);
   for (const value of cursor.held) runtime.held.push(value);
@@ -844,6 +847,8 @@ function nextValues(self: RObject): Value[] {
     cursor.catchTags = runtime.catchTags.splice(0);
     cursor.exception = runtime.globals.get('$!') ?? NIL;
     runtime.globals.set('$!', callerException);
+    cursor.missingReason = runtime.missingReason;
+    runtime.missingReason = callerMissingReason;
     for (const tag of callerTags) runtime.catchTags.push(tag);
     runtime.currentRow = row;
     runtime.heldSnapshots.pop();

@@ -126,6 +126,8 @@ const ASCII_POSIX_CLASSES: Record<string, string> = {
   blank: String.raw` \t`,
 };
 
+const UNICODE_BOUNDARY_WORD = String.raw`${POSIX_CLASSES.word}\u00B2\u00B3\u00B9\u00BC-\u00BE`;
+
 const PROPERTY_NAMES: Record<string, string> = {
   hiragana: 'Script=Hiragana',
   katakana: 'Script=Katakana',
@@ -441,15 +443,18 @@ function translateEscape(
     case 'G': {
       throw unsupportedSyntax(String.raw`\G`);
     }
-    case 'b': {
-      if (inClass) return String.raw`\b`;
-      const word = `[${classes.word}]`;
-      return `(?:(?<=${word})(?!${word})|(?<!${word})(?=${word}))`;
-    }
+    case 'b':
     case 'B': {
-      if (inClass) throw unsupportedClassEscape(String.raw`\B`);
-      const word = `[${classes.word}]`;
-      return `(?:(?<=${word})(?=${word})|(?<!${word})(?!${word}))`;
+      if (inClass) {
+        if (next === 'b') return String.raw`\b`;
+        throw unsupportedClassEscape(String.raw`\B`);
+      }
+      const word = `[${classes === ASCII_POSIX_CLASSES ? classes.word : UNICODE_BOUNDARY_WORD}]`;
+      const boundary =
+        next === 'b'
+          ? `(?:(?<=${word})(?!${word})|(?<!${word})(?=${word}))`
+          : `(?:(?<=${word})(?=${word})|(?<!${word})(?!${word}))`;
+      return String.raw`(?=[\s\S]|$)` + boundary;
     }
     case 'R': {
       return classes === ASCII_POSIX_CLASSES

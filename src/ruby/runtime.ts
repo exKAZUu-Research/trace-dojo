@@ -118,7 +118,6 @@ export interface FrameExtra {
   forbidSingletonDefinition?: boolean;
   /** The running method. */
   method?: RMethod;
-  missingReason?: MissingReason;
   def?: MethodDef;
   block?: RProc;
   lexicalBlockHome?: Frame;
@@ -199,6 +198,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly symbols = new Map<string, RSymbol>();
   readonly coreStrings = new Map<string, RString>();
   programName?: RString;
+  missingReason?: MissingReason;
   sleptNanoseconds = 0n;
   frozenStringLiterals = false;
   readonly frozenStrings = new Map<string, RString>();
