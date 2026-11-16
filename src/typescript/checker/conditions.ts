@@ -1,0 +1,414 @@
+import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
+
+import type { Checker } from './checker';
+import { type FlowState, type State } from './flow';
+import { named, skipParentheses, stringValue } from './syntax';
+import {
+  anyType,
+  booleanType,
+  filterType,
+  isAnyLike,
+  isIntrinsic,
+  neverType,
+  regularOf,
+  type Type,
+  unionOf,
+} from './types';
+
+/** The flow states where a condition is true and where it is false, with the condition's type. */
+interface Condition {
+  whenTrue: State;
+  whenFalse: State;
+  type: Type;
+}
+
+/** The kinds of expressions that are objects, which are always truthy. */
+const alwaysTruthyTypes = new Set(['array', 'arrow_function', 'class', 'function_expression', 'object', 'regex']);
+
+/** Checks conditions, computing the flow states where they are true and false. */
+export class ConditionChecker {
+  constructor(private readonly c: Checker) {}
+
+  /** Checks a condition, returning the flow states where it is true and where it is false. */
+  checkCondition(node: TreeNode): { whenTrue: State; whenFalse: State } {
+    const { whenTrue, whenFalse } = this.condition(node);
+    return { whenTrue, whenFalse };
+  }
+
+  condition(node: TreeNode, testsTruthiness = true): Condition {
+    const result = this.conditionOf(node);
+    if (testsTruthiness) this.checkTruthiness(node, result.type);
+    return result;
+  }
+
+  private conditionOf(node: TreeNode): Condition {
+    const expression = skipParentheses(node);
+    switch (expression.type) {
+      case 'unary_expression': {
+        if (expression.childForFieldName('operator')?.text !== '!') break;
+        const inner = this.condition(expression.childForFieldName('argument') as TreeNode);
+        return { whenTrue: inner.whenFalse, whenFalse: inner.whenTrue, type: booleanType };
+      }
+      case 'binary_expression': {
+        const result = this.binaryCondition(expression);
+        if (result) return result;
+        break;
+      }
+      case 'call_expression': {
+        return this.callCondition(expression);
+      }
+      case 'assignment_expression': {
+        const type = this.c.expressions.check(expression);
+        const left = skipParentheses(expression.childForFieldName('left') as TreeNode);
+        return {
+          ...this.narrowed(left, (current, assumeTrue) => this.c.flow.narrowByTruthiness(current, assumeTrue)),
+          type,
+        };
+      }
+      default: {
+        break;
+      }
+    }
+    const type = this.c.expressions.check(expression);
+    return { ...this.truthiness(expression), type };
+  }
+
+  /** The condition a binary expression is, if its operator narrows. */
+  private binaryCondition(expression: TreeNode): Condition | undefined {
+    const operator = expression.childForFieldName('operator')?.text ?? '';
+    const left = expression.childForFieldName('left') as TreeNode;
+    const right = expression.childForFieldName('right') as TreeNode;
+    if (operator === '&&' || operator === '||') return this.logicalCondition(operator, left, right);
+    if (['===', '!==', '==', '!='].includes(operator)) {
+      const type = this.c.expressions.check(expression);
+      return { ...this.narrowEquality(left, right, operator), type };
+    }
+    if (operator === 'instanceof') {
+      const type = this.c.expressions.check(expression);
+      const instance = this.c.silently(() => this.instanceTypeOfConstructor(this.c.expressions.check(right)));
+      return {
+        ...this.narrowed(left, (current, assumeTrue) => this.c.flow.narrowByInstanceof(current, instance, assumeTrue)),
+        type,
+      };
+    }
+    if (operator === 'in' && left.type === 'string') {
+      const type = this.c.expressions.check(expression);
+      const name = stringValue(left);
+      return {
+        ...this.narrowed(right, (current, assumeTrue) => this.c.flow.narrowByIn(current, name, assumeTrue)),
+        type,
+      };
+    }
+    return undefined;
+  }
+
+  private logicalCondition(operator: '&&' | '||', left: TreeNode, right: TreeNode): Condition {
+    const leftResult = this.condition(left);
+    const rightState = operator === '&&' ? leftResult.whenTrue : leftResult.whenFalse;
+    let rightResult: Condition = { whenTrue: undefined, whenFalse: undefined, type: neverType };
+    this.c.flow.from(rightState, () => {
+      rightResult = this.condition(right, false);
+    });
+    const merged =
+      operator === '&&'
+        ? {
+            whenTrue: rightResult.whenTrue,
+            whenFalse: this.c.flow.merge([leftResult.whenFalse, rightResult.whenFalse]),
+          }
+        : {
+            whenTrue: this.c.flow.merge([leftResult.whenTrue, rightResult.whenTrue]),
+            whenFalse: rightResult.whenFalse,
+          };
+    this.c.flow.current = this.c.flow.merge([merged.whenTrue, merged.whenFalse]);
+    const truthy = this.c.flow.narrowByTruthiness(leftResult.type, operator === '||');
+    return {
+      ...merged,
+      type: unionOf([
+        operator === '&&' ? this.c.flow.narrowByTruthiness(leftResult.type, false) : truthy,
+        rightResult.type,
+      ]),
+    };
+  }
+
+  /** The condition a call is, narrowing what its signature's type predicate tests. */
+  private callCondition(expression: TreeNode): Condition {
+    const type = this.c.expressions.check(expression);
+    const predicate = this.c.expressions.calls.predicateOf(expression);
+    if (!predicate) return { ...this.truthiness(expression), type };
+    const { target, type: predicateType } = predicate;
+    return {
+      ...this.narrowed(target, (current, assumeTrue) =>
+        assumeTrue
+          ? this.narrowToPredicate(current, predicateType)
+          : filterType(current, (member) => !this.c.relations.isAssignable(member, predicateType))
+      ),
+      type,
+    };
+  }
+
+  /** Reports a tested expression that is `void`, or that is always truthy or always falsy by its syntax. */
+  checkTruthiness(node: TreeNode, type: Type): void {
+    if (isIntrinsic(type, 'void')) {
+      this.c.error(node, "'void' 型の式は、真偽の判定に使えません。");
+      return;
+    }
+    const semantics = this.syntacticTruthiness(node);
+    if (semantics === 'always') this.c.error(node, 'この種類の式は、常に真になります。');
+    else if (semantics === 'never') this.c.error(node, 'この種類の式は、常に偽になります。');
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of expression whose syntax decides its truthiness.
+  private syntacticTruthiness(node: TreeNode): 'always' | 'never' | 'sometimes' {
+    const expression = withoutAssertions(node);
+    if (alwaysTruthyTypes.has(expression.type)) return 'always';
+    switch (expression.type) {
+      case 'number': {
+        return expression.text === '0' || expression.text === '1' ? 'sometimes' : 'always';
+      }
+      case 'null':
+      case 'undefined': {
+        return 'never';
+      }
+      case 'unary_expression': {
+        return expression.childForFieldName('operator')?.text === 'void' ? 'never' : 'sometimes';
+      }
+      case 'string': {
+        return stringValue(expression) ? 'always' : 'never';
+      }
+      case 'template_string': {
+        if (named(expression).some((child) => child.type === 'template_substitution')) return 'sometimes';
+        return named(expression).some((child) => child.text !== '') ? 'always' : 'never';
+      }
+      case 'ternary_expression': {
+        const a = this.syntacticTruthiness(expression.childForFieldName('consequence') as TreeNode);
+        const b = this.syntacticTruthiness(expression.childForFieldName('alternative') as TreeNode);
+        return a === b ? a : 'sometimes';
+      }
+      case 'identifier': {
+        return expression.text === 'undefined' && !this.c.scopeOf(expression).lookupValue('undefined')?.valueDeclaration
+          ? 'never'
+          : 'sometimes';
+      }
+      default: {
+        return 'sometimes';
+      }
+    }
+  }
+
+  /** Reports `if (obj.method)` where the method is always defined and the body never calls it. */
+  checkUncalledFunction(condition: TreeNode, body: TreeNode | null): void {
+    const tested = skipParentheses(condition);
+    const candidates =
+      tested.type === 'binary_expression' && tested.childForFieldName('operator')?.text === '&&'
+        ? [tested.childForFieldName('left') as TreeNode, tested.childForFieldName('right') as TreeNode]
+        : [tested];
+    for (const candidate of candidates) {
+      const expression = skipParentheses(candidate);
+      if (!this.isAlwaysDefinedFunction(expression)) continue;
+      const text = expression.text;
+      const usedInBody =
+        body?.text.includes(`${text}(`) ||
+        condition.text.includes(`${text}(`) ||
+        (body?.text.includes(text) && expression.type === 'identifier');
+      if (usedInBody) continue;
+      this.c.error(
+        expression,
+        'この関数は常に定義されているので、この条件は常に真になります。呼び出すつもりでしたか？'
+      );
+    }
+  }
+
+  /** Whether a reference is a function that is always defined: neither nullable nor an optional property. */
+  private isAlwaysDefinedFunction(expression: TreeNode): boolean {
+    if (expression.type !== 'identifier' && expression.type !== 'member_expression') return false;
+    const type = this.c.expressions.checkReferenceSilently(expression);
+    if (isAnyLike(type) || this.c.relations.isNullable(type) || type.kind !== 'object') return false;
+    if (this.c.signaturesOf(type, 'call').length === 0) return false;
+    if (expression.type !== 'member_expression') return true;
+    const objectType = this.c.expressions.checkReferenceSilently(expression.childForFieldName('object') as TreeNode);
+    const property = this.c.propertyOf(
+      this.c.relations.removeNullish(objectType),
+      expression.childForFieldName('property')?.text ?? ''
+    );
+    return property !== undefined && !property.optional;
+  }
+
+  private narrowToPredicate(current: Type, predicateType: Type): Type {
+    if (isAnyLike(current) || isIntrinsic(current, 'unknown')) return predicateType;
+    const filtered = filterType(current, (member) => this.c.relations.isAssignable(member, predicateType));
+    if (!isIntrinsic(filtered, 'never')) return filtered;
+    const candidates = filterType(current, (member) => this.c.relations.isAssignable(predicateType, member));
+    return isIntrinsic(candidates, 'never') ? predicateType : predicateType;
+  }
+
+  /** The instance type a constructor creates, for `instanceof`. */
+  instanceTypeOfConstructor(type: Type): Type {
+    if (isAnyLike(type)) return anyType;
+    const signatures = this.c.signaturesOf(type, 'construct');
+    if (signatures.length > 0) {
+      const returned = signatures[0].returnType();
+      if (returned.kind === 'object' && returned.objectKind === 'reference' && returned.target?.typeParameters) {
+        return this.c.reference(
+          returned.target,
+          returned.target.typeParameters.map(() => anyType)
+        );
+      }
+      return returned;
+    }
+    const prototype = this.c.propertyOf(type, 'prototype');
+    return prototype ? prototype.type() : anyType;
+  }
+
+  private truthiness(expression: TreeNode): { whenTrue: State; whenFalse: State } {
+    const narrowedChain = this.narrowed(expression, (current, assumeTrue) =>
+      this.c.flow.narrowByTruthiness(current, assumeTrue)
+    );
+    // `a?.b` being truthy means `a` is not nullish.
+    if (expression.type === 'member_expression' && expression.childForFieldName('optional_chain')) {
+      const object = expression.childForFieldName('object') as TreeNode;
+      const whenTrue = this.c.flow.from(narrowedChain.whenTrue, () =>
+        this.c.flow.narrowReference(object, (type) => this.c.relations.removeNullish(type))
+      );
+      return { whenTrue, whenFalse: narrowedChain.whenFalse };
+    }
+    return narrowedChain;
+  }
+
+  /** The states where a reference is narrowed for a true and a false condition. */
+  private narrowed(
+    reference: TreeNode,
+    narrow: (type: Type, assumeTrue: boolean) => Type
+  ): { whenTrue: State; whenFalse: State } {
+    const base = this.c.flow.current;
+    const key = this.c.flow.referenceKey(reference);
+    if (!key || !base) return { whenTrue: base?.clone(), whenFalse: base?.clone() };
+    const whenTrue = this.c.flow.from(base, () => this.c.flow.narrowReference(reference, (type) => narrow(type, true)));
+    const whenFalse = this.c.flow.from(base, () =>
+      this.c.flow.narrowReference(reference, (type) => narrow(type, false))
+    );
+    this.narrowDiscriminantParent(reference, narrow, whenTrue, whenFalse);
+    return { whenTrue, whenFalse };
+  }
+
+  /** Narrows `x` too when a condition tests its discriminant property `x.kind`. */
+  private narrowDiscriminantParent(
+    reference: TreeNode,
+    narrow: (type: Type, assumeTrue: boolean) => Type,
+    whenTrue: State,
+    whenFalse: State
+  ): void {
+    const expression = skipParentheses(reference);
+    if (expression.type !== 'member_expression') return;
+    const object = expression.childForFieldName('object') as TreeNode;
+    const name = expression.childForFieldName('property')?.text ?? '';
+    const objectType = this.c.expressions.checkReferenceSilently(object);
+    const nonNull = this.c.relations.removeNullish(objectType);
+    if (!this.c.flow.isDiscriminant(nonNull, name) && !this.c.relations.isNullable(objectType)) return;
+    const apply = (state: State, assumeTrue: boolean): void => {
+      if (!state) return;
+      const outer = this.c.flow.current;
+      this.c.flow.current = state;
+      try {
+        this.c.flow.narrowReference(object, (type) =>
+          this.c.flow.narrowByDiscriminant(type, name, (propertyType) => narrow(propertyType, assumeTrue))
+        );
+      } finally {
+        this.c.flow.current = outer;
+      }
+    };
+    apply(whenTrue, true);
+    apply(whenFalse, false);
+    // The states were narrowed in place, so the reference's own entry stays as narrowed.
+    void (whenTrue as FlowState | undefined);
+  }
+
+  private narrowEquality(left: TreeNode, right: TreeNode, operator: string): { whenTrue: State; whenFalse: State } {
+    const equal = operator === '===' || operator === '==';
+    const loose = operator === '==' || operator === '!=';
+    const leftExpression = skipParentheses(left);
+    const rightExpression = skipParentheses(right);
+    // `typeof x === "string"`
+    for (const [typeofSide, other] of [
+      [leftExpression, rightExpression],
+      [rightExpression, leftExpression],
+    ] as const) {
+      if (
+        typeofSide.type === 'unary_expression' &&
+        typeofSide.childForFieldName('operator')?.text === 'typeof' &&
+        other.type === 'string'
+      ) {
+        const target = typeofSide.childForFieldName('argument') as TreeNode;
+        const name = stringValue(other);
+        const result = this.narrowed(target, (current, assumeTrue) =>
+          this.c.flow.narrowByTypeof(current, name, assumeTrue === equal)
+        );
+        return result;
+      }
+    }
+    const leftType = this.c.expressions.checkReferenceSilently(left);
+    const rightType = this.c.expressions.checkReferenceSilently(right);
+    const base = this.c.flow.current;
+    let whenTrue = base?.clone();
+    let whenFalse = base?.clone();
+    // Each side that is a reference narrows by the other's type.
+    for (const [reference, otherType] of [
+      [leftExpression, rightType],
+      [rightExpression, leftType],
+    ] as const) {
+      if (!this.c.flow.referenceKey(reference)) continue;
+      const narrow = (current: Type, assumeTrue: boolean): Type =>
+        this.c.flow.narrowByEquality(current, regularOf(otherType), assumeTrue === equal, loose);
+      whenTrue = this.c.flow.from(whenTrue, () => this.c.flow.narrowReference(reference, (type) => narrow(type, true)));
+      whenFalse = this.c.flow.from(whenFalse, () =>
+        this.c.flow.narrowReference(reference, (type) => narrow(type, false))
+      );
+      this.narrowDiscriminantParent(reference, narrow, whenTrue, whenFalse);
+    }
+    return { whenTrue, whenFalse };
+  }
+
+  /** The state entering a `case` of a `switch` on `discriminant` (or the `default`, excluding the cases). */
+  narrowSwitchCase(discriminant: TreeNode, entry: State, caseTypes: Type[], isCase: boolean): State {
+    const outer = this.c.flow.current;
+    this.c.flow.current = entry?.clone();
+    try {
+      const expression = skipParentheses(discriminant);
+      if (expression.type === 'unary_expression' && expression.childForFieldName('operator')?.text === 'typeof') {
+        const target = expression.childForFieldName('argument') as TreeNode;
+        const names = caseTypes
+          .filter((type) => type.kind === 'literal' && typeof type.value === 'string')
+          .map((type) => String((type as { value: unknown }).value));
+        const result = this.narrowed(target, (current) => {
+          if (isCase) return unionOf(names.map((name) => this.c.flow.narrowByTypeof(current, name, true)));
+          let remaining = current;
+          for (const name of names) remaining = this.c.flow.narrowByTypeof(remaining, name, false);
+          return remaining;
+        });
+        return result.whenTrue;
+      }
+      if (!this.c.flow.referenceKey(expression)) return this.c.flow.current;
+      const result = this.narrowed(expression, (current) => {
+        if (isCase)
+          return unionOf(caseTypes.map((caseType) => this.c.flow.narrowByEquality(current, caseType, true, false)));
+        let remaining = current;
+        for (const caseType of caseTypes) remaining = this.c.flow.narrowByEquality(remaining, caseType, false, false);
+        return remaining;
+      });
+      return result.whenTrue;
+    } finally {
+      this.c.flow.current = outer;
+    }
+  }
+}
+
+/** An expression without the type assertions and parentheses around it, which do not change its value. */
+function withoutAssertions(node: TreeNode): TreeNode {
+  let expression = node;
+  for (;;) {
+    expression = skipParentheses(expression);
+    if (['as_expression', 'satisfies_expression', 'non_null_expression'].includes(expression.type))
+      expression = named(expression)[0];
+    else if (expression.type === 'type_assertion') expression = named(expression).at(-1) as TreeNode;
+    else return expression;
+  }
+}

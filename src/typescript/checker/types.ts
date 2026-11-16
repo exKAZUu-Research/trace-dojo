@@ -293,6 +293,8 @@ function unionSortKey(type: Type): number {
 }
 
 /** The union of types, flattened, without duplicates, with literals absorbed by their primitives. */
+// code-gauge-allow functionNcss 42 -- Flattens, deduplicates, and reduces members as TypeScript's unions do.
+// code-gauge-allow functionCognitiveComplexity 30 -- Flattens, deduplicates, and reduces members as TypeScript's unions do.
 export function unionOf(types: Type[], keepFresh = false): Type {
   const flat: Type[] = [];
   const seen = new Set<number>();
@@ -332,6 +334,8 @@ export function unionOf(types: Type[], keepFresh = false): Type {
   return union;
 }
 
+// code-gauge-allow functionNcss 33 -- Flattens and reduces members as TypeScript's intersections do.
+// code-gauge-allow functionCognitiveComplexity 27 -- Flattens and reduces members as TypeScript's intersections do.
 export function intersectionOf(types: Type[]): Type {
   const flat: Type[] = [];
   const add = (type: Type): void => {

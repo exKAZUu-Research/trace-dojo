@@ -1,5 +1,14 @@
 import type { Checker } from './checker';
-import { booleanType, falseType, type ObjectType, type Signature, trueType, type Type } from './types';
+import {
+  booleanType,
+  falseType,
+  type ObjectType,
+  type Property,
+  type Signature,
+  type Structure,
+  trueType,
+  type Type,
+} from './types';
 
 function isNullish(member: Type): boolean {
   return member.kind === 'intrinsic' && (member.name === 'null' || member.name === 'undefined');
@@ -22,6 +31,7 @@ export class Printer {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of type.
+  // code-gauge-allow functionNcss 47 -- One case per kind of type.
   private printType(type: Type): string {
     switch (type.kind) {
       case 'intrinsic': {
@@ -91,6 +101,7 @@ export class Printer {
     return text;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of object type.
   private printObject(type: ObjectType): string {
     if (type.aliasName) {
       const args = type.aliasArguments ?? [];
@@ -133,47 +144,47 @@ export class Printer {
   private printAnonymous(type: ObjectType): string {
     if (type.isClassStatic && type.classInfo) return `typeof ${type.classInfo.name}`;
     const structure = type.resolve();
-    if (
-      structure.properties.size === 0 &&
-      structure.callSignatures.length === 1 &&
-      structure.constructSignatures.length === 0 &&
-      !structure.stringIndex &&
-      !structure.numberIndex
-    ) {
-      return this.printSignature(structure.callSignatures[0], ' => ');
-    }
-    if (
-      structure.properties.size === 0 &&
-      structure.callSignatures.length === 0 &&
-      structure.constructSignatures.length === 1 &&
-      !structure.stringIndex &&
-      !structure.numberIndex
-    ) {
-      const signature = structure.constructSignatures[0];
-      return `${signature.isAbstract ? 'abstract ' : ''}new ${this.printSignature(signature, ' => ')}`;
-    }
+    const signatureOnly = this.printSignatureOnly(structure);
+    if (signatureOnly) return signatureOnly;
     const members: string[] = [];
     if (structure.stringIndex) members.push(`[x: string]: ${this.print(structure.stringIndex.type)};`);
     if (structure.numberIndex) members.push(`[x: number]: ${this.print(structure.numberIndex.type)};`);
     for (const signature of structure.callSignatures) members.push(`${this.printSignature(signature, ': ')};`);
     for (const signature of structure.constructSignatures) members.push(`new ${this.printSignature(signature, ': ')};`);
-    for (const property of structure.properties.values()) {
-      const name = /^[$A-Z_a-z\u0080-￿][\w$\u0080-￿]*$/.test(property.name)
-        ? property.name
-        : JSON.stringify(property.name);
-      const propertyType = property.type();
-      if (property.isMethod && propertyType.kind === 'object') {
-        const signatures = propertyType.resolve().callSignatures;
-        for (const signature of signatures)
-          members.push(`${name}${property.optional ? '?' : ''}${this.printSignature(signature, ': ')};`);
-        continue;
-      }
-      members.push(
-        `${property.readonly ? 'readonly ' : ''}${name}${property.optional ? '?' : ''}: ${this.print(property.optional ? this.c.relations.removeUndefined(propertyType) : propertyType)};`
-      );
-    }
+    for (const property of structure.properties.values()) members.push(...this.printProperty(property));
     if (members.length === 0) return '{}';
     return `{ ${members.join(' ')} }`;
+  }
+
+  /** A function or constructor type with a single signature and no other members, as an arrow. */
+  private printSignatureOnly(structure: Structure): string | undefined {
+    if (structure.properties.size > 0 || structure.stringIndex || structure.numberIndex) return undefined;
+    const { callSignatures, constructSignatures } = structure;
+    if (callSignatures.length === 1 && constructSignatures.length === 0) {
+      return this.printSignature(callSignatures[0], ' => ');
+    }
+    if (callSignatures.length === 0 && constructSignatures.length === 1) {
+      const signature = constructSignatures[0];
+      return `${signature.isAbstract ? 'abstract ' : ''}new ${this.printSignature(signature, ' => ')}`;
+    }
+    return undefined;
+  }
+
+  /** The members a property prints as: one per signature of a method. */
+  private printProperty(property: Property): string[] {
+    const name = /^[$A-Z_a-z\u0080-￿][\w$\u0080-￿]*$/.test(property.name)
+      ? property.name
+      : JSON.stringify(property.name);
+    const optional = property.optional ? '?' : '';
+    const propertyType = property.type();
+    if (property.isMethod && propertyType.kind === 'object') {
+      return propertyType
+        .resolve()
+        .callSignatures.map((signature) => `${name}${optional}${this.printSignature(signature, ': ')};`);
+    }
+    return [
+      `${property.readonly ? 'readonly ' : ''}${name}${optional}: ${this.print(property.optional ? this.c.relations.removeUndefined(propertyType) : propertyType)};`,
+    ];
   }
 
   printSignature(signature: Signature, arrow: string): string {

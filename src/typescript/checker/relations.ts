@@ -14,6 +14,7 @@ import {
   type TypeParameter,
   undefinedType,
   unionOf,
+  type UnionType,
   unknownType,
 } from './types';
 
@@ -53,43 +54,25 @@ export class Relations {
     return result;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 60 -- Follows TypeScript's order of checks for each kind of type.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Follows TypeScript's order of checks for each kind of type.
   private structuredRelated(source: Type, target: Type, relation: Relation): boolean {
     const s = regularOf(source);
     const t = regularOf(target);
-    if (s === t) return true;
-    if (s === errorType || t === errorType) return true;
-    if (isAnyLike(t) || isIntrinsic(t, 'unknown')) return true;
-    if (isAnyLike(s)) return !isIntrinsic(t, 'never');
-    if (isIntrinsic(s, 'never')) return true;
-    if (t.kind === 'union' && s.kind === 'union' && relation === 'assignable') {
-      return s.types.every((member) => this.isRelated(member, t, relation));
-    }
+    const trivial = this.trivialRelation(s, t);
+    if (trivial !== undefined) return trivial;
     if (s.kind === 'union') {
       return relation === 'comparable'
         ? s.types.some((member) => this.isRelated(member, t, relation))
         : s.types.every((member) => this.isRelated(member, t, relation));
     }
-    // A type parameter is related to a union its constraint is related to as a whole.
-    if (s.kind === 'typeParameter' && t.kind === 'union') {
-      if (t.types.some((member) => member.kind === 'typeParameter' && member.id === s.id)) return true;
-      if (this.constraintRelated(s, t, relation)) return true;
-    }
-    if (t.kind === 'union') {
-      if (t === booleanType && s.kind === 'literal' && typeof s.value === 'boolean') return true;
-      if (t.types.some((member) => this.isRelated(s, member, relation))) return true;
-      // An object can be assignable to a union of objects only as a whole, as a discriminated one is.
-      return s.kind === 'object' && this.isRelatedToDiscriminatedUnion(s, t.types, relation);
-    }
+    if (t.kind === 'union') return this.relatedToUnion(s, t, relation);
     if (t.kind === 'intersection') return t.types.every((member) => this.isRelated(s, member, relation));
     if (s.kind === 'intersection') {
       if (s.types.some((member) => this.isRelated(member, t, relation))) return true;
-      if (t.kind === 'object') return this.objectRelated(s, t, relation);
-      return false;
+      return t.kind === 'object' && this.objectRelated(s, t, relation);
     }
     if (s.kind === 'typeParameter') {
-      if (t.kind === 'typeParameter') return s.id === t.id || this.constraintRelated(s, t, relation);
-      return this.constraintRelated(s, t, relation);
+      return (t.kind === 'typeParameter' && s.id === t.id) || this.constraintRelated(s, t, relation);
     }
     if (t.kind === 'typeParameter') return false;
     if (s.kind === 'indexedAccess' || s.kind === 'keyof' || s.kind === 'conditional') {
@@ -97,41 +80,67 @@ export class Relations {
       const constraint = this.c.baseConstraint(s);
       return constraint !== s && this.isRelated(constraint, t, relation);
     }
-    if (t.kind === 'indexedAccess' || t.kind === 'keyof' || t.kind === 'conditional') {
-      if (t.kind === 'keyof' && s.kind === 'literal' && (typeof s.value === 'string' || typeof s.value === 'number')) {
+    if (t.kind === 'indexedAccess' || t.kind === 'keyof' || t.kind === 'conditional') return false;
+    return this.relatedToConcrete(s, t, relation);
+  }
+
+  /** The relation that holds whatever the types' structures are, if any. */
+  private trivialRelation(s: Type, t: Type): boolean | undefined {
+    if (s === t || s === errorType || t === errorType) return true;
+    if (isAnyLike(t) || isIntrinsic(t, 'unknown')) return true;
+    if (isAnyLike(s)) return !isIntrinsic(t, 'never');
+    if (isIntrinsic(s, 'never')) return true;
+    return undefined;
+  }
+
+  private relatedToUnion(s: Type, t: UnionType, relation: Relation): boolean {
+    // A type parameter is related to a union its constraint is related to as a whole.
+    if (
+      s.kind === 'typeParameter' &&
+      (t.types.some((member) => member.kind === 'typeParameter' && member.id === s.id) ||
+        this.constraintRelated(s, t, relation))
+    )
+      return true;
+    if (t === booleanType && s.kind === 'literal' && typeof s.value === 'boolean') return true;
+    if (t.types.some((member) => this.isRelated(s, member, relation))) return true;
+    // An object can be assignable to a union of objects only as a whole, as a discriminated one is.
+    return s.kind === 'object' && this.isRelatedToDiscriminatedUnion(s, t.types, relation);
+  }
+
+  private relatedToConcrete(s: Type, t: Type, relation: Relation): boolean {
+    switch (t.kind) {
+      case 'intrinsic': {
+        return this.intrinsicTarget(s, t.name, relation);
+      }
+      case 'literal': {
+        if (s.kind === 'literal') return s.value === t.value;
+        return relation === 'comparable' && s.kind === 'intrinsic' && s.name === typeof t.value;
+      }
+      case 'templateLiteral':
+      case 'stringMapping': {
+        if (s.kind === 'literal' && typeof s.value === 'string') return this.matchesTemplate(s.value, t);
+        if (s.kind === 'templateLiteral' && t.kind === 'templateLiteral') return this.sameGeneric(s, t);
+        return relation === 'comparable' && isIntrinsic(s, 'string');
+      }
+      case 'object': {
+        return this.relatedToObject(s, t, relation);
+      }
+      default: {
         return false;
       }
-      return false;
     }
-    if (t.kind === 'intrinsic') return this.intrinsicTarget(s, t.name, relation);
-    if (t.kind === 'literal') {
-      if (s.kind === 'literal') return s.value === t.value;
-      if (relation === 'comparable' && s.kind === 'intrinsic') return s.name === typeof t.value;
-      return false;
+  }
+
+  private relatedToObject(s: Type, t: ObjectType, relation: Relation): boolean {
+    if (s.kind === 'intrinsic') {
+      if (['null', 'undefined', 'void', 'unknown'].includes(s.name)) return false;
+      if (s.name === 'object') return this.isEmptyObjectType(t);
     }
-    if (t.kind === 'templateLiteral' || t.kind === 'stringMapping') {
-      if (s.kind === 'literal' && typeof s.value === 'string') return this.matchesTemplate(s.value, t);
-      if (s.kind === 'templateLiteral' && t.kind === 'templateLiteral') return this.sameGeneric(s, t);
-      return relation === 'comparable' && isIntrinsic(s, 'string');
+    if (s.kind === 'literal' || s.kind === 'intrinsic' || s.kind === 'templateLiteral' || s.kind === 'stringMapping') {
+      // A primitive has the members of its boxing interface.
+      return this.isEmptyObjectType(t) || this.objectRelated(s, t, relation);
     }
-    if (t.kind === 'object') {
-      if (s.kind === 'intrinsic') {
-        if (['null', 'undefined', 'void', 'unknown'].includes(s.name)) return false;
-        if (s.name === 'object') return this.isEmptyObjectType(t);
-      }
-      if (
-        s.kind === 'literal' ||
-        s.kind === 'intrinsic' ||
-        s.kind === 'templateLiteral' ||
-        s.kind === 'stringMapping'
-      ) {
-        // A primitive has the members of its boxing interface.
-        if (this.isEmptyObjectType(t)) return true;
-        return this.objectRelated(s, t, relation);
-      }
-      if (s.kind === 'object') return this.objectRelated(s, t, relation);
-    }
-    return false;
+    return s.kind === 'object' && this.objectRelated(s, t, relation);
   }
 
   private constraintRelated(source: TypeParameter, target: Type, relation: Relation): boolean {
@@ -201,10 +210,15 @@ export class Relations {
   }
 
   /** Whether a string matches a template literal type such as `` `id-${number}` ``. */
+  // code-gauge-allow functionCognitiveComplexity 24 -- Matches a string against a template literal type by backtracking over its placeholders.
   private matchesTemplate(value: string, target: Type): boolean {
     if (target.kind === 'stringMapping') {
       const inner = target.type;
-      const mapped = this.c.stringMapping(target.mapping, { kind: 'literal', value, fresh: false } as Type);
+      const mapped = this.c.typeOperators.stringMapping(target.mapping, {
+        kind: 'literal',
+        value,
+        fresh: false,
+      } as Type);
       if (mapped.kind !== 'literal' || mapped.value !== value) return false;
       return isIntrinsic(inner, 'string') || this.isAssignable({ kind: 'literal', value } as Type, inner);
     }
@@ -256,34 +270,28 @@ export class Relations {
     return false;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- Compares each kind of member as TypeScript does.
   private objectRelated(source: Type, target: ObjectType, relation: Relation): boolean {
     if (target.objectKind === 'mapped') return false;
-    // References to the same generic type compare their type arguments, as arrays do.
-    if (
-      source.kind === 'object' &&
-      source.objectKind === 'reference' &&
-      target.objectKind === 'reference' &&
-      source.target === target.target
-    ) {
-      const sourceArguments = source.typeArguments ?? [];
-      const targetArguments = target.typeArguments ?? [];
-      if (sourceArguments.every((argument, index) => this.isRelated(argument, targetArguments[index], relation)))
-        return true;
-      if (source.target?.name === 'Array' || source.target?.name === 'ReadonlyArray') return false;
-    }
-    if (source.kind === 'object' && source.objectKind === 'tuple' && target.objectKind === 'tuple')
-      return this.tupleRelated(source, target, relation);
-    // An array or a tuple is a read-only array, an iterable, and an array-like of its elements.
-    if (
-      source.kind === 'object' &&
-      this.c.isArrayOrTuple(source) &&
-      target.objectKind === 'reference' &&
-      ['ReadonlyArray', 'Iterable', 'ArrayLike', 'Array'].includes(target.target?.name ?? '')
-    ) {
-      if (target.target?.name === 'Array' && (this.c.isReadonlyArrayType(source) || source.tuple?.readonly))
-        return false;
-      return this.isRelated(this.c.elementTypeOf(source), target.typeArguments?.[0] ?? unknownType, relation);
+    const byElements = this.elementsRelated(source, target, relation);
+    if (byElements !== undefined) return byElements;
+    const sourceStructure = this.c.structureOf(source);
+    const targetStructure = target.resolve();
+    const { stringIndex, numberIndex } = targetStructure;
+    return (
+      this.propertiesRelated(source, sourceStructure, targetStructure, relation) &&
+      this.signaturesRelated(sourceStructure.callSignatures, targetStructure.callSignatures, relation) &&
+      this.signaturesRelated(sourceStructure.constructSignatures, targetStructure.constructSignatures, relation) &&
+      (!stringIndex || this.indexRelated(sourceStructure, source, stringIndex.type, false, relation)) &&
+      (!numberIndex || this.indexRelated(sourceStructure, source, numberIndex.type, true, relation)) &&
+      !this.lacksWeakTypeProperty(sourceStructure, targetStructure, relation)
+    );
+  }
+
+  /** The relation of arrays, tuples, and references to the same generic type, if it decides one. */
+  private elementsRelated(source: Type, target: ObjectType, relation: Relation): boolean | undefined {
+    if (source.kind === 'object') {
+      const related = this.arrayLikeRelated(source, target, relation);
+      if (related !== undefined) return related;
     }
     if (target.objectKind === 'tuple') return false;
     if (
@@ -294,8 +302,39 @@ export class Relations {
     )
       return false;
     if (source.kind === 'object' && this.c.isReadonlyArrayType(source) && this.c.isArrayType(target)) return false;
-    const sourceStructure = this.c.structureOf(source);
-    const targetStructure = target.resolve();
+    return undefined;
+  }
+
+  private arrayLikeRelated(source: ObjectType, target: ObjectType, relation: Relation): boolean | undefined {
+    // References to the same generic type compare their type arguments, as arrays do.
+    if (source.objectKind === 'reference' && target.objectKind === 'reference' && source.target === target.target) {
+      const sourceArguments = source.typeArguments ?? [];
+      const targetArguments = target.typeArguments ?? [];
+      if (sourceArguments.every((argument, index) => this.isRelated(argument, targetArguments[index], relation)))
+        return true;
+      if (source.target?.name === 'Array' || source.target?.name === 'ReadonlyArray') return false;
+    }
+    if (source.objectKind === 'tuple' && target.objectKind === 'tuple')
+      return this.tupleRelated(source, target, relation);
+    // An array or a tuple is a read-only array, an iterable, and an array-like of its elements.
+    if (
+      this.c.isArrayOrTuple(source) &&
+      target.objectKind === 'reference' &&
+      ['ReadonlyArray', 'Iterable', 'ArrayLike', 'Array'].includes(target.target?.name ?? '')
+    ) {
+      if (target.target?.name === 'Array' && (this.c.isReadonlyArrayType(source) || source.tuple?.readonly))
+        return false;
+      return this.isRelated(this.c.elementTypeOf(source), target.typeArguments?.[0] ?? unknownType, relation);
+    }
+    return undefined;
+  }
+
+  private propertiesRelated(
+    source: Type,
+    sourceStructure: Structure,
+    targetStructure: Structure,
+    relation: Relation
+  ): boolean {
     for (const [name, targetProperty] of targetStructure.properties) {
       const sourceProperty =
         source.kind === 'object' || source.kind === 'intersection'
@@ -307,21 +346,12 @@ export class Relations {
       }
       if (!this.propertyRelated(sourceProperty, targetProperty, relation)) return false;
     }
-    if (!this.signaturesRelated(sourceStructure.callSignatures, targetStructure.callSignatures, relation)) return false;
-    if (!this.signaturesRelated(sourceStructure.constructSignatures, targetStructure.constructSignatures, relation))
-      return false;
-    if (
-      targetStructure.stringIndex &&
-      !this.indexRelated(sourceStructure, source, targetStructure.stringIndex.type, false, relation)
-    )
-      return false;
-    if (
-      targetStructure.numberIndex &&
-      !this.indexRelated(sourceStructure, source, targetStructure.numberIndex.type, true, relation)
-    )
-      return false;
-    // A weak type, whose properties are all optional, needs a source sharing one of them.
-    if (
+    return true;
+  }
+
+  /** Whether the target is a weak type, whose properties are all optional, and the source shares none of them. */
+  private lacksWeakTypeProperty(sourceStructure: Structure, targetStructure: Structure, relation: Relation): boolean {
+    return (
       relation === 'assignable' &&
       targetStructure.properties.size > 0 &&
       [...targetStructure.properties.values()].every((property) => property.optional) &&
@@ -330,10 +360,7 @@ export class Relations {
       !targetStructure.numberIndex &&
       (sourceStructure.properties.size > 0 || sourceStructure.callSignatures.length > 0) &&
       ![...targetStructure.properties.keys()].some((name) => sourceStructure.properties.has(name))
-    ) {
-      return false;
-    }
-    return true;
+    );
   }
 
   private propertyRelated(source: Property, target: Property, relation: Relation): boolean {
@@ -351,6 +378,7 @@ export class Relations {
     return this.isRelated(sourceType, targetType, relation);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Follows TypeScript's rules for which members satisfy an index signature.
   private indexRelated(
     structure: Structure,
     source: Type,
@@ -378,6 +406,8 @@ export class Relations {
     return true;
   }
 
+  // code-gauge-allow functionNcss 31 -- Compares fixed, optional, and rest elements as TypeScript does.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Compares fixed, optional, and rest elements as TypeScript does.
   private tupleRelated(source: ObjectType, target: ObjectType, relation: Relation): boolean {
     const sourceElements = source.tuple?.elements ?? [];
     const targetElements = target.tuple?.elements ?? [];
@@ -412,11 +442,12 @@ export class Relations {
     return true;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Compares parameters and return types as TypeScript does.
   signatureRelated(source: Signature, target: Signature, relation: Relation): boolean {
     let sourceSignature = source;
     if (source.typeParameters.length > 0) {
       // A generic source is instantiated to fit the target, as the target's parameters infer its type arguments.
-      sourceSignature = this.c.expressions.calls.instantiateToFit(source, target);
+      sourceSignature = this.c.inference.instantiateToFit(source, target);
     }
     if (target.isAbstract === false && source.isAbstract) return false;
     const sourceRequired = sourceSignature.parameters.filter(

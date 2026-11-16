@@ -1,7 +1,7 @@
+// code-gauge-allow-file fileNcss 424 -- Follows the flow of control through each kind of statement.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import type { FunctionContext } from './expressions';
 import { FlowState, type State } from './flow';
 import type { Sym } from './scopes';
 import { hasToken, named, patternIdentifiers, skipParentheses } from './syntax';
@@ -12,7 +12,6 @@ import {
   isIntrinsic,
   neverType,
   regularOf,
-  type Signature,
   stringType,
   type Structure,
   type Type,
@@ -32,6 +31,29 @@ const MAX_LOOP_PASSES = 3;
 /** Checks statements, following the flow of control through them. */
 export class StatementChecker {
   private readonly jumpTargets: JumpTarget[] = [];
+  /** How each kind of statement is checked; the others need no checks. */
+  private readonly checkers = new Map<string, (node: TreeNode) => void>([
+    ['expression_statement', (node) => this.expressionStatement(node)],
+    ['lexical_declaration', (node) => this.declaration(node)],
+    ['variable_declaration', (node) => this.declaration(node)],
+    ['statement_block', (node) => this.checkBlockStatements(named(node))],
+    ['if_statement', (node) => this.ifStatement(node)],
+    ['while_statement', (node) => this.whileStatement(node)],
+    ['do_statement', (node) => this.doStatement(node)],
+    ['for_statement', (node) => this.forStatement(node)],
+    ['for_in_statement', (node) => this.forInStatement(node)],
+    ['switch_statement', (node) => this.switchStatement(node)],
+    ['try_statement', (node) => this.tryStatement(node)],
+    ['return_statement', (node) => this.returnStatement(node)],
+    ['throw_statement', (node) => this.throwStatement(node)],
+    ['break_statement', () => this.breakStatement()],
+    ['continue_statement', () => this.continueStatement()],
+    ['function_declaration', (node) => this.c.functions.functionDeclaration(node)],
+    ['class_declaration', (node) => this.c.classDeclarations.checkClass(node)],
+    ['abstract_class_declaration', (node) => this.c.classDeclarations.checkClass(node)],
+    ['interface_declaration', (node) => this.interfaceDeclaration(node)],
+    ['type_alias_declaration', (node) => this.typeAliasDeclaration(node)],
+  ]);
 
   constructor(private readonly c: Checker) {}
 
@@ -53,98 +75,39 @@ export class StatementChecker {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of statement.
   private check(node: TreeNode): void {
-    switch (node.type) {
-      case 'expression_statement': {
-        const expression = named(node)[0];
-        if (expression) this.c.expressions.check(expression);
-        return;
-      }
-      case 'lexical_declaration':
-      case 'variable_declaration': {
-        this.declaration(node);
-        return;
-      }
-      case 'statement_block': {
-        this.checkBlockStatements(named(node));
-        return;
-      }
-      case 'if_statement': {
-        this.ifStatement(node);
-        return;
-      }
-      case 'while_statement': {
-        this.whileStatement(node);
-        return;
-      }
-      case 'do_statement': {
-        this.doStatement(node);
-        return;
-      }
-      case 'for_statement': {
-        this.forStatement(node);
-        return;
-      }
-      case 'for_in_statement': {
-        this.forInStatement(node);
-        return;
-      }
-      case 'switch_statement': {
-        this.switchStatement(node);
-        return;
-      }
-      case 'try_statement': {
-        this.tryStatement(node);
-        return;
-      }
-      case 'return_statement': {
-        this.returnStatement(node);
-        return;
-      }
-      case 'throw_statement': {
-        const expression = named(node)[0];
-        if (expression) this.c.expressions.check(expression);
-        this.c.flow.current = undefined;
-        return;
-      }
-      case 'break_statement': {
-        const target = this.jumpTargets.at(-1);
-        target?.breaks.push(this.c.flow.current?.clone());
-        this.c.flow.current = undefined;
-        return;
-      }
-      case 'continue_statement': {
-        const target = this.jumpTargets.findLast((candidate) => candidate.isLoop);
-        target?.continues.push(this.c.flow.current?.clone());
-        this.c.flow.current = undefined;
-        return;
-      }
-      case 'function_declaration': {
-        this.functionDeclaration(node);
-        return;
-      }
-      case 'class_declaration':
-      case 'abstract_class_declaration': {
-        this.c.classes.checkClass(node);
-        return;
-      }
-      case 'interface_declaration': {
-        this.interfaceDeclaration(node);
-        return;
-      }
-      case 'type_alias_declaration': {
-        const name = node.childForFieldName('name')?.text;
-        const symbol = name ? this.c.scopeOf(node).lookupType(name) : undefined;
-        this.c.typeParametersOf(node);
-        if (symbol) this.c.declaredTypeOf(symbol);
-        this.resolveTypesIn(node.childForFieldName('value'));
-        return;
-      }
-      default: {
-        return;
-      }
-    }
+    this.checkers.get(node.type)?.(node);
+  }
+
+  private expressionStatement(node: TreeNode): void {
+    const expression = named(node)[0];
+    if (expression) this.c.expressions.check(expression);
+  }
+
+  private throwStatement(node: TreeNode): void {
+    const expression = named(node)[0];
+    if (expression) this.c.expressions.check(expression);
+    this.c.flow.current = undefined;
+  }
+
+  private breakStatement(): void {
+    const target = this.jumpTargets.at(-1);
+    target?.breaks.push(this.c.flow.current?.clone());
+    this.c.flow.current = undefined;
+  }
+
+  private continueStatement(): void {
+    const target = this.jumpTargets.findLast((candidate) => candidate.isLoop);
+    target?.continues.push(this.c.flow.current?.clone());
+    this.c.flow.current = undefined;
+  }
+
+  private typeAliasDeclaration(node: TreeNode): void {
+    const name = node.childForFieldName('name')?.text;
+    const symbol = name ? this.c.scopeOf(node).lookupType(name) : undefined;
+    this.c.signatures.typeParametersOf(node);
+    if (symbol) this.c.typeNodes.declaredTypeOf(symbol);
+    this.resolveTypesIn(node.childForFieldName('value'));
   }
 
   /** Resolves every type written in a node, so that unknown names report errors. */
@@ -159,7 +122,7 @@ export class StatementChecker {
           parent?.type !== 'mapped_type_clause' &&
           parent?.type !== 'infer_type'
         ) {
-          this.c.typeFromNode(current);
+          this.c.typeNodes.typeFromNode(current);
         }
       }
       for (const child of named(current)) visit(child);
@@ -171,8 +134,8 @@ export class StatementChecker {
     const name = node.childForFieldName('name')?.text;
     const symbol = name ? this.c.scopeOf(node).lookupType(name) : undefined;
     if (!symbol) return;
-    this.c.typeParametersOf(node);
-    const type = this.c.declaredTypeOf(symbol);
+    this.c.signatures.typeParametersOf(node);
+    const type = this.c.typeNodes.declaredTypeOf(symbol);
     if (type.kind === 'object') {
       const structure = type.resolve();
       for (const property of structure.properties.values()) property.type();
@@ -205,74 +168,75 @@ export class StatementChecker {
 
   // Declarations -------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Each form of declarator.
   private declaration(node: TreeNode): void {
     const kind = node.type === 'variable_declaration' ? 'var' : (node.childForFieldName('kind')?.text ?? 'let');
-    const isConst = kind === 'const';
     for (const declarator of named(node)) {
       if (declarator.type !== 'variable_declarator') continue;
       const nameNode = declarator.childForFieldName('name') as TreeNode;
-      const value = declarator.childForFieldName('value');
-      const annotation = this.c.annotationType(declarator.childForFieldName('type'));
-      const definite = hasToken(declarator, '!');
-      if (nameNode.type === 'identifier') {
-        const symbol = this.c.scopeOf(nameNode).lookupValue(nameNode.text);
-        if (!symbol) continue;
-        const key = `s${symbol.id}`;
-        if (!value) {
-          if (isConst) continue;
-          if (!annotation) {
-            // `let x;` follows the types assigned to it, starting as `undefined`.
-            this.c.expressions.setVariableType(symbol, anyType);
-            this.c.flow.set(key, { type: undefinedType, assigned: kind === 'var' });
-            continue;
-          }
-          this.c.expressions.setVariableType(symbol, annotation);
-          const existing = this.c.flow.entry(key);
-          // A `var` declared again keeps what it holds.
-          if (kind === 'var' && existing) continue;
-          this.c.flow.set(key, { type: annotation, assigned: definite });
-          continue;
-        }
-        const valueType = this.c.expressions.check(value, annotation);
-        if (annotation) {
-          this.c.expressions.checkAssignable(nameNode, valueType, annotation);
-          this.c.expressions.setVariableType(symbol, annotation);
-          this.c.flow.set(key, {
-            type: this.c.flow.assignmentReduced(annotation, regularOf(valueType)),
-            assigned: true,
-          });
-          continue;
-        }
-        if (this.isEmptyArrayLiteral(value)) {
-          // `const a = []` evolves as elements are pushed.
-          this.c.expressions.setVariableType(symbol, this.c.arrayType(anyType));
-          this.c.flow.set(key, { type: this.c.arrayType(neverType), assigned: true, evolving: true });
-          continue;
-        }
-        const declared = this.c.expressions.widenDeclared(valueType, isConst);
-        const widened =
-          isIntrinsic(declared, 'null') || isIntrinsic(declared, 'undefined')
-            ? isConst
-              ? declared
-              : anyType
-            : declared;
-        this.c.expressions.setVariableType(symbol, widened);
-        this.c.flow.set(key, { type: isConst ? widened : widened === anyType ? declared : widened, assigned: true });
-        continue;
-      }
-      // A destructuring pattern.
-      const valueType = value ? this.c.expressions.check(value, annotation) : (annotation ?? anyType);
-      if (annotation && value) this.c.expressions.checkAssignable(nameNode, valueType, annotation);
-      const sourceType = annotation ?? this.c.expressions.widenDeclared(valueType, false);
-      this.c.expressions.bindPattern(nameNode, sourceType, (identifier, type) => {
-        const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
-        if (!symbol) return;
-        const declared = this.c.expressions.widenDeclared(type, isConst);
-        this.c.expressions.setVariableType(symbol, declared);
-        this.c.flow.set(`s${symbol.id}`, { type: declared, assigned: true });
-      });
+      if (nameNode.type === 'identifier') this.variableDeclarator(declarator, nameNode, kind);
+      else this.patternDeclarator(declarator, nameNode, kind === 'const');
     }
+  }
+
+  private variableDeclarator(declarator: TreeNode, nameNode: TreeNode, kind: string): void {
+    const value = declarator.childForFieldName('value');
+    const annotation = this.c.typeNodes.annotationType(declarator.childForFieldName('type'));
+    const symbol = this.c.scopeOf(nameNode).lookupValue(nameNode.text);
+    if (!symbol) return;
+    if (!value) {
+      this.uninitializedVariable(declarator, symbol, kind, annotation);
+      return;
+    }
+    const key = `s${symbol.id}`;
+    const valueType = this.c.expressions.check(value, annotation);
+    if (annotation) {
+      this.c.expressions.checkAssignable(nameNode, valueType, annotation);
+      this.c.expressions.setVariableType(symbol, annotation);
+      this.c.flow.set(key, { type: this.c.flow.assignmentReduced(annotation, regularOf(valueType)), assigned: true });
+      return;
+    }
+    if (this.isEmptyArrayLiteral(value)) {
+      // `const a = []` evolves as elements are pushed.
+      this.c.expressions.setVariableType(symbol, this.c.arrayType(anyType));
+      this.c.flow.set(key, { type: this.c.arrayType(neverType), assigned: true, evolving: true });
+      return;
+    }
+    const isConst = kind === 'const';
+    const declared = this.c.literals.widenDeclared(valueType, isConst);
+    const widened =
+      isIntrinsic(declared, 'null') || isIntrinsic(declared, 'undefined') ? (isConst ? declared : anyType) : declared;
+    this.c.expressions.setVariableType(symbol, widened);
+    this.c.flow.set(key, { type: isConst ? widened : widened === anyType ? declared : widened, assigned: true });
+  }
+
+  private uninitializedVariable(declarator: TreeNode, symbol: Sym, kind: string, annotation: Type | undefined): void {
+    if (kind === 'const') return;
+    const key = `s${symbol.id}`;
+    if (!annotation) {
+      // `let x;` follows the types assigned to it, starting as `undefined`.
+      this.c.expressions.setVariableType(symbol, anyType);
+      this.c.flow.set(key, { type: undefinedType, assigned: kind === 'var' });
+      return;
+    }
+    this.c.expressions.setVariableType(symbol, annotation);
+    // A `var` declared again keeps what it holds.
+    if (kind === 'var' && this.c.flow.entry(key)) return;
+    this.c.flow.set(key, { type: annotation, assigned: hasToken(declarator, '!') });
+  }
+
+  private patternDeclarator(declarator: TreeNode, pattern: TreeNode, isConst: boolean): void {
+    const value = declarator.childForFieldName('value');
+    const annotation = this.c.typeNodes.annotationType(declarator.childForFieldName('type'));
+    const valueType = value ? this.c.expressions.check(value, annotation) : (annotation ?? anyType);
+    if (annotation && value) this.c.expressions.checkAssignable(pattern, valueType, annotation);
+    const sourceType = annotation ?? this.c.literals.widenDeclared(valueType, false);
+    this.c.patterns.bindPattern(pattern, sourceType, (identifier, type) => {
+      const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
+      if (!symbol) return;
+      const declared = this.c.literals.widenDeclared(type, isConst);
+      this.c.expressions.setVariableType(symbol, declared);
+      this.c.flow.set(`s${symbol.id}`, { type: declared, assigned: true });
+    });
   }
 
   private isEmptyArrayLiteral(node: TreeNode): boolean {
@@ -285,7 +249,7 @@ export class StatementChecker {
     if (declaration.type === 'for_in_statement') return this.loopVariableType(declaration, symbol);
     if (declaration.type !== 'variable_declarator') return anyType;
     const nameNode = declaration.childForFieldName('name') as TreeNode;
-    const annotation = this.c.annotationType(declaration.childForFieldName('type'));
+    const annotation = this.c.typeNodes.annotationType(declaration.childForFieldName('type'));
     const value = declaration.childForFieldName('value');
     const isConst = declaration.parent?.childForFieldName('kind')?.text === 'const';
     if (nameNode.type === 'identifier') {
@@ -295,14 +259,14 @@ export class StatementChecker {
       const flow = this.c.flow.current;
       this.c.flow.current = new FlowState();
       try {
-        return this.c.expressions.widenDeclared(this.c.expressions.check(value), isConst);
+        return this.c.literals.widenDeclared(this.c.expressions.check(value), isConst);
       } finally {
         this.c.flow.current = flow;
       }
     }
     const source =
-      annotation ?? (value ? this.c.expressions.widenDeclared(this.c.expressions.check(value), false) : anyType);
-    return this.c.expressions.widenDeclared(this.c.expressions.patternType(nameNode, source, symbol.name), isConst);
+      annotation ?? (value ? this.c.literals.widenDeclared(this.c.expressions.check(value), false) : anyType);
+    return this.c.literals.widenDeclared(this.c.patterns.patternType(nameNode, source, symbol.name), isConst);
   }
 
   private loopVariableType(node: TreeNode, symbol: Sym): Type {
@@ -311,18 +275,18 @@ export class StatementChecker {
     const left = header.childForFieldName('left') as TreeNode;
     const isOf = header.childForFieldName('operator')?.text === 'of';
     const rightType = this.c.expressions.check(right);
-    const elementType = isOf ? this.c.expressions.iteratedType(undefined, rightType) : stringType;
+    const elementType = isOf ? this.c.patterns.iteratedType(undefined, rightType) : stringType;
     if (left.type === 'identifier') return elementType;
-    return this.c.expressions.patternType(left, elementType, symbol.name);
+    return this.c.patterns.patternType(left, elementType, symbol.name);
   }
 
   // Control flow -------------------------------------------------------------------------------------------------
 
   private ifStatement(node: TreeNode): void {
     const condition = node.childForFieldName('condition') as TreeNode;
-    const { whenTrue, whenFalse } = this.c.expressions.checkCondition(condition);
+    const { whenTrue, whenFalse } = this.c.conditions.checkCondition(condition);
     const consequence = node.childForFieldName('consequence') as TreeNode;
-    this.c.expressions.checkUncalledFunction(condition, consequence);
+    this.c.conditions.checkUncalledFunction(condition, consequence);
     const alternative = node.childForFieldName('alternative');
     const afterTrue = this.c.flow.from(whenTrue, () => this.checkSubstatement(consequence));
     const afterFalse = this.c.flow.from(whenFalse, () => {
@@ -392,7 +356,7 @@ export class StatementChecker {
     const condition = node.childForFieldName('condition') as TreeNode;
     const body = node.childForFieldName('body') as TreeNode;
     this.loop((target) => {
-      const { whenTrue, whenFalse } = this.c.expressions.checkCondition(condition);
+      const { whenTrue, whenFalse } = this.c.conditions.checkCondition(condition);
       this.c.flow.current = whenTrue;
       this.checkSubstatement(body);
       const end = this.c.flow.merge([this.c.flow.current, ...target.continues]);
@@ -408,7 +372,7 @@ export class StatementChecker {
       this.checkSubstatement(body);
       this.c.flow.current = this.c.flow.merge([this.c.flow.current, ...target.continues]);
       if (!this.c.flow.isReachable) return;
-      const { whenTrue, whenFalse } = this.c.expressions.checkCondition(condition);
+      const { whenTrue, whenFalse } = this.c.conditions.checkCondition(condition);
       this.c.flow.current = whenTrue;
       return this.isAlwaysTrue(condition) ? undefined : whenFalse;
     });
@@ -422,32 +386,27 @@ export class StatementChecker {
       .find((child) => child.isNamed && child.type !== 'empty_statement');
     const increment = header.childrenForFieldName('increment').find((child) => child.isNamed);
     const body = node.childForFieldName('body') as TreeNode;
-    if (initializer && initializer.type !== 'empty_statement') {
-      if (initializer.type === 'lexical_declaration' || initializer.type === 'variable_declaration')
-        this.declaration(initializer);
-      else if (initializer.type === 'expression_statement') this.c.expressions.check(named(initializer)[0]);
-      else this.c.expressions.check(initializer);
-    }
+    if (initializer && initializer.type !== 'empty_statement') this.forInitializer(initializer);
+    const conditionNode = condition && condition.type === 'expression_statement' ? named(condition)[0] : condition;
     this.loop((target) => {
       let whenFalse: State;
-      const conditionNode =
-        condition && condition.type !== 'empty_statement'
-          ? condition.type === 'expression_statement'
-            ? named(condition)[0]
-            : condition
-          : undefined;
       if (conditionNode) {
-        const result = this.c.expressions.checkCondition(conditionNode);
+        const result = this.c.conditions.checkCondition(conditionNode);
         this.c.flow.current = result.whenTrue;
         whenFalse = this.isAlwaysTrue(conditionNode) ? undefined : result.whenFalse;
-      } else {
-        whenFalse = undefined;
       }
       this.checkSubstatement(body);
       this.c.flow.current = this.c.flow.merge([this.c.flow.current, ...target.continues]);
       if (increment && this.c.flow.isReachable) this.c.expressions.check(increment);
       return whenFalse;
     });
+  }
+
+  private forInitializer(initializer: TreeNode): void {
+    if (initializer.type === 'lexical_declaration' || initializer.type === 'variable_declaration')
+      this.declaration(initializer);
+    else if (initializer.type === 'expression_statement') this.c.expressions.check(named(initializer)[0]);
+    else this.c.expressions.check(initializer);
   }
 
   private isAlwaysTrue(condition: TreeNode): boolean {
@@ -461,55 +420,57 @@ export class StatementChecker {
     const isOf = header.childForFieldName('operator')?.text === 'of';
     const kind = header.childForFieldName('kind')?.text;
     const rightType = this.c.expressions.check(right);
-    let elementType: Type;
-    if (isOf) {
-      elementType = this.c.expressions.iteratedType(right, rightType);
-    } else {
-      const object = regularOf(rightType);
-      if (
-        !isAnyLike(object) &&
-        !isIntrinsic(object, 'unknown') &&
-        (object.kind === 'literal' || (object.kind === 'intrinsic' && object.name !== 'object'))
-      ) {
-        this.c.error(
-          right,
-          'for...in 文の右辺は、any 型、オブジェクト型、型パラメーターのいずれかでなければいけません。'
-        );
-      }
-      elementType = stringType;
-    }
+    const elementType = isOf ? this.c.patterns.iteratedType(right, rightType) : this.forInKeyType(right, rightType);
     const body = node.childForFieldName('body') as TreeNode;
-    const bindLoopVariables = (): void => {
-      if (kind) {
-        this.c.expressions.bindPattern(left, elementType, (identifier, type) => {
-          const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
-          if (!symbol) return;
-          this.c.expressions.setVariableType(symbol, kind === 'const' ? type : this.c.widen(type));
-          this.c.flow.set(`s${symbol.id}`, { type, assigned: true });
-        });
-        return;
-      }
-      for (const identifier of patternIdentifiers(left)) {
-        const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
-        if (symbol) this.c.flow.set(`s${symbol.id}`, { type: this.c.expressions.valueTypeOf(symbol), assigned: true });
-      }
-      if (left.type === 'identifier') {
-        const symbol = this.c.scopeOf(left).lookupValue(left.text);
-        const declared = symbol ? this.c.expressions.valueTypeOf(symbol) : errorType;
-        if (declared !== errorType && !this.c.relations.isAssignable(elementType, declared))
-          this.c.expressions.reportNotAssignable(left, elementType, declared);
-      }
-    };
     this.loop((target) => {
       const head = this.c.flow.current?.clone();
-      bindLoopVariables();
+      if (kind) this.bindLoopVariables(left, kind, elementType);
+      else this.assignLoopVariables(left, elementType);
       this.checkSubstatement(body);
       this.c.flow.current = this.c.flow.merge([this.c.flow.current, ...target.continues]);
       return this.c.flow.merge([head, this.c.flow.current]);
     });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Narrows each case and follows the fallthrough.
+  /** The type of the keys a `for...in` loop takes, reporting an object that is a primitive. */
+  private forInKeyType(right: TreeNode, rightType: Type): Type {
+    const object = regularOf(rightType);
+    if (
+      !isAnyLike(object) &&
+      !isIntrinsic(object, 'unknown') &&
+      (object.kind === 'literal' || (object.kind === 'intrinsic' && object.name !== 'object'))
+    ) {
+      this.c.error(
+        right,
+        'for...in 文の右辺は、any 型、オブジェクト型、型パラメーターのいずれかでなければいけません。'
+      );
+    }
+    return stringType;
+  }
+
+  /** Declares the variables of a loop's `const`, `let`, or `var` head. */
+  private bindLoopVariables(left: TreeNode, kind: string, elementType: Type): void {
+    this.c.patterns.bindPattern(left, elementType, (identifier, type) => {
+      const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
+      if (!symbol) return;
+      this.c.expressions.setVariableType(symbol, kind === 'const' ? type : this.c.widen(type));
+      this.c.flow.set(`s${symbol.id}`, { type, assigned: true });
+    });
+  }
+
+  /** Assigns the existing variables a loop's head without a declaration names. */
+  private assignLoopVariables(left: TreeNode, elementType: Type): void {
+    for (const identifier of patternIdentifiers(left)) {
+      const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
+      if (symbol) this.c.flow.set(`s${symbol.id}`, { type: this.c.expressions.valueTypeOf(symbol), assigned: true });
+    }
+    if (left.type !== 'identifier') return;
+    const symbol = this.c.scopeOf(left).lookupValue(left.text);
+    const declared = symbol ? this.c.expressions.valueTypeOf(symbol) : errorType;
+    if (declared !== errorType && !this.c.relations.isAssignable(elementType, declared))
+      this.c.expressions.reportNotAssignable(left, elementType, declared);
+  }
+
   private switchStatement(node: TreeNode): void {
     const value = node.childForFieldName('value') as TreeNode;
     const discriminant = skipParentheses(value);
@@ -526,24 +487,13 @@ export class StatementChecker {
       for (const caseNode of cases) {
         let caseEntry: State;
         if (caseNode.type === 'switch_case') {
-          const test = caseNode.childForFieldName('value') as TreeNode;
           this.c.flow.current = entry?.clone();
-          const testType = this.c.expressions.check(test);
-          caseTypes.push(regularOf(testType));
-          if (
-            !isAnyLike(discriminantType) &&
-            !isAnyLike(testType) &&
-            !this.c.relations.isComparable(regularOf(discriminantType), regularOf(testType))
-          ) {
-            this.c.error(
-              test,
-              `型 '${this.c.print(regularOf(testType))}' は型 '${this.c.print(regularOf(discriminantType))}' と比べられません。`
-            );
-          }
-          caseEntry = this.c.expressions.narrowSwitchCase(discriminant, entry, [regularOf(testType)], true);
+          const testType = this.checkCaseTest(caseNode.childForFieldName('value') as TreeNode, discriminantType);
+          caseTypes.push(testType);
+          caseEntry = this.c.conditions.narrowSwitchCase(discriminant, entry, [testType], true);
         } else {
           hasDefault = true;
-          caseEntry = this.c.expressions.narrowSwitchCase(discriminant, entry, caseTypes, false);
+          caseEntry = this.c.conditions.narrowSwitchCase(discriminant, entry, caseTypes, false);
         }
         this.c.flow.current = this.c.flow.merge([caseEntry, fallthrough]);
         const statements = caseNode
@@ -555,8 +505,24 @@ export class StatementChecker {
     } finally {
       this.jumpTargets.pop();
     }
-    const noMatch = hasDefault ? undefined : this.c.expressions.narrowSwitchCase(discriminant, entry, caseTypes, false);
+    const noMatch = hasDefault ? undefined : this.c.conditions.narrowSwitchCase(discriminant, entry, caseTypes, false);
     this.c.flow.current = this.c.flow.merge([fallthrough!, ...target.breaks, noMatch]);
+  }
+
+  /** Checks a `case` test, reporting one that cannot equal the discriminant, and returns its type. */
+  private checkCaseTest(test: TreeNode, discriminantType: Type): Type {
+    const testType = this.c.expressions.check(test);
+    if (
+      !isAnyLike(discriminantType) &&
+      !isAnyLike(testType) &&
+      !this.c.relations.isComparable(regularOf(discriminantType), regularOf(testType))
+    ) {
+      this.c.error(
+        test,
+        `型 '${this.c.print(regularOf(testType))}' は型 '${this.c.print(regularOf(discriminantType))}' と比べられません。`
+      );
+    }
+    return regularOf(testType);
   }
 
   private tryStatement(node: TreeNode): void {
@@ -569,20 +535,7 @@ export class StatementChecker {
     let catchEnd: State;
     if (handler) {
       this.c.flow.current = this.c.flow.merge([entry, tryEnd]);
-      const parameter = handler.childForFieldName('parameter');
-      const annotation = this.c.annotationType(handler.childForFieldName('type'));
-      if (annotation && !isAnyLike(annotation) && !isIntrinsic(annotation, 'unknown')) {
-        this.c.error(
-          handler.childForFieldName('type') ?? handler,
-          'catch の変数の型の注釈は、any か unknown にしてください。'
-        );
-      }
-      if (parameter && parameter.type !== 'identifier') {
-        this.c.expressions.bindPattern(parameter, annotation ?? anyType, (identifier, type) => {
-          const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
-          if (symbol) this.c.expressions.setVariableType(symbol, type);
-        });
-      }
+      this.bindCatchParameter(handler);
       const handlerBody = handler.childForFieldName('body') as TreeNode;
       this.checkBlockStatements(named(handlerBody));
       catchEnd = this.c.flow.current;
@@ -597,8 +550,25 @@ export class StatementChecker {
     this.c.flow.current = after;
   }
 
+  private bindCatchParameter(handler: TreeNode): void {
+    const parameter = handler.childForFieldName('parameter');
+    const annotation = this.c.typeNodes.annotationType(handler.childForFieldName('type'));
+    if (annotation && !isAnyLike(annotation) && !isIntrinsic(annotation, 'unknown')) {
+      this.c.error(
+        handler.childForFieldName('type') ?? handler,
+        'catch の変数の型の注釈は、any か unknown にしてください。'
+      );
+    }
+    if (parameter && parameter.type !== 'identifier') {
+      this.c.patterns.bindPattern(parameter, annotation ?? anyType, (identifier, type) => {
+        const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
+        if (symbol) this.c.expressions.setVariableType(symbol, type);
+      });
+    }
+  }
+
   private returnStatement(node: TreeNode): void {
-    const context = this.c.expressions.functions.at(-1);
+    const context = this.c.functions.contexts.at(-1);
     const expression = named(node)[0];
     if (!context) {
       if (expression) this.c.expressions.check(expression);
@@ -624,111 +594,5 @@ export class StatementChecker {
     }
     context.returnStates.push(this.c.flow.current?.clone());
     this.c.flow.current = undefined;
-  }
-
-  // Functions ----------------------------------------------------------------------------------------------------
-
-  private functionDeclaration(node: TreeNode): void {
-    const name = node.childForFieldName('name');
-    const symbol = name ? this.c.scopeOf(node).lookupValue(name.text) : undefined;
-    const signature = this.c.signatureOf(node);
-    this.checkFunctionLike(node, signature, undefined);
-    if (symbol) this.checkOverloads(symbol, node, signature);
-  }
-
-  private checkOverloads(symbol: Sym, implementation: TreeNode, signature: Signature): void {
-    const overloads = symbol.valueDeclarations.filter((declaration) => declaration.type === 'function_signature');
-    for (const overload of overloads) {
-      const overloadSignature = this.c.signatureOf(overload);
-      const compatible =
-        overloadSignature.parameters.length >=
-          signature.parameters.filter((parameter) => !parameter.optional && !parameter.rest).length &&
-        overloadSignature.parameters.every((parameter, index) => {
-          const implementationType = this.c.expressions.calls.parameterTypeAt(signature, index);
-          return (
-            !implementationType ||
-            this.c.relations.isAssignable(parameter.type, implementationType) ||
-            this.c.relations.isAssignable(implementationType, parameter.type)
-          );
-        });
-      if (!compatible) {
-        this.c.error(
-          overload.childForFieldName('name') ?? overload,
-          'このオーバーロードのシグネチャは、実装のシグネチャと合いません。'
-        );
-      }
-    }
-    void implementation;
-  }
-
-  /** Checks a function's body loudly, when its expression or declaration is checked. */
-  deferFunctionBody(node: TreeNode, signature: Signature, contextualReturn: Type | undefined): void {
-    this.checkFunctionLike(node, signature, contextualReturn);
-  }
-
-  checkFunctionLike(node: TreeNode, signature: Signature, contextualReturn: Type | undefined): void {
-    if (this.c.silent > 0) return;
-    const parameters = node.childForFieldName('parameters');
-    this.checkParameterOrder(parameters ? named(parameters) : []);
-    for (const parameter of parameters ? named(parameters) : []) {
-      const value = parameter.childForFieldName('value');
-      const annotation = this.c.annotationType(parameter.childForFieldName('type'));
-      if (value) {
-        const type = this.c.flow.from(new FlowState(), () => {
-          const valueType = this.c.expressions.check(value, annotation);
-          if (annotation)
-            this.c.expressions.checkAssignable(parameter.childForFieldName('pattern') ?? value, valueType, annotation);
-        });
-        void type;
-      }
-    }
-    if (!node.childForFieldName('body')) return;
-    this.c.expressions.checkFunctionBody(node, signature, contextualReturn, false);
-  }
-
-  /** Reports a required parameter after one marked `?`, which callers could not omit. */
-  private checkParameterOrder(parameters: TreeNode[]): void {
-    let optional = false;
-    for (const parameter of parameters) {
-      const isRest = parameter.childForFieldName('pattern')?.type === 'rest_pattern';
-      if (parameter.type === 'optional_parameter') optional = true;
-      else if (optional && !isRest && !parameter.childForFieldName('value')) {
-        this.c.error(parameter, '省略できる引数の後に、省略できない引数は書けません。');
-      }
-    }
-  }
-
-  /** Reports a function that may end without returning a value its declared return type requires. */
-  checkMissingReturn(node: TreeNode, context: FunctionContext, declared: Type): void {
-    if (!context.endReachable || context.isConstructor) return;
-    if (hasToken(node, 'set') || node.childForFieldName('body')?.type !== 'statement_block') return;
-    const members = declared.kind === 'union' ? declared.types : [declared];
-    if (
-      members.some(
-        (member) =>
-          isAnyLike(member) ||
-          isIntrinsic(member, 'void') ||
-          isIntrinsic(member, 'unknown') ||
-          isIntrinsic(member, 'undefined')
-      )
-    )
-      return;
-    const returnNode = node.childForFieldName('return_type') ?? node;
-    if (isIntrinsic(declared, 'never')) {
-      this.c.error(returnNode, "戻り値の型が 'never' の関数は、最後まで実行されて終わってはいけません。");
-      return;
-    }
-    if (!context.hasReturn) {
-      this.c.error(
-        returnNode,
-        "宣言した戻り値の型が 'undefined'、'void'、'any' のどれでもない関数は、値を返さなければいけません。"
-      );
-      return;
-    }
-    this.c.error(returnNode, "関数の最後に return 文がなく、戻り値の型に 'undefined' が含まれていません。");
-  }
-
-  unionOfReturns(types: Type[]): Type {
-    return unionOf(types);
   }
 }

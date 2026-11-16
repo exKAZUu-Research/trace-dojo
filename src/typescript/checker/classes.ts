@@ -1,7 +1,7 @@
+// code-gauge-allow-file fileNcss 432 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { checkDuplicateMembers } from './declarations';
 import { FlowState, type State } from './flow';
 import type { Sym } from './scopes';
 import { hasToken, named, propertyNameText } from './syntax';
@@ -20,10 +20,31 @@ import {
   simpleProperty,
   type Structure,
   type Type,
+  type TypeParameter,
   undefinedType,
   unionOf,
   voidType,
 } from './types';
+
+interface MethodEntry {
+  signatures: Signature[];
+  implementation?: TreeNode;
+  abstract: boolean;
+  first: TreeNode;
+}
+
+interface AccessorEntry {
+  getter?: TreeNode;
+  setter?: TreeNode;
+}
+
+/** The members of a class body collected so far, as one side, instance or static, declares them. */
+interface ClassMembers {
+  info: ClassInfo;
+  structure: Structure;
+  methods: Map<string, MethodEntry>;
+  accessors: Map<string, AccessorEntry>;
+}
 
 const classTypes = new Set(['class_declaration', 'abstract_class_declaration', 'class']);
 
@@ -39,56 +60,16 @@ export class ClassChecker {
     return this.classInfoOfNode(declaration as TreeNode);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- Collects each kind of class member.
   classInfoOfNode(node: TreeNode): ClassInfo {
     const cached = this.infos.get(node.id);
     if (cached) return cached;
     const name = node.childForFieldName('name')?.text ?? this.anonymousClassName(node);
-    const typeParameters = this.c.typeParametersOf(node);
+    const typeParameters = this.c.signatures.typeParametersOf(node);
     const isAbstract = node.type === 'abstract_class_declaration' || hasToken(node, 'abstract');
-    let instanceStructure: Structure | undefined;
-    let staticStructure: Structure | undefined;
     const info = { name, declaration: node, isAbstract } as ClassInfo;
     this.infos.set(node.id, info);
-    const instanceType: ObjectType = {
-      kind: 'object',
-      id: newTypeId(),
-      objectKind: 'interface',
-      name,
-      typeParameters: typeParameters.length > 0 ? typeParameters : undefined,
-      classInfo: info,
-      resolve: () => {
-        if (instanceStructure) return instanceStructure;
-        instanceStructure = emptyStructure();
-        const own = this.membersOf(node, info, false);
-        const base = this.baseInstanceType(node);
-        instanceStructure = base ? this.mergeBase(own, base, instanceType) : own;
-        return instanceStructure;
-      },
-    };
-    const staticType: ObjectType = {
-      kind: 'object',
-      id: newTypeId(),
-      objectKind: 'anonymous',
-      name,
-      classInfo: info,
-      isClassStatic: true,
-      resolve: () => {
-        if (staticStructure) return staticStructure;
-        staticStructure = emptyStructure();
-        const own = this.membersOf(node, info, true);
-        own.properties.set('prototype', simpleProperty('prototype', info.instanceType, { readonly: true }));
-        own.constructSignatures.push(...this.constructSignatures(node, info));
-        const baseStatic = this.baseStaticType(node);
-        if (baseStatic) {
-          for (const [memberName, property] of this.c.structureOf(baseStatic).properties) {
-            if (!own.properties.has(memberName)) own.properties.set(memberName, property);
-          }
-        }
-        staticStructure = own;
-        return staticStructure;
-      },
-    };
+    const instanceType = this.instanceTypeOf(node, info, typeParameters);
+    const staticType = this.staticTypeOf(node, info);
     instanceType.thisType = {
       kind: 'typeParameter',
       id: newTypeId(),
@@ -99,6 +80,54 @@ export class ClassChecker {
     info.instanceType = instanceType;
     info.staticType = staticType;
     return info;
+  }
+
+  private instanceTypeOf(node: TreeNode, info: ClassInfo, typeParameters: TypeParameter[]): ObjectType {
+    let structure: Structure | undefined;
+    const instanceType: ObjectType = {
+      kind: 'object',
+      id: newTypeId(),
+      objectKind: 'interface',
+      name: info.name,
+      typeParameters: typeParameters.length > 0 ? typeParameters : undefined,
+      classInfo: info,
+      resolve: () => {
+        if (structure) return structure;
+        structure = emptyStructure();
+        const own = this.membersOf(node, info, false);
+        const base = this.baseInstanceType(node);
+        structure = base ? this.mergeBase(own, base, instanceType) : own;
+        return structure;
+      },
+    };
+    return instanceType;
+  }
+
+  private staticTypeOf(node: TreeNode, info: ClassInfo): ObjectType {
+    let structure: Structure | undefined;
+    return {
+      kind: 'object',
+      id: newTypeId(),
+      objectKind: 'anonymous',
+      name: info.name,
+      classInfo: info,
+      isClassStatic: true,
+      resolve: () => {
+        if (structure) return structure;
+        structure = emptyStructure();
+        const own = this.membersOf(node, info, true);
+        own.properties.set('prototype', simpleProperty('prototype', info.instanceType, { readonly: true }));
+        own.constructSignatures.push(...this.constructSignatures(node, info));
+        const baseStatic = this.baseStaticType(node);
+        if (baseStatic) {
+          for (const [memberName, property] of this.c.structureOf(baseStatic).properties) {
+            if (!own.properties.has(memberName)) own.properties.set(memberName, property);
+          }
+        }
+        structure = own;
+        return structure;
+      },
+    };
   }
 
   private anonymousClassName(node: TreeNode): string {
@@ -130,7 +159,7 @@ export class ClassChecker {
     };
   }
 
-  private extendsClause(node: TreeNode): TreeNode | undefined {
+  extendsClause(node: TreeNode): TreeNode | undefined {
     const heritage = node.namedChildren.find((child) => child?.type === 'class_heritage');
     return heritage?.namedChildren.find((child) => child?.type === 'extends_clause') ?? undefined;
   }
@@ -151,7 +180,9 @@ export class ClassChecker {
     const signatures = this.c.signaturesOf(staticType, 'construct');
     if (signatures.length === 0) return undefined;
     const argumentsNode = clause.childForFieldName('type_arguments');
-    const typeArguments = argumentsNode ? named(argumentsNode).map((argument) => this.c.typeFromNode(argument)) : [];
+    const typeArguments = argumentsNode
+      ? named(argumentsNode).map((argument) => this.c.typeNodes.typeFromNode(argument))
+      : [];
     const returned = signatures[0].returnType();
     if (returned.kind === 'object' && returned.objectKind === 'reference' && returned.target) {
       return this.c.reference(
@@ -169,7 +200,7 @@ export class ClassChecker {
     return base?.kind === 'object' ? base.classInfo : undefined;
   }
 
-  private constructorNode(node: TreeNode): TreeNode | undefined {
+  constructorNode(node: TreeNode): TreeNode | undefined {
     const body = node.childForFieldName('body');
     return body
       ? named(body).find(
@@ -195,7 +226,7 @@ export class ClassChecker {
     const declarations = overloads.length > 0 ? overloads : ctor ? [ctor] : [];
     if (declarations.length > 0) {
       return declarations.map((declaration) => ({
-        ...this.c.signatureOf(declaration),
+        ...this.c.signatures.signatureOf(declaration),
         typeParameters,
         returnType: () => returnType,
         isAbstract: info.isAbstract,
@@ -213,107 +244,17 @@ export class ClassChecker {
     return [{ typeParameters, parameters: [], returnType: () => returnType, isAbstract: info.isAbstract }];
   }
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of class member.
-  private membersOf(node: TreeNode, info: ClassInfo, isStatic: boolean): Structure {
+  membersOf(node: TreeNode, info: ClassInfo, isStatic: boolean): Structure {
     const structure = emptyStructure();
     const body = node.childForFieldName('body');
     if (!body) return structure;
-    const methods = new Map<
-      string,
-      { signatures: Signature[]; implementation?: TreeNode; abstract: boolean; first: TreeNode }
-    >();
-    const accessors = new Map<string, { getter?: TreeNode; setter?: TreeNode }>();
+    const members: ClassMembers = { info, structure, methods: new Map(), accessors: new Map() };
     for (const member of named(body)) {
-      if (hasToken(member, 'static') !== isStatic) continue;
-      const nameNode = member.childForFieldName('name');
-      const name = nameNode ? propertyNameText(nameNode) : undefined;
-      switch (member.type) {
-        case 'public_field_definition': {
-          if (name === undefined || !nameNode) break;
-          structure.properties.set(name, {
-            name,
-            type: () => this.fieldType(member, nameNode),
-            optional: hasToken(member, '?'),
-            readonly: hasToken(member, 'readonly'),
-            isMethod: false,
-            visibility: this.visibilityOf(member),
-            declaringClass: info,
-            isPrivateName: nameNode.type === 'private_property_identifier',
-            declaration: member,
-            isAbstract: hasToken(member, 'abstract'),
-          });
-          break;
-        }
-        case 'method_definition':
-        case 'method_signature':
-        case 'abstract_method_signature': {
-          if (name === undefined || name === 'constructor') break;
-          if (hasToken(member, 'get') || hasToken(member, 'set')) {
-            const entry = accessors.get(name) ?? {};
-            if (hasToken(member, 'get')) entry.getter = member;
-            else entry.setter = member;
-            accessors.set(name, entry);
-            break;
-          }
-          const entry = methods.get(name) ?? { signatures: [], abstract: false, first: member };
-          if (member.type === 'method_definition' && member.childForFieldName('body')) entry.implementation = member;
-          else entry.signatures.push({ ...this.c.signatureOf(member), isMethod: true });
-          if (member.type === 'abstract_method_signature' || hasToken(member, 'abstract')) entry.abstract = true;
-          methods.set(name, entry);
-          break;
-        }
-        case 'index_signature': {
-          const indexType = member.childForFieldName('index_type');
-          const keyType = indexType ? this.c.typeFromNode(indexType) : undefined;
-          const index = {
-            type: this.c.annotationType(member.childForFieldName('type')) ?? anyType,
-            readonly: hasToken(member, 'readonly'),
-          };
-          if (keyType && isIntrinsic(keyType, 'number')) structure.numberIndex = index;
-          else structure.stringIndex = index;
-          break;
-        }
-        default: {
-          break;
-        }
-      }
+      if (hasToken(member, 'static') === isStatic) this.addMember(members, member);
     }
-    for (const [name, entry] of methods) {
-      const signatures =
-        entry.signatures.length > 0 && entry.implementation
-          ? entry.signatures
-          : entry.implementation
-            ? [{ ...this.c.signatureOf(entry.implementation), isMethod: true }]
-            : entry.signatures;
-      const declaration = entry.first;
-      structure.properties.set(name, {
-        name,
-        type: () => this.c.overloadedFunction(signatures),
-        optional: hasToken(declaration, '?'),
-        readonly: false,
-        isMethod: true,
-        visibility: this.visibilityOf(declaration),
-        declaringClass: info,
-        isPrivateName: declaration.childForFieldName('name')?.type === 'private_property_identifier',
-        declaration,
-        isAbstract: entry.abstract,
-      });
-    }
-    for (const [name, { getter, setter }] of accessors) {
-      const declaration = (getter ?? setter) as TreeNode;
-      structure.properties.set(name, {
-        name,
-        type: () => this.accessorType(getter, setter),
-        optional: false,
-        readonly: !setter,
-        getterOnly: !setter,
-        isMethod: false,
-        visibility: this.visibilityOf(declaration),
-        declaringClass: info,
-        isPrivateName: declaration.childForFieldName('name')?.type === 'private_property_identifier',
-        declaration,
-        isAbstract: hasToken(declaration, 'abstract'),
-      });
+    for (const [name, entry] of members.methods) structure.properties.set(name, this.methodProperty(name, entry, info));
+    for (const [name, accessor] of members.accessors) {
+      structure.properties.set(name, this.accessorProperty(name, accessor, info));
     }
     if (!isStatic) {
       const ctor = this.constructorNode(node);
@@ -322,10 +263,116 @@ export class ClassChecker {
     return structure;
   }
 
+  private addMember(members: ClassMembers, member: TreeNode): void {
+    const nameNode = member.childForFieldName('name');
+    const name = nameNode ? propertyNameText(nameNode) : undefined;
+    switch (member.type) {
+      case 'public_field_definition': {
+        if (name !== undefined && nameNode)
+          members.structure.properties.set(name, this.fieldProperty(name, nameNode, member, members.info));
+        break;
+      }
+      case 'method_definition':
+      case 'method_signature':
+      case 'abstract_method_signature': {
+        if (name !== undefined && name !== 'constructor') this.addMethod(members, name, member);
+        break;
+      }
+      case 'index_signature': {
+        this.addIndexSignature(members.structure, member);
+        break;
+      }
+      default: {
+        break;
+      }
+    }
+  }
+
+  private fieldProperty(name: string, nameNode: TreeNode, member: TreeNode, info: ClassInfo): Property {
+    return {
+      name,
+      type: () => this.fieldType(member, nameNode),
+      optional: hasToken(member, '?'),
+      readonly: hasToken(member, 'readonly'),
+      isMethod: false,
+      visibility: this.visibilityOf(member),
+      declaringClass: info,
+      isPrivateName: nameNode.type === 'private_property_identifier',
+      declaration: member,
+      isAbstract: hasToken(member, 'abstract'),
+    };
+  }
+
+  /** Records a method's signature or implementation, or an accessor, under its name. */
+  private addMethod(members: ClassMembers, name: string, member: TreeNode): void {
+    if (hasToken(member, 'get') || hasToken(member, 'set')) {
+      const entry = members.accessors.get(name) ?? {};
+      if (hasToken(member, 'get')) entry.getter = member;
+      else entry.setter = member;
+      members.accessors.set(name, entry);
+      return;
+    }
+    const entry = members.methods.get(name) ?? { signatures: [], abstract: false, first: member };
+    if (member.type === 'method_definition' && member.childForFieldName('body')) entry.implementation = member;
+    else entry.signatures.push({ ...this.c.signatures.signatureOf(member), isMethod: true });
+    if (member.type === 'abstract_method_signature' || hasToken(member, 'abstract')) entry.abstract = true;
+    members.methods.set(name, entry);
+  }
+
+  private addIndexSignature(structure: Structure, member: TreeNode): void {
+    const indexType = member.childForFieldName('index_type');
+    const keyType = indexType ? this.c.typeNodes.typeFromNode(indexType) : undefined;
+    const index = {
+      type: this.c.typeNodes.annotationType(member.childForFieldName('type')) ?? anyType,
+      readonly: hasToken(member, 'readonly'),
+    };
+    if (keyType && isIntrinsic(keyType, 'number')) structure.numberIndex = index;
+    else structure.stringIndex = index;
+  }
+
+  private methodProperty(name: string, entry: MethodEntry, info: ClassInfo): Property {
+    const signatures =
+      entry.signatures.length > 0 && entry.implementation
+        ? entry.signatures
+        : entry.implementation
+          ? [{ ...this.c.signatures.signatureOf(entry.implementation), isMethod: true }]
+          : entry.signatures;
+    const declaration = entry.first;
+    return {
+      name,
+      type: () => this.c.overloadedFunction(signatures),
+      optional: hasToken(declaration, '?'),
+      readonly: false,
+      isMethod: true,
+      visibility: this.visibilityOf(declaration),
+      declaringClass: info,
+      isPrivateName: declaration.childForFieldName('name')?.type === 'private_property_identifier',
+      declaration,
+      isAbstract: entry.abstract,
+    };
+  }
+
+  private accessorProperty(name: string, { getter, setter }: AccessorEntry, info: ClassInfo): Property {
+    const declaration = (getter ?? setter) as TreeNode;
+    return {
+      name,
+      type: () => this.accessorType(getter, setter),
+      optional: false,
+      readonly: !setter,
+      getterOnly: !setter,
+      isMethod: false,
+      visibility: this.visibilityOf(declaration),
+      declaringClass: info,
+      isPrivateName: declaration.childForFieldName('name')?.type === 'private_property_identifier',
+      declaration,
+      isAbstract: hasToken(declaration, 'abstract'),
+    };
+  }
+
   private addParameterProperties(ctor: TreeNode, info: ClassInfo, structure: Structure): void {
     const parameters = ctor.childForFieldName('parameters');
     if (!parameters) return;
-    const signature = this.c.signatureOf(ctor);
+    const signature = this.c.signatures.signatureOf(ctor);
     let index = 0;
     for (const parameter of named(parameters)) {
       const pattern = parameter.childForFieldName('pattern');
@@ -356,7 +403,7 @@ export class ClassChecker {
   }
 
   private fieldType(member: TreeNode, nameNode: TreeNode): Type {
-    const annotation = this.c.annotationType(member.childForFieldName('type'));
+    const annotation = this.c.typeNodes.annotationType(member.childForFieldName('type'));
     if (annotation) return annotation;
     const value = member.childForFieldName('value');
     if (value) {
@@ -367,7 +414,7 @@ export class ClassChecker {
           this.c.expressions.check(value)
         )
       );
-      return this.c.expressions.widenDeclared(valueType, hasToken(member, 'readonly'));
+      return this.c.literals.widenDeclared(valueType, hasToken(member, 'readonly'));
     }
     if (!this.c.isLibrary(member)) this.c.error(nameNode, `メンバー ${nameNode.text} の型が暗黙に any になります。`);
     return anyType;
@@ -375,11 +422,11 @@ export class ClassChecker {
 
   private accessorType(getter: TreeNode | undefined, setter: TreeNode | undefined): Type {
     if (getter) {
-      const signature = this.c.signatureOf(getter);
+      const signature = this.c.signatures.signatureOf(getter);
       return signature.returnType();
     }
     if (setter) {
-      const signature = this.c.signatureOf(setter);
+      const signature = this.c.signatures.signatureOf(setter);
       return signature.parameters[0]?.type ?? anyType;
     }
     return anyType;
@@ -387,7 +434,7 @@ export class ClassChecker {
 
   classExpression(node: TreeNode): Type {
     const info = this.classInfoOfNode(node);
-    this.checkClass(node);
+    this.c.classDeclarations.checkClass(node);
     return info.staticType;
   }
 
@@ -395,7 +442,7 @@ export class ClassChecker {
 
   private readonly thisStack: (Type | undefined)[] = [];
 
-  private withThis<T>(type: Type | undefined, run: () => T): T {
+  withThis<T>(type: Type | undefined, run: () => T): T {
     this.thisStack.push(type);
     try {
       return run();
@@ -443,7 +490,6 @@ export class ClassChecker {
     return this.thisOwner(node)?.id ?? 0;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of function that decides `this`.
   thisTypeOfExpression(node: TreeNode): Type {
     const owner = this.thisOwner(node);
     if (!owner) return undefinedType;
@@ -478,7 +524,7 @@ export class ClassChecker {
     const parameters = owner.childForFieldName('parameters');
     const first = parameters ? named(parameters)[0] : undefined;
     if (first?.childForFieldName('pattern')?.type === 'this')
-      return this.c.annotationType(first.childForFieldName('type'));
+      return this.c.typeNodes.annotationType(first.childForFieldName('type'));
     return undefined;
   }
 
@@ -516,7 +562,7 @@ export class ClassChecker {
       if (current.type === 'interface_declaration') {
         const name = current.childForFieldName('name')?.text;
         const symbol = name ? this.c.scopeOf(current).lookupType(name) : undefined;
-        return symbol ? this.c.declaredTypeOf(symbol) : anyType;
+        return symbol ? this.c.typeNodes.declaredTypeOf(symbol) : anyType;
       }
     }
     this.c.error(node, "'this' 型は、クラスかインターフェースの中でしか使えません。");
@@ -542,7 +588,7 @@ export class ClassChecker {
     const owner = this.thisOwner(node);
     const isStatic = owner !== undefined && hasToken(owner, 'static');
     const target = isStatic ? (this.baseStaticType(classNode) ?? anyType) : base;
-    return this.c.expressions.propertyAccess(
+    return this.c.members.propertyAccess(
       node,
       node.childForFieldName('object') as TreeNode,
       propertyNode,
@@ -569,7 +615,7 @@ export class ClassChecker {
     const clause = classNode ? this.extendsClause(classNode) : undefined;
     const argumentsNode = clause?.childForFieldName('type_arguments');
     const typeArguments = argumentsNode
-      ? named(argumentsNode).map((argument) => this.c.typeFromNode(argument))
+      ? named(argumentsNode).map((argument) => this.c.typeNodes.typeFromNode(argument))
       : undefined;
     const instantiated = typeArguments
       ? signatures.map((signature) =>
@@ -678,233 +724,6 @@ export class ClassChecker {
   initialFlow(node: TreeNode): State {
     void node;
     return new FlowState();
-  }
-
-  /** Reports the fields a constructor leaves unassigned, which strict property initialization requires. */
-  checkPropertyInitialization(
-    classNode: TreeNode,
-    ctor: TreeNode | undefined,
-    endState: State,
-    returnStates: State[]
-  ): void {
-    const body = classNode.childForFieldName('body');
-    if (!body) return;
-    const ownerId = ctor?.id ?? 0;
-    const states = [endState, ...returnStates].filter((state): state is FlowState => state !== undefined);
-    for (const member of named(body)) {
-      if (member.type !== 'public_field_definition' || hasToken(member, 'static')) continue;
-      if (
-        member.childForFieldName('value') ||
-        hasToken(member, '!') ||
-        hasToken(member, '?') ||
-        hasToken(member, 'declare') ||
-        hasToken(member, 'abstract')
-      )
-        continue;
-      const typeNode = member.childForFieldName('type');
-      const nameNode = member.childForFieldName('name');
-      if (!typeNode || !nameNode || nameNode.type === 'computed_property_name') continue;
-      const type = this.c.annotationType(typeNode) ?? anyType;
-      if (isAnyLike(type) || isIntrinsic(type, 'unknown') || this.c.relations.isAssignable(undefinedType, type))
-        continue;
-      const key = `this${ownerId}.${nameNode.text}`;
-      const assigned =
-        ctor !== undefined && states.length > 0 && states.every((state) => state.assignedFields.has(key));
-      if (!assigned) {
-        this.c.error(
-          nameNode,
-          `プロパティ ${nameNode.text} には初期値がなく、コンストラクタの中で必ず代入されてもいません。`
-        );
-      }
-    }
-  }
-
-  // Declarations -------------------------------------------------------------------------------------------------
-
-  private readonly checked = new Set<number>();
-
-  // code-gauge-allow functionCognitiveComplexity 40 -- Each check a class declaration needs.
-  checkClass(node: TreeNode): void {
-    if (this.c.silent > 0 || this.checked.has(node.id)) return;
-    this.checked.add(node.id);
-    const info = this.classInfoOfNode(node);
-    const clause = this.extendsClause(node);
-    const baseValue = clause?.childForFieldName('value');
-    if (baseValue) {
-      const baseType = this.c.expressions.check(baseValue);
-      if (!isAnyLike(baseType) && baseType !== errorType && this.c.signaturesOf(baseType, 'construct').length === 0) {
-        this.c.error(baseValue, `型 '${this.c.print(baseType)}' はコンストラクタの型ではありません。`);
-      }
-    }
-    const body = node.childForFieldName('body');
-    const members = body ? named(body) : [];
-    if (body) checkDuplicateMembers(this.c, body);
-    // Types written in the class report the names they cannot find.
-    this.c.typeParametersOf(node);
-    const instance = info.instanceType.resolve();
-    info.staticType.resolve();
-    for (const property of instance.properties.values()) {
-      if (property.declaringClass === info) property.type();
-    }
-    const ctor = this.constructorNode(node);
-    for (const member of members) this.checkMember(node, member, info, ctor);
-    if (!ctor) this.checkPropertyInitialization(node, undefined, new FlowState(), []);
-    else if (clause && !this.firstSuperCallAnywhere(ctor)) {
-      this.c.error(
-        ctor.childForFieldName('name') ?? ctor,
-        "派生クラスのコンストラクタには 'super' の呼び出しが必要です。"
-      );
-    }
-    this.checkImplements(node, info);
-    this.c.statements.checkIndexConformance(this.membersOf(node, info, false));
-    this.checkAbstractMembers(node, info);
-    this.checkBaseCompatibility(node, info);
-  }
-
-  private firstSuperCallAnywhere(ctor: TreeNode): boolean {
-    let found = false;
-    const visit = (current: TreeNode): void => {
-      if (found) return;
-      if (current.type === 'call_expression' && current.childForFieldName('function')?.type === 'super') {
-        found = true;
-        return;
-      }
-      if (
-        ['function_declaration', 'function_expression', 'class', 'method_definition'].includes(current.type) &&
-        current.id !== ctor.id
-      )
-        return;
-      for (const child of named(current)) visit(child);
-    };
-    visit(ctor);
-    return found;
-  }
-
-  private checkMember(classNode: TreeNode, member: TreeNode, info: ClassInfo, ctor: TreeNode | undefined): void {
-    const isStatic = hasToken(member, 'static');
-    switch (member.type) {
-      case 'public_field_definition': {
-        const value = member.childForFieldName('value');
-        const annotation = this.c.annotationType(member.childForFieldName('type'));
-        if (value) {
-          const valueType = this.withThis(isStatic ? info.staticType : info.instanceType, () =>
-            this.c.flow.from(this.c.flow.current, () => {
-              this.c.expressions.functions.push({
-                node: member,
-                returnTypes: [],
-                endReachable: false,
-                keepsLiterals: false,
-                isConstructor: false,
-                hasReturnWithValue: false,
-                hasReturn: false,
-                returnStates: [],
-              });
-              try {
-                const type = this.c.expressions.check(value, annotation);
-                if (annotation)
-                  this.c.expressions.checkAssignable(member.childForFieldName('name') ?? value, type, annotation);
-              } finally {
-                this.c.expressions.functions.pop();
-              }
-            })
-          );
-          void valueType;
-        }
-        break;
-      }
-      case 'method_definition': {
-        const signature = this.c.signatureOf(member);
-        this.c.statements.checkFunctionLike(member, signature, undefined);
-        if (member.id === ctor?.id) void classNode;
-        break;
-      }
-      case 'class_static_block': {
-        this.c.statements.checkFunctionLike(
-          member,
-          { typeParameters: [], parameters: [], returnType: () => voidType },
-          undefined
-        );
-        break;
-      }
-      default: {
-        break;
-      }
-    }
-  }
-
-  private checkImplements(node: TreeNode, info: ClassInfo): void {
-    const heritage = node.namedChildren.find((child) => child?.type === 'class_heritage');
-    const clause = heritage?.namedChildren.find((child) => child?.type === 'implements_clause');
-    if (!clause) return;
-    for (const typeNode of named(clause)) {
-      const target = this.c.typeFromNode(typeNode);
-      if (target === errorType || isAnyLike(target)) continue;
-      if (!this.c.relations.isAssignable(info.instanceType, target)) {
-        const missing =
-          target.kind === 'object'
-            ? [...target.resolve().properties.values()].filter(
-                (property) => !property.optional && !this.c.propertyOf(info.instanceType, property.name)
-              )
-            : [];
-        const detail =
-          missing.length > 0
-            ? `プロパティ ${missing.map((property) => `'${property.name}'`).join(', ')} がありません。`
-            : '';
-        this.c.error(
-          node.childForFieldName('name') ?? node,
-          `クラス '${info.name}' は、インターフェース '${this.c.print(target)}' を正しく実装していません。${detail}`
-        );
-      }
-    }
-  }
-
-  private checkAbstractMembers(node: TreeNode, info: ClassInfo): void {
-    if (info.isAbstract) return;
-    const structure = info.instanceType.resolve();
-    const missing = [...structure.properties.values()].filter(
-      (property) => property.isAbstract && property.declaringClass !== info
-    );
-    if (missing.length === 0) return;
-    const base = missing[0].declaringClass?.name ?? '';
-    const nameNode = node.childForFieldName('name') ?? node;
-    if (missing.length === 1) {
-      this.c.error(
-        nameNode,
-        `抽象クラスでないクラス '${info.name}' は、クラス '${base}' から継承した抽象メンバー '${missing[0].name}' を実装していません。`
-      );
-    } else {
-      this.c.error(
-        nameNode,
-        `抽象クラスでないクラス '${info.name}' は、クラス '${base}' から継承した抽象メンバー ${missing.map((property) => `'${property.name}'`).join(', ')} を実装していません。`
-      );
-    }
-  }
-
-  private checkBaseCompatibility(node: TreeNode, info: ClassInfo): void {
-    const base = this.baseInstanceType(node);
-    if (!base || isAnyLike(base)) return;
-    const own = this.membersOf(node, info, false);
-    for (const [name, property] of own.properties) {
-      const baseProperty = this.c.propertyOf(base, name);
-      if (!baseProperty) continue;
-      if (baseProperty.visibility === 'private' || property.visibility === 'private') {
-        if (baseProperty.visibility === 'private' || property.visibility !== baseProperty.visibility) {
-          this.c.error(
-            property.declaration?.childForFieldName('name') ?? node,
-            `クラス '${info.name}' は、基底クラスを正しく継承していません。プロパティ '${name}' の可視性が異なります。`
-          );
-        }
-        continue;
-      }
-      const ownType = property.type();
-      const baseType = baseProperty.type();
-      if (!this.c.relations.isAssignable(ownType, baseType)) {
-        this.c.error(
-          property.declaration?.childForFieldName('name') ?? node,
-          `型 '${info.name}' のプロパティ '${name}' は、基底の型の同じプロパティに代入できません。型 '${this.c.print(ownType)}' を型 '${this.c.print(baseType)}' に代入することはできません。`
-        );
-      }
-    }
   }
 }
 

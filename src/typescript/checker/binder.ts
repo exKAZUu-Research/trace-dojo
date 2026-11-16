@@ -32,6 +32,24 @@ export class Binder {
   /** The identifiers that name what an assignment changes, to find the variables a program reassigns. */
   readonly assignedIdentifiers: TreeNode[] = [];
   readonly moduleScope: Scope;
+  /** How each kind of node that declares names or opens a scope of its own is bound. */
+  private readonly binders = new Map<string, (node: TreeNode, scope: Scope) => void>([
+    ['lexical_declaration', (node, scope) => this.bindVariableDeclaration(node, scope)],
+    ['variable_declaration', (node, scope) => this.bindVariableDeclaration(node, scope)],
+    ['function_declaration', (node, scope) => this.bindFunctionDeclaration(node, scope)],
+    ['function_signature', (node, scope) => this.bindFunctionDeclaration(node, scope)],
+    ['class_declaration', (node, scope) => this.bindClassDeclaration(node, scope)],
+    ['abstract_class_declaration', (node, scope) => this.bindClassDeclaration(node, scope)],
+    ['class', (node, scope) => this.bindClass(node, scope)],
+    ['interface_declaration', (node, scope) => this.bindTypeDeclaration(node, scope, 'interface')],
+    ['type_alias_declaration', (node, scope) => this.bindTypeDeclaration(node, scope, 'alias')],
+    ['ambient_declaration', (node, scope) => this.bindAmbient(node, scope)],
+    ['assignment_expression', (node, scope) => this.bindAssignment(node, scope, 'left')],
+    ['augmented_assignment_expression', (node, scope) => this.bindAssignment(node, scope, 'left')],
+    ['update_expression', (node, scope) => this.bindAssignment(node, scope, 'argument')],
+    ['for_in_statement', (node, scope) => this.bindForIn(node, scope)],
+    ['catch_clause', (node, scope) => this.bindCatch(node, scope)],
+  ]);
 
   constructor(
     root: TreeNode,
@@ -73,114 +91,78 @@ export class Binder {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of declaration, as the binder must see each.
   private bind(node: TreeNode, scope: Scope): void {
-    switch (node.type) {
-      case 'lexical_declaration':
-      case 'variable_declaration': {
-        const kind =
-          node.type === 'variable_declaration' ? 'var' : (node.childForFieldName('kind')?.text as 'let' | 'const');
-        const target = kind === 'var' ? scope.functionScope : scope;
-        for (const declarator of named(node)) {
-          if (declarator.type !== 'variable_declarator') continue;
-          const name = declarator.childForFieldName('name');
-          if (name)
-            for (const identifier of patternIdentifiers(name))
-              target.declareValue(identifier.text, kind, declarator, identifier);
-          this.bindChildren(declarator, scope);
-        }
-        return;
-      }
-      case 'function_declaration':
-      case 'function_signature': {
-        const name = node.childForFieldName('name');
-        if (name) scope.declareValue(name.text, 'function', node, name);
-        this.bindFunction(node, scope);
-        return;
-      }
-      case 'class_declaration':
-      case 'abstract_class_declaration': {
-        const name = node.childForFieldName('name');
-        if (name) {
-          scope.declareValue(name.text, 'class', node, name);
-          scope.declareType(name.text, 'class', node, name);
-        }
-        this.bindClass(node, scope);
-        return;
-      }
-      case 'class': {
-        this.bindClass(node, scope);
-        return;
-      }
-      case 'interface_declaration': {
-        const name = node.childForFieldName('name');
-        if (name) scope.declareType(name.text, 'interface', node, name);
-        this.bindTypeParameterOwner(node, scope);
-        return;
-      }
-      case 'type_alias_declaration': {
-        const name = node.childForFieldName('name');
-        if (name) scope.declareType(name.text, 'alias', node, name);
-        this.bindTypeParameterOwner(node, scope);
-        return;
-      }
-      case 'ambient_declaration': {
-        this.bindAmbient(node, scope);
-        return;
-      }
-      case 'assignment_expression':
-      case 'augmented_assignment_expression': {
-        const left = node.childForFieldName('left');
-        if (left) this.noteAssigned(left);
-        this.bindChildren(node, scope);
-        return;
-      }
-      case 'update_expression': {
-        const argument = node.childForFieldName('argument');
-        if (argument) this.noteAssigned(argument);
-        this.bindChildren(node, scope);
-        return;
-      }
-      default: {
-        break;
-      }
-    }
-    if (functionLikeTypes.has(node.type)) {
-      this.bindFunction(node, scope);
-      return;
-    }
-    if (node.type === 'for_in_statement') {
-      const blockScope = this.newScope(node, 'block', scope);
-      const header = node.childForFieldName('header') ?? node;
-      const left = header.childForFieldName('left');
-      const kind = header.childForFieldName('kind')?.text as 'let' | 'const' | 'var' | undefined;
-      if (left && kind) {
-        const target = kind === 'var' ? scope.functionScope : blockScope;
-        for (const identifier of patternIdentifiers(left)) target.declareValue(identifier.text, kind, node, identifier);
-      } else if (left) {
-        this.noteAssigned(left);
-      }
-      this.bindChildren(node, blockScope);
-      return;
-    }
-    if (node.type === 'catch_clause') {
-      const blockScope = this.newScope(node, 'block', scope);
-      const parameter = node.childForFieldName('parameter');
-      if (parameter)
-        for (const identifier of patternIdentifiers(parameter))
-          blockScope.declareValue(identifier.text, 'catch', node, identifier);
-      this.bindChildren(node, blockScope);
-      return;
-    }
-    if (blockTypes.has(node.type) && !this.isFunctionBody(node)) {
+    const bindKind = this.binders.get(node.type);
+    if (bindKind) bindKind(node, scope);
+    else if (functionLikeTypes.has(node.type)) this.bindFunction(node, scope);
+    else if (blockTypes.has(node.type) && !this.isFunctionBody(node))
       this.bindChildren(node, this.newScope(node, 'block', scope));
-      return;
+    else if (typeParameterOwners.has(node.type)) this.bindTypeParameterOwner(node, scope);
+    else this.bindChildren(node, scope);
+  }
+
+  private bindVariableDeclaration(node: TreeNode, scope: Scope): void {
+    const kind =
+      node.type === 'variable_declaration' ? 'var' : (node.childForFieldName('kind')?.text as 'let' | 'const');
+    const target = kind === 'var' ? scope.functionScope : scope;
+    for (const declarator of named(node)) {
+      if (declarator.type !== 'variable_declarator') continue;
+      const name = declarator.childForFieldName('name');
+      if (name)
+        for (const identifier of patternIdentifiers(name))
+          target.declareValue(identifier.text, kind, declarator, identifier);
+      this.bindChildren(declarator, scope);
     }
-    if (typeParameterOwners.has(node.type)) {
-      this.bindTypeParameterOwner(node, scope);
-      return;
+  }
+
+  private bindFunctionDeclaration(node: TreeNode, scope: Scope): void {
+    const name = node.childForFieldName('name');
+    if (name) scope.declareValue(name.text, 'function', node, name);
+    this.bindFunction(node, scope);
+  }
+
+  private bindClassDeclaration(node: TreeNode, scope: Scope): void {
+    const name = node.childForFieldName('name');
+    if (name) {
+      scope.declareValue(name.text, 'class', node, name);
+      scope.declareType(name.text, 'class', node, name);
     }
+    this.bindClass(node, scope);
+  }
+
+  private bindTypeDeclaration(node: TreeNode, scope: Scope, kind: 'interface' | 'alias'): void {
+    const name = node.childForFieldName('name');
+    if (name) scope.declareType(name.text, kind, node, name);
+    this.bindTypeParameterOwner(node, scope);
+  }
+
+  private bindAssignment(node: TreeNode, scope: Scope, field: 'left' | 'argument'): void {
+    const target = node.childForFieldName(field);
+    if (target) this.noteAssigned(target);
     this.bindChildren(node, scope);
+  }
+
+  private bindForIn(node: TreeNode, scope: Scope): void {
+    const blockScope = this.newScope(node, 'block', scope);
+    const header = node.childForFieldName('header') ?? node;
+    const left = header.childForFieldName('left');
+    const kind = header.childForFieldName('kind')?.text as 'let' | 'const' | 'var' | undefined;
+    if (left && kind) {
+      const target = kind === 'var' ? scope.functionScope : blockScope;
+      for (const identifier of patternIdentifiers(left)) target.declareValue(identifier.text, kind, node, identifier);
+    } else if (left) {
+      this.noteAssigned(left);
+    }
+    this.bindChildren(node, blockScope);
+  }
+
+  private bindCatch(node: TreeNode, scope: Scope): void {
+    const blockScope = this.newScope(node, 'block', scope);
+    const parameter = node.childForFieldName('parameter');
+    if (parameter)
+      for (const identifier of patternIdentifiers(parameter))
+        blockScope.declareValue(identifier.text, 'catch', node, identifier);
+    this.bindChildren(node, blockScope);
   }
 
   private isFunctionBody(node: TreeNode): boolean {
@@ -205,6 +187,7 @@ export class Binder {
       for (const identifier of patternIdentifiers(current)) this.assignedIdentifiers.push(identifier);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Declares each form of parameter a function-like node has.
   private bindFunction(node: TreeNode, scope: Scope): void {
     const functionScope = this.newScope(node, 'function', scope);
     this.declareTypeParameters(node, functionScope);

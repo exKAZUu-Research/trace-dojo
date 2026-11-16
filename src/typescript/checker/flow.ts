@@ -114,6 +114,7 @@ export class Flow {
   }
 
   /** The key of a reference that narrowing applies to: a variable, `this`, or a property path of one. */
+  // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of reference that flow analysis follows.
   referenceKey(node: TreeNode): string | undefined {
     const expression = skipParentheses(node);
     switch (expression.type) {
@@ -163,6 +164,7 @@ export class Flow {
   // Narrowing operations ----------------------------------------------------------------------------------------
 
   /** The part of a type that `typeof value === name` keeps (or, with `assumeTrue` false, that the opposite keeps). */
+  // code-gauge-allow functionCognitiveComplexity 22 -- Follows TypeScript's narrowing of each kind of type by a `typeof` result.
   narrowByTypeof(type: Type, name: string, assumeTrue: boolean): Type {
     if (assumeTrue) {
       if (isAnyLike(type) || isIntrinsic(type, 'unknown')) {
@@ -189,6 +191,8 @@ export class Flow {
   }
 
   /** Whether `typeof` a value of the type gives `name`: always, never, or maybe. */
+  // code-gauge-allow functionNcss 37 -- One case per `typeof` result.
+  // code-gauge-allow functionCognitiveComplexity 16 -- One case per `typeof` result.
   private typeofMatches(type: Type, name: string): boolean | 'maybe' {
     switch (type.kind) {
       case 'literal': {
@@ -240,6 +244,7 @@ export class Flow {
   }
 
   /** The part of a type that a truthy (or falsy) value has. */
+  // code-gauge-allow functionCognitiveComplexity 28 -- Follows TypeScript's narrowing of each kind of type by truthiness.
   narrowByTruthiness(type: Type, assumeTrue: boolean): Type {
     if (assumeTrue) {
       if (isIntrinsic(type, 'unknown')) return type;
@@ -263,6 +268,7 @@ export class Flow {
   }
 
   /** The part of a type that `value === other` (or `!==`) keeps, given the other operand's type. */
+  // code-gauge-allow functionCognitiveComplexity 30 -- Follows TypeScript's narrowing of each kind of type by equality.
   narrowByEquality(type: Type, other: Type, assumeTrue: boolean, loose: boolean): Type {
     const nullish = isIntrinsic(other, 'null') || isIntrinsic(other, 'undefined');
     if (assumeTrue) {

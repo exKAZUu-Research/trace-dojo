@@ -120,15 +120,18 @@ function generic(node: TreeNode, type: string): ViewNode {
   for (const [index, child] of node.children.entries()) {
     if (!child) continue;
     const fieldName = node.fieldNameForChild(index);
-    if (fieldName && typeFields.has(fieldName)) continue;
-    if (typeOnlyNodes.has(child.type)) continue;
-    if (!child.isNamed && modifiedTypes.has(node.type) && memberModifiers.has(child.type)) continue;
-    if (type === 'formal_parameters' && isThisParameter(child)) continue;
-    if (child.type === 'class_heritage' && !child.namedChildren.some((part) => part?.type === 'extends_clause'))
-      continue;
-    parts.push({ node: view(child), fieldName });
+    if (!isErased(node, type, child, fieldName ?? undefined)) parts.push({ node: view(child), fieldName });
   }
   return assemble(node, type, parts);
+}
+
+/** Whether a child is TypeScript-only syntax, which the JavaScript view leaves out. */
+function isErased(node: TreeNode, type: string, child: TreeNode, fieldName: string | undefined): boolean {
+  if (fieldName && typeFields.has(fieldName)) return true;
+  if (typeOnlyNodes.has(child.type)) return true;
+  if (!child.isNamed && modifiedTypes.has(node.type) && memberModifiers.has(child.type)) return true;
+  if (type === 'formal_parameters' && isThisParameter(child)) return true;
+  return child.type === 'class_heritage' && !child.namedChildren.some((part) => part?.type === 'extends_clause');
 }
 
 function assemble(node: TreeNode, type: string, parts: Part[], text = node.text): ViewNode {
