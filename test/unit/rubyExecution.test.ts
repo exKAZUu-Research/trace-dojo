@@ -15314,3 +15314,165 @@ test.each([
     uncaughtException: 'Enumerator::Lazy#initialize は、この採点環境では使えません。',
   });
 });
+
+const nativeNumericAccumulationCases = [
+  ['class Rational;def +(x);puts :plus;99;end;end;p [1r,2r].sum', '(3/1)\n'],
+  ['class Rational;def +(x);puts :plus;99;end;end;p [1r,2r].each.sum', '(3/1)\n'],
+  ['class Rational;def +(x);puts :plus;99;end;end;p [1r,2r].sum(1r)', '(4/1)\n'],
+  ['class Rational;def +(x);puts :plus;99;end;end;p [1r,2r].each.sum(1r)', '(4/1)\n'],
+  ['class Rational;def +(x);puts :plus;99;end;end;p [1r,2r].sum(0.5)', '3.5\n'],
+  ['class Rational;def +(x);puts :plus;99;end;end;p [1r,2r].each.sum(0.5)', '3.5\n'],
+  ['class Rational;def +(x);puts :plus;99;end;end;p [1r,2.0].sum', '3.0\n'],
+  ['class Rational;def +(x);puts :plus;99;end;end;p [1r,2.0].each.sum', '3.0\n'],
+  ['class Rational;def +(x);puts :plus;99;end;end;p [1r,2.0].sum(1r)', '4.0\n'],
+  ['class Rational;def +(x);puts :plus;99;end;end;p [1r,2.0].each.sum(1r)', 'plus\n102.0\n'],
+  ['class Rational;def +(x);puts :plus;99;end;end;p [1r,2.0].sum(0.5)', '3.5\n'],
+  ['class Rational;def +(x);puts :plus;99;end;end;p [1r,2.0].each.sum(0.5)', '3.5\n'],
+  ['class Rational;def to_f;puts :float;99.0;end;end;p [1r,2r].sum', '(3/1)\n'],
+  ['class Rational;def to_f;puts :float;99.0;end;end;p [1r,2r].each.sum', '(3/1)\n'],
+  ['class Rational;def to_f;puts :float;99.0;end;end;p [1r,2r].sum(1r)', '(4/1)\n'],
+  ['class Rational;def to_f;puts :float;99.0;end;end;p [1r,2r].each.sum(1r)', '(4/1)\n'],
+  ['class Rational;def to_f;puts :float;99.0;end;end;p [1r,2r].sum(0.5)', '3.5\n'],
+  ['class Rational;def to_f;puts :float;99.0;end;end;p [1r,2r].each.sum(0.5)', '3.5\n'],
+  ['class Rational;def to_f;puts :float;99.0;end;end;p [1r,2.0].sum', '3.0\n'],
+  ['class Rational;def to_f;puts :float;99.0;end;end;p [1r,2.0].each.sum', '3.0\n'],
+  ['class Rational;def to_f;puts :float;99.0;end;end;p [1r,2.0].sum(1r)', '4.0\n'],
+  ['class Rational;def to_f;puts :float;99.0;end;end;p [1r,2.0].each.sum(1r)', '4.0\n'],
+  ['class Rational;def to_f;puts :float;99.0;end;end;p [1r,2.0].sum(0.5)', '3.5\n'],
+  ['class Rational;def to_f;puts :float;99.0;end;end;p [1r,2.0].each.sum(0.5)', '3.5\n'],
+  [
+    ';r=(1r/2..);e=r.step(2);p [e.next,e.next,e.next];p e.first(3);p e.each.take(3);a=[];r.step(2){|v|a<<v;break if a.size==3};p a',
+    '[(1/2), 2.5, 4.5]\n[(1/2), 2.5, 4.5]\n[(1/2), 2.5, 4.5]\n[(1/2), (5/2), (9/2)]\n',
+  ],
+  [
+    ';r=(1r/2..);e=r.step(2r);p [e.next,e.next,e.next];p e.first(3);p e.each.take(3);a=[];r.step(2r){|v|a<<v;break if a.size==3};p a',
+    '[(1/2), (5/2), (9/2)]\n[(1/2), (5/2), (9/2)]\n[(1/2), (5/2), (9/2)]\n[(1/2), (5/2), (9/2)]\n',
+  ],
+  [
+    ';r=(1..);e=r.step(2);p [e.next,e.next,e.next];p e.first(3);p e.each.take(3);a=[];r.step(2){|v|a<<v;break if a.size==3};p a',
+    '[1, 3, 5]\n[1, 3, 5]\n[1, 3, 5]\n[1, 3, 5]\n',
+  ],
+  [
+    ';r=(1..);e=r.step(2r);p [e.next,e.next,e.next];p e.first(3);p e.each.take(3);a=[];r.step(2r){|v|a<<v;break if a.size==3};p a',
+    '[1, (3/1), (5/1)]\n[1, (3/1), (5/1)]\n[1, (3/1), (5/1)]\n[1, (3/1), (5/1)]\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;99;end;end;r=(1r/2..);e=r.step(2);p [e.next,e.next,e.next];p e.first(3);p e.each.take(3);a=[];r.step(2){|v|a<<v;break if a.size==3};p a',
+    '[(1/2), 2.5, 4.5]\n[(1/2), 2.5, 4.5]\n[(1/2), 2.5, 4.5]\nplus\n[(1/2), 99, 101]\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;99;end;end;r=(1r/2..);e=r.step(2r);p [e.next,e.next,e.next];p e.first(3);p e.each.take(3);a=[];r.step(2r){|v|a<<v;break if a.size==3};p a',
+    'plus\nplus\n[(1/2), 99, 99]\nplus\nplus\n[(1/2), 99, 99]\nplus\nplus\n[(1/2), 99, 99]\nplus\nplus\n[(1/2), 99, 99]\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;99;end;end;r=(1..);e=r.step(2);p [e.next,e.next,e.next];p e.first(3);p e.each.take(3);a=[];r.step(2){|v|a<<v;break if a.size==3};p a',
+    '[1, 3, 5]\n[1, 3, 5]\n[1, 3, 5]\n[1, 3, 5]\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;99;end;end;r=(1..);e=r.step(2r);p [e.next,e.next,e.next];p e.first(3);p e.each.take(3);a=[];r.step(2r){|v|a<<v;break if a.size==3};p a',
+    'plus\nplus\n[1, 99, 99]\nplus\nplus\n[1, 99, 99]\nplus\nplus\n[1, 99, 99]\nplus\nplus\n[1, 99, 99]\n',
+  ],
+  [
+    'class Integer;def coerce(x);puts :coerce;[x.to_f,to_f];end;end;r=(1r/2..);e=r.step(2);p [e.next,e.next,e.next];p e.first(3);p e.each.take(3);a=[];r.step(2){|v|a<<v;break if a.size==3};p a',
+    'coerce\ncoerce\n[(1/2), 2.5, 4.5]\ncoerce\ncoerce\n[(1/2), 2.5, 4.5]\ncoerce\ncoerce\n[(1/2), 2.5, 4.5]\n[(1/2), (5/2), (9/2)]\n',
+  ],
+  [
+    'class Integer;def coerce(x);puts :coerce;[x.to_f,to_f];end;end;r=(1r/2..);e=r.step(2r);p [e.next,e.next,e.next];p e.first(3);p e.each.take(3);a=[];r.step(2r){|v|a<<v;break if a.size==3};p a',
+    '[(1/2), (5/2), (9/2)]\n[(1/2), (5/2), (9/2)]\n[(1/2), (5/2), (9/2)]\n[(1/2), (5/2), (9/2)]\n',
+  ],
+  [
+    'class Integer;def coerce(x);puts :coerce;[x.to_f,to_f];end;end;r=(1..);e=r.step(2);p [e.next,e.next,e.next];p e.first(3);p e.each.take(3);a=[];r.step(2){|v|a<<v;break if a.size==3};p a',
+    '[1, 3, 5]\n[1, 3, 5]\n[1, 3, 5]\n[1, 3, 5]\n',
+  ],
+  [
+    'class Integer;def coerce(x);puts :coerce;[x.to_f,to_f];end;end;r=(1..);e=r.step(2r);p [e.next,e.next,e.next];p e.first(3);p e.each.take(3);a=[];r.step(2r){|v|a<<v;break if a.size==3};p a',
+    '[1, (3/1), (5/1)]\n[1, (3/1), (5/1)]\n[1, (3/1), (5/1)]\n[1, (3/1), (5/1)]\n',
+  ],
+  [
+    'class Float;def +(x);puts :float_plus;99.0;end;end;begin;p [1r,2r].sum(0.5);rescue=>e;p e.class,e.message;end',
+    'float_plus\n99.0\n',
+  ],
+  [
+    'class Float;def +(x);puts :float_plus;99.0;end;end;begin;p [1r,2r].each.sum(0.5);rescue=>e;p e.class,e.message;end',
+    '3.5\n',
+  ],
+  [
+    'class Float;def +(x);puts :float_plus;99.0;end;end;begin;p [1r,2].sum(0.5);rescue=>e;p e.class,e.message;end',
+    'float_plus\n99.0\n',
+  ],
+  [
+    'class Float;def +(x);puts :float_plus;99.0;end;end;begin;p [1r,2].each.sum(0.5);rescue=>e;p e.class,e.message;end',
+    '3.5\n',
+  ],
+  [
+    'class Float;def +(x);puts :float_plus;99.0;end;end;begin;p [1r,2.0].sum(0.5);rescue=>e;p e.class,e.message;end',
+    '3.5\n',
+  ],
+  [
+    'class Float;def +(x);puts :float_plus;99.0;end;end;begin;p [1r,2.0].each.sum(0.5);rescue=>e;p e.class,e.message;end',
+    '3.5\n',
+  ],
+  [
+    'class Float;def +(x);puts :float_plus;99.0;end;end;begin;p [2.0,1r].sum(0.5);rescue=>e;p e.class,e.message;end',
+    '3.5\n',
+  ],
+  [
+    'class Float;def +(x);puts :float_plus;99.0;end;end;begin;p [2.0,1r].each.sum(0.5);rescue=>e;p e.class,e.message;end',
+    '3.5\n',
+  ],
+  ['class Rational;def +(x);puts :plus;"bad";end;end;begin;p [2.0,1r].sum;rescue=>e;p e.class,e.message;end', '3.0\n'],
+  [
+    'class Rational;def +(x);puts :plus;"bad";end;end;begin;p [2.0,1r].each.sum;rescue=>e;p e.class,e.message;end',
+    '3.0\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;"bad";end;end;begin;p [2.0,1r].sum(1r);rescue=>e;p e.class,e.message;end',
+    '4.0\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;"bad";end;end;begin;p [2.0,1r].each.sum(1r);rescue=>e;p e.class,e.message;end',
+    'plus\nTypeError\n"no implicit conversion to float from string"\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;"bad";end;end;begin;p [2.0,1r].sum(0.5);rescue=>e;p e.class,e.message;end',
+    '3.5\n',
+  ],
+  [
+    'class Rational;def +(x);puts :plus;"bad";end;end;begin;p [2.0,1r].each.sum(0.5);rescue=>e;p e.class,e.message;end',
+    '3.5\n',
+  ],
+] as const;
+
+test.each(nativeNumericAccumulationCases)(
+  'Numeric sum dispatch and endless arithmetic sequences retain native behavior: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
+
+const nativeSumFallbackCases = [
+  ['class X;def coerce(x);puts :coerce;[x,2r];end;end;;p [1r,X.new].sum()', 'coerce\n(3/1)\n'],
+  ['class X;def coerce(x);puts :coerce;[x,2r];end;end;;p [1r,X.new].each.sum()', 'coerce\n(3/1)\n'],
+  ['class X;def coerce(x);puts :coerce;[x,2r];end;end;;p [1r,X.new].sum(1r)', 'coerce\n(4/1)\n'],
+  ['class X;def coerce(x);puts :coerce;[x,2r];end;end;;p [1r,X.new].each.sum(1r)', 'coerce\n(4/1)\n'],
+  [
+    'class X;def coerce(x);puts :coerce;[x,2r];end;end;class Rational;def +(x);puts :plus;99;end;end;p [1r,X.new].sum()',
+    'plus\n99\n',
+  ],
+  [
+    'class X;def coerce(x);puts :coerce;[x,2r];end;end;class Rational;def +(x);puts :plus;99;end;end;p [1r,X.new].each.sum()',
+    'plus\n99\n',
+  ],
+  [
+    'class X;def coerce(x);puts :coerce;[x,2r];end;end;class Rational;def +(x);puts :plus;99;end;end;p [1r,X.new].sum(1r)',
+    'plus\n99\n',
+  ],
+  [
+    'class X;def coerce(x);puts :coerce;[x,2r];end;end;class Rational;def +(x);puts :plus;99;end;end;p [1r,X.new].each.sum(1r)',
+    'plus\nplus\n99\n',
+  ],
+] as const;
+
+test.each(nativeSumFallbackCases)('Sum retains public dispatch after numeric accumulation: %s', (source, stdout) => {
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});

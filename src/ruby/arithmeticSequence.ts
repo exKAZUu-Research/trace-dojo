@@ -1,11 +1,20 @@
 import { rEquals, toInt } from './conversions';
 import { coreMethod } from './define';
 import { argumentError, typeError } from './errors';
-import { callMethod, type Gen, invoke } from './interp';
+import { callBlock, callMethod, type Gen, invoke } from './interp';
 import { isRational } from './libRational';
-import { NIL, RArray, type Value } from './objects';
+import { NIL, RArray, type RProc, type Value } from './objects';
 import { rt } from './runtime';
 import { arr } from './values';
+
+export function* endlessSequence(start: Value, step: Value, block: RProc): Gen<void> {
+  let current = start;
+  for (;;) {
+    rt().spend();
+    yield* callBlock(block, [current], false);
+    current = yield* integerOperation(current, '+', step);
+  }
+}
 
 export function* rationalSequenceSize(start: Value, end: Value, step: Value, exclusive: boolean): Gen<bigint> {
   const distance = yield* integerOperation(end, '-', start);

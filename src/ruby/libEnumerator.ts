@@ -1,5 +1,5 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { rationalSequenceLast, rationalSequenceSize } from './arithmeticSequence';
+import { endlessSequence, rationalSequenceLast, rationalSequenceSize } from './arithmeticSequence';
 import {
   addressOf,
   caseEquals,
@@ -368,6 +368,13 @@ function* runSource(source: EnumeratorSource, block: RProc, args: Value[] = []):
     const count = source.args.length + args.length;
     if (source.method === 'chain' && count > 0) throw argumentCountError(count, 0, 0);
     return yield* source.iterate(block);
+  }
+  if (source.arithmetic) {
+    const { start, end, step } = arithmeticSpec(source.recv, source.iterationArgs ?? source.args, source.keywords);
+    if (end === NIL && !isRubyFloat(start) && !isRubyFloat(step)) {
+      yield* endlessSequence(start, step, block);
+      return source.recv;
+    }
   }
   return yield* callMethod(
     source.recv,

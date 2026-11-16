@@ -77,6 +77,26 @@ function toNumber(fraction: { numerator: bigint; denominator: bigint }): number 
   return bigintRatio(fraction.numerator, fraction.denominator);
 }
 
+export function rationalToFloat(value: RObject): number {
+  return toNumber(fractionOf(value));
+}
+
+export function addRationals(left: RObject, right: bigint | RObject): RObject {
+  const a = fractionOf(left);
+  const b = typeof right === 'bigint' ? { numerator: right, denominator: 1n } : fractionOf(right);
+  return addFractions(a, b);
+}
+
+function addFractions(
+  a: Pick<Fraction, 'numerator' | 'denominator'>,
+  b: Pick<Fraction, 'numerator' | 'denominator'>
+): RObject {
+  return makeRational(
+    boundedAdd(boundedMultiply(a.numerator, b.denominator), boundedMultiply(b.numerator, a.denominator)),
+    boundedMultiply(a.denominator, b.denominator)
+  );
+}
+
 function* arithmetic(self: RObject, other: Value, op: string): Gen {
   const a = fractionOf(self);
   if (isRubyFloat(other)) return yield* callMethod(toNumber(a), op, [other]);
@@ -87,10 +107,7 @@ function* arithmetic(self: RObject, other: Value, op: string): Gen {
   }
   switch (op) {
     case '+': {
-      return makeRational(
-        boundedAdd(boundedMultiply(a.numerator, b.denominator), boundedMultiply(b.numerator, a.denominator)),
-        boundedMultiply(a.denominator, b.denominator)
-      );
+      return addFractions(a, b);
     }
     case '-': {
       return makeRational(
