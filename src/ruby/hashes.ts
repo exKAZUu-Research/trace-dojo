@@ -1,4 +1,5 @@
 import { inspect, toInt } from './conversions';
+import { isCoreMethod } from './define';
 import { frozenError, runtimeError } from './errors';
 import { callMethod, callProc, type Gen, isGenerator, runToEnd } from './interp';
 import { type HashEntry, NIL, RArray, RBasic, RHash, RRange, RString, RSymbol, type Value } from './objects';
@@ -23,12 +24,19 @@ export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], traversal?: H
   }
   if (value instanceof RString) return digest(String(stringKeyHash(value)));
   const method = classOf(value).findMethod('hash');
-  if (method && method.body.kind === 'user') {
-    traversal.callbacks++;
-    const hash = yield* callMethod(value, 'hash', []);
-    return digest(String(yield* toInt(hash)));
-  }
-  if (value instanceof RArray || value instanceof RRange || value instanceof RHash) {
+  const structuralOwner =
+    value instanceof RArray
+      ? rt().c.Array
+      : value instanceof RRange
+        ? rt().c.Range
+        : value instanceof RHash
+          ? rt().c.Hash
+          : undefined;
+  if (
+    (value instanceof RArray || value instanceof RRange || value instanceof RHash) &&
+    structuralOwner &&
+    isCoreMethod(method, structuralOwner, 'hash')
+  ) {
     const cached = traversal.memo.get(value);
     if (cached?.callbacks === traversal.callbacks) return cached.key;
     const callbacks = traversal.callbacks;

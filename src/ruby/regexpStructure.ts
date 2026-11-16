@@ -19,6 +19,8 @@ export function validateRegexpSourceSyntax(source: string, extended: boolean, bi
     root = parseSourceRegexp(source, extended, binary);
     validateSourceReferences(root);
   } catch (error) {
+    if (error instanceof Error && error.message === 'Quantifier value unsupported in Oniguruma')
+      throw new RegexpEncodingError('too big number for repeat range');
     if (error instanceof RegexpEncodingError || error instanceof UnsupportedFeatureError) throw error;
     if (
       error instanceof RangeError ||

@@ -11322,3 +11322,145 @@ test('Extended lexical scopes preserve negated class boundaries', () => {
     uncaughtException: undefined,
   });
 });
+
+test('Yielder keywords and collection overrides retain Ruby dispatch protocols', () => {
+  expect(
+    run(String.raw`y=Enumerator::Yielder.new{|a:,**rest|p a,rest}
+y.yield(a:1,b:2)
+y.yield(a:3)
+y.to_proc.call(a:4,c:5)
+e=Enumerator.new{|out|out.yield(a:6)}
+e.each{|a:|p a}
+class X<Array
+ define_method(:hash){1}
+ define_method(:eql?){|other|true}
+end
+x=X.new([1]);y=X.new([2]);p({[x]=>:ok}[[y]])
+a=[1];b=[2]
+[a,b].each{|item|item.define_singleton_method(:hash){1};item.define_singleton_method(:eql?){|other|true}}
+p({[a]=>:singleton}[[b]])
+class String;define_method(:==){|other|true};end
+class Symbol;define_method(:==){|other|true};end
+class TrueClass;define_method(:==){|other|true};end
+class FalseClass;define_method(:==){|other|true};end
+p(1=='x',1==:x,1==true,1==false,1.0=='x')
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n{b: 2}\n3\n{}\n4\n{c: 5}\n6\n:ok\n:singleton\ntrue\ntrue\ntrue\ntrue\ntrue\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Every record allocator establishes member storage for reflection and inheritance', () => {
+  expect(
+    run(String.raw`[Struct,Data].each do |base|
+ begin;Class.instance_method(:allocate).bind(base).call;rescue TypeError=>e;puts e.message;end
+end
+S=Struct.new(:x,:y)
+s=Class.instance_method(:allocate).bind(S).call
+p s.to_a,s.to_h,s.members
+D=Data.define(:x)
+d=Class.instance_method(:allocate).bind(D).call
+p d.members,d.to_h,d.frozen?
+class T<S;end
+p Class.instance_method(:allocate).bind(T).call.to_a
+C=S.dup
+p Class.instance_method(:allocate).bind(C).call.to_a
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'allocator undefined for Struct\nallocator undefined for Data\n[nil, nil]\n{x: nil, y: nil}\n[:x, :y]\n[:x]\n{x: nil}\nfalse\n[nil, nil]\n[nil, nil]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native reflection preserves declared signatures through aliases, copies and binding', () => {
+  expect(
+    run(String.raw`p Time.instance_method(:initialize).parameters
+p Rational.instance_method(:marshal_dump).arity
+m=Struct.instance_method(:select);p m.owner,m.arity,m.parameters
+class S<Struct.new(:x)
+ alias pick select
+ define_method(:choice,instance_method(:select))
+end
+s=S.new(1)
+[:select,:pick,:choice].each{|name|m=s.method(name);p m.arity,m.parameters,m.call{|x|x==1}}
+x=s.method(:select).unbind.bind(s);p x.arity,x.parameters,x.call{|v|true}
+p Method.instance_method(:clone).arity
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[[:opt, :year], [:opt, :mon], [:opt, :mday], [:opt, :hour], [:opt, :min], [:opt, :sec], [:opt, :zone], [:key, :in], [:key, :precision]]\n0\nStruct\n-1\n[[:rest]]\n-1\n[[:rest]]\n[1]\n-1\n[[:rest]]\n[1]\n-1\n[[:rest]]\n[1]\n-1\n[[:rest]]\n[1]\n0\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Mutable deconstruction retains live arrays and Ruby slice bounds', () => {
+  expect(
+    run(String.raw`module Clear
+ def self.===(v);$a.clear;true;end
+end
+module Pop
+ def self.===(v);$a.pop;true;end
+end
+$a=[1,2];p(($a in [Clear,nil]))
+$a=[1,2];p(($a in [Pop,nil]))
+$a=[1,2,3];p(($a in [Pop,*rest,nil]));p rest
+$a=[1,2,3];p(($a in [Clear,*rest,nil]));p rest
+$a=[1,2];p(($a in [*before,Clear,nil]));p before
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\ntrue\nfalse\n[]\ntrue\nnil\ntrue\n[]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Regexp repeat limits are source errors in dynamic construction', () => {
+  expect(
+    run(String.raw`['a{100001}','a{0,100001}','a{100001,}','a{,100001}','{100001}'].each do |source|
+ begin;Regexp.new(source);rescue RegexpError=>e;puts e.message;end
+end
+p Regexp.new('a{100000}').source
+p Regexp.new('[{100001}]').match?('1')
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'too big number for repeat range: /a{100001}/\ntoo big number for repeat range: /a{0,100001}/\ntoo big number for repeat range: /a{100001,}/\ntoo big number for repeat range: /a{,100001}/\ntoo big number for repeat range: /{100001}/\n"a{100000}"\ntrue\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['a{100001}', 'a{0,100001}', 'a{100001,}', 'a{,100001}'])(
+  'oversized regexp repeat rejects before execution: %s',
+  (source) => {
+    expect(run(`puts :before;p /${source}/`)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test.each([
+  String.raw`p "ß".match?(/s{2}/i)`,
+  String.raw`p "ﬀ".match?(/f+/i)`,
+  String.raw`p "ß".match?(/(s)(s)/i)`,
+  String.raw`p "ß".match?(/(?i:s{2})/)`,
+  String.raw`p "ss".match?(/\u00df/i)`,
+])('Unicode expansion is refused regardless of regexp structure: %s', (source) => {
+  expect(run(source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'Unicode の複数文字 casefold は、この採点環境では使えません。',
+  });
+});
+
+test.each([String.raw`p "ss".match?(/\A[a-ÿ]\z/i)`, String.raw`p "ss".match?(/\A\p{Lower}\z/i)`])(
+  'casefold expansion through character sets fails explicitly: %s',
+  (source) => {
+    expect(run(source)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: 'Unicode の複数文字 casefold は、この採点環境では使えません。',
+    });
+  }
+);

@@ -168,6 +168,7 @@ function* newStructClass(
   const members = memberSymbols.map((member) => member.name);
   const cls = new RClass(rt().c.Class, undefined, superclass, false);
   cls.isUserDefined = true;
+  cls.instanceKind = 'record';
   layouts.set(cls, { ...layout, members, memberSymbols });
   defineAccessors(
     cls,
@@ -210,7 +211,7 @@ function* newStructClass(
   return cls;
 }
 
-function allocateStruct(cls: RClass): RObject {
+export function allocateStruct(cls: RClass): RObject {
   const object = new RObject(cls);
   object.data = new StructValues(layoutOf(cls).members.map(() => NIL));
   return object;

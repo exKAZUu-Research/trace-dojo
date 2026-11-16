@@ -17,7 +17,7 @@ interface Failure {
 export interface DeconstructionCache {
   subject: Value;
   attempted?: boolean;
-  items?: Value[];
+  array?: RArray;
 }
 
 let lastFailure: Failure | undefined;
@@ -68,7 +68,7 @@ export function* matchPattern(pattern: Pattern, value: Value, frame: Frame, cach
       case 'alt': {
         for (const option of pattern.options) {
           const matched = yield* matchPattern(option, value, frame, cache);
-          if (cache?.items) rt().heldArrays.push(cache.items);
+          if (cache?.array) rt().held.push(cache.array);
           if (matched) return true;
         }
         return false;
@@ -99,11 +99,11 @@ function* classMatches(cls: Expr | undefined, value: Value, frame: Frame): Gen<b
   return yield* checked(yield* ev(cls, frame), value);
 }
 
-function* deconstruct(value: Value, cache: DeconstructionCache | undefined): Gen<Value[] | undefined> {
+function* deconstruct(value: Value, cache: DeconstructionCache | undefined): Gen<RArray | undefined> {
   if (cache?.subject === value && cache.attempted) {
-    if (cache.items !== undefined) {
-      rt().heldArrays.push(cache.items);
-      return cache.items;
+    if (cache.array !== undefined) {
+      rt().held.push(cache.array);
+      return cache.array;
     }
     yield* fail(function* () {
       return `${yield* inspect(value)} does not respond to #deconstruct`;
@@ -119,9 +119,9 @@ function* deconstruct(value: Value, cache: DeconstructionCache | undefined): Gen
   }
   const result = yield* callMethod(value, 'deconstruct', []);
   if (!(result instanceof RArray)) throw typeError('deconstruct must return Array');
-  rt().heldArrays.push(result.items);
-  if (cache?.subject === value) cache.items = result.items;
-  return result.items;
+  rt().held.push(result);
+  if (cache?.subject === value) cache.array = result;
+  return result;
 }
 
 function* matchArray(
@@ -131,21 +131,21 @@ function* matchArray(
   cache: DeconstructionCache | undefined
 ): Gen<boolean> {
   if (!(yield* classMatches(pattern.cls, value, frame))) return false;
-  const items = yield* deconstruct(value, cache);
-  if (!items) return false;
+  const array = yield* deconstruct(value, cache);
+  if (!array) return false;
   const fixed = pattern.pre.length + pattern.post.length;
-  if (pattern.rest ? items.length < fixed : items.length !== fixed) {
+  if (pattern.rest ? array.items.length < fixed : array.items.length !== fixed) {
     return yield* fail(function* () {
-      return `${yield* inspect(arr(items))} length mismatch (given ${items.length}, expected ${fixed}${pattern.rest ? '+' : ''})`;
+      return `${yield* inspect(arr(array.items))} length mismatch (given ${array.items.length}, expected ${fixed}${pattern.rest ? '+' : ''})`;
     });
   }
   for (const [index, item] of pattern.pre.entries())
-    if (!(yield* matchPattern(item, items[index], frame))) return false;
+    if (!(yield* matchPattern(item, array.items.at(index) ?? NIL, frame))) return false;
   if (pattern.rest?.target)
-    bind(pattern.rest.target, arr(items.slice(pattern.pre.length, items.length - pattern.post.length)), frame);
-  const offset = items.length - pattern.post.length;
+    bind(pattern.rest.target, patternSlice(array, pattern.pre.length, array.items.length - fixed), frame);
+  const offset = array.items.length - pattern.post.length;
   for (const [index, item] of pattern.post.entries())
-    if (!(yield* matchPattern(item, items[offset + index], frame))) return false;
+    if (!(yield* matchPattern(item, array.items.at(offset + index) ?? NIL, frame))) return false;
   return true;
 }
 
@@ -156,25 +156,30 @@ function* matchFind(
   cache: DeconstructionCache | undefined
 ): Gen<boolean> {
   if (!(yield* classMatches(pattern.cls, value, frame))) return false;
-  const items = yield* deconstruct(value, cache);
-  if (!items) return false;
+  const array = yield* deconstruct(value, cache);
+  if (!array) return false;
   const width = pattern.middle.length;
-  for (let start = 0; start + width <= items.length; start++) {
+  for (let start = 0; start + width <= array.items.length; start++) {
     let matched = true;
     for (const [index, item] of pattern.middle.entries()) {
-      if (!(yield* matchPattern(item, items[start + index], frame))) {
+      if (!(yield* matchPattern(item, array.items.at(start + index) ?? NIL, frame))) {
         matched = false;
         break;
       }
     }
     if (!matched) continue;
-    if (pattern.before) bind(pattern.before, arr(items.slice(0, start)), frame);
-    if (pattern.after) bind(pattern.after, arr(items.slice(start + width)), frame);
+    if (pattern.before) bind(pattern.before, patternSlice(array, 0, start), frame);
+    if (pattern.after)
+      bind(pattern.after, patternSlice(array, start + width, array.items.length - start - width), frame);
     return true;
   }
   return yield* fail(function* () {
-    return `${yield* inspect(arr(items))} does not match to find pattern`;
+    return `${yield* inspect(arr(array.items))} does not match to find pattern`;
   });
+}
+
+function patternSlice(array: RArray, start: number, length: number): Value {
+  return start > array.items.length || length < 0 ? NIL : arr(array.items.slice(start, start + length));
 }
 
 // code-gauge-allow functionNcss 38 -- One case per kind of pattern.

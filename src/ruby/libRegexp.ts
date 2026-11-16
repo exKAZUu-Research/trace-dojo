@@ -46,6 +46,7 @@ import {
   type Value,
 } from './objects';
 import { regexpCaptureNames, regexpHasNumberedBackref } from './regexpCaptureNames';
+import { regexpHasExpandingCasefold } from './regexpCasefold';
 import { RegexpCursor } from './regexpCursor';
 import { decodeRegexpByteEscape, regexpByteEscape, RegexpEncodingError } from './regexpEscapes';
 import { regexpLexicalSource } from './regexpLexicalSource';
@@ -713,9 +714,9 @@ export function execAt(
   if (start < 0 || start > charIndex(text, text.length)) return undefined;
   const data = dataOf(regexp);
   if (source && !validated) validateRegexpSubject(regexp, source);
-  if (data.ignoreCase) {
+  if (!source?.binary && (data.ignoreCase || /\(\?[ims]*i/.test(data.js.source))) {
     if (data.foldCheck?.text !== text)
-      data.foldCheck = { text, unsupported: requiresMultiCharacterFold(data.source, text) };
+      data.foldCheck = { text, unsupported: regexpHasExpandingCasefold(data.js.source, text) };
     if (data.foldCheck.unsupported) throw new UnsupportedFeatureError('Unicode の複数文字 casefold');
   }
   const binaryMatch = source?.binary === true && data.encoding === 'US-ASCII';
@@ -807,16 +808,6 @@ export function validateRegexpSubject(regexp: RObject, source: RString): void {
       rt().c['Encoding::CompatibilityError'],
       `incompatible encoding regexp match (${data.encoding} regexp with ${subjectEncoding} string)`
     );
-}
-
-function requiresMultiCharacterFold(source: string, text: string): boolean {
-  if ([...source].some((char) => char.toUpperCase().length > char.length || char.toLowerCase().length > char.length))
-    return true;
-  const upperSource = source.toUpperCase();
-  return [...text].some((char) => {
-    const expanded = char.toUpperCase();
-    return expanded.length > char.length && upperSource.includes(expanded);
-  });
 }
 
 function matchData(state: MatchState): RObject {

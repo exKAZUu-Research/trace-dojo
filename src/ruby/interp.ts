@@ -168,8 +168,10 @@ function* evalStmt(statement: Stmt, frame: Frame): Gen {
   runtime.spend();
   const { e } = statement;
   let { step } = statement;
-  if (step === 'none' && e.k === 'call' && e.fcall && classOf(frame.self).findMethod(e.name)?.body.kind === 'user')
-    step = 'call';
+  if (step === 'none' && e.k === 'call' && e.fcall) {
+    const kind = classOf(frame.self).findMethod(e.name)?.body.kind;
+    if (kind === 'user' || kind === 'proc') step = 'call';
+  }
   if (step === 'none') return yield* ev(e, frame);
   if (step === 'constant') {
     const mark = runtime.steps.statementMark();
@@ -433,7 +435,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
         for (const clause of e.clauses) {
           rt().currentRow = clause.row;
           const matched = yield* matchPattern(clause.pattern, subject, frame, cache);
-          if (cache.items) rt().heldArrays.push(cache.items);
+          if (cache.array) frame.temporaries.push(cache.array);
           if (!matched) continue;
           if (clause.guard && truthy(yield* ev(clause.guard.cond, frame)) === clause.guard.unless) {
             guardFailed();
@@ -1961,6 +1963,7 @@ export function* invoke(
       return yield* invokeUser(method, body.def, body.cref, recv, args, keywords, block, used, missingReason);
     }
     case 'proc': {
+      runtime.userCallVersion++;
       return yield* callProc(body.proc, args, {
         keywords,
         block,

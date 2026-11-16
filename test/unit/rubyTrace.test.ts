@@ -1047,3 +1047,11 @@ test.each([
 function methodBodySteps(source: string): TraceItem[] {
   return rubyTrace(source).filter(({ callLines }) => callLines.length > 0);
 }
+
+test.each(['+', '*'])('proc-defined operators record the same class initializer steps as def: %s', (operator) => {
+  const program = (definition: string): string =>
+    `class Integer\n ${definition}\n  $g=7\n end\nend\nclass C\n X=1${operator}2\nend\ny=1`;
+  const expected = rubyTrace(program(`def ${operator}(x)`));
+  expect(expected.length).toBeGreaterThan(0);
+  expect(rubyTrace(program(`define_method(:${operator}) do |x|`))).toEqual(expected);
+});

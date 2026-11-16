@@ -960,11 +960,17 @@ def('Enumerator::Yielder', ['<<'], 1, function* (self: RObject, [value]) {
   yield* callProc(consumerOf(self), [value]);
   return self;
 });
-def('Enumerator::Yielder', ['yield', 'call'], [0, -1], function* (self: RObject, args) {
-  return yield* callProc(consumerOf(self), args);
-});
+def(
+  'Enumerator::Yielder',
+  'yield',
+  [0, -1],
+  function* (self: RObject, args, _block, keywords) {
+    return yield* callProc(consumerOf(self), args, { keywords });
+  },
+  { keywords: true }
+);
 def('Enumerator::Yielder', 'to_proc', 0, (self: RObject) => {
-  const proc = nativeProc(-1, (args) => callProc(consumerOf(self), args));
+  const proc = nativeProc(-1, (args, _block, _used, keywords) => callProc(consumerOf(self), args, { keywords }));
   proc.captured = [self];
   return proc;
 });

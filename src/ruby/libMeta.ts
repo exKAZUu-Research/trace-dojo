@@ -168,6 +168,7 @@ function methodObject(
   owner = methodReflectionOwner(method, classOf(recv)),
   moduleBound = false
 ): RObject {
+  if (method.body.kind === 'native') method = { ...method, nativeIdentityOwner: method.nativeIdentityOwner ?? owner };
   const object = new RObject(rt().c.Method);
   const data: MethodData = {
     recv,
@@ -517,7 +518,7 @@ export function methodArity(method: RMethod): number {
 }
 
 function nativeSignature(method: RMethod): NativeSignature | undefined {
-  const owner = method.owner;
+  const owner = method.nativeIdentityOwner ?? method.owner;
   const name = owner.isSingleton && owner.attached instanceof RClass ? `${owner.attached.name}.` : `${owner.name}#`;
   return method.nativeSignature ?? nativeSignatures[name + method.name];
 }

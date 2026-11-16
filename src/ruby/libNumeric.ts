@@ -14,7 +14,7 @@ import {
   toStr,
   tryImplicitConversion,
 } from './conversions';
-import { def, sdef } from './define';
+import { def, isCoreMethod, sdef } from './define';
 import { argumentError, floatDomainError, rangeError, rubyError, typeError, zeroDivisionError } from './errors';
 import { exceptionOption } from './exceptionOption';
 import { roundFloatDigits, roundHalfAway } from './floatFormat';
@@ -201,7 +201,8 @@ for (const owner of ['Integer', 'Float']) {
   def(owner, '+@', 0, (self: Num) => self);
   def(owner, ['==', '==='], 1, function* (self: Num, [other]) {
     if (isNum(other)) return numericEquals(self, other);
-    if (classOf(other).findMethod('==')?.body.kind === 'user')
+    const equality = classOf(other).findMethod('==');
+    if (equality && !isCoreMethod(equality, equality.owner, '=='))
       return truthy(yield* callMethod(other, '==', [callbackReceiver(self)]));
     if (other === NIL || typeof other === 'boolean' || other instanceof RString || other instanceof RSymbol)
       return false;

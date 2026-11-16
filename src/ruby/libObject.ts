@@ -25,7 +25,7 @@ import { writeStderrLine } from './libIo';
 import { identifierSymbol } from './libMeta';
 import { kernelFloat, kernelInteger } from './libNumeric';
 import { identifierKeyString } from './libString';
-import { copyStructLayout } from './libStruct';
+import { allocateStruct, copyStructLayout } from './libStruct';
 import {
   invalidateMethodCaches,
   NIL,
@@ -936,6 +936,7 @@ sdef('Class', 'new', [0, 1], function* (_self, [superclass], block) {
 export function allocate(cls: RClass): Value {
   const runtime = rt();
   if (cls.isSingleton) throw typeError("can't create instance of singleton class");
+  if (cls === runtime.c.Struct || cls === runtime.c.Data) throw typeError(`allocator undefined for ${cls.name}`);
   switch (cls.instanceKind) {
     case 'string': {
       const value = new RString(cls, '');
@@ -947,6 +948,9 @@ export function allocate(cls: RClass): Value {
     }
     case 'hash': {
       return new RHash(cls);
+    }
+    case 'record': {
+      return allocateStruct(cls);
     }
     case 'exception': {
       const object = new RObject(cls);

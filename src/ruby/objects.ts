@@ -305,7 +305,7 @@ export class RClass extends RBasic {
   /** Whether the program defined this class rather than the library, which decides what the trace shows. */
   isUserDefined = false;
   /** The kind of object `new` makes, which a subclass of a library class inherits. */
-  instanceKind: 'object' | 'string' | 'array' | 'hash' | 'exception' | 'none' = 'object';
+  instanceKind: 'object' | 'string' | 'array' | 'hash' | 'exception' | 'record' | 'none' = 'object';
 
   constructor(
     cls: RClass,
