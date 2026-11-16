@@ -1,5 +1,5 @@
 import { debugType, floatFitsInt, formatFloat, numericPrefix } from './conversions';
-import { deprecated, throwError } from './errors';
+import { deprecated } from './errors';
 import { formatFloatForMessage, toStr } from './operators';
 import { rt } from './runtime';
 import { PhpArray, type PhpClass, PhpObject, type TypeDecl, type Value } from './values';
@@ -265,6 +265,3 @@ export function givenType(value: Value): string {
   return debugType(value);
 }
 
-export function throwTypeError(message: string): never {
-  throwError('TypeError', message);
-}

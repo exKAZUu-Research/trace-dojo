@@ -74,13 +74,11 @@ setCallCapture(() => callStack.toReversed());
 
 /** Whether native code is running a callback, which stack traces show as `[internal function]`. */
 let nativeDepth = 0;
-const nativeMarks: number[] = [];
 
 export function resetCallStack(): void {
   hostStackExhaustion = new HostStackExhaustion();
   callStack.length = 0;
   nativeDepth = 0;
-  nativeMarks.length = 0;
 }
 
 /** The display name of a function in messages: `f`, `A::m`, or `{closure:/main.php:3}`. */
@@ -187,7 +185,7 @@ function bindNative(
     if (param.variadic) {
       for (let rest = index; rest < positional.length; rest++) {
         const arg = positional[rest];
-        values.push(param.byRef ? (arg.ref?.v ?? arg.v) : coerceArg(fn, param, rest, arg.v, strict, name));
+        values.push(param.byRef ? (arg.ref?.v ?? arg.v) : coerceArg(param, rest, arg.v, strict, name));
         refs.push(arg.ref);
       }
       break;
@@ -205,7 +203,7 @@ function bindNative(
       values.push(arg.ref ? arg.ref.v : arg.v);
       refs.push(arg.ref);
     } else {
-      values.push(coerceArg(fn, param, index, arg.v, strict, name));
+      values.push(coerceArg(param, index, arg.v, strict, name));
       refs.push(undefined);
     }
   }
@@ -218,7 +216,6 @@ function bindNative(
 }
 
 function coerceArg(
-  fn: NativeFunction,
   param: Param,
   index: number,
   value: Value,
@@ -244,7 +241,6 @@ function coerceArg(
       `${name}(): Argument #${index + 1} ($${param.name}) must be of type ${typeToString(param.type)}, ${givenType(value)} given`
     );
   }
-  void fn;
   return coerced;
 }
 
@@ -319,7 +315,6 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
   callStack.push(record);
   runtime.depth++;
   const outerNative = nativeDepth;
-  nativeMarks.push(nativeDepth);
   nativeDepth = 0;
   let returned: Value;
   try {
@@ -344,7 +339,6 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
     returned = result;
   } finally {
     nativeDepth = outerNative;
-    nativeMarks.pop();
     runtime.depth--;
     callStack.pop();
     runtime.frames.pop();
@@ -575,11 +569,7 @@ export function parseTypeText(text: string): TypeDecl {
   return { k: 'named', name: builtin.includes(lower(text)) ? lower(text) : text };
 }
 
-export function isNativeCallRunning(): boolean {
-  return nativeDepth > 0;
-}
 
-export { invokeUser as _invokeUser };
 
 export function closureFunction(decl: FunctionDecl): UserFunction {
   const runtime = rt();

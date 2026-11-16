@@ -579,14 +579,13 @@ class FixedStorage {
 
 const fixedOf = (object: PhpObject): FixedStorage => object.internal as FixedStorage;
 
-function fixedIndex(object: PhpObject, index: Value, method: string): number {
+function fixedIndex(object: PhpObject, index: Value): number {
   if (typeof index !== 'bigint' && !(typeof index === 'string' && /^\d+$/.test(index))) {
     throwError('TypeError', `Cannot access offset of type ${debugType(index)} on SplFixedArray`);
   }
   const position = Number(index);
   if (position < 0 || position >= fixedOf(object).items.length)
     throwError('OutOfBoundsException', 'Index invalid or out of range');
-  void method;
   return position;
 }
 
@@ -613,20 +612,20 @@ defineClass({
     },
     {
       signature: 'offsetGet($index): mixed',
-      impl: ({ thisObj, args }) => fixedOf(thisObj).items[fixedIndex(thisObj, args[0], 'offsetGet')],
+      impl: ({ thisObj, args }) => fixedOf(thisObj).items[fixedIndex(thisObj, args[0])],
     },
     {
       signature: 'offsetSet($index, mixed $value): void',
       impl: ({ thisObj, args }) => {
         if (args[0] === null) throwError('OutOfBoundsException', 'Index invalid or out of range');
-        fixedOf(thisObj).items[fixedIndex(thisObj, args[0], 'offsetSet')] = share(args[1]);
+        fixedOf(thisObj).items[fixedIndex(thisObj, args[0])] = share(args[1]);
         return null;
       },
     },
     {
       signature: 'offsetUnset($index): void',
       impl: ({ thisObj, args }) => {
-        fixedOf(thisObj).items[fixedIndex(thisObj, args[0], 'offsetUnset')] = null;
+        fixedOf(thisObj).items[fixedIndex(thisObj, args[0])] = null;
         return null;
       },
     },

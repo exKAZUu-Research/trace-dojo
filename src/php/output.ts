@@ -170,7 +170,7 @@ function dumpValue(value: Value, level: number, active: Set<object>): string {
     for (const [key, slot, label] of entries) {
       text += `${' '.repeat(level + 1)}[${typeof key === 'bigint' ? key : label}]=>\n`;
       if (slot === UNINIT) {
-        const decl = declForKey(object.cls, typeof key === 'string' ? keyFor(object, key, label) : String(key));
+        const decl = declForKey(object.cls, typeof key === 'string' ? keyFor(key, label) : String(key));
         text += `${' '.repeat(level + 1)}uninitialized(${decl?.type ? typeToString(decl.type) : 'mixed'})\n`;
       } else text += dumpValue(slotValue(slot), level + 2, active);
     }
@@ -180,10 +180,9 @@ function dumpValue(value: Value, level: number, active: Set<object>): string {
   }
 }
 
-function keyFor(object: PhpObject, name: string, label: string): string {
+function keyFor(name: string, label: string): string {
   const match = /^"(.*)":"(.*)":private$/s.exec(label);
   if (match) return `\0${match[2]}\0${name}`;
-  void object;
   return name;
 }
 

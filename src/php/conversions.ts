@@ -1,4 +1,3 @@
-import { lower } from './bytes';
 import { INT_MAX, INT_MIN, type Key, PhpArray, type PhpObject, type Value } from './values';
 
 /** Formats a float as PHP's `echo` does, with 14 significant digits (`precision=14`). */
@@ -71,10 +70,6 @@ export function floatToInt(value: number): bigint {
   return BigInt(Math.trunc(value));
 }
 
-/** Wraps an integer that left the 64-bit range, for bitwise operations. */
-export function wrapInt(value: bigint): bigint {
-  return BigInt.asIntN(64, value);
-}
 
 /** The result of an integer operation, or the float PHP produces when it overflows. */
 export function intOrFloat(value: bigint): bigint | number {
@@ -199,10 +194,6 @@ export function debugType(value: Value): string {
   return object.cls.isAnonymous ? anonymousDebugName(object) : object.cls.name;
 }
 
-/** The type name in "Unsupported operand types" and similar messages, which name objects by class too. */
-export function zendTypeName(value: Value): string {
-  return debugType(value);
-}
 
 function anonymousDebugName(object: PhpObject): string {
   const parent = object.cls.parent;
@@ -217,10 +208,6 @@ export function compareBytes(a: string, b: string): number {
   return a < b ? -1 : 1;
 }
 
-/** Case-insensitive name comparison for functions, classes, and methods. */
-export function sameName(a: string, b: string): boolean {
-  return lower(a) === lower(b);
-}
 
 export function sign(value: number | bigint): number {
   if (typeof value === 'bigint') return value < 0n ? -1 : value > 0n ? 1 : 0;

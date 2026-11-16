@@ -2,9 +2,9 @@
 import { randomInt } from 'node:crypto';
 
 import { debugType, formatFloat } from './conversions';
-import { deprecated, throwError, warn } from './errors';
+import { deprecated, throwError } from './errors';
 import { defineAlias, defineConstant, defineFunction } from './native';
-import { arithmetic, compare, toFloat, toInt } from './operators';
+import { arithmetic, compare } from './operators';
 import { rt } from './runtime';
 import { fixedDigits, phpRound, type RoundMode } from './strings';
 import { PhpArray, type Value } from './values';
@@ -147,7 +147,7 @@ defineFunction('dechex(int $num): string', ({ args }) => toBase(args[0] as bigin
 defineFunction('decbin(int $num): string', ({ args }) => toBase(args[0] as bigint, 2));
 defineFunction('decoct(int $num): string', ({ args }) => toBase(args[0] as bigint, 8));
 
-function fromBase(name: string, text: string, radix: number): Value {
+function fromBase(text: string, radix: number): Value {
   let value = 0n;
   let float = 0;
   let isFloat = false;
@@ -171,20 +171,19 @@ function fromBase(name: string, text: string, radix: number): Value {
     }
   }
   if (invalid) deprecated('Invalid characters passed for attempted conversion, these have been ignored');
-  void name;
   return isFloat ? float : value;
 }
 
-defineFunction('hexdec(string $hex_string): int|float', ({ args }) => fromBase('hexdec', args[0] as string, 16));
-defineFunction('bindec(string $binary_string): int|float', ({ args }) => fromBase('bindec', args[0] as string, 2));
-defineFunction('octdec(string $octal_string): int|float', ({ args }) => fromBase('octdec', args[0] as string, 8));
+defineFunction('hexdec(string $hex_string): int|float', ({ args }) => fromBase(args[0] as string, 16));
+defineFunction('bindec(string $binary_string): int|float', ({ args }) => fromBase(args[0] as string, 2));
+defineFunction('octdec(string $octal_string): int|float', ({ args }) => fromBase(args[0] as string, 8));
 defineFunction('base_convert(string $num, int $frombase, int $tobase): string', ({ args }) => {
   const [text, from, to] = args as [string, bigint, bigint];
   if (from < 2n || from > 36n)
     throwError('ValueError', 'base_convert(): Argument #2 ($from_base) must be between 2 and 36 (inclusive)');
   if (to < 2n || to > 36n)
     throwError('ValueError', 'base_convert(): Argument #3 ($to_base) must be between 2 and 36 (inclusive)');
-  const value = fromBase('base_convert', text.toLowerCase(), Number(from));
+  const value = fromBase(text.toLowerCase(), Number(from));
   if (typeof value === 'number') return Math.trunc(value).toString(Number(to));
   return (value as bigint).toString(Number(to));
 });
@@ -245,6 +244,8 @@ defineFunction('random_int(int $min, int $max): int', ({ args }) => {
   if (span < 2n ** 48n - 1n) return min + BigInt(randomInt(0, Number(span) + 1));
   return min + (BigInt(randomInt(0, 2 ** 47)) * span) / 2n ** 47n;
 });
-defineFunction('lcg_value(): float', () => Math.random());
+defineFunction('lcg_value(): float', () => {
+  deprecated(String.raw`Function lcg_value() is deprecated since 8.4, use \Random\Randomizer::getFloat() instead`);
+  return Math.random();
+});
 
-export { toFloat, toInt, warn };

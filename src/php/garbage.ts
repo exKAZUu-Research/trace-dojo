@@ -1,6 +1,6 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { Frame, Runtime } from './runtime';
-import { type ClosureData, isClosure, PhpArray, PhpObject, Ref, type Slot, type Value } from './values';
+import { type ClosureData, isClosure, PhpArray, PhpObject, Ref, type Slot } from './values';
 
 /** The objects at most of which a run checks for garbage on every allocation, to reuse object handles as PHP does. */
 const ALLOCATION_CHECK_LIMIT = 2000;
@@ -284,6 +284,3 @@ export function holderCounts(runtime: Runtime): Map<PhpObject, number> {
   return counts;
 }
 
-export function valueIsComposite(value: Value): boolean {
-  return value instanceof PhpArray || value instanceof PhpObject;
-}

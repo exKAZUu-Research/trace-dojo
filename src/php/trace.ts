@@ -5,8 +5,7 @@ import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { dec } from './bytes';
-import { declForKey, propNameOf, resolveStatic } from './classes';
-import { formatFloatRepr } from './conversions';
+import { propNameOf, resolveStatic } from './classes';
 import { parsePhp } from './parse';
 import { runProgram } from './run';
 import { type Frame, rt, Runtime } from './runtime';
@@ -152,8 +151,6 @@ function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: num
     }
     for (const [key, slot] of value.props) {
       if (slot === UNINIT) continue;
-      const decl = declForKey(value.cls, key);
-      void decl;
       const node = displayNodeOf(slot instanceof Ref ? slot.v : slot, seen, budget);
       if (node) define(entries, dec(propNameOf(key)), node);
       if (budget.remaining <= 0) break;
@@ -169,4 +166,3 @@ function keyLabel(key: Key, isList: boolean): string {
   return dec(key);
 }
 
-export { formatFloatRepr };

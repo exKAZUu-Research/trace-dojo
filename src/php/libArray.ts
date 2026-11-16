@@ -149,15 +149,14 @@ defineFunction('array_key_exists($key, array $array): bool', ({ args }) => {
       'TypeError',
       `array_key_exists(): Argument #2 ($array) must be of type array, ${debugType(array)} given`
     );
-  return array.has(arrayKeyOf(key, 'array_key_exists'));
+  return array.has(arrayKeyOf(key));
 });
 defineAlias('key_exists', 'array_key_exists');
 
-function arrayKeyOf(key: Value, name: string): Key {
+function arrayKeyOf(key: Value): Key {
   if (key instanceof PhpArray || key instanceof PhpObject) {
-    throwError('TypeError', `Illegal offset type`);
+    throwError('TypeError', 'Illegal offset type');
   }
-  void name;
   return toKey(key);
 }
 

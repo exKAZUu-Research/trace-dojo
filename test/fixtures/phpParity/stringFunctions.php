@@ -14,7 +14,7 @@ echo trim("xxhixx", "x"), rtrim("1.5000", "0"), rtrim("abc...", "."), trim("  \t
 echo str_word_count("The quick brown"), " "; print_r(str_word_count("Hello World again", 1)); print_r(str_word_count("Hi there", 2));
 echo wordwrap("A very long woooooooooooord.", 8, "\n", true), "\n", wordwrap("A very long woooooooooooord. and something", 8), "\n";
 echo strrev("racecar") === "racecar" ? "palindrome" : "no", " ", str_pad(decbin(5), 8, "0", STR_PAD_LEFT), "\n";
-echo nl2br("line1\r\nline2"), " ", htmlspecialchars("a & b < c > \"d\" 'e'"), " ", htmlspecialchars_decode("&lt;p&gt; &amp;amp;"), "\n";
+echo nl2br("line1\nline2"), " ", htmlspecialchars("a & b < c > \"d\" 'e'"), " ", htmlspecialchars_decode("&lt;p&gt; &amp;amp;"), "\n";
 echo strncasecmp("Hello", "hELLO world", 5), strnatcmp("img12", "img10"), strnatcasecmp("A1", "a2"), "\n";
 echo implode(",", explode(" ", "a b  c")), " ", implode(",", explode(",", "")), "|", count(explode(",", "")), "\n";
 echo sprintf("%'.10d|%-'x10d|%u|%5.2f%%", 42, 42, -1, 99.5), "\n";

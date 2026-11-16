@@ -1,6 +1,5 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
-import { lower } from './bytes';
 import { invoke } from './calls';
 import { requireClass } from './classes';
 import { debugType } from './conversions';
@@ -8,12 +7,11 @@ import { throwError } from './errors';
 import { collectGarbage } from './garbage';
 import { callTargetOf, closureFromCallable, closureTarget } from './interp';
 import { defineClass, installNatives, type NativeMethod } from './native';
-import { rt, type Runtime } from './runtime';
+import { rt } from './runtime';
 import { type ClosureData, PhpObject, type Value } from './values';
 
 /** Installs the builtin functions, constants, and classes into a new run. */
-export function bootstrap(runtime: Runtime): void {
-  void runtime;
+export function bootstrap(): void {
   installNatives();
 }
 
@@ -207,9 +205,6 @@ function defineTurtleMethods(): NativeMethod[] {
 
 defineClass({ name: 'Turtle', methods: defineTurtleMethods() });
 
-export function lowerName(name: string): string {
-  return lower(name);
-}
 
 export function typeName(value: Value): string {
   return debugType(value);

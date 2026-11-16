@@ -138,5 +138,5 @@ function exportLiteral(value: null | boolean | bigint | number | string): string
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'bigint') return value.toString();
   if (typeof value === 'number') return formatFloatRepr(value, 'E', true);
-  return `'${value.replaceAll(/['\\]/g, '\\$&')}'`;
+  return `'${value.replaceAll(/['\\]/g, String.raw`\$&`)}'`;
 }

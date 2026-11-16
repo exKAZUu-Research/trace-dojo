@@ -173,14 +173,14 @@ export class Converter {
   private classRef(node: Node): ClassRef {
     if (node.type === 'relative_scope') {
       const word = lower(node.text);
-      if (word === 'self') return this.selfRef(node);
+      if (word === 'self') return { k: 'self' };
       if (word === 'parent') return { k: 'parent' };
       return { k: 'static' };
     }
     if (node.type === 'name' || node.type === 'qualified_name' || node.type === 'relative_name') {
       const raw = this.nameText(node);
       const word = lower(raw);
-      if (word === 'self') return this.selfRef(node);
+      if (word === 'self') return { k: 'self' };
       if (word === 'parent') return { k: 'parent' };
       if (word === 'static') return { k: 'static' };
       return { k: 'named', name: this.resolveClassName(raw) };
@@ -188,14 +188,6 @@ export class Converter {
     return { k: 'expr', e: this.expr(node) };
   }
 
-  private selfRef(node: Node): ClassRef {
-    if (this.currentClass === undefined && !this.fn.isMethod && this.fn.className === undefined) {
-      // PHP allows `self` in a closure that may later be bound to a class.
-      return { k: 'self' };
-    }
-    void node;
-    return { k: 'self' };
-  }
 
   // Statements --------------------------------------------------------------------------------------------------------
 
@@ -652,7 +644,7 @@ export class Converter {
       if (effective === 'function') this.functionImports.set(lower(alias), full);
       else if (effective === 'const') this.constImports.set(alias, full);
       else {
-        if (this.classImports.has(lower(alias)) || (this.namespace === '' && false)) {
+        if (this.classImports.has(lower(alias))) {
           this.error(
             node,
             `名前「${alias}」は、すでに use で使われています（Cannot use ${full} as ${alias} because the name is already in use）。`
@@ -1735,13 +1727,7 @@ export class Converter {
           );
         }
         args.push({
-          e: alias(
-            valueNode.type === 'name' &&
-              valueNode.parent?.type === 'argument' &&
-              ['self', 'parent', 'static'].includes(lower(valueNode.text))
-              ? this.constant(valueNode)
-              : this.expr(valueNode)
-          ),
+          e: this.expr(valueNode),
           spread: false,
         });
       }
@@ -2038,10 +2024,6 @@ export class Converter {
       })
       .join('\n');
   }
-}
-
-function alias(e: Expr): Expr {
-  return e;
 }
 
 /** Whether an expression statement only calls functions or creates objects, whose own steps show what it did. */

@@ -40,7 +40,7 @@ export function executePhpProgram(source: string, input?: ProgramInput): Program
 export function runProgram(runtime: Runtime, parsed: ParsedProgram, onEnd?: (frame: Frame) => void): ProgramRun {
   return withRuntime(runtime, () => {
     resetCallStack();
-    bootstrap(runtime);
+    bootstrap();
     runtime.program = parsed.program;
     runtime.notices = parsed.notices;
     let uncaughtException: string | undefined;

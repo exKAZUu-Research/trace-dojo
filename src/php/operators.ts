@@ -13,7 +13,7 @@ import {
   toBool,
 } from './conversions';
 import { deprecated, throwError, warn } from './errors';
-import { INT_MAX, INT_MIN, type Key, PhpArray, PhpObject, type Value } from './values';
+import { INT_MIN, type Key, PhpArray, PhpObject, type Value } from './values';
 
 /** Converts an object to a string through `__toString`, which the interpreter provides. */
 let objectToString: (object: PhpObject) => string = () => '';
@@ -453,11 +453,4 @@ export function toKey(value: Value): Key {
   throwError('TypeError', `Cannot access offset of type ${debugType(value)} on array`);
 }
 
-export function keyToValue(key: Key): Value {
-  return key;
-}
 
-/** Whether the int range holds `value`. */
-export function inIntRange(value: bigint): boolean {
-  return value <= INT_MAX && value >= INT_MIN;
-}

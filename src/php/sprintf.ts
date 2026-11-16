@@ -9,7 +9,7 @@ const MAX_FLOAT_PRECISION = 53;
 /** Formats like PHP's `sprintf`, whose `%e` writes the shortest exponent and whose `%f` rounds half to even. */
 // code-gauge-allow functionCognitiveComplexity 60 -- Transcribes php_formatted_print's parser step by step.
 // code-gauge-allow functionNcss 90 -- Transcribes php_formatted_print's parser step by step.
-export function formatPrintf(name: string, format: string, args: Value[], fromArray = false): string {
+export function formatPrintf(format: string, args: Value[], fromArray = false): string {
   let result = '';
   let index = 0;
   let currentArg = 0;
@@ -156,7 +156,6 @@ export function formatPrintf(name: string, format: string, args: Value[], fromAr
     }
     index++;
   }
-  void name;
   return result;
 }
 

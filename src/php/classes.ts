@@ -2,9 +2,9 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
 import { lower } from './bytes';
-import { type ArgValue, functionDisplayName, invoke } from './calls';
+import { type ArgValue, invoke } from './calls';
 import { debugType, toBool } from './conversions';
-import { deprecated, fatal, throwError, warn } from './errors';
+import { deprecated, throwError, warn } from './errors';
 import { share } from './places';
 import { FatalError, rt } from './runtime';
 import { coerce, describeType, NO_MATCH, typeToString } from './types';
@@ -120,7 +120,7 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
   for (const iface of cls.interfaces) {
     for (const [name, constant] of iface.consts) if (!cls.consts.has(name)) cls.consts.set(name, constant);
   }
-  for (const prop of decl.props) addProperty(cls, prop, row);
+  for (const prop of decl.props) addProperty(cls, prop);
   applyTraits(cls, decl);
   for (const method of decl.methods) addMethod(cls, method);
   checkInheritance(cls, row);
@@ -175,7 +175,7 @@ function propertyKey(cls: PhpClass, name: string, visibility: Visibility): strin
 }
 
 // code-gauge-allow functionCognitiveComplexity 25 -- Property redeclaration follows PHP's checks in order.
-function addProperty(cls: PhpClass, ast: PropertyDeclAst, row: number, fromTrait?: PhpClass): void {
+function addProperty(cls: PhpClass, ast: PropertyDeclAst): void {
   const inherited = cls.propByName.get(ast.name);
   if (inherited && inherited.cls !== cls && inherited.visibility !== 'private') {
     if (inherited.isStatic !== ast.isStatic) {
@@ -232,8 +232,6 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst, row: number, fromTrait
       setParam: ast.hooks.setParam,
     };
   }
-  void fromTrait;
-  void row;
   if (ast.isStatic) {
     const ref: LazyRef = new Ref(null);
     // Static properties take their initial values when the class is first used, as constant expressions may refer to
@@ -315,7 +313,7 @@ function applyTraits(cls: PhpClass, decl: ClassDecl): void {
     for (const prop of trait.decl?.props ?? []) {
       const existing = cls.propByName.get(prop.name);
       if (existing && existing.cls === cls) continue;
-      addProperty(cls, prop, decl.row, trait);
+      addProperty(cls, prop);
     }
     for (const [name, constant] of trait.consts) {
       if (!cls.consts.has(name)) cls.consts.set(name, { ...constant, cls, evaluate: constant.evaluate });
@@ -946,11 +944,7 @@ export function classConstant(cls: PhpClass, name: string, scope: PhpClass | und
   return share(constant.value as Value);
 }
 
-export function methodDisplay(method: Method): string {
-  return functionDisplayName({ fn: method.fn, method });
-}
 
-export { fatal };
 
 export function objectToArray(object: PhpObject): PhpArray {
   const array = new PhpArray();

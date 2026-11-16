@@ -1,6 +1,5 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { deprecated, throwError, warn } from './errors';
-import { toKey } from './operators';
 import type { Frame } from './runtime';
 import { type Key, PhpArray, PhpObject, Ref, type Value } from './values';
 
@@ -195,4 +194,3 @@ export function readElement(array: PhpArray, key: Key, quiet: boolean): Value {
   return value;
 }
 
-export { toKey };

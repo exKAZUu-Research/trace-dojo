@@ -4,8 +4,8 @@ import { lower } from './bytes';
 import { callStack, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
 import * as conversionsModule from './conversions';
-import { declForKey, findClass, lookupMethod, propNameOf, visibleProps } from './classes';
-import { debugType, getType, isNumericString, normalizeKeyString, numericPrefix } from './conversions';
+import { findClass, lookupMethod, visibleProps } from './classes';
+import { debugType, getType, isNumericString, normalizeKeyString } from './conversions';
 import {
   E_ALL,
   E_COMPILE_ERROR,
@@ -43,7 +43,7 @@ import { PhpThrow, rt } from './runtime';
 import { formatPrintf } from './sprintf';
 import { setCallableCheck } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { type ClosureData, isClosure, PhpArray, PhpClass, PhpObject, UNINIT, type Value } from './values';
+import { isClosure, PhpArray, PhpClass, PhpObject, type Value } from './values';
 
 // Constants ------------------------------------------------------------------------------------------------------------
 
@@ -108,18 +108,18 @@ defineFunction('var_export(mixed $value, bool $return = false): ?string', ({ arg
   return null;
 });
 defineFunction('printf(string $format, mixed ...$values): int', ({ args }) => {
-  const text = formatPrintf('printf', args[0] as string, args.slice(1));
+  const text = formatPrintf(args[0] as string, args.slice(1));
   rt().echo(text);
   return BigInt(text.length);
 });
 defineFunction('sprintf(string $format, mixed ...$values): string', ({ args }) =>
-  formatPrintf('sprintf', args[0] as string, args.slice(1))
+  formatPrintf(args[0] as string, args.slice(1))
 );
 defineFunction('vsprintf(string $format, array $values): string', ({ args }) =>
-  formatPrintf('vsprintf', args[0] as string, (args[1] as PhpArray).values(), true)
+  formatPrintf(args[0] as string, (args[1] as PhpArray).values(), true)
 );
 defineFunction('vprintf(string $format, array $values): int', ({ args }) => {
-  const text = formatPrintf('vprintf', args[0] as string, (args[1] as PhpArray).values(), true);
+  const text = formatPrintf(args[0] as string, (args[1] as PhpArray).values(), true);
   rt().echo(text);
   return BigInt(text.length);
 });
@@ -492,7 +492,7 @@ defineFunction('class_parents(object|string $object_or_class, bool $autoload = t
 });
 defineFunction('spl_object_id(object $object): int', ({ args }) => BigInt((args[0] as PhpObject).id));
 defineFunction('spl_object_hash(object $object): string', ({ args }) =>
-  (args[0] as PhpObject).id.toString(16).padStart(32, '0')
+  `${(args[0] as PhpObject).id.toString(16).padStart(16, '0')}${'0'.repeat(16)}`
 );
 defineFunction('iterator_to_array(Traversable|array $iterator, bool $preserve_keys = true): array', ({ args }) => {
   const [iterable, preserveKeys = true] = args;
@@ -603,8 +603,6 @@ defineFunction('debug_print_backtrace(int $options = 0, int $limit = 0): void', 
   return null;
 });
 
-export { declForKey, numericPrefix, propNameOf, UNINIT };
-export type { ClosureData };
 
 // Standard streams ---------------------------------------------------------------------------------------------------
 
@@ -642,7 +640,7 @@ defineFunction('fwrite($stream, string $data, ?int $length = null): int|false', 
 });
 defineAlias('fputs', 'fwrite');
 defineFunction('fprintf($stream, string $format, mixed ...$values): int', ({ args }) => {
-  const text = formatPrintf('fprintf', args[1] as string, args.slice(2));
+  const text = formatPrintf(args[1] as string, args.slice(2));
   writeStream(args[0], text, 'fprintf');
   return BigInt(text.length);
 });

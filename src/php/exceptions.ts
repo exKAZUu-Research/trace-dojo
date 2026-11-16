@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { type CallRecord, callStack } from './calls';
-import { createObject, findClass, readProp } from './classes';
+import { createObject, findClass } from './classes';
 import { formatFloatRepr } from './conversions';
 import { setErrorFactories } from './errors';
 import { callMethod, callValue } from './interp';
@@ -283,4 +283,3 @@ const subclasses: [string, string][] = [
 ];
 for (const [name, parent] of subclasses) defineClass({ name, parent });
 
-export { readProp };
