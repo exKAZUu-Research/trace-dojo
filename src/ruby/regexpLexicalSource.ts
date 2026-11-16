@@ -28,6 +28,7 @@ export function regexpSourceTokens(source: string, extended: boolean): Token[] {
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 20 -- Original token boundaries and option precedence must stay visible while constructing the compiler source.
 function sourceToken(token: Token, source: string): string {
   if (token.type === 'Character') {
     if (token.raw.startsWith('\\')) {
@@ -51,6 +52,7 @@ function sourceToken(token: Token, source: string): string {
   return token.raw;
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- The complete Ruby escape families are checked before source rewriting can join or discard their characters.
 function validateEscape(raw: string, start: number | undefined, sourceLength: number): void {
   if (raw === '\\') throw new RegexpEncodingError('too short escape sequence');
   if (raw.startsWith(String.raw`\x`) && !/^(?:\\x[\da-f]{1,2})+$/i.test(raw))

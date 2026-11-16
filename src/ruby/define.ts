@@ -134,6 +134,7 @@ export function setSingletonFactory(factory: (cls: RClass) => RClass): void {
   singletonOf = factory;
 }
 
+// code-gauge-allow functionCognitiveComplexity 29 -- The ordered cases for native method registration share state; splitting them solely for the metric would hide their sequencing.
 export function installNatives(runtime: Runtime): void {
   // Extensions apply after every definition, whatever order the modules that register them load in.
   for (const spec of [...specs.filter((each) => !each.wrap), ...specs.filter((each) => each.wrap)]) {

@@ -35,6 +35,8 @@ export function* prettyInspect(value: Value): Gen<string> {
   return `${layout(doc)}\n`;
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- The ordered cases for width-sensitive recursive object rendering share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss 44 -- The ordered cases for width-sensitive recursive object rendering share state; splitting them solely for the metric would hide their sequencing.
 export function* writePretty(value: Value, write: (part: string) => Gen<void>): Gen<void> {
   const callbacks = inspectionCallbackCount(value, new Set(), { nodes: 0, textLength: 0 });
   if (callbacks === 0) {

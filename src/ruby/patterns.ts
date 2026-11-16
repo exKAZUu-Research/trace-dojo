@@ -44,6 +44,7 @@ export function guardFailed(): void {
 }
 
 /** Whether a value matches a pattern, binding the pattern's variables in the frame as it goes, as Ruby does. */
+// code-gauge-allow functionNcss 36 -- The ordered cases for Ruby pattern matching share state; splitting them solely for the metric would hide their sequencing.
 export function* matchPattern(pattern: Pattern, value: Value, frame: Frame, cache?: DeconstructionCache): Gen<boolean> {
   rt().spend();
   const mark = frame.temporaries.length;

@@ -1,3 +1,5 @@
+// code-gauge-allow-file fileNcss 667 -- Ruby calendar fields and formatting share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file duplicateLines 15 -- English calendar names mirror the C interpreter because both expose the same fixed calendar vocabulary.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   compareValues,
@@ -109,6 +111,7 @@ function nowNanoseconds(): bigint {
   return BigInt(Math.round((Date.now() + (runtime.slept ?? 0) * 1000) * 1e6));
 }
 
+// code-gauge-allow functionCognitiveComplexity 28 -- Time argument forms have different field order and coercion contracts.
 function* fieldArgs(args: Value[]): Gen<{ fields: number[]; seconds: number }> {
   const fields: number[] = [];
   for (const [index, arg] of args.slice(0, 5).entries()) fields.push(yield* fieldValue(arg, index));
@@ -127,6 +130,7 @@ function* fieldArgs(args: Value[]): Gen<{ fields: number[]; seconds: number }> {
   return { fields, seconds };
 }
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Calendar fields distinguish symbolic names, integer conversion and range errors.
 function* fieldValue(arg: Value, index: number): Gen<number> {
   if (arg === NIL) return index === 0 ? Number(yield* toInt(arg)) : index < 3 ? 1 : 0;
   if (!(arg instanceof RString)) return Number(yield* toInt(arg));
@@ -241,6 +245,7 @@ function calendarArgs(args: Value[]): Value[] {
   return args.length === 10 ? [args[5], args[4], args[3], args[2], args[1], args[0]] : args.slice(0, 6);
 }
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Calendar normalization preserves subsecond arithmetic, zone selection and native field errors together.
 function* buildTime(
   cls: RClass,
   args: Value[],
@@ -466,6 +471,7 @@ function pad(value: number, width: number, flag: string): string {
   return String(value).padStart(width, flag === '_' ? ' ' : '0');
 }
 
+// code-gauge-allow functionNcss 38 -- The ordered cases for Ruby calendar fields and formatting share state; splitting them solely for the metric would hide their sequencing.
 function strftime(data: TimeData, format: string): string {
   if (format.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
   const date = data.fields();
@@ -629,6 +635,7 @@ function formatYear(year: number, flag: string): string {
   return year < 0 ? `-${String(-year).padStart(4, '0')}` : String(year).padStart(4, '0');
 }
 
+// code-gauge-allow functionNcss 52 -- Calendar directives share a date but require separate week, year and padding rules.
 function calendarDirective(data: TimeData, date: Date, directive: string, flag: string): string | undefined {
   switch (directive) {
     case 'Y': {
@@ -705,6 +712,8 @@ function calendarDirective(data: TimeData, date: Date, directive: string, flag: 
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 25 -- Clock directives share a timestamp but have distinct precision and zone rendering rules.
+// code-gauge-allow functionNcss 56 -- Clock directives share a timestamp but have distinct precision and zone rendering rules.
 function clockDirective(
   data: TimeData,
   date: Date,

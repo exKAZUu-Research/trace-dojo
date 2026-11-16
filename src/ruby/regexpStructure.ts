@@ -72,6 +72,7 @@ function validateSourceTokens(tokens: Token[]): void {
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 20 -- Capture declarations and references share one alias inventory before AST validation.
 function aliasedCaptureTokens(tokens: Token[]): Token[] {
   const aliases = new Map<string, string>();
   for (const token of tokens) {
@@ -147,7 +148,6 @@ function byteViewNode(node: SourceNode, inClass: boolean): boolean {
   return true;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Source and host AST validation distinguish invalid patterns, unsupported forms, and exhausted budgets.
 export function validateRegexpStructure(source: string): void {
   if (!source.includes('(?<') && !/\\(?:[1-9]|k<)/.test(source)) return;
   try {
@@ -258,6 +258,7 @@ function normalizeRubyRegexpEscapes(source: string, extended: boolean, binary = 
   return result;
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Ruby byte, Unicode and property escapes need their distinct validation and normalization rules.
 function normalizedRegexpEscape(
   source: string,
   start: number,

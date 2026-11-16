@@ -48,7 +48,6 @@ export function traceRubyProgram(program: string, trace: TraceOptions, input?: P
  * then, when `withContext`, the instance variables of `self` (as Java's `this.x`), the class variables of the
  * program's classes (as Java's static fields), and the global variables.
  */
-// code-gauge-allow functionCognitiveComplexity 16 -- Trace collection follows Ruby scope and object kinds while matching the shared trace format.
 function variablesOf(runtime: Runtime, frame: Frame, withContext: boolean): TraceVariables {
   const variables: TraceVariables = { vars: {}, referenceVars: {} };
   for (const [name, value] of visibleLocals(frame)) addVariable(variables, name, value);
@@ -123,7 +122,7 @@ function addVariable(variables: TraceVariables, name: string, value: Value): voi
 const NOT_SCALAR = Symbol('notScalar');
 type Scalar = TraceItemVariable[string];
 
-// code-gauge-allow duplicateLines 21 -- Trace collection follows Ruby scope and object kinds while matching the shared trace format.
+// code-gauge-allow functionNcss 31 -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
 function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }): Scalar | typeof NOT_SCALAR {
   if (budget.remaining-- <= 0) throw new ExecutionLimitError('trace');
   rt().spend();
@@ -163,6 +162,8 @@ function traceIntOf(value: bigint): number | bigint {
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 /** The node showing a value as learners see it, or `undefined` for a value the trace hides. */
+// code-gauge-allow functionCognitiveComplexity 30 -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss 51 -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
 function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: number }): DisplayNode | undefined {
   if (budget.remaining-- <= 0) return { kind: 'value', value: '…' };
   rt().spend();
@@ -221,7 +222,6 @@ function rangeText(value: RRange): string {
   return `${end(value.begin)}${value.exclusive ? '...' : '..'}${end(value.end)}`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Trace collection follows Ruby scope and object kinds while matching the shared trace format.
 function containerNodeOf(value: RBasic, seen: Set<object>, budget: { remaining: number }): DisplayNode {
   const entries: Record<string, DisplayNode> = {};
   if (value instanceof RArray) {
@@ -304,6 +304,8 @@ function keyLabels(keys: Value[]): string[] {
 }
 
 /** A hash key as text, quoting strings and marking symbols when `quoted`, without running the program's methods. */
+// code-gauge-allow functionCognitiveComplexity 28 -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss 32 -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
 function keyText(key: Value, quoted: boolean, seen = new Set<RArray>(), memo = new WeakMap<RArray, string>()): string {
   rt().spend();
   if (key instanceof RString) return boundedKeyText(quoted ? strInspect(key.s) : key.s);

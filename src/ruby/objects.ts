@@ -405,7 +405,6 @@ export class RClass extends RBasic {
     return list;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Method lookup resolves visibility markers against the current ancestor body.
   findMethod(name: string): RMethod | undefined {
     if (this.methodCache?.version !== hierarchyVersion.value) {
       this.methodCache = { version: hierarchyVersion.value, map: new Map() };

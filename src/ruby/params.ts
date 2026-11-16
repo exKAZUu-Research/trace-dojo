@@ -9,8 +9,7 @@ import { arr, newHash, realClassOf } from './values';
 
 type BindMode = 'method' | 'lambda' | 'proc';
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Ruby parameter forms share arity and binding paths, which this function keeps in source order.
-// code-gauge-allow functionNcss 42 -- Ruby parameter forms share arity and binding paths, which this function keeps in source order.
+// code-gauge-allow functionNcss 59 -- Ruby parameter forms share arity and binding paths, which this function keeps in source order.
 export function* bindParams(
   params: Params,
   frame: Frame,

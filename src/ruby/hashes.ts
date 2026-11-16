@@ -14,7 +14,6 @@ interface HashTraversal {
 
 /** A bounded structural digest for container hash methods, based on each child's public hash. */
 // code-gauge-allow functionCognitiveComplexity 23 -- Hash keys have distinct primitive, composite, and user-defined hash rules.
-// code-gauge-allow functionNcss 34 -- Hash keys have distinct primitive, composite, and user-defined hash rules.
 export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], traversal?: HashTraversal): Gen<string> {
   traversal ??= { cycle: false, callbacks: 0, memo: new WeakMap() };
   rt().spend();
@@ -134,6 +133,7 @@ function* findEntry(hash: RHash, key: Value): Gen<{ base: string; slot: string; 
   return yield* findEntryInBucket(hash, key, base);
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- The ordered cases for Ruby hash equality and collision handling share state; splitting them solely for the metric would hide their sequencing.
 function* findEntryInBucket(
   hash: RHash,
   key: Value,

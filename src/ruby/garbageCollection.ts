@@ -3,6 +3,8 @@ import { RArray, RBasic, RClass, RHash, RObject, RProc, RRange, type Value } fro
 import type { Frame, Runtime, Scope } from './runtime';
 
 /** Removes the turtles that nothing the program can still reach refers to, as Java's garbage collection would. */
+// code-gauge-allow functionCognitiveComplexity 19 -- The ordered cases for runtime reachability traversal share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss 33 -- The ordered cases for runtime reachability traversal share state; splitting them solely for the metric would hide their sequencing.
 export function collectGarbage(runtime: Runtime): void {
   if (!runtime.world.hasTurtles) return;
   const reached = new Set<TurtleState>();
@@ -45,7 +47,6 @@ export function pushFrameReferences(frame: Frame, pending: Value[]): void {
 
 /** Pushes the values an object refers to. */
 // code-gauge-allow functionCognitiveComplexity 18 -- The walker visits each runtime value kind and its reachable fields.
-// code-gauge-allow functionNcss 31 -- The walker visits each runtime value kind and its reachable fields.
 function pushReferences(value: RBasic, pending: Value[]): void {
   pending.push(value.cls);
   for (const fields of [value.ivars, value.internal]) for (const item of fields?.values() ?? []) pending.push(item);

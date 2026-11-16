@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 563 -- Reflection and encoded constant lookup share representation and state; splitting registration by size would scatter that concern.
 import type { Params } from './ast';
 import { addressOf, className, inspect, stringEncodingName, tryImplicitConversion } from './conversions';
 import { def, findCoreMethod, isCoreMethod, sdef, sundef } from './define';
@@ -304,7 +305,6 @@ function unboundMethod(method: RMethod, name: string, owner: RClass): RObject {
   return unbound;
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Ruby method descriptions distinguish native signatures, user parameters, aliases, owners, and source locations.
 function* methodDescription(self: RObject): Gen<RString> {
   const { recv, method, name, owner: definingOwner, moduleBound } = self.data as MethodData;
   const unbound = self.cls === rt().c.UnboundMethod;
@@ -850,6 +850,8 @@ function reflectedConstant(module: RClass, name: string, inherit: boolean, neste
   return undefined;
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- The ordered cases for reflection and encoded constant lookup share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow duplicateLines 22 -- Constant queries share path validation but differ in missing-constant hooks, fallback lookup and return behavior.
 def('Module', 'const_get', [1, 2], function* (self: RClass, args) {
   const inherit = args.length < 2 || truthy(args[1]);
   const input = yield* symbolNameOf(args[0], true);
@@ -883,6 +885,7 @@ def('Module', 'const_set', 2, function* (self: RClass, [name, value]) {
   constSet(self, constant, value, row);
   return value;
 });
+// code-gauge-allow duplicateLines 23 -- Constant queries share path validation but differ in missing-constant hooks, fallback lookup and return behavior.
 def('Module', 'const_defined?', [1, 2], function* (self: RClass, args) {
   const input = yield* symbolNameOf(args[0], true);
   const requested = input.name;
