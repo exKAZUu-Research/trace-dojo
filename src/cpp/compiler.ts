@@ -1538,8 +1538,18 @@ export class Compiler extends StatementCompiler {
   private memberReference(type: Extract<Type, { kind: 'reference' }>, expr: Expr, row: number): Eval<Value> {
     if ((expr.isLvalue && bindsDirectly(expr.type, type.to)) || !isConstType(type.to))
       return this.convert(expr, type, row).run as Eval<Value>;
-    const value = this.convert(expr, unqualified(type.to), row).run;
-    return (frame) => new Ptr(new Box(value(frame) as Value), 0);
+    const heldType = unqualified(type.to);
+    const value = this.convert(expr, heldType, row).run;
+    const destroy = this.destroyerOf(heldType);
+    // The object holding the member lives until its block ends, as does a variable the aggregate initializes.
+    if (!destroy || !this.context.fn) return (frame) => new Ptr(new Box(value(frame) as Value), 0);
+    const holder = this.context.declareLocal(`\0member${row}`, heldType, false);
+    this.context.scope.destructibles.push({ slot: holder.slot, destroy });
+    return (frame) => {
+      const box = new Box(value(frame) as Value);
+      frame.slots[holder.slot] = box;
+      return new Ptr(box, 0);
+    };
   }
 
   private clauseExpression(node: Syntax, clauses: Clauses): Expr {
@@ -1774,8 +1784,7 @@ function copyValue(frame: Frame, type: Type, value: Value): Value {
 function assignValue(frame: Frame, type: Type, target: Value, source: Value): Value {
   if (type.kind === 'class') {
     if (target === UNINIT || source === UNINIT) return copyValue(frame, type, source);
-    type.cls.operations?.assign(frame, target, source);
-    return target;
+    return type.cls.operations?.assign(frame, target, source) ?? target;
   }
   if (type.kind === 'array') {
     const targetArray = target as ArrayStore;

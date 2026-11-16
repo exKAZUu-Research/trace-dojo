@@ -44,6 +44,9 @@ std::vector<M> makeVector() {
 
 M make(int i) { return M(i); }
 
+struct RefHolder { const M& m; int k; };
+struct IntRef { const int& a; int b; };
+
 int main() {
   { const int& r = Outer().in.v; std::cout << "use " << r << " "; } std::cout << "\n";
   { const M& m = Outer().in.m; std::cout << "use " << m.id << " "; } std::cout << "\n";
@@ -63,4 +66,6 @@ int main() {
   std::cout << "\n";
   for (const auto& m : std::vector<M>{M(6)}) std::cout << "x" << m.id << " ";
   std::cout << "\n";
+  { RefHolder h{M(7), 2}; std::cout << "use " << h.m.id << h.k << " "; } std::cout << "\n";
+  { IntRef r{10, 2}; std::cout << r.a << r.b << "\n"; }
 }

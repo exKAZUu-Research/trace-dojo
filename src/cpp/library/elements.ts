@@ -38,10 +38,7 @@ export function elementOperations(compiler: ExpressionCompiler, type: Type, row:
         if (cls.isNoncopyable) throw new CppRuntimeError('custom', `${cls.name} のオブジェクトはコピーできません。`);
         return operations?.copy(frame, value) ?? value;
       },
-      assign: (frame, target, source) => {
-        operations?.assign(frame, target, source);
-        return target;
-      },
+      assign: (frame, target, source) => operations?.assign(frame, target, source) ?? target,
       destroy: operations?.destroy,
       hasEffects:
         !cls.library && (operations?.destroy !== undefined || cls.constructors.some((ctor) => isUserCopy(ctor, cls))),

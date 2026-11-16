@@ -51,8 +51,11 @@ export interface LibraryClass {
 export interface ClassOperations {
   /** Copies an object, as the copy constructor does. */
   copy: (frame: Frame, source: Value) => Value;
-  /** Assigns an object's value to another existing object in place, as the copy assignment operator does. */
-  assign: (frame: Frame, target: Value, source: Value) => void;
+  /**
+   * Assigns an object's value to another existing object, as the copy assignment operator does: in place, or, for an
+   * object that is an immutable value (an iterator), by giving the value that replaces the target.
+   */
+  assign: (frame: Frame, target: Value, source: Value) => Value | void;
   /** Runs the destructor of an object and of its members, when one of them has any effect. */
   destroy?: (frame: Frame, object: Value) => void;
 }

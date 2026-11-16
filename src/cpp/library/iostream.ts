@@ -135,7 +135,7 @@ export class Streams {
     this.manipulator = new ClassInfo('std::__manipulator', 'class');
     this.manipulator.isComplete = true;
     this.manipulator.library = { kind: 'manipulator', args: [], size: 16, align: 8 };
-    this.manipulator.operations = { copy: (_frame, value) => value, assign: () => {} };
+    this.manipulator.operations = { copy: (_frame, value) => value, assign: (_frame, _target, source) => source };
     this.ostream = this.streamClass('std::ostream', undefined, true, false);
     this.istream = this.streamClass('std::istream', undefined, false, true);
     this.ostringstream = this.streamClass('std::ostringstream', this.ostream, true, false);

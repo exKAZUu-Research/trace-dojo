@@ -515,8 +515,10 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       if (type.kind === 'class') {
         const ops = type.cls.operations;
         const copy = ops?.copy(frame, x.read()) as Value;
-        ops?.assign(frame, x.read(), y.read());
-        ops?.assign(frame, y.read(), copy);
+        const first = ops?.assign(frame, x.read(), y.read());
+        if (first !== undefined) x.write(first);
+        const second = ops?.assign(frame, y.read(), copy);
+        if (second !== undefined) y.write(second);
         ops?.destroy?.(frame, copy);
       } else {
         const value = x.read();
@@ -886,7 +888,7 @@ function backInserter(library: Library, container: Type): ClassInfo {
   cls.isComplete = true;
   const element = container.kind === 'class' ? (container.cls.library?.args[0] ?? VOID) : VOID;
   cls.library = { kind: 'back_insert_iterator', args: [element], size: 8, align: 8 };
-  cls.operations = { copy: (_frame, value) => value, assign: () => {} };
+  cls.operations = { copy: (_frame, value) => value, assign: (_frame, _target, source) => source };
   library.instances.set(key, cls);
   return cls;
 }

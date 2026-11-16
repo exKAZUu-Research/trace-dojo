@@ -36,7 +36,7 @@ export function randomAccessIterator(
         ? undefined
         : iteratorOperator(compiler, cls, elementType, isReverse, operator, operands, row),
   };
-  cls.operations = { copy: (_frame, value) => value, assign: () => {} };
+  cls.operations = { copy: (_frame, value) => value, assign: (_frame, _target, source) => source };
   if (isConst) {
     const mutable = randomAccessIterator(cache, container, element, false, isReverse, isBidirectional);
     cls.constructors = [nativeConstructor(cls, [classType(mutable)], ([value]) => value)];

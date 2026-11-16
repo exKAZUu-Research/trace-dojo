@@ -961,7 +961,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         const place = location(frame) as Ptr;
         const object = place.read();
         const from = (value(frame) as Ptr).read();
-        cls.operations?.assign(frame, object, from);
+        const replacement = cls.operations?.assign(frame, object, from);
+        if (replacement !== undefined) place.write(replacement);
         return place;
       },
     };
