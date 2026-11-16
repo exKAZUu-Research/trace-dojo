@@ -252,7 +252,10 @@ export abstract class CallCompiler extends BuiltinCompiler {
     }
     const key = `${this.idOf(decl)}(${paramTypes.map((type) => this.idOf(type as object)).join(',')})`;
     const existing = this.instances.get(key);
-    if (existing) return existing;
+    if (existing) {
+      if (existing.state === 'pending' && this.resolvingFields === 0) this.compilePendingBodies();
+      return existing;
+    }
     const { returnType, inferredErrors } = this.inParameterScope(decl, paramTypes, () => {
       const payload = this.compileType(syntax.returnType);
       if (!syntax.inferredErrorSet) return { returnType: payload, inferredErrors: undefined };
@@ -260,6 +263,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
         kind: 'error_set',
         names: new Set(),
         inferredFrom: syntax.name,
+        resolved: false,
       };
       return { returnType: errorUnionOf(errors, payload), inferredErrors: errors };
     });

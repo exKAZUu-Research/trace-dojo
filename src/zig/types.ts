@@ -73,6 +73,7 @@ export interface ErrorSetType {
   readonly name?: string;
   /** The function whose errors this set is, for an inferred error set (`!T`). */
   readonly inferredFrom?: string;
+  resolved?: boolean;
 }
 
 export interface ErrorUnionType {

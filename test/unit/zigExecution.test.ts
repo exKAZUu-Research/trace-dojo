@@ -2627,3 +2627,39 @@ test('constant writer values and pointers permit buffered inspection and reject 
       ).kind
     ).toBe('compileError');
 });
+
+test('known optional captures retain compile-time payloads and skip unselected semantic branches', () => {
+  const source = `const std=@import("std");pub fn main()void{const size:?usize=3;if(size)|len|{const a:[len]u8=@splat(7);std.debug.print("{any}",.{a});}else{const bad:u8=300;_=bad;}const none:?u8=null;if(none)|x|{const bad:u8=300;_=bad;_=x;}else{std.debug.print(" null",.{});}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '{ 7, 7, 7 } null',
+    uncaughtException: undefined,
+  });
+});
+
+test('known error unions select handlers with their own payload type and known captures', () => {
+  const source = `const std=@import("std");pub fn main()void{const ok:error{Bad}!u8=1;if(ok)|x|{std.debug.print("{} ",.{x});}else|err|{const bad:u8=300;_=bad;_=err;}const e:error{Bad}!u8=error.Bad;const a=e catch 1000;const b=e catch|err| @errorName(err);std.debug.print("{} {s}",.{a,b});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 1000 Bad',
+    uncaughtException: undefined,
+  });
+});
+
+test('resolved empty error sets skip catch and if handlers while retaining calls', () => {
+  const source = `const std=@import("std");fn inferred()!void{std.debug.print("a",.{});}fn explicit()error{}!u8{std.debug.print("b",.{});return 4;}pub fn main()void{inferred() catch|err|{_=err;};if(explicit())|x|{std.debug.print("{}",.{x});}else|err|{_=err;}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'ab4',
+    uncaughtException: undefined,
+  });
+});
+
+test('recursive inferred error sets retain reachable handlers', () => {
+  const source = `const std=@import("std");fn recurse(n:u8)!void{if(n==0)return error.Bad;try recurse(n-1);}pub fn main()void{recurse(2) catch|err|{std.debug.print("{s}",.{@errorName(err)});};}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'Bad',
+    uncaughtException: undefined,
+  });
+});

@@ -174,6 +174,7 @@ export abstract class StatementCompiler extends CallCompiler {
       this.fn = outerFn;
     }
     instance.state = 'compiled';
+    if (compilation.inferredErrors) compilation.inferredErrors.resolved = true;
   }
 
   private currentFn(span: Span): FnContext {
@@ -1032,6 +1033,17 @@ export abstract class StatementCompiler extends CallCompiler {
       if (condition.type.kind !== 'optional') return this.error(expression.condition, 'optional の値が必要です。');
       const child = condition.type.child;
       if (expression.elseCapture) this.error(expression.elseCapture, 'optional の条件の else では値を受け取れません。');
+      if (condition.known) {
+        const present = condition.value !== NULL;
+        return this.selectedBranch(
+          present ? expression.consequent : expression.otherwise,
+          present ? this.captureBinding(expression.capture, child, condition) : undefined,
+          condition,
+          (value) => (value instanceof Some ? value.value : value),
+          resultType,
+          asStatement
+        );
+      }
       const capture = expression.capture;
       const binding = this.captureBinding(capture, child, condition);
       const then = this.withCapture(binding, () =>
@@ -1061,6 +1073,21 @@ export abstract class StatementCompiler extends CallCompiler {
     // An error union: `if (eu) |value| ... else |err| ...`.
     if (condition.type.kind !== 'error_union') return this.error(expression.condition, 'エラー共用体の値が必要です。');
     const union = condition.type;
+    if (!expression.otherwise) return this.error(expression, 'エラー共用体の if には else が要ります。');
+    if (condition.known || (union.errorSet.resolved !== false && union.errorSet.names?.size === 0)) {
+      const failed = condition.known && condition.value instanceof ErrorValue;
+      const capture = failed
+        ? this.captureBinding(expression.elseCapture, union.errorSet, undefined)
+        : this.captureBinding(expression.capture, union.payload, condition);
+      return this.selectedBranch(
+        failed ? expression.otherwise : expression.consequent,
+        capture,
+        condition,
+        (value) => value,
+        resultType,
+        asStatement
+      );
+    }
     const binding = this.captureBinding(expression.capture, union.payload, condition);
     const errorBinding = this.captureBinding(expression.elseCapture, union.errorSet, undefined);
     const then = this.withCapture(binding, () =>
@@ -1091,6 +1118,54 @@ export abstract class StatementCompiler extends CallCompiler {
       },
       [binding?.binding, errorBinding?.binding]
     );
+  }
+
+  private selectedBranch(
+    expression: Expression | undefined,
+    capture: ReturnType<StatementCompiler['captureBinding']>,
+    condition: TExpr,
+    payload: (value: Value) => Value,
+    resultType: Type | undefined,
+    asStatement: boolean
+  ): { stmt: Stmt; value: TExpr } {
+    if (!expression) {
+      const value = this.derived(condition, VOID, () => {});
+      return { stmt: this.valueStmt(value), value };
+    }
+    if (capture && condition.known) {
+      const address = capture.locate ? this.addressOf(condition) : undefined;
+      if (!address || address.known) {
+        capture.binding = {
+          ...capture.binding,
+          known: true,
+          value: address
+            ? condition.type.kind === 'optional'
+              ? this.optionalPayloadPointer(address.value as Pointer)
+              : address.value
+            : payload(condition.value),
+        };
+      }
+    }
+    const chosen = this.withCapture(capture, () => this.branch(expression, undefined, resultType, asStatement));
+    const run = <T>(frame: Frame, evaluate: (frame: Frame) => T): T => {
+      try {
+        const pointer = capture?.locate?.(frame);
+        const value = pointer ? pointer.load() : condition.eval(frame);
+        capture?.bind(frame, payload(value), pointer);
+        return evaluate(frame);
+      } finally {
+        if (capture) frame.slots[capture.binding.slot] = UNASSIGNED;
+      }
+    };
+    const chosenValue = chosen.value;
+    const value = chosenValue
+      ? { ...chosenValue, place: undefined, eval: (frame: Frame) => run(frame, chosenValue.eval) }
+      : known(VOID, undefined, condition.span);
+    const chosenStmt = chosen.stmt;
+    const stmt = chosenStmt
+      ? { ...chosenStmt, exec: (frame: Frame) => run(frame, chosenStmt.exec) }
+      : this.valueStmt(value);
+    return { stmt, value };
   }
 
   /** A value whose type exists only at compile time, such as `comptime_int`, cannot depend on a runtime condition. */
@@ -2236,6 +2311,18 @@ export abstract class StatementCompiler extends CallCompiler {
     if (type.kind !== 'error_union') {
       return this.error(expression, `catch はエラー共用体の値にだけ使えます（${typeName(type)} 型です）。`);
     }
+    if (
+      (operand.known && !(operand.value instanceof ErrorValue)) ||
+      (type.errorSet.resolved !== false && type.errorSet.names?.size === 0)
+    ) {
+      if (discarded) this.rejectDiscardedError(type.payload, expression.operand);
+      const payload = this.derived(operand, type.payload, (value) => value);
+      return discarded
+        ? this.derived(payload, VOID, () => {})
+        : resultType
+          ? this.coerce(payload, resultType, expression)
+          : payload;
+    }
     // `x catch unreachable` reports the error it did not expect.
     if (!expression.capture && unwrapParens(expression.handler).kind === 'unreachable') {
       // A library call the compiler folds still runs when the program does, as in Zig.
@@ -2256,6 +2343,21 @@ export abstract class StatementCompiler extends CallCompiler {
         },
         expression
       );
+    }
+    if (operand.known && operand.value instanceof ErrorValue) {
+      const handler = this.selectedBranch(
+        expression.handler,
+        this.captureBinding(expression.capture, type.errorSet, undefined),
+        operand,
+        (value) => value,
+        discarded ? undefined : resultType,
+        false
+      ).value;
+      if (discarded) {
+        this.rejectDiscardedError(handler.type, expression.handler);
+        return this.derived(handler, VOID, () => {});
+      }
+      return handler;
     }
     const capture = this.captureBinding(expression.capture, type.errorSet, undefined);
     const handler = this.withCapture(capture, () =>
