@@ -389,3 +389,51 @@ test.each(['Data.Map', 'Data.Map.Strict'])('key-set traversals preserve comparis
     });
   }
 });
+
+test.each(['Data.Set', 'Data.Map'])('list builders force keys in input order in %s', (module) => {
+  const type = module === 'Data.Set' ? 'M.Set Int' : 'M.Map Int Int';
+  const input = module === 'Data.Set' ? '[error "first",error "second"]' : '[(error "first",0),(error "second",0)]';
+  const builders =
+    module === 'Data.Set' ? ['fromList'] : ['fromList', 'fromListWith (+)', String.raw`fromListWithKey (\_->(+))`];
+  for (const builder of builders) {
+    expect(
+      executeProgram('haskell', `import qualified ${module} as M\nmain=print(M.size(M.${builder} ${input}::${type}))`)
+    ).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: 'first' });
+  }
+});
+
+test('Set mapping transforms the first ascending element first', () => {
+  expect(
+    executeProgram(
+      'haskell',
+      'import qualified Data.Set as S\nmain=print(S.size(S.map (\\x->error(show x)::Int)(S.fromList[1,2,3::Int])))'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: '1' });
+  expect(
+    executeProgram('haskell', 'import qualified Data.Map as M\nmain=print(M.size(M.fromList[(1::Int,undefined::Int)]))')
+  ).toMatchObject({ kind: 'executed', stdout: '1\n', uncaughtException: undefined });
+});
+
+test.each(['Data.Map', 'Data.Map.Strict'])(
+  'submaps inspect the right tree and compare root values first in %s',
+  (module) => {
+    const imports = `import qualified ${module} as M\n`;
+    for (const left of ['M.empty', 'error "first"']) {
+      expect(
+        executeProgram('haskell', `${imports}main=print(M.isSubmapOf (${left}::M.Map Int Int)(error "second"))`)
+      ).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: 'second' });
+    }
+    const source = `${imports}import qualified Data.Map as L\na=L.fromList[(1,error "left"),(2,error "root"),(3,error "right")]\nb=M.fromList[(k,0::Int)|k<-[1,2,3::Int]]\nmain=print(M.isSubmapOf a b)`;
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: '',
+      uncaughtException: 'root',
+    });
+    expect(
+      executeProgram(
+        'haskell',
+        `${imports}import qualified Data.Map as L\nmain=print(M.isSubmapOf(L.singleton(1::Int)(undefined::Int)) M.empty)`
+      )
+    ).toMatchObject({ kind: 'executed', stdout: 'False\n', uncaughtException: undefined });
+  }
+);

@@ -34,12 +34,18 @@ main = print ((Box 1 'x') { value = True }, change (Box True (2 :: Int)))`;
 test('strict map merges preserve carried values and force computed values', () => {
   const imports = 'import qualified Data.Map as L\nimport qualified Data.Map.Strict as S\n';
   const maps = 'a = L.singleton 1 (error "carried" :: Int)\nb = L.singleton 2 (3 :: Int)\n';
-  const source = `${imports}${maps}main = print (S.size (S.unionWith (+) a b), S.size (S.unionWithKey (\\_ -> (+)) b a), S.size (S.unionsWith (+) [a,b]), S.size (S.differenceWith (\\x _ -> Just x) a b))`;
-  expect(executeProgram('haskell', source)).toMatchObject({
-    kind: 'executed',
-    uncaughtException: 'carried',
-    stdout: '(2,',
-  });
+  for (const [expression, stdout, uncaughtException] of [
+    ['S.unionWith (+) a b', '2\n', undefined],
+    [String.raw`S.unionWithKey (\_ -> (+)) b a`, '', 'carried'],
+    ['S.unionsWith (+) [a,b]', '', 'carried'],
+    [String.raw`S.differenceWith (\x _ -> Just x) a b`, '1\n', undefined],
+  ]) {
+    expect(executeProgram('haskell', `${imports}${maps}main=print(S.size(${expression}))`)).toMatchObject({
+      kind: 'executed',
+      stdout,
+      uncaughtException,
+    });
+  }
   for (const expression of [
     String.raw`S.unionWith (\_ _ -> error "computed") b b`,
     String.raw`S.differenceWith (\_ _ -> Just (error "computed")) b b`,

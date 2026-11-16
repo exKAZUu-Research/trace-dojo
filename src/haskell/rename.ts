@@ -317,8 +317,8 @@ class Renamer {
     origins.add(source);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Import items distinguish values, type children, unsupported entries and hiding.
-  // code-gauge-allow functionNcss 34 -- Import selection distinguishes names, children, hiding and unsupported APIs.
+  // code-gauge-allow functionCognitiveComplexity 28 -- Import items distinguish values, type children, unsupported entries and hiding.
+  // code-gauge-allow functionNcss 36 -- Import selection distinguishes names, children, hiding and unsupported APIs.
   private selectImportItem(exports: ExportTable, item: ImportItem, imp: Import, into: ExportTable): void {
     const { name } = item.name;
     if (item.kind === 'value') {
@@ -358,6 +358,7 @@ class Renamer {
             return found;
           });
     for (const child of children) {
+      if (!imp.hiding && child.unsupported) throw unsupportedError(item.name.span, child.unsupported);
       into.values.set(child.name, child);
       (into.types.get(name) as { children: ValueEntity[] }).children.push(child);
     }

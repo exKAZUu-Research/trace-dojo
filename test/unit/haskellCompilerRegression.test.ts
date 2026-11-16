@@ -402,3 +402,32 @@ test.each(['[R ..B]', '[R,G ..B]', '[x..y]', '[(R)..B]', '[Main.R ..Main.B]'])(
     });
   }
 );
+
+test.each([
+  ['Text.Printf (PrintfArg(formatArg))', 'formatArg'],
+  ['Text.Printf (PrintfArg(parseFormat))', 'parseFormat'],
+  ['Text.Read (Read(readPrec))', 'readPrec'],
+  ['Text.Read (Read(readListPrec))', 'readListPrec'],
+  ['Text.Read (Read(..))', 'readListPrec'],
+])('known class methods retain unsupported diagnostics: %s', (item, method) => {
+  const result = executeProgram('haskell', `import ${item}\nmain=print(1::Int)`);
+  expect(result).toMatchObject({
+    kind: 'compileError',
+    diagnostics: expect.arrayContaining([
+      expect.objectContaining({ message: expect.stringContaining('この採点環境では使えません') }),
+    ]),
+  });
+  if (result.kind === 'compileError')
+    expect(result.diagnostics.some(({ message }) => message.includes(method))).toBe(true);
+});
+
+test.each(['Text.Read (Read(readsPrec))', 'Text.Printf (PrintfArg)', 'Text.Read hiding (Read(readPrec))'])(
+  'supported and hidden class selections remain usable: %s',
+  (item) => {
+    expect(executeProgram('haskell', `import ${item}\nmain=print(1::Int)`)).toMatchObject({
+      kind: 'executed',
+      stdout: '1\n',
+      uncaughtException: undefined,
+    });
+  }
+);

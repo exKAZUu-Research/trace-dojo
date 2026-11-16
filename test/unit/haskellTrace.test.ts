@@ -279,10 +279,10 @@ test.each(['forM [1,2] $', 'for [1,2] $', 'traverse', 'flip traverse [1,2] $'])(
     const source = `import Control.Monad\nimport Data.Traversable\nmain=do\n  ${call}\n  print(3::Int)`;
     const recording = traceProgram('haskell', source, source);
     expect(recording.stdout).toBe('1\n2\n3\n');
-    const control = source.replace(call, String.raw`forM [1,2] $ \x->do print(x::Int)`);
-    expect(withoutLines(recording.traceItems)).toEqual(
-      withoutLines(traceProgram('haskell', control, control).traceItems)
+    const control = javaMain(
+      '    for (int x : new int[] {1,2}) { System.out.println(x); }\n    System.out.println(3);'
     );
+    expect(withoutLines(recording.traceItems)).toEqual(withoutLines(traceProgram('java', control, control).traceItems));
   }
 );
 

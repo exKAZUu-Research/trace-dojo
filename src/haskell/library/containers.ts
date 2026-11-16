@@ -102,7 +102,7 @@ deleteFindMax (SBin _ x l r) = case deleteFindMax r of (m, r') -> (m, balance x 
 deleteFindMax STip = (errorWithoutStackTrace "Set.deleteFindMax: can not return the maximal element of an empty set", STip)
 
 fromList :: Ord a => [a] -> Set a
-fromList = B.foldl (\t x -> insert x t) STip
+fromList = B.foldl' (\t x -> insert x t) STip
 
 fromAscList :: Eq a => [a] -> Set a
 fromAscList xs = fromDistinctAscList (B.map B.last (group xs))
@@ -607,13 +607,13 @@ deleteFindMax (Bin _ k x l r) = case deleteFindMax r of (km, r') -> (km, balance
 deleteFindMax Tip = (errorWithoutStackTrace "Map.deleteFindMax: can not return the maximal element of an empty map", Tip)
 
 fromList :: Ord k => [(k, a)] -> Map k a
-fromList = B.foldl (\t (k, x) -> insert k x t) Tip
+fromList = B.foldl' (\t (k, x) -> insert k x t) Tip
 
 fromListWith :: Ord k => (a -> a -> a) -> [(k, a)] -> Map k a
-fromListWith f = B.foldl (\t (k, x) -> insertWith f k x t) Tip
+fromListWith f = B.foldl' (\t (k, x) -> insertWith f k x t) Tip
 
 fromListWithKey :: Ord k => (k -> a -> a -> a) -> [(k, a)] -> Map k a
-fromListWithKey f = B.foldl (\t (k, x) -> insertWith (f k) k x t) Tip
+fromListWithKey f = B.foldl' (\t (k, x) -> insertWith (f k) k x t) Tip
 
 fromAscList :: Eq k => [(k, a)] -> Map k a
 fromAscList xs = fromDistinctAscList (combine xs)
@@ -869,7 +869,19 @@ withoutKeys m (S.SBin _ k sl sr) = case splitLookup k m of
                 if size left + size right == size m then m else link2 left right
 
 isSubmapOf :: (Ord k, Eq a) => Map k a -> Map k a -> Bool
-isSubmapOf a b = all (\(k, x) -> lookup k b == Just x) (toAscList a)
+isSubmapOf a b = b ${BT}seq${BT} size a <= size b && submapValues (==) a b
+
+submapValues :: Ord k => (a -> b -> Bool) -> Map k a -> Map k b -> Bool
+submapValues _ Tip _ = True
+submapValues _ _ Tip = False
+submapValues f (Bin 1 k x _ _) b = case lookup k b of
+  Nothing -> False
+  Just y -> f x y
+submapValues f (Bin _ k x l r) b = case splitLookup k b of
+  (bl,found,br) -> case found of
+    Nothing -> False
+    Just y -> f x y && size l <= size bl && size r <= size br
+                   && submapValues f l bl && submapValues f r br
 
 lookupMin :: Map k a -> Maybe (k, a)
 lookupMin Tip = Nothing

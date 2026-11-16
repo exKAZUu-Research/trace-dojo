@@ -9,7 +9,7 @@ import type { GlobalDef } from './core';
 import { type ClassEntity, type ConInfo, nextId, type TypeEntity, type ValueEntity } from './entities';
 import type { Builtins } from './infer';
 import { LIBRARY_SOURCES, PUBLIC_MODULES, UNSUPPORTED_MODULES, UNSUPPORTED_VALUES } from './library';
-import { KNOWN_LIBRARY_TYPES, KNOWN_LIBRARY_VALUES } from './library/knownValues';
+import { KNOWN_LIBRARY_CLASS_METHODS, KNOWN_LIBRARY_TYPES, KNOWN_LIBRARY_VALUES } from './library/knownValues';
 import { type CompiledModuleInfo, emptyExports, type ExportTable, type TypeLike } from './modules';
 import { misplacedHaskellAtomicMessage, parseHaskell } from './parse';
 import { setPrimitiveTypes } from './primitives';
@@ -214,6 +214,7 @@ class LibraryCompiler {
           });
         }
       }
+      attachKnownClassMethods(exports);
       assertPublicExports(name, exports);
       modules.set(name, { name, exports, instances: [] });
     }
@@ -237,6 +238,16 @@ class LibraryCompiler {
       values.set(name, entity);
     }
     return values;
+  }
+}
+
+function attachKnownClassMethods(exports: ExportTable): void {
+  for (const [typeName, entry] of exports.types) {
+    if (entry.entity.kind !== 'class') continue;
+    entry.children = (KNOWN_LIBRARY_CLASS_METHODS[typeName] ?? []).flatMap((method) => {
+      const value = exports.values.get(method);
+      return value ? [value] : [];
+    });
   }
 }
 
