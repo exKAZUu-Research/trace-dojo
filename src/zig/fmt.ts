@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 610 -- The file holds one layer of the compiler, whose parts share its private state.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
@@ -48,7 +49,6 @@ const ANY = 'any';
 export const MAX_DEPTH = 3;
 
 /** Parses a format string as `Writer.print` does at compile time, checking it against the arguments. */
-// code-gauge-allow functionCognitiveComplexity 40 -- Transcribes `Writer.print`'s format loop.
 export function parseFormat(format: readonly number[], argNames: readonly string[]): Segment[] {
   const segments: Segment[] = [];
   const used = new Set<number>();
@@ -134,7 +134,6 @@ function isAlign(byte: number | undefined): boolean {
 }
 
 /** `std.fmt.Placeholder.parse`. */
-// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes `Placeholder.parse`.
 function parsePlaceholder(bytes: readonly number[]): {
   arg: ParsedSpecifier;
   spec: string;
@@ -197,7 +196,6 @@ export interface TypeInfo {
 }
 
 /** Reports the compile errors `printValue` gives for a specifier and a type, as Zig does before running. */
-// code-gauge-allow functionCognitiveComplexity 60 -- Mirrors the compile-time branches of `printValue`.
 export function checkFormat(spec: string, type: Type, info: TypeInfo, hasOptions: boolean, depth = MAX_DEPTH): void {
   const invalid = (): never => {
     throw new FormatError(`invalid format string '${spec}' for type '${typeName(type)}'`);
@@ -364,8 +362,6 @@ function isByteString(type: Type): boolean {
 // Printing ------------------------------------------------------------------------------------------------------------
 
 /** Appends a value printed as `printValue(spec, options, value)` does. */
-// code-gauge-allow functionCognitiveComplexity 80 -- Transcribes `printValue`.
-// code-gauge-allow functionNcss 160 -- Transcribes `printValue`.
 export function printValue(
   out: number[],
   spec: string,
@@ -688,6 +684,7 @@ function isPowerOf10(value: bigint): boolean {
 }
 
 /** `std.fmt.float.round`, which rounds the shortest decimal's digits, half up. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function roundDecimal(decimal: Decimal, mode: 'decimal' | 'scientific', precision: number): Decimal {
   let roundDigit = 0;
   let output = decimal.mantissa;
@@ -745,6 +742,7 @@ function formatScientific(input: Decimal, precision: number | undefined): string
 }
 
 /** `std.fmt.float.formatDecimal`. */
+// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function formatDecimal(input: Decimal, precision: number | undefined): string {
   if (input.special) return special(input);
   const decimal = precision === undefined ? input : roundDecimal(input, 'decimal', precision);
@@ -777,6 +775,7 @@ function formatDecimal(input: Decimal, precision: number | undefined): string {
 }
 
 /** `printFloatHex`: a float as `0x1.8p1`. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function printFloatHex(out: number[], value: AnyFloat, bits: FloatBits, upper: boolean, options: Options): void {
   const big = asBigFloat(value);
   let text = big.sign ? '-' : '';

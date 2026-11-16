@@ -1,3 +1,5 @@
+// code-gauge-allow-file fileNcss 726 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file duplicateLines 17 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { CompileError } from '../interpreter/diagnostics';
 import { PANIC, panic } from './arith';
 import type { Container, ContainerMember, Expression, FunctionDeclaration, Span } from './ast';
@@ -305,6 +307,7 @@ export abstract class SemaBase implements SemaApi {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Checks each rule of Zig's type coercion or container analysis in turn.
   private resolveVariable(decl: Extract<Decl, { kind: 'const' | 'var' }>): void {
     if (decl.state === 'resolved') return;
     if (decl.state === 'resolving') {
@@ -393,6 +396,7 @@ export abstract class SemaBase implements SemaApi {
     return fields;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 20 -- Checks each rule of Zig's type coercion or container analysis in turn.
   enumFields(type: EnumType): NonNullable<EnumType['fields']> {
     if (type.fields) return type.fields;
     const syntax = type.namespace.syntax;
@@ -488,8 +492,6 @@ export abstract class SemaBase implements SemaApi {
     return this.error(span, mismatch(to, expression.type));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 60 -- One case per kind of coercion that Zig defines.
-  // code-gauge-allow functionNcss 150 -- One case per kind of coercion that Zig defines.
   protected tryCoerce(expression: TExpr, to: Type, span: Span): TExpr | undefined {
     const from = expression.type;
     if (from === to) return expression;
@@ -583,6 +585,7 @@ export abstract class SemaBase implements SemaApi {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Checks each rule of Zig's type coercion or container analysis in turn.
   private coerceToInt(expression: TExpr, to: IntType, span: Span): TExpr | undefined {
     const from = expression.type;
     if (from.kind === 'comptime_int' || (from.kind === 'int' && expression.known)) {
@@ -602,6 +605,7 @@ export abstract class SemaBase implements SemaApi {
     return undefined;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- Checks each rule of Zig's type coercion or container analysis in turn.
   private coerceToFloat(expression: TExpr, to: Extract<Type, { kind: 'float' }>, span: Span): TExpr | undefined {
     const from = expression.type;
     if (from.kind === 'comptime_float' && expression.known) {
@@ -660,7 +664,8 @@ export abstract class SemaBase implements SemaApi {
     return payload ? { ...payload, type: to, place: undefined } : undefined;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per pointer coercion that Zig defines.
+  // code-gauge-allow functionNcss 31 -- Checks each rule of Zig's type coercion or container analysis in turn.
+  // code-gauge-allow functionCognitiveComplexity 25 -- Checks each rule of Zig's type coercion or container analysis in turn.
   private coerceToPointer(expression: TExpr, to: Extract<Type, { kind: 'pointer' }>, span: Span): TExpr | undefined {
     const from = expression.type;
     if (from.kind === 'fn' || (from === NATIVE_FN_TYPE && expression.value instanceof FnRef)) {
@@ -784,7 +789,6 @@ export abstract class SemaBase implements SemaApi {
     return result;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- One case per rule of Zig's peer type resolution.
   private peerPair(a: Type, b: Type, all: readonly TExpr[]): Type | undefined {
     if (a === b) return a;
     if (a.kind === 'undefined') return b;
@@ -881,6 +885,7 @@ export function intWidens(from: IntType, to: IntType): boolean {
 }
 
 /** Whether a value of one type is a value of another without conversion, as pointers' and optionals' children need. */
+// code-gauge-allow functionCognitiveComplexity 24 -- Checks each rule of Zig's type coercion or container analysis in turn.
 export function inMemoryCoercible(from: Type, to: Type): boolean {
   if (from === to) return true;
   if (from.kind === 'pointer' && to.kind === 'pointer') {
@@ -984,7 +989,6 @@ export function copyForStorage(value: Value): Value {
 // Undefined values ------------------------------------------------------------------------------------------------
 
 /** The value that `undefined` memory holds in a Debug build, which fills it with the byte 0xAA. */
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of type.
 export function undefinedValue(type: Type): Value {
   switch (type.kind) {
     case 'int': {

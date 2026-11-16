@@ -1,3 +1,4 @@
+// code-gauge-allow-file duplicateLines 17 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 /** `std.unicode`, `std.meta`, `std.enums`, and `std.PriorityQueue`. */
 import type { Span } from '../ast';
@@ -38,6 +39,7 @@ function sequenceLength(first: number): number | undefined {
 }
 
 /** Decodes one UTF-8 sequence as `utf8Decode` does, or names its error. */
+// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function decode(bytes: number[]): number | string {
   switch (bytes.length) {
     case 1: {

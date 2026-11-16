@@ -1,3 +1,4 @@
+// code-gauge-allow-file duplicateLines 25 -- Library types repeat the same shape of method on purpose, each over its own state.
 import type { Frame } from '../runtime';
 import { known, runtime } from '../semaBase';
 import { BOOL, fnType, optionalOf, type StructType, type Type, typeName, USIZE, VOID } from '../types';

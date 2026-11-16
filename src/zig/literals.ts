@@ -56,7 +56,6 @@ function escapeBytes(text: string, node: Node, inString: boolean): number[] {
   return [escapeValue(text, node)];
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes `parseEscapeSequence`.
 function escapeValue(text: string, node: Node): number {
   const kind = text[1];
   switch (kind) {
@@ -108,7 +107,6 @@ export function parseFloatText(text: string, node: Node): void {
   checkNumber(text, node);
 }
 
-// code-gauge-allow functionCognitiveComplexity 40 -- Transcribes `parseNumberLiteral`'s checks.
 function checkNumber(text: string, node: Node): void {
   let index = 0;
   let base = 10;

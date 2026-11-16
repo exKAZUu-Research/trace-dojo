@@ -83,6 +83,7 @@ class UnexpectedRemainder extends Error {}
 const DIVISION_ERRORS = errorSetOf(['DivisionByZero', 'Overflow']);
 const MOD_ERRORS = errorSetOf(['DivisionByZero', 'NegativeDenominator']);
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function intDivision(
   name: string,
   errors: typeof DIVISION_ERRORS,

@@ -1,3 +1,4 @@
+// code-gauge-allow-file duplicateLines 19 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { panic } from '../arith';
 /**
  * `std.HashMap` and `std.HashMapUnmanaged` (with `AutoHashMap` and `StringHashMap`), transcribed from Zig's open
@@ -284,8 +285,6 @@ function stateOf(
   return (frame) => readMapState(evaluate(frame));
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Defines each method of Zig's hash maps.
-// code-gauge-allow functionNcss 150 -- Defines each method of Zig's hash maps.
 function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: KeyKind, managed: boolean): void {
   const { map, entry, kv, getOrPutResult, iterator, keyIterator, valueIterator } = types;
   /** A method: the allocator comes first for unmanaged maps' allocating methods. */

@@ -27,7 +27,8 @@ function intLayout(bits: number): Layout {
   return { size, align: Math.min(size, 16) };
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of type.
+// code-gauge-allow functionNcss 49 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
 function layoutOf(type: Type): Layout {
   switch (type.kind) {
     case 'int': {

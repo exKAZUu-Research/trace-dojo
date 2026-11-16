@@ -1,3 +1,4 @@
+// code-gauge-allow-file duplicateLines 16 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { alignOf, sizeOf } from '../layout';
 import {
   known,

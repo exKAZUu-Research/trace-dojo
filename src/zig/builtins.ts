@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 594 -- The file holds one layer of the compiler, whose parts share its private state.
 import {
   divCeil,
   divExact,
@@ -187,8 +188,6 @@ const ARGUMENT_COUNTS: Record<string, number> = {
 };
 
 export abstract class BuiltinCompiler extends ExpressionCompiler {
-  // code-gauge-allow functionCognitiveComplexity 60 -- One case per builtin function.
-  // code-gauge-allow functionNcss 200 -- One case per builtin function.
   protected compileBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
     const { name, args } = expression;
     const unavailable = UNAVAILABLE.get(name);
@@ -509,7 +508,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     return this.derived(operand, int, (value) => intCast(value as bigint, int));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per division builtin and operand type.
+  // code-gauge-allow functionNcss 54 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private divisionBuiltin(name: string, expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
     const [leftSyntax, rightSyntax] = expression.args;
     let left = this.compile(leftSyntax, resultType);
@@ -583,7 +583,6 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
   }
 
   /** `@min` and `@max`, whose integer result type Zig narrows to the range the result can take. */
-  // code-gauge-allow functionCognitiveComplexity 30 -- Narrows the result type as Zig's Sema does.
   private minMax(name: string, expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
     const { args } = expression;
     if (args.length < 2) this.error(expression, `${name} には2つ以上の引数が要ります。`);
@@ -659,7 +658,6 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     return this.error(expression, `@abs は数の型にだけ使えます（${typeName(type)} 型です）。`);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per math builtin.
   private floatMath(name: string, expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
     let operand = this.compile(expression.args[0], resultType);
     if (operand.type.kind === 'comptime_int') operand = this.coerce(operand, COMPTIME_FLOAT, expression.args[0]);
@@ -681,6 +679,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     return this.derived(operand, type, apply);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private overflowBuiltin(name: string, expression: ExpressionOf<'builtinCall'>): TExpr {
     const [leftSyntax, rightSyntax] = expression.args;
     let left = this.compile(leftSyntax);
@@ -738,6 +737,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     );
   }
 
+  // code-gauge-allow functionNcss 39 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private bitBuiltin(name: string, expression: ExpressionOf<'builtinCall'>): TExpr {
     const operand = this.compile(expression.args[0]);
     const type = operand.type;

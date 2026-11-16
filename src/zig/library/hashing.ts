@@ -28,6 +28,8 @@ function read(bytes: readonly number[], offset: number, count: number): bigint {
 }
 
 /** `Wyhash.hash(seed, input)`. */
+// code-gauge-allow functionNcss 40 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 export function wyhash(seed: bigint, input: readonly number[]): bigint {
   const state = [seed ^ mix(seed ^ SECRET[0], SECRET[1]), 0n, 0n];
   state[1] = state[0];
@@ -86,7 +88,6 @@ function littleEndian(value: bigint, bytes: number): number[] {
 }
 
 /** The bytes that `autoHash` feeds the hasher for a key, which `Wyhash.hash` then hashes in one call. */
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of key type.
 export function autoHashBytes(value: Value, type: Type): number[] {
   switch (type.kind) {
     case 'int': {

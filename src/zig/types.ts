@@ -238,6 +238,7 @@ const C_INTEGERS: Record<string, [boolean, number]> = {
 };
 
 /** The type a primitive name such as `i32`, `usize`, or `bool` denotes, or undefined for other names. */
+// code-gauge-allow functionNcss 41 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
 export function primitiveType(name: string): Type | undefined {
   const int = /^([iu])(0|[1-9]\d*)$/.exec(name);
   if (int) {
@@ -476,7 +477,8 @@ export function indexableChild(type: Type): Type | undefined {
 // Names ---------------------------------------------------------------------------------------------------------------
 
 /** The type's name as Zig's `@typeName` writes it. */
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of type.
+// code-gauge-allow functionNcss 45 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
 export function typeName(type: Type): string {
   switch (type.kind) {
     case 'int': {

@@ -173,6 +173,7 @@ const WRITE_ERROR = errorSetOf(['WriteFailed']);
 
 addIoMembers();
 
+// code-gauge-allow functionNcss 52 -- Defines the methods of one library type, each a short closure over its state.
 function addIoMembers(): void {
   addMembers(IO, {
     File: typeMember(() => FILE),

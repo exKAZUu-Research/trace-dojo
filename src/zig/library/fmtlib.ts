@@ -34,7 +34,6 @@ function charToDigit(c: number, base: number): number | undefined {
 }
 
 /** `std.fmt.parseInt`, transcribed: the sign, a base prefix when the base is 0, digits with `_` between them. */
-// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes `parseIntWithSign`.
 function parseInt(bytes: number[], base: number, type: IntType): Value {
   if (bytes.length === 0) return INVALID_CHARACTER;
   let negative = false;
@@ -81,6 +80,7 @@ function parseInt(bytes: number[], base: number, type: IntType): Value {
 }
 
 /** `std.fmt.parseFloat`: decimal or hexadecimal digits with `_`, `inf`, or `nan`, rounded to the type. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function parseFloat(bytes: number[], type: Extract<Type, { kind: 'float' }>): Value {
   const text = String.fromCodePoint(...bytes);
   const match = /^([+-]?)(.*)$/s.exec(text) as RegExpExecArray;

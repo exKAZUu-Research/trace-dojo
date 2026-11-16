@@ -1,3 +1,4 @@
+// code-gauge-allow-file duplicateLines 17 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Span } from '../ast';
 import { sizeOf } from '../layout';
@@ -100,8 +101,6 @@ function setLength(list: List, length: number): void {
   list.items = list.struct.slots[0] as Slice;
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Defines each method of Zig's ArrayList.
-// code-gauge-allow functionNcss 150 -- Defines each method of Zig's ArrayList.
 function defineMembers(type: StructType, child: Type): void {
   const items = sliceOf(child, false);
   const constItems = sliceOf(child, true);

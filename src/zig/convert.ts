@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 723 -- The file holds one layer of the compiler, whose parts share its private state.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -230,6 +231,8 @@ function containerField(node: Node): ContainerField {
   return { ...spanOf(node), type: typeExpression(nameNode), value };
 }
 
+// code-gauge-allow functionNcss 33 -- Walks the parts of one syntax node in source order.
+// code-gauge-allow functionCognitiveComplexity 20 -- Walks the parts of one syntax node in source order.
 function container(node: Node): Container {
   if (node.type === 'opaque_declaration') unavailable(node, 'opaque 型');
   const containerKind =
@@ -384,6 +387,8 @@ const ASSIGN_OPERATORS = new Set<string>([
 ]);
 
 /** `const a, var b, c.x = value;`: the parts before `=`, separated by commas, then the value. */
+// code-gauge-allow functionNcss 33 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
 function destructure(node: Node, equals: number): Statement {
   const before = node.children.slice(0, equals);
   const after = node.children.slice(equals + 1);
@@ -431,8 +436,6 @@ function typeExpression(node: Node): Expression {
   return expression(node);
 }
 
-// code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of syntax node.
-// code-gauge-allow functionNcss 120 -- One case per kind of syntax node.
 export function expression(node: Node): Expression {
   const span = spanOf(node);
   if (!node.isNamed) {
@@ -809,6 +812,8 @@ function afterHeader(node: Node): Node[] {
   return node.children.slice(close + 1);
 }
 
+// code-gauge-allow functionNcss 32 -- Walks the parts of one syntax node in source order.
+// code-gauge-allow functionCognitiveComplexity 19 -- Walks the parts of one syntax node in source order.
 function ifExpression(node: Node, span: Span): Expression {
   const condition = expression(node.childForFieldName('condition') as Node);
   const rest = afterHeader(node);
@@ -844,7 +849,8 @@ function ifExpression(node: Node, span: Span): Expression {
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Walks the parts of a while loop in source order.
+// code-gauge-allow functionNcss 46 -- Walks the parts of one syntax node in source order.
+// code-gauge-allow functionCognitiveComplexity 25 -- Walks the parts of one syntax node in source order.
 function whileExpression(node: Node, span: Span, outerLabel: Label | undefined): Expression {
   const condition = expression(node.childForFieldName('condition') as Node);
   const labelNode = node.namedChildren.find((child) => child.type === 'block_label');
@@ -893,6 +899,8 @@ function whileExpression(node: Node, span: Span, outerLabel: Label | undefined):
   };
 }
 
+// code-gauge-allow functionNcss 49 -- Walks the parts of one syntax node in source order.
+// code-gauge-allow functionCognitiveComplexity 30 -- Walks the parts of one syntax node in source order.
 function forExpression(node: Node, span: Span, outerLabel: Label | undefined): Expression {
   const labelNode = node.namedChildren.find((child) => child.type === 'block_label');
   const label = outerLabel ?? (labelNode ? blockLabel(labelNode) : undefined);

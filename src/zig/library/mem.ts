@@ -1,3 +1,4 @@
+// code-gauge-allow-file duplicateLines 25 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
 import type { Frame } from '../runtime';
@@ -97,6 +98,7 @@ function positionSearch(
   });
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Handles each kind of value the operation accepts.
 function trimmer(name: string, start: boolean, end: boolean): () => Member {
   return generic(name, 3, (sema, call, type, [sliceArg, stripArg]) => {
     const slice = constSlice(sema, sliceArg, type);

@@ -1,3 +1,4 @@
+// code-gauge-allow-file duplicateLines 20 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { PANIC, panic } from './arith';
 import type { Capture, Expression, ExpressionOf, Label, Span, Statement, SwitchCase } from './ast';
 import { CallCompiler, type FunctionCompilation } from './calls';
@@ -101,6 +102,8 @@ export abstract class StatementCompiler extends CallCompiler {
 
   // Functions -------------------------------------------------------------------------------------------------------
 
+  // code-gauge-allow functionNcss 35 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected compileFunctionBody(compilation: FunctionCompilation): void {
     const { instance, syntax, namespace } = compilation;
     instance.state = 'compiling';
@@ -307,6 +310,8 @@ export abstract class StatementCompiler extends CallCompiler {
     return { exec: this.simple(row, isObjectCreation(valueSyntax), run), noreturn: false };
   }
 
+  // code-gauge-allow functionNcss 44 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private destructure(statement: Extract<Statement, { kind: 'destructure' }>): Stmt {
     const sequential = this.sequentialDestructure(statement);
     if (sequential) return sequential;
@@ -464,7 +469,6 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of statement expression.
   private statementExpression(expression: Expression, span: Span): Stmt {
     switch (expression.kind) {
       case 'if': {
@@ -517,7 +521,7 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Handles plain, compound, discarding, and literal assignments.
+  // code-gauge-allow functionNcss 32 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private assignment(expression: ExpressionOf<'assign'>, span: Span): Stmt {
     const row = this.stepRow(span);
     if (expression.targets.length !== 1) return this.error(expression, '書き方に誤りがあります。');
@@ -603,6 +607,7 @@ export abstract class StatementCompiler extends CallCompiler {
    * `x = .{ ... }` writes each field or element into `x` in turn, as Zig's result locations do, so that later fields see
    * the earlier ones' new values.
    */
+  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private anonymousInitAssignment(
     value: Expression,
     type: Type,
@@ -670,7 +675,6 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** The code of a jump: it computes the jump's value and gives the Jump that leaves its target. */
-  // code-gauge-allow functionCognitiveComplexity 30 -- Handles break, continue, and return with and without values.
   private jumpMaker(expression: ExpressionOf<'break' | 'continue' | 'return'>): (frame: Frame) => Jump {
     if (expression.kind === 'return') return this.returnMaker(expression);
     const target = this.findTarget(expression.label, expression.kind, expression);
@@ -788,6 +792,8 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** A block as a statement or an expression; a labeled block's value is what `break :label value` gives. */
+  // code-gauge-allow functionNcss 42 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 27 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private blockStatement(
     expression: ExpressionOf<'block'>,
     resultType: Type | undefined,
@@ -882,8 +888,6 @@ export abstract class StatementCompiler extends CallCompiler {
     return this.ifCompiled(expression, resultType, false).value;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 45 -- Handles bool, optional, and error union conditions alike.
-  // code-gauge-allow functionNcss 90 -- Handles bool, optional, and error union conditions alike.
   private ifCompiled(
     expression: ExpressionOf<'if'>,
     resultType: Type | undefined,
@@ -987,7 +991,8 @@ export abstract class StatementCompiler extends CallCompiler {
     return { value: this.compile(expression, resultType) };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Combines statement and expression forms of a two-way branch.
+  // code-gauge-allow functionParameterCount 7 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private combineBranches(
     span: Span,
     then: { stmt?: Stmt; value?: TExpr },
@@ -1098,8 +1103,6 @@ export abstract class StatementCompiler extends CallCompiler {
 
   // While -------------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 50 -- Handles bool, optional, and error union loops and their values.
-  // code-gauge-allow functionNcss 100 -- Handles bool, optional, and error union loops and their values.
   private whileLoop(
     expression: ExpressionOf<'while'>,
     resultType: Type | undefined,
@@ -1270,8 +1273,6 @@ export abstract class StatementCompiler extends CallCompiler {
 
   // For ---------------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 60 -- Handles every kind of for operand and capture.
-  // code-gauge-allow functionNcss 130 -- Handles every kind of for operand and capture.
   private forLoop(
     expression: ExpressionOf<'for'>,
     resultType: Type | undefined,
@@ -1406,6 +1407,8 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** How a `for` reads an array, a pointer to one, or a slice, by value or by pointer. */
+  // code-gauge-allow functionNcss 46 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private forOperand(
     compiled: TExpr,
     byPointer: boolean,
@@ -1568,8 +1571,6 @@ export abstract class StatementCompiler extends CallCompiler {
 
   // Switch ------------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 80 -- Checks and dispatches every kind of switch operand and prong.
-  // code-gauge-allow functionNcss 200 -- Checks and dispatches every kind of switch operand and prong.
   private switchStatement(
     expression: ExpressionOf<'switch'>,
     resultType: Type | undefined,
@@ -1756,8 +1757,6 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 45 -- Compiles a prong's items, capture, and body.
-  // code-gauge-allow functionNcss 90 -- Compiles a prong's items, capture, and body.
   private switchProng(
     each: SwitchCase,
     context: {
@@ -1905,7 +1904,8 @@ export abstract class StatementCompiler extends CallCompiler {
     return all.filter((key) => !seen.has(key));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of switch operand.
+  // code-gauge-allow functionNcss 36 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private checkExhaustive(
     expression: ExpressionOf<'switch'>,
     tagType: Type,

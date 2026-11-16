@@ -1,3 +1,4 @@
+// code-gauge-allow-file duplicateLines 17 -- Library types repeat the same shape of method on purpose, each over its own state.
 import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
@@ -24,7 +25,6 @@ import {
   ZUnion,
 } from './values';
 
-// code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceZigProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileProgram(parseZig(program), {
     atomicRows: new Set(trace.atomicAnnotations.keys()),
@@ -115,7 +115,8 @@ function isString(type: Type): boolean {
   return false;
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of type.
+// code-gauge-allow functionNcss 37 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
 function scalarOf(value: Value, type: Type): Scalar | typeof NOT_SCALAR {
   if (value === UNASSIGNED) return NOT_SCALAR;
   switch (type.kind) {
@@ -187,7 +188,6 @@ function basicScalar(value: Value): TraceScalar {
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows null as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of type.
 function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNode | undefined {
   if (value === UNASSIGNED) return undefined;
   if (type.kind === 'fn' || (type.kind === 'pointer' && type.child.kind === 'fn')) return undefined;

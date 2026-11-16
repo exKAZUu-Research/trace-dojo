@@ -52,7 +52,6 @@ export abstract class CallCompiler extends BuiltinCompiler {
 
   // Calls -------------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of callee.
   protected compileCall(expression: ExpressionOf<'call'>, resultType: Type | undefined): TExpr {
     const { callee } = expression;
     if (callee.kind === 'field') {
@@ -84,7 +83,6 @@ export abstract class CallCompiler extends BuiltinCompiler {
     return { callee: this.resolveDecl(decl, span) };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of callee.
   private callValue(
     callee: TExpr,
     receiver: TExpr | undefined,
@@ -138,7 +136,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Binds the receiver and the arguments as Zig does.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps one operation of the interpreter in one place.
   private callDeclaration(
     ref: FnRef,
     receiver: TExpr | undefined,

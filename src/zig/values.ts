@@ -207,6 +207,7 @@ export function copyValue(value: Value): Value {
  * Stores a value into a slot, copying an aggregate into the one the slot holds when both have the same shape, so that
  * pointers into the slot's aggregate see the new value.
  */
+// code-gauge-allow functionCognitiveComplexity 16 -- Handles each kind of value the operation accepts.
 export function storeInto(target: Slots, index: number, value: Value): void {
   const current = target.slots[index];
   if (value instanceof ZArray && current instanceof ZArray && current.length === value.length) {

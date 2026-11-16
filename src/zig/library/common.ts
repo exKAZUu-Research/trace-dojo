@@ -59,6 +59,7 @@ export function equalValues(a: Value, b: Value): boolean {
 }
 
 /** Compares two scalars: -1, 0, or 1. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Handles each kind of value the operation accepts.
 export function compareScalars(a: Value, b: Value): number {
   if (typeof a === 'bigint' && typeof b === 'bigint') return a < b ? -1 : a > b ? 1 : 0;
   if (typeof a === 'number' && typeof b === 'number') return a < b ? -1 : a > b ? 1 : 0;

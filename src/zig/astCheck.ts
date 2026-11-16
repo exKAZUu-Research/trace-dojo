@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 563 -- The file holds one layer of the compiler, whose parts share its private state.
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import type {
   Capture,
@@ -106,6 +107,7 @@ class AstChecker {
 
   // Containers ------------------------------------------------------------------------------------------------------
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Mirrors one AstGen check over the constructs it covers.
   checkContainer(
     members: readonly ContainerMember[],
     fields: readonly ContainerField[],
@@ -276,6 +278,7 @@ class AstChecker {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 24 -- Mirrors one AstGen check over the constructs it covers.
   private reference(name: string, span: Span, use: Use): void {
     if (name === '_') {
       this.error(span, '「_」は、値を捨てる代入（_ = x;）の左辺にだけ書けます。');
@@ -373,8 +376,6 @@ class AstChecker {
 
   // Expressions -----------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 45 -- One case per kind of expression.
-  // code-gauge-allow functionNcss 110 -- One case per kind of expression.
   expression(expression: Expression, use: Use): void {
     switch (expression.kind) {
       case 'identifier': {
@@ -628,6 +629,8 @@ class AstChecker {
     }
   }
 
+  // code-gauge-allow functionNcss 32 -- Mirrors one AstGen check over the constructs it covers.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Mirrors one AstGen check over the constructs it covers.
   private forExpression(expression: Extract<Expression, { kind: 'for' }>): void {
     for (const operand of expression.operands) {
       this.expression(operand.value, 'value');
@@ -668,6 +671,7 @@ class AstChecker {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 26 -- Mirrors one AstGen check over the constructs it covers.
   private switchExpression(expression: Extract<Expression, { kind: 'switch' }>): void {
     const byPointer = expression.cases.some((each) => each.capture?.byPointer);
     this.expression(expression.operand, byPointer ? 'ref' : 'value');

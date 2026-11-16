@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 997 -- The file holds one layer of the compiler, whose parts share its private state.
 import {
   checked,
   divExact,
@@ -102,8 +103,6 @@ export abstract class ExpressionCompiler extends SemaBase {
   protected abstract compileCatch(expression: ExpressionOf<'catch'>, resultType: Type | undefined): TExpr;
   protected abstract localSlot(): number;
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of expression.
-  // code-gauge-allow functionNcss 110 -- One case per kind of expression.
   compile(expression: Expression, resultType?: Type): TExpr {
     switch (expression.kind) {
       case 'integer':
@@ -280,7 +279,8 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Field access ----------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of operand.
+  // code-gauge-allow functionNcss 36 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected fieldAccess(expression: ExpressionOf<'field'>): TExpr {
     const object = this.compile(expression.object);
     const { name } = expression;
@@ -483,7 +483,6 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Indexing and slicing ----------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of operand.
   protected index(expression: ExpressionOf<'index'>): TExpr {
     const object = this.compile(expression.object);
     const index = this.coerce(this.compile(expression.index, USIZE), USIZE, expression.index);
@@ -528,6 +527,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   /** Locates the element at an index of an array, a pointer to one, or a slice, checking the bounds. */
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private elementAccess(
     object: TExpr,
     type: Type
@@ -561,7 +561,6 @@ export abstract class ExpressionCompiler extends SemaBase {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 35 -- Checks each kind of operand and bound as Zig does.
   private slice(expression: ExpressionOf<'slice'>): TExpr {
     const operand = this.compile(expression.object);
     let type = operand.type;
@@ -665,7 +664,8 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Operators -------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per unary operator.
+  // code-gauge-allow functionNcss 37 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
   private unary(expression: ExpressionOf<'unary'>, resultType: Type | undefined): TExpr {
     if (expression.operator === '&') {
       let operandType = resultType?.kind === 'pointer' ? resultType.child : undefined;
@@ -727,7 +727,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     return value;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One group per kind of binary operator.
+  // code-gauge-allow functionNcss 33 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
   private binary(expression: ExpressionOf<'binary'>, resultType: Type | undefined): TExpr {
     const { operator } = expression;
     switch (operator) {
@@ -822,7 +822,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of comparable type.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps one operation of the interpreter in one place.
   private comparison(expression: ExpressionOf<'binary'>): TExpr {
     const { operator } = expression;
     let left = this.compile(expression.left);
@@ -856,7 +856,6 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   /** A function comparing two values of a type: negative, zero, or positive, or NaN when unordered. */
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of comparable type.
   private comparator(type: Type, ordered: boolean, span: Span): (a: Value, b: Value) => number {
     switch (type.kind) {
       case 'int':
@@ -903,7 +902,6 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 45 -- One case per arithmetic operator and operand type.
   private arithmetic(expression: ExpressionOf<'binary'>, resultType: Type | undefined): TExpr {
     const { operator } = expression;
     let left = this.compile(expression.left, resultType);
@@ -993,7 +991,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- One case per arithmetic operator and operand type.
+  // code-gauge-allow functionNcss 51 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
   private operation(operator: BinaryOperator, type: Type, span: Span): (a: Value, b: Value) => Value {
     if (type.kind === 'float' || type.kind === 'comptime_float') {
       const bits: FloatBits = type.kind === 'float' ? type.bits : 128;
@@ -1194,7 +1192,8 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Initializers ----------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of initialized type.
+  // code-gauge-allow functionNcss 32 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected structInit(expression: ExpressionOf<'structInit'>, resultType: Type | undefined): TExpr {
     const type = expression.type ? this.compileType(expression.type) : resultType && unwrapResult(resultType);
     if (!type) return this.anonymousStruct(expression);
@@ -1302,7 +1301,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     return type;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of initialized type.
+  // code-gauge-allow functionNcss 36 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected arrayInit(expression: ExpressionOf<'arrayInit'>, resultType: Type | undefined): TExpr {
     let type: Type | undefined;
     if (expression.type) {
