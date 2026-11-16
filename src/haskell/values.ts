@@ -1,0 +1,177 @@
+import type { TurtleState } from '../interpreter/turtleWorld';
+import type { Core, FunctionInfo, IODoCore, LamCore } from './core';
+import type { ConInfo, InstanceInfo } from './entities';
+import type { RunNext, TailCall } from './machine';
+import type { Primitive } from './primitives';
+
+/**
+ * A value in weak head normal form: an integer (`Int` and `Integer` as bigints), a floating-point number, a
+ * character (one code point), a constructor application, a function, an `IO` action, a class dictionary, or a turtle.
+ */
+export type Value = bigint | number | string | ConValue | FunValue | IOAction | Dict | TurtleValue;
+
+/** What a variable or a field holds: a value, or a thunk that computes one. */
+export type Slot = Value | Thunk;
+
+export class Env {
+  readonly slots: (Slot | undefined)[];
+
+  constructor(
+    size: number,
+    readonly parent: Env | undefined,
+    /** Set for the frame of a named function's call, which a trace shows as a frame. */
+    readonly info?: FunctionInfo
+  ) {
+    this.slots = Array.from<Slot | undefined>({ length: size });
+  }
+
+  at(depth: number): Env {
+    return depth === 0 ? this : (this.parent as Env).at(depth - 1);
+  }
+
+  /** The frame of the named function's call that this environment belongs to, if any. */
+  invocation(): Env | undefined {
+    return this.info ? this : this.parent?.invocation();
+  }
+}
+
+export class ConValue {
+  constructor(
+    readonly con: ConInfo,
+    readonly fields: Slot[]
+  ) {}
+}
+
+export class Closure {
+  constructor(
+    readonly lam: LamCore,
+    readonly env: Env | undefined
+  ) {}
+
+  get arity(): number {
+    return this.lam.arity;
+  }
+}
+
+export class PrimFn {
+  constructor(readonly prim: Primitive) {}
+
+  get arity(): number {
+    return this.prim.arity;
+  }
+}
+
+/** A function applied to fewer arguments than it takes. */
+export class Partial {
+  constructor(
+    readonly fn: Closure | PrimFn,
+    readonly args: Slot[]
+  ) {}
+
+  get arity(): number {
+    return this.fn.arity - this.args.length;
+  }
+}
+
+export type FunValue = Closure | PrimFn | Partial;
+
+export type ThunkState = 'pending' | 'evaluating' | 'done';
+
+export class Thunk {
+  state: ThunkState = 'pending';
+  value: Value | undefined;
+
+  constructor(
+    public code: Core | undefined,
+    public env: Env | undefined,
+    /** Computes the value natively, for thunks the evaluator builds itself (such as a string's rest). */
+    public native?: () => Slot | TailCall
+  ) {}
+
+  static of(value: Value): Thunk {
+    const thunk = new Thunk(undefined, undefined);
+    thunk.state = 'done';
+    thunk.value = value;
+    return thunk;
+  }
+}
+
+/** An `IO` action, which only running it performs. */
+export type IOAction = IOReturn | IOBind | IOThen | IOPrim | IODo;
+
+export class IOReturn {
+  constructor(readonly value: Slot) {}
+}
+
+export class IOBind {
+  constructor(
+    readonly action: Slot,
+    readonly next: Slot
+  ) {}
+}
+
+export class IOThen {
+  constructor(
+    readonly action: Slot,
+    readonly next: Slot
+  ) {}
+}
+
+/** A primitive action, which performs its effect and returns its result, or another action to run in its place. */
+export class IOPrim {
+  constructor(
+    readonly name: string,
+    readonly run: () => Slot | RunNext,
+    /** The slots the action uses, which keep the turtles they reach alive. */
+    readonly refs: Slot[] = []
+  ) {}
+}
+
+/** A `do` block in `IO`, which runs its statements one by one, recording a step after each when tracing. */
+export class IODo {
+  constructor(
+    readonly code: IODoCore,
+    readonly env: Env
+  ) {}
+}
+
+export class Dict {
+  constructor(
+    readonly instance: InstanceInfo,
+    readonly methods: Slot[],
+    readonly supers: Slot[],
+    /** The dictionaries of the instance's context, which its methods and superclasses take. */
+    readonly args: Slot[]
+  ) {}
+}
+
+export class TurtleValue {
+  constructor(readonly turtle: TurtleState) {}
+}
+
+export function isIOAction(value: Value): value is IOAction {
+  return (
+    value instanceof IOReturn ||
+    value instanceof IOBind ||
+    value instanceof IOThen ||
+    value instanceof IOPrim ||
+    value instanceof IODo
+  );
+}
+
+export function isFunction(value: Value): value is FunValue {
+  return value instanceof Closure || value instanceof PrimFn || value instanceof Partial;
+}
+
+/** An exception a program raises, carrying the Haskell value that describes it. */
+export class HaskellException extends Error {
+  constructor(
+    /** The message `displayException` gives, which an uncaught exception reports. */
+    readonly display: string,
+    /** The kind of exception, for `Control.Exception`-style matching. */
+    readonly kind: 'ErrorCall' | 'ArithException' | 'PatternMatchFail' | 'IOException' | 'NonTermination' | 'Other'
+  ) {
+    super(display);
+    this.name = 'HaskellException';
+  }
+}

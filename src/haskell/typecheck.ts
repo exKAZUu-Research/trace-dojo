@@ -1,0 +1,604 @@
+import { FUNCTION_TYPE } from './builtinTypes';
+import { type ClassEnv, superclassPaths } from './classEnv';
+import { DERIVABLE_CLASSES, deriveInstance } from './deriving';
+import {
+  type ClassEntity,
+  type Evidence,
+  type InstanceInfo,
+  nextId,
+  type TypeEntity,
+  type ValueEntity,
+} from './entities';
+import { compileError, unsupportedError } from './errors';
+import { type Builtins, Checker, newDictParam, typeError, typeParamKinds } from './infer';
+import { TypePrinter } from './prettyType';
+import type { RBinding, RType } from './rast';
+import type { RClassDecl, RDataDecl, RInstanceDecl, RModule, RSynonymDecl } from './rename';
+import type { Span } from './syntax';
+import {
+  defaultKind,
+  freshKindVar,
+  freshSkolem,
+  instantiateType,
+  type Kind,
+  kindArrow,
+  matchType,
+  type Pred,
+  prune,
+  type Scheme,
+  splitApp,
+  STAR,
+  tap,
+  tcon,
+  type Type,
+  unifyKinds,
+  zonk,
+} from './types';
+
+/** An instance whose methods a module defines, with the bindings that implement them. */
+export interface CheckedInstance {
+  info: InstanceInfo;
+  /** Each method's implementation binding, whose binder is the implementation's entity. */
+  bindings: RBinding[];
+}
+
+export interface TypecheckResult {
+  instances: CheckedInstance[];
+  /** The default method implementations of the module's classes. */
+  defaults: RBinding[];
+}
+
+export interface TypecheckOptions {
+  env: ClassEnv;
+  builtins: Builtins;
+  /** Whether the module is the program, whose `main` must be an `IO` action. */
+  isProgram: boolean;
+  /** Entities that derived instances refer to, such as `showParen`. */
+  derivingSupport: (name: string) => ValueEntity;
+}
+
+/** Checks a renamed module's declarations and bindings, filling in kinds, schemes, instances, and evidence. */
+export function typecheckModule(module: RModule, options: TypecheckOptions): TypecheckResult {
+  const checker = new Checker(options.env, options.builtins);
+  inferKinds(checker, module);
+  for (const decl of module.dataDecls) defineConstructors(checker, decl);
+  for (const decl of module.classes) defineClassMethods(checker, decl);
+  const instanceDecls = module.instances.map((decl) => declareInstance(checker, decl, module.name));
+  const derived = deriveInstances(checker, module, options);
+  const instances: CheckedInstance[] = [];
+  for (const declared of [...instanceDecls, ...derived]) {
+    checkInstanceSupers(checker, declared.info, declared.span);
+  }
+  checker.inferBindGroup(module.values, true);
+  for (const declared of [...instanceDecls, ...derived]) instances.push(checkInstanceMethods(checker, declared));
+  const defaults = module.classes.flatMap((decl) => checkDefaults(checker, decl));
+  if (options.isProgram) checkMain(checker, module, options.builtins);
+  checker.solveTop();
+  return { instances, defaults };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Kinds
+
+function inferKinds(checker: Checker, module: RModule): void {
+  const dataParamKinds = new Map<TypeEntity, Kind[]>();
+  for (const decl of module.dataDecls) {
+    const kinds = decl.params.map(() => freshKindVar() as Kind);
+    dataParamKinds.set(decl.entity, kinds);
+    decl.entity.kind = arrowKind(kinds, STAR);
+  }
+  const synonymParamKinds = new Map<TypeEntity, Kind[]>();
+  for (const decl of module.synonyms) {
+    const kinds = decl.params.map(() => freshKindVar() as Kind);
+    synonymParamKinds.set(decl.entity, kinds);
+    decl.entity.kind = arrowKind(kinds, freshKindVar());
+  }
+  for (const decl of module.classes) decl.entity.tyvarKind = freshKindVar();
+  for (const decl of orderSynonyms(module.synonyms)) {
+    const kinds = synonymParamKinds.get(decl.entity) as Kind[];
+    const vars = new Map<string, Type>(decl.params.map((name, index) => [name, { tag: 'tgen', index }]));
+    const varKinds = new Map<string, Kind>(decl.params.map((name, index) => [name, kinds[index]]));
+    let resultKind = decl.entity.kind;
+    for (let index = 0; index < decl.params.length; index++) {
+      const pruned = resultKind as { tag: 'arrow'; to: Kind };
+      resultKind = pruned.to;
+    }
+    decl.entity.synonym = checker.convertType(decl.rhs, vars, varKinds, resultKind);
+  }
+  for (const decl of module.dataDecls) {
+    const kinds = dataParamKinds.get(decl.entity) as Kind[];
+    const vars = new Map<string, Type>(decl.params.map((name, index) => [name, { tag: 'tgen', index }]));
+    const varKinds = new Map<string, Kind>(decl.params.map((name, index) => [name, kinds[index]]));
+    for (const { con, fields } of decl.cons) {
+      con.fieldTypes = fields.map((field) => checker.convertType(field, vars, varKinds, STAR));
+    }
+  }
+  for (const decl of module.classes) {
+    for (const sup of decl.supers) {
+      if (!unifyKinds(decl.entity.tyvarKind, sup.cls.tyvarKind)) {
+        typeError(sup.span, `スーパークラス ${sup.cls.name} の型変数と、種類（カインド）が合いません。`);
+      }
+    }
+    for (const method of decl.methods) {
+      method.entity.scheme = methodScheme(checker, decl, method.sig);
+    }
+  }
+  for (const decl of module.dataDecls) decl.entity.kind = defaultKind(decl.entity.kind);
+  for (const decl of module.synonyms) decl.entity.kind = defaultKind(decl.entity.kind);
+  for (const decl of module.classes) {
+    decl.entity.tyvarKind = defaultKind(decl.entity.tyvarKind);
+    for (const method of decl.methods) {
+      const scheme = method.entity.scheme as Scheme;
+      scheme.kinds = scheme.kinds.map(defaultKind);
+    }
+  }
+}
+
+/** The kind of a type constructor taking parameters of the given kinds to `result`. */
+function arrowKind(params: readonly Kind[], result: Kind): Kind {
+  let kind = result;
+  for (const param of params.toReversed()) kind = kindArrow(param, kind);
+  return kind;
+}
+
+/** Orders synonyms so that each comes after those it mentions, rejecting cycles. */
+function orderSynonyms(decls: RSynonymDecl[]): RSynonymDecl[] {
+  const byEntity = new Map(decls.map((decl) => [decl.entity, decl]));
+  const ordered: RSynonymDecl[] = [];
+  const state = new Map<RSynonymDecl, 'visiting' | 'done'>();
+  const visit = (decl: RSynonymDecl): void => {
+    const current = state.get(decl);
+    if (current === 'done') return;
+    if (current === 'visiting') throw compileError(decl.span, `型シノニム ${decl.entity.name} が循環しています。`);
+    state.set(decl, 'visiting');
+    const walk = (type: RType): void => {
+      if (type.k === 'con') {
+        const dependency = byEntity.get(type.entity);
+        if (dependency) visit(dependency);
+      } else if (type.k === 'app') {
+        walk(type.fn);
+        walk(type.arg);
+      } else if (type.k === 'fun') {
+        walk(type.from);
+        walk(type.to);
+      }
+    };
+    walk(decl.rhs);
+    state.set(decl, 'done');
+    ordered.push(decl);
+  };
+  for (const decl of decls) visit(decl);
+  return ordered;
+}
+
+function methodScheme(checker: Checker, decl: RClassDecl, sig: RClassDecl['methods'][number]['sig']): Scheme {
+  const names: string[] = [decl.param];
+  const collect = (type: RType): void => {
+    if (type.k === 'var' && !names.includes(type.name)) names.push(type.name);
+    else if (type.k === 'app') {
+      collect(type.fn);
+      collect(type.arg);
+    } else if (type.k === 'fun') {
+      collect(type.from);
+      collect(type.to);
+    }
+  };
+  collect(sig.type);
+  for (const constraint of sig.context) collect(constraint.type);
+  const kinds: Kind[] = names.map((_, index) => (index === 0 ? decl.entity.tyvarKind : freshKindVar()));
+  const vars = new Map<string, Type>(names.map((name, index) => [name, { tag: 'tgen', index }]));
+  const varKinds = new Map<string, Kind>(names.map((name, index) => [name, kinds[index]]));
+  const type = checker.convertType(sig.type, vars, varKinds, STAR);
+  const preds: Pred[] = [{ cls: decl.entity, type: { tag: 'tgen', index: 0 } }];
+  for (const constraint of sig.context) {
+    if (constraint.type.k === 'var' && constraint.type.name === decl.param) {
+      throw compileError(constraint.span, 'クラスのメソッドの文脈に、クラスの型変数の制約は書けません。');
+    }
+    preds.push({
+      cls: constraint.cls,
+      type: checker.convertType(constraint.type, vars, varKinds, constraint.cls.tyvarKind),
+    });
+  }
+  return { kinds, names, preds, type };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Data types and classes
+
+function defineConstructors(checker: Checker, decl: RDataDecl): void {
+  void checker;
+  for (const field of decl.entity.fields.values()) {
+    const types = [...field.positions.entries()].map(([con, position]) => con.fieldTypes[position]);
+    const first = types[0];
+    for (const other of types.slice(1)) {
+      const bindings: (Type | undefined)[] = [];
+      if (
+        !matchType(first, other, bindings) ||
+        bindings.some((bound, index) => bound && !(bound.tag === 'tgen' && bound.index === index))
+      ) {
+        throw compileError(decl.span, `フィールド ${field.name} の型が、構成子ごとに違います。`);
+      }
+    }
+    field.fieldType = first;
+    const kinds = typeParamKinds(decl.entity);
+    const recordType = tap(tcon(decl.entity), ...kinds.map((_, index): Type => ({ tag: 'tgen', index })));
+    field.entity.scheme = { kinds, preds: [], type: tap(tcon(FUNCTION_TYPE), recordType, first) };
+  }
+}
+
+function defineClassMethods(checker: Checker, decl: RClassDecl): void {
+  void checker;
+  decl.entity.supers = decl.supers.map((sup) => sup.cls);
+  for (const [index, sup] of decl.supers.entries()) {
+    if (superclassPaths(sup.cls).some((entry) => entry.cls === decl.entity) || sup.cls === decl.entity) {
+      throw compileError(decl.span, `クラス ${decl.entity.name} のスーパークラスが循環しています。`);
+    }
+    if (decl.supers.findIndex((other) => other.cls === sup.cls) !== index) {
+      throw compileError(sup.span, `スーパークラス ${sup.cls.name} が重複しています。`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Instances
+
+interface DeclaredInstance {
+  info: InstanceInfo;
+  bindings: RBinding[];
+  span: Span;
+}
+
+function declareInstance(checker: Checker, decl: RInstanceDecl, moduleName: string): DeclaredInstance {
+  const names: string[] = [];
+  const collect = (type: RType): void => {
+    if (type.k === 'var' && !names.includes(type.name)) names.push(type.name);
+    else if (type.k === 'app') {
+      collect(type.fn);
+      collect(type.arg);
+    } else if (type.k === 'fun') {
+      collect(type.from);
+      collect(type.to);
+    }
+  };
+  collect(decl.type);
+  const kinds: Kind[] = names.map(() => freshKindVar());
+  const vars = new Map<string, Type>(names.map((name, index) => [name, { tag: 'tgen', index }]));
+  const varKinds = new Map<string, Kind>(names.map((name, index) => [name, kinds[index]]));
+  const head = checker.convertType(decl.type, vars, varKinds, decl.cls.tyvarKind);
+  const context: Pred[] = decl.context.map((constraint) => ({
+    cls: constraint.cls,
+    type: checker.convertType(constraint.type, vars, varKinds, constraint.cls.tyvarKind),
+  }));
+  if (splitApp(head).head.tag !== 'tcon') {
+    throw unsupportedError(decl.span, '型変数だけを型に書いたインスタンス');
+  }
+  const info = makeInstance(decl.cls, kinds.map(defaultKind), head, context, moduleName, decl.span);
+  registerInstance(checker, info, decl.span);
+  return { info, bindings: decl.bindings, span: decl.span };
+}
+
+export function makeInstance(
+  cls: ClassEntity,
+  kinds: Kind[],
+  head: Type,
+  context: Pred[],
+  moduleName: string,
+  span?: Span
+): InstanceInfo {
+  return {
+    id: nextId(),
+    cls,
+    kinds,
+    head,
+    context,
+    equalities: [],
+    methods: Array.from<ValueEntity | undefined>({ length: cls.methods.length }),
+    supers: [],
+    contextParams: [],
+    module: moduleName,
+    span,
+  };
+}
+
+function registerInstance(checker: Checker, info: InstanceInfo, span: Span): void {
+  for (const existing of checker.env.instancesOf(info.cls)) {
+    if (headsOverlap(existing.head, info.head)) {
+      const printer = new TypePrinter();
+      throw compileError(
+        span,
+        `${info.cls.name} ${printer.show(
+          instantiateType(
+            info.head,
+            info.kinds.map((_, index) => freshSkolem(STAR, 0, `t${index}`))
+          ),
+          2
+        )} のインスタンスが重複しています。`
+      );
+    }
+  }
+  checker.env.add(info);
+}
+
+/** Whether two instance heads could describe the same type, which Haskell forbids without overlap pragmas. */
+function headsOverlap(a: Type, b: Type): boolean {
+  const left = new Map<number, Type>();
+  const right = new Map<number, Type>();
+  const unify = (x: Type, y: Type): boolean => {
+    const p = prune(x);
+    const q = prune(y);
+    if (p.tag === 'tgen') {
+      const bound = left.get(p.index);
+      if (bound) return true;
+      left.set(p.index, q);
+      return true;
+    }
+    if (q.tag === 'tgen') {
+      right.set(q.index, p);
+      return true;
+    }
+    if (p.tag === 'tcon' && q.tag === 'tcon') return p.entity === q.entity;
+    if (p.tag === 'tap' && q.tag === 'tap') return unify(p.fn, q.fn) && unify(p.arg, q.arg);
+    return false;
+  };
+  return unify(a, b);
+}
+
+/** Finds each superclass's evidence at the instance's type, from the instance's context and other instances. */
+function checkInstanceSupers(checker: Checker, info: InstanceInfo, span: Span): void {
+  const skolems = info.kinds.map((kind, index) => freshSkolem(kind, checker.level + 1, `t${index}`));
+  const head = instantiateType(info.head, skolems);
+  info.contextParams = info.context.map((pred) =>
+    newDictParam({ cls: pred.cls, type: instantiateType(pred.type, skolems) })
+  );
+  const givens = info.contextParams.map((param) => ({
+    pred: param.pred,
+    evidence: { kind: 'param', param } as Evidence,
+  }));
+  info.supers = info.cls.supers.map((sup) => {
+    let evidence: Evidence | undefined;
+    checker.checkAgainstScheme(
+      { kinds: [], preds: [], type: head },
+      span,
+      () => {
+        evidence = checker.want(
+          { cls: sup, type: head },
+          span,
+          `インスタンス ${info.cls.name} のスーパークラス ${sup.name}`
+        );
+      },
+      givens
+    );
+    return evidence as Evidence;
+  });
+  // The superclass evidence refers to the context's dictionaries as parameters, so it must not depend on defaulting.
+  info.supers = info.supers.map((evidence) => evidence);
+}
+
+function checkInstanceMethods(checker: Checker, declared: DeclaredInstance): CheckedInstance {
+  const { info } = declared;
+  const bindings: RBinding[] = [];
+  for (const binding of declared.bindings) {
+    if (binding.k !== 'fun' || binding.binder.kind !== 'global') continue;
+    const method = binding.binder.entity;
+    const index = method.method?.index as number;
+    if (info.methods[index]) {
+      throw compileError(binding.span, `メソッド ${method.name} が重複して定義されています。`);
+    }
+    const implementation: ValueEntity = {
+      id: nextId(),
+      name: `$c${method.name}`,
+      module: info.module,
+      sort: 'var',
+      span: binding.span,
+    };
+    info.methods[index] = implementation;
+    const skolems = info.kinds.map((kind, position) => freshSkolem(kind, checker.level + 1, `t${position}`));
+    const head = instantiateType(info.head, skolems);
+    const contextParams = info.context.map((pred) =>
+      newDictParam({ cls: pred.cls, type: instantiateType(pred.type, skolems) })
+    );
+    const methodScheme = method.scheme as Scheme;
+    const rest: Scheme = {
+      kinds: methodScheme.kinds.slice(1),
+      names: methodScheme.names?.slice(1),
+      preds: methodScheme.preds.slice(1).map((pred) => ({ cls: pred.cls, type: shiftGens(pred.type, head) })),
+      type: shiftGens(methodScheme.type, head),
+    };
+    const givens = contextParams.map((param) => ({ pred: param.pred, evidence: { kind: 'param', param } as Evidence }));
+    const ownParams = checker.checkAgainstScheme(
+      rest,
+      binding.span,
+      (type) => checkClauses(checker, binding, type),
+      givens
+    );
+    const implementationBinding: RBinding = {
+      ...binding,
+      binder: { kind: 'global', entity: implementation },
+      dictParams: [...contextParams, ...ownParams],
+    };
+    bindings.push(implementationBinding);
+  }
+  return { info, bindings };
+}
+
+/** Replaces `TGen 0` (the class variable) by a type and shifts the other indices down by one. */
+function shiftGens(type: Type, replacement: Type): Type {
+  const pruned = prune(type);
+  if (pruned.tag === 'tgen') return pruned.index === 0 ? replacement : { tag: 'tgen', index: pruned.index - 1 };
+  if (pruned.tag === 'tap')
+    return { tag: 'tap', fn: shiftGens(pruned.fn, replacement), arg: shiftGens(pruned.arg, replacement) };
+  return pruned;
+}
+
+function checkClauses(checker: Checker, binding: Extract<RBinding, { k: 'fun' }>, type: Type): void {
+  for (const clause of binding.clauses) {
+    let remaining = type;
+    for (const pat of clause.pats) {
+      const param = checker.freshVar();
+      const result = checker.freshVar();
+      checker.unify(remaining, tap(tcon(FUNCTION_TYPE), param, result), clause.span, 'メソッドの引数');
+      checker.inferPat(pat, param);
+      remaining = result;
+    }
+    checker.checkRhs(clause.rhs, remaining);
+  }
+}
+
+function checkDefaults(checker: Checker, decl: RClassDecl): RBinding[] {
+  const result: RBinding[] = [];
+  for (const binding of decl.defaults) {
+    if (binding.k !== 'fun' || binding.binder.kind !== 'global') continue;
+    const method = binding.binder.entity;
+    const index = method.method?.index as number;
+    const implementation: ValueEntity = {
+      id: nextId(),
+      name: `$dm${method.name}`,
+      module: decl.entity.module,
+      sort: 'var',
+      span: binding.span,
+    };
+    decl.entity.defaults[index] = implementation;
+    const params = checker.checkAgainstScheme(method.scheme as Scheme, binding.span, (type) =>
+      checkClauses(checker, binding, type)
+    );
+    const implementationBinding: RBinding = {
+      ...binding,
+      binder: { kind: 'global', entity: implementation },
+      dictParams: params,
+    };
+    result.push(implementationBinding);
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Deriving
+
+function deriveInstances(checker: Checker, module: RModule, options: TypecheckOptions): DeclaredInstance[] {
+  const pending: { decl: RDataDecl; cls: ClassEntity; info: InstanceInfo; span: Span }[] = [];
+  for (const decl of module.dataDecls) {
+    for (const { cls, span } of decl.deriving) {
+      const derivable = DERIVABLE_CLASSES.find((name) => name === cls.name && cls.module === 'Base');
+      if (!derivable) {
+        if (['Functor', 'Foldable', 'Traversable', 'Generic', 'Data', 'Lift'].includes(cls.name)) {
+          throw unsupportedError(span, `${cls.name} の deriving`);
+        }
+        throw compileError(span, `クラス ${cls.name} は deriving できません。`);
+      }
+      checkDerivable(decl, cls, span);
+      const kinds = typeParamKinds(decl.entity);
+      const head = tap(tcon(decl.entity), ...kinds.map((_, index): Type => ({ tag: 'tgen', index })));
+      const info = makeInstance(cls, kinds, head, [], module.name, span);
+      registerInstance(checker, info, span);
+      pending.push({ decl, cls, info, span });
+    }
+  }
+  // Infer the contexts together, since derived instances of mutually recursive types depend on each other.
+  for (let round = 0; round < 50; round++) {
+    let changed = false;
+    for (const item of pending) {
+      const context = inferDerivedContext(checker, item.decl, item.cls, item.span);
+      if (!sameContext(context, item.info.context)) {
+        item.info.context = context;
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  return pending.map((item) => ({
+    info: item.info,
+    bindings: deriveInstance(item.decl, item.cls, options.derivingSupport),
+    span: item.span,
+  }));
+}
+
+function checkDerivable(decl: RDataDecl, cls: ClassEntity, span: Span): void {
+  const cons = decl.entity.cons;
+  if (cls.name === 'Enum' && (cons.length === 0 || cons.some((con) => con.arity > 0))) {
+    throw compileError(
+      span,
+      `${decl.entity.name} の Enum は deriving できません（引数のない構成子だけの型にしてください）。`
+    );
+  }
+  if (cls.name === 'Bounded' && (cons.length === 0 || (cons.length > 1 && cons.some((con) => con.arity > 0)))) {
+    throw compileError(span, `${decl.entity.name} の Bounded は deriving できません。`);
+  }
+}
+
+function inferDerivedContext(checker: Checker, decl: RDataDecl, cls: ClassEntity, span: Span): Pred[] {
+  const kinds = typeParamKinds(decl.entity);
+  const params = kinds.map((kind, index) => freshSkolem(kind, 1_000_000, decl.params[index] ?? `t${index}`));
+  const work: Pred[] = [];
+  for (const con of decl.entity.cons) {
+    for (const field of con.fieldTypes) work.push({ cls, type: instantiateType(field, params) });
+  }
+  const context: Pred[] = [];
+  const printer = new TypePrinter();
+  const keys = new Set<string>();
+  while (work.length > 0) {
+    const pred = work.pop() as Pred;
+    const type = zonk(pred.type);
+    const { head } = splitApp(type);
+    if (head.tag === 'tvar') {
+      // GHC infers constraints on the type's variables, such as `Show a` or `Show (b a)`.
+      const generic = generalizeParams(type, params);
+      const key = `${pred.cls.id}:${printer.show(generic)}`;
+      if (!keys.has(key)) {
+        keys.add(key);
+        context.push({ cls: pred.cls, type: generic });
+      }
+      continue;
+    }
+    const found = checker.env.findInstance({ cls: pred.cls, type });
+    if (typeof found === 'string') {
+      throw compileError(
+        span,
+        `${printer.showPred({ cls: pred.cls, type })} のインスタンスがないので、${cls.name} を deriving できません。`
+      );
+    }
+    for (const contextPred of found.instance.context) {
+      work.push({ cls: contextPred.cls, type: instantiateType(contextPred.type, found.args) });
+    }
+  }
+  return context.toSorted((a, b) => printer.showPred(a).localeCompare(printer.showPred(b)));
+}
+
+/** Replaces a derived instance's type parameters by its scheme's variables. */
+function generalizeParams(type: Type, params: readonly Type[]): Type {
+  const pruned = prune(type);
+  const index = params.indexOf(pruned);
+  if (index !== -1) return { tag: 'tgen', index };
+  if (pruned.tag === 'tap')
+    return { tag: 'tap', fn: generalizeParams(pruned.fn, params), arg: generalizeParams(pruned.arg, params) };
+  return pruned;
+}
+
+function sameContext(a: Pred[], b: Pred[]): boolean {
+  const printer = new TypePrinter();
+  return a.length === b.length && a.every((pred, index) => printer.showPred(pred) === printer.showPred(b[index]));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// main
+
+function checkMain(checker: Checker, module: RModule, builtins: Builtins): void {
+  const main = module.exports.values.get('main');
+  const binding = module.values.bindings.find(
+    (candidate) =>
+      candidate.k === 'fun' && candidate.binder.kind === 'global' && candidate.binder.entity.name === 'main'
+  );
+  if (!binding || binding.k !== 'fun' || binding.binder.kind !== 'global') {
+    throw compileError(0, 'main が定義されていません。');
+  }
+  if (!main && module.hasExportList) {
+    throw compileError(binding.span, 'main が export されていません。');
+  }
+  const scheme = binding.binder.entity.scheme as Scheme;
+  const instantiated = checker.instantiate(scheme, binding.span, 'main');
+  checker.unify(
+    instantiated.type,
+    tap(tcon(builtins.io), checker.freshVar()),
+    binding.span,
+    'main の型は IO でなければなりません'
+  );
+}

@@ -1,0 +1,122 @@
+/**
+ * The intermediate code the evaluator runs: an untyped lambda calculus with explicit dictionaries, simple case
+ * analysis, and `IO` blocks that carry what tracing needs. Local variables live in frames addressed by depth and
+ * index; each lambda (and each top-level body) has one frame for its parameters and the variables it binds.
+ */
+import type { ConInfo, InstanceInfo, ValueEntity } from './entities';
+import type { Primitive } from './primitives';
+import type { Type } from './types';
+import type { Value } from './values';
+
+export interface LocalRef {
+  depth: number;
+  index: number;
+}
+
+/** A function or top-level binding whose calls are frames in a trace. */
+export interface FunctionInfo {
+  name: string;
+  /** The row of its declaration, which `-- atomic` marks. */
+  row: number;
+  isAtomic: boolean;
+}
+
+export type Core =
+  | { k: 'local'; depth: number; index: number }
+  | { k: 'global'; global: GlobalDef }
+  | { k: 'lit'; value: Value }
+  | { k: 'str'; value: string }
+  | { k: 'app'; fn: Core; args: Core[] }
+  | LamCore
+  | { k: 'frame'; size: number; body: Core; info: FunctionInfo }
+  | { k: 'let'; binds: { index: number; expr: Core }[]; body: Core }
+  | CaseCore
+  | { k: 'charCase'; scrut: Core; value: string; matched: Core; unmatched: Core }
+  | { k: 'con'; con: ConInfo; args: Core[] }
+  | { k: 'prim'; prim: Primitive }
+  | { k: 'method'; dict: Core; index: number }
+  | { k: 'super'; dict: Core; index: number }
+  | { k: 'dict'; instance: InstanceInfo; args: Core[] }
+  | { k: 'error'; message: string; kind: 'error' | 'patternMatch' }
+  | IODoCore;
+
+export interface LamCore {
+  k: 'lam';
+  arity: number;
+  /** The number of slots of the lambda's frame: its parameters, then the variables its body binds. */
+  size: number;
+  body: Core;
+  /** Set for a named function, whose calls are trace frames. */
+  info?: FunctionInfo;
+}
+
+export interface CaseCore {
+  k: 'case';
+  scrut: Core;
+  /** The slot that receives the evaluated scrutinee, if any. */
+  bindIndex?: number;
+  /** The alternatives by constructor tag, each with the slots its fields go to (-1 for unused fields). */
+  alts: Map<number, { slots: number[]; body: Core }>;
+  default?: Core;
+}
+
+/** A variable a trace shows while a statement runs: its name, where it lives, and its type for display. */
+export interface VisibleVar {
+  name: string;
+  depth: number;
+  index: number;
+  type: Type;
+}
+
+export type IOStmt =
+  | {
+      kind: 'exp';
+      row: number;
+      expr: Core;
+      /** Whether the statement only calls functions, whose steps may show what it did. */
+      onlyCalls: boolean;
+      /** Whether the statement is a control statement (`if`, `case`, `when`), which records no step itself. */
+      noStep: boolean;
+      visible: VisibleVar[];
+    }
+  | {
+      kind: 'bind';
+      row: number;
+      expr: Core;
+      /** The slot that receives the action's result. */
+      slot: number;
+      /** Code that matches the result against the pattern and binds its variables, if it is not a variable. */
+      matcher?: Core;
+      /**
+       * Whether the statement binds only references (records, turtles, lists) from a call, as Java's declaration
+       * initialized by creating an object does, whose steps may show what it did.
+       */
+      onlyCalls: boolean;
+      visible: VisibleVar[];
+    }
+  | {
+      kind: 'let';
+      row: number;
+      binds: { index: number; expr: Core }[];
+      visible: VisibleVar[];
+      /** Whether the statement defines only functions and actions, which records no step. */
+      noStep: boolean;
+    };
+
+export interface IODoCore {
+  k: 'iodo';
+  stmts: IOStmt[];
+  /** The row of the lambda whose parameters a block binds, which records a binding step when the block starts. */
+  bindingRow?: number;
+  /** Whether the lambda's parameters hold values learners answer, such as numbers and strings. */
+  bindingStoresAnswer?: boolean;
+  /** The variables visible when the block starts. */
+  entryVisible: VisibleVar[];
+}
+
+/** A top-level binding of the library or the program, which each run evaluates at most once. */
+export interface GlobalDef {
+  entity: ValueEntity | undefined;
+  name: string;
+  code?: Core;
+}

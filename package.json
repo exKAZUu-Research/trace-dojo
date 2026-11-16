@@ -70,6 +70,7 @@
     "@willbooster/shared-lib-react": "6.3.0",
     "@willbooster/tree-sitter-c": "39.0.0",
     "@willbooster/tree-sitter-go": "12.0.0",
+    "@willbooster/tree-sitter-haskell": "19.0.0",
     "@willbooster/tree-sitter-java": "34.0.0",
     "@willbooster/tree-sitter-javascript": "25.0.0",
     "@willbooster/tree-sitter-python": "20.0.0",
