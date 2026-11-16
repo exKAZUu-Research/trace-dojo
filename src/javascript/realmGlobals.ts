@@ -461,6 +461,7 @@ function defineConsole(builder: RealmBuilder): void {
       return option === null ? Number.POSITIVE_INFINITY : runtime.toNumber(option);
     };
     const compact = isObject(options) ? runtime.get(options, 'compact') : undefined;
+    const showHidden = isObject(options) && toBoolean(runtime.get(options, 'showHidden'));
     write(
       runtime,
       'stdout',
@@ -468,6 +469,7 @@ function defineConsole(builder: RealmBuilder): void {
         breakLength: limit('breakLength'),
         compact: typeof compact === 'boolean' || typeof compact === 'number' ? compact : undefined,
         maxArrayLength: limit('maxArrayLength'),
+        showHidden,
       })
     );
     return;

@@ -182,7 +182,7 @@ interface Frame {
 function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string {
   const { runtime } = ctx;
   const constructor = constructorName(runtime, value);
-  const keys = enumerableKeys(runtime, value);
+  const keys = enumerableKeys(runtime, value, ctx.showHidden);
   const showsLength = ctx.showHidden && value instanceof JsArray;
   const frame = frameOf(ctx, value, constructor, keys.length > 0 || value.promise !== undefined || showsLength);
   if (typeof frame === 'string') return frame;
@@ -301,7 +301,8 @@ function prefixOf(constructor: string | undefined, fallback: string, size = ''):
 }
 
 /** The keys an object lists, its strings and then its symbols, as `Object.keys` and then its symbols order them. */
-function enumerableKeys(runtime: Runtime, object: JsObject): Key[] {
+/** The keys an object shows: its enumerable ones, or with `showHidden` all of its own, as `%o` shows them. */
+function enumerableKeys(runtime: Runtime, object: JsObject, showHidden: boolean): Key[] {
   // An array keeps its elements apart from its other properties.
   const own =
     object instanceof JsArray
@@ -312,7 +313,7 @@ function enumerableKeys(runtime: Runtime, object: JsObject): Key[] {
   const keys: Key[] = [...strings, ...runtime.ownSymbols(object)];
   const listed = keys.filter((key) => {
     if (object.isError && (key === 'message' || key === 'name' || key === 'stack')) return false;
-    return object.properties.get(key)?.enumerable;
+    return showHidden || object.properties.get(key)?.enumerable;
   });
   // An error also shows its own hidden reasons, bracketed, as Node.js does.
   if (object.isError) {

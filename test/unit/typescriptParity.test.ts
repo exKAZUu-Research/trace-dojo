@@ -8,7 +8,9 @@ import { executeProgram } from '../../src/interpreter/program';
 const PARITY_DIR = path.join(import.meta.dirname, '..', 'fixtures', 'typescriptParity');
 const TYPE_ERROR_DIR = path.join(import.meta.dirname, '..', 'fixtures', 'typescriptTypeErrors');
 
-const programsIn = (directory: string): string[] => fs.readdirSync(directory).filter((name) => name.endsWith('.ts'));
+// The programs are `.ts.txt` files, which the repository's own type check leaves alone, as some are rejected on purpose.
+const programsIn = (directory: string): string[] =>
+  fs.readdirSync(directory).filter((name) => name.endsWith('.ts.txt'));
 const read = (directory: string, name: string): string => fs.readFileSync(path.join(directory, name), 'utf8');
 
 // The interpreter's clock stands still in these tests, so that the program, not the load of the host, decides each one.
@@ -22,7 +24,7 @@ afterEach(() => {
 // Each `.out` file holds what Node.js 26.13.0 printed for its program, which TypeScript 7.0.2 (`tsc --strict`)
 // accepted, followed by the first line of the exception that ended it, if one did.
 test.each(programsIn(PARITY_DIR))('%s prints what Node.js prints', (name) => {
-  const expected = read(PARITY_DIR, name.replace(/\.ts$/, '.out'));
+  const expected = read(PARITY_DIR, name.replace(/\.ts\.txt$/, '.out'));
   const execution = executeProgram('typescript', read(PARITY_DIR, name));
   if (execution.kind !== 'executed') throw new Error(`${name} did not run: ${JSON.stringify(execution)}`);
   const uncaught = execution.uncaughtException ? `[uncaught] ${execution.uncaughtException.split('\n')[0]}\n` : '';
@@ -34,7 +36,7 @@ test.each(programsIn(PARITY_DIR))('%s prints what Node.js prints', (name) => {
 test.each(programsIn(TYPE_ERROR_DIR))('%s is rejected on the rows tsc reports', (name) => {
   const expectedRows = [
     ...new Set(
-      read(TYPE_ERROR_DIR, name.replace(/\.ts$/, '.out'))
+      read(TYPE_ERROR_DIR, name.replace(/\.ts\.txt$/, '.out'))
         .split('\n')
         .filter((line) => line.startsWith('('))
         .map((line) => Number(/^\((\d+),/.exec(line)?.[1]))
