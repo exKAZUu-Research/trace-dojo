@@ -9,6 +9,7 @@ import { formatString } from './format';
 import { digest } from './hashes';
 import { chargeIntegerResult, integerBits, integerGcd } from './integerBudget';
 import { callMethod, type Gen, invoke } from './interp';
+import { advertisesPublicMethod } from './libMeta';
 import { isRubyFloat, NIL, RArray, RObject, RString, RSymbol, type Value } from './objects';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
 import { arr, isA, realClassOf, str, truthy } from './values';
@@ -367,38 +368,108 @@ def('Float', 'rationalize', [0, 1], () => {
   throw new UnsupportedFeatureError('Float#rationalize（有理数）');
 });
 
-function* rationalOf(value: Value, raise: boolean, allowMissing = false): Gen<RObject | typeof NIL | undefined> {
-  if (typeof value === 'bigint') return makeRational(value, 1n);
+function* convertRationalArguments(args: Value[], raise: boolean): Gen {
+  if (args.includes(NIL)) {
+    if (!raise) return NIL;
+    throw typeError("can't convert nil into Rational");
+  }
+  const first = yield* normalizeRationalArgument(args[0], raise);
+  if (first === undefined) return NIL;
+  const second = args.length === 1 ? undefined : yield* normalizeRationalArgument(args[1], raise);
+  if (args.length === 2 && second === undefined) return NIL;
+  if (isRational(first) && (second === undefined || (yield* exactOne(second)))) return first;
+  if (second === undefined) {
+    if (typeof first === 'bigint') return makeRational(first, 1n);
+    return raise ? yield* convertToRational(first, false) : ((yield* rescueRationalConversion(first)) ?? NIL);
+  }
+  return yield* convertRationalPair(first, second, raise);
+}
+
+// code-gauge-allow functionCognitiveComplexity 21 -- Native checked conversions, rescued exceptions and numeric division share ordered operands.
+function* convertRationalPair(first: Value, second: Value, raise: boolean): Gen {
+  if (!isA(first, rt().c.Numeric)) {
+    const converted = raise ? yield* convertToRational(first, true) : yield* rescueRationalConversion(first);
+    if (converted === undefined) return NIL;
+    first = converted;
+  }
+  if (!isA(second, rt().c.Numeric)) {
+    const converted = raise ? yield* convertToRational(second, true) : yield* rescueRationalConversion(second);
+    if (converted === undefined) return NIL;
+    second = converted;
+  }
+  if (
+    isA(first, rt().c.Numeric) &&
+    isA(second, rt().c.Numeric) &&
+    (typeof first !== 'bigint' || typeof second !== 'bigint')
+  ) {
+    first = (yield* rescueRationalConversion(first)) ?? first;
+    if (second === 1n) return first;
+    if (typeof first === 'bigint')
+      return yield* invoke(coreMethod(rt().c.Integer, '/'), first, [second], undefined, undefined, true);
+    return yield* callMethod(first, '/', [second], undefined, undefined, { fcall: true });
+  }
+  if (typeof first !== 'bigint') throw typeError('not an integer');
+  if (typeof second !== 'bigint') {
+    if (!raise) return NIL;
+    throw typeError('not an integer');
+  }
+  return makeRational(first, second);
+}
+
+function* normalizeRationalArgument(value: Value, raise: boolean): Gen<Value | undefined> {
+  if (typeof value === 'bigint' || isRational(value)) return value;
   if (isRubyFloat(value)) return floatToRational(Number(value));
-  if (isRational(value)) return value;
-  try {
-    if (value === NIL) throw typeError("can't convert nil into Rational");
-    if (value instanceof RString) return yield* rationalFromString(value, raise);
-    const converted = yield* tryImplicitConversion(value, 'to_r');
-    if (converted !== undefined) {
-      if (isRational(converted)) return converted;
-      throw typeError(
-        `can't convert ${realClassOf(value).name} to Rational (${realClassOf(value).name}#to_r gives ${realClassOf(converted).name})`
-      );
+  if (value instanceof RString) return yield* rationalFromString(value, raise);
+  if (!(yield* advertisesPublicMethod(value, 'to_r'))) {
+    try {
+      const converted = yield* tryImplicitConversion(value, 'to_int');
+      if (typeof converted === 'bigint') return converted;
+    } catch (error) {
+      if (!(error instanceof RubyError)) throw error;
     }
-    if (allowMissing) return NIL;
+  }
+  return value;
+}
+
+function* convertToRational(value: Value, checked: boolean): Gen<RObject | typeof NIL> {
+  if (isRational(value)) return value;
+  const converted = yield* tryImplicitConversion(value, 'to_r');
+  if (converted === undefined) {
+    if (checked) return NIL;
     throw typeError(`can't convert ${realClassOf(value).name} into Rational`);
+  }
+  if (converted === NIL && checked) return NIL;
+  if (isRational(converted)) return converted;
+  throw typeError(
+    `can't convert ${realClassOf(value).name} to Rational (${realClassOf(value).name}#to_r gives ${realClassOf(converted).name})`
+  );
+}
+
+function* rescueRationalConversion(value: Value): Gen<RObject | undefined> {
+  try {
+    const result = yield* convertToRational(value, false);
+    return result instanceof RObject ? result : undefined;
   } catch (error) {
-    if (!raise && error instanceof RubyError) return undefined;
+    if (error instanceof RubyError) return undefined;
     throw error;
   }
 }
 
+function* exactOne(value: Value): Gen<boolean> {
+  const fraction = asFraction(value);
+  return fraction ? fraction.numerator === 1n && fraction.denominator === 1n : yield* rEquals(value, 1n);
+}
+
 function* rationalFromString(source: RString, raise: boolean): Gen<RObject | undefined> {
   const text = source.s.replaceAll(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, '');
-  const result = parseRationalText(text, true);
+  const result = parseRationalText(text, true, raise);
   if (result || !raise) return result;
   const messageFormat = str('invalid value for convert(): %p');
   messageFormat.binary = true;
   throw rubyError(rt().c.ArgumentError, yield* formatString(messageFormat, [source]));
 }
 
-function parseRationalText(text: string, exact: boolean): RObject | undefined {
+function parseRationalText(text: string, exact: boolean, raise = true): RObject | undefined {
   const digits = String.raw`\d(?:_?\d)*`;
   const component = `(?:${digits}(?:\\.(?:${digits})?)?|\\.(?:${digits})?)`;
   const pattern = new RegExp(
@@ -411,6 +482,7 @@ function parseRationalText(text: string, exact: boolean): RObject | undefined {
   const denominator = denominatorDecimal
     ? decimalComponent('', denominatorDecimal, denominatorExponent)
     : { numerator: 1n, denominator: 1n };
+  if (!raise && denominator.numerator === 0n) return undefined;
   return makeRational(numerator.numerator * denominator.denominator, numerator.denominator * denominator.numerator);
 }
 
@@ -446,16 +518,7 @@ def(
   [1, 2],
   function* (_self, args, _block, keywords) {
     const raise = yield* exceptionOption(keywords);
-    const first = yield* rationalOf(args[0], raise, args.length === 2);
-    if (first === undefined) return NIL;
-    if (args.length === 1) return first;
-    const second = yield* rationalOf(args[1], raise, true);
-    if (second === undefined) return NIL;
-    if (!(first instanceof RObject) || !(second instanceof RObject)) {
-      if (!raise) return NIL;
-      throw typeError('not an integer');
-    }
-    return yield* arithmetic(first, second, '/');
+    return yield* convertRationalArguments(args, raise);
   },
   { visibility: 'private', keywords: true }
 );

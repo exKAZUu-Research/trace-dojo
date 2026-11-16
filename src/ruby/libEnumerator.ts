@@ -54,7 +54,7 @@ import {
   RArray,
   RHash,
   RObject,
-  RProc,
+  type RProc,
   RRange,
   RString,
   RSymbol,
@@ -924,30 +924,22 @@ def(
   'Enumerator',
   'initialize',
   [0, -1],
-  // code-gauge-allow functionCognitiveComplexity 22 -- Receiver types, size conversion, frozen state and producer replacement retain native validation order.
-  // code-gauge-allow functionNcss 33 -- Initializer validation and rooted producer installation share the converted size and receiver.
   function* (self: RObject, args, block) {
     if (self.cls.isSubclassOf(rt().c['Enumerator::Lazy']))
       throw new UnsupportedFeatureError('Enumerator::Lazy#initialize');
     if (!block) throw argumentError('tried to create Proc object without a block');
     if (args.length > 1) throw argumentCountError(args.length, 0, 1);
     const producer = block;
-    const [size] = args;
-    let sizeProvider: (() => Value | Gen<Value>) | undefined;
-    let sizeRoot: Value | undefined;
-    if (size !== undefined) {
-      if (size instanceof RProc || (yield* advertisesPublicMethod(size, 'call'))) {
-        sizeRoot = size;
-        sizeProvider = function* () {
-          return size instanceof RProc || (yield* advertisesPublicMethod(size, 'call'))
-            ? yield* callMethod(size, 'call', [])
-            : size;
-        };
-      } else {
-        const normalized = size === NIL || (isRubyFloat(size) && Number(size) === Infinity) ? size : yield* toInt(size);
-        sizeProvider = () => normalized;
-      }
-    }
+    let size = args[0] ?? NIL;
+    if (
+      size !== NIL &&
+      !(yield* advertisesPublicMethod(size, 'call')) &&
+      !(isRubyFloat(size) && Number(size) === Infinity)
+    )
+      size = yield* toInt(size);
+    const sizeProvider = function* (): Gen<Value> {
+      return (yield* tryImplicitConversion(size, 'call')) ?? size;
+    };
     assertMutableEnumerator(self);
     if (self.cls.isSubclassOf(rt().c['Enumerator::Chain']))
       throw typeError('wrong argument type chain (expected enumerator)');
@@ -955,13 +947,13 @@ def(
     const data: GeneratorData = {
       block: producer,
       held() {
-        return [this.block, ...(sizeRoot === undefined ? [] : [sizeRoot])];
+        return [this.block, size];
       },
     };
     generator.data = data;
     const enumerator = makeEnumerator(generator, 'each', [], undefined, {});
     const source = enumerator.data as EnumeratorSource;
-    if (sizeProvider) source.size = sizeProvider;
+    source.size = sizeProvider;
     self.data = source;
     return self;
   },

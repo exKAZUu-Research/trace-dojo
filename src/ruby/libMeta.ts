@@ -137,8 +137,7 @@ export function* respondsToName(self: Value, name: string, includeAll: boolean):
 export function* advertisesPublicMethod(self: Value, name: string): Gen<boolean> {
   const responder = classOf(self).findMethod('respond_to?');
   if (responder && (responder.body.kind !== 'native' || !('builtinResponder' in responder.body.fn))) {
-    const args = methodArity(responder) === 1 ? [sym(name)] : [sym(name), false];
-    return truthy(yield* invoke(responder, self, args, undefined, undefined, true));
+    return truthy(yield* invoke(responder, self, [sym(name)], undefined, undefined, true));
   }
   return yield* respondsToName(self, name, false);
 }

@@ -28575,3 +28575,4836 @@ test.each(nativeInternalIdentityCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeRationalConversionStageCases = [
+  ['begin;p Rational(0);rescue=>e;p e.class,e.message;end', '(0/1)\n'],
+  ['begin;p Rational(0,exception:false);rescue=>e;p e.class,e.message;end', '(0/1)\n'],
+  ['begin;p Rational(0,0);rescue=>e;p e.class,e.message;end', 'ZeroDivisionError\n"divided by 0"\n'],
+  ['begin;p Rational(0,0,exception:false);rescue=>e;p e.class,e.message;end', 'ZeroDivisionError\n"divided by 0"\n'],
+  ['begin;p Rational(0,2);rescue=>e;p e.class,e.message;end', '(0/1)\n'],
+  ['begin;p Rational(0,2,exception:false);rescue=>e;p e.class,e.message;end', '(0/1)\n'],
+  ['begin;p Rational(0,1r);rescue=>e;p e.class,e.message;end', '(0/1)\n'],
+  ['begin;p Rational(0,1r,exception:false);rescue=>e;p e.class,e.message;end', '(0/1)\n'],
+  ['begin;p Rational(0,0.5);rescue=>e;p e.class,e.message;end', '(0/1)\n'],
+  ['begin;p Rational(0,0.5,exception:false);rescue=>e;p e.class,e.message;end', '(0/1)\n'],
+  [
+    'begin;p Rational(0," bad ");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  ['begin;p Rational(0," bad ",exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  ['begin;p Rational(0," 1/2 ");rescue=>e;p e.class,e.message;end', '(0/1)\n'],
+  ['begin;p Rational(0," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end', '(0/1)\n'],
+  ['begin;p Rational(0,nil);rescue=>e;p e.class,e.message;end', 'TypeError\n"can\'t convert nil into Rational"\n'],
+  ['begin;p Rational(0,nil,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(0,W.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(0,W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(0,A.new);rescue=>e;p e.class,e.message;end',
+    'first\n(0/1)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(0,A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\n(0/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(0,B.new);rescue=>e;p e.class,e.message;end',
+    'second\n(0/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(0,B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\n(0/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(0,P.new);rescue=>e;p e.class,e.message;end',
+    'protected\n(0/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(0,P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\n(0/1)\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(0,Bad.new);rescue=>e;p e.class,e.message;end',
+    'bad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(0,Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(0,Wrong.new);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(0,Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(0,Raised.new);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(0,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(0,I.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(0/1)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(0,I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(0/1)\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(0,J.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(0,J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(0,K.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(0,K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(0,Both.new);rescue=>e;p e.class,e.message;end',
+    'rational\n(0/1)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(0,Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\n(0/1)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(0,PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(0/1)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(0,PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(0/1)\n',
+  ],
+  ['begin;p Rational(2);rescue=>e;p e.class,e.message;end', '(2/1)\n'],
+  ['begin;p Rational(2,exception:false);rescue=>e;p e.class,e.message;end', '(2/1)\n'],
+  ['begin;p Rational(2,0);rescue=>e;p e.class,e.message;end', 'ZeroDivisionError\n"divided by 0"\n'],
+  ['begin;p Rational(2,0,exception:false);rescue=>e;p e.class,e.message;end', 'ZeroDivisionError\n"divided by 0"\n'],
+  ['begin;p Rational(2,2);rescue=>e;p e.class,e.message;end', '(1/1)\n'],
+  ['begin;p Rational(2,2,exception:false);rescue=>e;p e.class,e.message;end', '(1/1)\n'],
+  ['begin;p Rational(2,1r);rescue=>e;p e.class,e.message;end', '(2/1)\n'],
+  ['begin;p Rational(2,1r,exception:false);rescue=>e;p e.class,e.message;end', '(2/1)\n'],
+  ['begin;p Rational(2,0.5);rescue=>e;p e.class,e.message;end', '(4/1)\n'],
+  ['begin;p Rational(2,0.5,exception:false);rescue=>e;p e.class,e.message;end', '(4/1)\n'],
+  [
+    'begin;p Rational(2," bad ");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  ['begin;p Rational(2," bad ",exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  ['begin;p Rational(2," 1/2 ");rescue=>e;p e.class,e.message;end', '(4/1)\n'],
+  ['begin;p Rational(2," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end', '(4/1)\n'],
+  ['begin;p Rational(2,nil);rescue=>e;p e.class,e.message;end', 'TypeError\n"can\'t convert nil into Rational"\n'],
+  ['begin;p Rational(2,nil,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(2,W.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(2,W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(2,A.new);rescue=>e;p e.class,e.message;end',
+    'first\n(4/1)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(2,A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\n(4/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(2,B.new);rescue=>e;p e.class,e.message;end',
+    'second\n(1/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(2,B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\n(1/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(2,P.new);rescue=>e;p e.class,e.message;end',
+    'protected\n(1/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(2,P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\n(1/1)\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(2,Bad.new);rescue=>e;p e.class,e.message;end',
+    'bad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(2,Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(2,Wrong.new);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(2,Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(2,Raised.new);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(2,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(2,I.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(2/3)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(2,I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(2/3)\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(2,J.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(2,J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(2,K.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(2,K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(2,Both.new);rescue=>e;p e.class,e.message;end',
+    'rational\n(1/1)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(2,Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\n(1/1)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(2,PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(2/3)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(2,PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(2/3)\n',
+  ],
+  ['begin;p Rational(1r);rescue=>e;p e.class,e.message;end', '(1/1)\n'],
+  ['begin;p Rational(1r,exception:false);rescue=>e;p e.class,e.message;end', '(1/1)\n'],
+  ['begin;p Rational(1r,0);rescue=>e;p e.class,e.message;end', 'ZeroDivisionError\n"divided by 0"\n'],
+  ['begin;p Rational(1r,0,exception:false);rescue=>e;p e.class,e.message;end', 'ZeroDivisionError\n"divided by 0"\n'],
+  ['begin;p Rational(1r,2);rescue=>e;p e.class,e.message;end', '(1/2)\n'],
+  ['begin;p Rational(1r,2,exception:false);rescue=>e;p e.class,e.message;end', '(1/2)\n'],
+  ['begin;p Rational(1r,1r);rescue=>e;p e.class,e.message;end', '(1/1)\n'],
+  ['begin;p Rational(1r,1r,exception:false);rescue=>e;p e.class,e.message;end', '(1/1)\n'],
+  ['begin;p Rational(1r,0.5);rescue=>e;p e.class,e.message;end', '(2/1)\n'],
+  ['begin;p Rational(1r,0.5,exception:false);rescue=>e;p e.class,e.message;end', '(2/1)\n'],
+  [
+    'begin;p Rational(1r," bad ");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  ['begin;p Rational(1r," bad ",exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  ['begin;p Rational(1r," 1/2 ");rescue=>e;p e.class,e.message;end', '(2/1)\n'],
+  ['begin;p Rational(1r," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end', '(2/1)\n'],
+  ['begin;p Rational(1r,nil);rescue=>e;p e.class,e.message;end', 'TypeError\n"can\'t convert nil into Rational"\n'],
+  ['begin;p Rational(1r,nil,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(1r,W.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(1r,W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(1r,A.new);rescue=>e;p e.class,e.message;end',
+    'first\n(2/1)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(1r,A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\n(2/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(1r,B.new);rescue=>e;p e.class,e.message;end',
+    'second\n(1/2)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(1r,B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\n(1/2)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(1r,P.new);rescue=>e;p e.class,e.message;end',
+    'protected\n(1/2)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(1r,P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\n(1/2)\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(1r,Bad.new);rescue=>e;p e.class,e.message;end',
+    'bad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(1r,Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(1r,Wrong.new);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(1r,Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(1r,Raised.new);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(1r,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(1r,I.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/3)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(1r,I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/3)\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(1r,J.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(1r,J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(1r,K.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(1r,K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(1r,Both.new);rescue=>e;p e.class,e.message;end',
+    'rational\n(1/2)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(1r,Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\n(1/2)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(1r,PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/3)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(1r,PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/3)\n',
+  ],
+  ['begin;p Rational(0.5);rescue=>e;p e.class,e.message;end', '(1/2)\n'],
+  ['begin;p Rational(0.5,exception:false);rescue=>e;p e.class,e.message;end', '(1/2)\n'],
+  ['begin;p Rational(0.5,0);rescue=>e;p e.class,e.message;end', 'ZeroDivisionError\n"divided by 0"\n'],
+  ['begin;p Rational(0.5,0,exception:false);rescue=>e;p e.class,e.message;end', 'ZeroDivisionError\n"divided by 0"\n'],
+  ['begin;p Rational(0.5,2);rescue=>e;p e.class,e.message;end', '(1/4)\n'],
+  ['begin;p Rational(0.5,2,exception:false);rescue=>e;p e.class,e.message;end', '(1/4)\n'],
+  ['begin;p Rational(0.5,1r);rescue=>e;p e.class,e.message;end', '(1/2)\n'],
+  ['begin;p Rational(0.5,1r,exception:false);rescue=>e;p e.class,e.message;end', '(1/2)\n'],
+  ['begin;p Rational(0.5,0.5);rescue=>e;p e.class,e.message;end', '(1/1)\n'],
+  ['begin;p Rational(0.5,0.5,exception:false);rescue=>e;p e.class,e.message;end', '(1/1)\n'],
+  [
+    'begin;p Rational(0.5," bad ");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  ['begin;p Rational(0.5," bad ",exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  ['begin;p Rational(0.5," 1/2 ");rescue=>e;p e.class,e.message;end', '(1/1)\n'],
+  ['begin;p Rational(0.5," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end', '(1/1)\n'],
+  ['begin;p Rational(0.5,nil);rescue=>e;p e.class,e.message;end', 'TypeError\n"can\'t convert nil into Rational"\n'],
+  ['begin;p Rational(0.5,nil,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(0.5,W.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(0.5,W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(0.5,A.new);rescue=>e;p e.class,e.message;end',
+    'first\n(1/1)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(0.5,A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\n(1/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(0.5,B.new);rescue=>e;p e.class,e.message;end',
+    'second\n(1/4)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(0.5,B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\n(1/4)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(0.5,P.new);rescue=>e;p e.class,e.message;end',
+    'protected\n(1/4)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(0.5,P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\n(1/4)\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(0.5,Bad.new);rescue=>e;p e.class,e.message;end',
+    'bad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(0.5,Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(0.5,Wrong.new);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(0.5,Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(0.5,Raised.new);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(0.5,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(0.5,I.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/6)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(0.5,I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/6)\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(0.5,J.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(0.5,J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(0.5,K.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(0.5,K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(0.5,Both.new);rescue=>e;p e.class,e.message;end',
+    'rational\n(1/4)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(0.5,Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\n(1/4)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(0.5,PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/6)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(0.5,PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/6)\n',
+  ],
+  [
+    'begin;p Rational(" bad ");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  ['begin;p Rational(" bad ",exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'begin;p Rational(" bad ",0);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  ['begin;p Rational(" bad ",0,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'begin;p Rational(" bad ",2);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  ['begin;p Rational(" bad ",2,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'begin;p Rational(" bad ",1r);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  ['begin;p Rational(" bad ",1r,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'begin;p Rational(" bad ",0.5);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  ['begin;p Rational(" bad ",0.5,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'begin;p Rational(" bad "," bad ");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  ['begin;p Rational(" bad "," bad ",exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'begin;p Rational(" bad "," 1/2 ");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  ['begin;p Rational(" bad "," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'begin;p Rational(" bad ",nil);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  ['begin;p Rational(" bad ",nil,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(" bad ",W.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(" bad ",W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(" bad ",A.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(" bad ",A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(" bad ",B.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(" bad ",B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(" bad ",P.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(" bad ",P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(" bad ",Bad.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(" bad ",Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(" bad ",Wrong.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(" bad ",Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(" bad ",Raised.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(" bad ",Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(" bad ",I.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(" bad ",I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(" bad ",J.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(" bad ",J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(" bad ",K.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(" bad ",K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(" bad ",Both.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(" bad ",Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(" bad ",PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(" bad ",PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(" bad ",N.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(" bad ",N.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class M<Numeric;def /(x);puts :divide;7;end;def inspect;"numeric-missing";end;end;begin;p Rational(" bad ",M.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class M<Numeric;def /(x);puts :divide;7;end;def inspect;"numeric-missing";end;end;begin;p Rational(" bad ",M.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  ['begin;p Rational(" 1/2 ");rescue=>e;p e.class,e.message;end', '(1/2)\n'],
+  ['begin;p Rational(" 1/2 ",exception:false);rescue=>e;p e.class,e.message;end', '(1/2)\n'],
+  ['begin;p Rational(" 1/2 ",0);rescue=>e;p e.class,e.message;end', 'ZeroDivisionError\n"divided by 0"\n'],
+  [
+    'begin;p Rational(" 1/2 ",0,exception:false);rescue=>e;p e.class,e.message;end',
+    'ZeroDivisionError\n"divided by 0"\n',
+  ],
+  ['begin;p Rational(" 1/2 ",2);rescue=>e;p e.class,e.message;end', '(1/4)\n'],
+  ['begin;p Rational(" 1/2 ",2,exception:false);rescue=>e;p e.class,e.message;end', '(1/4)\n'],
+  ['begin;p Rational(" 1/2 ",1r);rescue=>e;p e.class,e.message;end', '(1/2)\n'],
+  ['begin;p Rational(" 1/2 ",1r,exception:false);rescue=>e;p e.class,e.message;end', '(1/2)\n'],
+  ['begin;p Rational(" 1/2 ",0.5);rescue=>e;p e.class,e.message;end', '(1/1)\n'],
+  ['begin;p Rational(" 1/2 ",0.5,exception:false);rescue=>e;p e.class,e.message;end', '(1/1)\n'],
+  [
+    'begin;p Rational(" 1/2 "," bad ");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  ['begin;p Rational(" 1/2 "," bad ",exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  ['begin;p Rational(" 1/2 "," 1/2 ");rescue=>e;p e.class,e.message;end', '(1/1)\n'],
+  ['begin;p Rational(" 1/2 "," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end', '(1/1)\n'],
+  [
+    'begin;p Rational(" 1/2 ",nil);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  ['begin;p Rational(" 1/2 ",nil,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(" 1/2 ",W.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(" 1/2 ",W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(" 1/2 ",A.new);rescue=>e;p e.class,e.message;end',
+    'first\n(1/1)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(" 1/2 ",A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\n(1/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(" 1/2 ",B.new);rescue=>e;p e.class,e.message;end',
+    'second\n(1/4)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(" 1/2 ",B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\n(1/4)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(" 1/2 ",P.new);rescue=>e;p e.class,e.message;end',
+    'protected\n(1/4)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(" 1/2 ",P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\n(1/4)\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(" 1/2 ",Bad.new);rescue=>e;p e.class,e.message;end',
+    'bad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(" 1/2 ",Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(" 1/2 ",Wrong.new);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(" 1/2 ",Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(" 1/2 ",Raised.new);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(" 1/2 ",Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(" 1/2 ",I.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/6)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(" 1/2 ",I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/6)\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(" 1/2 ",J.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(" 1/2 ",J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(" 1/2 ",K.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(" 1/2 ",K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(" 1/2 ",Both.new);rescue=>e;p e.class,e.message;end',
+    'rational\n(1/4)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(" 1/2 ",Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\n(1/4)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(" 1/2 ",PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/6)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(" 1/2 ",PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/6)\n',
+  ],
+  ['begin;p Rational(nil);rescue=>e;p e.class,e.message;end', 'TypeError\n"can\'t convert nil into Rational"\n'],
+  ['begin;p Rational(nil,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  ['begin;p Rational(nil,0);rescue=>e;p e.class,e.message;end', 'TypeError\n"can\'t convert nil into Rational"\n'],
+  ['begin;p Rational(nil,0,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  ['begin;p Rational(nil,2);rescue=>e;p e.class,e.message;end', 'TypeError\n"can\'t convert nil into Rational"\n'],
+  ['begin;p Rational(nil,2,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  ['begin;p Rational(nil,1r);rescue=>e;p e.class,e.message;end', 'TypeError\n"can\'t convert nil into Rational"\n'],
+  ['begin;p Rational(nil,1r,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  ['begin;p Rational(nil,0.5);rescue=>e;p e.class,e.message;end', 'TypeError\n"can\'t convert nil into Rational"\n'],
+  ['begin;p Rational(nil,0.5,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'begin;p Rational(nil," bad ");rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  ['begin;p Rational(nil," bad ",exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'begin;p Rational(nil," 1/2 ");rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  ['begin;p Rational(nil," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  ['begin;p Rational(nil,nil);rescue=>e;p e.class,e.message;end', 'TypeError\n"can\'t convert nil into Rational"\n'],
+  ['begin;p Rational(nil,nil,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(nil,W.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(nil,W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(nil,A.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(nil,A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(nil,B.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(nil,B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(nil,P.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(nil,P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(nil,Bad.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(nil,Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(nil,Wrong.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(nil,Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(nil,Raised.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(nil,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(nil,I.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(nil,I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(nil,J.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(nil,J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(nil,K.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(nil,K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(nil,Both.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(nil,Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(nil,PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(nil,PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(nil,N.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(nil,N.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class M<Numeric;def /(x);puts :divide;7;end;def inspect;"numeric-missing";end;end;begin;p Rational(nil,M.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class M<Numeric;def /(x);puts :divide;7;end;def inspect;"numeric-missing";end;end;begin;p Rational(nil,M.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(W.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert W into Rational"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(W.new,0);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(W.new,0,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(W.new,2);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(W.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(W.new,1r);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(W.new,1r,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(W.new,0.5);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(W.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(W.new," bad ");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(W.new," bad ",exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(W.new," 1/2 ");rescue=>e;p e.class,e.message;end',
+    'TypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(W.new," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(W.new,nil);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(W.new,nil,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(W.new,W.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;begin;p Rational(W.new,W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(W.new,A.new);rescue=>e;p e.class,e.message;end',
+    'first\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(W.new,A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(W.new,B.new);rescue=>e;p e.class,e.message;end',
+    'second\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(W.new,B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(W.new,P.new);rescue=>e;p e.class,e.message;end',
+    'protected\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(W.new,P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(W.new,Bad.new);rescue=>e;p e.class,e.message;end',
+    'bad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(W.new,Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(W.new,Wrong.new);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(W.new,Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(W.new,Raised.new);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(W.new,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(W.new,I.new);rescue=>e;p e.class,e.message;end',
+    'integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(W.new,I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nnil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(W.new,J.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(W.new,J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(W.new,K.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(W.new,K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(W.new,Both.new);rescue=>e;p e.class,e.message;end',
+    'rational\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(W.new,Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(W.new,PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(W.new,PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nnil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(W.new,N.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(W.new,N.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new);rescue=>e;p e.class,e.message;end',
+    'first\n(1/2)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\n(1/2)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new,0);rescue=>e;p e.class,e.message;end',
+    'first\nZeroDivisionError\n"divided by 0"\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new,0,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\nZeroDivisionError\n"divided by 0"\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new,2);rescue=>e;p e.class,e.message;end',
+    'first\n(1/4)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\n(1/4)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new,1r);rescue=>e;p e.class,e.message;end',
+    'first\n(1/2)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new,1r,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\n(1/2)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new,0.5);rescue=>e;p e.class,e.message;end',
+    'first\n(1/1)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\n(1/1)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new," bad ");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new," bad ",exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new," 1/2 ");rescue=>e;p e.class,e.message;end',
+    'first\n(1/1)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end',
+    'first\n(1/1)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new,nil);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new,nil,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new,W.new);rescue=>e;p e.class,e.message;end',
+    'first\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new,W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\nnil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new,A.new);rescue=>e;p e.class,e.message;end',
+    'first\nfirst\n(1/1)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;begin;p Rational(A.new,A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\nfirst\n(1/1)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(A.new,B.new);rescue=>e;p e.class,e.message;end',
+    'first\nsecond\n(1/4)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(A.new,B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\nsecond\n(1/4)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(A.new,P.new);rescue=>e;p e.class,e.message;end',
+    'first\nprotected\n(1/4)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(A.new,P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\nprotected\n(1/4)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(A.new,Bad.new);rescue=>e;p e.class,e.message;end',
+    'first\nbad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(A.new,Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\nbad\nnil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(A.new,Wrong.new);rescue=>e;p e.class,e.message;end',
+    'first\nwrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(A.new,Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\nwrong\nnil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(A.new,Raised.new);rescue=>e;p e.class,e.message;end',
+    'first\nraised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(A.new,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\nraised\nnil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(A.new,I.new);rescue=>e;p e.class,e.message;end',
+    'integer\nfirst\n(1/6)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(A.new,I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nfirst\n(1/6)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(A.new,J.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nfirst\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(A.new,J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nfirst\nnil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(A.new,K.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nfirst\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(A.new,K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nfirst\nnil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(A.new,Both.new);rescue=>e;p e.class,e.message;end',
+    'first\nrational\n(1/4)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(A.new,Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\nrational\n(1/4)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(A.new,PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'integer\nfirst\n(1/6)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(A.new,PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nfirst\n(1/6)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new);rescue=>e;p e.class,e.message;end',
+    'second\n(2/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\n(2/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new,0);rescue=>e;p e.class,e.message;end',
+    'second\nZeroDivisionError\n"divided by 0"\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new,0,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\nZeroDivisionError\n"divided by 0"\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new,2);rescue=>e;p e.class,e.message;end',
+    'second\n(1/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\n(1/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new,1r);rescue=>e;p e.class,e.message;end',
+    'second\n(2/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new,1r,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\n(2/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new,0.5);rescue=>e;p e.class,e.message;end',
+    'second\n(4/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\n(4/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new," bad ");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new," bad ",exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new," 1/2 ");rescue=>e;p e.class,e.message;end',
+    'second\n(4/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end',
+    'second\n(4/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new,nil);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new,nil,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new,W.new);rescue=>e;p e.class,e.message;end',
+    'second\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new,W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\nnil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new,A.new);rescue=>e;p e.class,e.message;end',
+    'second\nfirst\n(4/1)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new,A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\nfirst\n(4/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new,B.new);rescue=>e;p e.class,e.message;end',
+    'second\nsecond\n(1/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;begin;p Rational(B.new,B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\nsecond\n(1/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(B.new,P.new);rescue=>e;p e.class,e.message;end',
+    'second\nprotected\n(1/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(B.new,P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\nprotected\n(1/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(B.new,Bad.new);rescue=>e;p e.class,e.message;end',
+    'second\nbad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(B.new,Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\nbad\nnil\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(B.new,Wrong.new);rescue=>e;p e.class,e.message;end',
+    'second\nwrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(B.new,Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\nwrong\nnil\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(B.new,Raised.new);rescue=>e;p e.class,e.message;end',
+    'second\nraised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(B.new,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\nraised\nnil\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(B.new,I.new);rescue=>e;p e.class,e.message;end',
+    'integer\nsecond\n(2/3)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(B.new,I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nsecond\n(2/3)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(B.new,J.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nsecond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(B.new,J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nsecond\nnil\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(B.new,K.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nsecond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(B.new,K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nsecond\nnil\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(B.new,Both.new);rescue=>e;p e.class,e.message;end',
+    'second\nrational\n(1/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(B.new,Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\nrational\n(1/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(B.new,PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'integer\nsecond\n(2/3)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(B.new,PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nsecond\n(2/3)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new);rescue=>e;p e.class,e.message;end',
+    'protected\n(2/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\n(2/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,0);rescue=>e;p e.class,e.message;end',
+    'protected\nZeroDivisionError\n"divided by 0"\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,0,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\nZeroDivisionError\n"divided by 0"\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,2);rescue=>e;p e.class,e.message;end',
+    'protected\n(1/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\n(1/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,1r);rescue=>e;p e.class,e.message;end',
+    'protected\n(2/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,1r,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\n(2/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,0.5);rescue=>e;p e.class,e.message;end',
+    'protected\n(4/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\n(4/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new," bad ");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new," bad ",exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new," 1/2 ");rescue=>e;p e.class,e.message;end',
+    'protected\n(4/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\n(4/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,nil);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,nil,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,W.new);rescue=>e;p e.class,e.message;end',
+    'protected\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\nnil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,A.new);rescue=>e;p e.class,e.message;end',
+    'protected\nfirst\n(4/1)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\nfirst\n(4/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,B.new);rescue=>e;p e.class,e.message;end',
+    'protected\nsecond\n(1/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\nsecond\n(1/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,P.new);rescue=>e;p e.class,e.message;end',
+    'protected\nprotected\n(1/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;begin;p Rational(P.new,P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\nprotected\n(1/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(P.new,Bad.new);rescue=>e;p e.class,e.message;end',
+    'protected\nbad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(P.new,Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\nbad\nnil\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(P.new,Wrong.new);rescue=>e;p e.class,e.message;end',
+    'protected\nwrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(P.new,Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\nwrong\nnil\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(P.new,Raised.new);rescue=>e;p e.class,e.message;end',
+    'protected\nraised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(P.new,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\nraised\nnil\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(P.new,I.new);rescue=>e;p e.class,e.message;end',
+    'integer\nprotected\n(2/3)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(P.new,I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nprotected\n(2/3)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(P.new,J.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nprotected\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(P.new,J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nprotected\nnil\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(P.new,K.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nprotected\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(P.new,K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nprotected\nnil\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(P.new,Both.new);rescue=>e;p e.class,e.message;end',
+    'protected\nrational\n(1/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(P.new,Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\nrational\n(1/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(P.new,PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'integer\nprotected\n(2/3)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(P.new,PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nprotected\n(2/3)\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new);rescue=>e;p e.class,e.message;end',
+    'bad\nTypeError\n"can\'t convert Bad to Rational (Bad#to_r gives NilClass)"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,0);rescue=>e;p e.class,e.message;end',
+    'bad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,0,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,2);rescue=>e;p e.class,e.message;end',
+    'bad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,1r);rescue=>e;p e.class,e.message;end',
+    'bad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,1r,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,0.5);rescue=>e;p e.class,e.message;end',
+    'bad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new," bad ");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new," bad ",exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new," 1/2 ");rescue=>e;p e.class,e.message;end',
+    'bad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,nil);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,nil,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,W.new);rescue=>e;p e.class,e.message;end',
+    'bad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,A.new);rescue=>e;p e.class,e.message;end',
+    'bad\nfirst\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,B.new);rescue=>e;p e.class,e.message;end',
+    'bad\nsecond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,P.new);rescue=>e;p e.class,e.message;end',
+    'bad\nprotected\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,Bad.new);rescue=>e;p e.class,e.message;end',
+    'bad\nbad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;begin;p Rational(Bad.new,Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Bad.new,Wrong.new);rescue=>e;p e.class,e.message;end',
+    'bad\nwrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Bad.new,Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Bad.new,Raised.new);rescue=>e;p e.class,e.message;end',
+    'bad\nraised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Bad.new,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(Bad.new,I.new);rescue=>e;p e.class,e.message;end',
+    'integer\nbad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(Bad.new,I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nbad\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(Bad.new,J.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nbad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(Bad.new,J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nbad\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(Bad.new,K.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nbad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(Bad.new,K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nbad\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Bad.new,Both.new);rescue=>e;p e.class,e.message;end',
+    'bad\nrational\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Bad.new,Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(Bad.new,PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'integer\nbad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(Bad.new,PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nbad\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(Bad.new,N.new);rescue=>e;p e.class,e.message;end',
+    'bad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(Bad.new,N.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,0);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,0,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,2);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,1r);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,1r,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,0.5);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new," bad ");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new," bad ",exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new," 1/2 ");rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,nil);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,nil,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,W.new);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,A.new);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,B.new);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,P.new);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,Bad.new);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,Wrong.new);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;begin;p Rational(Wrong.new,Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Wrong.new,Raised.new);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Wrong.new,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(Wrong.new,I.new);rescue=>e;p e.class,e.message;end',
+    'integer\nwrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(Wrong.new,I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nwrong\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(Wrong.new,J.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nwrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(Wrong.new,J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nwrong\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(Wrong.new,K.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nwrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(Wrong.new,K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nwrong\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Wrong.new,Both.new);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Wrong.new,Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(Wrong.new,PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'integer\nwrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(Wrong.new,PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nwrong\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(Wrong.new,N.new);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(Wrong.new,N.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,0);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,0,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,2);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,1r);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,1r,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,0.5);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new," bad ");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new," bad ",exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new," 1/2 ");rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,nil);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,nil,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,W.new);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,A.new);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,B.new);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,P.new);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,Bad.new);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,Wrong.new);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,Raised.new);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Raised.new,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(Raised.new,I.new);rescue=>e;p e.class,e.message;end',
+    'integer\nraised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(Raised.new,I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nraised\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(Raised.new,J.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nraised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(Raised.new,J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nraised\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(Raised.new,K.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nraised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(Raised.new,K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nraised\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Raised.new,Both.new);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Raised.new,Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(Raised.new,PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'integer\nraised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(Raised.new,PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nraised\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(Raised.new,N.new);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(Raised.new,N.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(3/1)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(3/1)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,0);rescue=>e;p e.class,e.message;end',
+    'integer\nZeroDivisionError\n"divided by 0"\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,0,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nZeroDivisionError\n"divided by 0"\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,2);rescue=>e;p e.class,e.message;end',
+    'integer\n(3/2)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(3/2)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,1r);rescue=>e;p e.class,e.message;end',
+    'integer\n(3/1)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,1r,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(3/1)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,0.5);rescue=>e;p e.class,e.message;end',
+    'integer\n(6/1)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(6/1)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new," bad ");rescue=>e;p e.class,e.message;end',
+    'integer\nArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new," bad ",exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new," 1/2 ");rescue=>e;p e.class,e.message;end',
+    'integer\n(6/1)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(6/1)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,nil);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,nil,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,W.new);rescue=>e;p e.class,e.message;end',
+    'integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nnil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,A.new);rescue=>e;p e.class,e.message;end',
+    'integer\nfirst\n(6/1)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nfirst\n(6/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,B.new);rescue=>e;p e.class,e.message;end',
+    'integer\nsecond\n(3/2)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nsecond\n(3/2)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,P.new);rescue=>e;p e.class,e.message;end',
+    'integer\nprotected\n(3/2)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nprotected\n(3/2)\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,Bad.new);rescue=>e;p e.class,e.message;end',
+    'integer\nbad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nbad\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,Wrong.new);rescue=>e;p e.class,e.message;end',
+    'integer\nwrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nwrong\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,Raised.new);rescue=>e;p e.class,e.message;end',
+    'integer\nraised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nraised\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,I.new);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;begin;p Rational(I.new,I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(I.new,J.new);rescue=>e;p e.class,e.message;end',
+    'integer\nbad_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(I.new,J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nbad_integer\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(I.new,K.new);rescue=>e;p e.class,e.message;end',
+    'integer\nraised_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(I.new,K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nraised_integer\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(I.new,Both.new);rescue=>e;p e.class,e.message;end',
+    'integer\nrational\n(3/2)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(I.new,Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nrational\n(3/2)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(I.new,PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(I.new,PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nTypeError\n"can\'t convert J into Rational"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,0);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,0,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,2);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,1r);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,1r,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,0.5);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new," bad ");rescue=>e;p e.class,e.message;end',
+    'bad_integer\nArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new," bad ",exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new," 1/2 ");rescue=>e;p e.class,e.message;end',
+    'bad_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,nil);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,nil,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,W.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,A.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nfirst\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,B.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nsecond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,P.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nprotected\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,Bad.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nbad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,Wrong.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nwrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,Raised.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nraised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,I.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\ninteger\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\ninteger\nnil\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,J.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nbad_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;begin;p Rational(J.new,J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nbad_integer\nnil\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(J.new,K.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nraised_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(J.new,K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nraised_integer\nnil\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(J.new,Both.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nrational\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(J.new,Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(J.new,PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\ninteger\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(J.new,PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\ninteger\nnil\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(J.new,N.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(J.new,N.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nTypeError\n"can\'t convert K into Rational"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,0);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,0,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,2);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,1r);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,1r,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,0.5);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new," bad ");rescue=>e;p e.class,e.message;end',
+    'raised_integer\nArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new," bad ",exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new," 1/2 ");rescue=>e;p e.class,e.message;end',
+    'raised_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,nil);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,nil,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,W.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,A.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nfirst\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,B.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nsecond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,P.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nprotected\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,Bad.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nbad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,Wrong.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nwrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,Raised.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nraised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,I.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\ninteger\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\ninteger\nnil\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,J.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nbad_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nbad_integer\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,K.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nraised_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;begin;p Rational(K.new,K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nraised_integer\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(K.new,Both.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nrational\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(K.new,Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(K.new,PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\ninteger\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(K.new,PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\ninteger\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(K.new,N.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(K.new,N.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new);rescue=>e;p e.class,e.message;end',
+    'rational\n(2/1)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\n(2/1)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,0);rescue=>e;p e.class,e.message;end',
+    'rational\nZeroDivisionError\n"divided by 0"\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,0,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\nZeroDivisionError\n"divided by 0"\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,2);rescue=>e;p e.class,e.message;end',
+    'rational\n(1/1)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\n(1/1)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,1r);rescue=>e;p e.class,e.message;end',
+    'rational\n(2/1)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,1r,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\n(2/1)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,0.5);rescue=>e;p e.class,e.message;end',
+    'rational\n(4/1)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\n(4/1)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new," bad ");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new," bad ",exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new," 1/2 ");rescue=>e;p e.class,e.message;end',
+    'rational\n(4/1)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\n(4/1)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,nil);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,nil,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,W.new);rescue=>e;p e.class,e.message;end',
+    'rational\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\nnil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,A.new);rescue=>e;p e.class,e.message;end',
+    'rational\nfirst\n(4/1)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\nfirst\n(4/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,B.new);rescue=>e;p e.class,e.message;end',
+    'rational\nsecond\n(1/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\nsecond\n(1/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,P.new);rescue=>e;p e.class,e.message;end',
+    'rational\nprotected\n(1/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\nprotected\n(1/1)\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,Bad.new);rescue=>e;p e.class,e.message;end',
+    'rational\nbad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\nbad\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,Wrong.new);rescue=>e;p e.class,e.message;end',
+    'rational\nwrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\nwrong\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,Raised.new);rescue=>e;p e.class,e.message;end',
+    'rational\nraised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\nraised\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,I.new);rescue=>e;p e.class,e.message;end',
+    'integer\nrational\n(2/3)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nrational\n(2/3)\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,J.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nrational\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nrational\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,K.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nrational\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nrational\nnil\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,Both.new);rescue=>e;p e.class,e.message;end',
+    'rational\nrational\n(1/1)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\nrational\n(1/1)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'integer\nrational\n(2/3)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(Both.new,PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nrational\n(2/3)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(3/1)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(3/1)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,0);rescue=>e;p e.class,e.message;end',
+    'integer\nZeroDivisionError\n"divided by 0"\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,0,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nZeroDivisionError\n"divided by 0"\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,2);rescue=>e;p e.class,e.message;end',
+    'integer\n(3/2)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(3/2)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,1r);rescue=>e;p e.class,e.message;end',
+    'integer\n(3/1)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,1r,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(3/1)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,0.5);rescue=>e;p e.class,e.message;end',
+    'integer\n(6/1)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(6/1)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new," bad ");rescue=>e;p e.class,e.message;end',
+    'integer\nArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new," bad ",exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nnil\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new," 1/2 ");rescue=>e;p e.class,e.message;end',
+    'integer\n(6/1)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(6/1)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,nil);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,nil,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,W.new);rescue=>e;p e.class,e.message;end',
+    'integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nnil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,A.new);rescue=>e;p e.class,e.message;end',
+    'integer\nfirst\n(6/1)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nfirst\n(6/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,B.new);rescue=>e;p e.class,e.message;end',
+    'integer\nsecond\n(3/2)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nsecond\n(3/2)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,P.new);rescue=>e;p e.class,e.message;end',
+    'integer\nprotected\n(3/2)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nprotected\n(3/2)\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,Bad.new);rescue=>e;p e.class,e.message;end',
+    'integer\nbad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nbad\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,Wrong.new);rescue=>e;p e.class,e.message;end',
+    'integer\nwrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nwrong\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,Raised.new);rescue=>e;p e.class,e.message;end',
+    'integer\nraised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nraised\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,I.new);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,J.new);rescue=>e;p e.class,e.message;end',
+    'integer\nbad_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nbad_integer\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,K.new);rescue=>e;p e.class,e.message;end',
+    'integer\nraised_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nraised_integer\nnil\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,Both.new);rescue=>e;p e.class,e.message;end',
+    'integer\nrational\n(3/2)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nrational\n(3/2)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(PrivateBoth.new,PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new);rescue=>e;p e.class,e.message;end',
+    'numeric\n(2/1)\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'numeric\n(2/1)\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,0);rescue=>e;p e.class,e.message;end',
+    'numeric\nZeroDivisionError\n"divided by 0"\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,0,exception:false);rescue=>e;p e.class,e.message;end',
+    'numeric\nZeroDivisionError\n"divided by 0"\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,2);rescue=>e;p e.class,e.message;end',
+    'numeric\n(1/1)\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'numeric\n(1/1)\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,1r);rescue=>e;p e.class,e.message;end',
+    'numeric\n(2/1)\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,1r,exception:false);rescue=>e;p e.class,e.message;end',
+    'numeric\n(2/1)\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,0.5);rescue=>e;p e.class,e.message;end',
+    'numeric\n(4/1)\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'numeric\n(4/1)\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new," bad ");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new," bad ",exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new," 1/2 ");rescue=>e;p e.class,e.message;end',
+    'numeric\n(4/1)\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new," 1/2 ",exception:false);rescue=>e;p e.class,e.message;end',
+    'numeric\n(4/1)\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,nil);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,nil,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,W.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"not an integer"\n',
+  ],
+  [
+    'class W;def to_str;puts :string;"1/2";end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,W.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,A.new);rescue=>e;p e.class,e.message;end',
+    'first\nnumeric\n(4/1)\n',
+  ],
+  [
+    'class A;def to_r;puts :first;1r/2;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,A.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'first\nnumeric\n(4/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,B.new);rescue=>e;p e.class,e.message;end',
+    'second\nnumeric\n(1/1)\n',
+  ],
+  [
+    'class B;private;def to_r;puts :second;2r;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,B.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'second\nnumeric\n(1/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,P.new);rescue=>e;p e.class,e.message;end',
+    'protected\nnumeric\n(1/1)\n',
+  ],
+  [
+    'class P;protected;def to_r;puts :protected;2r;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,P.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'protected\nnumeric\n(1/1)\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,Bad.new);rescue=>e;p e.class,e.message;end',
+    'bad\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class Bad;def to_r;puts :bad;nil;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,Bad.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad\nnil\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,Wrong.new);rescue=>e;p e.class,e.message;end',
+    'wrong\nTypeError\n"can\'t convert Wrong to Rational (Wrong#to_r gives Integer)"\n',
+  ],
+  [
+    'class Wrong;def to_r;puts :wrong;2;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,Wrong.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'wrong\nnil\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,Raised.new);rescue=>e;p e.class,e.message;end',
+    'raised\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,I.new);rescue=>e;p e.class,e.message;end',
+    'integer\nnumeric\n(2/3)\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;3;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,I.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nnumeric\n(2/3)\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,J.new);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class J;def to_int;puts :bad_integer;nil;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,J.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'bad_integer\nnil\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,K.new);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class K;def to_int;puts :raised_integer;raise "stop";end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,K.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'raised_integer\nnil\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,Both.new);rescue=>e;p e.class,e.message;end',
+    'rational\nnumeric\n(1/1)\n',
+  ],
+  [
+    'class Both;def to_int;puts :integer;3;end;def to_r;puts :rational;2r;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,Both.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\nnumeric\n(1/1)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,PrivateBoth.new);rescue=>e;p e.class,e.message;end',
+    'integer\nnumeric\n(2/3)\n',
+  ],
+  [
+    'class PrivateBoth;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(N.new,PrivateBoth.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\nnumeric\n(2/3)\n',
+  ],
+  [
+    'class M<Numeric;def /(x);puts :divide;7;end;def inspect;"numeric-missing";end;end;begin;p Rational(M.new,nil);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  [
+    'class M<Numeric;def /(x);puts :divide;7;end;def inspect;"numeric-missing";end;end;begin;p Rational(M.new,nil,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(2/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(2/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"can\'t convert X into Rational"\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(2/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(2/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"can\'t convert X into Rational"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(2/1)\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(2/1)\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;true;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"can\'t convert X into Rational"\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;false;end;def to_int;puts :integer;3;end;public;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(2/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(2/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"can\'t convert X into Rational"\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(2/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(2/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"can\'t convert X into Rational"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(2/1)\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(2/1)\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;true;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"can\'t convert X into Rational"\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;false;end;def to_int;puts :integer;3;end;private;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(2/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(2/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"can\'t convert X into Rational"\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(2/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(2/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"can\'t convert X into Rational"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x,all=false);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(x,all);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(2/1)\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(2/1)\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;true;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrational\n(1/1)\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"can\'t convert X into Rational"\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nTypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X;def respond_to?(*args);puts :respond;false;end;def to_int;puts :integer;3;end;protected;def to_r;puts :rational;2r;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'respond\nrespond\nrespond\nnil\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1);rescue=>e;p e.class,e.message;end',
+    'rational\n(2/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1,X.new);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\n(2/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'rational\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1r/2);rescue=>e;p e.class,e.message;end',
+    'rational\n(4/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1r/2,X.new);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1r/2,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\n(4/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1r/2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,0.5);rescue=>e;p e.class,e.message;end',
+    'rational\n(4/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(0.5,X.new);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\n(4/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(0.5,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new);rescue=>e;p e.class,e.message;end',
+    'rational\ncoerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new);rescue=>e;p e.class,e.message;end',
+    'rational\ncoerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\ncoerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\ncoerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1);rescue=>e;p e.class,e.message;end',
+    'integer\n(4/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/4)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(4/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/4)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'integer\n(2/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/2)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(2/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/2)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1r/2);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1r/2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1r/2,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1r/2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,0.5);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(0.5,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(0.5,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1);rescue=>e;p e.class,e.message;end',
+    'integer\n(4/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/4)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(4/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/4)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'integer\n(2/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/2)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(2/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/2)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1r/2);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1r/2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1r/2,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1r/2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,0.5);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(0.5,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(0.5,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;2r;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1);rescue=>e;p e.class,e.message;end',
+    'rational\nnumeric\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1,X.new);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\nnumeric\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1r/2);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1r/2,X.new);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1r/2,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1r/2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,0.5);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(0.5,X.new);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(0.5,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1);rescue=>e;p e.class,e.message;end',
+    'integer\n(4/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/4)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(4/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/4)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'integer\n(2/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/2)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(2/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/2)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1r/2);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1r/2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1r/2,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1r/2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,0.5);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(0.5,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(0.5,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1);rescue=>e;p e.class,e.message;end',
+    'integer\n(4/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/4)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(4/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/4)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'integer\n(2/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/2)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(2/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/2)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1r/2);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1r/2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1r/2,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1r/2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,0.5);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(0.5,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(0.5,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;nil;end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1);rescue=>e;p e.class,e.message;end',
+    'rational\nnumeric\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1,X.new);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\nnumeric\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1r/2);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1r/2,X.new);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1r/2,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1r/2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,0.5);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(0.5,X.new);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(0.5,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'coerce\n(2/3)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;public;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\ndivide\n7\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1);rescue=>e;p e.class,e.message;end',
+    'integer\n(4/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/4)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(4/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/4)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'integer\n(2/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/2)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(2/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/2)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1r/2);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1r/2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1r/2,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1r/2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,0.5);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(0.5,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(0.5,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;private;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1);rescue=>e;p e.class,e.message;end',
+    'integer\n(4/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/4)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(4/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/4)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,2);rescue=>e;p e.class,e.message;end',
+    'integer\n(2/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/2)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,2,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(2/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/2)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1r/2);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1r/2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,1r/2,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(1r/2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,0.5);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(0.5,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,0.5,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(8/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(0.5,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\n(1/8)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  [
+    'class X<Numeric;def inspect;"numeric";end;protected;def to_r;puts :rational;raise "stop";end;def /(x);puts :divide;7;end;def coerce(x);puts :coerce;[2r,3r];end;def to_int;puts :integer;4;end;end;begin;p Rational(X.new,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ninteger\n(1/1)\n',
+  ],
+  ['begin;p Rational("1/0");rescue=>e;p e.class,e.message;end', 'ZeroDivisionError\n"divided by 0"\n'],
+  ['begin;p Rational("1/0",exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  ['begin;p Rational("1/0",1);rescue=>e;p e.class,e.message;end', 'ZeroDivisionError\n"divided by 0"\n'],
+  ['begin;p Rational("1/0",1,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  ['begin;p Rational("1/0",nil);rescue=>e;p e.class,e.message;end', 'TypeError\n"can\'t convert nil into Rational"\n'],
+  ['begin;p Rational("1/0",nil,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational("1/0",Raised.new);rescue=>e;p e.class,e.message;end',
+    'ZeroDivisionError\n"divided by 0"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational("1/0",Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  ['begin;p Rational("0/0");rescue=>e;p e.class,e.message;end', 'ZeroDivisionError\n"divided by 0"\n'],
+  ['begin;p Rational("0/0",exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  ['begin;p Rational("0/0",1);rescue=>e;p e.class,e.message;end', 'ZeroDivisionError\n"divided by 0"\n'],
+  ['begin;p Rational("0/0",1,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  ['begin;p Rational("0/0",nil);rescue=>e;p e.class,e.message;end', 'TypeError\n"can\'t convert nil into Rational"\n'],
+  ['begin;p Rational("0/0",nil,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational("0/0",Raised.new);rescue=>e;p e.class,e.message;end',
+    'ZeroDivisionError\n"divided by 0"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational("0/0",Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  ['begin;p Rational(Float::INFINITY);rescue=>e;p e.class,e.message;end', 'FloatDomainError\n"Infinity"\n'],
+  [
+    'begin;p Rational(Float::INFINITY,exception:false);rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"Infinity"\n',
+  ],
+  ['begin;p Rational(Float::INFINITY,1);rescue=>e;p e.class,e.message;end', 'FloatDomainError\n"Infinity"\n'],
+  [
+    'begin;p Rational(Float::INFINITY,1,exception:false);rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"Infinity"\n',
+  ],
+  [
+    'begin;p Rational(Float::INFINITY,nil);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  ['begin;p Rational(Float::INFINITY,nil,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Float::INFINITY,Raised.new);rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"Infinity"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Float::INFINITY,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"Infinity"\n',
+  ],
+  ['begin;p Rational(Float::NAN);rescue=>e;p e.class,e.message;end', 'FloatDomainError\n"NaN"\n'],
+  ['begin;p Rational(Float::NAN,exception:false);rescue=>e;p e.class,e.message;end', 'FloatDomainError\n"NaN"\n'],
+  ['begin;p Rational(Float::NAN,1);rescue=>e;p e.class,e.message;end', 'FloatDomainError\n"NaN"\n'],
+  ['begin;p Rational(Float::NAN,1,exception:false);rescue=>e;p e.class,e.message;end', 'FloatDomainError\n"NaN"\n'],
+  [
+    'begin;p Rational(Float::NAN,nil);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert nil into Rational"\n',
+  ],
+  ['begin;p Rational(Float::NAN,nil,exception:false);rescue=>e;p e.class,e.message;end', 'nil\n'],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Float::NAN,Raised.new);rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"NaN"\n',
+  ],
+  [
+    'class Raised;def to_r;puts :raised;raise "stop";end;end;begin;p Rational(Float::NAN,Raised.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"NaN"\n',
+  ],
+  [
+    'class Integer;def to_r;puts :integer;2r;end;end;class Y;public;def /(x);puts :divide;7;end;end;class X<Numeric;def to_r;nil;end;private;def coerce(x);puts :coerce;[Y.new,2];end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ncoerce\ndivide\n7\n',
+  ],
+  [
+    'class Integer;def to_r;puts :integer;2r;end;end;class Y;public;def /(x);puts :divide;7;end;end;class X<Numeric;def to_r;nil;end;private;def coerce(x);puts :coerce;[Y.new,2];end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ncoerce\ndivide\n7\n',
+  ],
+  [
+    'class Integer;def to_r;puts :integer;2r;end;end;class Y;private;def /(x);puts :divide;7;end;end;class X<Numeric;def to_r;nil;end;private;def coerce(x);puts :coerce;[Y.new,2];end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ncoerce\ndivide\n7\n',
+  ],
+  [
+    'class Integer;def to_r;puts :integer;2r;end;end;class Y;private;def /(x);puts :divide;7;end;end;class X<Numeric;def to_r;nil;end;private;def coerce(x);puts :coerce;[Y.new,2];end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ncoerce\ndivide\n7\n',
+  ],
+  [
+    'class Integer;def to_r;puts :integer;2r;end;end;class Y;protected;def /(x);puts :divide;7;end;end;class X<Numeric;def to_r;nil;end;private;def coerce(x);puts :coerce;[Y.new,2];end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ncoerce\ndivide\n7\n',
+  ],
+  [
+    'class Integer;def to_r;puts :integer;2r;end;end;class Y;protected;def /(x);puts :divide;7;end;end;class X<Numeric;def to_r;nil;end;private;def coerce(x);puts :coerce;[Y.new,2];end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ncoerce\ndivide\n7\n',
+  ],
+  [
+    'class Integer;def to_r;puts :integer;nil;end;end;class Y;public;def /(x);puts :divide;7;end;end;class X<Numeric;def to_r;nil;end;private;def coerce(x);puts :coerce;[Y.new,2];end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ncoerce\ndivide\n7\n',
+  ],
+  [
+    'class Integer;def to_r;puts :integer;nil;end;end;class Y;public;def /(x);puts :divide;7;end;end;class X<Numeric;def to_r;nil;end;private;def coerce(x);puts :coerce;[Y.new,2];end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ncoerce\ndivide\n7\n',
+  ],
+  [
+    'class Integer;def to_r;puts :integer;nil;end;end;class Y;private;def /(x);puts :divide;7;end;end;class X<Numeric;def to_r;nil;end;private;def coerce(x);puts :coerce;[Y.new,2];end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ncoerce\ndivide\n7\n',
+  ],
+  [
+    'class Integer;def to_r;puts :integer;nil;end;end;class Y;private;def /(x);puts :divide;7;end;end;class X<Numeric;def to_r;nil;end;private;def coerce(x);puts :coerce;[Y.new,2];end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ncoerce\ndivide\n7\n',
+  ],
+  [
+    'class Integer;def to_r;puts :integer;nil;end;end;class Y;protected;def /(x);puts :divide;7;end;end;class X<Numeric;def to_r;nil;end;private;def coerce(x);puts :coerce;[Y.new,2];end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ncoerce\ndivide\n7\n',
+  ],
+  [
+    'class Integer;def to_r;puts :integer;nil;end;end;class Y;protected;def /(x);puts :divide;7;end;end;class X<Numeric;def to_r;nil;end;private;def coerce(x);puts :coerce;[Y.new,2];end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ncoerce\ndivide\n7\n',
+  ],
+  [
+    'class Integer;def to_r;puts :integer;raise "integer conversion";end;end;class Y;public;def /(x);puts :divide;7;end;end;class X<Numeric;def to_r;nil;end;private;def coerce(x);puts :coerce;[Y.new,2];end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ncoerce\ndivide\n7\n',
+  ],
+  [
+    'class Integer;def to_r;puts :integer;raise "integer conversion";end;end;class Y;public;def /(x);puts :divide;7;end;end;class X<Numeric;def to_r;nil;end;private;def coerce(x);puts :coerce;[Y.new,2];end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ncoerce\ndivide\n7\n',
+  ],
+  [
+    'class Integer;def to_r;puts :integer;raise "integer conversion";end;end;class Y;private;def /(x);puts :divide;7;end;end;class X<Numeric;def to_r;nil;end;private;def coerce(x);puts :coerce;[Y.new,2];end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ncoerce\ndivide\n7\n',
+  ],
+  [
+    'class Integer;def to_r;puts :integer;raise "integer conversion";end;end;class Y;private;def /(x);puts :divide;7;end;end;class X<Numeric;def to_r;nil;end;private;def coerce(x);puts :coerce;[Y.new,2];end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ncoerce\ndivide\n7\n',
+  ],
+  [
+    'class Integer;def to_r;puts :integer;raise "integer conversion";end;end;class Y;protected;def /(x);puts :divide;7;end;end;class X<Numeric;def to_r;nil;end;private;def coerce(x);puts :coerce;[Y.new,2];end;end;begin;p Rational(2,X.new);rescue=>e;p e.class,e.message;end',
+    'integer\ncoerce\ndivide\n7\n',
+  ],
+  [
+    'class Integer;def to_r;puts :integer;raise "integer conversion";end;end;class Y;protected;def /(x);puts :divide;7;end;end;class X<Numeric;def to_r;nil;end;private;def coerce(x);puts :coerce;[Y.new,2];end;end;begin;p Rational(2,X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'integer\ncoerce\ndivide\n7\n',
+  ],
+] as const;
+
+test.each(nativeRationalConversionStageCases)(
+  'Rational conversion stages preserve validation, callback order and error precedence: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
+
+const nativePublicQueryStageCases = [
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;public;def respond_to?(name);p name;true;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    ':call\n:call\ncall\n3\n:call\ncall\n3\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;public;def respond_to?(name);p name;true;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    ':force\n:each\neach\n[2]\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;public;def respond_to?(name);p name;false;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    ':call\n:to_int\nTypeError\n"no implicit conversion of X into Integer"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;public;def respond_to?(name);p name;false;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    ':force\n:to_ary\n[x]\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;private;def respond_to?(name);p name;true;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    ':call\n:call\ncall\n3\n:call\ncall\n3\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;private;def respond_to?(name);p name;true;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    ':force\n:each\neach\n[2]\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;private;def respond_to?(name);p name;false;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    ':call\n:to_int\nTypeError\n"no implicit conversion of X into Integer"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;private;def respond_to?(name);p name;false;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    ':force\n:to_ary\n[x]\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;protected;def respond_to?(name);p name;true;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    ':call\n:call\ncall\n3\n:call\ncall\n3\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;protected;def respond_to?(name);p name;true;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    ':force\n:each\neach\n[2]\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;protected;def respond_to?(name);p name;false;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    ':call\n:to_int\nTypeError\n"no implicit conversion of X into Integer"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;protected;def respond_to?(name);p name;false;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    ':force\n:to_ary\n[x]\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;public;def respond_to?(name,all=false);p name,all;true;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    ':call\nfalse\n:call\ntrue\ncall\n3\n:call\ntrue\ncall\n3\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;public;def respond_to?(name,all=false);p name,all;true;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    ':force\nfalse\n:each\nfalse\neach\n[2]\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;public;def respond_to?(name,all=false);p name,all;false;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    ':call\nfalse\n:to_int\ntrue\nTypeError\n"no implicit conversion of X into Integer"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;public;def respond_to?(name,all=false);p name,all;false;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    ':force\nfalse\n:to_ary\ntrue\n[x]\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;private;def respond_to?(name,all=false);p name,all;true;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    ':call\nfalse\n:call\ntrue\ncall\n3\n:call\ntrue\ncall\n3\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;private;def respond_to?(name,all=false);p name,all;true;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    ':force\nfalse\n:each\nfalse\neach\n[2]\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;private;def respond_to?(name,all=false);p name,all;false;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    ':call\nfalse\n:to_int\ntrue\nTypeError\n"no implicit conversion of X into Integer"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;private;def respond_to?(name,all=false);p name,all;false;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    ':force\nfalse\n:to_ary\ntrue\n[x]\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;protected;def respond_to?(name,all=false);p name,all;true;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    ':call\nfalse\n:call\ntrue\ncall\n3\n:call\ntrue\ncall\n3\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;protected;def respond_to?(name,all=false);p name,all;true;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    ':force\nfalse\n:each\nfalse\neach\n[2]\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;protected;def respond_to?(name,all=false);p name,all;false;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    ':call\nfalse\n:to_int\ntrue\nTypeError\n"no implicit conversion of X into Integer"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;protected;def respond_to?(name,all=false);p name,all;false;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    ':force\nfalse\n:to_ary\ntrue\n[x]\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;public;def respond_to?(name,all);p name,all;true;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;public;def respond_to?(name,all);p name,all;true;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;public;def respond_to?(name,all);p name,all;false;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;public;def respond_to?(name,all);p name,all;false;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;private;def respond_to?(name,all);p name,all;true;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;private;def respond_to?(name,all);p name,all;true;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;private;def respond_to?(name,all);p name,all;false;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;private;def respond_to?(name,all);p name,all;false;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;protected;def respond_to?(name,all);p name,all;true;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;protected;def respond_to?(name,all);p name,all;true;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;protected;def respond_to?(name,all);p name,all;false;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;protected;def respond_to?(name,all);p name,all;false;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;public;def respond_to?(*args);p args;true;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    '[:call]\n[:call, true]\ncall\n3\n[:call, true]\ncall\n3\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;public;def respond_to?(*args);p args;true;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    '[:force]\n[:each]\neach\n[2]\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;public;def respond_to?(*args);p args;false;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    '[:call]\n[:to_int, true]\nTypeError\n"no implicit conversion of X into Integer"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;public;def respond_to?(*args);p args;false;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    '[:force]\n[:to_ary, true]\n[x]\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;private;def respond_to?(*args);p args;true;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    '[:call]\n[:call, true]\ncall\n3\n[:call, true]\ncall\n3\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;private;def respond_to?(*args);p args;true;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    '[:force]\n[:each]\neach\n[2]\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;private;def respond_to?(*args);p args;false;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    '[:call]\n[:to_int, true]\nTypeError\n"no implicit conversion of X into Integer"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;private;def respond_to?(*args);p args;false;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    '[:force]\n[:to_ary, true]\n[x]\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;protected;def respond_to?(*args);p args;true;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    '[:call]\n[:call, true]\ncall\n3\n[:call, true]\ncall\n3\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;protected;def respond_to?(*args);p args;true;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    '[:force]\n[:each]\neach\n[2]\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;protected;def respond_to?(*args);p args;false;end;end;begin;e=Enumerator.new(X.new){|y|y<<1};p e.size;p e.size;rescue=>e;p e.class,e.message;end',
+    '[:call]\n[:to_int, true]\nTypeError\n"no implicit conversion of X into Integer"\n',
+  ],
+  [
+    'class X;def inspect;"x";end;def call;puts :call;3;end;def force;puts :force;self;end;def each;puts :each;yield 2;end;protected;def respond_to?(*args);p args;false;end;end;begin;p [1].lazy.flat_map{|x|X.new}.force;rescue=>e;p e.class,e.message;end',
+    '[:force]\n[:to_ary, true]\n[x]\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(){|y|y<<1};class NilClass;public;def call;puts :call;7;end;end;p e.size;p e.dup.size',
+    'call\n7\ncall\n7\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(){|y|y<<1};class NilClass;public;def call;puts :call;nil;end;end;p e.size;p e.dup.size',
+    'call\nnil\ncall\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(){|y|y<<1};class NilClass;private;def call;puts :call;7;end;end;p e.size;p e.dup.size',
+    'call\n7\ncall\n7\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(){|y|y<<1};class NilClass;private;def call;puts :call;nil;end;end;p e.size;p e.dup.size',
+    'call\nnil\ncall\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(){|y|y<<1};class NilClass;protected;def call;puts :call;7;end;end;p e.size;p e.dup.size',
+    'call\n7\ncall\n7\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(){|y|y<<1};class NilClass;protected;def call;puts :call;nil;end;end;p e.size;p e.dup.size',
+    'call\nnil\ncall\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(nil){|y|y<<1};class NilClass;public;def call;puts :call;7;end;end;p e.size;p e.dup.size',
+    'call\n7\ncall\n7\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(nil){|y|y<<1};class NilClass;public;def call;puts :call;nil;end;end;p e.size;p e.dup.size',
+    'call\nnil\ncall\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(nil){|y|y<<1};class NilClass;private;def call;puts :call;7;end;end;p e.size;p e.dup.size',
+    'call\n7\ncall\n7\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(nil){|y|y<<1};class NilClass;private;def call;puts :call;nil;end;end;p e.size;p e.dup.size',
+    'call\nnil\ncall\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(nil){|y|y<<1};class NilClass;protected;def call;puts :call;7;end;end;p e.size;p e.dup.size',
+    'call\n7\ncall\n7\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(nil){|y|y<<1};class NilClass;protected;def call;puts :call;nil;end;end;p e.size;p e.dup.size',
+    'call\nnil\ncall\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(2){|y|y<<1};class Integer;public;def call;puts :call;7;end;end;p e.size;p e.dup.size',
+    'call\n7\ncall\n7\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(2){|y|y<<1};class Integer;public;def call;puts :call;nil;end;end;p e.size;p e.dup.size',
+    'call\nnil\ncall\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(2){|y|y<<1};class Integer;private;def call;puts :call;7;end;end;p e.size;p e.dup.size',
+    'call\n7\ncall\n7\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(2){|y|y<<1};class Integer;private;def call;puts :call;nil;end;end;p e.size;p e.dup.size',
+    'call\nnil\ncall\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(2){|y|y<<1};class Integer;protected;def call;puts :call;7;end;end;p e.size;p e.dup.size',
+    'call\n7\ncall\n7\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(2){|y|y<<1};class Integer;protected;def call;puts :call;nil;end;end;p e.size;p e.dup.size',
+    'call\nnil\ncall\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(Float::INFINITY){|y|y<<1};class Float;public;def call;puts :call;7;end;end;p e.size;p e.dup.size',
+    'call\n7\ncall\n7\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(Float::INFINITY){|y|y<<1};class Float;public;def call;puts :call;nil;end;end;p e.size;p e.dup.size',
+    'call\nnil\ncall\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(Float::INFINITY){|y|y<<1};class Float;private;def call;puts :call;7;end;end;p e.size;p e.dup.size',
+    'call\n7\ncall\n7\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(Float::INFINITY){|y|y<<1};class Float;private;def call;puts :call;nil;end;end;p e.size;p e.dup.size',
+    'call\nnil\ncall\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(Float::INFINITY){|y|y<<1};class Float;protected;def call;puts :call;7;end;end;p e.size;p e.dup.size',
+    'call\n7\ncall\n7\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(Float::INFINITY){|y|y<<1};class Float;protected;def call;puts :call;nil;end;end;p e.size;p e.dup.size',
+    'call\nnil\ncall\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(I.new){|y|y<<1};class Integer;public;def call;puts :call;7;end;end;p e.size;p e.dup.size',
+    'integer\ncall\n7\ncall\n7\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(I.new){|y|y<<1};class Integer;public;def call;puts :call;nil;end;end;p e.size;p e.dup.size',
+    'integer\ncall\nnil\ncall\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(I.new){|y|y<<1};class Integer;private;def call;puts :call;7;end;end;p e.size;p e.dup.size',
+    'integer\ncall\n7\ncall\n7\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(I.new){|y|y<<1};class Integer;private;def call;puts :call;nil;end;end;p e.size;p e.dup.size',
+    'integer\ncall\nnil\ncall\nnil\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(I.new){|y|y<<1};class Integer;protected;def call;puts :call;7;end;end;p e.size;p e.dup.size',
+    'integer\ncall\n7\ncall\n7\n',
+  ],
+  [
+    'class I;def to_int;puts :integer;2;end;end;e=Enumerator.new(I.new){|y|y<<1};class Integer;protected;def call;puts :call;nil;end;end;p e.size;p e.dup.size',
+    'integer\ncall\nnil\ncall\nnil\n',
+  ],
+  [
+    'class Proc;public :call;end;begin;e=Enumerator.new(->{puts :block;3}){|y|y<<1};class Proc;public :call;end;p e.size;rescue=>e;p e.class,e.message;end',
+    'block\n3\n',
+  ],
+  [
+    'class Proc;public :call;end;begin;e=Enumerator.new(->{puts :block;3}){|y|y<<1};class Proc;private :call;end;p e.size;rescue=>e;p e.class,e.message;end',
+    'block\n3\n',
+  ],
+  [
+    'class Proc;public :call;end;begin;e=Enumerator.new(->{puts :block;3}){|y|y<<1};class Proc;protected :call;end;p e.size;rescue=>e;p e.class,e.message;end',
+    'block\n3\n',
+  ],
+  [
+    'class Proc;private :call;end;begin;e=Enumerator.new(->{puts :block;3}){|y|y<<1};class Proc;public :call;end;p e.size;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Proc into Integer"\n',
+  ],
+  [
+    'class Proc;private :call;end;begin;e=Enumerator.new(->{puts :block;3}){|y|y<<1};class Proc;private :call;end;p e.size;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Proc into Integer"\n',
+  ],
+  [
+    'class Proc;private :call;end;begin;e=Enumerator.new(->{puts :block;3}){|y|y<<1};class Proc;protected :call;end;p e.size;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Proc into Integer"\n',
+  ],
+  [
+    'class Proc;protected :call;end;begin;e=Enumerator.new(->{puts :block;3}){|y|y<<1};class Proc;public :call;end;p e.size;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Proc into Integer"\n',
+  ],
+  [
+    'class Proc;protected :call;end;begin;e=Enumerator.new(->{puts :block;3}){|y|y<<1};class Proc;private :call;end;p e.size;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Proc into Integer"\n',
+  ],
+  [
+    'class Proc;protected :call;end;begin;e=Enumerator.new(->{puts :block;3}){|y|y<<1};class Proc;protected :call;end;p e.size;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Proc into Integer"\n',
+  ],
+  [
+    'class X;attr_accessor :answer;def initialize;@answer=true;end;def respond_to?(*args);p args;@answer;end;def call;puts :call;3;end;def inspect;"size";end;end;x=X.new;e=Enumerator.new(x){|y|y<<1};x.answer=true;p e.size',
+    '[:call]\n[:call, true]\ncall\n3\n',
+  ],
+  [
+    'class X;attr_accessor :answer;def initialize;@answer=true;end;def respond_to?(*args);p args;@answer;end;def call;puts :call;3;end;def inspect;"size";end;end;x=X.new;e=Enumerator.new(x){|y|y<<1};x.answer=false;p e.size',
+    '[:call]\n[:call, true]\nsize\n',
+  ],
+] as const;
+
+test.each(nativePublicQueryStageCases)(
+  'Public validation and internal size queries preserve native callback stages: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
+
+const numericConversionRefusals = [
+  [
+    'class N<Numeric;def to_r;puts :numeric;2r;end;def inspect;"numeric";end;end;begin;p Rational(0,N.new);rescue=>e;p e.class,e.message;end',
+    'Numeric#coerce \u306F\u3001\u3053\u306E\u63A1\u70B9\u74B0\u5883\u3067\u306F\u4F7F\u3048\u307E\u305B\u3093\u3002',
+  ],
+  [
+    'class M<Numeric;def /(x);puts :divide;7;end;def inspect;"numeric-missing";end;end;begin;p Rational(0,M.new);rescue=>e;p e.class,e.message;end',
+    'Numeric#to_int \u306F\u3001\u3053\u306E\u63A1\u70B9\u74B0\u5883\u3067\u306F\u4F7F\u3048\u307E\u305B\u3093\u3002',
+  ],
+] as const;
+
+test.each(numericConversionRefusals)(
+  'Rational conversion retains explicit Numeric base capability boundaries: %s',
+  (source, message) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', uncaughtException: message });
+  }
+);

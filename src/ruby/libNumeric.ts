@@ -72,7 +72,7 @@ function* coerceBinary(self: Num, other: Value, op: string, target?: string): Ge
   const pair = yield* tryImplicitConversion(other, 'coerce', [callbackReceiver(self)]);
   if (pair !== undefined) {
     if (!(pair instanceof RArray) || pair.items.length !== 2) throw typeError('coerce must return [x, y]');
-    return yield* callMethod(pair.items[0], op, [pair.items[1]]);
+    return yield* callMethod(pair.items[0], op, [pair.items[1]], undefined, undefined, { fcall: true });
   }
   throw coerceError(other, target ?? (typeof self === 'bigint' ? 'Integer' : 'Float'));
 }
