@@ -184,6 +184,8 @@ export class ClassInfo {
   isFinal = false;
   /** The constructor a class without user-declared ones has, when it has anything to initialize. */
   implicitDefault?: FunctionInfo;
+  /** The error a use of the implicit default constructor reports when it is deleted. */
+  implicitDefaultError?: string;
   row = -1;
 
   constructor(

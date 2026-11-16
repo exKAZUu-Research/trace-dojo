@@ -76,6 +76,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         return constantExpr(BOOL, node.type === 'true' ? 1 : 0, node.row);
       }
       case 'null': {
+        // libc++ on macOS defines NULL as `__null`, an integer null pointer constant of type long.
+        if (node.text === 'NULL') return { ...constantExpr(LONG, 0n, node.row), isNullConstant: true };
         return { type: NULLPTR, isLvalue: false, row: node.row, run: () => NULL_PTR, isNullConstant: true };
       }
       case 'identifier': {
@@ -927,20 +929,28 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       row,
       run: (frame) => frame.pending.at(-1) as unknown as Ptr,
     };
-    const combined = this.binary(binaryOperator, current, source, row);
+    // C++17 sequences the right operand of a compound assignment before the left one, too; an object of class
+    // type stays where it is for its conversion function.
+    const right = source.type.kind === 'class' ? undefined : this.rvalue(source);
+    const operand: Expr = right ? { ...right, run: (frame) => frame.pending.at(-2) as Value } : source;
+    const combined = this.binary(binaryOperator, current, operand, row);
     const value = this.convert(combined, unqualified(target.type), row).run;
+    const evaluateRight = right?.run;
     return {
       type: target.type,
       isLvalue: true,
       row,
       run: (frame) => {
-        const place = location(frame) as Ptr;
-        frame.pending.push(place);
+        const mark = frame.pending.length;
+        let place: Ptr;
         let result: Value | Ptr;
         try {
+          frame.pending.push(evaluateRight ? (evaluateRight(frame) as Value) : undefined);
+          place = location(frame) as Ptr;
+          frame.pending.push(place);
           result = value(frame);
         } finally {
-          frame.pending.pop();
+          frame.pending.length = mark;
         }
         place.write(result as Value);
         return place;
@@ -1013,6 +1023,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (a.type.kind === 'void' && b.type.kind === 'void') return { left: a, right: b, type: a.type, isLvalue: false };
     const av = this.rvalue(a);
     const bv = this.rvalue(b);
+    // Operands of the same type keep it, without the usual arithmetic conversions (C++20 [expr.cond]).
+    if (av.type.kind !== 'class' && sameType(av.type, bv.type, false))
+      return { left: av, right: bv, type: unqualified(av.type), isLvalue: false };
     if (isArithmetic(av.type) && isArithmetic(bv.type)) {
       const common = commonType(unqualified(av.type) as never, unqualified(bv.type) as never) as ArithmeticType;
       return {
@@ -1055,7 +1068,6 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         }
       }
     }
-    if (sameType(av.type, bv.type, false)) return { left: av, right: bv, type: av.type, isLvalue: false };
     return this.error(row, `条件演算子の2つの値の型（${typeName(a.type)} と ${typeName(b.type)}）が合いません。`);
   }
 
@@ -1387,8 +1399,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   private newExpression(node: Syntax): Expr {
     if (fieldOf(node, 'placement')) return this.unsupported(node.row, '配置 new（new (場所) 型）');
-    const baseType = this.resolveTypeSpecifier(fieldOf(node, 'type') as Syntax);
-    const declarator = fieldOf(node, 'declarator');
+    let baseType = this.resolveTypeSpecifier(fieldOf(node, 'type') as Syntax);
+    let declarator = fieldOf(node, 'declarator');
+    for (; declarator?.type === 'abstract_pointer_declarator'; declarator = fieldOf(declarator, 'declarator'))
+      baseType = pointerTo(baseType);
     const argsNode = fieldOf(node, 'arguments');
     if (declarator) {
       const lengths: Syntax[] = [];
@@ -1435,13 +1449,19 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (!isInteger(lengthExpr.type))
       return this.error(row, `new[] の要素の数には整数を書いてください（${typeName(lengthExpr.type)}）。`);
     const length = convertArithmetic(lengthExpr, LONG).run;
-    const element = this.defaultInitializer(elementType, row);
-    let initial: Eval<Value>[] = [];
-    if (argsNode) {
-      if (argsNode.type !== 'initializer_list') return this.error(row, 'new T[n] の後には {...} しか書けません。');
-      initial = argsNode.children.map((child) => this.elementInitializer(elementType, child));
-    }
-    const zero = this.valueInitialized(elementType, row).run as Eval<Value>;
+    // C++20 initializes the elements from parentheses as from braces, except for narrowing (C++20 [dcl.init.general]).
+    const initial = (argsNode?.children ?? []).map((child) =>
+      argsNode?.type === 'initializer_list'
+        ? this.elementInitializer(elementType, child)
+        : this.copyInitializer(elementType, this.compileExpression(child), child.row, false)
+    );
+    // The elements without initializers need a default constructor only when some may exist.
+    const hasRest = lengthExpr.constant === undefined || Number(lengthExpr.constant) > initial.length;
+    const rest = hasRest
+      ? argsNode
+        ? (this.valueInitialized(elementType, row).run as Eval<Value>)
+        : this.defaultInitializer(elementType, row)
+      : undefined;
     return {
       type: pointerTo(elementType),
       isLvalue: false,
@@ -1457,7 +1477,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         try {
           for (let index = 0; index < count; index++) {
             if (index < initial.length) values.push(initial[index](frame));
-            else values.push(argsNode ? zero(frame) : element(frame));
+            else values.push((rest as Eval<Value>)(frame));
           }
         } finally {
           frame.pending.pop();

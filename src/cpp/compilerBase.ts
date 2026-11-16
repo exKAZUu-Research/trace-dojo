@@ -337,7 +337,11 @@ export abstract class CompilerBase {
   }
 
   private sizedType(node: Syntax): Type {
-    const words = node.all.filter((child) => !child.isNamed).map((child) => child.type);
+    // The grammar gives the specifier of a functional cast (`short(1)`) as one token without children.
+    const words =
+      node.all.length === 0
+        ? node.text.split(/\s+/)
+        : node.all.filter((child) => !child.isNamed).map((child) => child.type);
     const inner = fieldOf(node, 'type');
     if (inner) {
       if (inner.type !== 'primitive_type') return this.error(node.row, `${node.text} という型はありません。`);
