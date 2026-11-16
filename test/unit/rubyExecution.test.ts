@@ -15780,3 +15780,168 @@ test('Lazy enum targets keep unavailable private Enumerable aliases explicit', (
     uncaughtException: 'Enumerator::Lazy#_enumerable_map は、この採点環境では使えません。',
   });
 });
+
+const nativeLazyMethodBoundaryCases = [
+  ['begin;p [1,2,3].lazy.each_with_index.peek_values;rescue=>e;p e.class,e.message;end', '[1, 0]\n'],
+  ['begin;p [1,2,3].lazy.each_with_index.next_values;rescue=>e;p e.class,e.message;end', '[1, 0]\n'],
+  ['begin;p [1,2,3].lazy.each_with_index.take(2).force;rescue=>e;p e.class,e.message;end', '[[1, 0], [2, 1]]\n'],
+  [
+    'begin;p [1,2,3].lazy.each_with_index.each{|*x|p x;break :done};rescue=>e;p e.class,e.message;end',
+    '[1, 0]\n:done\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_with_index.each(1).take(1).force;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_entry(1).peek_values;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_entry(1).next_values;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_entry(1).take(2).force;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_entry(1).each{|*x|p x;break :done};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_entry(1).each(1).take(1).force;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 2, expected 0)"\n',
+  ],
+  ['begin;p [1,2,3].lazy.map{|x|x*2}.each_with_index.peek_values;rescue=>e;p e.class,e.message;end', '[2, 0]\n'],
+  ['begin;p [1,2,3].lazy.map{|x|x*2}.each_with_index.next_values;rescue=>e;p e.class,e.message;end', '[2, 0]\n'],
+  [
+    'begin;p [1,2,3].lazy.map{|x|x*2}.each_with_index.take(2).force;rescue=>e;p e.class,e.message;end',
+    '[[2, 0], [4, 1]]\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.map{|x|x*2}.each_with_index.each{|*x|p x;break :done};rescue=>e;p e.class,e.message;end',
+    '[2, 0]\n:done\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.map{|x|x*2}.each_with_index.each(1).take(1).force;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  ['begin;p [1,2,3].lazy.map{|x|x*2}.each_entry(1).peek_values;rescue=>e;p e.class,e.message;end', '[2]\n'],
+  ['begin;p [1,2,3].lazy.map{|x|x*2}.each_entry(1).next_values;rescue=>e;p e.class,e.message;end', '[2]\n'],
+  ['begin;p [1,2,3].lazy.map{|x|x*2}.each_entry(1).take(2).force;rescue=>e;p e.class,e.message;end', '[2, 4]\n'],
+  [
+    'begin;p [1,2,3].lazy.map{|x|x*2}.each_entry(1).each{|*x|p x;break :done};rescue=>e;p e.class,e.message;end',
+    '[2]\n:done\n',
+  ],
+  ['begin;p [1,2,3].lazy.map{|x|x*2}.each_entry(1).each(1).take(1).force;rescue=>e;p e.class,e.message;end', '[2]\n'],
+  ['begin;p [1,2,3].lazy.each_entry.each_with_index.peek_values;rescue=>e;p e.class,e.message;end', '[1, 0]\n'],
+  ['begin;p [1,2,3].lazy.each_entry.each_with_index.next_values;rescue=>e;p e.class,e.message;end', '[1, 0]\n'],
+  [
+    'begin;p [1,2,3].lazy.each_entry.each_with_index.take(2).force;rescue=>e;p e.class,e.message;end',
+    '[[1, 0], [2, 1]]\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_entry.each_with_index.each{|*x|p x;break :done};rescue=>e;p e.class,e.message;end',
+    '[1, 0]\n:done\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_entry.each_with_index.each(1).take(1).force;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_entry.each_entry(1).peek_values;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_entry.each_entry(1).next_values;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_entry.each_entry(1).take(2).force;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_entry.each_entry(1).each{|*x|p x;break :done};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_entry.each_entry(1).each(1).take(1).force;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 2, expected 0)"\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_with_index.each_with_index.peek_values;rescue=>e;p e.class,e.message;end',
+    '[[1, 0], 0]\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_with_index.each_with_index.next_values;rescue=>e;p e.class,e.message;end',
+    '[[1, 0], 0]\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_with_index.each_with_index.take(2).force;rescue=>e;p e.class,e.message;end',
+    '[[[1, 0], 0], [[2, 1], 1]]\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_with_index.each_with_index.each{|*x|p x;break :done};rescue=>e;p e.class,e.message;end',
+    '[[1, 0], 0]\n:done\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_with_index.each_with_index.each(1).take(1).force;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_with_index.each_entry(1).peek_values;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_with_index.each_entry(1).next_values;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_with_index.each_entry(1).take(2).force;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_with_index.each_entry(1).each{|*x|p x;break :done};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.each_with_index.each_entry(1).each(1).take(1).force;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 2, expected 0)"\n',
+  ],
+  ['begin;p [1,2,3].lazy.with_index.each_with_index.peek_values;rescue=>e;p e.class,e.message;end', '[[1, 0], 0]\n'],
+  ['begin;p [1,2,3].lazy.with_index.each_with_index.next_values;rescue=>e;p e.class,e.message;end', '[[1, 0], 0]\n'],
+  [
+    'begin;p [1,2,3].lazy.with_index.each_with_index.take(2).force;rescue=>e;p e.class,e.message;end',
+    '[[[1, 0], 0], [[2, 1], 1]]\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.with_index.each_with_index.each{|*x|p x;break :done};rescue=>e;p e.class,e.message;end',
+    '[[1, 0], 0]\n:done\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.with_index.each_with_index.each(1).take(1).force;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  ['begin;p [1,2,3].lazy.with_index.each_entry(1).peek_values;rescue=>e;p e.class,e.message;end', '[[1, 0]]\n'],
+  ['begin;p [1,2,3].lazy.with_index.each_entry(1).next_values;rescue=>e;p e.class,e.message;end', '[[1, 0]]\n'],
+  [
+    'begin;p [1,2,3].lazy.with_index.each_entry(1).take(2).force;rescue=>e;p e.class,e.message;end',
+    '[[1, 0], [2, 1]]\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.with_index.each_entry(1).each{|*x|p x;break :done};rescue=>e;p e.class,e.message;end',
+    '[[1, 0]]\n:done\n',
+  ],
+  [
+    'begin;p [1,2,3].lazy.with_index.each_entry(1).each(1).take(1).force;rescue=>e;p e.class,e.message;end',
+    '[[1, 0]]\n',
+  ],
+] as const;
+
+test.each(nativeLazyMethodBoundaryCases)(
+  'Lazy ordinary adapters retain native method and tuple boundaries: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
