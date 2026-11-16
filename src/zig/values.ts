@@ -208,7 +208,7 @@ export function copyValue(value: Value): Value {
  * Stores a value into a slot, copying an aggregate into the one the slot holds when both have the same shape, so that
  * pointers into the slot's aggregate see the new value.
  */
-// code-gauge-allow functionCognitiveComplexity 16 -- Handles each kind of value the operation accepts.
+// code-gauge-allow functionCognitiveComplexity 18 -- Handles each kind of value the operation accepts.
 export function storeInto(target: Slots, index: number, value: Value): void {
   const current = target.slots[index];
   if (value instanceof ZArray && current instanceof ZArray && current.length === value.length) {
@@ -226,6 +226,12 @@ export function storeInto(target: Slots, index: number, value: Value): void {
   if (value instanceof ZUnion && current instanceof ZUnion && current.tag === value.tag) {
     if (current === value) return;
     storeInto(current, 0, value.slots[0]);
+    return;
+  }
+  if (value instanceof Some && current instanceof Some) {
+    const payload = new Cell(current.value);
+    storeInto(payload, 0, value.value);
+    target.slots[index] = new Some(payload.slots[0]);
     return;
   }
   target.slots[index] = copyValue(value);

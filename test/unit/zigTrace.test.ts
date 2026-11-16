@@ -242,3 +242,48 @@ pub fn main() void {
   expect(result.traceItems.some((item) => item.vars.tag === '.a' && item.vars.v === 4)).toBe(true);
   expect(result.finalVars).not.toHaveProperty('tag');
 });
+
+test('panic snapshots retain entry locals and clear nested scopes without running defers', () => {
+  const program = `pub fn main() void {
+    const t = Turtle.init();
+    t.forward();
+    const n: i32 = 3;
+    _ = n;
+    {
+        const lost = Turtle.init(3, 3);
+        defer lost.forward();
+        @panic("stop");
+    }
+}`;
+  const result = traceProgram('zig', program, program);
+  expect(result.uncaughtException).toBe('panic: stop');
+  expect(result.finalVars).toEqual({ n: 3 });
+  expect(result.finalTurtles).toEqual([{ x: 0, y: 1, color: '#', dir: 'N' }]);
+});
+
+test.each(['std.mem.sort', 'std.sort.block', 'std.sort.heap', 'std.sort.isSorted'])(
+  'native callbacks keep complete temporary operands alive (%s)',
+  (sort) => {
+    const program = `const std = @import("std");
+fn make(g: std.mem.Allocator) ![]Turtle {
+    const a = try g.alloc(Turtle, 3);
+    a[0] = Turtle.init(0, 0);
+    a[1] = Turtle.init(2, 0);
+    a[2] = Turtle.init(4, 0);
+    return a;
+}
+fn less(_: void, a: Turtle, b: Turtle) bool {
+    _ = a;
+    _ = b;
+    const marker: i32 = 1;
+    _ = marker;
+    return false;
+}
+pub fn main(init: std.process.Init) !void { _ = ${sort}(Turtle, try make(init.gpa), {}, less); }`;
+    const result = traceProgram('zig', program, program);
+    const comparisons = result.traceItems.filter((item) => item.vars.marker === 1);
+    expect(comparisons.length).toBeGreaterThan(0);
+    expect(comparisons.every((item) => item.turtles.length === 3)).toBe(true);
+    expect(result.uncaughtException).toBeUndefined();
+  }
+);

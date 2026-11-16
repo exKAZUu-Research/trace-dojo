@@ -233,19 +233,20 @@ export abstract class StatementCompiler extends CallCompiler {
       return {
         exec: (frame) => {
           const mark = frame.defers.length;
-          let completion: Jump | undefined;
           try {
-            completion = run(frame);
-          } catch (error) {
-            if (error instanceof Jump) {
-              runDefers(frame, mark, isErrorReturn(error, fnTarget) ? error.value : undefined);
-              clear(frame);
+            let completion: Jump | undefined;
+            try {
+              completion = run(frame);
+            } catch (error) {
+              if (error instanceof Jump)
+                runDefers(frame, mark, isErrorReturn(error, fnTarget) ? error.value : undefined);
+              throw error;
             }
-            throw error;
+            runDefers(frame, mark, completion && isErrorReturn(completion, fnTarget) ? completion.value : undefined);
+            return completion;
+          } finally {
+            clear(frame);
           }
-          runDefers(frame, mark, completion && isErrorReturn(completion, fnTarget) ? completion.value : undefined);
-          clear(frame);
-          return completion;
         },
         noreturn,
       };
@@ -1333,6 +1334,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const captureSlots = [binding?.binding.slot, errorBinding?.binding.slot].filter((slot) => slot !== undefined);
     const loop = clearingLocals(captureSlots, (frame: Frame): Jump | { value: Value } | undefined => {
       for (;;) {
+        if (binding) frame.slots[binding.binding.slot] = UNASSIGNED;
         frame.runtime.spend();
         if (!test(frame)) break;
         if (hasBinding) frame.runtime.steps.stepBinding(row, storesAnswer);

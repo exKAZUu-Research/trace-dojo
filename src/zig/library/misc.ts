@@ -1,4 +1,3 @@
-// code-gauge-allow-file duplicateLines 18 -- Native methods share argument evaluation and receiver handling.
 import { allocationSlots } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Span } from '../ast';

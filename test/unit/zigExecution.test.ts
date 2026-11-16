@@ -731,3 +731,56 @@ pub fn main(init: std.process.Init) !void {
     uncaughtException: undefined,
   });
 });
+
+test.each(['@memcpy(&b, &a)', '@memmove(&b, &a)', '@memset(&b, a[0])', 'b = a'])(
+  'nested optional aggregate stores preserve existing pointers (%s)',
+  (operation) => {
+    const program = `const std = @import("std");
+const P = struct { x: [2]i32 };
+pub fn main() void {
+    var a = [_]??P{P{ .x = .{ 1, 2 } }};
+    _ = &a;
+    var b = [_]??P{P{ .x = .{ 3, 4 } }};
+    const p = &b[0].?.?.x[0];
+    ${operation};
+    p.* = 5;
+    std.debug.print("{} {} {}", .{b[0].?.?.x[0], p.*, a[0].?.?.x[0]});
+}`;
+    expect(executeProgram('zig', program)).toMatchObject({
+      kind: 'executed',
+      stderr: '5 5 1',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('while captures release their previous turtle before the next condition', () => {
+  const program = `const std = @import("std");
+var n: u8 = 0;
+fn next() ?Turtle {
+    if (n == 0) { n += 1; return Turtle.init(0, 1); }
+    const t = Turtle.init(0, 0);
+    std.debug.print("{}", .{t.canMoveForward()});
+    return null;
+}
+pub fn main() void { while (next()) |t| { _ = t; } }`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true',
+    uncaughtException: undefined,
+  });
+});
+
+test('turtle collection traverses large aggregate roots without host argument limits', () => {
+  const program = `pub fn main() void {
+    var values: [200000]u8 = undefined;
+    _ = &values;
+    const t = Turtle.init();
+    t.forward();
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    finalTurtles: [{ x: 0, y: 1, color: '#', dir: 'N' }],
+    uncaughtException: undefined,
+  });
+});

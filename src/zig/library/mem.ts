@@ -44,7 +44,7 @@ import {
   tupleOf,
 } from './common';
 import { ALLOCATOR, ERROR_OUT_OF_MEMORY } from './heap';
-import { compileArgs, expectArgs, fnMember, type Member, nativeStruct, typeMember } from './native';
+import { compileArgs, expectArgs, fnMember, type Member, nativeCall, nativeStruct, typeMember } from './native';
 import { type SortAlgorithm, sortValues } from './sorting';
 
 function findSequence(haystack: Value[], needle: Value[], from: number): number {
@@ -744,24 +744,17 @@ function sorter(name: string, algorithm: SortAlgorithm): () => Member {
     const lessThan = sema.functionOf(sema.compile(lessThanArg), lessThanArg);
     if (lessThan.params.length !== 3)
       sema.error(lessThanArg, '比べる関数は fn (context, a, b) bool の形にしてください。');
-    const evaluateItems = items.eval;
-    const evaluateContext = context.eval;
-    return runtime(
-      VOID,
-      (frame) => {
-        const slice = evaluateItems(frame) as Slice;
-        const contextValue = evaluateContext(frame);
-        const sorted = sortValues(
-          slice.values(),
-          (a, b) => lessThan.call(frame, [contextValue, a, b]) as boolean,
-          algorithm,
-          frame
-        );
-        for (const [index, value] of sorted.entries()) slice.set(index, value);
-        return;
-      },
-      call.span
-    );
+    return nativeCall(VOID, [items, context], call.span, ([value, contextValue], frame) => {
+      const slice = value as Slice;
+      const sorted = sortValues(
+        slice.values(),
+        (a, b) => lessThan.call(frame, [contextValue, a, b]) as boolean,
+        algorithm,
+        frame
+      );
+      for (const [index, value] of sorted.entries()) slice.set(index, value);
+      return;
+    });
   });
 }
 

@@ -123,7 +123,10 @@ export class Runtime {
     const reached = new Set<unknown>();
     const stack: unknown[] = [];
     for (const global of this.globals) stack.push(global);
-    for (const frame of this.frames) stack.push(...frame.slots, ...frame.temporaries);
+    for (const frame of this.frames) {
+      for (const value of frame.slots) stack.push(value);
+      for (const value of frame.temporaries) stack.push(value);
+    }
     const turtles = new Set<unknown>();
     while (stack.length > 0) {
       const item = stack.pop();
@@ -135,9 +138,10 @@ export class Runtime {
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Traverses each supported value representation without recursive host calls.
 function pushChildren(item: object, stack: unknown[], turtles: Set<unknown>): void {
   if (item instanceof ZArray || item instanceof ZStruct || item instanceof ZUnion) {
-    stack.push(...item.slots);
+    for (const value of item.slots) stack.push(value);
   } else if (item instanceof Pointer) {
     stack.push(item.target);
   } else if (item instanceof Slice) {
@@ -148,9 +152,9 @@ function pushChildren(item: object, stack: unknown[], turtles: Set<unknown>): vo
     if (item.state.turtle) turtles.add(item.state.turtle);
     for (const value of Object.values(item.state)) stack.push(value);
   } else if (Array.isArray(item)) {
-    stack.push(...(item as unknown[]));
+    for (const value of item) stack.push(value);
   } else if ('slots' in item && Array.isArray((item as Slots).slots)) {
-    stack.push(...(item as Slots).slots);
+    for (const value of (item as Slots).slots) stack.push(value);
   }
 }
 

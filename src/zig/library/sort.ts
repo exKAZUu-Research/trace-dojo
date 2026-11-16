@@ -1,16 +1,16 @@
 import type { Span } from '../ast';
 // code-gauge-allow-file duplicateLines 26 -- Library types repeat the same shape of method on purpose, each over its own state.
 import type { Frame } from '../runtime';
-import { known, runtime, type SemaApi } from '../semaBase';
+import { known, type SemaApi } from '../semaBase';
 import { BOOL, fnType, optionalOf, type StructType, type Type, typeName, USIZE, VOID } from '../types';
 import { FnValue, NULL, type Slice, type Value, ZStruct } from '../values';
 import { compareScalars, constSlice, generic, mutableSlice, ORDER, tupleOf } from './common';
-import { type Member, nativeFunction, nativeStruct } from './native';
+import { type Member, nativeCall, nativeFunction, nativeStruct } from './native';
 import { type SortAlgorithm, sortValues } from './sorting';
 
 /** `std.sort.asc(T)` and `desc(T)`: comparison functions for `std.mem.sort`. */
 function comparator(name: string, direction: number): () => Member {
-  const cache = new Map<Type, FnValue>();
+  const cache = new WeakMap<Type, FnValue>();
   return generic(name, 1, (_sema, call, type) => {
     let value = cache.get(type);
     if (!value) {
@@ -35,24 +35,17 @@ function sorter(name: string, algorithm: SortAlgorithm): () => Member {
     const context = sema.compile(contextArg);
     const lessThan = sema.functionOf(sema.compile(lessThanArg), lessThanArg);
     checkParams(sema, name, lessThan.params, [context.type, type, type], lessThanArg);
-    const evaluateItems = items.eval;
-    const evaluateContext = context.eval;
-    return runtime(
-      VOID,
-      (frame) => {
-        const slice = evaluateItems(frame) as Slice;
-        const contextValue = evaluateContext(frame);
-        const sorted = sortValues(
-          slice.values(),
-          (a, b) => lessThan.call(frame, [contextValue, a, b]) as boolean,
-          algorithm,
-          frame
-        );
-        for (const [index, value] of sorted.entries()) slice.set(index, value);
-        return;
-      },
-      call.span
-    );
+    return nativeCall(VOID, [items, context], call.span, ([value, contextValue], frame) => {
+      const slice = value as Slice;
+      const sorted = sortValues(
+        slice.values(),
+        (a, b) => lessThan.call(frame, [contextValue, a, b]) as boolean,
+        algorithm,
+        frame
+      );
+      for (const [index, value] of sorted.entries()) slice.set(index, value);
+      return;
+    });
   });
 }
 
@@ -68,20 +61,13 @@ function reader(
     const context = sema.compile(contextArg);
     const fn = sema.functionOf(sema.compile(fnArg), fnArg);
     checkParams(sema, name, fn.params, [context.type, ...Array.from({ length: elementCount }, () => type)], fnArg);
-    const evaluateItems = items.eval;
-    const evaluateContext = context.eval;
-    return runtime(
-      resultType(type),
-      (frame: Frame) => {
-        const values = (evaluateItems(frame) as Slice).values();
-        const contextValue = evaluateContext(frame);
-        return compute(values, (args) => {
-          frame.runtime.spend();
-          return fn.call(frame, [contextValue, ...args]);
-        });
-      },
-      call.span
-    );
+    return nativeCall(resultType(type), [items, context], call.span, ([slice, contextValue], frame: Frame) => {
+      const values = (slice as Slice).values();
+      return compute(values, (args) => {
+        frame.runtime.spend();
+        return fn.call(frame, [contextValue, ...args]);
+      });
+    });
   });
 }
 
@@ -137,13 +123,12 @@ function equalRangeMember(): Member {
     const context = sema.compile(contextArg);
     const fn = sema.functionOf(sema.compile(fnArg), fnArg);
     checkParams(sema, 'std.sort.equalRange', fn.params, [context.type, type], fnArg);
-    const evaluateItems = items.eval;
-    const evaluateContext = context.eval;
-    return runtime(
+    return nativeCall(
       tupleOf(sema, [USIZE, USIZE]),
-      (frame: Frame) => {
-        const values = (evaluateItems(frame) as Slice).values();
-        const contextValue = evaluateContext(frame);
+      [items, context],
+      call.span,
+      ([slice, contextValue], frame: Frame) => {
+        const values = (slice as Slice).values();
         const order = (item: Value): bigint => {
           frame.runtime.spend();
           return fn.call(frame, [contextValue, item]) as bigint;
@@ -162,8 +147,7 @@ function equalRangeMember(): Member {
           }
         }
         return new ZStruct([BigInt(low), BigInt(low)]);
-      },
-      call.span
+      }
     );
   })();
 }

@@ -43,11 +43,13 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
     let result;
     try {
       result = body(frame);
-      // The turtles that main's variables still reach when it ends are the final ones, as in Java.
-      onEnd?.(frame);
-      runtime.collectGarbage();
     } finally {
-      runtime.popFrame();
+      try {
+        onEnd?.(frame);
+        runtime.collectGarbage();
+      } finally {
+        runtime.popFrame();
+      }
     }
     if (result instanceof ErrorValue) uncaughtException = `error: ${result.name}`;
   } catch (error) {
