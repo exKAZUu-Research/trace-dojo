@@ -2,8 +2,6 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
-// Every expected output below is what `zig run` of Zig 0.17.1 (aarch64-macos, Debug) printed for the same program.
-
 test('std.debug.print writes to standard error and a stdout writer only what it flushed', () => {
   const program = `const std = @import("std");
 pub fn main(init: std.process.Init) !void {
@@ -260,3 +258,36 @@ function rows(program: string): number[] {
   const result = executeProgram('zig', program);
   return result.kind === 'compileError' ? result.diagnostics.map((diagnostic) => diagnostic.row) : [];
 }
+
+test('compilation bounds array storage before materializing undefined and repeated values', () => {
+  const declarations = [
+    'var a: [4294967296]u8 = undefined; _ = &a;',
+    'var a: [1001][1000]u8 = undefined; _ = &a;',
+    'const a: [4294967296]u8 = @splat(1); _ = a;',
+    'const a: [1001][1000]u8 = @splat(undefined); _ = a;',
+    'var a: [600000]u8 = undefined; var b: [600000]u8 = undefined; _ = &a; _ = &b;',
+  ];
+  for (const declaration of declarations) {
+    expect(executeProgram('zig', `pub fn main() void { ${declaration} }`)).toEqual({
+      kind: 'limitExceeded',
+      limit: 'storage',
+    });
+  }
+  expect(
+    executeProgram(
+      'zig',
+      `const std = @import("std");
+pub fn main() void {
+    var a: [2][3]u8 = undefined;
+    _ = &a;
+    const b: [3]u8 = @splat(2);
+    const empty: [0]u8 = @splat(1);
+    std.debug.print("{any} {any} {}", .{ a, b, empty.len });
+}`
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stderr: '{ { 170, 170, 170 }, { 170, 170, 170 } } { 2, 2, 2 } 0',
+    uncaughtException: undefined,
+  });
+});

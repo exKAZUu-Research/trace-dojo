@@ -1156,6 +1156,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const sentinel = a.sentinel !== undefined && a.sentinel === b.sentinel ? a.sentinel : undefined;
     const length = a.length + b.length;
     const arrayType = arrayOf(length, child, sentinel);
+    this.storage.reserve(arrayType);
     const resultType = a.viaPointer ? pointerTo(arrayType, true) : arrayType;
     const build = (x: Value[], y: Value[]): Value => {
       const array = newArray(

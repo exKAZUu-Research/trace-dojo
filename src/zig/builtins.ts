@@ -437,6 +437,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
           );
         }
         const element = this.coerce(this.compile(args[0], target.child), target.child, args[0]);
+        this.storage.reserve(target);
         const { length, sentinel } = target;
         return this.derived(element, target, (value) =>
           newArray(

@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss 802 -- The file holds one layer of the compiler, whose parts share its private state.
 // code-gauge-allow-file duplicateLines 17 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { CompileError } from '../interpreter/diagnostics';
+import { CompilationStorage, valueSlots } from './allocation';
 import { PANIC, panic } from './arith';
 import type { Container, ContainerMember, Expression, FunctionDeclaration, Span } from './ast';
 import {
@@ -174,6 +175,7 @@ export function isType(value: Value): value is Type {
 }
 
 export abstract class SemaBase implements SemaApi {
+  protected readonly storage = new CompilationStorage();
   protected scope: Scope;
   /** The namespaces of user containers, by syntax, so that a container expression evaluates to one type. */
   protected readonly containerTypes = new Map<Container, Type>();
@@ -546,6 +548,7 @@ export abstract class SemaBase implements SemaApi {
     if (from.kind === 'noreturn') return { ...expression, type: to };
     if (from.kind === 'undefined') {
       this.resolveLayout(to, span, new Set());
+      this.storage.reserve(to);
       return known(to, undefinedValue(to), span);
     }
     switch (to.kind) {
@@ -823,6 +826,7 @@ export abstract class SemaBase implements SemaApi {
 
   /** An aggregate built from elements, known when they all are. */
   protected aggregate(type: Type, elements: readonly TExpr[], span: Span, build: (values: Value[]) => Value): TExpr {
+    this.storage.reserve(type);
     if (elements.every((element) => element.known)) {
       return known(type, build(elements.map((element) => copyForStorage(element.value))), span);
     }
@@ -1096,6 +1100,11 @@ export function copyForStorage(value: Value): Value {
 
 /** The value that `undefined` memory holds in a Debug build, which fills it with the byte 0xAA. */
 export function undefinedValue(type: Type): Value {
+  valueSlots(type);
+  return buildUndefinedValue(type);
+}
+
+function buildUndefinedValue(type: Type): Value {
   switch (type.kind) {
     case 'int': {
       const bytes = Math.ceil(type.bits / 8);
@@ -1111,25 +1120,25 @@ export function undefinedValue(type: Type): Value {
     }
     case 'array': {
       return newArray(
-        Array.from({ length: type.length }, () => undefinedValue(type.child)),
+        Array.from({ length: type.length }, () => buildUndefinedValue(type.child)),
         type.sentinel
       );
     }
     case 'struct': {
-      return new ZStruct((type.fields ?? []).map((field) => undefinedValue(field.type)));
+      return new ZStruct((type.fields ?? []).map((field) => buildUndefinedValue(field.type)));
     }
     case 'optional': {
-      return undefinedValue(type.child);
+      return buildUndefinedValue(type.child);
     }
     case 'error_union': {
-      return undefinedValue(type.payload);
+      return buildUndefinedValue(type.payload);
     }
     case 'enum': {
       return 0xaan & ((1n << BigInt(type.tagType?.bits ?? 8)) - 1n);
     }
     case 'union': {
       const fields = type.fields ?? [];
-      return new ZUnion(0, fields[0] ? undefinedValue(fields[0].type) : undefined);
+      return new ZUnion(0, fields[0] ? buildUndefinedValue(fields[0].type) : undefined);
     }
     case 'pointer': {
       return type.size === 'slice' ? new Slice(UNDEFINED_STORAGE, 0, 0) : new Pointer(UNDEFINED_STORAGE, 0);
