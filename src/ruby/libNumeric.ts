@@ -247,7 +247,9 @@ for (const owner of ['Integer', 'Float']) {
   def(owner, 'div', 1, function* (self: Num, [other]) {
     if (!isNum(other)) return yield* coerceBinary(self, other, 'div');
     if (typeof self === 'bigint' && typeof other === 'bigint') return floorDiv(self, other);
-    return floatToInt(floatDivmod(Number(self), Number(other))[0]);
+    if (typeof self === 'bigint') return floatToInt(floatDivmod(Number(self), Number(other))[0]);
+    if (Number(other) === 0) throw zeroDivisionError();
+    return floatToInt(Math.floor(Number(self) / Number(other)));
   });
   def(owner, 'fdiv', 1, function* (self: Num, [other]) {
     if (!isNum(other)) return yield* coerceBinary(self, other, 'fdiv');

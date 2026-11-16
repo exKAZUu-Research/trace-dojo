@@ -12968,3 +12968,468 @@ test.each([
 ])('Single-character regexp searches preserve fold boundaries: %s', (source, stdout) => {
   expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
+
+test('Native split, record and enumerator protocol boundary 0', () => {
+  expect(run('p (1...Rational(-2,3)).step(Rational(-1,3)).size')).toMatchObject({
+    kind: 'executed',
+    stdout: '6\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 1', () => {
+  expect(run('p (-1...Rational(2,3)).step(Rational(1,3)).size')).toMatchObject({
+    kind: 'executed',
+    stdout: '6\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 2', () => {
+  expect(
+    run(
+      'S=Struct.new(:a,:b,keyword_init:true);[1,1.5,-1,-3,3,3.5,nil,true].each{|k|begin;p [k,S.new(k=>9)];rescue=>e;p [k,e.class,e.message];end}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[1, #<struct S a=nil, b=9>]\n[1.5, #<struct S a=nil, b=9>]\n[-1, #<struct S a=nil, b=9>]\n[-3, ArgumentError, "unknown keywords: -3"]\n[3, ArgumentError, "unknown keywords: 3"]\n[3.5, ArgumentError, "unknown keywords: 3"]\n[nil, TypeError, "no implicit conversion from nil to integer"]\n[true, TypeError, "no implicit conversion of true into Integer"]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 3', () => {
+  expect(
+    run(
+      'class K;def to_int;3;end;end;begin;p Struct.new(:a,keyword_init:true).new(K.new=>1);rescue=>e;p e.class,e.message;end'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'ArgumentError\n"unknown keywords: 3"\n', uncaughtException: undefined });
+});
+
+test('Native split, record and enumerator protocol boundary 4', () => {
+  expect(
+    run(
+      "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1;y<<n};begin;e.next;rescue=>x;p x.message;end;begin;e.each(3);puts :accepted;rescue=>x;p x.class,x.message;end;p e.next;e.rewind;p e.dup.next"
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '"stop"\nTypeError\n"can\'t copy execution context"\n2\n3\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 5', () => {
+  expect(
+    run(
+      "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1;y<<n};begin;e.next;rescue=>x;p x.message;end;begin;e.each(3){|v|p v};puts :accepted;rescue=>x;p x.class,x.message;end;p e.next;e.rewind;p e.dup.next"
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '"stop"\nTypeError\n"can\'t copy execution context"\n2\n3\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 6', () => {
+  expect(
+    run(
+      "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1;y<<n};begin;e.next;rescue=>x;p x.message;end;begin;e.dup;puts :accepted;rescue=>x;p x.class,x.message;end;p e.next;e.rewind;p e.dup.next"
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '"stop"\nTypeError\n"can\'t copy execution context"\n2\n3\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 7', () => {
+  expect(
+    run(
+      "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1;y<<n};begin;e.next;rescue=>x;p x.message;end;begin;e.clone;puts :accepted;rescue=>x;p x.class,x.message;end;p e.next;e.rewind;p e.dup.next"
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '"stop"\nTypeError\n"can\'t copy execution context"\n2\n3\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 8', () => {
+  expect(
+    run(
+      "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1;y<<n}.lazy;begin;e.next;rescue=>x;p x.message;end;begin;e.each(3);puts :accepted;rescue=>x;p x.class,x.message;end;p e.next;e.rewind;p e.dup.next"
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '"stop"\nTypeError\n"can\'t copy execution context"\n2\n3\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 9', () => {
+  expect(
+    run(
+      "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1;y<<n}.lazy;begin;e.next;rescue=>x;p x.message;end;begin;e.each(3){|v|p v};puts :accepted;rescue=>x;p x.class,x.message;end;p e.next;e.rewind;p e.dup.next"
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '"stop"\nTypeError\n"can\'t copy execution context"\n2\n3\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 10', () => {
+  expect(
+    run(
+      "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1;y<<n}.lazy;begin;e.next;rescue=>x;p x.message;end;begin;e.dup;puts :accepted;rescue=>x;p x.class,x.message;end;p e.next;e.rewind;p e.dup.next"
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '"stop"\nTypeError\n"can\'t copy execution context"\n2\n3\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 11', () => {
+  expect(
+    run(
+      "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1;y<<n}.lazy;begin;e.next;rescue=>x;p x.message;end;begin;e.clone;puts :accepted;rescue=>x;p x.class,x.message;end;p e.next;e.rewind;p e.dup.next"
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '"stop"\nTypeError\n"can\'t copy execution context"\n2\n3\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 12', () => {
+  expect(
+    run(
+      "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1;y<<n}.lazy.map{|v|v};begin;e.next;rescue=>x;p x.message;end;begin;e.each(3);puts :accepted;rescue=>x;p x.class,x.message;end;p e.next;e.rewind;p e.dup.next"
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '"stop"\nTypeError\n"can\'t copy execution context"\n2\n3\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 13', () => {
+  expect(
+    run(
+      "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1;y<<n}.lazy.map{|v|v};begin;e.next;rescue=>x;p x.message;end;begin;e.each(3){|v|p v};puts :accepted;rescue=>x;p x.class,x.message;end;p e.next;e.rewind;p e.dup.next"
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '"stop"\nTypeError\n"can\'t copy execution context"\n2\n3\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 14', () => {
+  expect(
+    run(
+      "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1;y<<n}.lazy.map{|v|v};begin;e.next;rescue=>x;p x.message;end;begin;e.dup;puts :accepted;rescue=>x;p x.class,x.message;end;p e.next;e.rewind;p e.dup.next"
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '"stop"\nTypeError\n"can\'t copy execution context"\n2\n3\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 15', () => {
+  expect(
+    run(
+      "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1;y<<n}.lazy.map{|v|v};begin;e.next;rescue=>x;p x.message;end;begin;e.clone;puts :accepted;rescue=>x;p x.class,x.message;end;p e.next;e.rewind;p e.dup.next"
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '"stop"\nTypeError\n"can\'t copy execution context"\n2\n3\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 16', () => {
+  expect(run('/x/=~\'x\';"ab".split(//,-1){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["a", "x"]\n["b", "z"]\n["", "z"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 17', () => {
+  expect(run('/x/=~\'x\';"ab".split(//,0){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["a", "x"]\n["b", "z"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 18', () => {
+  expect(run('/x/=~\'x\';"ab".split(//,1){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", "x"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 19', () => {
+  expect(run('/x/=~\'x\';"ab".split(//,2){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["a", "x"]\n["b", "z"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 20', () => {
+  expect(run('/x/=~\'x\';"ab".split(//,3){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["a", "x"]\n["b", "z"]\n["", "z"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 21', () => {
+  expect(run('/x/=~\'x\';"ab".split(//,4){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["a", "x"]\n["b", "z"]\n["", "z"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 22', () => {
+  expect(run('/x/=~\'x\';"ab".split(/$/,-1){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", ""]\n["", nil]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 23', () => {
+  expect(run('/x/=~\'x\';"ab".split(/$/,0){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", ""]\nnil\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 24', () => {
+  expect(run('/x/=~\'x\';"ab".split(/$/,1){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", "x"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 25', () => {
+  expect(run('/x/=~\'x\';"ab".split(/$/,2){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", ""]\n["", "z"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 26', () => {
+  expect(run('/x/=~\'x\';"ab".split(/$/,3){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", ""]\n["", nil]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 27', () => {
+  expect(run('/x/=~\'x\';"ab".split(/$/,4){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", ""]\n["", nil]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 28', () => {
+  expect(run(String.raw`/x/=~'x';"ab".split(/\b/,-1){|v|p [v,$&];/z/=~"z"};p $&`)).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", ""]\n["", nil]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 29', () => {
+  expect(run(String.raw`/x/=~'x';"ab".split(/\b/,0){|v|p [v,$&];/z/=~"z"};p $&`)).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", ""]\nnil\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 30', () => {
+  expect(run(String.raw`/x/=~'x';"ab".split(/\b/,1){|v|p [v,$&];/z/=~"z"};p $&`)).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", "x"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 31', () => {
+  expect(run(String.raw`/x/=~'x';"ab".split(/\b/,2){|v|p [v,$&];/z/=~"z"};p $&`)).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", ""]\n["", "z"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 32', () => {
+  expect(run(String.raw`/x/=~'x';"ab".split(/\b/,3){|v|p [v,$&];/z/=~"z"};p $&`)).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", ""]\n["", nil]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 33', () => {
+  expect(run(String.raw`/x/=~'x';"ab".split(/\b/,4){|v|p [v,$&];/z/=~"z"};p $&`)).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", ""]\n["", nil]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 34', () => {
+  expect(run('/x/=~\'x\';"ab".split(/(?:)/,-1){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["a", ""]\n["b", ""]\n["", nil]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 35', () => {
+  expect(run('/x/=~\'x\';"ab".split(/(?:)/,0){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["a", ""]\n["b", ""]\nnil\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 36', () => {
+  expect(run('/x/=~\'x\';"ab".split(/(?:)/,1){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", "x"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 37', () => {
+  expect(run('/x/=~\'x\';"ab".split(/(?:)/,2){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["a", ""]\n["b", "z"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 38', () => {
+  expect(run('/x/=~\'x\';"ab".split(/(?:)/,3){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["a", ""]\n["b", ""]\n["", "z"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 39', () => {
+  expect(run('/x/=~\'x\';"ab".split(/(?:)/,4){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["a", ""]\n["b", ""]\n["", nil]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 40', () => {
+  expect(run('/x/=~\'x\';"ab".split(/ /,-1){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", "x"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 41', () => {
+  expect(run('/x/=~\'x\';"ab".split(/ /,0){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", "x"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 42', () => {
+  expect(run('/x/=~\'x\';"ab".split(/ /,1){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", "x"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 43', () => {
+  expect(run('/x/=~\'x\';"ab".split(/ /,2){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", "x"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 44', () => {
+  expect(run('/x/=~\'x\';"ab".split(/ /,3){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", "x"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 45', () => {
+  expect(run('/x/=~\'x\';"ab".split(/ /,4){|v|p [v,$&];/z/=~"z"};p $&')).toMatchObject({
+    kind: 'executed',
+    stdout: '["ab", "x"]\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 46', () => {
+  expect(run('s="a b";s.split(//){|v|p v;s[2]="z"}')).toMatchObject({
+    kind: 'executed',
+    stdout: '"a"\n" "\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 47', () => {
+  expect(run('s="a b";s.split(/ /){|v|p v;s[2]="z"}')).toMatchObject({
+    kind: 'executed',
+    stdout: '"a"\n"z"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 48', () => {
+  expect(
+    run('class C;def each(*a,**k);p [a,k];yield [a,k];end;end;p C.new.to_enum(:each,1,x:2).each(3){}')
+  ).toMatchObject({ kind: 'executed', stdout: '[[1, {x: 2}, 3], {}]\nnil\n', uncaughtException: undefined });
+});
+
+test('Native split, record and enumerator protocol boundary 49', () => {
+  expect(
+    run('class C;def each(*a,**k);p [a,k];yield [a,k];end;end;p C.new.to_enum(:each,1,x:2).each(3).each{}')
+  ).toMatchObject({ kind: 'executed', stdout: '[[1, {x: 2}, 3], {}]\nnil\n', uncaughtException: undefined });
+});
+
+test('Native split, record and enumerator protocol boundary 50', () => {
+  expect(
+    run('class C;def each(*a,**k);p [a,k];yield [a,k];end;end;p C.new.to_enum(:each,1,x:2).each(3).next')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '[[1, {x: 2}, 3], {}]\n[[1, {x: 2}, 3], {}]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native split, record and enumerator protocol boundary 51', () => {
+  expect(
+    run('class C;def each(*a,**k);p [a,k];yield [a,k];end;end;p C.new.to_enum(:each,1,x:2).each.each{}')
+  ).toMatchObject({ kind: 'executed', stdout: '[[1], {x: 2}]\nnil\n', uncaughtException: undefined });
+});

@@ -374,8 +374,7 @@ function* runSource(source: EnumeratorSource, block: RProc, args: Value[] = []):
   return yield* callMethod(
     source.recv,
     source.method,
-    [...(source.iterationArgs ?? source.args), ...args],
-    source.keywords,
+    ...enumeratorArguments(source, args, source.iterationArgs ?? source.args),
     block,
     {
       fcall: true,
@@ -384,7 +383,7 @@ function* runSource(source: EnumeratorSource, block: RProc, args: Value[] = []):
 }
 
 function hasExecutionContext(cursor: Cursor | undefined): boolean {
-  return cursor !== undefined && (cursor.running || (cursor.started && cursor.result === undefined));
+  return cursor !== undefined && cursor.state !== 'new' && cursor.state !== 'completed';
 }
 
 def('Enumerator', 'each', [0, -1], function* (self: RObject, args, block) {
@@ -393,22 +392,33 @@ def('Enumerator', 'each', [0, -1], function* (self: RObject, args, block) {
   if (args.length > 0 && hasExecutionContext(source.cursor)) throw typeError("can't copy execution context");
   if (!block) {
     if (args.length === 0) return self;
+    const [appendedArgs, keywords] = enumeratorArguments(source, args);
     if (source.iterate) {
       const enumerator = new RObject(rt().c.Enumerator);
       enumerator.data = {
         ...source,
-        args: [...source.args, ...args],
+        args: appendedArgs,
+        keywords,
         cursor: undefined,
         size: () => NIL,
       } satisfies EnumeratorSource;
       return enumerator;
     }
-    const enumerator = makeEnumerator(source.recv, source.method, [...source.args, ...args], source.keywords);
+    const enumerator = makeEnumerator(source.recv, source.method, appendedArgs, keywords);
     sourceOf(enumerator).size = () => NIL;
     return enumerator;
   }
   return yield* runSource(source, block, args);
 });
+function enumeratorArguments(
+  source: EnumeratorSource,
+  extra: Value[],
+  base = source.args
+): [Value[], RHash | undefined] {
+  if (extra.length === 0) return [base, source.keywords];
+  return [[...base, ...(source.keywords ? [source.keywords] : []), ...extra], undefined];
+}
+
 def('Enumerator', 'with_index', [0, 1], (self: RObject, args, block) => withIndex(self, args, block, 'with_index'));
 def('Enumerator', 'each_with_index', 0, (self: RObject, args, block) =>
   withIndex(self, args, block, 'each_with_index')
@@ -727,8 +737,7 @@ interface Cursor {
   peeked: Value[][];
   feed?: Value;
   feedSet: boolean;
-  started: boolean;
-  running?: boolean;
+  state: 'new' | 'running' | 'suspended' | 'failed' | 'completed';
   result?: Value;
 }
 
@@ -759,7 +768,7 @@ function startCursor(self: RObject): Cursor {
     exception: NIL,
     peeked: [],
     feedSet: false,
-    started: false,
+    state: 'new',
   };
 }
 
@@ -767,9 +776,13 @@ function startCursor(self: RObject): Cursor {
 function nextValues(self: RObject): Value[] {
   assertMutableEnumerator(self);
   const source = sourceOf(self);
+  if (source.cursor?.state === 'failed') {
+    const { feed, feedSet } = source.cursor;
+    source.cursor = { ...startCursor(self), feed, feedSet };
+  }
   source.cursor ??= startCursor(self);
   const cursor = source.cursor;
-  if (cursor.running)
+  if (cursor.state === 'running')
     throw rubyError(
       rt().c.FiberError,
       rt().activeCursor === cursor
@@ -795,23 +808,22 @@ function nextValues(self: RObject): Value[] {
   runtime.heldArrays.push(...cursor.heldArrays);
   runtime.catchTags.push(...cursor.catchTags);
   let step: IteratorResult<unknown, Value>;
-  let failed = false;
   const previousCursor = runtime.activeCursor;
   try {
-    cursor.running = true;
+    const resumed = cursor.state === 'suspended';
+    cursor.state = 'running';
     runtime.activeCursor = cursor;
-    const feed = cursor.started && cursor.feedSet ? cursor.feed : NIL;
-    if (cursor.started) {
+    const feed = resumed && cursor.feedSet ? cursor.feed : NIL;
+    if (resumed) {
       cursor.feedSet = false;
       cursor.feed = undefined;
     }
     step = cursor.runner.next(feed);
-    cursor.started = true;
+    cursor.state = step.done ? 'completed' : 'suspended';
   } catch (error) {
-    failed = true;
+    cursor.state = 'failed';
     throw error;
   } finally {
-    cursor.running = false;
     runtime.activeCursor = previousCursor;
     runtime.held.splice(0, heldBase, ...callerHeld);
     runtime.heldArrays.splice(0, arraysBase, ...callerArrays);
@@ -824,7 +836,6 @@ function nextValues(self: RObject): Value[] {
     runtime.catchTags.push(...callerTags);
     runtime.currentRow = row;
     runtime.heldSnapshots.pop();
-    if (failed) source.cursor = undefined;
   }
   if (step.done) {
     cursor.result = step.value;

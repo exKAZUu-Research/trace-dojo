@@ -61,7 +61,10 @@ export class RegexpCursor {
   next(state: MatchState, current = false): number {
     const [from, to] = this.range(state)!;
     if (from !== to) return to;
-    const source = current ? this.snapshot : (state.snapshot ?? this.snapshot);
+    return this.nextCharacter(to, current ? this.snapshot : (state.snapshot ?? this.snapshot));
+  }
+
+  nextCharacter(to: number, source = this.snapshot): number {
     if (source.binary) return to + 1;
     const unit = regexpByteUnit(source, to);
     if (regexpByteIndex(source, unit) !== to) return to + 1;

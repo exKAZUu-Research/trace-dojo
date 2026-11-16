@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 481 -- Record layout and initialization share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 484 -- Record layout and initialization share representation and state; splitting registration by size would scatter that concern.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   addressOf,
@@ -101,23 +101,31 @@ export function structEntriesOf(value: RObject): [string, Value][] | undefined {
 
 function* memberIndex(self: RObject, key: Value): Gen<number> {
   const { members, memberSymbols } = layoutOf(self.cls);
+  const resolved = yield* resolveRecordKey(memberSymbols, key);
+  if (resolved.index !== -1) return resolved.index;
+  if ('offset' in resolved)
+    throw indexError(
+      `offset ${resolved.offset} too ${resolved.offset < 0 ? 'small' : 'large'} for struct(size:${members.length})`
+    );
+  const symbol = resolved.symbol;
+  const error = nameError(`no member '${symbol.key}' in struct`, self, symbol.key);
+  error.exception.internal!.set('name', key);
+  throw error;
+}
+
+function* resolveRecordKey(
+  memberSymbols: RSymbol[],
+  key: Value
+): Gen<{ key: RSymbol | RString; index: number; symbol: RSymbol } | { key: bigint; index: number; offset: bigint }> {
   if (key instanceof RSymbol || key instanceof RString) {
-    const symbol = key instanceof RSymbol ? key : RSymbol.of(key.s, key.binary, key.usAscii, stringBytes(key));
-    const index = memberSymbols.indexOf(symbol);
-    if (index === -1) {
-      const error = nameError(`no member '${symbol.key}' in struct`, self, symbol.key);
-      error.exception.internal!.set('name', key);
-      throw error;
-    }
-    return index;
+    const symbol = key instanceof RSymbol ? key : symbolFromString(key);
+    return { key, index: memberSymbols.indexOf(symbol), symbol };
   }
-  const raw = yield* toIndex(key);
-  let index = raw;
-  if (index < 0) index += members.length;
-  if (index < 0 || index >= members.length) {
-    throw indexError(`offset ${raw} too ${raw < 0 ? 'small' : 'large'} for struct(size:${members.length})`);
-  }
-  return index;
+  if (key === NIL) throw typeError('no implicit conversion from nil to integer');
+  const { integer: offset } = yield* toIndexExact(key);
+  const length = BigInt(memberSymbols.length);
+  const index = offset < 0n ? offset + length : offset;
+  return { key: offset, index: index >= 0n && index < length ? Number(index) : -1, offset };
 }
 
 function* membersFrom(args: Value[], kind: 'struct' | 'data'): Gen<RSymbol[]> {
@@ -312,23 +320,22 @@ def(
       let nonAsciiEncoding: string | undefined;
       let incompatibleEncodings: [string, string] | undefined;
       for (const entry of keywords?.map.values() ?? []) {
-        const key = entry.key instanceof RString ? symbolFromString(entry.key) : entry.key;
-        const index = key instanceof RSymbol ? memberSymbols.indexOf(key) : -1;
+        const { key, index } = yield* resolveRecordKey(memberSymbols, entry.key);
         if (index !== -1) {
           next[index] = entry.value;
           continue;
         }
         const bytes =
-          entry.key instanceof RSymbol
-            ? (entry.key.bytes ?? new TextEncoder().encode(entry.key.name))
-            : entry.key instanceof RString
-              ? stringBytes(entry.key)
-              : new TextEncoder().encode(yield* inspect(entry.key));
+          key instanceof RSymbol
+            ? (key.bytes ?? new TextEncoder().encode(key.name))
+            : key instanceof RString
+              ? stringBytes(key)
+              : new TextEncoder().encode(yield* inspect(key));
         if (bytes.some((byte) => byte >= 0x80)) {
           const encoding =
-            (entry.key instanceof RSymbol || entry.key instanceof RString) && entry.key.usAscii
+            (key instanceof RSymbol || key instanceof RString) && key.usAscii
               ? 'US-ASCII'
-              : rubyEncodingName((entry.key instanceof RSymbol || entry.key instanceof RString) && entry.key.binary);
+              : rubyEncodingName((key instanceof RSymbol || key instanceof RString) && key.binary);
           if (nonAsciiEncoding && nonAsciiEncoding !== encoding) incompatibleEncodings ??= [nonAsciiEncoding, encoding];
           nonAsciiEncoding ??= encoding;
         }

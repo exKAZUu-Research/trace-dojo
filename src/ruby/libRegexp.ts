@@ -1817,13 +1817,27 @@ function scanValue(state: MatchState): Value {
     : groupText(state, 0);
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- The ordered cases for Ruby regexp encoding and match state share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 37 -- The ordered cases for Ruby regexp encoding and match state share state; splitting them solely for the metric would hide their sequencing.
 wrapFirst('split', function* (self, args, block) {
   const limit = args.length > 1 ? yield* toIndex(args[1]) : 0;
   if (limit === 1) return yield* splitSingle(self, block);
-  setLastMatch(undefined);
-  const cursor = new RegexpCursor(args[0] as RObject, self);
+  const regexp = args[0] as RObject;
+  const source = dataOf(regexp).source;
+  const literalSeparator = source === '' || source === ' ';
+  if (!literalSeparator) setLastMatch(undefined);
+  const cursor = new RegexpCursor(regexp, self);
+  if (source === '') return yield* splitCharacters(self, cursor, limit, block);
+  return yield* splitRegexp(self, cursor, limit, block, !literalSeparator);
+});
+
+// code-gauge-allow functionCognitiveComplexity 28 -- Separator search, field/capture emission and terminal match state share one cursor lifecycle.
+// code-gauge-allow functionNcss 34 -- Separator search, field/capture emission and terminal match state share one cursor lifecycle.
+function* splitRegexp(
+  self: RString,
+  cursor: RegexpCursor,
+  limit: number,
+  block: RProc | undefined,
+  trackMatch: boolean
+): Gen {
   if (cursor.length === 0) return block ? self : arr([]);
   const parts: RString[] = [];
   const emit = splitEmitter(cursor, limit, block, parts);
@@ -1833,7 +1847,7 @@ wrapFirst('split', function* (self, args, block) {
   while (search <= cursor.length) {
     if (limit > 0 && fields === limit - 1) break;
     const state = cursor.match(search);
-    setLastMatch(state);
+    if (trackMatch) setLastMatch(state);
     if (!state) break;
     const [from, to] = cursor.range(state)!;
     const next = cursor.next(state);
@@ -1852,9 +1866,28 @@ wrapFirst('split', function* (self, args, block) {
     }
     search = next;
   }
+  if (search > cursor.length && trackMatch && (limit <= 0 || fields < limit - 1)) setLastMatch(undefined);
   yield* emit(position, cursor.length);
   return block ? self : arr(parts);
-});
+}
+
+function* splitCharacters(self: RString, cursor: RegexpCursor, limit: number, block: RProc | undefined): Gen {
+  if (cursor.length === 0) return block ? self : arr([]);
+  const parts: RString[] = [];
+  const emit = splitEmitter(cursor, limit, block, parts);
+  let position = 0;
+  let fields = 0;
+  while (position < cursor.length && (limit <= 0 || fields < limit - 1)) {
+    rt().spend();
+    const next = cursor.nextCharacter(position);
+    yield* emit(position, next);
+    fields++;
+    position = next;
+  }
+  yield* emit(position, cursor.length);
+  return block ? self : arr(parts);
+}
+
 function* splitSingle(self: RString, block: RProc | undefined): Gen {
   if (self.s.length === 0) return block ? self : arr([]);
   const part = copyStringEncoding(self);
