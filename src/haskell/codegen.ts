@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 901 -- The Core generator covers every construct of the language in one pass over shared state.
+// code-gauge-allow-file fileNcss 906 -- The Core generator covers every construct of the language in one pass over shared state.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   CHAR_TYPE,
@@ -26,6 +26,7 @@ import {
   type ValueEntity,
 } from './entities';
 import { TailCall } from './machine';
+import { patternProjection, patternResult } from './patternBindings';
 import { surfacePatternText } from './patternText';
 import { primitiveNamed, rationalToFloat } from './primitives';
 import type { LocalVar, RAlt, RBindGroup, RBinding, RClause, RExpr, RGuard, RPat, RRhs, RStmt } from './rast';
@@ -129,31 +130,27 @@ export class Codegen {
       def.code = this.compileFunction(binding, entity.name, true);
       return;
     }
-    // A top-level pattern binding: a hidden global holds the value, and each variable selects its part.
     const whole = globalOf(binding, '<pattern>');
     const frame = new FrameScope(undefined);
     whole.code = this.withFrame(frame, () => {
-      const body = this.withVisible([], () => this.compileRhs(binding.rhs, this.patternFail(binding.span)));
+      const slot = frame.alloc();
+      const rhs = this.withVisible([], () => this.compileRhs(binding.rhs, this.patternFail(binding.span)));
+      const matched = this.matchBoundPattern(binding, slot);
       return {
         k: 'frame',
         size: frame.size,
-        body,
+        body: { k: 'let', binds: [{ index: slot, expr: rhs }], body: matched },
         info: { name: '<pattern>', row: binding.span.row, isAtomic: false },
       } as Core;
     });
-    for (const [index, local] of binding.binders.entries()) {
+    for (const index of binding.binders.keys()) {
       const global = (binding.globals as ValueEntity[])[index];
-      const selectorFrame = new FrameScope(undefined);
-      globalOf(global, global.name, global).code = this.withFrame(selectorFrame, () => {
-        const slot = selectorFrame.alloc();
-        const body = this.selectFromPattern(binding.pat, slot, local, binding.span);
-        return {
-          k: 'frame',
-          size: selectorFrame.size,
-          body: { k: 'let', binds: [{ index: slot, expr: { k: 'global', global: whole } }], body },
-          info: { name: global.name, row: binding.span.row, isAtomic: false },
-        } as Core;
-      });
+      globalOf(global, global.name, global).code = {
+        k: 'frame',
+        size: 0,
+        body: patternProjection({ k: 'global', global: whole }, index, binding.binders.length),
+        info: { name: global.name, row: binding.span.row, isAtomic: false },
+      };
     }
   }
 
@@ -366,7 +363,7 @@ export class Codegen {
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- Local functions and pattern bindings need separate slot set-ups in one recursive group.
-  // code-gauge-allow functionNcss 31 -- Local functions and pattern bindings need separate slot set-ups in one recursive group.
+  // code-gauge-allow functionNcss 33 -- Recursive groups reserve caller slots before shared pattern matches or functions are compiled.
   private compileLocalGroup(group: RBindGroup): { index: number; expr: Core }[] {
     const binds: { index: number; expr: Core }[] = [];
     const slots = new Map<RBinding, number[]>();
@@ -399,8 +396,13 @@ export class Codegen {
       }
       const whole = this.frame.alloc();
       binds.push({ index: whole, expr: this.compileRhs(binding.rhs, this.patternFail(binding.span)) });
-      for (const [index, local] of binding.binders.entries()) {
-        binds.push({ index: own[index], expr: this.selectFromPattern(binding.pat, whole, local, binding.span) });
+      const matched = this.frame.alloc();
+      binds.push({ index: matched, expr: this.matchBoundPattern(binding, whole) });
+      for (const index of binding.binders.keys()) {
+        binds.push({
+          index: own[index],
+          expr: patternProjection({ k: 'local', depth: 0, index: matched }, index, binding.binders.length),
+        });
       }
     }
     return binds;
@@ -414,9 +416,8 @@ export class Codegen {
     };
   }
 
-  /** Code that matches the value in `slot` against a pattern and yields one of its variables. */
-  private selectFromPattern(pat: RPat, slot: number, target: LocalVar, span: Span): Core {
-    // Each selector matches with its own slots, so that selecting one variable never overwrites another.
+  private matchBoundPattern(binding: Extract<RBinding, { k: 'pat' }>, slot: number): Core {
+    const { pat, span } = binding;
     const saved = new Map(this.frame.slots);
     const savedVisible = this.visible.length;
     try {
@@ -427,7 +428,7 @@ export class Codegen {
         message: `${sourceSpanText(span)}: Non-exhaustive patterns in ${text}`,
         kind: 'patternMatch',
       };
-      return this.matchPlan(plan, this.localRef(target), fail);
+      return this.matchPlan(plan, patternResult(binding.binders.map((binder) => this.localRef(binder))), fail);
     } finally {
       this.frame.slots.clear();
       for (const [key, value] of saved) this.frame.slots.set(key, value);

@@ -55,17 +55,13 @@ class DialectValidator {
     const itemIds = new Set(items.map((item) => item.id));
     let insideBraces = false;
     for (const child of children) {
-      if (child.type === '{' || child.type === '}') {
-        this.visit(child, child.type === '{' ? context : undefined);
-        insideBraces = child.type === '{';
-        continue;
-      }
       const nested = insideBraces
         ? undefined
         : first && itemIds.has(child.id)
           ? { indent: this.column(first), itemStart: child.startIndex }
           : context;
       this.visit(child, nested);
+      if (child.type === '{' || child.type === '}') insideBraces = child.type === '{';
     }
   }
 

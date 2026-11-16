@@ -635,3 +635,32 @@ test.each(['T', 't'])('record braces require continuation indentation: %s', (rec
     uncaughtException: undefined,
   });
 });
+
+test.each([2000, 3000])('large pattern bindings share their match (%i variables)', { timeout: 30_000 }, (count) => {
+  const pattern = `[${Array.from({ length: count }, (_, index) => `x${index}`).join(',')}]=[1..${count}::Int]`;
+  const result = `(x0,x${count - 1},x0)`;
+  for (const source of [`${pattern}\nmain=print${result}`, `main=print(let ${pattern} in ${result})`]) {
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: `(1,${count},1)\n`,
+      uncaughtException: undefined,
+    });
+  }
+});
+
+test('shared pattern matches remain deferred and retain full-pattern failures', () => {
+  expect(executeProgram('haskell', 'main=print(let (x,Just y)=(1,Nothing::Maybe Int) in 1::Int)')).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+  for (const target of ['x', 'y']) {
+    expect(
+      executeProgram('haskell', `main=print(let (x,Just y)=(1::Int,Nothing::Maybe Int) in ${target})`)
+    ).toMatchObject({
+      kind: 'executed',
+      stdout: '',
+      uncaughtException: expect.stringContaining('Non-exhaustive patterns'),
+    });
+  }
+});
