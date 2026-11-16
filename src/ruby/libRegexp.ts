@@ -630,6 +630,11 @@ export function makeRegexp(
 function hasNonAsciiRegexpEscape(source: string, extended: boolean): boolean {
   let inClass = false;
   for (let index = 0; index < source.length; index++) {
+    if (!inClass && source.startsWith('(?#', index)) {
+      index = regexpCommentEnd(source, index + 3);
+      if (index < 0) break;
+      continue;
+    }
     const posixLength = inClass ? (/^\[:\^?\w+:\]/.exec(source.slice(index))?.[0].length ?? 0) : 0;
     if (posixLength > 0) {
       index += posixLength - 1;
@@ -642,21 +647,20 @@ function hasNonAsciiRegexpEscape(source: string, extended: boolean): boolean {
       continue;
     }
     if (source[index] !== '\\') continue;
-    const escape = source[index + 1];
-    if (escape === '\\') {
-      index++;
-      continue;
-    }
-    if (escape === 'u') {
-      const unicode = unicodeRegexpEscape(source.slice(index + 2));
-      if (unicode?.points.some((point) => Number.parseInt(point, 16) > 127)) return true;
-    }
-    if ((escape === 'p' || escape === 'P') && /^\{\^?\w+\}/.test(source.slice(index + 2))) return true;
-    const byte = regexpByteEscape(source, index);
-    if (byte && byte.value > 127) return true;
+    if (nonAsciiRegexpEscapeAt(source, index)) return true;
     index++;
   }
   return false;
+}
+
+function nonAsciiRegexpEscapeAt(source: string, index: number): boolean {
+  const escape = source[index + 1];
+  if (escape === 'u') {
+    const unicode = unicodeRegexpEscape(source.slice(index + 2));
+    return unicode?.points.some((point) => Number.parseInt(point, 16) > 127) ?? false;
+  }
+  if ((escape === 'p' || escape === 'P') && /^\{\^?\w+\}/.test(source.slice(index + 2))) return true;
+  return (regexpByteEscape(source, index)?.value ?? 0) > 127;
 }
 
 export function normalizeSlashLiteralSource(source: string): string {

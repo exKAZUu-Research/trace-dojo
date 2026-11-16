@@ -9803,3 +9803,16 @@ begin;p 'hello'.end_with?(/lo/);rescue TypeError=>e;p e.message;end
       '"X"\n"éaXc"\n["ab", "a", "b"]\n"\\\\1"\n"a\\\\1c"\n["b", "b"]\n"regexp group 1 not matched"\n"regexp group 2 not matched"\n"regexp group 1 not matched"\n"undefined group name reference: missing"\n"regexp not matched"\nnil\n[255, 98]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n"no implicit conversion of Regexp into String"\n',
   });
 });
+
+test('regexp comment escapes do not participate in validation or encoding', () => {
+  expect(
+    run(String.raw`['(?#\400)a','(?#\777)a','(?#\303\251)a','(?#\xFF)a','(?#\u00e9)a','(?#\p{L})a','(?#\x)a'].each do |source|
+  [0,Regexp::EXTENDED].each do |options|
+    r=Regexp.new(source,options);p [r.match?('a'),r.encoding]
+  end
+end
+p /(?#\777)a/.match?('a'),/[(?#)]/.match?('#'),Regexp.new('(?#é)a').encoding
+p Regexp.new('a #\400',Regexp::EXTENDED).match?('a')
+`)
+  ).toMatchObject({ stdout: '[true, #<Encoding:US-ASCII>]\n'.repeat(14) + 'true\ntrue\n#<Encoding:UTF-8>\ntrue\n' });
+});
