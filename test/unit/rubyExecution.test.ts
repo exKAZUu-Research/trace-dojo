@@ -11168,3 +11168,31 @@ p A::X,B::X
     uncaughtException: undefined,
   });
 });
+
+test('Regexp property spellings use the parser Unicode canonical-name map', () => {
+  expect(
+    run(String.raw`['HexDigit','Hex-Digit','ASCIIHexDigit','ASCIIHEXDIGIT','SoftDotted','DashPunctuation','NoncharacterCodePoint','Latin','Canadian_Aboriginal','LowercaseLetter','XID_Start'].each do |name|
+ source="\\p{#{name}}"
+ r=Regexp.new(source)
+ p [name,['f','x','i','-','\uFDD0','\u1401'].map{|s|r.match?(s)}]
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '["HexDigit", [true, false, false, false, true, true]]\n["Hex-Digit", [true, false, false, false, true, true]]\n["ASCIIHexDigit", [true, false, false, false, true, true]]\n["ASCIIHEXDIGIT", [true, false, false, false, true, true]]\n["SoftDotted", [false, false, true, false, false, false]]\n["DashPunctuation", [false, false, false, true, false, false]]\n["NoncharacterCodePoint", [false, false, false, false, false, false]]\n["Latin", [true, true, true, false, true, true]]\n["Canadian_Aboriginal", [false, false, false, false, false, false]]\n["LowercaseLetter", [true, true, true, false, true, true]]\n["XID_Start", [true, true, true, false, true, true]]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  String.raw`(?=a)?(?<=a+)b`,
+  String.raw`\A+(?<!a*)b`,
+  String.raw`(?=a)?(?<=a*)`,
+  String.raw`\A+(?<=(?=a))`,
+  String.raw`(?<=a*)\z?`,
+  String.raw`(a)(?<=\1)`,
+  String.raw`(?<a>a)(?<=\k<a>)`,
+])('source syntax completes before regexp capability checks: %s', (source) => {
+  expect(run(`puts :before;p /${source}/`)).toMatchObject({ kind: 'compileError' });
+});

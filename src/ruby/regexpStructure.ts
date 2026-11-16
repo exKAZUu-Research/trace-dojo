@@ -29,8 +29,8 @@ export function validateRegexpSourceSyntax(source: string, extended: boolean, bi
       throw new UnsupportedFeatureError('正規表現の構文の検証');
     throw new SyntaxError('invalid regexp source');
   }
-  if (hasZeroWidthRepeat(root)) throw new UnsupportedFeatureError('正規表現の量指定されたゼロ幅表明');
   visitSource(root, false, false);
+  if (hasZeroWidthRepeat(root)) throw new UnsupportedFeatureError('正規表現の量指定されたゼロ幅表明');
 }
 
 export function hasRegexpProperty(source: string, extended: boolean): boolean {
@@ -125,7 +125,7 @@ function byteViewNode(node: SourceNode, inClass: boolean): boolean {
 }
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Source and host AST validation distinguish invalid patterns, unsupported forms, and exhausted budgets.
-export function validateRegexpStructure(source: string, rubySource: string, extended: boolean): void {
+export function validateRegexpStructure(source: string): void {
   if (!source.includes('(?<') && !/\\(?:[1-9]|k<)/.test(source)) return;
   try {
     new RegExp(source, 'u');
@@ -135,7 +135,6 @@ export function validateRegexpStructure(source: string, rubySource: string, exte
     throw error;
   }
   try {
-    if (rubySource.includes('(?<')) validateSourceLookbehind(rubySource, extended);
     const pattern = new RegExpParser().parsePattern(source, 0, source.length, { unicode: true });
     visitRegExpAST(pattern, {
       onBackreferenceEnter(reference) {
@@ -148,17 +147,6 @@ export function validateRegexpStructure(source: string, rubySource: string, exte
     if (error instanceof RegExpSyntaxError) throw new UnsupportedFeatureError('正規表現の構文の検証');
     throw error;
   }
-}
-
-function validateSourceLookbehind(source: string, extended: boolean): void {
-  let root: SourceNode;
-  try {
-    root = parseSourceRegexp(source, extended);
-  } catch (error) {
-    if (error instanceof RangeError) throw error;
-    throw new UnsupportedFeatureError('正規表現の後読みの構文の検証');
-  }
-  visitSource(root, false, false);
 }
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Source traversal carries lookbehind and negative-capture context through nested AST nodes.
@@ -211,7 +199,7 @@ function sourceWidth(node: SourceNode): number | undefined {
     return width === undefined || node.min !== node.max ? undefined : width * node.min;
   }
   if (node.type === 'Assertion' || node.type === 'LookaroundAssertion' || node.type === 'Directive') return 0;
-  if (node.type === 'Backreference') throw new UnsupportedFeatureError('正規表現の後読み内の後方参照');
+  if (node.type === 'Backreference') return undefined;
   return 1;
 }
 

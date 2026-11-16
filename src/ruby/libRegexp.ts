@@ -1,5 +1,8 @@
 import vm from 'node:vm';
 
+import { slug } from 'oniguruma-parser/parser';
+import { OnigUnicodePropertyMap } from 'oniguruma-parser/unicode';
+
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   addressOf,
@@ -392,7 +395,7 @@ export function translate(
     }
     out += char;
   }
-  validateRegexpStructure(out, source, extended);
+  validateRegexpStructure(out);
   return out;
 }
 
@@ -512,7 +515,7 @@ function translateEscape(
       const property = /^\{(\^?)([^}]+)\}/.exec(source.slice(index + 1));
       if (!property) return `\\${next}`;
       const rawName = property[2];
-      const key = rawName.toLowerCase();
+      const key = slug(rawName);
       skip(property[0].length);
       const negated = (next === 'P') !== (property[1] === '^');
       const body =
@@ -530,18 +533,15 @@ function translateEscape(
         }
         return inClass ? body : `[${negated ? '^' : ''}${body}]`;
       }
-      let name = PROPERTY_NAMES[key] ?? rawName;
-      if (name === rawName) {
+      let name = PROPERTY_NAMES[key] ?? OnigUnicodePropertyMap.get(key) ?? rawName;
+      try {
+        new RegExp(`\\p{${name}}`, 'u');
+      } catch {
         try {
-          new RegExp(`\\p{${name}}`, 'u');
+          new RegExp(`\\p{Script=${name}}`, 'u');
+          name = `Script=${name}`;
         } catch {
-          const script = `${rawName[0].toUpperCase()}${rawName.slice(1).toLowerCase()}`;
-          try {
-            new RegExp(`\\p{Script=${script}}`, 'u');
-            name = `Script=${script}`;
-          } catch {
-            throw unsupportedSyntax(`Unicode プロパティ ${rawName}`);
-          }
+          throw unsupportedSyntax(`Unicode プロパティ ${rawName}`);
         }
       }
       return `\\${negated ? 'P' : 'p'}{${name}}`;
