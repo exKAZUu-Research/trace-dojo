@@ -1,5 +1,6 @@
 import type { Container, FunctionDeclaration, VariableDeclaration } from './ast';
-import type { Value } from './values';
+import { type AnyFloat, BigFloat, shortestDecimal } from './floats';
+import { ErrorValue, Pointer, scalarValueKey, type Value } from './values';
 import { WeakValueMap } from './weakValueMap';
 
 /** Zig's types. Types that Zig compares by structure are interned, so that `===` tells whether two are the same. */
@@ -324,6 +325,7 @@ export function typeId(type: Type): number {
 }
 
 const interned = new WeakValueMap<string, Type>();
+const sentinelValues = new WeakValueMap<string, Value & object>();
 
 function intern<T extends Type>(key: string, create: () => T): T {
   let type = interned.get(key) as T | undefined;
@@ -335,10 +337,11 @@ function intern<T extends Type>(key: string, create: () => T): T {
 }
 
 function sentinelKey(sentinel: Value | undefined): string {
-  return sentinel === undefined ? '' : `:${String(sentinel)}`;
+  return sentinel === undefined ? '' : `:${scalarValueKey(sentinel)}`;
 }
 
 export function arrayOf(length: number, child: Type, sentinel?: Value): ArrayType {
+  sentinel = canonicalSentinel(child, sentinel);
   return intern(`array ${length} ${typeId(child)}${sentinelKey(sentinel)}`, () => ({
     kind: 'array',
     length,
@@ -357,6 +360,7 @@ export function pointerTo(child: Type, isConst: boolean): PointerType {
 }
 
 export function sliceOf(child: Type, isConst: boolean, sentinel?: Value): PointerType {
+  sentinel = canonicalSentinel(child, sentinel);
   return intern(`pointer slice ${typeId(child)} ${isConst}${sentinelKey(sentinel)}`, () => ({
     kind: 'pointer',
     size: 'slice',
@@ -364,6 +368,15 @@ export function sliceOf(child: Type, isConst: boolean, sentinel?: Value): Pointe
     isConst,
     sentinel,
   }));
+}
+
+function canonicalSentinel(type: Type, value: Value | undefined): Value | undefined {
+  if (typeof value !== 'object') return value;
+  const key = `${typeId(type)} ${scalarValueKey(value)}`;
+  const existing = sentinelValues.get(key);
+  if (existing) return existing;
+  sentinelValues.set(key, value);
+  return value;
 }
 
 export function optionalOf(child: Type): OptionalType {
@@ -389,7 +402,7 @@ export function fnType(params: readonly Type[], returnType: Type): FnType {
 /** An error set of the given names; sets of the same names are the same type, as Zig resolves them alike. */
 export function errorSetOf(names: Iterable<string>): ErrorSetType {
   const sorted = [...new Set(names)].toSorted();
-  return intern(`error_set ${sorted.join(',')}`, () => ({
+  return intern(`error_set ${JSON.stringify(sorted)}`, () => ({
     kind: 'error_set',
     names: new Set(sorted),
   }));
@@ -493,13 +506,13 @@ export function typeName(type: Type): string {
       return `f${type.bits}`;
     }
     case 'array': {
-      const sentinel = type.sentinel === undefined ? '' : `:${String(type.sentinel)}`;
+      const sentinel = type.sentinel === undefined ? '' : `:${sentinelText(type.sentinel, type.child)}`;
       return `[${type.length}${sentinel}]${typeName(type.child)}`;
     }
     case 'pointer': {
       const qualifier = type.isConst ? 'const ' : '';
       if (type.size === 'slice') {
-        const sentinel = type.sentinel === undefined ? '' : `:${String(type.sentinel)}`;
+        const sentinel = type.sentinel === undefined ? '' : `:${sentinelText(type.sentinel, type.child)}`;
         return `[${sentinel}]${qualifier}${typeName(type.child)}`;
       }
       return `*${qualifier}${typeName(type.child)}`;
@@ -548,4 +561,25 @@ export function typeName(type: Type): string {
       return type.kind;
     }
   }
+}
+
+// code-gauge-allow functionCognitiveComplexity 17 -- Renders typed scalar sentinels and full-range float decimals without the writer buffer limit.
+function sentinelText(value: Value, type: Type): string {
+  if (value instanceof ErrorValue) return `error.${value.name}`;
+  if (type.kind === 'enum') return `.${type.fields?.find((field) => field.value === value)?.name ?? String(value)}`;
+  if (
+    (typeof value === 'number' || value instanceof BigFloat) &&
+    (type.kind === 'float' || type.kind === 'comptime_float')
+  ) {
+    const decimal = shortestDecimal(value as AnyFloat, type.kind === 'float' ? type.bits : 128);
+    const sign = decimal.sign ? '-' : '';
+    if (decimal.special) return sign + decimal.special;
+    const digits = decimal.mantissa.toString();
+    const point = digits.length + decimal.exponent;
+    if (point <= 0) return `${sign}0.${'0'.repeat(-point)}${digits}`;
+    if (point >= digits.length) return sign + digits + '0'.repeat(point - digits.length);
+    return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
+  }
+  if (value instanceof Pointer) return '0';
+  return String(value);
 }

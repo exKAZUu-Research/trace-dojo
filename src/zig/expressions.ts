@@ -90,6 +90,7 @@ import {
   markConstantStorage,
   NULL,
   Pointer,
+  scalarValuesEqual,
   Slice,
   type Slots,
   Some,
@@ -711,7 +712,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         const to = evaluateEnd ? Number(evaluateEnd(frame) as bigint) : length;
         if (to > limitOf(length)) indexOutOfBounds(to, length);
         if (from > to) panic(`start index ${from} is larger than end index ${to}`);
-        if (sentinel !== undefined && target.slots[offset + to] !== sentinel) {
+        if (sentinel !== undefined && !scalarValuesEqual(target.slots[offset + to], sentinel)) {
           panic(`sentinel mismatch: expected ${String(sentinel)}, found ${String(target.slots[offset + to])}`);
         }
         return { target, from: offset + from, to: offset + to };
@@ -1252,7 +1253,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const sentinel =
       a.sentinel === undefined
         ? b.sentinel
-        : b.sentinel === undefined || a.sentinel === b.sentinel
+        : b.sentinel === undefined || scalarValuesEqual(a.sentinel, b.sentinel)
           ? a.sentinel
           : undefined;
     const length = a.length + b.length;

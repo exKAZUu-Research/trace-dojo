@@ -348,12 +348,7 @@ const ARENA_ALLOCATOR: StructType = allocatorInstanceType(
     ResetMode: typeMember(() => ARENA_RESET_MODE),
     init: fnMember('ArenaAllocator.init', (sema, call) => {
       const [child] = compileArgs(sema, expectArgs(sema, call, 1, 'ArenaAllocator.init'), [ALLOCATOR]);
-      return nativeCall(
-        ARENA_ALLOCATOR,
-        [child],
-        call.span,
-        ([value]) => new ZStruct([value, new ZStruct([NULL, NULL])])
-      );
+      return nativeCall(ARENA_ALLOCATOR, [child], call.span, ([value]) => arenaValue(value));
     }),
     deinit: fnMember('ArenaAllocator.deinit', (sema, call) => {
       expectArgs(sema, call, 0, 'deinit');
@@ -379,6 +374,10 @@ const ARENA_ALLOCATOR: StructType = allocatorInstanceType(
     }),
   }
 );
+
+export function arenaValue(child: Value): ZStruct {
+  return new ZStruct([child, new ZStruct([NULL, NULL])]);
+}
 
 const FIXED_BUFFER_ALLOCATOR: StructType = allocatorInstanceType(
   'heap.FixedBufferAllocator',

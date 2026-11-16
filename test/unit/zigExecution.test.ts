@@ -2542,3 +2542,88 @@ test('zero-sized allocator replacements and empty allocations do not leak debug 
     uncaughtException: undefined,
   });
 });
+
+test.each(['f32', 'f64', 'f128', 'comptime_float'])(
+  'known min/max signed-zero ties retain the second operand in %s',
+  (type) => {
+    const source = `const std=@import("std");pub fn main()void{const a=@min(@as(${type},-0.0),@as(${type},0.0));const b=@max(@as(${type},0.0),@as(${type},-0.0));std.debug.print("{d} {d}",.{a,b});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '0 -0',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['f32', 'f64', 'f128'])('runtime min/max signed-zero ties retain instruction semantics in %s', (type) => {
+  const source = `const std=@import("std");pub fn main()void{var a:${type}=-0.0;var b:${type}=0.0;_=&a;_=&b;std.debug.print("{d} {d}",.{@min(a,b),@max(b,a)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '-0 0',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['@"a,b"', 'a,b', 'b', 'a,b b'],
+  ['@"a,b,c"', 'a,@"b,c"', '@"b,c"', 'a,b,c b,c'],
+])('quoted comma names cannot collide with multiple error-set members: %s', (first, second, member, output) => {
+  const source = `const std=@import("std");const A=error{${first}};const B=error{${second}};fn f()B{return error.${member};}pub fn main()void{const a:A=error.${first};std.debug.print("{s} {s}",.{@errorName(a),@errorName(f())});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: output,
+    uncaughtException: undefined,
+  });
+});
+
+test('float sentinels preserve distinct values and readable array and slice type names', () => {
+  const source = `const std=@import("std");pub fn main()void{const a=[_:1.0]f128{3};const b=[_:2.0]f128{3};std.debug.print("{d} {d}|{} {}",.{a[1],b[1],@TypeOf(a),@TypeOf(@as([:1.0]const f128,&a))});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 2|[1:1]f128 [:1]const f128',
+    uncaughtException: undefined,
+  });
+});
+
+test('error sentinels preserve distinct values and readable array and slice type names', () => {
+  const source = `const std=@import("std");const E=error{A,B};pub fn main()void{const a=[_:error.A]E{error.B};const b=[_:error.B]E{error.A};std.debug.print("{s} {s}|{} {}",.{@errorName(a[1]),@errorName(b[1]),@TypeOf(a),@TypeOf(@as([:error.A]const E,&a))});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'A B|[1:error.A]error{A,B} [:error.A]const error{A,B}',
+    uncaughtException: undefined,
+  });
+});
+
+test('byte-backed sentinel arrays initialize and compare float sentinels by value', () => {
+  const source = `const std=@import("std");pub fn main()!void{var bytes:[64]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create([1:1.0]f128);p.*=.{3};const s=p[0..1:1.0];std.debug.print("{d} {d}",.{s[0],p[1]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '3 1',
+    uncaughtException: undefined,
+  });
+});
+
+test('process init exposes a usable arena allocator and capacity state', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{std.debug.print("{}|",.{init.arena.queryCapacity()});const a=try init.arena.allocator().alloc(u8,3);a[0]=42;std.debug.print("{} {}",.{a[0],init.arena.queryCapacity()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '0|42 42',
+    uncaughtException: undefined,
+  });
+});
+
+test('constant writer values and pointers permit buffered inspection and reject mutation', () => {
+  const source = `const std=@import("std");pub fn main()void{var b:[8]u8=undefined;const w=std.Io.Writer.fixed(&b);const p=&w;std.debug.print("{} {}",.{w.buffered().len,p.buffered().len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '0 0',
+    uncaughtException: undefined,
+  });
+  for (const receiver of ['w', 'p'])
+    expect(
+      executeProgram(
+        'zig',
+        `const std=@import("std");pub fn main()void{var b:[8]u8=undefined;const w=std.Io.Writer.fixed(&b);${receiver === 'p' ? 'const p=&w;' : ''}${receiver}.writeAll("x") catch unreachable;}`
+      ).kind
+    ).toBe('compileError');
+});

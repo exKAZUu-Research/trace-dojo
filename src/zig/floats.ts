@@ -295,11 +295,11 @@ export function negate(value: AnyFloat): AnyFloat {
   return new BigFloat(!value.sign, value.kind, value.mantissa, value.exponent);
 }
 
-export function minMaxFloat(a: AnyFloat, b: AnyFloat, isMax: boolean): AnyFloat {
+export function minMaxFloat(a: AnyFloat, b: AnyFloat, isMax: boolean, comptime = false): AnyFloat {
   if (isNaNFloat(a)) return b;
   if (isNaNFloat(b)) return a;
   const order = compareFloats(a, b) ?? 0;
-  if (order === 0 && signBit(a) !== signBit(b)) return isMax === signBit(a) ? b : a;
+  if (order === 0 && signBit(a) !== signBit(b)) return comptime ? b : isMax === signBit(a) ? b : a;
   return isMax ? (order >= 0 ? a : b) : order <= 0 ? a : b;
 }
 

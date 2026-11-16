@@ -640,9 +640,9 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       return this.error(expression, `${name} は数の型にだけ使えます（${typeName(peer)} 型です）。`);
     }
     const isMax = name === '@max';
-    const pick = (a: Value, b: Value): Value => {
+    const pick = (a: Value, b: Value, comptime = false): Value => {
       if (typeof a === 'bigint' && typeof b === 'bigint') return isMax ? (a > b ? a : b) : a < b ? a : b;
-      return minMaxFloat(a as AnyFloat, b as AnyFloat, isMax);
+      return minMaxFloat(a as AnyFloat, b as AnyFloat, isMax, comptime);
     };
     let type: Type = peer;
     if (peer.kind === 'int') {
@@ -664,12 +664,20 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         ? operands
         : operands.map((operand) => (operand.type === peer ? operand : this.coerce(operand, peer, operand.span)));
     const all = coerced.every((operand) => operand.known);
-    const pickAll = (values: Value[]): Value => {
+    const pickAll = (values: Value[], comptime = false): Value => {
       let result = values[0];
-      for (const value of values.slice(1)) result = pick(result, value);
+      for (const value of values.slice(1)) result = pick(result, value, comptime);
       return result;
     };
-    if (all) return known(type, pickAll(coerced.map((operand) => operand.value)), expression);
+    if (all)
+      return known(
+        type,
+        pickAll(
+          coerced.map((operand) => operand.value),
+          true
+        ),
+        expression
+      );
     return this.combine(coerced, type, pickAll, expression);
   }
 

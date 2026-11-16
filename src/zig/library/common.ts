@@ -13,7 +13,7 @@ import {
   typeName,
   USIZE,
 } from '../types';
-import { compileTimeReadable, FnValue, NULL, Pointer, Slice, storeInto, type Value, ZArray } from '../values';
+import { compileTimeReadable, NULL, Pointer, Slice, storeInto, type Value, ZArray } from '../values';
 import { ALLOCATOR, ALLOCATOR_ERROR, nativeEnum } from './heap';
 import { compileArgs, expectArgs, fnMember, type Member } from './native';
 
@@ -78,13 +78,7 @@ export function mutableSlice(sema: SemaApi, arg: Expression, child: Type): TExpr
   return sema.coerce(sema.compile(arg, sliceOf(child, false)), sliceOf(child, false), arg);
 }
 
-/** Whether two elements are equal, as `==` compares them. */
-export function equalValues(a: Value, b: Value): boolean {
-  if (a instanceof BigFloat && b instanceof BigFloat) return compareFloats(a, b) === 0;
-  if (a instanceof Pointer && b instanceof Pointer) return a.equals(b);
-  if (a instanceof FnValue && b instanceof FnValue) return a.fn === b.fn;
-  return a === b;
-}
+export { scalarValuesEqual as equalValues } from '../values';
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Handles each kind of value the operation accepts.
 export function compareScalars(a: Value, b: Value): number {

@@ -9,6 +9,7 @@ import {
   errorSetOf,
   errorUnionOf,
   intType,
+  pointerTo,
   sliceOf,
   type StructType,
   TYPE,
@@ -20,7 +21,7 @@ import {
 } from '../types';
 import { decodeUtf8 } from '../utf8';
 import { ErrorValue, NativeHandle, Pointer, Slice, type Value, ZArray, ZStruct } from '../values';
-import { ALLOCATOR, allocatorMembers, heapNamespace } from './heap';
+import { ALLOCATOR, allocatorMembers, ARENA_ALLOCATOR, arenaValue, heapNamespace } from './heap';
 import {
   addMembers,
   compileArgs,
@@ -343,7 +344,7 @@ function addWriterMembers(): void {
       );
     }),
     buffered: fnMember('Writer.buffered', (sema, call) => {
-      const writer = writerOf(sema, call);
+      const writer = writerOf(sema, call, false);
       return runtime(
         sliceOf(U8, false),
         (frame) => {
@@ -389,28 +390,22 @@ function fileWriter(sema: SemaApi, call: NativeCall): TExpr {
   );
 }
 
-/** The state of the writer a method is called on, through `*std.Io.Writer`. */
-function writerOf(sema: SemaApi, call: NativeCall): (frame: Parameters<TExpr['eval']>[0]) => WriterState {
+function writerOf(
+  sema: SemaApi,
+  call: NativeCall,
+  mutable = true
+): (frame: Parameters<TExpr['eval']>[0]) => WriterState {
   const receiver = call.receiver;
   if (!receiver) return sema.error(call.span, 'std.Io.Writer の値に対して呼び出してください。');
-  const type = receiver.type;
-  const evaluate = receiver.eval;
-  if (type.kind === 'pointer' && type.child === WRITER) {
-    return (frame) => writerState((evaluate(frame) as Pointer).load());
-  }
-  if (type === WRITER) {
-    // A method that takes `*Writer` takes the address of a writer variable or field.
-    const address = sema.addressOf(receiver);
-    if (address.type.kind === 'pointer' && address.type.isConst) {
-      return sema.error(call.span, '定数の std.Io.Writer には書き込めません（var で宣言してください）。');
-    }
-    const locate = address.eval;
-    return (frame) => writerState((locate(frame) as Pointer).load());
-  }
-  return sema.error(call.span, `${typeName(type)} 型には、このメソッドがありません。`);
+  const pointer = receiver.type === WRITER ? sema.addressOf(receiver) : receiver;
+  if (pointer.type.kind !== 'pointer' || pointer.type.child !== WRITER)
+    return sema.error(call.span, `${typeName(receiver.type)} 型には、このメソッドがありません。`);
+  if (mutable && pointer.type.isConst)
+    return sema.error(call.span, '定数の std.Io.Writer には書き込めません（var で宣言してください）。');
+  const evaluate = pointer.eval;
+  return (frame) => writerState((evaluate(frame) as Pointer).load());
 }
 
-/** Writes bytes through a writer: into its buffer, draining the buffer and the bytes when they do not fit. */
 function writeRepeated(frame: Parameters<TExpr['eval']>[0], state: WriterState, data: number[], count: number): Value {
   const length = data.length * count;
   const end = state.end + length;
@@ -442,7 +437,7 @@ export const PROCESS_INIT: StructType = nativeStruct(
     { name: 'gpa', type: ALLOCATOR, hasDefault: false },
     {
       name: 'arena',
-      type: { kind: 'pointer', size: 'one', child: ALLOCATOR, isConst: true } as Type,
+      type: pointerTo(ARENA_ALLOCATOR, false),
       hasDefault: false,
     },
   ],
@@ -474,11 +469,7 @@ export class ExitSignal extends Error {
 /** The `std.process.Init` that `main(init: std.process.Init)` receives. */
 export function processInit(): Value {
   const gpa = handle('allocator', { name: 'gpa', live: 0 });
-  return new ZStruct([
-    handle('io', {}),
-    gpa,
-    new Pointer({ slots: [handle('allocator', { name: 'arena', live: 0 })] }, 0),
-  ]);
+  return new ZStruct([handle('io', {}), gpa, new Pointer({ slots: [arenaValue(gpa)] }, 0)]);
 }
 
 export { allocatorMembers, BOOL, bytesToText, CONST_U8, NativeHandle, TYPE, ZArray };

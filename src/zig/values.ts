@@ -1,5 +1,5 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
-import type { BigFloat } from './floats';
+import { BigFloat, compareFloats } from './floats';
 import type { FunctionInstance } from './functions';
 import type { Type } from './types';
 import { WeakValueMap } from './weakValueMap';
@@ -32,6 +32,9 @@ export type Value =
 export interface Slots {
   slots: Value[];
 }
+
+const scalarIdentities = new WeakMap<object, number>();
+let nextScalarIdentity = 1;
 
 const storageLocations = new WeakMap<object, (index: number) => { storage: object; index: number }>();
 
@@ -348,4 +351,35 @@ class SomeSlots implements Slots {
       },
     });
   }
+}
+
+export function scalarValueKey(value: Value): string {
+  if (value instanceof BigFloat) return `float ${value.kind} ${value.sign} ${value.mantissa} ${value.exponent}`;
+  if (value instanceof ErrorValue || value instanceof EnumLiteral)
+    return `${value.constructor.name} ${JSON.stringify(value.name)}`;
+  if (value instanceof Some) return `some ${scalarValueKey(value.value)}`;
+  if (value instanceof Pointer) {
+    const location = value.storageLocation();
+    return `pointer ${scalarIdentity(location.storage)} ${location.index}`;
+  }
+  if (value instanceof FnValue) return `fn ${scalarIdentity(value.fn)}`;
+  if (typeof value === 'object') return `object ${scalarIdentity(value)}`;
+  if (typeof value === 'number' && Object.is(value, -0)) return 'number -0';
+  return `${typeof value} ${String(value)}`;
+}
+
+function scalarIdentity(value: object): number {
+  let identity = scalarIdentities.get(value);
+  if (identity === undefined) {
+    identity = nextScalarIdentity++;
+    scalarIdentities.set(value, identity);
+  }
+  return identity;
+}
+
+export function scalarValuesEqual(a: Value, b: Value): boolean {
+  if (a instanceof BigFloat && b instanceof BigFloat) return compareFloats(a, b) === 0;
+  if (a instanceof Pointer && b instanceof Pointer) return a.equals(b);
+  if (a instanceof FnValue && b instanceof FnValue) return a.fn === b.fn;
+  return a === b;
 }

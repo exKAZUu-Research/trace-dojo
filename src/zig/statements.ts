@@ -670,7 +670,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** The code that writes an anonymous literal into the value at `holder.slots[index]`, or undefined for other values. */
-  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private resultLocationStore(value: Expression, type: Type): ResultStore | undefined {
     if (
       value.kind === 'structInit' &&
@@ -695,6 +695,7 @@ export abstract class StatementCompiler extends CallCompiler {
         const aggregate = holder.slots[index] as ZArray | ZStruct;
         const offset = aggregate instanceof ZArray ? aggregate.offset : 0;
         for (const [position, store] of stores.entries()) store(frame, aggregate, offset + position);
+        if (type.kind === 'array' && type.sentinel !== undefined) storeInto(aggregate, offset + length, type.sentinel);
       };
     }
     if (value.kind === 'structInit' && !value.type && type.kind === 'union' && value.fields.length === 1) {
