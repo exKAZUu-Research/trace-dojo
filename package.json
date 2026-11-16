@@ -154,7 +154,8 @@
     "react-is": "19.3.1"
   },
   "patchedDependencies": {
-    "npm@11.21.1": "patches/npm@11.21.1.patch"
+    "npm@11.21.1": "patches/npm@11.21.1.patch",
+    "oniguruma-parser@0.12.2": "patches/oniguruma-parser@0.12.2.patch"
   },
   "trustedDependencies": [
     "@airbnb/node-memwatch",

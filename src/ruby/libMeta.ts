@@ -337,18 +337,18 @@ function methodParameterSignature(params: Params): string {
     params.required.length + params.optional.length + params.post.length + params.keywords.length === 0
   )
     return '...';
-  return [
+  const signature = [
     ...params.required.map((param) => (typeof param === 'string' ? param : '_')),
     ...params.optional.map((param) => `${param.name}=...`),
     ...(params.rest === undefined ? [] : [params.rest === '*' ? '*' : `*${params.rest}`]),
     ...params.post.map((param) => (typeof param === 'string' ? param : '_')),
     ...params.keywords.map((param) => `${param.name}:${param.value ? ' ...' : ''}`),
-    ...(params.keywordRest === undefined || (params.keywordRest === '**' && params.rest !== undefined)
-      ? []
-      : [params.keywordRest === '**' ? '**' : `**${params.keywordRest}`]),
-    ...(params.noKeywords ? ['**nil'] : []),
-    ...(params.block === undefined ? [] : [params.block === '&' ? '...' : `&${params.block}`]),
-  ].join(', ');
+  ];
+  if (params.keywordRest !== undefined && (params.keywordRest !== '**' || signature.length === 0))
+    signature.push(params.keywordRest === '**' ? '**' : `**${params.keywordRest}`);
+  if (params.noKeywords) signature.push('**nil');
+  if (params.block !== undefined) signature.push(params.block === '&' ? '...' : `&${params.block}`);
+  return signature.join(', ');
 }
 
 function joinMethodDescription(parts: RString[]): RString {

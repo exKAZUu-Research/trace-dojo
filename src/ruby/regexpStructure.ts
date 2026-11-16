@@ -5,10 +5,12 @@ import {
   type Node as SourceNode,
   parse as parseOniguruma,
 } from 'oniguruma-parser/parser';
+import { tokenize } from 'oniguruma-parser/tokenizer';
 
 import { ExecutionLimitError } from '../interpreter/limits';
 import { regexpCommentEnd, regexpLineCommentEnd } from './regexpCaptureNames';
 import { decodeRegexpByteEscape, regexpByteEscape } from './regexpEscapes';
+import { regexpPropertyNames } from './regexpProperties';
 import { UnsupportedFeatureError } from './runtime';
 
 export function validateRegexpSourceSyntax(source: string, extended: boolean): void {
@@ -40,12 +42,27 @@ function propertyNode(node: SourceNode): boolean {
 }
 
 function parseSourceRegexp(source: string, extended: boolean): SourceNode {
-  return parseOniguruma(normalizeRubyRegexpEscapes(source, extended), {
+  const normalized = normalizeRubyRegexpEscapes(source, extended);
+  validateSourceTokens(normalized, extended);
+  return parseOniguruma(normalized, {
     flags: extended ? 'x' : '',
     skipLookbehindValidation: true,
     skipBackrefValidation: true,
     skipPropertyNameValidation: true,
   });
+}
+
+function validateSourceTokens(source: string, extended: boolean): void {
+  for (const token of tokenize(source, { flags: extended ? 'x' : '' }).tokens) {
+    if (token.type === 'Quantifier') {
+      const bounds = /^\{(\d+),(\d+)\}/.exec(token.raw);
+      if (bounds && Number(bounds[1]) > Number(bounds[2])) throw new SyntaxError('invalid reversed quantifier range');
+    }
+    if (token.type === 'CharacterSet' && token.kind === 'property') {
+      const name = (token.value ?? '').replaceAll(/[-_ ]/g, '').toLowerCase();
+      if (!regexpPropertyNames.has(name)) throw new SyntaxError('invalid character property name');
+    }
+  }
 }
 
 export function supportsRegexpByteView(source: string, extended: boolean): boolean {

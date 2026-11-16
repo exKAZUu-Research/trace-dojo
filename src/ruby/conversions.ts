@@ -5,6 +5,7 @@ import { argumentError, implicitConversionError, rangeError, rubyError, typeErro
 import { hashGet } from './hashes';
 import { callMethod, callProc, type Gen, runToEnd } from './interp';
 import { methodArity } from './libMeta';
+import { symbolString } from './libString';
 import {
   isRubyFloat,
   NIL,
@@ -270,6 +271,7 @@ export function* toSValue(value: Value): Gen<RString> {
   const fast = fastToS(value);
   if (fast !== undefined && !isOverridden(value, 'to_s')) {
     if (value === NIL || typeof value === 'boolean') return frozenCoreString(fast);
+    if (value instanceof RSymbol) return symbolString(value);
     return /^[\u0000-\u007F]*$/.test(fast) ? asciiString(fast) : str(fast);
   }
   const converted = yield* callMethod(value, 'to_s', [], undefined, undefined, { fcall: true });

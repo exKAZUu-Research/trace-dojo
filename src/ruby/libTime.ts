@@ -11,7 +11,7 @@ import {
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, floatDomainError, frozenError, rangeError, rubyError, typeError } from './errors';
-import { bigintRatio, ldexpDouble } from './floatMath';
+import { bigintRatio } from './floatMath';
 import { callMethod, type Gen } from './interp';
 import { floatToRational, fractionOf, isRational, makeRational } from './libRational';
 import { isRubyFloat, NIL, type RClass, type RHash, RObject, RString, type Value } from './objects';
@@ -778,27 +778,8 @@ def('Time', 'to_f', 0, (self: RObject) => {
   const data = dataOf(self);
   if (data.remainderNumerator === 0n) return Number(data.nanoseconds) / 1_000_000_000;
   const fraction = fractionOf(makeRational(data.exactNumerator(), data.remainderDenominator * 1_000_000_000n));
-  return rationalTimeFloat(fraction.numerator, fraction.denominator);
+  return Number(fraction.numerator) / Number(fraction.denominator);
 });
-
-function rationalTimeFloat(numerator: bigint, denominator: bigint): number {
-  const absolute = numerator < 0n ? -numerator : numerator;
-  const encoded = Number(numerator);
-  const smallNumerator = absolute < 1n << 62n;
-  if (
-    (smallNumerator && denominator < 1n << 53n) ||
-    (!smallNumerator && denominator < 1n << 62n && Number.isFinite(encoded))
-  )
-    return encoded / Number(denominator);
-  const denominatorShift = denominator.toString(2).length - 64;
-  let numeratorShift = absolute.toString(2).length - 128;
-  if (numeratorShift > 32) numeratorShift -= 32;
-  else if (numeratorShift > 0) numeratorShift = 0;
-  const left = numeratorShift > 0 ? numerator >> BigInt(numeratorShift) : numerator << BigInt(-numeratorShift);
-  const right =
-    denominatorShift > 0 ? denominator >> BigInt(denominatorShift) : denominator << BigInt(-denominatorShift);
-  return ldexpDouble(Number(left / right), numeratorShift - denominatorShift);
-}
 
 def('Time', ['getutc', 'getgm'], 0, (self: RObject) => {
   const data = dataOf(self);

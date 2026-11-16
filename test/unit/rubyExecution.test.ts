@@ -10694,3 +10694,113 @@ p String.new('é',capacity:Capacity.new,encoding:Encoding::UTF_8).bytes`)
     uncaughtException: undefined,
   });
 });
+
+test('Enumerator reinitialization validates before committing and respects freeze', () => {
+  expect(
+    run(String.raw`class E < Enumerator
+ def reset(*args,&block);super_init(*args,&block);end
+ def super_init(*args,&block);initialize(*args,&block);end
+end
+[Enumerator,E].each do |type|
+ [Object.new,'bad'].each do |size|
+  e=type.new{|y|y<<1;y<<2}
+  begin;e.send(:initialize,size){|y|y<<3};rescue=>x;p x.class;end
+  p e.next
+ end
+ e=type.new{|y|y<<1};e.freeze
+ begin;e.send(:initialize){|y|y<<3};rescue=>x;p x.class;end
+end
+e=Enumerator.new{|y|y<<1};o=Object.new
+o.define_singleton_method(:to_int){puts :coerce;e.freeze;1}
+begin;e.send(:initialize,o){|y|y<<2};rescue=>x;p x.class;end
+begin;Enumerator.new;rescue=>x;p x.class,x.message;end
+class Blank<Enumerator;def initialize;end;end
+e=Blank.new.freeze
+begin;Enumerator.instance_method(:initialize).bind(e).call{|y|y<<1};rescue=>x;p x.class,x.message;end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'TypeError\n1\nTypeError\n1\nFrozenError\nTypeError\n1\nTypeError\n1\nFrozenError\ncoerce\nFrozenError\nArgumentError\n"tried to create Proc object without a block"\nFrozenError\n"can\'t modify frozen Blank: #<Blank: uninitialized>"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Encoded symbols retain string conversion through interpolation and dispatch', () => {
+  expect(
+    run(String.raw`['ASCII-8BIT','US-ASCII'].each do |encoding|
+ s=String.new(255.chr,encoding:encoding);a=:"#{s}";v=:"#{a}"
+ p v.encoding,v.to_s.bytes,"#{a}".bytes,"#{a}".encoding
+ c=Class.new{define_method(v){7}};p [c.new].map(&v)
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '#<Encoding:BINARY (ASCII-8BIT)>\n[255]\n[255]\n#<Encoding:BINARY (ASCII-8BIT)>\n[7]\n#<Encoding:US-ASCII>\n[255]\n[255]\n#<Encoding:US-ASCII>\n[7]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Regexp source tokens retain invalid bounds and property names before AST normalization', () => {
+  for (const pattern of [
+    String.raw`\X{2,1}`,
+    String.raw`\Gx{3,2}`,
+    String.raw`\X(a{4,2})`,
+    String.raw`\X[abc]{9,2}`,
+    String.raw`\X(?i:a{3,2})`,
+    String.raw`\X\p{NoSuchProperty}`,
+    String.raw`\G\P{NotAProperty}`,
+  ]) {
+    expect(run(`puts :before;p /${pattern}/`)).toMatchObject({ kind: 'compileError' });
+  }
+  expect(
+    run(String.raw`p /[a{3,2}]/.match?('{'), /a\{3,2\}/.match?('a{3,2}'), /a(?# {3,2})/.match?('a'), /a # {3,2} \p{NoSuchProperty}
+/x.match?('a'), /\p{White_Space}/.match?(' '), /\p{Greek}/.match?('α')`)
+  ).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\ntrue\ntrue\ntrue\ntrue\n' });
+});
+
+test('Time float conversion uses native Float conversion for rational nanoseconds', () => {
+  expect(
+    run(`[Rational(1,2**53+1),Rational(1,10**30),Rational(5,5**40),Rational(1,7**20),Rational(1,7)].each do |fraction|
+  [0,1,-1,1709960707].each{|seconds|p (Time.at(seconds)+fraction).to_f}
+end`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '1.1102230246251565e-16\n1.0000000000000002\n-1.0\n1709960707.0000002\n9.999999999999999e-31\n1.0\n-1.0\n1709960707.0\n5.4975581388800005e-28\n1.0\n-1.0\n1709960707.0000002\n1.253254289419685e-17\n1.0\n-1.0\n1709960707.0\n0.14285714285714285\n1.1428571428571428\n-0.8571428571428571\n1709960707.142857\n',
+  });
+});
+
+test('Anonymous keyword-rest inspection follows the complete preceding signature', () => {
+  expect(
+    run(`class Signatures
+ def a(x,**);end
+ def b(x=1,**);end
+ def c(x,**,&);end
+ def d(x:,**);end
+ def e(**);end
+end
+[:a,:b,:c,:d,:e].each{|n|p Signatures.instance_method(n).to_s.sub(/ (main\\.rb|-e):\\d+>/,'>')}`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '"#<UnboundMethod: Signatures#a(x)>"\n"#<UnboundMethod: Signatures#b(x=...)>"\n"#<UnboundMethod: Signatures#c(x, ...)>"\n"#<UnboundMethod: Signatures#d(x:)>"\n"#<UnboundMethod: Signatures#e(**)>"\n',
+  });
+});
+
+test('Frozen external iterators refuse cursor mutations while allowing each', () => {
+  expect(
+    run(`[:next,:peek,:next_values,:peek_values,:rewind,:feed].each do |operation|
+ [false,true].each do |started|
+  e=Enumerator.new{|y|y<<1;y<<2};e.peek if started;e.freeze
+  begin;operation==:feed ? e.feed(1) : e.send(operation);rescue=>error;p error.class;end
+ end
+end
+e=Enumerator.new{|y|y<<1;y<<2};e.freeze;p e.each.to_a`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'FrozenError\n'.repeat(12) + '[1, 2]\n',
+    uncaughtException: undefined,
+  });
+});

@@ -1,0 +1,15 @@
+diff --git a/package.json b/package.json
+index 205e2ff0e3688bbc3744f75021846a40dc1d077b..b7e9c7b83fe7a14bee547d9b2d7a5957bc1e4c5f 100644
+--- a/package.json
++++ b/package.json
+@@ -30,6 +30,10 @@
+     "./unicode": {
+       "types": "./dist/unicode.d.ts",
+       "import": "./dist/unicode.js"
++    },
++    "./tokenizer": {
++      "types": "./dist/tokenizer/tokenize.d.ts",
++      "import": "./dist/tokenizer/tokenize.js"
+     }
+   },
+   "browser": "./dist/oniguruma-parser.min.js",

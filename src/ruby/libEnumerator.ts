@@ -2,6 +2,7 @@ import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   addressOf,
   caseEquals,
+  className,
   comparisonFailed,
   inspect,
   numericCompare,
@@ -14,7 +15,15 @@ import {
 } from './conversions';
 import { coreMethod, def, iundef, sdef } from './define';
 import { customReceiverSize, cycleSize, windowSize } from './enumeratorSize';
-import { argumentCountError, argumentError, floatDomainError, rangeError, rubyError, typeError } from './errors';
+import {
+  argumentCountError,
+  argumentError,
+  floatDomainError,
+  frozenError,
+  rangeError,
+  rubyError,
+  typeError,
+} from './errors';
 import { floatStepCount } from './floatMath';
 import { pushFrameReferences } from './garbageCollection';
 import { hashGet, hashSet } from './hashes';
@@ -28,6 +37,7 @@ import {
   nativeProc,
   requireBlock,
   respondsTo,
+  runToEnd,
 } from './interp';
 import { lazySourceDescription, setLazyDisplaySource } from './lazyDisplay';
 import { iterate, iterateYielded, STOP, zipCollections } from './libEnumerable';
@@ -73,7 +83,7 @@ export function makeEnumerator(
   method: string,
   args: Value[],
   keywords?: RHash,
-  explicit?: { sizeBlock?: RProc; target?: RObject }
+  explicit?: { sizeBlock?: RProc }
 ): RObject {
   const sizeBlock = explicit?.sizeBlock;
   const spec = method === 'step' || method === '%' ? arithmeticSpec(recv, args, keywords) : undefined;
@@ -82,8 +92,7 @@ export function makeEnumerator(
     (spec.end === NIL || isRubyNumber(spec.end)) &&
     isRubyNumber(spec.step) &&
     (isRubyNumber(recv) || (recv instanceof RRange && isRubyNumber(recv.begin)));
-  const enumerator =
-    explicit?.target ?? new RObject(arithmetic ? rt().c['Enumerator::ArithmeticSequence'] : rt().c.Enumerator);
+  const enumerator = new RObject(arithmetic ? rt().c['Enumerator::ArithmeticSequence'] : rt().c.Enumerator);
   const source: EnumeratorSource = {
     recv,
     method,
@@ -596,6 +605,7 @@ for (const name of ['==', '===', 'eql?'])
     );
   });
 def('Enumerator', ['inspect', 'to_s'], 0, function* (self: RObject) {
+  if (self.data === undefined) return str(`#<${className(realClassOf(self))}: uninitialized>`);
   const source = sourceOf(self);
   if (self.cls === rt().c['Enumerator::Chain']) {
     const elements = new BoundedTextParts('#<Enumerator::Chain: []>'.length);
@@ -724,6 +734,7 @@ function startCursor(self: RObject): Cursor {
 
 /** Resumes the iteration until it yields its next value, or raises StopIteration when it has ended. */
 function nextValues(self: RObject): Value[] {
+  assertMutableEnumerator(self);
   const source = sourceOf(self);
   source.cursor ??= startCursor(self);
   const cursor = source.cursor;
@@ -814,6 +825,7 @@ def('Enumerator', 'peek', 0, (self: RObject) => {
   return args.length === 0 ? NIL : args.length === 1 ? args[0] : arr(args);
 });
 def('Enumerator', 'rewind', 0, function* (self: RObject) {
+  assertMutableEnumerator(self);
   const receiver = sourceOf(self).recv;
   if (receiver !== self) yield* tryImplicitConversion(receiver, 'rewind');
   if (self.cls === rt().c['Enumerator::Lazy']) {
@@ -832,6 +844,7 @@ def('Enumerator', 'peek_values', 0, (self: RObject) => {
   return arr(args);
 });
 def('Enumerator', 'feed', 1, (self: RObject, [value]) => {
+  assertMutableEnumerator(self);
   const source = sourceOf(self);
   source.cursor ??= startCursor(self);
   if (source.cursor.feedSet) throw typeError('feed value already set');
@@ -854,38 +867,45 @@ def(
   'initialize',
   [0, 1],
   function* (self: RObject, args, block) {
-    const runtime = rt();
-    const generator = new RObject(runtime.c['Enumerator::Generator']);
-    const data: GeneratorData = {
-      block: requireBlock(block),
-      held() {
-        return [this.block];
-      },
-    };
-    generator.data = data;
-    const enumerator = makeEnumerator(generator, 'each', [], undefined, { target: self });
+    if (!block) throw argumentError('tried to create Proc object without a block');
+    const producer = block;
     const [size] = args;
+    let sizeProvider: (() => Value | Gen<Value>) | undefined;
+    let sizeRoot: Value | undefined;
     if (size !== undefined) {
-      const source = enumerator.data as EnumeratorSource;
       if (size instanceof RProc || (yield* advertisesPublicMethod(size, 'call'))) {
-        source.size = function* () {
+        sizeRoot = size;
+        sizeProvider = function* () {
           return size instanceof RProc || (yield* advertisesPublicMethod(size, 'call'))
             ? yield* callMethod(size, 'call', [])
             : size;
         };
-        const previousHeld = source.held;
-        source.held = function () {
-          return [...previousHeld.call(this), size];
-        };
       } else {
         const normalized = size === NIL || (isRubyFloat(size) && Number(size) === Infinity) ? size : yield* toInt(size);
-        source.size = () => normalized;
+        sizeProvider = () => normalized;
       }
     }
-    return enumerator;
+    assertMutableEnumerator(self);
+    const generator = new RObject(rt().c['Enumerator::Generator']);
+    const data: GeneratorData = {
+      block: producer,
+      held() {
+        return [this.block, ...(sizeRoot === undefined ? [] : [sizeRoot])];
+      },
+    };
+    generator.data = data;
+    const enumerator = makeEnumerator(generator, 'each', [], undefined, {});
+    const source = enumerator.data as EnumeratorSource;
+    if (sizeProvider) source.size = sizeProvider;
+    self.data = source;
+    return self;
   },
   { visibility: 'private' }
 );
+function assertMutableEnumerator(self: RObject): void {
+  if (self.frozen) throw frozenError(self, runToEnd(inspect(self)));
+}
+
 sdef('Enumerator::Lazy', 'new', [0, -1], () => {
   throw new UnsupportedFeatureError('Enumerator::Lazy.new');
 });
