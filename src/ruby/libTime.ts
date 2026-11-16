@@ -1008,7 +1008,7 @@ def('Time', '-', 1, function* (self: RObject, [other]) {
 });
 def('Time', '<=>', 1, function* (self: RObject, [other]) {
   if (!(other instanceof RObject && other.data instanceof TimeData)) {
-    const result = yield* callMethod(other, '<=>', [self]);
+    const result = yield* callMethod(other, '<=>', [self], undefined, undefined, { fcall: true });
     const sign = yield* comparisonSign(result);
     return sign === undefined ? NIL : BigInt(-sign);
   }

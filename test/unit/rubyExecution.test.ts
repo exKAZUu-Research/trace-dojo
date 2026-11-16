@@ -12682,3 +12682,125 @@ test('Producer allocation and iteration remain separate from Generator overrides
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ['w', '["a\\nb"]\n'],
+  ['W', '["a\\nb"]\n'],
+  ['i', '[:"a\\nb"]\n'],
+  ['I', '[:"a\\nb"]\n'],
+])('Percent-%s word decoding preserves escaped physical newlines', (kind, stdout) => {
+  expect(
+    run(String.raw`p %${kind}[a\
+b]`)
+  ).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test('Record keyword names retain String binding and Data diagnostics', () => {
+  expect(
+    run(
+      'S=Struct.new(:a,keyword_init:true);p S.new("a"=>9).to_h;D=Data.define(:m);p D.new("m"=>1).to_h;begin;D.new("m"=>1,"z"=>3);rescue=>e;p e.class,e.message;end;begin;D.new(1=>2);rescue=>e;p e.class,e.message;end'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '{a: 9}\n{m: 1}\nArgumentError\n"unknown keyword: \\"z\\""\nTypeError\n"1 is not a symbol nor a string"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Generated record APIs appear after inherited hooks', () => {
+  expect(
+    run(
+      'class << Struct;def inherited(c);p [c.respond_to?(:members),c.respond_to?(:keyword_init?)];end;end;S=Struct.new(:x,keyword_init:true);p S.members,S.keyword_init?,S.inspect;class << Data;def inherited(c);p c.respond_to?(:members);end;end;D=Data.define(:x);p D.members'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '[false, false]\n[:x]\ntrue\n"S(keyword_init: true)"\nfalse\n[:x]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Time reciprocal comparison invokes private protocols', () => {
+  expect(run('class X;private;def <=>(t);1;end;end;p(Time.at(0)<=>X.new)')).toMatchObject({
+    kind: 'executed',
+    stdout: '-1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Lazy active argument copy boundary 0', () => {
+  expect(
+    run('l=[1,2].lazy;p l.next;begin;l.each(3);puts :accepted;rescue=>e;p e.class,e.message;end;p l.next')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '1\nTypeError\n"can\'t copy execution context"\n2\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Lazy active argument copy boundary 1', () => {
+  expect(
+    run('l=[1,2].lazy;p l.next;begin;l.each(3){|x|p x};puts :accepted;rescue=>e;p e.class,e.message;end;p l.next')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '1\nTypeError\n"can\'t copy execution context"\n2\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Lazy active argument copy boundary 2', () => {
+  expect(
+    run('l=[1,2].lazy.map{|x|x};p l.next;begin;l.each(3);puts :accepted;rescue=>e;p e.class,e.message;end;p l.next')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '1\nTypeError\n"can\'t copy execution context"\n2\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Lazy active argument copy boundary 3', () => {
+  expect(
+    run(
+      'l=[1,2].lazy.map{|x|x};p l.next;begin;l.each(3){|x|p x};puts :accepted;rescue=>e;p e.class,e.message;end;p l.next'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '1\nTypeError\n"can\'t copy execution context"\n2\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Completed iterator restarts with arguments 0', () => {
+  expect(
+    run('e=Enumerator.new{|y,*args|y<<args};p e.next;begin;e.next;rescue StopIteration;end;p e.each(3).to_a')
+  ).toMatchObject({ kind: 'executed', stdout: '[]\n[[3]]\n', uncaughtException: undefined });
+});
+
+test('Completed iterator restarts with arguments 1', () => {
+  expect(
+    run('e=Enumerator.new{|y,*args|y<<args}.lazy;p e.next;begin;e.next;rescue StopIteration;end;p e.each(3).to_a')
+  ).toMatchObject({ kind: 'executed', stdout: '[]\n[[3]]\n', uncaughtException: undefined });
+});
+
+test('Completed iterator restarts with arguments 2', () => {
+  expect(
+    run(
+      'e=Enumerator.new{|y,*args|y<<args}.lazy.map{|x|x};p e.next;begin;e.next;rescue StopIteration;end;p e.each(3).to_a'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '[]\n[[]]\n', uncaughtException: undefined });
+});
+
+test('Completed iterator duplication 0', () => {
+  expect(run('e=[1].each;p e.next;begin;e.next;rescue StopIteration;end;p e.dup.to_a')).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n[1]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Completed iterator duplication 1', () => {
+  expect(run('e=[1].each.lazy;p e.next;begin;e.next;rescue StopIteration;end;p e.dup.to_a')).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n[1]\n',
+    uncaughtException: undefined,
+  });
+});

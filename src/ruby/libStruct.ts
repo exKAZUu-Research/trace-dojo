@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 474 -- Record layout and initialization share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 479 -- Record layout and initialization share representation and state; splitting registration by size would scatter that concern.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   addressOf,
@@ -24,7 +24,7 @@ import { addMethod, assertMutableClass, callBlock, callMethod, callProc, type Ge
 import { tryAry } from './libArray';
 import { sizedEnumerator } from './libEnumerator';
 import { identifierSymbol, symbolNameOf } from './libMeta';
-import { symbolString } from './libString';
+import { symbolFromString, symbolString } from './libString';
 import { NIL, RArray, RClass, type RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
 import {
@@ -182,6 +182,7 @@ function* newStructClass(
     layout.kind === 'struct'
   );
   const singleton = singletonClassOf(cls);
+  installRecordClassMethods(singleton, layout.kind);
   if (layout.kind === 'data')
     addMethod(singleton, { name: 'define', owner: singleton, visibility: 'public', body: { kind: 'undefined' } });
   for (const name of ['new', '[]']) {
@@ -214,6 +215,24 @@ function* newStructClass(
     },
   });
   return cls;
+}
+
+function installRecordClassMethods(singleton: RClass, kind: Layout['kind']): void {
+  const methods: [string, (self: RClass) => Value][] = [
+    ['members', (self) => arr([...layoutOf(self).memberSymbols])],
+    [
+      'inspect',
+      (self) => str(`${className(self)}${layoutOf(self).keywordInit === true ? '(keyword_init: true)' : ''}`),
+    ],
+  ];
+  if (kind === 'struct') methods.push(['keyword_init?', (self) => layoutOf(self).keywordInit ?? NIL]);
+  for (const [name, fn] of methods)
+    addMethod(singleton, {
+      name,
+      owner: singleton,
+      visibility: 'public',
+      body: { kind: 'native', fn: (self) => fn(self as RClass), min: 0, max: 0, takesKeywords: false },
+    });
 }
 
 export function allocateStruct(cls: RClass): RObject {
@@ -281,7 +300,7 @@ def(
   'Struct',
   'initialize',
   [0, -1],
-  // code-gauge-allow functionNcss 49 -- The ordered cases for record layout and initialization share state; splitting them solely for the metric would hide their sequencing.
+  // code-gauge-allow functionNcss 50 -- The ordered cases for record layout and initialization share state; splitting them solely for the metric would hide their sequencing.
   function* (self: RObject, args, _block, keywords) {
     if (self.frozen) throw frozenError(self, yield* inspect(self));
     const { members, memberSymbols, keywordInit } = layoutOf(self.cls);
@@ -293,7 +312,8 @@ def(
       let nonAsciiEncoding: string | undefined;
       let incompatibleEncodings: [string, string] | undefined;
       for (const entry of keywords?.map.values() ?? []) {
-        const index = entry.key instanceof RSymbol ? memberSymbols.indexOf(entry.key) : -1;
+        const key = entry.key instanceof RString ? symbolFromString(entry.key) : entry.key;
+        const index = key instanceof RSymbol ? memberSymbols.indexOf(key) : -1;
         if (index !== -1) {
           next[index] = entry.value;
           continue;
@@ -352,11 +372,6 @@ def(
     return NIL;
   },
   { visibility: 'private', keywords: true }
-);
-sdef('Struct', 'members', 0, (self: RClass) => arr([...layoutOf(self).memberSymbols]));
-sdef('Struct', 'keyword_init?', 0, (self: RClass) => layoutOf(self).keywordInit ?? NIL);
-sdef('Struct', 'inspect', 0, (self: RClass) =>
-  str(`${className(self)}${layoutFor(self)?.keywordInit === true ? '(keyword_init: true)' : ''}`)
 );
 def('Struct', 'members', 0, (self: RObject) => arr([...layoutOf(self.cls).memberSymbols]));
 def('Struct', ['to_a', 'deconstruct', 'values'], 0, (self: RObject) => arr([...valuesOf(self)]));
@@ -590,8 +605,9 @@ def(
     const given = new Set<RSymbol>();
     const unknown: string[] = [];
     for (const entry of keywords?.map.values() ?? []) {
-      const name = entry.key instanceof RSymbol ? symInspect(entry.key) : `:${yield* inspect(entry.key)}`;
-      const index = entry.key instanceof RSymbol ? memberSymbols.indexOf(entry.key) : -1;
+      const key = yield* symbolNameOf(entry.key);
+      const index = memberSymbols.indexOf(key);
+      const name = entry.key instanceof RString ? yield* inspect(entry.key) : symInspect(key);
       if (index === -1) unknown.push(name);
       else {
         values[index] = entry.value;
@@ -608,7 +624,6 @@ def(
   },
   { visibility: 'private', keywords: true }
 );
-sdef('Data', 'members', 0, (self: RClass) => arr([...layoutOf(self).memberSymbols]));
 def('Data', 'members', 0, (self: RObject) => arr([...layoutOf(self.cls).memberSymbols]));
 def('Data', 'to_h', 0, (self: RObject, _args, block) => structToHash(self, block));
 

@@ -496,7 +496,15 @@ export class Converter {
           .map((child): Expr => {
             const parts: StrPart[] = interpolates
               ? this.stringParts(child)
-              : [decodePercentLiteral(child.text, delimiter, true)];
+              : [
+                  decodePercentLiteral(
+                    namedChildren(child)
+                      .map((part) => part.text)
+                      .join(''),
+                    delimiter,
+                    true
+                  ),
+                ];
             return node.type === 'symbol_array' ? this.symbol(child, parts) : { k: 'str', parts };
           });
         return { k: 'array', items };
@@ -793,6 +801,8 @@ export class Converter {
   }
 
   private decode(node: Node, text: string): { text: string; binary: boolean; bytes?: number[] } {
+    if (node.type === 'bare_string' || node.type === 'bare_symbol')
+      text = text.replaceAll('\r\n', '\n').replaceAll('\\\n', String.raw`\n`);
     const decoded = decodeDoubleQuoted(text);
     if (decoded === undefined) this.fail(node, '文字列のエスケープの書き方に誤りがあります。');
     return decoded;
@@ -1912,6 +1922,7 @@ export class Converter {
 }
 
 function decodePercentLiteral(value: string, opening: string, words: boolean): string {
+  if (words) value = value.replaceAll('\r\n', '\n');
   const closing = ({ '(': ')', '[': ']', '{': '}', '<': '>' } as Record<string, string>)[opening] ?? opening;
   return value.replaceAll(/\\(.)/gs, (whole, escaped: string) =>
     escaped === opening || escaped === closing || escaped === '\\' || (words && /[ \t\r\n\f\v]/.test(escaped))

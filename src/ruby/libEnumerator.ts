@@ -119,7 +119,7 @@ export function makeEnumerator(
       ];
     },
     copy() {
-      if (this.cursor?.started) throw typeError("can't copy execution context");
+      if (hasExecutionContext(this.cursor)) throw typeError("can't copy execution context");
       return {
         ...this,
         args: [...this.args],
@@ -383,15 +383,24 @@ function* runSource(source: EnumeratorSource, block: RProc, args: Value[] = []):
   );
 }
 
+function hasExecutionContext(cursor: Cursor | undefined): boolean {
+  return cursor?.started === true && cursor.result === undefined;
+}
+
 def('Enumerator', 'each', [0, -1], function* (self: RObject, args, block) {
   const source = sourceOf(self);
   if (source.arithmetic && args.length > 0) throw argumentCountError(args.length, 0, 0);
-  if (args.length > 0 && source.cursor?.started) throw typeError("can't copy execution context");
+  if (args.length > 0 && hasExecutionContext(source.cursor)) throw typeError("can't copy execution context");
   if (!block) {
     if (args.length === 0) return self;
     if (source.iterate) {
       const enumerator = new RObject(rt().c.Enumerator);
-      enumerator.data = { ...source, args: [...source.args, ...args], size: () => NIL } satisfies EnumeratorSource;
+      enumerator.data = {
+        ...source,
+        args: [...source.args, ...args],
+        cursor: undefined,
+        size: () => NIL,
+      } satisfies EnumeratorSource;
       return enumerator;
     }
     const enumerator = makeEnumerator(source.recv, source.method, [...source.args, ...args], source.keywords);
@@ -1108,7 +1117,7 @@ function makeLazy(source: Value, steps: LazyStep[]): RObject {
       ];
     },
     copy() {
-      if (this.enumerator?.cursor?.started) throw typeError("can't copy execution context");
+      if (hasExecutionContext(this.enumerator?.cursor)) throw typeError("can't copy execution context");
       return { ...this, enumerator: undefined };
     },
   };
@@ -1277,7 +1286,7 @@ function* runLazy(self: RObject, visit: (value: Value, yielded?: Value[]) => Gen
         const args = yielded.length === 0 && data.steps.length > 0 ? [NIL] : yielded;
         return yield* streamLazyStep(data.steps, states, 0, value, visitWithStop, args);
       },
-      args
+      lazySourceArgs(data, args)
     );
     if (!visitorStopped)
       for (const [position, step] of data.steps.entries()) {
@@ -1293,6 +1302,10 @@ function* runLazy(self: RObject, visit: (value: Value, yielded?: Value[]) => Gen
     rt().held.length = held;
     arrays.length = arrayMark;
   }
+}
+
+function lazySourceArgs(data: LazyData, args: Value[]): Value[] {
+  return data.steps.every((step) => step.kind === 'each_entry') ? args : [];
 }
 
 interface LazyState {
@@ -1481,6 +1494,8 @@ function* streamFlattened(mapped: Value, next: (value: Value) => Gen<unknown>): 
 }
 
 def('Enumerator::Lazy', 'each', [0, -1], function* (self: RObject, args, block) {
+  if (args.length > 0 && hasExecutionContext((self.data as LazyData).enumerator?.cursor))
+    throw typeError("can't copy execution context");
   if (!block) {
     if (args.length === 0) return self;
     const data = self.data as LazyData;
@@ -1489,7 +1504,10 @@ def('Enumerator::Lazy', 'each', [0, -1], function* (self: RObject, args, block) 
       last?.kind === 'each_entry'
         ? [...data.steps.slice(0, -1), { ...last, args: [...(last.args ?? []), ...args] }]
         : data.steps;
-    return makeLazy(lazyIterationSource(data.source, args, last?.kind === 'each_entry' ? [] : args), steps);
+    return makeLazy(
+      lazyIterationSource(data.source, lazySourceArgs(data, args), last?.kind === 'each_entry' ? [] : args),
+      steps
+    );
   }
   return yield* runLazy(self, (value, yielded) => callProc(block, yielded ?? [value], { used: false }), args);
 });
