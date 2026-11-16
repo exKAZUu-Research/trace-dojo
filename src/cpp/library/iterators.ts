@@ -4,11 +4,19 @@ import type { ExpressionCompiler } from '../expressionCompiler';
 import type { Eval } from '../runtime';
 import { BOOL, ClassInfo, classType, isInteger, LONG, PTRDIFF_T, type Type, typeName, withConst } from '../types';
 import { Ptr } from '../values';
+import type { IteratorCategory } from './libraryClass';
 import { nativeConstructor } from './support';
 
+/** The operators that only a random-access iterator has. */
+const RANDOM_ACCESS_OPERATORS = new Set(['+', '-', '+=', '-=', '[]', '<', '<=', '>', '>=']);
+/** The operators that a forward iterator lacks. */
+const BIDIRECTIONAL_OPERATORS = new Set(['--', 'x--']);
+const MUTATING_OPERATORS = new Set(['++', '--', 'x++', 'x--', '+=', '-=']);
+
 /**
- * The random-access iterator of a sequence (a string, a vector, an array, or a deque), whose value is a `Ptr` to an
- * element. A reverse iterator points one past the element it designates, as `std::reverse_iterator` does.
+ * The iterator of a container, whose value is a `Ptr` to an element of the container's store, and whose operators are
+ * those of its category. A reverse iterator points one past the element it designates, as `std::reverse_iterator`
+ * does.
  */
 export function randomAccessIterator(
   cache: Map<string, ClassInfo>,
@@ -16,7 +24,7 @@ export function randomAccessIterator(
   element: Type,
   isConst: boolean,
   isReverse: boolean,
-  isBidirectional = false
+  category: IteratorCategory = 'randomAccess'
 ): ClassInfo {
   const name = `${container}::${isReverse ? (isConst ? 'const_reverse_iterator' : 'reverse_iterator') : isConst ? 'const_iterator' : 'iterator'}`;
   const cached = cache.get(name);
@@ -29,19 +37,45 @@ export function randomAccessIterator(
     kind: 'iterator',
     args: [element],
     isReverse,
+    iteratorCategory: category,
     size: 8,
     align: 8,
     operator: (compiler, operator, operands, row) =>
-      isBidirectional && ['+', '-', '+=', '-=', '[]', '<', '<=', '>', '>='].includes(operator)
-        ? undefined
-        : iteratorOperator(compiler, cls, elementType, isReverse, operator, operands, row),
+      hasOperator(category, operator)
+        ? iteratorOperator(
+            compiler,
+            cls,
+            elementType,
+            isReverse,
+            operator,
+            withTemporaryTarget(compiler, operator, operands),
+            row
+          )
+        : undefined,
   };
   cls.operations = { copy: (_frame, value) => value, assign: (_frame, _target, source) => source };
   if (isConst) {
-    const mutable = randomAccessIterator(cache, container, element, false, isReverse, isBidirectional);
+    const mutable = randomAccessIterator(cache, container, element, false, isReverse, category);
     cls.constructors = [nativeConstructor(cls, [classType(mutable)], ([value]) => value)];
   }
   return cls;
+}
+
+function hasOperator(category: IteratorCategory, operator: string): boolean {
+  if (category === 'randomAccess') return true;
+  return (
+    !RANDOM_ACCESS_OPERATORS.has(operator) && (category === 'bidirectional' || !BIDIRECTIONAL_OPERATORS.has(operator))
+  );
+}
+
+/**
+ * The operands with a prvalue that `++`, `--`, `+=`, or `-=` modifies made a temporary, as an iterator is a class
+ * object whose member operators take one (`++v.begin()`).
+ */
+function withTemporaryTarget(compiler: ExpressionCompiler, operator: string, operands: Expr[]): Expr[] {
+  const [target, ...rest] = operands;
+  if (!target || target.isLvalue || !MUTATING_OPERATORS.has(operator)) return operands;
+  return [compiler.materialize(target), ...rest];
 }
 
 /** The element a sequence iterator designates, checking that it is one. */

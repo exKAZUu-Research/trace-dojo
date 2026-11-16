@@ -18,11 +18,15 @@ import {
   LDOUBLE,
   LLONG,
   LONG,
+  SCHAR,
+  SHORT,
   type Type,
+  UCHAR,
   UINT,
   ULLONG,
   ULONG,
   unqualified,
+  USHORT,
   VOID,
 } from '../types';
 import { Box, Ptr, type Value } from '../values';
@@ -330,13 +334,28 @@ export class Library {
     for (const [name, type] of [
       ['size_t', ULONG],
       ['ptrdiff_t', LONG],
-      ['int64_t', LLONG],
-      ['uint64_t', ULLONG],
+      ['intptr_t', LONG],
+      ['uintptr_t', ULONG],
+      ['intmax_t', LONG],
+      ['uintmax_t', ULONG],
+      ['int8_t', SCHAR],
+      ['int16_t', SHORT],
       ['int32_t', INT],
+      ['int64_t', LLONG],
+      ['uint8_t', UCHAR],
+      ['uint16_t', USHORT],
       ['uint32_t', UINT],
+      ['uint64_t', ULLONG],
       ['nullptr_t', { kind: 'nullptr' }],
     ] as const) {
       this.addStd(name, { kind: 'type', type });
+    }
+    // The grammar reads the other names of <cstdint> as primitive types.
+    for (const [name, type] of [
+      ['intmax_t', LONG],
+      ['uintmax_t', ULONG],
+    ] as const) {
+      this.globalNames.set(name, { kind: 'type', type });
     }
   }
 }
@@ -414,12 +433,21 @@ function mathFunctions(): Map<string, FunctionInfo[]> {
     ['isfinite', (x: number) => Number.isFinite(x)],
     ['signbit', (x: number) => x < 0 || Object.is(x, -0)],
   ] as const) {
-    functions.set(
-      name,
-      [FLOAT, DOUBLE, LDOUBLE].map((type) => native(name, [type], BOOL, ([x]) => (test(x as number) ? 1 : 0)))
-    );
+    functions.set(name, classification(name, test));
   }
   return functions;
+}
+
+/** The overloads of a classification function such as `isnan`, which libc++ also has for integers. */
+function classification(name: string, test: (x: number) => boolean): FunctionInfo[] {
+  return [
+    ...[FLOAT, DOUBLE, LDOUBLE].map((type) => native(name, [type], BOOL, ([x]) => (test(x as number) ? 1 : 0))),
+    generic(name, (args) => {
+      const type = args.length === 1 ? unqualified(args[0].type) : undefined;
+      if (type?.kind !== 'int') return;
+      return native(name, [type], BOOL, ([x]) => (test(asNumber(x)) ? 1 : 0));
+    }),
+  ];
 }
 
 const integerVersion = (name: string, arity: number, run: (args: number[]) => number): FunctionInfo =>

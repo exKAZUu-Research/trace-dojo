@@ -33,6 +33,64 @@ test.each([
   ['a const variable without an initializer', 'int main() {\n  const int x; }', 1],
   ['an abstract class as a parameter type', 'struct A { virtual void h() = 0; };\nvoid g(A a) {}', 1],
   ['an int argument between double and bool', 'void f(double) {}\nvoid f(bool) {}\nint main() {\n  f(1); }', 3],
+  [
+    'a list iterator plus an integer',
+    '#include <list>\nint main() { std::list<int> l{1};\n  auto it = l.begin() + 1; }',
+    2,
+  ],
+  [
+    'list iterators compared with <',
+    '#include <list>\nint main() { std::list<int> l;\n  bool b = l.begin() < l.end(); }',
+    2,
+  ],
+  ['+= on a list iterator', '#include <list>\nint main() { std::list<int> l{1}; auto it = l.begin();\n  it += 1; }', 2],
+  [
+    'std::sort of a list',
+    '#include <list>\n#include <algorithm>\nint main() { std::list<int> l;\n  std::sort(l.begin(), l.end()); }',
+    3,
+  ],
+  [
+    'std::shuffle of a list',
+    '#include <list>\n#include <algorithm>\n#include <random>\nint main() { std::list<int> l; std::mt19937 g;\n  std::shuffle(l.begin(), l.end(), g); }',
+    4,
+  ],
+  [
+    '-- on an unordered_set iterator',
+    '#include <unordered_set>\nint main() { std::unordered_set<int> s{1}; auto it = s.end();\n  --it; }',
+    2,
+  ],
+  [
+    'std::prev of an unordered_set iterator',
+    '#include <unordered_set>\n#include <iterator>\nint main() { std::unordered_set<int> s{1};\n  std::prev(s.end()); }',
+    3,
+  ],
+  [
+    'resize of a vector of a class without a default constructor',
+    '#include <vector>\nstruct P { P(int) {} };\nint main() { std::vector<P> v;\n  v.resize(3); }',
+    3,
+  ],
+  [
+    'a vector of n objects of a class without a default constructor',
+    '#include <vector>\nstruct P { P(int) {} };\nint main() {\n  std::vector<P> v(3); }',
+    3,
+  ],
+  [
+    '[] of a map whose mapped type has no default constructor',
+    '#include <map>\nstruct P { P(int) {} };\nint main() { std::map<int, P> m;\n  m[1]; }',
+    3,
+  ],
+  [
+    'list::remove of a class without ==',
+    '#include <list>\nstruct P { int x; };\nint main() { std::list<P> l;\n  l.remove(P{1}); }',
+    3,
+  ],
+  [
+    'set::insert of a class without <',
+    '#include <set>\nstruct P { int x; };\nint main() { std::set<P> s;\n  s.insert(P{1}); }',
+    3,
+  ],
+  ['std::sqrt with only <cstdio>', '#include <cstdio>\nint main() {\n  double x = std::sqrt(2.0); }', 2],
+  ['std::abs with only <cstdio>', '#include <cstdio>\nint main() {\n  int x = std::abs(-2); }', 2],
 ])('the interpreter rejects %s', (_, program, row) => {
   const execution = executeProgram('cpp', program.includes('int main') ? program : `${program}\nint main() {}`);
   expect(execution).toMatchObject({ kind: 'compileError', diagnostics: [{ row }] });

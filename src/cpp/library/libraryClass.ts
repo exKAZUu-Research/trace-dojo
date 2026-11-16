@@ -5,6 +5,8 @@ import type { Syntax } from '../syntax';
 import type { Type } from '../types';
 import type { Value } from '../values';
 
+export type IteratorCategory = 'forward' | 'bidirectional' | 'randomAccess';
+
 /** What the library provides for a class besides its members: its operators and its layout. */
 export interface LibraryClass {
   /** The class template or class, such as `vector` or `string`. */
@@ -43,6 +45,8 @@ export interface LibraryClass {
   apply?: (type: Type) => ((a: Value, b: Value) => Value) | undefined;
   /** Whether an iterator goes backward, as `std::reverse_iterator` does. */
   isReverse?: boolean;
+  /** The category of an iterator, which decides its operators and the algorithms that accept it. */
+  iteratorCategory?: IteratorCategory;
   /** Whether a program's class may derive from this one, as from the exception classes. */
   isInheritable?: boolean;
 }

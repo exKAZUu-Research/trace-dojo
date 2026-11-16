@@ -29,7 +29,7 @@ const DBL = {
   FLT_EPSILON: 1.1920928955078125e-7,
 };
 
-const MATH_CONSTANTS: Record<string, number> = {
+export const MATH_CONSTANTS: Record<string, number> = {
   M_E: Math.E,
   M_LOG2E: Math.LOG2E,
   M_LOG10E: Math.LOG10E,

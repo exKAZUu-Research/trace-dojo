@@ -255,6 +255,9 @@ export function keyText(key: Value, type: Type): string {
 
 type Order = (a: Value, b: Value) => number;
 
+const keyWithoutOrder = (keyType: Type): string =>
+  `${typeName(keyType)} の値は < で比べられないので、キーにできません。`;
+
 /** The order of a container's comparator: `std::less<K>` (the default) or `std::greater<K>`. */
 export function comparatorOrder(
   compiler: ExpressionCompiler,
@@ -263,7 +266,7 @@ export function comparatorOrder(
   row: number
 ): Order {
   const less = lessThan(unqualified(keyType));
-  if (!less) return compiler.error(row, `${typeName(keyType)} の値は < で比べられないので、キーにできません。`);
+  if (!less) return compiler.error(row, keyWithoutOrder(keyType));
   if (!comparator) return less;
   if (comparator.kind === 'class' && comparator.cls.library?.kind === 'functor') {
     const name = comparator.cls.name.replace(/<.*$/, '');
@@ -272,6 +275,19 @@ export function comparatorOrder(
   }
   return compiler.unsupported(row, `比べ方に ${typeName(comparator)} を使うこと`);
 }
+
+/** The members of an ordered associative container that compare keys, besides `erase` of a key. */
+const COMPARING_MEMBERS = new Set([
+  'insert',
+  'emplace',
+  'try_emplace',
+  'find',
+  'count',
+  'contains',
+  'lower_bound',
+  'upper_bound',
+  'at',
+]);
 
 /**
  * `std::map<K, V>`, `std::multimap<K, V>`, `std::set<K>`, or `std::multiset<K>`, whose objects are `OrderedValue`s
@@ -294,16 +310,25 @@ export function orderedClass(
   library.instances.set(key, cls);
   cls.isComplete = true;
   const compiler = library.compiler;
-  const order = comparatorOrder(compiler, keyType, comparator, 0);
+  // A container of keys without `<` stops only at a member that compares them, as libc++ instantiates members on use.
+  const hasOrder = lessThan(unqualified(keyType)) !== undefined;
+  const checkOrder = (compiler_: ExpressionCompiler, row: number): void => {
+    if (!hasOrder) compiler_.error(row, keyWithoutOrder(keyType));
+  };
+  const order: Order = hasOrder
+    ? comparatorOrder(compiler, keyType, comparator, 0)
+    : () => {
+        throw new CppRuntimeError('custom', keyWithoutOrder(keyType));
+      };
   const isMap = valueType !== undefined;
   const isMulti = kind.startsWith('multi');
   const isSelf = (expr: Expr | undefined): boolean => expr?.type.kind === 'class' && expr.type.cls === cls;
   const entryType: Type = isMap ? classType(pairClass(library, withConst(keyType), valueType)) : keyType;
   const elementType: Type = isMap ? entryType : withConst(keyType);
-  const iterator = randomAccessIterator(library.iterators, name, elementType, false, false, true);
-  const constIterator = randomAccessIterator(library.iterators, name, elementType, true, false, true);
-  const reverseIterator = randomAccessIterator(library.iterators, name, elementType, false, true, true);
-  const constReverseIterator = randomAccessIterator(library.iterators, name, elementType, true, true, true);
+  const iterator = randomAccessIterator(library.iterators, name, elementType, false, false, 'bidirectional');
+  const constIterator = randomAccessIterator(library.iterators, name, elementType, true, false, 'bidirectional');
+  const reverseIterator = randomAccessIterator(library.iterators, name, elementType, false, true, 'bidirectional');
+  const constReverseIterator = randomAccessIterator(library.iterators, name, elementType, true, true, 'bidirectional');
   const types = {
     iterator: classType(iterator),
     constIterator: classType(constIterator),
@@ -379,7 +404,8 @@ export function orderedClass(
     args,
     size: 24,
     align: 8,
-    listInitializer: (compiler_, elements) => {
+    listInitializer: (compiler_, elements, row) => {
+      checkOrder(compiler_, row);
       const inits = elements.map((node) => compiler_.elementInitializer(unqualified(entryType), node));
       return (frame) => {
         const self = make([]);
@@ -399,8 +425,10 @@ export function orderedClass(
     operator: (compiler_, operator, operands, row) => {
       const [left, right] = operands;
       if (operator === '[]' && isMap && isSelf(left) && !isMulti) {
+        checkOrder(compiler_, row);
         if (isConstType(left.type))
           return compiler_.error(row, `const の ${cls.name} には [] を使えません（at を使ってください）。`);
+        if (!mapped().isDefaultConstructible) return mappedNotDefaultConstructible(compiler_, valueType as Type, row);
         const keyRun = compiler_.convert(right, constRef(keyType), row).run;
         const object = left.isLvalue ? left.run : compiler_.materialize(left).run;
         return {
@@ -453,14 +481,21 @@ export function orderedClass(
       }
       return;
     },
-    memberCall: (compiler_, object, member, callArgs, row) =>
-      emplacementCall(compiler_, object, member, callArgs, row, {
+    memberCall: (compiler_, object, member, callArgs, row) => {
+      const [first] = callArgs;
+      const isKeyErase =
+        member === 'erase' &&
+        callArgs.length === 1 &&
+        (first.type.kind !== 'class' || first.type.cls.library?.kind !== 'iterator');
+      if (COMPARING_MEMBERS.has(member) || isKeyErase) checkOrder(compiler_, row);
+      return emplacementCall(compiler_, object, member, callArgs, row, {
         types: { keyType, entryType, valueType },
         table,
         resultType: isMulti ? types.iterator : classType(insertResult),
         isTemporaryObject: !isMulti,
         result: insertionResult,
-      }),
+      });
+    },
     constructingMembers: isMap ? ['emplace', 'try_emplace'] : ['emplace'],
   };
   cls.operations = {
@@ -593,3 +628,11 @@ export function orderedClass(
 }
 
 const keyArg = (arg: unknown): Value => (arg as Ptr).read();
+
+/** Stops at `m[key]` of a map whose mapped type has no default constructor, which `[]` needs to insert an entry. */
+export function mappedNotDefaultConstructible(compiler: ExpressionCompiler, mapped: Type, row: number): never {
+  return compiler.error(
+    row,
+    `${typeName(mapped)} のオブジェクトは引数なしでは作れないので、[] は使えません（at や insert を使ってください）。`
+  );
+}

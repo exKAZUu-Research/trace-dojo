@@ -12,6 +12,8 @@ export interface ElementOperations {
   type: Type;
   /** A value-initialized element, as `std::vector<T>(n)` makes. */
   make: (frame: Frame) => Value;
+  /** Whether the type has a default constructor, which `make` needs. */
+  isDefaultConstructible: boolean;
   copy: (frame: Frame, value: Value) => Value;
   /** Assigns `source` to the element `target`, giving the element's new value (the same object for a class). */
   assign: (frame: Frame, target: Value, source: Value) => Value;
@@ -25,15 +27,15 @@ export function elementOperations(compiler: ExpressionCompiler, type: Type, row:
   if (type.kind === 'class') {
     const { cls } = type;
     const operations = cls.operations;
-    const make =
-      cls.isComplete && !cls.isAbstract
-        ? lazyDefault(compiler, cls, row)
-        : () => {
-            throw new CppRuntimeError('custom', `${cls.name} のオブジェクトは、引数なしでは作れません。`);
-          };
+    const construct = cls.isComplete && !cls.isAbstract ? defaultConstructor(compiler, cls, row) : undefined;
     return {
       type,
-      make,
+      make:
+        construct ??
+        (() => {
+          throw new CppRuntimeError('custom', `${cls.name} のオブジェクトは、引数なしでは作れません。`);
+        }),
+      isDefaultConstructible: construct !== undefined,
       copy: (frame, value) => {
         if (cls.isNoncopyable) throw new CppRuntimeError('custom', `${cls.name} のオブジェクトはコピーできません。`);
         return operations?.copy(frame, value) ?? value;
@@ -48,6 +50,7 @@ export function elementOperations(compiler: ExpressionCompiler, type: Type, row:
   return {
     type,
     make: () => zero,
+    isDefaultConstructible: true,
     copy: (_frame, value) => value,
     assign: (_frame, _target, source) => source,
     hasEffects: false,
@@ -71,8 +74,7 @@ export function moveValue(frame: Frame, type: Type, target: Value, source: Value
   const { cls } = type;
   const kind = cls.library?.kind;
   if (target instanceof StringValue && source instanceof StringValue) {
-    target.bytes = source.bytes;
-    source.bytes = '';
+    target.moveFrom(source);
   } else if ((kind === 'vector' || kind === 'deque' || kind === 'list') && target instanceof SequenceValue) {
     const from = source as SequenceValue;
     cls.operations?.destroy?.(frame, target);
@@ -107,17 +109,16 @@ function isUserCopy(ctor: FunctionInfo, cls: ClassInfo): boolean {
   );
 }
 
-function lazyDefault(compiler: ExpressionCompiler, cls: ClassInfo, row: number): (frame: Frame) => Value {
-  let run: ((frame: Frame) => Value) | undefined;
+function defaultConstructor(
+  compiler: ExpressionCompiler,
+  cls: ClassInfo,
+  row: number
+): ((frame: Frame) => Value) | undefined {
   try {
-    run = compiler.defaultConstructed(cls, row, true).run as (frame: Frame) => Value;
+    return compiler.defaultConstructed(cls, row, true).run as (frame: Frame) => Value;
   } catch {
-    run = undefined;
+    return undefined;
   }
-  return (frame) => {
-    if (!run) throw new CppRuntimeError('custom', `${cls.name} のオブジェクトは、引数なしでは作れません。`);
-    return run(frame);
-  };
 }
 
 /** A comparison of two elements, as `<` or a comparator object or function gives it. */
