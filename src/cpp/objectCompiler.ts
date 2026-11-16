@@ -8,7 +8,7 @@ import {
   implicitConversion,
   Rank,
 } from './conversions';
-import { CppRuntimeError } from './errors';
+import { CppException, CppRuntimeError } from './errors';
 import type { Expr } from './expr';
 import { type Eval, type Frame, holdAll } from './runtime';
 import { FunctionContext } from './scopes';
@@ -29,14 +29,17 @@ import { type ArrayStore, Box, CObject, Liveness, NULL_PTR, Ptr, Store, UNINIT, 
 
 /**
  * Calls a function with its arguments as its parameters declare them: a `Ptr` for a reference, else a value. A member
- * function gets the location of its object as `self`.
+ * function gets the location of its object as `self`. The parameters that are objects are destroyed when the call
+ * returns, unless `isCallerDestroying`: a call the program writes leaves them to the end of its full-expression, as
+ * the Itanium C++ ABI does, having made them temporaries (see `callArguments`).
  */
 export function invoke(
   frame: Frame,
   fn: FunctionInfo,
   args: unknown[],
   self: Ptr | undefined,
-  row: number
+  row: number,
+  isCallerDestroying = false
 ): Value | Ptr {
   const { runtime } = frame;
   if (fn.native) {
@@ -51,10 +54,25 @@ export function invoke(
       callee.slots[index] = param.type.kind === 'reference' ? (args[index] as Ptr) : new Box(args[index] as Value);
     }
     compiled.body(callee);
+    if (!isCallerDestroying) destroyParameters(callee, fn, args);
     return callee.returnValue;
+  } catch (error) {
+    if (!isCallerDestroying && error instanceof CppException) destroyParameters(callee, fn, args);
+    throw error;
   } finally {
     runtime.popFrame();
   }
+}
+
+function destroyParameters(frame: Frame, fn: FunctionInfo, args: unknown[]): void {
+  for (let index = fn.params.length - 1; index >= 0; index--) {
+    const destroy = parameterDestroyer(fn.params[index].type);
+    if (destroy) destroy(frame, args[index] as Value);
+  }
+}
+
+function parameterDestroyer(type: Type): ((frame: Frame, value: Value) => void) | undefined {
+  return type.kind === 'class' ? type.cls.operations?.destroy : undefined;
 }
 
 /** The key that identifies a virtual function across a hierarchy: its name and its parameters. */
@@ -69,6 +87,35 @@ export function destroyTemporaries(frame: Frame, mark: number): void {
     const temporary = temporaries.pop();
     if (!temporary) break;
     temporary.destroy(frame, temporary.object);
+  }
+}
+
+/**
+ * Makes the elements of an array, or the members of an aggregate, in order, keeping the ones made reachable. An
+ * exception destroys the ones already made, the last first (C++20 [except.ctor]).
+ */
+export function makeEach(
+  frame: Frame,
+  count: number,
+  make: (index: number) => Value,
+  destroyerAt: (index: number) => ((frame: Frame, value: Value) => void) | undefined
+): Value[] {
+  const values: Value[] = [];
+  const mark = frame.pending.length;
+  try {
+    for (let index = 0; index < count; index++) {
+      const value = make(index);
+      values.push(value);
+      frame.pending.push(value);
+    }
+    return values;
+  } catch (error) {
+    if (error instanceof CppException) {
+      for (let index = values.length - 1; index >= 0; index--) destroyerAt(index)?.(frame, values[index]);
+    }
+    throw error;
+  } finally {
+    frame.pending.length = mark;
   }
 }
 
@@ -308,6 +355,11 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   }
 
   /** Converts the arguments of a resolved call and adds the defaults of the parameters it leaves out. */
+  /**
+   * Converts the arguments of a resolved call and adds the defaults of the parameters it leaves out. A parameter that
+   * is an object becomes a temporary of the caller's full-expression, so the call must be invoked with
+   * `isCallerDestroying`.
+   */
   callArguments(resolved: Resolved, args: Expr[], row: number): Eval<unknown>[] {
     const { fn, conversions } = resolved;
     const runs = args.map((arg, index) => conversions[index].apply(arg).run);
@@ -316,7 +368,16 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     for (const param of fn.params.slice(args.length)) {
       runs.push(this.defaultArgument(fn, param.defaultValue as Syntax, param.type, row).run);
     }
-    return runs;
+    return runs.map((run, index) => {
+      const type = fn.params[index]?.type;
+      if (type?.kind !== 'class') return run;
+      return (frame) => {
+        const value = run(frame) as Value;
+        const destroy = parameterDestroyer(type);
+        if (destroy) frame.temporaries.push({ object: value, destroy });
+        return value;
+      };
+    });
   }
 
   /** Compiles a default argument where a call uses it, in the scope of the function's declaration. */
@@ -349,7 +410,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
           if (callee.isPure)
             throw new CppRuntimeError('custom', `純粋仮想関数 ${callee.displayName} を呼び出しました。`);
         }
-        return invoke(frame, callee, values, location, row);
+        return invoke(frame, callee, values, location, row, true);
       });
     };
     const isReference = fn.ret.kind === 'reference';
@@ -384,11 +445,11 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     const { fn } = resolved;
     const argRuns = this.callArguments(resolved, args, row);
     const run: Eval<Value> = fn.native
-      ? (frame) => holdAll(frame, argRuns, (values) => invoke(frame, fn, values, undefined, row) as Value)
+      ? (frame) => holdAll(frame, argRuns, (values) => invoke(frame, fn, values, undefined, row, true) as Value)
       : (frame) =>
           holdAll(frame, argRuns, (values) => {
             const object = newObject(cls);
-            invoke(frame, fn, values, new Ptr(new Box(object), 0), row);
+            invoke(frame, fn, values, new Ptr(new Box(object), 0), row, true);
             return object;
           });
     return { type: classType(cls), isLvalue: false, row, run, onlyCalls: true, isTemporaryObject: true };

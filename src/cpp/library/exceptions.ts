@@ -31,11 +31,12 @@ export function exceptionClasses(stringType: () => Type): Map<string, ClassInfo>
       copy: (_frame, source) => {
         const object = source as CObject;
         const copy = new CObject(cls, [...object.values]);
-        copy.message = object.message;
+        // Copying as `std::exception` slices the message off, as its copy constructor keeps none.
+        copy.message = hasMessage ? object.message : cls.name;
         return copy;
       },
       assign: (_frame, target, source) => {
-        (target as CObject).message = (source as CObject).message;
+        if (hasMessage) (target as CObject).message = (source as CObject).message;
       },
     };
     classes.set(name, cls);

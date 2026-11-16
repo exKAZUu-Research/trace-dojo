@@ -81,6 +81,9 @@ export function unsupportedMessage(feature: string): string {
 /** A C++ exception in flight: the exception object and the type `throw` gave it. */
 export class CppException extends Error {
   private box?: Box;
+  /** The number of handlers running for the exception, nested ones included. */
+  handlerCount = 0;
+  isDestroyed = false;
 
   constructor(
     readonly value: Value,
