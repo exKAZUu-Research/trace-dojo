@@ -10,6 +10,7 @@ const reservedNames = new Set(
 );
 const layoutNodes = new Set([
   'declarations',
+  'imports',
   'local_binds',
   'alternatives',
   'class_declarations',
@@ -36,6 +37,7 @@ class DialectValidator {
     this.visit(this.root);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Traversal tracks implicit layout and explicit brace contexts.
   private visit(node: Node, context?: Layout): void {
     if (isComment(node)) return;
     if (node.type === 'variable' && reservedNames.has(node.text)) fail(node);
@@ -49,10 +51,17 @@ class DialectValidator {
     const explicit = children.some((child) => child.type === '{');
     if (first && !explicit && context && this.column(first) <= context.indent) fail(first);
     const itemIds = new Set(items.map((item) => item.id));
+    let insideBraces = false;
     for (const child of children) {
-      const nested =
-        first && itemIds.has(child.id)
-          ? { indent: explicit ? -1 : this.column(first), itemStart: child.startIndex }
+      if (child.type === '{' || child.type === '}') {
+        this.visit(child);
+        insideBraces = child.type === '{';
+        continue;
+      }
+      const nested = insideBraces
+        ? undefined
+        : first && itemIds.has(child.id)
+          ? { indent: this.column(first), itemStart: child.startIndex }
           : context;
       this.visit(child, nested);
     }
@@ -85,7 +94,8 @@ function sourceColumns(source: string): Uint32Array {
 
 function layoutItems(node: Node, children: Node[]): Node[] {
   if (node.type === 'do' && node.isNamed) return node.childrenForFieldName('statement');
-  return layoutNodes.has(node.type) ? children.filter((child) => child.isNamed && !isComment(child)) : [];
+  if (!layoutNodes.has(node.type) || node.parent?.children.some((child) => child?.type === '{')) return [];
+  return children.filter((child) => child.isNamed && !isComment(child));
 }
 
 function isComment(node: Node): boolean {

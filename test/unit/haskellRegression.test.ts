@@ -238,3 +238,10 @@ test.each([
   const source = `main=print(${operation} [${Array.from({ length: 30_000 }, () => 1).join(',')}])`;
   expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
+
+test.each(['x=y\ny=x\nmain=print(x::Int)', 'main=print(let x=y;y=x in x::Int)', 'x=y\ny=z\nz=x\nmain=print(x::Int)'])(
+  'cyclic thunk redirects remain bounded: %s',
+  (source) => {
+    expect(executeProgram('haskell', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);

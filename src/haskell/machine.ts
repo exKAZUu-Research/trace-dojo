@@ -300,6 +300,7 @@ export class Machine {
       return;
     }
     if (slot.state === 'evaluating') throw this.runtime.selfDependencyError();
+    this.runtime.spend();
     this.squeezeUpdateFrame(slot);
     slot.state = 'evaluating';
     this.stack.push({

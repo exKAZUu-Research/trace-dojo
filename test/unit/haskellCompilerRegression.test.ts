@@ -259,3 +259,34 @@ test('string pattern failures preserve lexical escape spelling', () => {
     uncaughtException: expect.stringContaining(String.raw`Non-exhaustive patterns in ["\x80\&0", x]`),
   });
 });
+
+test.each([
+  ['data P=P {\nx :: Int\n} deriving Show\nmain=print(P {\nx=1\n})', 'P {x = 1}\n'],
+  ['main=do {\n print 1;\n print 2\n}', '1\n2\n'],
+  ['main=do\n  let {\nx=1\n}\n  print x', '1\n'],
+  ['f x=case x of {\n True -> 1;\n False -> 2\n}\nmain=print(f True)', '1\n'],
+  ['data P=P {x::Int}\nmain=do\n  let p=P {\nx=1\n}\n  print(case p of P {\nx=y\n} -> y)', '1\n'],
+])('explicit braces suspend outer layout while preserving nested blocks: %s', (source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test('implicit blocks inside braces still enforce their own layout', () => {
+  expect(executeProgram('haskell', 'main=do {\n print 1;\n let x=[1,\n     2];\n print x\n}').kind).toBe(
+    'compileError'
+  );
+});
+
+test.each([
+  'import Data.List (\n  sort\n)\nmain=print(sort [2,1])',
+  'import Data.List (sort,\nsortBy)\nmain=print(sort [2,1])',
+])('import continuations obey module layout: %s', (source) => {
+  expect(executeProgram('haskell', source).kind).toBe('compileError');
+});
+
+test('indented import continuations remain valid', () => {
+  expect(executeProgram('haskell', 'import Data.List (\n  sort\n  )\nmain=print(sort [2,1])')).toMatchObject({
+    kind: 'executed',
+    stdout: '[1,2]\n',
+    uncaughtException: undefined,
+  });
+});
