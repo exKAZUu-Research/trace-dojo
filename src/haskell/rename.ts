@@ -875,7 +875,8 @@ class Renamer {
         return { k: 'comp', expr: this.renameExpr(expr.expr, inner), quals: stmts, span };
       }
       case 'leftSection': {
-        return { k: 'app', fn: this.renameOperator(expr.op, scope), arg: this.renameExpr(expr.left, scope), span };
+        const left = this.sectionOperand(expr.op, expr.left, 'infixl', scope);
+        return { k: 'app', fn: this.renameOperator(expr.op, scope), arg: this.renameExpr(left, scope), span };
       }
       case 'rightSection': {
         if (expr.op.name === '-' && !expr.op.qualifier) {
@@ -885,7 +886,7 @@ class Renamer {
         return {
           k: 'rsection',
           op: this.renameOperator(expr.op, scope),
-          right: this.renameExpr(expr.right, scope),
+          right: this.renameExpr(this.sectionOperand(expr.op, expr.right, 'infixr', scope), scope),
           span,
         };
       }
@@ -996,6 +997,26 @@ class Renamer {
     }
     const entity = op.isConstructor ? this.lookupCon(op).entity : this.lookupValue(op, true);
     return entity.fixity ?? DEFAULT_FIXITY;
+  }
+
+  /**
+   * A section's operand, whose outermost operator must bind tighter than the section's operator, or as tightly with
+   * the associativity that the side of the section needs.
+   */
+  private sectionOperand(op: Operator, operand: Expr, assoc: Fixity['assoc'], scope: LocalScope): Expr {
+    if (operand.kind !== 'chain') return operand;
+    const resolved = this.resolveChain(operand.items, scope, operand.span);
+    if (resolved.kind !== 'binop' && resolved.kind !== 'neg') return resolved;
+    const inner = resolved.kind === 'binop' ? this.fixityOf(resolved.op, scope) : NEGATE_FIXITY;
+    const outer = this.fixityOf(op, scope);
+    if (inner.prec > outer.prec || (inner.prec === outer.prec && inner.assoc === assoc && outer.assoc === assoc)) {
+      return resolved;
+    }
+    const innerName = resolved.kind === 'binop' ? resolved.op.name : '-';
+    throw compileError(
+      op.span,
+      `セクションの演算子 ${op.name} [${outer.assoc} ${outer.prec}] と、中の演算子 ${innerName} [${inner.assoc} ${inner.prec}] は、括弧なしでは書けません。`
+    );
   }
 
   /** Resolves an operator chain by the Haskell report's algorithm, which also places prefix minus. */
