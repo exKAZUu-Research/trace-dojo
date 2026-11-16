@@ -10,6 +10,9 @@ import { findJavaScriptTraceAnnotations } from '../javascript/parse';
 import { executeJavaScriptProgram } from '../javascript/run';
 import { traceJavaScriptProgram } from '../javascript/trace';
 import { findJavaTraceAnnotations } from '../problems/fillInBlank/javaSource';
+import { findPhpTraceAnnotations } from '../php/parse';
+import { executePhpProgram } from '../php/run';
+import { tracePhpProgram } from '../php/trace';
 import type { TraceItem, TraceItemVariable, TurtleTrace } from '../problems/trace';
 import { findPythonTraceAnnotations } from '../python/parse';
 import { executePythonProgram } from '../python/run';
@@ -77,6 +80,7 @@ const interpreters = {
     execute: executeRubyProgram,
   },
   c: { findTraceAnnotations: findCTraceAnnotations, record: traceCProgram, execute: executeCProgram },
+  php: { findTraceAnnotations: findPhpTraceAnnotations, record: tracePhpProgram, execute: executePhpProgram },
 } satisfies Record<string, Interpreter>;
 
 /**
