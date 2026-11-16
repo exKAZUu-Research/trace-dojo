@@ -154,8 +154,12 @@ export function toNumber(value: BigFloat, bits: 16 | 32 | 64 = 64): number {
 /** Rounds a value to a float type. */
 export function roundTo(value: BigFloat, bits: FloatBits): BigFloat {
   if (value.kind !== 'finite' || value.mantissa === 0n) return value;
+  const format = FORMATS[bits];
+  const topExponent = value.exponent + value.mantissa.toString(2).length - 1;
+  if (topExponent > format.maxExponent) return new BigFloat(value.sign, 'inf', 0n, 0);
+  if (topExponent < format.minExponent - format.precision) return new BigFloat(value.sign, 'finite', 0n, 0);
   const { num, den } = toRational(value);
-  return roundRational(value.sign, num, den, FORMATS[bits]);
+  return roundRational(value.sign, num, den, format);
 }
 
 /** A float of a width as the representation its type uses. */

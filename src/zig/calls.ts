@@ -1,10 +1,11 @@
 import { PANIC, panic } from './arith';
-import type { Expression, ExpressionOf, FunctionDeclaration, Span } from './ast';
+import type { Expression, ExpressionOf, FunctionDeclaration, SourceFile, Span } from './ast';
 import { BuiltinCompiler } from './builtins';
 import { FunctionInstance } from './functions';
 import { Frame, Jump } from './runtime';
 import {
-  copyForStorage,
+  addDecls,
+  copyForFrame,
   evaluateHeld,
   FnRef,
   isType,
@@ -24,6 +25,7 @@ import {
   isComptimeOnly,
   type Namespace,
   pointerTo,
+  TYPE,
   type Type,
   typeName,
   VOID,
@@ -127,13 +129,13 @@ export abstract class CallCompiler extends BuiltinCompiler {
       this.coerce(this.compile(arg, fnType.params[index]), fnType.params[index], arg)
     );
     const evaluateCallee = callee.eval;
-    const evaluators = args.map((arg) => arg.eval);
+    const evaluators = args.map((arg) => (frame: Frame) => copyForFrame(frame, arg.eval(frame), arg.type));
     const row = expression.row;
     return runtime(
       fnType.returnType,
       (frame) => {
         const fn = (evaluateCallee(frame) as FnValue).fn;
-        return this.invoke(fn, evaluateHeld(frame, evaluators), row, frame);
+        return this.invoke(fn, evaluateHeld(frame, evaluators), row, frame, true);
       },
       expression
     );
@@ -182,11 +184,11 @@ export abstract class CallCompiler extends BuiltinCompiler {
         );
       }
     }
-    const evaluators = args.map((arg) => arg.eval);
+    const evaluators = args.map((arg) => (frame: Frame) => copyForFrame(frame, arg.eval(frame), arg.type));
     const row = expression.row;
     return runtime(
       instance.returnType,
-      (frame) => this.invoke(instance, evaluateHeld(frame, evaluators), row, frame),
+      (frame) => this.invoke(instance, evaluateHeld(frame, evaluators), row, frame, true),
       expression
     );
   }
@@ -262,7 +264,8 @@ export abstract class CallCompiler extends BuiltinCompiler {
       return { returnType: errorUnionOf(errors, payload), inferredErrors: errors };
     });
     const instance = new FunctionInstance(syntax.name, paramTypes, returnType);
-    instance.isAtomic = this.atomicRow(syntax);
+    instance.internal = decl.namespace.internal ?? false;
+    instance.isAtomic = !instance.internal && this.atomicRow(syntax);
     this.instances.set(key, instance);
     const isMethod = decl.namespace !== this.root;
     const compile = (): void =>
@@ -327,14 +330,47 @@ export abstract class CallCompiler extends BuiltinCompiler {
     return this.invoke(fn, args, undefined, frame);
   }
 
+  private readonly libraryNamespaces = new WeakMap<SourceFile, WeakMap<Type, Namespace>>();
+
+  libraryFunction(
+    file: SourceFile,
+    element: Type,
+    name: string,
+    params: readonly Type[],
+    span: Span
+  ): FunctionInstance {
+    let types = this.libraryNamespaces.get(file);
+    if (!types) {
+      types = new WeakMap();
+      this.libraryNamespaces.set(file, types);
+    }
+    let namespace = types.get(element);
+    if (!namespace) {
+      namespace = { name: 'std.sort.block', internal: true, decls: new Map() };
+      addDecls(namespace, file.members);
+      namespace.decls.set('T', { kind: 'native', name: 'T', resolve: () => ({ type: TYPE, value: element }) });
+      types.set(element, namespace);
+    }
+    const decl = namespace.decls.get(name);
+    if (decl?.kind !== 'fn') throw new Error(`Missing library function ${name}`);
+    return this.instantiate(new FnRef(decl), params, span);
+  }
+
   /** Runs a function in a new frame, as the call at `callRow` of the caller's frame. */
-  protected invoke(fn: FunctionInstance, args: Value[], callRow: number | undefined, caller: Frame): Value {
+  protected invoke(
+    fn: FunctionInstance,
+    args: Value[],
+    callRow: number | undefined,
+    caller: Frame,
+    argumentsHaveStorage = false
+  ): Value {
     const { runtime: rt } = caller;
     rt.spend();
     if (fn.native) return fn.native(args, caller);
     if (!fn.body) return panic('関数がまだ準備できていません。');
-    const frame = new Frame(rt, fn, callRow, fn.slotCount);
-    for (const [index, slot] of fn.paramSlots.entries()) frame.slots[slot] = copyForStorage(args[index]);
+    const frame = new Frame(rt, fn, fn.internal ? undefined : callRow, fn.slotCount);
+    for (const [index, slot] of fn.paramSlots.entries())
+      frame.slots[slot] = argumentsHaveStorage ? args[index] : copyForFrame(frame, args[index], fn.params[index]);
     rt.pushFrame(frame);
     let result: Value;
     try {

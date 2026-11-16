@@ -1,4 +1,5 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import { valueSlots } from './allocation';
 import {
   checked,
   divExact,
@@ -75,6 +76,7 @@ import {
   type StructType,
   TYPE,
   type Type,
+  typeId,
   typeName,
   U8,
   UNDEFINED_TYPE,
@@ -296,7 +298,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const key = bytes.join(',');
     let constant = this.stringConstants.get(key);
     if (!constant) {
-      constant = new Constant(new ZArray([...bytes.map(BigInt), 0n], 0, bytes.length));
+      constant = new Constant(new ZArray([...bytes.map(BigInt), 0n], 0, bytes.length, true));
       this.stringConstants.set(key, constant);
     }
     const type = pointerTo(arrayOf(bytes.length, U8, 0n), true);
@@ -630,7 +632,12 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     const fromArray = staticLen !== undefined;
     staticLen ??= knownLengthOf(base);
-    const sentinel = expression.sentinel ? this.sentinelValue(expression.sentinel, child) : undefined;
+    const reachesSentinel = !end || (end.known && staticLen !== undefined && end.value === BigInt(staticLen));
+    const sentinel = expression.sentinel
+      ? this.sentinelValue(expression.sentinel, child)
+      : reachesSentinel
+        ? sourceSentinel
+        : undefined;
     const limitOf = (length: number): number => length + (sourceSentinel === undefined ? 0 : 1);
     if (start.known && end?.known && (start.value as bigint) > (end.value as bigint)) {
       this.error(
@@ -661,35 +668,37 @@ export abstract class ExpressionCompiler extends SemaBase {
     const evaluateEnd = end?.eval;
     const compute = (frame: Frame): { target: Slots; from: number; to: number } => {
       const value = evaluateBase(frame);
-      let target: Slots;
-      let offset: number;
-      let length: number;
-      if (fromArray) {
-        const array = (value as Pointer).load() as ZArray;
-        target = array;
-        offset = array.offset;
-        length = staticLen as number;
-      } else {
-        const slice = value as Slice;
-        target = slice.target;
-        offset = slice.start;
-        length = slice.length;
-      }
-      const from = Number(evaluateStart(frame) as bigint);
-      const to = evaluateEnd ? Number(evaluateEnd(frame) as bigint) : length;
-      if (to > limitOf(length)) indexOutOfBounds(to, length);
-      if (from > to) panic(`start index ${from} is larger than end index ${to}`);
-      if (sentinel !== undefined && target.slots[offset + to] !== sentinel) {
-        panic(`sentinel mismatch: expected ${String(sentinel)}, found ${String(target.slots[offset + to])}`);
-      }
-      return { target, from: offset + from, to: offset + to };
+      return withHeldValues(frame, [value], () => {
+        let target: Slots;
+        let offset: number;
+        let length: number;
+        if (fromArray) {
+          const array = (value as Pointer).load() as ZArray;
+          target = array;
+          offset = array.offset;
+          length = staticLen as number;
+        } else {
+          const slice = value as Slice;
+          target = slice.target;
+          offset = slice.start;
+          length = slice.length;
+        }
+        const from = Number(evaluateStart(frame) as bigint);
+        const to = evaluateEnd ? Number(evaluateEnd(frame) as bigint) : length;
+        if (to > limitOf(length)) indexOutOfBounds(to, length);
+        if (from > to) panic(`start index ${from} is larger than end index ${to}`);
+        if (sentinel !== undefined && target.slots[offset + to] !== sentinel) {
+          panic(`sentinel mismatch: expected ${String(sentinel)}, found ${String(target.slots[offset + to])}`);
+        }
+        return { target, from: offset + from, to: offset + to };
+      });
     };
     if (resultLength !== undefined) {
       return runtime(
         resultType,
         (frame) => {
           const { target, from, to } = compute(frame);
-          return new Pointer(new Constant(new ZArray(target.slots, from, to - from)), 0);
+          return new Pointer(new Constant(new ZArray(target.slots, from, to - from, sentinel !== undefined)), 0);
         },
         expression
       );
@@ -1216,7 +1225,15 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (left.known && right.known) return known(resultType, build(a.read(left.value), b.read(right.value)), expression);
     const evaluateLeft = left.eval;
     const evaluateRight = right.eval;
-    return runtime(resultType, (frame) => build(a.read(evaluateLeft(frame)), b.read(evaluateRight(frame))), expression);
+    return runtime(
+      resultType,
+      (frame) => {
+        frame.runtime.reserveStorage(valueSlots(arrayType));
+        const values = evaluateHeld(frame, [evaluateLeft, evaluateRight]);
+        return build(a.read(values[0]), b.read(values[1]));
+      },
+      expression
+    );
   }
 
   /** `a ** n`: repeats an array a number of times known at compile time. */
@@ -1342,7 +1359,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const index = fields.findIndex((field) => field.name === init.name);
     if (index === -1) return this.error(init, `${typeName(type)} 型には、フィールド「${init.name}」がありません。`);
     const value = this.coerce(this.compile(init.value, fields[index].type), fields[index].type, init.value);
-    return this.derived(value, type, (payload) => new ZUnion(index, copyForStorage(payload)));
+    return this.aggregate(type, [value], expression, ([payload]) => new ZUnion(index, payload));
   }
 
   /** `.{ .x = 1 }` without a result type, whose type is an anonymous struct of the fields' types. */
@@ -1362,7 +1379,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const key = fields
       .map((field) => {
         const known = field.comptimeValue === undefined ? '' : `=${valueKey(field.comptimeValue)}`;
-        return `${field.name}:${typeName(field.type)}${known}`;
+        return `${field.name}:${typeId(field.type)}${known}`;
       })
       .join(',');
     let type = this.anonymousTypes.get(key);
@@ -1370,7 +1387,10 @@ export abstract class ExpressionCompiler extends SemaBase {
       type = {
         kind: 'struct',
         isTuple: false,
-        namespace: { name: `anonymous struct { ${key} }`, decls: new Map() },
+        namespace: {
+          name: `anonymous struct { ${fields.map((field) => `${field.name}:${typeName(field.type)}`).join(',')} }`,
+          decls: new Map(),
+        },
         layout: 'auto',
         fields,
       };
@@ -1386,8 +1406,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     const key = fields
       .map((field) =>
         field.comptimeValue === undefined
-          ? typeName(field.type)
-          : `${typeName(field.type)}=${valueKey(field.comptimeValue)}`
+          ? String(typeId(field.type))
+          : `${typeId(field.type)}=${valueKey(field.comptimeValue)}`
       )
       .join(',');
     let type = this.tupleTypes.get(key);
@@ -1532,7 +1552,7 @@ function valueKey(value: Value): string {
     return `${typeof value}${String(value)}`;
   if (value instanceof EnumLiteral || value instanceof ErrorValue) return `${value.constructor.name}.${value.name}`;
   if (value === NULL) return 'null';
-  if (isType(value)) return `type ${typeName(value)}`;
+  if (isType(value)) return `type ${typeId(value)}`;
   return `object ${objectId(value)}`;
 }
 

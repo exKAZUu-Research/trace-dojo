@@ -157,7 +157,7 @@ function stringConstant(text: string): Member {
   const bytes = [...text].map((char) => BigInt(char.codePointAt(0) as number));
   return {
     type: pointerTo(arrayOf(bytes.length, U8, 0n), true),
-    value: new Pointer(new Constant(new ZArray([...bytes, 0n], 0, bytes.length)), 0),
+    value: new Pointer(new Constant(new ZArray([...bytes, 0n], 0, bytes.length, true)), 0),
   };
 }
 

@@ -23,6 +23,7 @@ export class FunctionInstance {
   isAtomic = false;
   /** Whether the function records steps, which only a traced program's functions do. */
   recordsSteps = false;
+  internal = false;
   state: 'pending' | 'compiling' | 'compiled' = 'pending';
   /** Whether the function's name marks it as one that creates an object, as Java's constructors do. */
   readonly createsObject: boolean;

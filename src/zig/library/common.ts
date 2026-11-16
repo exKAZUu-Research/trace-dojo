@@ -1,7 +1,7 @@
 import type { Expression, Span } from '../ast';
 import { BigFloat, compareFloats } from '../floats';
-import { ZigPanic } from '../runtime';
-import { copyForStorage, known, runtime, type SemaApi, type TExpr } from '../semaBase';
+import { type Frame, withHeldValues, ZigPanic } from '../runtime';
+import { copyForStorage, evaluateHeld, known, runtime, type SemaApi, type TExpr } from '../semaBase';
 import {
   BOOL,
   type EnumType,
@@ -109,7 +109,12 @@ export function optionalIndex(index: number): Value {
 }
 
 /** Computes a value from arguments, at compile time when they are all known. */
-export function computed(type: Type, args: readonly TExpr[], span: Span, compute: (values: Value[]) => Value): TExpr {
+export function computed(
+  type: Type,
+  args: readonly TExpr[],
+  span: Span,
+  compute: (values: Value[], frame?: Frame) => Value
+): TExpr {
   if (args.every((arg) => arg.known)) {
     try {
       return known(type, compute(args.map((arg) => arg.value)), span);
@@ -123,7 +128,8 @@ export function computed(type: Type, args: readonly TExpr[], span: Span, compute
     type,
     (frame) => {
       frame.runtime.spend(1 + Math.floor(args.length));
-      return compute(evaluators.map((evaluate) => evaluate(frame)));
+      const values = evaluateHeld(frame, evaluators);
+      return withHeldValues(frame, values, () => compute(values, frame));
     },
     span
   );

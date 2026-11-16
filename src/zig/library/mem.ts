@@ -1,20 +1,10 @@
-// code-gauge-allow-file fileNcss 465 -- Groups the related standard library operations that share this module.
-import { allocationSlots } from '../allocation';
+// code-gauge-allow-file fileNcss 545 -- Groups the related standard library operations that share this module.
 // code-gauge-allow-file duplicateLines 25 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
 import { floatFromBigInt } from '../floats';
 import type { Frame } from '../runtime';
-import {
-  copyForStorage,
-  evaluateHeld,
-  known,
-  newArray,
-  runtime,
-  type SemaApi,
-  type TExpr,
-  undefinedValue,
-} from '../semaBase';
+import { copyForStorage, known, newArray, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
   BOOL,
   CONST_U8_SLICE,
@@ -33,6 +23,7 @@ import {
 } from '../types';
 import { NULL, type Pointer, Slice, storeInto, type Value, ZStruct } from '../values';
 import { WeakValueMap } from '../weakValueMap';
+import { blockSortFunction, runBlockSort } from './blockSort';
 import {
   allocating,
   allocatorArg,
@@ -53,9 +44,14 @@ import {
   subSlice,
   tupleOf,
 } from './common';
-import { ALLOCATOR, ERROR_OUT_OF_MEMORY } from './heap';
+import { ALLOCATOR, allocatorState, ERROR_OUT_OF_MEMORY, reserveNativeAllocation } from './heap';
 import { compileArgs, expectArgs, fnMember, type Member, nativeCall, nativeStruct, typeMember } from './native';
 import { type SortAlgorithm, sortValues } from './sorting';
+
+interface AllocationPlan {
+  length: number;
+  build: () => Value[];
+}
 
 function findSequence(haystack: Value[], needle: Value[], from: number): number {
   if (needle.length === 0) return from <= haystack.length ? from : -1;
@@ -425,22 +421,38 @@ const MEMBERS: Record<string, () => Member> = {
   countScalar: sliceSearch('std.mem.countScalar', 'scalar', USIZE, (h, v) =>
     BigInt(h.filter((x) => equalValues(x, v)).length)
   ),
+  // code-gauge-allow functionNcss 32 -- Keeps bounded substring search with argument analysis.
+  // code-gauge-allow functionCognitiveComplexity 25 -- Keeps bounded substring search with argument analysis.
   containsAtLeast: generic('std.mem.containsAtLeast', 4, (sema, call, type, [h, countArg, n]) => {
     const haystack = constSlice(sema, h, type);
     const [count] = compileArgs(sema, [countArg], [USIZE]);
     const needle = constSlice(sema, n, type);
-    return computed(BOOL, [haystack, count, needle], call.span, ([x, c, y]) => {
+    return computed(BOOL, [haystack, count, needle], call.span, ([x, c, y], frame) => {
       const values = elements(y);
+      if (values.length === 0) panic(PANIC.unreachable);
+      if (c === 0n) return true;
+      const items = elements(x);
+      const spend = (): void => {
+        if (frame) frame.runtime.spend();
+        else sema.spendCompilation();
+      };
       let found = 0n;
-      for (
-        let index = findSequence(elements(x), values, 0);
-        index !== -1;
-        index = findSequence(elements(x), values, index + values.length)
-      ) {
-        found++;
-        if (found >= (c as bigint)) return true;
+      for (let position = 0; position + values.length <= items.length;) {
+        let equal = true;
+        for (let offset = 0; offset < values.length; offset++) {
+          spend();
+          if (!equalValues(items[position + offset], values[offset])) {
+            equal = false;
+            break;
+          }
+        }
+        if (equal) {
+          found++;
+          if (found >= (c as bigint)) return true;
+          position += values.length;
+        } else position++;
       }
-      return found >= (c as bigint);
+      return false;
     });
   }),
   trim: trimmer('std.mem.trim', true, true),
@@ -567,20 +579,58 @@ const MEMBERS: Record<string, () => Member> = {
     const [input, needle, replacement] = [inputArg, needleArg, replacementArg].map((arg) =>
       constSlice(sema, arg, type)
     );
-    return computed(USIZE, [input, needle, replacement], call.span, ([x, n, r]) =>
-      BigInt(replaced(elements(x), elements(n), elements(r)).values.length)
-    );
+    return computed(USIZE, [input, needle, replacement], call.span, ([x, n, r], frame) => {
+      const source = elements(x),
+        pattern = elements(n),
+        replace = elements(r);
+      const count = replacementCount(source, pattern, () => (frame ? frame.runtime.spend() : sema.spendCompilation()));
+      return BigInt(source.length + count * (replace.length - pattern.length));
+    });
   }),
+  // code-gauge-allow functionNcss 34 -- Implements sequential replacement, overlap and capacity checks together.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Implements sequential replacement, overlap and capacity checks together.
   replace: generic('std.mem.replace', 5, (sema, call, type, [inputArg, needleArg, replacementArg, outputArg]) => {
     const [input, needle, replacement] = [inputArg, needleArg, replacementArg].map((arg) =>
       constSlice(sema, arg, type)
     );
     const output = mutableSlice(sema, outputArg, type);
-    return computed(USIZE, [input, needle, replacement, output], call.span, ([x, n, r, out]) => {
-      const { values, count } = replaced(elements(x), elements(n), elements(r));
-      const target = out as Slice;
-      if (values.length > target.length) indexOutOfBounds(values.length - 1, target.length);
-      for (const [index, value] of values.entries()) storeSliceValue(target, index, value);
+    return computed(USIZE, [input, needle, replacement, output], call.span, ([x, n, r, out], frame) => {
+      const source = x as Slice,
+        pattern = n as Slice,
+        replace = r as Slice,
+        target = out as Slice;
+      if (pattern.length === 0) panic(PANIC.unreachable);
+      const spend = (cost = 1): void => {
+        if (frame) frame.runtime.spend(cost);
+        else sema.spendCompilation(cost);
+      };
+      let index = 0,
+        written = 0,
+        count = 0;
+      while (index < source.length) {
+        spend();
+        let matches = index + pattern.length <= source.length;
+        for (let offset = 0; matches && offset < pattern.length; offset++) {
+          spend();
+          matches = equalValues(source.get(index + offset), pattern.get(offset));
+        }
+        if (matches) {
+          if (written + replace.length > target.length) indexOutOfBounds(replace.length, target.length - written);
+          if (
+            target.target.slots === replace.target.slots &&
+            Math.abs(target.start + written - replace.start) < replace.length
+          )
+            panic(PANIC.memcpyAlias);
+          spend(1 + Math.floor(replace.length / 16));
+          storeSliceValues(subSlice(target, written, replace.length), replace.values());
+          written += replace.length;
+          index += pattern.length;
+          count++;
+        } else {
+          if (written >= target.length) indexOutOfBounds(written, target.length);
+          storeSliceValue(target, written++, source.get(index++));
+        }
+      }
       return BigInt(count);
     });
   }),
@@ -596,7 +646,7 @@ const MEMBERS: Record<string, () => Member> = {
         sliceOf(type, false),
         [allocator, input, needle, replacement],
         call.span,
-        ([x, n, r]) => replaced(elements(x), elements(n), elements(r)).values
+        ([x, n, r], frame) => replacementPlan(elements(x), elements(n), elements(r), () => frame.runtime.spend())
       );
     }
   ),
@@ -609,8 +659,8 @@ const MEMBERS: Record<string, () => Member> = {
       sliceOf(sliceOf(type, true), true),
       slicesArg
     );
-    return allocatingCall(sliceOf(type, false), [allocator, slices], call.span, ([value]) =>
-      elements(value).flatMap((part) => elements(part))
+    return allocatingCall(sliceOf(type, false), [allocator, slices], call.span, ([value], frame) =>
+      joiningPlan(elements(value), [], () => frame.runtime.spend())
     );
   }),
   join: fnMember('std.mem.join', (sema, call) => {
@@ -622,13 +672,11 @@ const MEMBERS: Record<string, () => Member> = {
       sliceOf(CONST_U8_SLICE, true),
       slicesArg
     );
-    return allocatingCall(sliceOf(U8, false), [allocator, separator, slices], call.span, ([sep, value]) => {
-      const parts = elements(value).map((part) => elements(part));
-      const glue = elements(sep);
-      return parts.flatMap((part, index) => (index === 0 ? part : [...glue, ...part]));
-    });
+    return allocatingCall(sliceOf(U8, false), [allocator, separator, slices], call.span, ([sep, value], frame) =>
+      joiningPlan(elements(value), elements(sep), () => frame.runtime.spend())
+    );
   }),
-  sort: sorter('std.mem.sort', 'stable'),
+  sort: sorter('std.mem.sort', 'block'),
   sortUnstable: sorter('std.mem.sortUnstable', 'pdq'),
   zeroes: fnMember('std.mem.zeroes', (sema, call) => {
     const [typeArg] = expectArgs(sema, call, 1, 'std.mem.zeroes');
@@ -712,39 +760,87 @@ function copier(name: string): () => Member {
   });
 }
 
-function replaced(input: Value[], needle: Value[], replacement: Value[]): { values: Value[]; count: number } {
-  const values: Value[] = [];
+function replacementCount(
+  input: Value[],
+  needle: Value[],
+  spend: () => void,
+  onMatch?: (position: number) => void
+): number {
+  if (needle.length === 0) panic(PANIC.unreachable);
   let count = 0;
-  let index = 0;
-  while (index < input.length) {
-    if (needle.length > 0 && startsWith(input, needle, index)) {
-      values.push(...replacement);
-      index += needle.length;
-      count++;
-    } else {
-      values.push(input[index]);
-      index++;
+  for (let index = 0; index < input.length;) {
+    spend();
+    let matches = index + needle.length <= input.length;
+    for (let offset = 0; matches && offset < needle.length; offset++) {
+      spend();
+      matches = equalValues(input[index + offset], needle[offset]);
     }
+    if (matches) {
+      count++;
+      onMatch?.(index);
+      index += needle.length;
+    } else index++;
   }
-  return { values, count };
+  return count;
 }
 
-/** A call that allocates its result, returning `error.OutOfMemory` when the run's slots run out. */
-function allocatingCall(type: Type, args: readonly TExpr[], span: Span, compute: (values: Value[]) => Value[]): TExpr {
-  const evaluators = args.map((arg) => arg.eval);
-  return runtime(
-    allocating(type),
-    (frame) => {
-      const values = compute(evaluateHeld(frame, evaluators).slice(1));
-      frame.runtime.spend(1 + Math.floor(values.length / 16));
-      const child = type.kind === 'pointer' ? type.child : type;
-      const slots = allocationSlots(values.length, child);
-      if (!frame.runtime.canAllocate(slots)) return ERROR_OUT_OF_MEMORY;
-      frame.runtime.allocate(slots);
-      return newSlice(values);
+function replacementPlan(input: Value[], needle: Value[], replacement: Value[], spend: () => void): AllocationPlan {
+  const positions: number[] = [];
+  const count = replacementCount(input, needle, spend, (position) => positions.push(position));
+  const length = input.length + count * (replacement.length - needle.length);
+  return {
+    length,
+    build: () => {
+      const values: Value[] = [];
+      let cursor = 0,
+        match = 0;
+      while (cursor < input.length) {
+        if (cursor === positions[match]) {
+          for (const value of replacement) values.push(value);
+          cursor += needle.length;
+          match++;
+        } else values.push(input[cursor++]);
+      }
+      return values;
     },
-    span
-  );
+  };
+}
+
+function joiningPlan(parts: readonly Value[], separator: readonly Value[], spend: () => void): AllocationPlan {
+  const slices = parts as readonly Slice[];
+  let length = separator.length * Math.max(0, slices.length - 1);
+  for (const slice of slices) {
+    spend();
+    length += slice.length;
+  }
+  return {
+    length,
+    build: () => {
+      const values: Value[] = [];
+      for (const [index, slice] of slices.entries()) {
+        if (index > 0) for (const value of separator) values.push(value);
+        for (let at = 0; at < slice.length; at++) values.push(slice.get(at));
+      }
+      return values;
+    },
+  };
+}
+
+function allocatingCall(
+  type: Type,
+  args: readonly TExpr[],
+  span: Span,
+  plan: (values: Value[], frame: Frame) => AllocationPlan
+): TExpr {
+  return nativeCall(allocating(type), args, span, (values, frame) => {
+    const allocation = plan(values.slice(1), frame);
+    const child = type.kind === 'pointer' ? type.child : type;
+    const complete = reserveNativeAllocation(frame, allocatorState(values[0]), allocation.length, child);
+    if (!complete) return ERROR_OUT_OF_MEMORY;
+    const result = newSlice(allocation.build());
+    complete(result.target);
+    return result;
+  });
 }
 
 function sorter(name: string, algorithm: SortAlgorithm): () => Member {
@@ -754,15 +850,18 @@ function sorter(name: string, algorithm: SortAlgorithm): () => Member {
     const lessThan = sema.functionOf(sema.compile(lessThanArg), lessThanArg);
     if (lessThan.params.length !== 3)
       sema.error(lessThanArg, '比べる関数は fn (context, a, b) bool の形にしてください。');
+    if (lessThan.returnType !== BOOL) sema.error(lessThanArg, '比べる関数の戻り値は bool にしてください。');
+    const block = algorithm === 'block' ? blockSortFunction(sema, type, context.type, call.span) : undefined;
     return nativeCall(VOID, [items, context], call.span, ([value, contextValue], frame) => {
       const slice = value as Slice;
-      const sorted = sortValues(
-        slice.values(),
-        (a, b) => lessThan.call(frame, [contextValue, a, b]) as boolean,
-        algorithm,
-        frame
-      );
-      storeSliceValues(slice, sorted);
+      if (block) runBlockSort(sema, block, frame, slice, contextValue, (args) => lessThan.call(frame, args));
+      else
+        sortValues(
+          slice,
+          (a, b) => lessThan.call(frame, [contextValue, a, b]) as boolean,
+          algorithm as Exclude<SortAlgorithm, 'block'>,
+          frame
+        );
       return;
     });
   });

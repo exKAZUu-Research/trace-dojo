@@ -1,9 +1,8 @@
-import { allocationSlots } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Span } from '../ast';
 import { sizeOf } from '../layout';
 import type { Frame } from '../runtime';
-import { copyForStorage, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
+import { copyForFrame, copyForStorage, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
   errorUnionOf,
   optionalOf,
@@ -20,7 +19,6 @@ import {
 import { NULL, Pointer, Slice, storeInto, type Value, ZArray, ZStruct } from '../values';
 import { constSlice, elements } from './common';
 import {
-  allocateMemory,
   ALLOCATOR,
   ALLOCATOR_ERROR,
   type AllocatorState,
@@ -28,8 +26,9 @@ import {
   ERROR_OUT_OF_MEMORY,
   freeMemory,
   nativeEnum,
+  reserveNativeAllocation,
 } from './heap';
-import { compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
+import { compileArgs, expectArgs, fnMember, type Member, nativeStateCall, nativeStruct } from './native';
 import { compilePrint, PrintWriteError } from './print';
 
 const SAFETY_STATE = nativeEnum('debug.SafetyLock.State', ['unlocked', 'locked']);
@@ -91,12 +90,13 @@ function growCapacity(minimum: number, child: Type): number {
 
 /** Gives the list exactly `capacity` slots, copying its items to new storage; false when memory runs out. */
 function reallocate(frame: Frame, list: List, capacity: number, child: Type): boolean {
-  if (!frame.runtime.canAllocate(allocationSlots(capacity, child))) return false;
-  const values = list.items.values();
+  const previous = list.capacity > 0 ? list.items.target : undefined;
+  const complete = reserveNativeAllocation(frame, list.allocator, capacity, child, previous);
+  if (!complete) return false;
+  const values = list.items.values().map(copyForStorage);
   for (let index = values.length; index < capacity; index++) values.push(undefinedValue(child));
   const storage = new ZArray(values, 0, capacity);
-  const previous = list.capacity > 0 ? list.items.target : undefined;
-  if (!allocateMemory(frame, list.allocator, storage, capacity, child, previous)) return false;
+  complete(storage);
   list.struct.slots[0] = new Slice(storage, 0, list.items.length);
   list.struct.slots[1] = BigInt(capacity);
   list.items = list.struct.slots[0] as Slice;
@@ -133,31 +133,28 @@ function defineMembers(type: StructType, child: Type): void {
       const expected = options.allocator ? [ALLOCATOR, ...options.args] : options.args;
       const args = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
       const list = receiverOf(sema, call.receiver, type, call.span, options.byValue !== true);
-      const evaluators = args.slice(options.allocator ? 1 : 0).map((arg) => arg.eval);
-      const evaluateAllocator = options.allocator ? args[0].eval : undefined;
-      return runtime(
+      return nativeStateCall(
         options.result,
-        (frame) => {
-          frame.runtime.spend();
-          const received = listOf(list(frame));
-          if (evaluateAllocator) received.allocator = allocatorState(evaluateAllocator(frame));
-          return run(
-            received,
-            evaluators.map((evaluate) => evaluate(frame)),
-            frame
-          );
-        },
-        call.span
+        args,
+        call.span,
+        (frame) => ({ receiver: options.byValue ? (copyForFrame(frame, list(frame), type) as ZStruct) : list(frame) }),
+        (state, values, frame) => {
+          const received = listOf(state.receiver);
+          if (options.allocator) received.allocator = allocatorState(values[0]);
+          return run(received, options.allocator ? values.slice(1) : values, frame);
+        }
       );
     });
   const insertValues = (frame: Frame, list: List, index: number, values: Value[]): Value => {
     if (!ensureTotalCapacity(frame, list, list.items.length + values.length, child)) return ERROR_OUT_OF_MEMORY;
     // `addManyAt` slices `items[index..]` after growing the list.
     if (index > list.items.length) panic(`start index ${index} is larger than end index ${list.items.length}`);
-    const current = list.items.values();
-    current.splice(index, 0, ...values.map((value) => copyForStorage(value)));
-    for (const [position, value] of current.entries()) list.items.target.slots[list.items.start + position] = value;
-    setLength(list, current.length);
+    const current = list.items.values().map(copyForStorage);
+    const inserted = values.map(copyForStorage);
+    const combined = [...current.slice(0, index), ...inserted, ...current.slice(index)];
+    for (const [position, value] of combined.entries())
+      storeInto(list.items.target, list.items.start + position, value);
+    setLength(list, combined.length);
     return undefined;
   };
   const members: Record<string, () => Member> = {
@@ -206,13 +203,13 @@ function defineMembers(type: StructType, child: Type): void {
     }),
     append: method('append', { args: [child], result: allocating(VOID), allocator: true }, (list, [item], frame) => {
       if (!ensureTotalCapacity(frame, list, list.items.length + 1, child)) return ERROR_OUT_OF_MEMORY;
-      list.items.target.slots[list.items.start + list.items.length] = copyForStorage(item);
+      storeInto(list.items.target, list.items.start + list.items.length, item);
       setLength(list, list.items.length + 1);
       return;
     }),
     appendAssumeCapacity: method('appendAssumeCapacity', { args: [child], result: VOID }, (list, [item]) => {
       if (list.items.length >= list.capacity) panic(PANIC.unreachable);
-      list.items.target.slots[list.items.start + list.items.length] = copyForStorage(item);
+      storeInto(list.items.target, list.items.start + list.items.length, item);
       setLength(list, list.items.length + 1);
       return;
     }),
@@ -228,7 +225,7 @@ function defineMembers(type: StructType, child: Type): void {
         const length = list.items.length + Number(count as bigint);
         if (!ensureTotalCapacity(frame, list, length, child)) return ERROR_OUT_OF_MEMORY;
         for (let index = list.items.length; index < length; index++)
-          list.items.target.slots[list.items.start + index] = copyForStorage(value);
+          storeInto(list.items.target, list.items.start + index, value);
         setLength(list, length);
         return;
       }
@@ -294,14 +291,15 @@ function defineMembers(type: StructType, child: Type): void {
       { args: [sliceOf(USIZE, true)], result: VOID },
       (list, [indexes]) => {
         const sorted = elements(indexes).map((index) => Number(index as bigint));
-        const values = list.items.values();
+        const values = list.items.values().map(copyForStorage);
         for (const [position, index] of sorted.entries()) {
           if (position > 0 && index < sorted[position - 1]) panic(PANIC.overflow);
           if (index >= values.length) panic(`index out of bounds: index ${index}, len ${values.length}`);
         }
         const removed = new Set(sorted);
         const kept = values.filter((_, index) => !removed.has(index));
-        for (const [position, value] of kept.entries()) list.items.target.slots[list.items.start + position] = value;
+        for (const [position, value] of kept.entries())
+          storeInto(list.items.target, list.items.start + position, value);
         setLength(list, kept.length);
         return;
       }
@@ -336,7 +334,7 @@ function defineMembers(type: StructType, child: Type): void {
     ),
     appendBounded: method('appendBounded', { args: [child], result: allocating(VOID) }, (list, [item]) => {
       if (list.items.length >= list.capacity) return ERROR_OUT_OF_MEMORY;
-      list.items.target.slots[list.items.start + list.items.length] = copyForStorage(item);
+      storeInto(list.items.target, list.items.start + list.items.length, item);
       setLength(list, list.items.length + 1);
       return;
     }),
@@ -380,25 +378,22 @@ function defineMembers(type: StructType, child: Type): void {
     ),
     toOwnedSlice: method('toOwnedSlice', { args: [], result: allocating(items), allocator: true }, (list, _, frame) => {
       // The memory shrinks to the items, in place where the allocator can.
-      const values = list.items.values();
+      const complete = reserveNativeAllocation(frame, list.allocator, list.items.length, child, list.items.target);
+      if (!complete) return ERROR_OUT_OF_MEMORY;
+      const values = list.items.values().map(copyForStorage);
       const owned = new ZArray(values, 0, values.length);
-      if (!allocateMemory(frame, list.allocator, owned, values.length, child, list.items.target)) {
-        return ERROR_OUT_OF_MEMORY;
-      }
+      complete(owned);
       list.struct.slots[0] = new Slice(new ZArray([]), 0, 0);
       list.struct.slots[1] = 0n;
       return new Slice(owned, 0, values.length);
     }),
     clone: method('clone', { args: [], result: allocating(type), byValue: true, allocator: true }, (list, _, frame) => {
-      const copy = listOf(
-        new ZStruct([
-          new Slice(new ZArray(list.items.values().map(copyForStorage)), 0, list.items.length),
-          0n,
-          new ZStruct([0n]),
-        ])
-      );
+      const copy = listOf(emptyList());
       copy.allocator = list.allocator;
       if (!reallocate(frame, copy, list.capacity, child)) return ERROR_OUT_OF_MEMORY;
+      for (let index = 0; index < list.items.length; index++)
+        storeInto(copy.items.target, copy.items.start + index, list.items.get(index));
+      setLength(copy, list.items.length);
       return copy.struct;
     }),
     allocatedSlice: method(
@@ -416,8 +411,8 @@ function defineMembers(type: StructType, child: Type): void {
       (list, [start, length, slice], frame) => {
         const from = Number(start as bigint);
         const count = Number(length as bigint);
-        const values = list.items.values();
-        const replacement = elements(slice);
+        const values = list.items.values().map(copyForStorage);
+        const replacement = elements(slice).map(copyForStorage);
         // Zig computes `items.len - len` before slicing `items[start + len ..]`.
         if (count > values.length) panic(PANIC.overflow);
         if (!ensureTotalCapacity(frame, list, values.length - count + replacement.length, child)) {
@@ -425,9 +420,10 @@ function defineMembers(type: StructType, child: Type): void {
         }
         if (from + count > values.length)
           panic(`start index ${from + count} is larger than end index ${values.length}`);
-        values.splice(from, count, ...replacement);
-        for (const [position, value] of values.entries()) list.items.target.slots[list.items.start + position] = value;
-        setLength(list, values.length);
+        const combined = [...values.slice(0, from), ...replacement, ...values.slice(from + count)];
+        for (const [position, value] of combined.entries())
+          storeInto(list.items.target, list.items.start + position, value);
+        setLength(list, combined.length);
         return;
       }
     ),

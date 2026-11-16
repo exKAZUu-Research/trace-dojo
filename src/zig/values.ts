@@ -50,7 +50,8 @@ export class ZArray implements Slots {
   constructor(
     public slots: Value[],
     readonly offset = 0,
-    readonly length = slots.length
+    readonly length = slots.length,
+    readonly hasSentinel = false
   ) {}
 
   get(index: number): Value {
@@ -64,11 +65,6 @@ export class ZArray implements Slots {
   /** The elements, followed by the sentinel when `withSentinel`. */
   values(withSentinel = false): Value[] {
     return this.slots.slice(this.offset, this.offset + this.length + (withSentinel ? 1 : 0));
-  }
-
-  /** Whether the array holds a sentinel after its elements. */
-  get hasSentinel(): boolean {
-    return this.offset + this.length < this.slots.length;
   }
 }
 
@@ -132,12 +128,13 @@ export class Pointer {
   }
 
   project(kind: 'length' | 'optional'): Pointer {
-    let projections = Pointer.projections.get(this.storageIdentity());
+    const location = this.storageLocation();
+    let projections = Pointer.projections.get(location.storage);
     if (!projections) {
       projections = new Map();
-      Pointer.projections.set(this.storageIdentity(), projections);
+      Pointer.projections.set(location.storage, projections);
     }
-    const key = `${this.index} ${kind}`;
+    const key = `${location.index} ${kind}`;
     let storage = projections.get(key);
     if (!storage) {
       storage = kind === 'length' ? new SliceLength(this) : new SomeSlots(this);
@@ -146,12 +143,19 @@ export class Pointer {
     return new Pointer(storage, 0);
   }
 
-  storageIdentity(): object {
-    return this.target instanceof SomeSlots || this.target instanceof SliceLength ? this.target : this.target.slots;
+  storageLocation(): { storage: object; index: number } {
+    const value = this.load();
+    if (value instanceof ZArray) return { storage: value.slots, index: value.offset };
+    return {
+      storage: this.target instanceof SomeSlots || this.target instanceof SliceLength ? this.target : this.target.slots,
+      index: this.index,
+    };
   }
 
   equals(other: Pointer): boolean {
-    return this.storageIdentity() === other.storageIdentity() && this.index === other.index;
+    const left = this.storageLocation(),
+      right = other.storageLocation();
+    return left.storage === right.storage && left.index === right.index;
   }
 }
 
@@ -216,7 +220,7 @@ export function isAggregate(value: Value): value is ZArray | ZStruct | ZUnion {
 export function copyValue(value: Value): Value {
   if (value instanceof ZArray) {
     const copied = value.values(value.hasSentinel).map((slot) => copyValue(slot));
-    return new ZArray(copied, 0, value.length);
+    return new ZArray(copied, 0, value.length, value.hasSentinel);
   }
   if (value instanceof ZStruct) return new ZStruct(value.slots.map((slot) => copyValue(slot)));
   if (value instanceof ZUnion) return new ZUnion(value.tag, copyValue(value.slots[0]));

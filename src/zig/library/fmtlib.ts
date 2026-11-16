@@ -17,7 +17,7 @@ import {
 } from '../types';
 import { ErrorValue, Slice, type Value } from '../values';
 import { allocating, allocatorArg, computed, constSlice, elements, generic, mutableSlice, newSlice } from './common';
-import { allocateMemory, allocatorState, ERROR_OUT_OF_MEMORY } from './heap';
+import { allocatorState, ERROR_OUT_OF_MEMORY, reserveNativeAllocation } from './heap';
 import { compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
 import { compilePrint, PrintWriteError } from './print';
 import type { WriterState } from './writer';
@@ -190,8 +190,10 @@ const MEMBERS: Record<string, () => Member> = {
           throw error;
         }
         frame.runtime.spend();
+        const complete = reserveNativeAllocation(frame, allocator, bytes.length, U8);
+        if (!complete) return ERROR_OUT_OF_MEMORY;
         const slice = newSlice(bytes.map(BigInt));
-        if (!allocateMemory(frame, allocator, slice.target, bytes.length, U8)) return ERROR_OUT_OF_MEMORY;
+        complete(slice.target);
         return slice;
       },
       call.span

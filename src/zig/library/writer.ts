@@ -1,16 +1,35 @@
 import { checkOutputSize } from '../allocation';
 import type { Frame } from '../runtime';
 import type { StructType } from '../types';
-import { ErrorValue, Slice, type Value, ZArray } from '../values';
+import { ErrorValue, Slice, type Value, ZArray, ZStruct } from '../values';
 import { nativeStruct } from './native';
 
-export const WRITER: StructType = nativeStruct('Io.Writer', {});
+export const WRITER: StructType = nativeStruct('Io.Writer', {}, [], { kind: 'writer', args: [], storageSlots: 4 });
 
 export interface WriterState extends Record<string, unknown> {
   fd: number | undefined;
   buffer: Slice;
   end: number;
   capacity: number;
+}
+
+export function writerValue(state: WriterState): ZStruct {
+  return new ZStruct([state.fd, state.buffer, state.end, state.capacity]);
+}
+
+export function writerState(value: Value): WriterState {
+  const header = value as ZStruct;
+  const state = {} as WriterState;
+  for (const [index, name] of ['fd', 'buffer', 'end', 'capacity'].entries()) {
+    Object.defineProperty(state, name, {
+      enumerable: true,
+      get: () => header.slots[index],
+      set: (value: Value) => {
+        header.slots[index] = value;
+      },
+    });
+  }
+  return state;
 }
 
 export function bufferedBytes(state: WriterState): number[] {

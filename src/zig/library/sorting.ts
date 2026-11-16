@@ -1,49 +1,31 @@
 import type { Frame } from '../runtime';
-import type { Value } from '../values';
+import { copyForStorage } from '../semaBase';
+import type { Slice, Value } from '../values';
+import { storeSliceValue } from './common';
 
-/** The sort algorithms of `std.sort`: the stable ones (`block`, `insertion`) give one order, `heap` and `pdq` theirs. */
-export type SortAlgorithm = 'stable' | 'heap' | 'pdq';
+export type SortAlgorithm = 'block' | 'insertion' | 'heap' | 'pdq';
 
-/**
- * Sorts values with a `lessThan` function. A stable sort's result is the one every stable algorithm gives, which is
- * that of Zig's block sort; `heap` and `pdq` are transcribed from Zig 0.17.1, so equal elements end in Zig's order.
- */
 export function sortValues(
-  values: Value[],
+  items: Slice,
   lessThan: (a: Value, b: Value) => boolean,
-  algorithm: SortAlgorithm,
+  algorithm: Exclude<SortAlgorithm, 'block'>,
   frame: Frame
-): Value[] {
-  if (algorithm === 'stable') return mergeSort(values, lessThan, frame);
-  const items = [...values];
+): void {
   const context: Context = {
     lessThan: (a, b) => {
       frame.runtime.spend();
-      return lessThan(items[a], items[b]);
+      return lessThan(items.get(a), items.get(b));
     },
     swap: (a, b) => {
-      [items[a], items[b]] = [items[b], items[a]];
+      const left = copyForStorage(items.get(a)),
+        right = copyForStorage(items.get(b));
+      storeSliceValue(items, a, right);
+      storeSliceValue(items, b, left);
     },
   };
-  if (algorithm === 'heap') heapContext(0, items.length, context);
+  if (algorithm === 'insertion') insertionContext(0, items.length, context);
+  else if (algorithm === 'heap') heapContext(0, items.length, context);
   else pdqContext(0, items.length, context);
-  return items;
-}
-
-function mergeSort(values: Value[], lessThan: (a: Value, b: Value) => boolean, frame: Frame): Value[] {
-  if (values.length <= 1) return values;
-  const middle = Math.floor(values.length / 2);
-  const left = mergeSort(values.slice(0, middle), lessThan, frame);
-  const right = mergeSort(values.slice(middle), lessThan, frame);
-  const merged: Value[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < left.length && j < right.length) {
-    frame.runtime.spend();
-    if (lessThan(right[j], left[i])) merged.push(right[j++]);
-    else merged.push(left[i++]);
-  }
-  return [...merged, ...left.slice(i), ...right.slice(j)];
 }
 
 interface Context {

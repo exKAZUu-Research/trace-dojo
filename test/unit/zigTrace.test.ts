@@ -287,3 +287,26 @@ pub fn main(init: std.process.Init) !void { _ = ${sort}(Turtle, try make(init.gp
     expect(result.uncaughtException).toBeUndefined();
   }
 );
+
+test('reference library sorting records learner callbacks without internal frames or rows', () => {
+  const program = `const std = @import("std");
+fn less(_: void, a: u8, b: u8) bool {
+    var t = Turtle.init(0, 0);
+    t.forward();
+    return a < b;
+}
+pub fn main() void {
+    var values = [_]u8{3, 2, 1};
+    std.sort.block(u8, &values, {}, less);
+}`;
+  const result = traceProgram('zig', program, program);
+  const lines = program.split('\n');
+  const sortLine = lines.findIndex((line) => line.includes('std.sort.block')) + 1;
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.traceItems.some((item) => item.callLines.length > 0)).toBe(true);
+  for (const item of result.traceItems) {
+    expect(item.line).toBeLessThanOrEqual(lines.length);
+    expect(item.callLines.every((line) => line === sortLine)).toBe(true);
+    expect(item.callLines.length).toBeLessThanOrEqual(1);
+  }
+});

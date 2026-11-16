@@ -3,7 +3,7 @@ import { allocationSlots } from '../allocation';
 import { panic } from '../arith';
 import type { Expression, Span } from '../ast';
 import type { Frame } from '../runtime';
-import { copyForStorage, evaluateHeld, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
+import { copyForFrame, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
   BOOL,
   CONST_U8_SLICE,
@@ -24,7 +24,7 @@ import { WeakValueMap } from '../weakValueMap';
 import { elements, equalValues } from './common';
 import { autoHashBytes, wyhash } from './hashing';
 import { ALLOCATOR, ALLOCATOR_ERROR, ERROR_OUT_OF_MEMORY } from './heap';
-import { compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
+import { compileArgs, expectArgs, fnMember, type Member, nativeStateCall, nativeStruct } from './native';
 
 type KeyKind = 'auto' | 'string';
 
@@ -79,9 +79,7 @@ function capacityForSize(size: number): number {
   return capacity;
 }
 
-function emptyState(keyType: Type, valueType: Type): MapState {
-  void keyType;
-  void valueType;
+function emptyState(): MapState {
   return {
     capacity: 0,
     metadata: [],
@@ -254,6 +252,7 @@ function hashMapType(name: string, keyType: Type, valueType: Type, kind: KeyKind
   ]);
   const map = nativeStruct(`${name}(${typeName(keyType)},${typeName(valueType)})`, {}, [], {
     kind: 'hashMap',
+    storageSlots: 4,
     args: [keyType, valueType],
   });
   const iterator = nativeStruct(`${name}.Iterator`, {});
@@ -280,6 +279,7 @@ function setMembers(type: StructType, members: Record<string, () => Member>): vo
 }
 
 /** The state of the map a method is called on, by value or through a pointer. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Validates the receiver and selects value or pointer semantics together.
 function stateOf(
   sema: SemaApi,
   receiver: TExpr | undefined,
@@ -292,7 +292,10 @@ function stateOf(
   if (receiver.type.kind === 'pointer' && receiver.type.child === type) {
     if (mutable && receiver.type.isConst)
       sema.error(span, '定数のハッシュマップは変更できません（var で宣言してください）。');
-    return (frame) => readMapState((evaluate(frame) as Pointer).load());
+    return (frame) => {
+      const value = (evaluate(frame) as Pointer).load();
+      return readMapState(mutable ? value : copyForFrame(frame, value, type));
+    };
   }
   if (receiver.type !== type) return sema.error(span, `${type.namespace.name} の値に対して呼び出してください。`);
   if (mutable) {
@@ -300,7 +303,10 @@ function stateOf(
     if (address.type.kind === 'pointer' && address.type.isConst)
       sema.error(span, 'ハッシュマップは var で宣言してください。');
   }
-  return (frame) => readMapState(evaluate(frame));
+  return (frame) => {
+    const value = evaluate(frame);
+    return readMapState(mutable ? value : copyForFrame(frame, value, type));
+  };
 }
 
 function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: KeyKind, managed: boolean): void {
@@ -319,19 +325,11 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       const expected = takesAllocator ? [ALLOCATOR, ...options.args] : options.args;
       const args = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
       const state = stateOf(sema, call.receiver, map, call.span, options.mutable);
-      const evaluators = args.map((arg) => arg.eval);
-      return runtime(
-        options.result,
-        (frame) => {
-          frame.runtime.spend();
-          const received = state(frame);
-          const values = evaluateHeld(frame, evaluators, copyForStorage);
-          return run(received, values.slice(takesAllocator ? 1 : 0), frame);
-        },
-        call.span
+      return nativeStateCall(options.result, args, call.span, state, (received, values, frame) =>
+        run(received, values.slice(takesAllocator ? 1 : 0), frame)
       );
     });
-  const fresh = (): ZStruct => new ZStruct([new NativeHandle('hashMap', emptyState(keyType, valueType))]);
+  const fresh = emptyMapValue;
   const members: Record<string, () => Member> = {
     Entry: () => ({ type: TYPE, value: entry }),
     KV: () => ({ type: TYPE, value: kv }),
@@ -339,7 +337,7 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
     Iterator: () => ({ type: TYPE, value: iterator }),
     Size: () => ({ type: TYPE, value: U32 }),
     deinit: method('deinit', { args: [], result: VOID, mutable: true, allocates: true }, (state) => {
-      Object.assign(state, emptyState(keyType, valueType));
+      Object.assign(state, emptyState());
       return;
     }),
     put: method(
@@ -466,7 +464,7 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       return;
     }),
     clearAndFree: method('clearAndFree', { args: [], result: VOID, mutable: true, allocates: true }, (state) => {
-      Object.assign(state, emptyState(keyType, valueType));
+      Object.assign(state, emptyState());
       return;
     }),
     ensureTotalCapacity: method(
@@ -508,15 +506,7 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       );
     });
   } else {
-    // A variable that takes `.empty` gets a map of its own, as Zig's copy of the empty struct is one.
-    members.empty = () => ({
-      type: map,
-      value: new ZStruct([
-        new NativeHandle('template', {
-          fresh: () => new NativeHandle('hashMap', emptyState(keyType, valueType)),
-        }),
-      ]),
-    });
+    members.empty = () => ({ type: map, value: emptyMapValue() });
   }
   setMembers(map, members);
   setMembers(
@@ -591,8 +581,41 @@ function nextMember(
   };
 }
 
+function emptyMapValue(): ZStruct {
+  const state = emptyState();
+  return new ZStruct([
+    0,
+    0,
+    0,
+    new NativeHandle('hashMapAllocation', { metadata: state.metadata, keys: state.keys, values: state.values }),
+  ]);
+}
+
 function readMapState(value: Value): MapState {
-  return ((value as ZStruct).slots[0] as NativeHandle).state as MapState;
+  const header = value as ZStruct;
+  const state = {} as MapState;
+  for (const [index, name] of ['capacity', 'size', 'available'].entries()) {
+    Object.defineProperty(state, name, {
+      enumerable: true,
+      get: () => header.slots[index],
+      set: (value: number) => {
+        header.slots[index] = value;
+      },
+    });
+  }
+  for (const name of ['metadata', 'keys', 'values']) {
+    Object.defineProperty(state, name, {
+      enumerable: true,
+      get: () => (header.slots[3] as NativeHandle).state[name],
+      set: (value: unknown) => {
+        header.slots[3] = new NativeHandle('hashMapAllocation', {
+          ...(header.slots[3] as NativeHandle).state,
+          [name]: value,
+        });
+      },
+    });
+  }
+  return state;
 }
 
 function allocating(type: Type): Type {

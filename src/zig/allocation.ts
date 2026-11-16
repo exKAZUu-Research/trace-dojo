@@ -10,6 +10,7 @@ export class CompilationStorage {
   }
 }
 
+// code-gauge-allow functionNcss 33 -- Counts the storage of each value representation recursively.
 export function valueSlots(type: Type): number {
   let count = 0;
   switch (type.kind) {
@@ -24,6 +25,8 @@ export function valueSlots(type: Type): number {
       break;
     }
     case 'struct': {
+      if (type.namespace.internal) break;
+      count = type.native?.storageSlots ?? 0;
       for (const field of type.fields ?? []) {
         count += 1 + valueSlots(field.type);
         if (count > LIMITS.maxSlots) break;

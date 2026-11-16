@@ -5,7 +5,7 @@ import { CallCompiler, type FunctionCompilation } from './calls';
 import type { FunctionInstance } from './functions';
 import { type Frame, Jump, withHeldValues } from './runtime';
 import {
-  copyForStorage,
+  copyForFrame,
   errorSetIncludes,
   evaluateHeld,
   known,
@@ -38,7 +38,6 @@ import {
   VOID,
 } from './types';
 import {
-  copyValue,
   ErrorValue,
   NULL,
   Pointer,
@@ -109,18 +108,18 @@ export abstract class StatementCompiler extends CallCompiler {
   // Functions -------------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionNcss 35 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected compileFunctionBody(compilation: FunctionCompilation): void {
     const { instance, syntax, namespace } = compilation;
     instance.state = 'compiling';
-    instance.recordsSteps = this.tracing;
+    instance.recordsSteps = this.tracing && !namespace.internal;
     const outerFn = this.fn;
     const fn: FnContext = {
       instance,
       returnType: compilation.returnType,
       inferredErrors: compilation.inferredErrors,
       target: {},
-      recordsSteps: this.tracing,
+      recordsSteps: instance.recordsSteps,
       targets: [],
     };
     this.fn = fn;
@@ -312,7 +311,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const evaluate = value.eval;
     const row = isUndefined ? undefined : this.stepRow(statement);
     const run = (frame: Frame): void => {
-      frame.slots[slot] = copyForStorage(evaluate(frame));
+      frame.slots[slot] = copyForFrame(frame, evaluate(frame), type);
     };
     return { exec: this.simple(row, isObjectCreation(valueSyntax), run), noreturn: false };
   }
@@ -352,7 +351,7 @@ export abstract class StatementCompiler extends CallCompiler {
         const binding = this.declareLocal(target.declaration.name, coerced.type, target.declaration.isConst, coerced);
         const convert = coerced;
         return (frame: Frame): void => {
-          frame.slots[binding.slot] = copyForStorage(convert.eval(frame));
+          frame.slots[binding.slot] = copyForFrame(frame, convert.eval(frame), convert.type);
         };
       }
       const destination = target.target as Expression;
@@ -368,7 +367,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const row = this.stepRow(statement);
     return {
       exec: this.simple(row, false, (frame) => {
-        frame.slots[aggregateSlot] = copyValue(evaluate(frame));
+        frame.slots[aggregateSlot] = copyForFrame(frame, evaluate(frame), type);
         try {
           for (const store of stores) store(frame);
         } finally {
@@ -1205,7 +1204,7 @@ export abstract class StatementCompiler extends CallCompiler {
     return {
       binding,
       bind: (frame, value) => {
-        frame.slots[binding.slot] = copyAggregate(value);
+        frame.slots[binding.slot] = copyForFrame(frame, value, binding.type);
       },
     };
   }
@@ -1422,7 +1421,7 @@ export abstract class StatementCompiler extends CallCompiler {
     };
     interface Operand {
       lengthOf?: (frame: Frame, value: Value) => number;
-      element: (value: Value, index: number) => Value;
+      element: (value: Value, index: number, frame: Frame) => Value;
       evaluate: (frame: Frame) => Value;
       type: Type;
       staticLength?: number;
@@ -1500,7 +1499,7 @@ export abstract class StatementCompiler extends CallCompiler {
         for (let position = 0; position < (count as number); position++) {
           frame.runtime.spend();
           for (const [index, slot] of slots.entries()) {
-            if (slot !== undefined) frame.slots[slot] = operands[index].element(values[index], position);
+            if (slot !== undefined) frame.slots[slot] = operands[index].element(values[index], position, frame);
           }
           frame.runtime.steps.stepBinding(row, storesAnswer);
           const completion = runBody(bodyExec, frame, id);
@@ -1551,7 +1550,7 @@ export abstract class StatementCompiler extends CallCompiler {
     span: Span
   ): {
     lengthOf?: (frame: Frame, value: Value) => number;
-    element: (value: Value, index: number) => Value;
+    element: (value: Value, index: number, frame: Frame) => Value;
     evaluate: (frame: Frame) => Value;
     type: Type;
     staticLength?: number;
@@ -1599,7 +1598,7 @@ export abstract class StatementCompiler extends CallCompiler {
     } else if (type.kind === 'array' && compiled.place) {
       // Zig loops over a copy of an array value, which the body's writes to the variable do not change.
       const read = evaluate;
-      evaluate = (frame) => copyValue(read(frame));
+      evaluate = (frame) => copyForFrame(frame, read(frame), type);
     }
     return {
       type: byPointer ? pointerTo(child, isConst) : child,
@@ -1611,9 +1610,9 @@ export abstract class StatementCompiler extends CallCompiler {
             const view = viewOf(value);
             return new Pointer(view.slots, view.start + index);
           }
-        : (value, index) => {
+        : (value, index, frame) => {
             const view = viewOf(value);
-            return copyAggregate(view.slots.slots[view.start + index]);
+            return copyForFrame(frame, view.slots.slots[view.start + index], child);
           },
     };
   }
@@ -1645,7 +1644,7 @@ export abstract class StatementCompiler extends CallCompiler {
     } else {
       const source = this.compile(operand.value);
       const type = source.type;
-      if (!source.known) evaluateOperand = (frame) => copyValue(source.eval(frame));
+      if (!source.known) evaluateOperand = (frame) => copyForFrame(frame, source.eval(frame), type);
       const compiled = source.known ? source : runtime(type, (frame) => frame.slots[operandSlot], operand);
       this.compilationBudget.spend(
         type.kind === 'array' ? type.length : type.kind === 'struct' ? (type.fields?.length ?? 0) : 0
@@ -2016,7 +2015,7 @@ export abstract class StatementCompiler extends CallCompiler {
           const binding = this.newLocal(capture.name, captureType, true);
           locals.set(capture.name, binding);
           bind = (frame, value) => {
-            frame.slots[binding.slot] = copyAggregate(union ? (value as ZUnion).slots[0] : value);
+            frame.slots[binding.slot] = copyForFrame(frame, union ? (value as ZUnion).slots[0] : value, binding.type);
           };
         }
       }
@@ -2432,12 +2431,7 @@ export { isObjectCreation };
 function copiedIfStored(value: TExpr): (frame: Frame) => Value {
   const evaluate = value.eval;
   if (!value.place) return evaluate;
-  return (frame) => copyAggregate(evaluate(frame));
-}
-
-/** A value captured or returned by value: an aggregate is copied, so that later writes to its source do not show. */
-function copyAggregate(value: Value): Value {
-  return copyValue(value);
+  return (frame) => copyForFrame(frame, evaluate(frame), value.type);
 }
 
 /** Writes a value into `holder.slots[index]`. */

@@ -53,6 +53,7 @@ class Snapshotter {
    */
   variablesOf(frame: Frame, withGlobals: boolean): TraceVariables {
     const variables: TraceVariables = { vars: {}, referenceVars: {} };
+    if (frame.fn.internal) return variables;
     const shown = new Set<string>();
     for (const local of frame.fn.locals) {
       const value = frame.slots[local.slot];

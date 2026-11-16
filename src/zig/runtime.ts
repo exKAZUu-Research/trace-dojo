@@ -1,4 +1,4 @@
-import { ExecutionBudget, LIMITS } from '../interpreter/limits';
+import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame } from '../interpreter/traceRecorder';
@@ -109,6 +109,11 @@ export class Runtime {
   }
 
   /** Counts slots that a program allocates, ending it as Zig does when memory runs out. */
+  reserveStorage(count: number): void {
+    if (!this.canAllocate(count)) throw new ExecutionLimitError('storage');
+    this.allocate(count);
+  }
+
   allocate(count: number): void {
     this.allocated += count;
     if (this.allocated > LIMITS.maxSlots || count > LIMITS.maxSlots) throw new OutOfMemory();

@@ -449,11 +449,15 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         const element = this.coerce(this.compile(args[0], target.child), target.child, args[0]);
         this.storage.reserve(target);
         const { length, sentinel } = target;
-        return this.derived(element, target, (value) =>
-          newArray(
-            Array.from({ length }, () => copyForStorage(value)),
-            sentinel
-          )
+        return this.derived(
+          element,
+          target,
+          (value) =>
+            newArray(
+              Array.from({ length }, () => copyForStorage(value)),
+              sentinel
+            ),
+          true
         );
       }
       default: {
@@ -922,7 +926,7 @@ export const CONST_U8: Type = sliceOf(U8, true);
 /** A string's UTF-8 bytes as a slice of constants. */
 export function bytesSlice(text: string): Slice {
   const bytes = [...new TextEncoder().encode(text)].map(BigInt);
-  return new Slice(new ZArray([...bytes, 0n], 0, bytes.length), 0, bytes.length);
+  return new Slice(new ZArray([...bytes, 0n], 0, bytes.length, true), 0, bytes.length);
 }
 
 /** The text of a byte slice or a pointer to a byte array, decoded as UTF-8. */

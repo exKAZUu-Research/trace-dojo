@@ -2,6 +2,7 @@ import type { Expression, Span } from '../ast';
 import { FunctionInstance } from '../functions';
 import { type Frame, withHeldValues } from '../runtime';
 import {
+  copyForFrame,
   evaluateHeld,
   known,
   NATIVE_FN_TYPE,
@@ -20,7 +21,7 @@ import {
   type Type,
   VOID as VOID_TYPE,
 } from '../types';
-import { NativeHandle, type Value } from '../values';
+import { NativeHandle, type NativeState, type Value } from '../values';
 import { PUBLIC_STD_MEMBERS } from './publicMembers';
 
 /** A declaration's type and value, which a native namespace resolves on first use. */
@@ -116,7 +117,7 @@ export function nativeCall(
   span: Span,
   compute: (values: Value[], frame: Frame) => Value
 ): TExpr {
-  const evaluators = args.map((arg) => arg.eval);
+  const evaluators = args.map((arg) => (frame: Frame) => copyForFrame(frame, arg.eval(frame), arg.type));
   return runtime(
     type,
     (frame) => {
@@ -136,6 +137,28 @@ export function pureCall(type: Type, args: readonly TExpr[], span: Span, compute
 
 export function handle(kind: string, state: Record<string, unknown>): NativeHandle {
   return new NativeHandle(kind, state);
+}
+
+export function nativeStateCall<S extends NativeState>(
+  type: Type,
+  args: readonly TExpr[],
+  span: Span,
+  receiver: (frame: Frame) => S,
+  compute: (state: S, values: Value[], frame: Frame) => Value
+): TExpr {
+  const evaluators = args.map((arg) => (frame: Frame) => copyForFrame(frame, arg.eval(frame), arg.type));
+  return runtime(
+    type,
+    (frame) => {
+      frame.runtime.spend();
+      const state = receiver(frame);
+      return withHeldValues(frame, [new NativeHandle('methodReceiver', state)], () => {
+        const values = evaluateHeld(frame, evaluators);
+        return withHeldValues(frame, values, () => compute(state, values, frame));
+      });
+    },
+    span
+  );
 }
 
 /** A native function as a function value, for library functions that return functions such as `std.sort.asc`. */

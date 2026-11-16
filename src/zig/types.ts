@@ -92,6 +92,7 @@ export interface StructField {
 
 /** What struct, enum, and union types share: their declarations, which the compiler analyzes on demand. */
 export interface Namespace {
+  readonly internal?: boolean;
   readonly name: string;
   readonly decls: Map<string, Decl>;
   readonly parent?: Namespace;
@@ -113,6 +114,7 @@ export interface StructType {
 }
 
 export interface NativeStruct {
+  readonly storageSlots?: number;
   readonly kind: string;
   /** The type arguments of a generic native type. */
   readonly args: readonly Type[];

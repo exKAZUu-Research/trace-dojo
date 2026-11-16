@@ -98,8 +98,8 @@ export function autoHashBytes(
   return bytes;
 }
 
-// code-gauge-allow functionNcss 49 -- Serializes each key representation while charging work before materialization.
-// code-gauge-allow functionCognitiveComplexity 21 -- Serializes each key representation while charging work before materialization.
+// code-gauge-allow functionNcss 50 -- Serializes each key representation while charging work before materialization.
+// code-gauge-allow functionCognitiveComplexity 23 -- Serializes each key representation while charging work before materialization.
 function appendHashBytes(
   bytes: number[],
   value: Value,
@@ -150,10 +150,10 @@ function appendHashBytes(
     }
     case 'pointer':
     case 'fn': {
-      const address =
-        value instanceof Pointer
-          ? (identityOf(value.storageIdentity()) << 32n) + BigInt(value.index)
-          : identityOf((value as FnValue).fn) << 32n;
+      const location = value instanceof Pointer ? value.storageLocation() : undefined;
+      const address = location
+        ? (identityOf(location.storage) << 32n) + BigInt(location.index)
+        : identityOf((value as FnValue).fn) << 32n;
       appendInteger(bytes, address, 8, spend);
       return;
     }

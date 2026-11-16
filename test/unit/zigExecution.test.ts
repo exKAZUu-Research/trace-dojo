@@ -1245,7 +1245,7 @@ test('literal storage is bounded cumulatively and resets for each compilation', 
 });
 
 test('wide integer arrays and hash serialization respect native resource budgets', () => {
-  expect(executeProgram('zig', wideIntegerMapProgram(100))).toMatchObject({
+  expect(executeProgram('zig', wideIntegerMapProgram(90))).toMatchObject({
     kind: 'limitExceeded',
     limit: 'operations',
   });
@@ -1276,3 +1276,199 @@ pub fn main(init: std.process.Init) !void {
     try map.put(key, 1);
 }`;
 }
+
+test('approximate equality preserves extended precision and equal infinities', () => {
+  const source = `const std = @import("std"); pub fn main() void {
+    const x: f128 = 9007199254740992; const y: f128 = 9007199254740993;
+    const inf = std.math.inf(f128);
+    std.debug.print("{} {} {} {} {}", .{std.math.approxEqAbs(f128,x,y,0.5), std.math.approxEqRel(f128,x,y,0.00000000000000001), std.math.approxEqAbs(f128,inf,inf,0), std.math.approxEqAbs(f128,-inf,-inf,1), std.math.approxEqAbs(f128,std.math.nan(f128),std.math.nan(f128),1)});
+  }`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'false false true true false',
+    uncaughtException: undefined,
+  });
+});
+
+test('integer logarithms and empty-needle searches fail their Debug assertions promptly', () => {
+  for (const expression of [
+    'std.math.log(u8,1,2)',
+    'std.math.log(u8,0,2)',
+    'std.math.log(u8,2,0)',
+    'std.mem.containsAtLeast(u8,"abc",18446744073709551615,"")',
+  ]) {
+    expect(
+      executeProgram('zig', `const std=@import("std");pub fn main()void{const value=${expression};_=value;}`)
+    ).toMatchObject({ kind: 'executed', uncaughtException: 'panic: reached unreachable code' });
+  }
+});
+
+test('large ldexp exponents overflow or underflow without huge integer shifts', () => {
+  const source = `const std=@import("std");pub fn main()void{
+    std.debug.print("{} {} {}", .{std.math.ldexp(@as(f128,1),2147483647)==std.math.inf(f128),std.math.ldexp(@as(f80,1),-2147483648)==0,std.math.ldexp(@as(f64,-1),2147483647)==-std.math.inf(f64)});
+  }`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true true true',
+    uncaughtException: undefined,
+  });
+});
+
+test('source-sized plain, quoted, and base64 output follows the output limit', () => {
+  const text = 'a'.repeat(900_000);
+  for (const source of [
+    `const std=@import("std");pub fn main()void{std.debug.print("${text}",.{});}`,
+    `const std=@import("std");pub fn main()void{std.debug.print("{q}",.{"${text}"});}`,
+    `const std=@import("std");pub fn main()void{std.debug.print("{b64}",.{"${text}"});}`,
+  ])
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'output' });
+});
+
+test('writer result types use the canonical usize and mutable byte slice', () => {
+  const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
+pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 2 true',
+    uncaughtException: undefined,
+  });
+});
+
+test('array view pointers compare by region storage and offset', () => {
+  const source = `const std=@import("std");pub fn main()void{var a=[_]u8{1,2,3,4};_= &a;const region=a[1..3];std.debug.print("{} {} {} {}",.{region==a[1..3],region!=a[1..3],region==a[2..4],&a==a[0..4]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true false false true',
+    uncaughtException: undefined,
+  });
+});
+
+test('ArrayList append and insertion retain pointers into initBuffer storage', () => {
+  const source = `const std=@import("std");const P=struct{x:u8};pub fn main(init:std.process.Init)!void{var buffer=[_]P{.{.x=1},.{.x=2},.{.x=3}};const p=&buffer[0].x;var list=std.ArrayList(P).initBuffer(&buffer);list.appendAssumeCapacity(.{.x=7});std.debug.print("{} {}|",.{p.*,buffer[0].x});try list.insert(init.gpa,0,.{.x=8});std.debug.print("{} {} {}",.{p.*,buffer[0].x,buffer[1].x});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '7 7|8 8 7',
+    uncaughtException: undefined,
+  });
+});
+
+test('copied native headers are independent while backing storage remains shared', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{
+    var a=std.AutoHashMap(u8,u8).init(init.gpa);defer a.deinit();try a.put(1,1);var b=a;try b.put(2,2);
+    var u:std.AutoHashMapUnmanaged(u8,u8)=.empty;defer u.deinit(init.gpa);try u.put(init.gpa,1,1);var v=u;try v.put(init.gpa,2,2);
+    var buffer:[8]u8=undefined;var first=std.Io.Writer.fixed(&buffer);try first.writeAll("a");var second=first;try second.writeAll("b");
+    std.debug.print("{} {} {} {} {s}|{s}",.{a.count(),b.count(),u.count(),v.count(),first.buffered(),second.buffered()});
+  }`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 2 1 2 a|ab',
+    uncaughtException: undefined,
+  });
+});
+
+test('runtime aggregate materializations share one storage budget across calls and frames', () => {
+  const prefix = 'const std=@import("std");';
+  const repeated =
+    prefix +
+    `fn make()[600000]u8{return @splat(1);}pub fn main()void{const a=make();const b=make();std.debug.print("{} {}",.{a.len,b.len});}`;
+  const recursive =
+    prefix +
+    `fn retain(n:u8)u8{const a:[400000]u8=@splat(1);if(n==0)return a[0];return a[0]+retain(n-1);}pub fn main()void{std.debug.print("{}",.{retain(3)});}`;
+  for (const source of [repeated, recursive])
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+  const reuse =
+    prefix + `pub fn main()void{var a:[400000]u8=@splat(0);for(0..5)|_|{a=@splat(1);}std.debug.print("{}",.{a[0]});}`;
+  expect(executeProgram('zig', reuse)).toMatchObject({ kind: 'executed', stderr: '1', uncaughtException: undefined });
+});
+
+test('arguments snapshot aggregate values before later argument effects', () => {
+  const source = `const std=@import("std");const P=struct{x:u8};var state=P{.x=1};fn mutate()u8{state.x=9;return 0;}fn observe(p:P,unused:u8)void{_=unused;std.debug.print("{}",.{p.x});}pub fn main()void{observe(state,mutate());}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '1', uncaughtException: undefined });
+});
+
+test('native receivers run before allocator and writer argument effects', () => {
+  const programs = [
+    `const std=@import("std");var n:u8=0;fn allocator()std.mem.Allocator{n=n*10+1;return std.heap.page_allocator;}fn size()usize{n=n*10+2;return 1;}pub fn main()!void{const b=try allocator().alloc(u8,size());std.heap.page_allocator.free(b);std.debug.print("{}",.{n});}`,
+    `const std=@import("std");var n:u8=0;fn out(w:*std.Io.Writer)*std.Io.Writer{n=n*10+1;return w;}fn bytes()[]const u8{n=n*10+2;return "x";}pub fn main()!void{var b:[1]u8=undefined;var w=std.Io.Writer.fixed(&b);_=try out(&w).write(bytes());std.debug.print("{}",.{n});}`,
+  ];
+  for (const source of programs)
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '12',
+      uncaughtException: undefined,
+    });
+});
+
+test('replacement size queries and allocating transforms check expansion before building output', () => {
+  const prefix = `const std=@import("std");pub fn main(init:std.process.Init)void{const input:[1000]u8=@splat(97);const replacement:[10000]u8=@splat(98);`;
+  expect(
+    executeProgram(
+      'zig',
+      prefix + `_=init;std.debug.print("{}",.{std.mem.replacementSize(u8,&input,"a",&replacement)});}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: '10000000', uncaughtException: undefined });
+  for (const expression of [
+    'std.mem.replaceOwned(u8,init.gpa,&input,"a",&replacement)',
+    'std.mem.concat(init.gpa,u8,&parts)',
+    'std.mem.join(init.gpa,",",&parts)',
+  ]) {
+    const source =
+      prefix +
+      `const parts:[1000][]const u8=@splat(&replacement);_= &parts;_= &input;const value=${expression} catch|err|{std.debug.print("{s}",.{@errorName(err)});return;};std.debug.print("{}",.{value.len});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'OutOfMemory',
+      uncaughtException: undefined,
+    });
+  }
+});
+
+test('slices and concatenation retain temporary turtle operands through later calls', () => {
+  for (const body of [
+    `fn index()usize{const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});return 0;}pub fn main()void{const a=(&[_]Turtle{Turtle.init(0,1)})[index()..];_=a;}`,
+    `fn index()usize{const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});return 1;}pub fn main()void{const a=(&[_]Turtle{Turtle.init(0,1)})[0..index()];_=a;}`,
+    `fn later()[1]Turtle{const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});return .{t};}pub fn main()void{const a=[_]Turtle{Turtle.init(0,1)} ++ later();_=a;}`,
+  ])
+    expect(executeProgram('zig', `const std=@import("std");${body}`)).toMatchObject({
+      kind: 'executed',
+      stderr: 'false',
+      uncaughtException: undefined,
+    });
+});
+
+test('tuple and named aggregate caches preserve distinct comparator specializations', () => {
+  const prefix = `const std=@import("std");fn asc(_:void,a:u8,b:u8)std.math.Order{return std.math.order(a,b);}fn desc(_:void,a:u8,b:u8)std.math.Order{return std.math.order(b,a);}pub fn main(init:std.process.Init)!void{var a:std.PriorityQueue(u8,void,asc)=.empty;_= &a;var b:std.PriorityQueue(u8,void,desc)=.empty;_= &b;`;
+  for (const body of [
+    `const first=.{a};_=first;var second=.{b};try second[0].push(init.gpa,1);try second[0].push(init.gpa,3);std.debug.print("{}",.{second[0].pop().?});}`,
+    `const first=.{.queue=a};_=first;var second=.{.queue=b};try second.queue.push(init.gpa,1);try second.queue.push(init.gpa,3);std.debug.print("{}",.{second.queue.pop().?});}`,
+  ])
+    expect(executeProgram('zig', prefix + body)).toMatchObject({
+      kind: 'executed',
+      stderr: '3',
+      uncaughtException: undefined,
+    });
+});
+
+test('insertion sort exposes Zig comparator order and live destination contents', () => {
+  const source = `const std=@import("std");var data=[_]u8{3,2,1};fn less(_:void,a:u8,b:u8)bool{std.debug.print("{}<{}@{} ",.{a,b,data[0]});return a<b;}pub fn main()void{std.sort.insertion(u8,&data,{},less);}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '2<3@3 1<3@2 1<2@2 ',
+    uncaughtException: undefined,
+  });
+});
+
+test('block sort matches reference callback and array hashes across cache boundaries', () => {
+  const fixtures = [
+    [9, '48 18022381761986048048 4122571923138513413'],
+    [513, '8488 13682772094992509688 9485111683807006533'],
+  ] as const;
+  for (const [length, expected] of fixtures) {
+    const source = `const std=@import("std");var data:[${length}]u16=undefined;var h:u64=0;var count:u64=0;fn less(_:void,a:u16,b:u16)bool{h=h*%1000003+%@as(u64,a)*%997+%@as(u64,b);h=h+%@as(u64,data[0]);count+=1;return a<b;}pub fn main()void{for(&data,0..)|*v,i|{v.*=@intCast((i*73+17)%97);}std.sort.block(u16,&data,{},less);var result:u64=0;for(data)|v|{result=result*%1009+%@as(u64,v);}std.debug.print("{} {} {}",.{count,h,result});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: expected,
+      uncaughtException: undefined,
+    });
+  }
+});

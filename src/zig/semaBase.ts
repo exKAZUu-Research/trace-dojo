@@ -1,10 +1,10 @@
-// code-gauge-allow-file fileNcss 870 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 885 -- The file holds one layer of the compiler, whose parts share its private state.
 // code-gauge-allow-file duplicateLines 18 -- Undefined and zero initializers share aggregate shapes but differ in scalar and optional values.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { CompilationStorage, valueSlots } from './allocation';
 import { PANIC, panic } from './arith';
-import type { Container, ContainerMember, Expression, FunctionDeclaration, Span } from './ast';
+import type { Container, ContainerMember, Expression, FunctionDeclaration, SourceFile, Span } from './ast';
 import {
   type AnyFloat,
   asBigFloat,
@@ -141,6 +141,8 @@ export interface SemaApi {
   compileType(expression: Expression): Type;
   reserveStorage(type: Type, span: Span): void;
   resolveStorage(type: Type, span: Span): void;
+  spendCompilation(cost?: number): void;
+  libraryFunction(file: SourceFile, element: Type, name: string, params: readonly Type[], span: Span): FunctionInstance;
   coerce(expression: TExpr, type: Type, span?: Span): TExpr;
   error(span: Span, message: string): never;
   knownValue(expression: TExpr, what: string): Value;
@@ -194,6 +196,18 @@ export abstract class SemaBase implements SemaApi {
 
   constructor(readonly root: Namespace) {
     this.scope = { namespace: root };
+  }
+
+  abstract libraryFunction(
+    file: SourceFile,
+    element: Type,
+    name: string,
+    params: readonly Type[],
+    span: Span
+  ): FunctionInstance;
+
+  spendCompilation(cost = 1): void {
+    this.compilationBudget.spend(cost);
   }
 
   resolveStorage(type: Type, span: Span): void {
@@ -283,6 +297,7 @@ export abstract class SemaBase implements SemaApi {
       name: qualified,
       decls: new Map(),
       parent,
+      internal: parent.internal,
       syntax: container,
       scope: this.scope,
     };
@@ -900,7 +915,14 @@ export abstract class SemaBase implements SemaApi {
       return known(type, build(elements.map((element) => copyForStorage(element.value))), span);
     }
     const evaluators = elements.map((element) => element.eval);
-    return runtime(type, (frame) => build(evaluateHeld(frame, evaluators, copyForStorage)), span);
+    return runtime(
+      type,
+      (frame) => {
+        frame.runtime.reserveStorage(valueSlots(type));
+        return build(evaluateHeld(frame, evaluators, copyForStorage));
+      },
+      span
+    );
   }
 
   protected fixedResult(operand: TExpr, type: Type, value: Value, span: Span = operand.span): TExpr {
@@ -919,10 +941,18 @@ export abstract class SemaBase implements SemaApi {
   }
 
   /** An expression of another type whose value a function computes from the original's. */
-  protected derived(expression: TExpr, type: Type, convert: (value: Value) => Value): TExpr {
+  protected derived(expression: TExpr, type: Type, convert: (value: Value) => Value, allocates = false): TExpr {
     if (expression.known) return known(type, convert(expression.value), expression.span);
     const evaluate = expression.eval;
-    return runtime(type, (frame) => convert(evaluate(frame)), expression.span);
+    return runtime(
+      type,
+      (frame) => {
+        const value = evaluate(frame);
+        if (allocates) frame.runtime.reserveStorage(valueSlots(type));
+        return convert(value);
+      },
+      expression.span
+    );
   }
 
   // Peer types ------------------------------------------------------------------------------------------------------
@@ -1138,7 +1168,7 @@ export function withSentinel(values: Value[], sentinel: Value | undefined): Valu
 
 /** A new array of the elements, followed by the sentinel of a sentinel-terminated array type. */
 export function newArray(values: Value[], sentinel: Value | undefined): ZArray {
-  return new ZArray(withSentinel(values, sentinel), 0, values.length);
+  return new ZArray(withSentinel(values, sentinel), 0, values.length, sentinel !== undefined);
 }
 
 /**
@@ -1174,13 +1204,19 @@ export function evaluateHeld(
   return values;
 }
 
+export function copyForFrame(frame: Frame, value: Value, type: Type): Value {
+  if (!(type.kind === 'struct' && type.namespace.internal)) frame.runtime.reserveStorage(valueSlots(type));
+  return copyForStorage(value);
+}
+
 /** A value about to be stored, whose aggregates must not be shared with the value it came from. */
 export function copyForStorage(value: Value): Value {
   if (value instanceof ZArray)
     return new ZArray(
       value.values(value.hasSentinel).map((slot) => copyForStorage(slot)),
       0,
-      value.length
+      value.length,
+      value.hasSentinel
     );
   if (value instanceof ZStruct) return new ZStruct(value.slots.map((slot) => copyForStorage(slot)));
   if (value instanceof ZUnion) return new ZUnion(value.tag, copyForStorage(value.slots[0]));

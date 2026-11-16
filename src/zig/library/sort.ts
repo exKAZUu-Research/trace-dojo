@@ -4,7 +4,8 @@ import type { Frame } from '../runtime';
 import { known, type SemaApi } from '../semaBase';
 import { BOOL, fnType, optionalOf, type StructType, type Type, typeName, USIZE, VOID } from '../types';
 import { FnValue, NULL, type Slice, type Value, ZStruct } from '../values';
-import { compareScalars, constSlice, generic, mutableSlice, ORDER, storeSliceValues, tupleOf } from './common';
+import { blockSortFunction, runBlockSort } from './blockSort';
+import { compareScalars, constSlice, generic, mutableSlice, ORDER, tupleOf } from './common';
 import { type Member, nativeCall, nativeFunction, nativeStruct } from './native';
 import { type SortAlgorithm, sortValues } from './sorting';
 
@@ -35,15 +36,18 @@ function sorter(name: string, algorithm: SortAlgorithm): () => Member {
     const context = sema.compile(contextArg);
     const lessThan = sema.functionOf(sema.compile(lessThanArg), lessThanArg);
     checkParams(sema, name, lessThan.params, [context.type, type, type], lessThanArg);
+    if (lessThan.returnType !== BOOL) sema.error(lessThanArg, '比べる関数の戻り値は bool にしてください。');
+    const block = algorithm === 'block' ? blockSortFunction(sema, type, context.type, call.span) : undefined;
     return nativeCall(VOID, [items, context], call.span, ([value, contextValue], frame) => {
       const slice = value as Slice;
-      const sorted = sortValues(
-        slice.values(),
-        (a, b) => lessThan.call(frame, [contextValue, a, b]) as boolean,
-        algorithm,
-        frame
-      );
-      storeSliceValues(slice, sorted);
+      if (block) runBlockSort(sema, block, frame, slice, contextValue, (args) => lessThan.call(frame, args));
+      else
+        sortValues(
+          slice,
+          (a, b) => lessThan.call(frame, [contextValue, a, b]) as boolean,
+          algorithm as Exclude<SortAlgorithm, 'block'>,
+          frame
+        );
       return;
     });
   });
@@ -155,8 +159,8 @@ function equalRangeMember(): Member {
 const MEMBERS: Record<string, () => Member> = {
   asc: comparator('std.sort.asc', 1),
   desc: comparator('std.sort.desc', -1),
-  block: sorter('std.sort.block', 'stable'),
-  insertion: sorter('std.sort.insertion', 'stable'),
+  block: sorter('std.sort.block', 'block'),
+  insertion: sorter('std.sort.insertion', 'insertion'),
   heap: sorter('std.sort.heap', 'heap'),
   pdq: sorter('std.sort.pdq', 'pdq'),
   isSorted: reader(

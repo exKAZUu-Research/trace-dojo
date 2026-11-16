@@ -1,5 +1,5 @@
 import { checkOutputSize } from './allocation';
-// code-gauge-allow-file fileNcss 719 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 731 -- The file holds one layer of the compiler, whose parts share its private state.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
@@ -90,7 +90,7 @@ export function parseFormat(format: readonly number[], argNames: readonly string
       end++;
       index += 2;
     }
-    literal.push(...format.slice(start, end));
+    for (let at = start; at < end; at++) literal.push(format[at]);
     if (unescape) continue;
     if (literal.length > 0) {
       segments.push({ kind: 'literal', bytes: literal });
@@ -119,7 +119,7 @@ export function parseFormat(format: readonly number[], argNames: readonly string
   }
   if (used.size !== argNames.length) {
     const missing = argNames.length - used.size;
-    const text = String.fromCodePoint(...format);
+    const text = bytesText(format);
     throw new FormatError(missing === 1 ? `unused argument in '${text}'` : `${missing} unused arguments in '${text}'`);
   }
   return segments;
@@ -160,7 +160,7 @@ function parsePlaceholder(bytes: readonly number[]): {
       i++;
       const start = i;
       while (i < bytes.length && bytes[i] !== 0x5d) i++;
-      const name = String.fromCodePoint(...bytes.slice(start, i));
+      const name = bytesText(bytes.slice(start, i));
       if (peek(0) !== 0x5d) throw new FormatError('Expected closing ]');
       i++;
       return { kind: 'named', name };
@@ -175,7 +175,7 @@ function parsePlaceholder(bytes: readonly number[]): {
   const arg = parseSpecifier();
   const specStart = i;
   while (i < bytes.length && bytes[i] !== 0x3a) i++;
-  const spec = String.fromCodePoint(...bytes.slice(specStart, i));
+  const spec = bytesText(bytes.slice(specStart, i));
   const colon = char();
   if (colon !== undefined && colon !== 0x3a)
     throw new FormatError(`expected : or }, found '${String.fromCodePoint(colon)}'`);
@@ -413,7 +413,7 @@ export function printValue(
           return printFloatHex(out, value as AnyFloat, floatBits(type), upper, options);
         // A byte string in hexadecimal, which Zig asserts has no width or precision.
         forbidOptions(options);
-        for (const byte of stringBytes(value, type)) out.push(...hexDigits(Number(byte), upper));
+        for (const byte of stringBytes(value, type)) appendBytes(out, hexDigits(Number(byte), upper));
         return;
       }
       case 's': {
@@ -463,54 +463,54 @@ export function printValue(
     }
     case 'error_set': {
       forbidOptions(options);
-      out.push(...utf8(`error.${(value as ErrorValue).name}`));
+      appendBytes(out, utf8(`error.${(value as ErrorValue).name}`));
       return;
     }
     case 'enum': {
       forbidOptions(options);
       const name = enumName(value as bigint, type, info);
-      if (name !== undefined) out.push(...utf8(`.${name}`));
-      else out.push(...utf8(`@fromBackingInt(${value as bigint})`));
+      if (name !== undefined) appendBytes(out, utf8(`.${name}`));
+      else appendBytes(out, utf8(`@fromBackingInt(${value as bigint})`));
       return;
     }
     case 'union': {
       if (depth === 0) {
-        out.push(...utf8('.{ ... }'));
+        appendBytes(out, utf8('.{ ... }'));
         return;
       }
       const fields = info.unionFields(type);
       if (type.tagType) {
         const union = value as ZUnion;
-        out.push(...utf8(`.{ .${fields[union.tag].name} = `));
+        appendBytes(out, utf8(`.{ .${fields[union.tag].name} = `));
         printValue(out, ANY, options, union.slots[0], fields[union.tag].type, info, depth - 1);
-        out.push(...utf8(' }'));
+        appendBytes(out, utf8(' }'));
         return;
       }
       if (type.layout === 'auto') {
-        out.push(...utf8('.{ ... }'));
+        appendBytes(out, utf8('.{ ... }'));
         return;
       }
       const union = value as ZUnion;
-      out.push(...utf8(`.{ .${fields[union.tag].name} = `));
+      appendBytes(out, utf8(`.{ .${fields[union.tag].name} = `));
       printValue(out, ANY, options, union.slots[0], fields[union.tag].type, info, depth - 1);
-      out.push(...utf8(' }'));
+      appendBytes(out, utf8(' }'));
       return;
     }
     case 'struct': {
       if (depth === 0) {
-        out.push(...utf8('.{ ... }'));
+        appendBytes(out, utf8('.{ ... }'));
         return;
       }
       const fields = info.structFields(type);
       const struct = value as ZStruct;
-      out.push(...utf8('.{'));
+      appendBytes(out, utf8('.{'));
       for (const [index, field] of fields.entries()) {
-        out.push(...utf8(index === 0 ? ' ' : ', '));
-        if (!type.isTuple) out.push(...utf8(`.${field.name} = `));
+        appendBytes(out, utf8(index === 0 ? ' ' : ', '));
+        if (!type.isTuple) appendBytes(out, utf8(`.${field.name} = `));
         const fieldValue = field.comptimeValue ?? struct.slots[index];
         printValue(out, ANY, options, fieldValue, field.type, info, depth - 1);
       }
-      out.push(...utf8(' }'));
+      appendBytes(out, utf8(' }'));
       return;
     }
     case 'pointer': {
@@ -524,42 +524,42 @@ export function printValue(
         if (child.kind === 'enum' || child.kind === 'union' || child.kind === 'struct') {
           return printValue(out, spec, options, (value as Pointer).load(), child, info, depth);
         }
-        out.push(...utf8(`${typeName(child)}@`));
+        appendBytes(out, utf8(`${typeName(child)}@`));
         printInt(out, addressOf(value), { kind: 'int', signed: false, bits: 64, name: 'usize' }, 16, false, options);
         return;
       }
       if (depth === 0) {
-        out.push(...utf8('{ ... }'));
+        appendBytes(out, utf8('{ ... }'));
         return;
       }
       const slice = value as Slice;
-      out.push(...utf8('{ '));
+      appendBytes(out, utf8('{ '));
       for (let index = 0; index < slice.length; index++) {
         printValue(out, spec, options, slice.get(index), type.child, info, depth - 1);
-        if (index !== slice.length - 1) out.push(...utf8(', '));
+        if (index !== slice.length - 1) appendBytes(out, utf8(', '));
       }
-      out.push(...utf8(' }'));
+      appendBytes(out, utf8(' }'));
       return;
     }
     case 'array': {
       if (depth === 0) {
-        out.push(...utf8('{ ... }'));
+        appendBytes(out, utf8('{ ... }'));
         return;
       }
       const array = value as ZArray;
-      out.push(...utf8('{ '));
+      appendBytes(out, utf8('{ '));
       for (let index = 0; index < type.length; index++) {
         printValue(out, spec, options, array.get(index), type.child, info, depth - 1);
-        if (index < type.length - 1) out.push(...utf8(', '));
+        if (index < type.length - 1) appendBytes(out, utf8(', '));
       }
-      out.push(...utf8(' }'));
+      appendBytes(out, utf8(' }'));
       return;
     }
     case 'type': {
       return alignBuffer(out, utf8(typeName(value as Type)), options);
     }
     case 'enum_literal': {
-      out.push(...utf8(`.${(value as EnumLiteral).name}`));
+      appendBytes(out, utf8(`.${(value as EnumLiteral).name}`));
       return;
     }
     case 'null': {
@@ -586,7 +586,9 @@ const SPECIAL_SPECIFIERS: Record<
   q: {
     accepts: isByteString,
     print: (out, value, type) => {
-      out.push(0x22, ...escapeString(stringBytes(value, type).map(Number)), 0x22);
+      out.push(0x22);
+      appendBytes(out, escapeString(stringBytes(value, type).map(Number)));
+      out.push(0x22);
     },
   },
   B: {
@@ -601,7 +603,9 @@ const SPECIAL_SPECIFIERS: Record<
     accepts: (type) => type.kind === 'pointer' && isByteString(type),
     print: (out, value, type, options) => {
       forbidOptions(options);
-      out.push(...utf8(btoa(String.fromCodePoint(...stringBytes(value, type).map(Number)))));
+      const bytes = stringBytes(value, type);
+      checkOutputSize(Math.ceil(bytes.length / 3) * 4);
+      appendBytes(out, utf8(btoa(bytes.map((byte) => String.fromCodePoint(Number(byte))).join(''))));
     },
   },
 };
@@ -610,13 +614,13 @@ const SPECIAL_SPECIFIERS: Record<
 function escapeString(bytes: readonly number[]): number[] {
   const out: number[] = [];
   const hex = (byte: number): void => {
-    out.push(...utf8(`\\x${byte.toString(16).padStart(2, '0')}`));
+    appendBytes(out, utf8(`\\x${byte.toString(16).padStart(2, '0')}`));
   };
   let index = 0;
   while (index < bytes.length) {
     const byte = bytes[index];
     const named = ESCAPES[byte];
-    if (named) out.push(...utf8(named));
+    if (named) appendBytes(out, utf8(named));
     else if (byte < 0x20 || byte === 0x7f) hex(byte);
     else if (byte < 0x80) out.push(byte);
     else {
@@ -628,6 +632,7 @@ function escapeString(bytes: readonly number[]): number[] {
       index += length;
       continue;
     }
+    checkOutputSize(out.length);
     index++;
   }
   return out;
@@ -747,7 +752,7 @@ function printUnicodeCodepoint(out: number[], codepoint: number): void {
     out.push(0xef, 0xbf, 0xbd);
     return;
   }
-  out.push(...utf8(String.fromCodePoint(codepoint)));
+  appendBytes(out, utf8(String.fromCodePoint(codepoint)));
 }
 
 /** `printInt`: integers print with their type's signedness, a comptime_int as `usize` or `isize` when it fits. */
@@ -962,4 +967,13 @@ function hexFloatDigits(big: BigFloat, bits: FloatBits, upper: boolean, precisio
   if (precision !== undefined && precision > trimmed.length) fraction += '0'.repeat(precision - trimmed.length);
   const point = (precision === undefined ? trimmed.length > 0 : precision > 0) ? '.' : '';
   return `0x${hex[0]}${point}${fraction}p${exponent}`;
+}
+
+function appendBytes(out: number[], bytes: readonly number[]): void {
+  checkOutputSize(out.length + bytes.length);
+  for (const byte of bytes) out.push(byte);
+}
+
+function bytesText(bytes: readonly number[]): string {
+  return new TextDecoder().decode(new Uint8Array(bytes));
 }

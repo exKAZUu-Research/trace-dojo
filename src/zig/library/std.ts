@@ -9,11 +9,13 @@ import {
   errorSetOf,
   errorUnionOf,
   intType,
+  sliceOf,
   type StructType,
   TYPE,
   type Type,
   typeName,
   U8,
+  USIZE,
   VOID,
 } from '../types';
 import { ErrorValue, NativeHandle, Pointer, Slice, type Value, ZArray, ZStruct } from '../values';
@@ -26,12 +28,13 @@ import {
   handle,
   type Member,
   nativeCall,
+  nativeStateCall,
   nativeStruct,
   typeMember,
   unavailableMember,
 } from './native';
 import { compilePrint, decodeOutput, printInto, PrintWriteError } from './print';
-import { bufferedBytes, flushWriter, WRITER, type WriterState, writeTo } from './writer';
+import { bufferedBytes, flushWriter, WRITER, type WriterState, writerState, writerValue, writeTo } from './writer';
 
 let std: StructType | undefined;
 
@@ -241,7 +244,6 @@ function addIoMembers(): void {
 }
 
 // code-gauge-allow functionNcss 60 -- Defines the methods of one library type, each a short closure over its state.
-// code-gauge-allow duplicateLines 17 -- Each writer method writes its own bytes through the same writer, in the same shape.
 function addWriterMembers(): void {
   addMembers(WRITER, {
     Error: typeMember(() => WRITE_ERROR),
@@ -273,7 +275,7 @@ function addWriterMembers(): void {
     }),
     splatByteAll: fnMember('Writer.splatByteAll', (sema, call) => {
       const writer = writerOf(sema, call);
-      const [byte, count] = compileArgs(sema, expectArgs(sema, call, 2, 'splatByteAll'), [U8, USIZE_TYPE()]);
+      const [byte, count] = compileArgs(sema, expectArgs(sema, call, 2, 'splatByteAll'), [U8, USIZE]);
       const evaluateByte = byte.eval;
       const evaluateCount = count.eval;
       return runtime(
@@ -288,50 +290,27 @@ function addWriterMembers(): void {
     }),
     write: fnMember('Writer.write', (sema, call) => {
       const writer = writerOf(sema, call);
-      const [bytes] = compileArgs(sema, expectArgs(sema, call, 1, 'write'), [CONST_U8_SLICE]);
-      const evaluate = bytes.eval;
-      return runtime(
-        errorUnionOf(WRITE_ERROR, USIZE_TYPE()),
-        (frame) => {
-          const data = byteValues(evaluate(frame)).map(Number);
-          return writeTo(frame, writer(frame), data) ?? BigInt(data.length);
-        },
-        call.span
-      );
+      const args = compileArgs(sema, expectArgs(sema, call, 1, 'write'), [CONST_U8_SLICE]);
+      return nativeStateCall(errorUnionOf(WRITE_ERROR, USIZE), args, call.span, writer, (state, [value], frame) => {
+        const data = byteValues(value).map(Number);
+        return writeTo(frame, state, data) ?? BigInt(data.length);
+      });
     }),
     splatBytesAll: fnMember('Writer.splatBytesAll', (sema, call) => {
       const writer = writerOf(sema, call);
-      const [bytes, count] = compileArgs(sema, expectArgs(sema, call, 2, 'splatBytesAll'), [
-        CONST_U8_SLICE,
-        USIZE_TYPE(),
-      ]);
-      const evaluateBytes = bytes.eval;
-      const evaluateCount = count.eval;
-      return runtime(
-        errorUnionOf(WRITE_ERROR, VOID),
-        (frame) => {
-          const data = byteValues(evaluateBytes(frame)).map(Number);
-          return writeRepeated(frame, writer(frame), data, Number(evaluateCount(frame) as bigint));
-        },
-        call.span
+      const args = compileArgs(sema, expectArgs(sema, call, 2, 'splatBytesAll'), [CONST_U8_SLICE, USIZE]);
+      return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), args, call.span, writer, (state, [bytes, count], frame) =>
+        writeRepeated(frame, state, byteValues(bytes).map(Number), Number(count as bigint))
       );
     }),
     printUnicodeCodepoint: fnMember('Writer.printUnicodeCodepoint', (sema, call) => {
       const writer = writerOf(sema, call);
-      const [codePoint] = compileArgs(sema, expectArgs(sema, call, 1, 'printUnicodeCodepoint'), [intType(false, 21)]);
-      const evaluate = codePoint.eval;
-      return runtime(
-        errorUnionOf(WRITE_ERROR, VOID),
-        (frame) => {
-          const value = Number(evaluate(frame) as bigint);
-          // A surrogate half or a value past U+10FFFF prints as the replacement character.
-          const valid = value <= 0x10_ff_ff && !(value >= 0xd8_00 && value <= 0xdf_ff);
-          return writeTo(frame, writer(frame), [
-            ...new TextEncoder().encode(String.fromCodePoint(valid ? value : 0xff_fd)),
-          ]);
-        },
-        call.span
-      );
+      const args = compileArgs(sema, expectArgs(sema, call, 1, 'printUnicodeCodepoint'), [intType(false, 21)]);
+      return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), args, call.span, writer, (state, [point], frame) => {
+        const value = Number(point as bigint);
+        const valid = value <= 0x10_ff_ff && !(value >= 0xd8_00 && value <= 0xdf_ff);
+        return writeTo(frame, state, [...new TextEncoder().encode(String.fromCodePoint(valid ? value : 0xff_fd))]);
+      });
     }),
     flush: fnMember('Writer.flush', (sema, call) => {
       const writer = writerOf(sema, call);
@@ -347,13 +326,13 @@ function addWriterMembers(): void {
       );
     }),
     fixed: fnMember('std.Io.Writer.fixed', (sema, call) => {
-      const [buffer] = compileArgs(sema, expectArgs(sema, call, 1, 'std.Io.Writer.fixed'), [sliceOfU8()]);
+      const [buffer] = compileArgs(sema, expectArgs(sema, call, 1, 'std.Io.Writer.fixed'), [sliceOf(U8, false)]);
       const evaluate = buffer.eval;
       return runtime(
         WRITER,
         (frame) => {
           const slice = evaluate(frame) as Slice;
-          return handle('writer', {
+          return writerValue({
             fd: undefined,
             buffer: slice,
             end: 0,
@@ -366,7 +345,7 @@ function addWriterMembers(): void {
     buffered: fnMember('Writer.buffered', (sema, call) => {
       const writer = writerOf(sema, call);
       return runtime(
-        sliceOfU8(),
+        sliceOf(U8, false),
         (frame) => {
           const state = writer(frame);
           return new Slice(state.buffer.target, state.buffer.start, state.end);
@@ -375,14 +354,6 @@ function addWriterMembers(): void {
       );
     }),
   });
-}
-
-function USIZE_TYPE(): Type {
-  return { kind: 'int', signed: false, bits: 64, name: 'usize' } as Type;
-}
-
-function sliceOfU8(): Type {
-  return { kind: 'pointer', size: 'slice', child: U8, isConst: false } as Type;
 }
 
 function fileOf(sema: SemaApi, call: NativeCall): TExpr {
@@ -400,8 +371,8 @@ function fileWriter(sema: SemaApi, call: NativeCall): TExpr {
   const file = fileOf(sema, call);
   const [, buffer] = expectArgs(sema, call, 2, 'writer');
   const [io] = compileArgs(sema, [call.args[0]], [IO]);
-  const compiledBuffer = sema.compile(buffer, sliceOfU8());
-  const slice = sema.coerce(compiledBuffer, sliceOfU8(), buffer);
+  const compiledBuffer = sema.compile(buffer, sliceOf(U8, false));
+  const slice = sema.coerce(compiledBuffer, sliceOf(U8, false), buffer);
   const evaluateFile = file.eval;
   const evaluateBuffer = slice.eval;
   return runtime(
@@ -412,7 +383,7 @@ function fileWriter(sema: SemaApi, call: NativeCall): TExpr {
       const buffer = evaluateBuffer(frame) as Slice;
       const capacity = buffer.length;
       const state: WriterState = { fd: target.state.fd as number, buffer, end: 0, capacity };
-      return new ZStruct([handle('writer', state)]);
+      return new ZStruct([writerValue(state)]);
     },
     call.span
   );
@@ -425,7 +396,7 @@ function writerOf(sema: SemaApi, call: NativeCall): (frame: Parameters<TExpr['ev
   const type = receiver.type;
   const evaluate = receiver.eval;
   if (type.kind === 'pointer' && type.child === WRITER) {
-    return (frame) => ((evaluate(frame) as Pointer).load() as NativeHandle).state as WriterState;
+    return (frame) => writerState((evaluate(frame) as Pointer).load());
   }
   if (type === WRITER) {
     // A method that takes `*Writer` takes the address of a writer variable or field.
@@ -434,7 +405,7 @@ function writerOf(sema: SemaApi, call: NativeCall): (frame: Parameters<TExpr['ev
       return sema.error(call.span, '定数の std.Io.Writer には書き込めません（var で宣言してください）。');
     }
     const locate = address.eval;
-    return (frame) => ((locate(frame) as Pointer).load() as NativeHandle).state as WriterState;
+    return (frame) => writerState((locate(frame) as Pointer).load());
   }
   return sema.error(call.span, `${typeName(type)} 型には、このメソッドがありません。`);
 }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 479 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 492 -- Groups the related standard library operations that share this module.
 import { divCeil, divExact, divFloor, divTrunc, floatMod, floatRem, mod, PANIC, panic, rem } from '../arith';
 import type { Expression } from '../ast';
 import { fusedMultiplyAdd, intFittingRange, roundFloat } from '../builtins';
@@ -359,6 +359,35 @@ function powi(x: bigint, y: bigint, type: IntType): bigint | 'Overflow' | 'Under
   return accumulator;
 }
 
+// code-gauge-allow functionCognitiveComplexity 26 -- Implements precision-aware tolerance, equality and special-value rules as one operation.
+function approximateEquality(relative: boolean): () => Member {
+  const name = relative ? 'std.math.approxEqRel' : 'std.math.approxEqAbs';
+  return generic(name, 4, (sema, call, type, args) => {
+    if (type.kind !== 'float' && type.kind !== 'comptime_float')
+      sema.error(call.span, `${name} には浮動小数点数の型を渡してください。`);
+    const values = args.map((arg) => sema.coerce(sema.compile(arg, type), type, arg));
+    const bits = bitsOf(type);
+    return computed(BOOL, values, call.span, ([x, y, tolerance]) => {
+      const a = x as AnyFloat,
+        b = y as AnyFloat,
+        t = tolerance as AnyFloat;
+      const order = compareFloats(t, 0);
+      if (order === undefined || (relative ? order <= 0 : order < 0)) panic(PANIC.unreachable);
+      if (compareFloats(a, b) === 0) return true;
+      if (isNaNFloat(a) || isNaNFloat(b)) return false;
+      const difference = absoluteFloat(floatArithmetic(a, b, '-', bits));
+      const absA = absoluteFloat(a),
+        absB = absoluteFloat(b);
+      const limit = relative ? floatArithmetic(compareFloats(absA, absB)! >= 0 ? absA : absB, t, '*', bits) : t;
+      return (compareFloats(difference, limit) ?? 1) <= 0;
+    });
+  });
+}
+
+function absoluteFloat(value: AnyFloat): AnyFloat {
+  return signBit(value) ? negate(value) : value;
+}
+
 const MEMBERS: Record<string, () => Member> = {
   pi: () => ({
     type: COMPTIME_FLOAT,
@@ -460,14 +489,19 @@ const MEMBERS: Record<string, () => Member> = {
   ),
   atan2: binaryFloat('std.math.atan2', Math.atan2),
   hypot: binaryFloat('std.math.hypot', Math.hypot),
+  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps integer and float logarithm analysis with their generated computation.
   log: generic('std.math.log', 3, (sema, call, type, [baseArg, xArg]) => {
     const base = sema.coerce(sema.compile(baseArg, type), type, baseArg);
     const x = sema.coerce(sema.compile(xArg, type), type, xArg);
     if (type.kind === 'int') {
-      return computed(type, [base, x], call.span, ([b, v]) => {
+      if (type.signed) sema.error(call.span, '整数の対数には、符号なし整数の型を渡してください。');
+      return computed(type, [base, x], call.span, ([b, v], frame) => {
+        if ((b as bigint) <= 1n || (v as bigint) <= 0n) panic(PANIC.unreachable);
         let result = 0n;
         let value = v as bigint;
         while (value >= (b as bigint)) {
+          if (frame) frame.runtime.spend();
+          else sema.spendCompilation();
           value /= b as bigint;
           result++;
         }
@@ -735,22 +769,7 @@ const MEMBERS: Record<string, () => Member> = {
   floatEps: floatConstant('std.math.floatEps', (format) => 1 - format.precision),
   floatMin: floatConstant('std.math.floatMin', (format) => format.minExponent),
   floatTrueMin: floatConstant('std.math.floatTrueMin', (format) => format.minExponent - (format.precision - 1)),
-  approxEqRel: generic('std.math.approxEqRel', 4, (sema, call, type, [xArg, yArg, toleranceArg]) => {
-    if (type.kind !== 'float' && type.kind !== 'comptime_float') {
-      return sema.error(
-        call.span,
-        `std.math.approxEqRel には浮動小数点数の型を渡してください（${typeName(type)} です）。`
-      );
-    }
-    const [x, y, tolerance] = [xArg, yArg, toleranceArg].map((arg) => sema.coerce(sema.compile(arg, type), type, arg));
-    return computed(BOOL, [x, y, tolerance], call.span, ([a, b, t]) => {
-      const [p, q, r] = [a, b, t].map((value) => toDouble(value as AnyFloat));
-      if (!(r > 0)) panic(PANIC.unreachable);
-      if (p === q) return true;
-      if (Number.isNaN(p) || Number.isNaN(q)) return false;
-      return Math.abs(p - q) <= Math.max(Math.abs(p), Math.abs(q)) * r;
-    });
-  }),
+  approxEqRel: approximateEquality(true),
   lerp: fnMember('std.math.lerp', (sema, call) => {
     const args = expectArgs(sema, call, 3, 'std.math.lerp').map((arg) => sema.compile(arg));
     const type = sema.peerType(args, call.span);
@@ -791,13 +810,7 @@ const MEMBERS: Record<string, () => Member> = {
     while (2 ** bits < type.bits) bits++;
     return known(TYPE, intType(false, bits), call.span);
   }),
-  approxEqAbs: generic('std.math.approxEqAbs', 4, (sema, call, type, [xArg, yArg, toleranceArg]) => {
-    const [x, y, tolerance] = [xArg, yArg, toleranceArg].map((arg) => sema.coerce(sema.compile(arg, type), type, arg));
-    return computed(BOOL, [x, y, tolerance], call.span, ([a, b, t]) => {
-      if (isNaNFloat(a as AnyFloat) || isNaNFloat(b as AnyFloat)) return false;
-      return Math.abs(toDouble(a as AnyFloat) - toDouble(b as AnyFloat)) <= toDouble(t as AnyFloat);
-    });
-  }),
+  approxEqAbs: approximateEquality(false),
 };
 
 function compareScalarsAny(a: Value, b: Value): number {

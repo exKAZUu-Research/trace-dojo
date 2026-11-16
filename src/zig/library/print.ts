@@ -2,11 +2,10 @@ import type { Expression, Span } from '../ast';
 import { byteValues } from '../builtins';
 import { checkFormat, FormatError, type Options, parseFormat, printValue, type Segment, type TypeInfo } from '../fmt';
 import { type Frame, withHeldValues, ZigPanic } from '../runtime';
-import type { SemaApi } from '../semaBase';
+import { copyForFrame, type SemaApi } from '../semaBase';
 import { CONST_U8_SLICE, pointerTo, type StructField, type Type, typeName } from '../types';
 import { ErrorValue, Pointer, type Value, type ZStruct } from '../values';
-import { handle } from './native';
-import { bufferedBytes, bufferingWriter, WRITER, type WriterState, writeTo } from './writer';
+import { bufferedBytes, bufferingWriter, WRITER, type WriterState, writerState, writerValue, writeTo } from './writer';
 
 export type CompiledPrint = (frame: Frame, destination?: WriterState) => number[];
 
@@ -51,7 +50,7 @@ export function compilePrint(sema: SemaApi, formatArg: Expression, argsArg: Expr
   const evaluate = args.eval;
   return (frame, suppliedDestination) => {
     const destination = suppliedDestination ?? bufferingWriter();
-    const args = evaluate(frame) as ZStruct;
+    const args = copyForFrame(frame, evaluate(frame), type) as ZStruct;
     return withHeldValues(frame, [args], () => {
       appendSegments(frame, destination, segments, fields, args, info, (arg, value) =>
         (formatMethods.get(arg) as FormatMethod)(frame, value, destination)
@@ -101,9 +100,14 @@ function formatMethod(sema: SemaApi, type: Type, span: Span): FormatMethod {
   }
   const byPointer = selfType.kind === 'pointer';
   return (frame, value, state) => {
-    const writer = new Pointer({ slots: [handle('writer', state)] }, 0);
-    const result = fn.call(frame, [byPointer ? new Pointer({ slots: [value] }, 0) : value, writer]);
-    if (result instanceof ErrorValue) throw new PrintWriteError(result);
+    const header = writerValue(state);
+    const writer = new Pointer({ slots: [header] }, 0);
+    try {
+      const result = fn.call(frame, [byPointer ? new Pointer({ slots: [value] }, 0) : value, writer]);
+      if (result instanceof ErrorValue) throw new PrintWriteError(result);
+    } finally {
+      Object.assign(state, writerState(header));
+    }
   };
 }
 
