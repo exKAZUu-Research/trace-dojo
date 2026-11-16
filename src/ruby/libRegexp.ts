@@ -724,7 +724,8 @@ export interface MatchState {
   regexp: RObject;
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Match execution checks encoding and limits before building the numbered and named capture state.
+// code-gauge-allow functionCognitiveComplexity 25 -- Match execution retains encoding, bounded forward/reverse searches and numbered/named capture state.
+// code-gauge-allow functionParameterCount 7 -- Search callers select shared subject state, validation and anchoring without rebuilding snapshots.
 export function execAt(
   regexp: RObject,
   text: string,

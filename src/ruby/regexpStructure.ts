@@ -146,7 +146,7 @@ function validSourceLookbehind(node: LookaroundAssertionNode | { body: Alternati
   return sole.type === 'Group' && !sole.flags && !sole.atomic && validSourceLookbehind(sole);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Width computation distinguishes sequences, equal-width alternatives, exact quantifiers and zero-width assertions.
+// code-gauge-allow functionCognitiveComplexity 19 -- Width computation distinguishes sequences, equal-width alternatives, exact quantifiers and zero-width assertions.
 function sourceWidth(node: SourceNode): number | undefined {
   if (node.type === 'CharacterSet' && node.variableLength) return undefined;
   if (node.type === 'Alternative') {
@@ -184,6 +184,8 @@ function validateSourceReferences(root: SourceNode): void {
   if (references.some((reference) => !captures.has(reference))) throw new SyntaxError('invalid backref number');
 }
 
+// code-gauge-allow functionCognitiveComplexity 29 -- Ruby escape decoding preserves class and comment context before source AST parsing.
+// code-gauge-allow functionNcss 35 -- The source normalization pass retains byte, Unicode and quoted-escape boundaries.
 function normalizeRubyRegexpEscapes(source: string, extended: boolean): string {
   let result = '';
   let inClass = false;

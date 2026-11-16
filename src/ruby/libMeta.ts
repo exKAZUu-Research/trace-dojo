@@ -328,6 +328,7 @@ function* methodDescription(self: RObject): Gen<RString> {
   ]);
 }
 
+// code-gauge-allow functionCognitiveComplexity 20 -- Ruby renders named, anonymous, forwarding, destructured and no-keyword parameter kinds differently.
 function methodParameterSignature(params: Params): string {
   if (
     params.rest === '*' &&

@@ -10666,3 +10666,31 @@ end`)
       '0.25\n0.6\n1.0e-09\n1.25\n1.6\n1.000000001\n-0.75\n-0.4\n-0.999999999\n1709960707.2499998\n1709960707.6\n1709960707.0\n-1709960706.7500002\n-1709960706.4\n-1709960707.0\n',
   });
 });
+
+test.each(['decoding: ASCII', 'mycoding: Shift_JIS', 'foo-coding: ASCII', 'fileencoding=ASCII'])(
+  'ordinary source-header keys keep UTF-8 literals executable: %s',
+  (header) => {
+    expect(run(`# ${header}\ns="é";s << "a";p s.bytes`)).toMatchObject({
+      kind: 'executed',
+      stdout: '[195, 169, 97]\n',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('String initialization validates the complete keyword set before construction', () => {
+  expect(
+    run(`class Capacity
+ def to_int;puts :capacity;2;end
+end
+[proc{String.new('a',foo:1,bar:2)},proc{String.new('a',capacity:Capacity.new,foo:1,bar:2)}].each do |make|
+ begin;make.call;rescue=>e;p e.class,e.message;end
+end
+p String.new('é',capacity:Capacity.new,encoding:Encoding::UTF_8).bytes`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'ArgumentError\n"unknown keywords: :foo, :bar"\nArgumentError\n"unknown keywords: :foo, :bar"\ncapacity\n[195, 169]\n',
+    uncaughtException: undefined,
+  });
+});

@@ -709,30 +709,31 @@ export class Converter {
       }
     }
     if (literal) parts.push(literal.replaceAll('\r\n', '\n'));
-    if (parts.every((part) => typeof part === 'string')) {
-      const source = parts.join('');
-      if (
-        regexpCaptureNames(source, flags.includes('x')).length > 0 &&
-        regexpHasNumberedBackref(source, flags.includes('x'))
-      )
-        this.fail(node, '名前付きキャプチャと番号付き後方参照は一緒に使えません。');
-      try {
-        validateRegexpSourceSyntax(source, flags.includes('x'));
-      } catch (error) {
-        if (error instanceof UnsupportedFeatureError) this.unsupported(node, '正規表現の構文の検証');
+    if (parts.every((part) => typeof part === 'string')) this.validateLiteralRegexp(node, parts.join(''), flags);
+    return { k: 'regex', parts, flags, slashDelimited: node.text.startsWith('/') };
+  }
+
+  private validateLiteralRegexp(node: Node, source: string, flags: string): void {
+    if (
+      regexpCaptureNames(source, flags.includes('x')).length > 0 &&
+      regexpHasNumberedBackref(source, flags.includes('x'))
+    )
+      this.fail(node, '名前付きキャプチャと番号付き後方参照は一緒に使えません。');
+    try {
+      validateRegexpSourceSyntax(source, flags.includes('x'));
+    } catch (error) {
+      if (error instanceof UnsupportedFeatureError) this.unsupported(node, '正規表現の構文の検証');
+      this.fail(node, '正規表現の書き方に誤りがあります。');
+    }
+    try {
+      new RegExp(translate(source, flags.includes('x'), flags.includes('m')), 'u');
+    } catch (error) {
+      if (!(error instanceof UnsupportedFeatureError)) {
+        const names = regexpCaptureNames(source, flags.includes('x'));
+        if (new Set(names).size !== names.length) this.unsupported(node, '重複する名前付きキャプチャ');
         this.fail(node, '正規表現の書き方に誤りがあります。');
       }
-      try {
-        new RegExp(translate(source, flags.includes('x'), flags.includes('m')), 'u');
-      } catch (error) {
-        if (!(error instanceof UnsupportedFeatureError)) {
-          const names = regexpCaptureNames(source, flags.includes('x'));
-          if (new Set(names).size !== names.length) this.unsupported(node, '重複する名前付きキャプチャ');
-          this.fail(node, '正規表現の書き方に誤りがあります。');
-        }
-      }
     }
-    return { k: 'regex', parts, flags, slashDelimited: node.text.startsWith('/') };
   }
 
   // code-gauge-allow duplicateLines 18 -- The similar lines handle different Ruby methods or values.
@@ -2203,7 +2204,7 @@ function sourceDirectives(source: string): { encoding?: string; frozen: boolean 
   const lines = source.split(/\r?\n/);
   const header = lines[0]?.startsWith('#!') ? lines[1] : lines[0];
   let frozen = false;
-  const encoding = /^\s*#.*?coding\s*[:=]\s*([-\w]+)/i.exec(header ?? '')?.[1];
+  const encoding = sourceEncoding(header ?? '');
   for (const line of lines) {
     if (line.trim().length === 0) continue;
     if (!/^\s*#/.test(line)) break;
@@ -2216,6 +2217,23 @@ function sourceDirectives(source: string): { encoding?: string; frozen: boolean 
     }
   }
   return { encoding, frozen };
+}
+
+function sourceEncoding(header: string): string | undefined {
+  if (!/^\s*#/.test(header)) return undefined;
+  const body = header.replace(/^\s*#/, '');
+  const emacs = /-\*-(.*?)-\*-/.exec(body)?.[1];
+  const fields = emacs === undefined ? [body] : emacs.split(';');
+  for (const field of fields) {
+    const match = /^[\s'":;]*([^\s'":;]+)\s*:\s*("(?:\\.|[^"])*"|[^"\s;]+)\s*$/.exec(field);
+    if (match) {
+      if (/^(?:en)?coding$/i.test(match[1])) return match[2].replaceAll(/^"|"$/g, '');
+      if (emacs === undefined) return undefined;
+    } else if (emacs === undefined && !/^[^\s'":;]+$/.test(field.trim())) {
+      return /coding\s*[:=]\s*([-\w]+)/i.exec(field)?.[1];
+    }
+  }
+  return undefined;
 }
 
 function namedChildren(node: Node): Node[] {

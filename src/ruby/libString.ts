@@ -29,6 +29,7 @@ import {
   runtimeError,
   typeError,
 } from './errors';
+import { validateKeywords } from './exceptionOption';
 import { formatString } from './format';
 import { hashDefault, hashGet, stringKeyEquals, stringKeyHash } from './hashes';
 import { callBlock, callMethod, type Gen, invoke, nativeProc, requireBlock } from './interp';
@@ -198,6 +199,7 @@ def(
   'initialize',
   [0, 1],
   function* (self: RString, args, _block, keywords) {
+    yield* validateKeywords(keywords, ['capacity', 'encoding']);
     let capacityValue: Value | undefined;
     let encodingValue: Value | undefined;
     if (keywords)
@@ -205,7 +207,6 @@ def(
         const key = entry.key instanceof RSymbol ? entry.key.name : undefined;
         if (key === 'capacity') capacityValue = entry.value;
         else if (key === 'encoding') encodingValue = entry.value;
-        else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
       }
     const source = args.length > 0 ? yield* toStrValue(args[0]) : undefined;
     let encoding: string | undefined;
