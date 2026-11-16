@@ -198,13 +198,13 @@ isUpper c = case generalCategory c of
   _ -> False
 
 isUpperCase :: Char -> Bool
-isUpperCase = isUpper
+isUpperCase c = generalCategory c == UppercaseLetter || (c >= '\x2160' && c <= '\x216f') || (c >= '\x24b6' && c <= '\x24cf') || (c >= '\x1f130' && c <= '\x1f149') || (c >= '\x1f150' && c <= '\x1f169') || (c >= '\x1f170' && c <= '\x1f189')
 
 isLower :: Char -> Bool
-isLower c = generalCategory c == LowercaseLetter || (c >= '\x2b0' && c <= '\x2b8') || (c >= '\x2c0' && c <= '\x2c1') || (c >= '\x2e0' && c <= '\x2e4') || c == '\x345' || c == '\x37a' || c == '\x10fc' || (c >= '\x1d2c' && c <= '\x1d6a') || c == '\x1d78' || (c >= '\x1d9b' && c <= '\x1dbf') || c == '\x2071' || c == '\x207f' || (c >= '\x2090' && c <= '\x209c') || (c >= '\x2170' && c <= '\x217f') || (c >= '\x24d0' && c <= '\x24e9') || (c >= '\x2c7c' && c <= '\x2c7d') || (c >= '\xa69c' && c <= '\xa69d') || c == '\xa770' || (c >= '\xa7f2' && c <= '\xa7f4') || (c >= '\xa7f8' && c <= '\xa7f9') || (c >= '\xab5c' && c <= '\xab5f') || c == '\xab69'
+isLower c = generalCategory c == LowercaseLetter
 
 isLowerCase :: Char -> Bool
-isLowerCase = isLower
+isLowerCase c = generalCategory c == LowercaseLetter || c == '\xaa' || c == '\xba' || (c >= '\x2b0' && c <= '\x2b8') || (c >= '\x2c0' && c <= '\x2c1') || (c >= '\x2e0' && c <= '\x2e4') || c == '\x345' || c == '\x37a' || c == '\x10fc' || (c >= '\x1d2c' && c <= '\x1d6a') || c == '\x1d78' || (c >= '\x1d9b' && c <= '\x1dbf') || c == '\x2071' || c == '\x207f' || (c >= '\x2090' && c <= '\x209c') || (c >= '\x2170' && c <= '\x217f') || (c >= '\x24d0' && c <= '\x24e9') || (c >= '\x2c7c' && c <= '\x2c7d') || (c >= '\xa69c' && c <= '\xa69d') || c == '\xa770' || (c >= '\xa7f1' && c <= '\xa7f4') || (c >= '\xa7f8' && c <= '\xa7f9') || (c >= '\xab5c' && c <= '\xab5f') || c == '\xab69' || c == '\x10780' || (c >= '\x10783' && c <= '\x10785') || (c >= '\x10787' && c <= '\x107b0') || (c >= '\x107b2' && c <= '\x107ba') || (c >= '\x1e030' && c <= '\x1e06d')
 
 isAlpha :: Char -> Bool
 isAlpha c = case generalCategory c of

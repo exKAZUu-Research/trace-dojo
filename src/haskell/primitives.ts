@@ -551,6 +551,23 @@ strict('generalCategory', 1, ([a]) => {
   return BigInt(index === -1 ? 29 : index);
 });
 
+/**
+ * The simple upper case of a Greek letter with ypogegrammeni, which JavaScript expands to two characters: GHC maps it
+ * to the letter with prosgegrammeni.
+ */
+function greekIotaUpper(char: string): string | undefined {
+  const code = char.codePointAt(0) as number;
+  if (
+    (code >= 0x1f_80 && code <= 0x1f_a7 && (code & 0x8) === 0) ||
+    code === 0x1f_b3 ||
+    code === 0x1f_c3 ||
+    code === 0x1f_f3
+  ) {
+    return String.fromCodePoint(code >= 0x1f_b0 ? code + 9 : code + 8);
+  }
+  return undefined;
+}
+
 /** GHC maps each character to one character, so a mapping that JavaScript expands keeps the character. */
 function singleCase(char: string, mapped: string): string {
   return (mapped.codePointAt(0) ?? 0) > 0xff_ff
@@ -581,7 +598,7 @@ strict('toUpper', 1, ([a]) => {
   const char = a as string;
   if (char === 'ǅ' || char === 'ǈ' || char === 'ǋ' || char === 'ǲ')
     return String.fromCodePoint((char.codePointAt(0) as number) - 1);
-  return singleCase(char, char.toUpperCase());
+  return greekIotaUpper(char) ?? singleCase(char, char.toUpperCase());
 });
 strict('toLower', 1, ([a]) => {
   const char = a as string;
@@ -592,7 +609,10 @@ strict('toLower', 1, ([a]) => {
 });
 strict('toTitle', 1, ([a]) => {
   const char = a as string;
-  return TITLE_CASES[char] ?? singleCase(char, char.toUpperCase());
+  const code = char.codePointAt(0) as number;
+  // Georgian Mkhedruli letters have Mtavruli capitals but are their own title case.
+  if ((code >= 0x10_d0 && code <= 0x10_fa) || (code >= 0x10_fd && code <= 0x10_ff)) return char;
+  return TITLE_CASES[char] ?? greekIotaUpper(char) ?? singleCase(char, char.toUpperCase());
 });
 
 // ---------------------------------------------------------------------------------------------------------------
