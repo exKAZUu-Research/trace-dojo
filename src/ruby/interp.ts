@@ -1506,6 +1506,7 @@ function* evalBegin(e: Extract<Expr, { k: 'begin' }>, frame: Frame): Gen {
         try {
           yield* evalBody(e.ensure, frame);
         } catch (error) {
+          // oxlint-disable-next-line no-unsafe-finally -- Ruby ensure may replace control flow, while fatal execution limits retain precedence.
           throw fatalError ?? error;
         } finally {
           if (pendingException) {

@@ -2,6 +2,7 @@ import { RegExpParser, RegExpSyntaxError, visitRegExpAST } from '@eslint-communi
 
 import { ExecutionLimitError } from '../interpreter/limits';
 import { UnsupportedFeatureError } from './runtime';
+import { codePointCharacters } from './unicodeText';
 
 const expandingFolds: ReadonlyMap<string, string> = new Map(
   Object.entries({
@@ -113,7 +114,7 @@ const expandingFolds: ReadonlyMap<string, string> = new Map(
 );
 
 export function regexpHasExpandingCasefold(source: string, subject: string): boolean {
-  if ([...subject].some((char) => expandingFolds.has(char))) return true;
+  if (codePointCharacters(subject).some((char) => expandingFolds.has(char))) return true;
   const upper = subject.toUpperCase();
   const lower = subject.toLowerCase();
   const candidates = [...expandingFolds]

@@ -25,14 +25,15 @@ export function* runAtExit(): Gen<(RubyError | ExitSignal | UnsupportedFeatureEr
     try {
       yield* callProc(handler, [], { used: false });
     } catch (error) {
-      if (error instanceof ReturnSignal) {
+      let failure = error;
+      if (failure instanceof ReturnSignal) {
         const converted = rubyError(runtime.c.LocalJumpError, 'unexpected return');
         converted.exception.internal = new Map([['hookReturn', true]]);
-        error = converted;
+        failure = converted;
       }
-      if (error instanceof RubyError) runtime.globals.set('$!', error.exception);
-      else if (!(error instanceof ExitSignal) && !(error instanceof UnsupportedFeatureError)) throw error;
-      errors.push(error);
+      if (failure instanceof RubyError) runtime.globals.set('$!', failure.exception);
+      else if (!(failure instanceof ExitSignal) && !(failure instanceof UnsupportedFeatureError)) throw failure;
+      errors.push(failure);
     }
   }
   return errors;

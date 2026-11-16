@@ -1,6 +1,7 @@
 import { LIMITS } from '../interpreter/limits';
 import type { RString } from './objects';
 import { rt, type Runtime } from './runtime';
+import { isAsciiText } from './unicodeText';
 
 interface Positions {
   characters?: Uint32Array;
@@ -44,7 +45,7 @@ export function regexpByteUnit(value: RString, byte: number): number {
 function bytePositions(text: string): Uint32Array | undefined {
   const positions = positionsOf(text);
   if (positions.bytes !== undefined) return positions.bytes || undefined;
-  if (!/[^\u0000-\u007F]/.test(text)) {
+  if (isAsciiText(text)) {
     positions.bytes = false;
     return undefined;
   }

@@ -424,6 +424,6 @@ def(
   },
   { visibility: 'private', keywords: true }
 );
-def('String', 'to_r', 0, function* (self: RString) {
+def('String', 'to_r', 0, function (self: RString) {
   return parseRationalText(self.s.replace(/^[ \t\n\r\f\v]+/, ''), false) ?? makeRational(0n, 1n);
 });

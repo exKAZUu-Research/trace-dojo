@@ -13,13 +13,14 @@ import {
   type Value,
 } from './objects';
 import { rt } from './runtime';
+import { codePointCharacters } from './unicodeText';
 
 export function str(s: string): RString {
   rt().checkStringLength(s.length);
   const value = new RString(rt().c.String, s);
   if (
     /[\uDC80-\uDCFF]/.test(s) &&
-    [...s].some((char) => {
+    codePointCharacters(s).some((char) => {
       const point = char.codePointAt(0) as number;
       return point >= 0xdc_80 && point <= 0xdc_ff;
     })
@@ -48,7 +49,7 @@ export function frozenCoreString(text: string): RString {
 export function stringBytes(value: RString): Uint8Array {
   if (value.rawBytes) return value.rawBytes;
   return value.binary
-    ? Uint8Array.from([...value.s].map((char) => char.codePointAt(0) as number))
+    ? Uint8Array.from(codePointCharacters(value.s).map((char) => char.codePointAt(0) as number))
     : new TextEncoder().encode(value.s);
 }
 
@@ -77,6 +78,7 @@ export function stringFromBytes(bytes: Uint8Array, binary = false, usAscii = fal
   return value;
 }
 
+// code-gauge-allow functionCognitiveComplexity 22 -- UTF-8 lead-byte widths and failed decodes preserve invalid bytes individually instead of replacing them.
 function decodeInvalidBytes(bytes: Uint8Array): string {
   const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   let text = '';
@@ -120,9 +122,10 @@ function encodeInvalidText(text: string): Uint8Array {
   return Uint8Array.from(bytes);
 }
 
+// code-gauge-allow functionCognitiveComplexity 27 -- Character slices share byte offsets and encoding flags across UTF-8, US-ASCII, binary and invalid-byte representations.
 export function stringCharacters(value: RString): RString[] {
   if (!value.rawBytes && !value.binary)
-    return [...value.s].map((char) => {
+    return codePointCharacters(value.s).map((char) => {
       const result = str(char);
       result.usAscii = value.usAscii;
       return result;

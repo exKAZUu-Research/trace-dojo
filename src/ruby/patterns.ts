@@ -221,13 +221,13 @@ function* matchHash(pattern: Extract<Pattern, { k: 'hash' }>, value: Value, fram
     }
   }
   if (pattern.rest === 'nil' && hash.map.size !== pattern.pairs.length) {
-    const rest = yield* restOf(hash, pattern.pairs);
+    const rest = restOf(hash, pattern.pairs);
     return yield* fail(function* () {
       return `rest of ${yield* inspect(rest)} is not empty`;
     });
   }
   if (pattern.rest && pattern.rest !== 'any' && pattern.rest !== 'nil')
-    bind(pattern.rest, yield* restOf(hash, pattern.pairs), frame);
+    bind(pattern.rest, restOf(hash, pattern.pairs), frame);
   if (pattern.pairs.length === 0 && pattern.rest === undefined && hash.map.size > 0) {
     return yield* fail(function* () {
       return `${yield* inspect(hash)} is not empty`;
@@ -236,7 +236,7 @@ function* matchHash(pattern: Extract<Pattern, { k: 'hash' }>, value: Value, fram
   return true;
 }
 
-function* restOf(hash: RHash, pairs: { key: string }[]): Gen<RHash> {
+function restOf(hash: RHash, pairs: { key: string }[]): RHash {
   const rest = newHash();
   rest.byIdentity = hash.byIdentity;
   rest.defaultValue = hash.defaultValue;

@@ -51,6 +51,7 @@ import { RegexpCursor } from './regexpCursor';
 import { regexpByteIndex, regexpByteUnit } from './regexpPositions';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { successorBytes, transformInvalid } from './stringTransforms';
+import { codePointCharacters, isAsciiText } from './unicodeText';
 import {
   arr,
   asciiString,
@@ -79,11 +80,11 @@ const SURROGATE = /[\uD800-\uDFFF]/;
 
 /** The characters of a string, as Ruby counts them: by code point. */
 export function charsOf(text: string): string[] {
-  return SURROGATE.test(text) ? [...text] : text.split('');
+  return SURROGATE.test(text) ? codePointCharacters(text) : text.split('');
 }
 
 export function charLength(text: string): number {
-  return SURROGATE.test(text) ? [...text].length : text.length;
+  return SURROGATE.test(text) ? codePointCharacters(text).length : text.length;
 }
 
 function modify(self: RString): void {
@@ -96,7 +97,7 @@ export function setText(self: RString, text: string): void {
   const value = str(text);
   self.s = value.s;
   self.rawBytes = value.rawBytes;
-  self.usAscii &&= !/[^\u0000-\u007F]/.test(text);
+  self.usAscii &&= isAsciiText(text);
 }
 
 export function setBytes(self: RString, bytes: Uint8Array, binary = self.binary): void {
@@ -393,14 +394,14 @@ def('String', '<=>', 1, (self: RString, [other]) => {
   if (!(other instanceof RString)) return NIL;
   return BigInt(compareRubyStrings(self, other));
 });
-def('String', 'casecmp', 1, function* (self: RString, [other]) {
+def('String', 'casecmp', 1, function (self: RString, [other]) {
   if (!(other instanceof RString)) {
     if (other instanceof RSymbol) throw implicitConversionError(other, 'String');
     return NIL;
   }
   return BigInt(compareBytes(foldAsciiBytes(self), foldAsciiBytes(other)));
 });
-def('String', 'casecmp?', 1, function* (self: RString, [other]) {
+def('String', 'casecmp?', 1, function (self: RString, [other]) {
   if (!(other instanceof RString)) {
     if (other instanceof RSymbol) throw implicitConversionError(other, 'String');
     return NIL;
@@ -999,7 +1000,7 @@ function* withoutAffix(self: RString, value: Value, prefix: boolean): Gen<Uint8A
 /** The code unit offset of a character position, for strings with characters outside the BMP. */
 function unitOffset(text: string, position: number): number {
   if (!SURROGATE.test(text)) return position;
-  return [...text].slice(0, position).join('').length;
+  return codePointCharacters(text).slice(0, position).join('').length;
 }
 
 function charPosition(text: string, offset: number): number {
@@ -1853,7 +1854,7 @@ for (const name of ['force_encoding', 'encode', 'unicode_normalize', 'unpack', '
     throw new UnsupportedFeatureError(`String#${name}（文字コード）`);
   });
 }
-def('String', 'ascii_only?', 0, (self: RString) => !/[^\u0000-\u007F]/.test(self.s));
+def('String', 'ascii_only?', 0, (self: RString) => isAsciiText(self.s));
 def('String', 'between?', 2, function* (self: RString, [min, max]) {
   return (yield* compareValues(self, min)) >= 0 && (yield* compareValues(self, max)) <= 0;
 });
@@ -1895,7 +1896,7 @@ function compatibleSymbolCase(left: RSymbol, right: RSymbol, leftString: RString
 }
 def('Symbol', 'inspect', 0, (self: RSymbol) => {
   const text = symInspect(self);
-  return /^[\u0000-\u007F]*$/.test(text) ? asciiString(text) : str(text);
+  return isAsciiText(text) ? asciiString(text) : str(text);
 });
 def('Symbol', ['length', 'size'], 0, (self: RSymbol) =>
   BigInt(self.binary || self.usAscii ? (self.bytes as Uint8Array).length : charLength(self.name))
@@ -1950,7 +1951,7 @@ export function identifierKeyString(key: string): RString {
 
 function encodedNameString(name: Pick<RSymbol, 'name' | 'binary' | 'usAscii' | 'bytes'>): RString {
   if (name.binary || name.usAscii) return stringFromBytes(name.bytes as Uint8Array, name.binary, name.usAscii);
-  return /^[\u0000-\u007F]*$/.test(name.name) ? asciiString(name.name) : str(name.name);
+  return isAsciiText(name.name) ? asciiString(name.name) : str(name.name);
 }
 
 export { requireBlock, rangeCovers, typeError };

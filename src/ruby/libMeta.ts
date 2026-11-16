@@ -725,7 +725,7 @@ def('Module', 'instance_method', 1, function* (self: RClass, [name]) {
   if (!method) throw undefinedMethodError(self, methodName);
   return unboundMethod(method, methodName, methodReflectionOwner(method, self));
 });
-def('UnboundMethod', 'bind', 1, function* (self: RObject, [recv]) {
+def('UnboundMethod', 'bind', 1, function (self: RObject, [recv]) {
   const { name, owner } = self.data as MethodData;
   return methodObject(recv, validBoundMethod(self, recv), name, owner, owner.isModule);
 });

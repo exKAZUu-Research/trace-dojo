@@ -1,6 +1,7 @@
 import { def } from './define';
 import { RObject, type RString, type RSymbol, type Value } from './objects';
 import { rt, type Runtime } from './runtime';
+import { isAsciiText } from './unicodeText';
 import { asciiString, stringBytes } from './values';
 
 const encodingNames = new WeakMap<RObject, RString>();
@@ -53,7 +54,7 @@ def(
   0,
   (self: RSymbol) =>
     rt().c.Encoding.constants.get(
-      self.binary ? 'ASCII_8BIT' : self.usAscii || /^[\u0000-\u007F]*$/.test(self.name) ? 'US_ASCII' : 'UTF_8'
+      self.binary ? 'ASCII_8BIT' : self.usAscii || isAsciiText(self.name) ? 'US_ASCII' : 'UTF_8'
     ) as Value
 );
 export function validStringEncoding(self: RString): boolean {

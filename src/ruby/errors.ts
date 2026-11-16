@@ -1,6 +1,7 @@
 import { className } from './conversions';
 import { NIL, type RClass, RObject, RString, RSymbol, type Value } from './objects';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
+import { isAsciiText } from './unicodeText';
 import { realClassOf, str, stringBytes, stringFromBytes } from './values';
 
 /** Creates a Ruby exception of `cls` with `message`, to throw. */
@@ -62,7 +63,7 @@ function namedErrorMessage(message: string, name: string | undefined): string | 
   if (name === undefined) return message;
   const symbol = RSymbol.fromKey(name);
   if (!symbol.binary && !symbol.usAscii) return message;
-  if (/[^\u0000-\u007F]/u.test(message.split(name).join('')))
+  if (!isAsciiText(message.split(name).join('')))
     throw new UnsupportedFeatureError('非ASCIIの所有者とバイト識別子の例外メッセージ');
   const shown = name.replaceAll(/[\uDD80-\uDDFF]/gu, (character) =>
     String.fromCodePoint(0xdc_00 + (character.codePointAt(0)! & 255))

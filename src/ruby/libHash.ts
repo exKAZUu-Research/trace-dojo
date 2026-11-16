@@ -543,7 +543,7 @@ def('Hash', 'filter_map', 0, function* (self: RHash, _args, block) {
     rt().heldArrays.pop();
   }
 });
-def('Hash', 'compact', 0, function* (self: RHash) {
+def('Hash', 'compact', 0, function (self: RHash) {
   const hash = copy(self, true);
   for (const [slot, entry] of hash.map) if (entry.value === NIL) hash.map.delete(slot);
   return hash;

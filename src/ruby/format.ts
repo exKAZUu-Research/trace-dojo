@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 541 -- Ruby format directives share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 542 -- Ruby format directives share representation and state; splitting registration by size would scatter that concern.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   combinedStringEncoding,
@@ -19,6 +19,7 @@ import { kernelFloat, kernelInteger } from './libNumeric';
 import { fractionOf, isRational } from './libRational';
 import { NIL, RFloat, RHash, type RObject, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
+import { codePointCharacters } from './unicodeText';
 import { realClassOf, stringBytes, stringFromBytes } from './values';
 
 interface Spec {
@@ -628,7 +629,7 @@ function hexFloat(value: number, precision: number | undefined): string {
 
 function pad(text: string, spec: Spec, zero: boolean): string {
   const width = spec.width ?? 0;
-  const length = [...text].length;
+  const length = codePointCharacters(text).length;
   if (length >= width) return text;
   const fill = (zero ? '0' : ' ').repeat(width - length);
   return spec.minus ? text + fill : fill + text;

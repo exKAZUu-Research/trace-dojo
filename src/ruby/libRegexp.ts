@@ -61,6 +61,7 @@ import {
   validateRegexpStructure,
 } from './regexpStructure';
 import { type Frame, rt, UnsupportedFeatureError } from './runtime';
+import { codePointCharacters, isAsciiText } from './unicodeText';
 import { arr, asciiString, newHash, realClassOf, str, stringBytes, stringFromBytes, sym, truthy } from './values';
 
 // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby exposes the canonical name with a hyphen and uppercase letters.
@@ -537,7 +538,7 @@ export function makeRegexp(source: string, options: RegexpOptions): RObject {
   try {
     encoding =
       options.fixedEncoding ||
-      /[^\u0000-\u007F]/.test(source) ||
+      !isAsciiText(source) ||
       hasNonAsciiRegexpEscape(source, options.extended ?? false) ||
       hasRegexpProperty(source, options.extended ?? false)
         ? options.sourceBinary
@@ -1215,7 +1216,7 @@ function literalRegexpText(regexp: RObject): string | undefined {
   if (data.ignoreCase || data.extended) return undefined;
   const syntax = String.raw`\\^$.*+?()[]{}|`;
   if (data.source.length === 2 && !syntax.includes(data.source[0]) && data.source[1] === '+') return data.source[0];
-  return [...data.source].some((char) => syntax.includes(char)) ? undefined : data.source;
+  return codePointCharacters(data.source).some((char) => syntax.includes(char)) ? undefined : data.source;
 }
 
 export function regexpValueDisplayOf(value: RObject): string | undefined {
@@ -1296,10 +1297,7 @@ function namedCaptureGroup(state: MatchState, key: RString | RSymbol): number {
       .slice(1, -1)
       .replaceAll(/\\(["\\#])/g, '$1');
     const message = `undefined group name reference: ${shown}`;
-    throw rubyError(
-      rt().c.IndexError,
-      stringFromBytes(new TextEncoder().encode(message), /^[\u0000-\u007F]*$/.test(shown))
-    );
+    throw rubyError(rt().c.IndexError, stringFromBytes(new TextEncoder().encode(message), isAsciiText(shown)));
   }
   return state.namedGroups[name];
 }

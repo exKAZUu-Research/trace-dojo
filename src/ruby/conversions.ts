@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 656 -- Ruby value conversion and encoded inspection share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 657 -- Ruby value conversion and encoded inspection share representation and state; splitting registration by size would scatter that concern.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { isCoreMethod } from './define';
 import { argumentError, implicitConversionError, rangeError, rubyError, typeError } from './errors';
@@ -22,6 +22,7 @@ import {
   type Value,
 } from './objects';
 import { rt, RubyError } from './runtime';
+import { isAsciiText } from './unicodeText';
 import {
   asciiString,
   classOf,
@@ -272,7 +273,7 @@ export function* toSValue(value: Value): Gen<RString> {
   if (fast !== undefined && !isOverridden(value, 'to_s')) {
     if (value === NIL || typeof value === 'boolean') return frozenCoreString(fast);
     if (value instanceof RSymbol) return symbolString(value);
-    return /^[\u0000-\u007F]*$/.test(fast) ? asciiString(fast) : str(fast);
+    return isAsciiText(fast) ? asciiString(fast) : str(fast);
   }
   const converted = yield* callMethod(value, 'to_s', [], undefined, undefined, { fcall: true });
   if (converted instanceof RString) return converted;
@@ -331,7 +332,7 @@ export function* inspectValue(value: Value): Gen<RString> {
   const fast = fastInspect(value);
   if (fast !== undefined && !isOverridden(value, 'inspect')) {
     if (typeof value === 'boolean') return frozenCoreString(fast);
-    return !(value instanceof RString) && /^[\u0000-\u007F]*$/.test(fast) ? asciiString(fast) : str(fast);
+    return !(value instanceof RString) && isAsciiText(fast) ? asciiString(fast) : str(fast);
   }
   const converted = yield* callMethod(value, 'inspect', [], undefined, undefined, { fcall: true });
   return converted instanceof RString ? converted : yield* toSValue(converted);
@@ -385,7 +386,7 @@ export function* inspectHash(hash: RHash): Gen<RString> {
       if (key instanceof RSymbol) {
         const name =
           !key.binary && !key.usAscii && isSimpleSymbol(key.name)
-            ? /^[\u0000-\u007F]*$/.test(key.name)
+            ? isAsciiText(key.name)
               ? asciiString(key.name)
               : str(key.name)
             : str(quotedSymbolName(key));
@@ -652,7 +653,7 @@ export function quotedSymbolName(symbol: string | RSymbol): string {
     ).join('');
     return `"${escaped}"`;
   }
-  return strInspect(name, /^[\u0000-\u007F]*$/.test(name) ? 'hex' : 'unicode');
+  return strInspect(name, isAsciiText(name) ? 'hex' : 'unicode');
 }
 
 // Comparisons ---------------------------------------------------------------------------------------------------------

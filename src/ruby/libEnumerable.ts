@@ -522,6 +522,7 @@ def('Enumerable', ['include?', 'member?'], 1, function* (self, [target]) {
 def('Enumerable', 'first', [0, 1], function* (self, args) {
   if (args.length === 0) {
     let found: Value = NIL;
+    // oxlint-disable-next-line require-yield -- This synchronous leaf implements the iterator callback generator protocol.
     yield* iterate(self, function* (value) {
       found = value;
       return STOP;
@@ -532,6 +533,7 @@ def('Enumerable', 'first', [0, 1], function* (self, args) {
   if (count < 0) throw argumentError('attempt to take negative size');
   const items: Value[] = [];
   if (count === 0) return arr([]);
+  // oxlint-disable-next-line require-yield -- This synchronous leaf implements the iterator callback generator protocol.
   yield* collectInto(self, [items], function* (value) {
     items.push(value);
     if (items.length >= count) return STOP;
@@ -543,6 +545,7 @@ def('Enumerable', 'take', 1, function* (self, [countValue]) {
   if (count < 0) throw argumentError('attempt to take negative size');
   const items: Value[] = [];
   if (count === 0) return arr([]);
+  // oxlint-disable-next-line require-yield -- This synchronous leaf implements the iterator callback generator protocol.
   yield* collectInto(self, [items], function* (value) {
     items.push(value);
     if (items.length >= count) return STOP;
@@ -925,11 +928,11 @@ def('Enumerable', 'group_by', 0, function* (self, _args, block) {
     return groups;
   });
 });
-def('Enumerable', 'chunk_while', 0, function* (self, _args, block) {
+def('Enumerable', 'chunk_while', 0, function (self, _args, block) {
   if (!block) throw argumentError('tried to create Proc object without a block');
   return chunkEnumerator(self, block, false);
 });
-def('Enumerable', 'slice_when', 0, function* (self, _args, block) {
+def('Enumerable', 'slice_when', 0, function (self, _args, block) {
   if (!block) throw argumentError('tried to create Proc object without a block');
   return chunkEnumerator(self, block, true);
 });
@@ -938,7 +941,7 @@ for (const [name, before] of [
   ['slice_before', true],
   ['slice_after', false],
 ] as const)
-  def('Enumerable', name, [0, 1], function* (self, args, predicate) {
+  def('Enumerable', name, [0, 1], function (self, args, predicate) {
     if (args.length + Number(!!predicate) !== 1)
       throw argumentCountError(args.length, predicate ? 0 : 1, predicate ? 0 : 1);
     const pattern = args[0];
@@ -1050,7 +1053,7 @@ def('Enumerable', 'each_cons', 1, function* (self, [sizeValue], block) {
   });
   return self;
 });
-def('Enumerable', 'chunk', 0, function* (self, _args, block) {
+def('Enumerable', 'chunk', 0, function (self, _args, block) {
   if (!block) return makeEnumerator(self, 'chunk', []);
   return customEnumerator(self, 'chunk', [block], (consumer) => chunkByKey(self, block, consumer));
 });

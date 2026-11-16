@@ -991,7 +991,7 @@ def('Enumerator::Yielder', 'to_proc', 0, (self: RObject) => {
   proc.captured = [self];
   return proc;
 });
-sdef('Enumerator', 'produce', [0, 1], function* (_self, args, block) {
+sdef('Enumerator', 'produce', [0, 1], function (_self, args, block) {
   const step = requireBlock(block, rt().c.ArgumentError, 'no block given');
   const runtime = rt();
   const generator = new RObject(runtime.c['Enumerator::Generator']);
@@ -1508,7 +1508,7 @@ def('Enumerator::Lazy', 'first', [0, 1], function* (self: RObject, args) {
     rt().heldArrays.pop();
   }
 });
-def('Enumerator::Lazy', 'eager', 0, function* (self: RObject) {
+def('Enumerator::Lazy', 'eager', 0, function (self: RObject) {
   return makeEnumerator(self, 'each', []);
 });
 def('Enumerator::Lazy', ['inspect', 'to_s'], 0, function* (self: RObject) {

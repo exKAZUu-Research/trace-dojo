@@ -219,6 +219,7 @@ def(
       const parts: WarningParts = { chunks: [], binary: false, usAscii: false, ascii: true, length: 0, started: false };
       yield* emitPuts(
         args,
+        // oxlint-disable-next-line require-yield -- This synchronous leaf implements the iterator callback generator protocol.
         function* (part) {
           appendWarningPart(parts, part instanceof RString ? part : str(part));
         },

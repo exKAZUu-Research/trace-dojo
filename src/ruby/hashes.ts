@@ -2,7 +2,7 @@ import { inspect, toInt } from './conversions';
 import { isCoreMethod } from './define';
 import { frozenError, runtimeError } from './errors';
 import { callMethod, callProc, type Gen, isGenerator, runToEnd } from './interp';
-import { type HashEntry, NIL, RArray, RBasic, RHash, RRange, RString, RSymbol, type Value } from './objects';
+import { type HashEntry, RArray, RBasic, RHash, RRange, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
 import { classOf, sameIdentity, snapshot, str, stringBytes, truthy } from './values';
 
@@ -123,7 +123,7 @@ function* findEntry(hash: RHash, key: Value): Gen<{ base: string; slot: string; 
     const identity =
       key instanceof RBasic || key instanceof RSymbol
         ? `o${key.id}`
-        : key === NIL
+        : typeof key === 'object'
           ? 'nil'
           : `${typeof key}:${String(key)}`;
     return yield* findEntryInBucket(hash, key, `h${digest(identity)}`);
