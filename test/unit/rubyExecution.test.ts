@@ -7209,6 +7209,21 @@ test('large Unicode-alternative Regexp scans retain every match', () => {
   expect(run('p ("a"*20000).scan(/é|a/).size')).toMatchObject({ stdout: '20000\n' });
 });
 
+test('Regexp exact intervals followed by question marks retain optional repetition', () => {
+  expect(
+    run(`p "a"[/a{2}?/]
+p "xaaay".sub(/(a){2}?/, "-")
+p "aaaa".scan(/a{2}?/)
+p "aaaa".scan(/a{2}??/)
+p "aaaa".scan(/a{2,3}?/)
+p "aaaa".scan(/a{2,3}??/)
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '""\n"-xaaay"\n["aa", "aa", ""]\n["", "", "", "", ""]\n["aa", "aa"]\n["aa", "aa", ""]\n',
+  });
+});
+
 test('BasicObject receives block instance evaluation', () => {
   expect(run('class B < BasicObject;def run;instance_eval{1};end;end;p B.new.run')).toMatchObject({ stdout: '1\n' });
 });

@@ -335,13 +335,13 @@ export function translate(
     if (inClass === 0 && char === '{') {
       const interval = /^\{(?:\d+(?:,\d*)?|,\d+)\}/.exec(source.slice(index));
       if (interval) {
-        const quantified = out.slice(atomStart) + interval[0].replace('{,', '{0,');
-        const next = source[index + interval[0].length];
-        const repeated =
-          next !== undefined &&
-          ('*+{'.includes(next) || (next === '?' && source[index + interval[0].length + 1] === '?'));
+        const reluctant = interval[0].includes(',') && source[index + interval[0].length] === '?';
+        const quantified = out.slice(atomStart) + interval[0].replace('{,', '{0,') + (reluctant ? '?' : '');
+        const length = interval[0].length + (reluctant ? 1 : 0);
+        const next = source[index + length];
+        const repeated = next !== undefined && '*+?{'.includes(next);
         out = `${out.slice(0, atomStart)}${repeated ? `(?:${quantified})` : quantified}`;
-        index += interval[0].length - 1;
+        index += length - 1;
         continue;
       }
     }
@@ -676,6 +676,8 @@ export function normalizeSlashLiteralSource(source: string): string {
 function triviallyLinearRegexp(source: string): boolean {
   let inClass = false;
   let quantifier = -1;
+  let alternation = false;
+  let grouped = false;
   for (let index = 0; index < source.length; index++) {
     const char = source[index];
     if (char === '\\') {
@@ -686,14 +688,17 @@ function triviallyLinearRegexp(source: string): boolean {
     if (char === '[') inClass = true;
     else if (char === ']') inClass = false;
     else if (!inClass) {
-      if (char === '|' || char === '{' || (char === '(' && source[index + 1] === '?')) return false;
+      if (char === '{' || (char === '(' && source[index + 1] === '?')) return false;
+      if (char === '|') alternation = true;
+      if (char === '(') grouped = true;
       if ('*+?'.includes(char)) {
         if (quantifier >= 0) return false;
         quantifier = index;
       }
     }
   }
-  if (quantifier < 0) return true;
+  if (quantifier < 0) return !alternation || !grouped;
+  if (alternation) return false;
   const tail = source.slice(quantifier + 1).replaceAll(')', '');
   return (
     tail === '' ||
