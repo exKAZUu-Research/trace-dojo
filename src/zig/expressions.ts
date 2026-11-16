@@ -16,6 +16,7 @@ import {
 } from './arith';
 import type { BinaryOperator, Expression, ExpressionOf, Span } from './ast';
 import { type AnyFloat, BigFloat, compareFloats, type FloatBits, floatOf, negate, parseFloatLiteral } from './floats';
+import { comparisonTest, isArithmeticType, isIntegerType, isZero, sign } from './operands';
 import { type Frame, Jump } from './runtime';
 import {
   addDecls,
@@ -826,9 +827,14 @@ export abstract class ExpressionCompiler extends SemaBase {
   private comparison(expression: ExpressionOf<'binary'>): TExpr {
     const { operator } = expression;
     let left = this.compile(expression.left);
-    let right = this.compile(expression.right, left.type.kind === 'null' ? undefined : left.type);
+    let right = this.compile(expression.right, left.type.kind === 'null' ? undefined : unionTag(left.type));
     if (left.type.kind === 'enum_literal' && right.type.kind !== 'enum_literal')
-      left = this.compile(expression.left, right.type);
+      left = this.compile(expression.left, unionTag(right.type));
+    // A tagged union compares with an enum value by its active tag.
+    const leftTag = left.type.kind === 'union' ? left.type.tagType : undefined;
+    const rightTag = right.type.kind === 'union' ? right.type.tagType : undefined;
+    if (leftTag && right.type === leftTag) left = this.coerce(left, leftTag, expression.left);
+    if (rightTag && left.type === rightTag) right = this.coerce(right, rightTag, expression.right);
     // `x == null` compares an optional with null.
     if (right.type.kind === 'null' || left.type.kind === 'null') {
       if (operator !== '==' && operator !== '!=') this.error(expression, 'null とは == と != でだけ比べられます。');
@@ -892,9 +898,10 @@ export abstract class ExpressionCompiler extends SemaBase {
         return (a, b) => ((a as Pointer).equals(b as Pointer) ? 0 : 1);
       }
       case 'optional': {
-        if (ordered || type.child.kind !== 'pointer')
-          this.error(span, `${typeName(type)} 型の値は、== で比べられません。`);
-        return (a, b) => (a === NULL || b === NULL ? (a === b ? 0 : 1) : (a as Pointer).equals(b as Pointer) ? 0 : 1);
+        if (ordered) this.error(span, `${typeName(type)} 型の値は、大小を比べられません。`);
+        const compareChild = this.comparator(type.child, false, span);
+        return (a, b) =>
+          a === NULL || b === NULL ? (a === b ? 0 : 1) : compareChild(optionalPayload(a), optionalPayload(b));
       }
       default: {
         return this.error(span, `${typeName(type)} 型の値は、${ordered ? '大小を' : '== で'}比べられません。`);
@@ -904,11 +911,10 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   private arithmetic(expression: ExpressionOf<'binary'>, resultType: Type | undefined): TExpr {
     const { operator } = expression;
-    let left = this.compile(expression.left, resultType);
-    let right = this.compile(expression.right, left.type.kind.startsWith('comptime') ? resultType : left.type);
-    if (left.type.kind.startsWith('comptime') && !right.type.kind.startsWith('comptime')) {
-      left = this.compile(expression.left, right.type);
-    }
+    // Zig gives the operands of arithmetic no result type, so `@floatFromInt(x) / 2` is an error.
+    void resultType;
+    let left = this.compile(expression.left);
+    let right = this.compile(expression.right);
     const bitwise = operator === '&' || operator === '|' || operator === '^';
     if (bitwise && (left.type.kind === 'bool' || right.type.kind === 'bool')) {
       this.error(expression, `bool の値には ${operator} ではなく and・or を使います。`);
@@ -921,11 +927,12 @@ export abstract class ExpressionCompiler extends SemaBase {
     right = this.coerce(right, type, expression.right);
     this.checkDivision(operator, type, left, right, expression);
     const operation = this.operation(operator, type, expression);
+    // A float of a fixed type divided by zero gives an infinity or NaN, as at run time.
+    const dividesByZero =
+      (operator === '/' || operator === '%') && right.known && isZero(right.value) && type.kind !== 'float';
+    if (dividesByZero) this.error(expression, '0 で割っています。');
     if (left.known && right.known) {
       return known(type, this.foldArithmetic(operation, left.value, right.value, type, expression), expression);
-    }
-    if (right.known && (operator === '/' || operator === '%') && isZero(right.value)) {
-      this.error(expression, '0 で割っています。');
     }
     const evaluateLeft = left.eval;
     const evaluateRight = right.eval;
@@ -963,31 +970,25 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
   }
 
+  /**
+   * Zig accepts `/` on signed integers only when both operands are known, and `%` on signed integers and floats only
+   * when both are known and not negative; otherwise the program must choose a rounding with a builtin.
+   */
   private checkDivision(operator: BinaryOperator, type: Type, left: TExpr, right: TExpr, span: Span): void {
     if (operator !== '/' && operator !== '%') return;
-    const signed = (type.kind === 'int' && type.signed) || type.kind === 'float';
-    if (operator === '/' && type.kind === 'int' && type.signed) {
-      const positive = left.known && right.known && (left.value as bigint) >= 0n && (right.value as bigint) > 0n;
-      if (!positive) {
-        this.error(
-          span,
-          `符号付きの整数 ${typeName(type)} の割り算には、@divTrunc・@divFloor・@divCeil・@divExact を使ってください。`
-        );
-      }
+    const bothKnown = left.known && right.known;
+    if (operator === '/' && type.kind === 'int' && type.signed && !bothKnown) {
+      this.error(
+        span,
+        `符号付きの整数 ${typeName(type)} の割り算には、@divTrunc・@divFloor・@divCeil・@divExact を使ってください。`
+      );
     }
-    if (operator === '%' && signed) {
-      const positive =
-        left.known &&
-        right.known &&
-        type.kind === 'int' &&
-        (left.value as bigint) >= 0n &&
-        (right.value as bigint) > 0n;
-      if (!positive) {
-        this.error(
-          span,
-          `符号付きの整数や浮動小数点数の余りには、@rem か @mod を使ってください（${typeName(type)} 型です）。`
-        );
-      }
+    const mayBeNegative = (type.kind === 'int' && type.signed) || type.kind !== 'int';
+    if (operator === '%' && mayBeNegative && !(bothKnown && sign(left.value) >= 0 && sign(right.value) > 0)) {
+      this.error(
+        span,
+        `符号付きの整数や浮動小数点数の余りには、@rem か @mod を使ってください（${typeName(type)} 型です）。`
+      );
     }
   }
 
@@ -1470,43 +1471,6 @@ function optionalPayload(value: Value): Value {
   return value instanceof Some ? value.value : value;
 }
 
-function isIntegerType(type: Type): boolean {
-  return type.kind === 'int' || type.kind === 'comptime_int';
-}
-
-function comparisonTest(operator: BinaryOperator): (order: number) => boolean {
-  switch (operator) {
-    case '==': {
-      return (order) => order === 0;
-    }
-    case '!=': {
-      return (order) => order !== 0;
-    }
-    case '<': {
-      return (order) => order < 0;
-    }
-    case '>': {
-      return (order) => order > 0;
-    }
-    case '<=': {
-      return (order) => order <= 0;
-    }
-    default: {
-      return (order) => order >= 0;
-    }
-  }
-}
-
-function isArithmeticType(type: Type): boolean {
-  return type.kind === 'int' || type.kind === 'comptime_int' || type.kind === 'float' || type.kind === 'comptime_float';
-}
-
-function isZero(value: Value): boolean {
-  if (typeof value === 'bigint') return value === 0n;
-  if (typeof value === 'number') return value === 0;
-  return value instanceof BigFloat && value.isZero;
-}
-
 /** The shift amount's type for an integer type: `u5` for 32 bits, as `std.math.Log2Int` gives. */
 export function log2IntType(type: IntType): IntType {
   let bits = 0;
@@ -1557,3 +1521,8 @@ function unwrapResult(type: Type): Type {
 }
 
 export { Constant, CONST_U8_SLICE, NativeFn };
+
+/** The type an operand compared with a value of `type` takes: the tag type for a tagged union. */
+function unionTag(type: Type): Type {
+  return type.kind === 'union' && type.tagType ? type.tagType : type;
+}

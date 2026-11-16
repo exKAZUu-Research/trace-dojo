@@ -19,7 +19,16 @@ import {
 } from '../types';
 import { NULL, Pointer, Slice, type Value, ZArray, ZStruct } from '../values';
 import { constSlice, elements } from './common';
-import { ALLOCATOR, ALLOCATOR_ERROR, ERROR_OUT_OF_MEMORY, nativeEnum } from './heap';
+import {
+  allocateMemory,
+  ALLOCATOR,
+  ALLOCATOR_ERROR,
+  type AllocatorState,
+  allocatorState,
+  ERROR_OUT_OF_MEMORY,
+  freeMemory,
+  nativeEnum,
+} from './heap';
 import { compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
 import { compilePrint } from './print';
 
@@ -65,6 +74,8 @@ interface List {
   struct: ZStruct;
   items: Slice;
   capacity: number;
+  /** The allocator a method received, which accounts for the list's memory. */
+  allocator?: AllocatorState;
 }
 
 function listOf(struct: ZStruct): List {
@@ -81,14 +92,22 @@ function growCapacity(minimum: number, child: Type): number {
 /** Gives the list exactly `capacity` slots, copying its items to new storage; false when memory runs out. */
 function reallocate(frame: Frame, list: List, capacity: number, child: Type): boolean {
   if (!frame.runtime.canAllocate(capacity)) return false;
-  frame.runtime.allocate(capacity);
   const values = list.items.values();
   for (let index = values.length; index < capacity; index++) values.push(undefinedValue(child));
-  list.struct.slots[0] = new Slice(new ZArray(values, 0, capacity), 0, list.items.length);
+  const storage = new ZArray(values, 0, capacity);
+  const previous = list.capacity > 0 ? list.items.target : undefined;
+  if (!allocateMemory(frame, list.allocator, storage, capacity, child, previous)) return false;
+  list.struct.slots[0] = new Slice(storage, 0, list.items.length);
   list.struct.slots[1] = BigInt(capacity);
   list.items = list.struct.slots[0] as Slice;
   list.capacity = capacity;
   return true;
+}
+
+function freeList(list: List): void {
+  if (list.capacity > 0) freeMemory(list.allocator, list.items.target);
+  list.struct.slots[0] = new Slice(new ZArray([]), 0, 0);
+  list.struct.slots[1] = 0n;
 }
 
 function ensureTotalCapacity(frame: Frame, list: List, capacity: number, child: Type): boolean {
@@ -114,12 +133,15 @@ function defineMembers(type: StructType, child: Type): void {
       const args = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
       const list = receiverOf(sema, call.receiver, type, call.span, options.byValue !== true);
       const evaluators = args.slice(options.allocator ? 1 : 0).map((arg) => arg.eval);
+      const evaluateAllocator = options.allocator ? args[0].eval : undefined;
       return runtime(
         options.result,
         (frame) => {
           frame.runtime.spend();
+          const received = listOf(list(frame));
+          if (evaluateAllocator) received.allocator = allocatorState(evaluateAllocator(frame));
           return run(
-            listOf(list(frame)),
+            received,
             evaluators.map((evaluate) => evaluate(frame)),
             frame
           );
@@ -140,12 +162,14 @@ function defineMembers(type: StructType, child: Type): void {
     Slice: () => ({ type: TYPE, value: items }),
     empty: () => ({ type, value: emptyList() }),
     initCapacity: fnMember('ArrayList.initCapacity', (sema, call) => {
-      const [, count] = compileArgs(sema, expectArgs(sema, call, 2, 'initCapacity'), [ALLOCATOR, USIZE]);
+      const [allocator, count] = compileArgs(sema, expectArgs(sema, call, 2, 'initCapacity'), [ALLOCATOR, USIZE]);
       const evaluate = count.eval;
+      const evaluateAllocator = allocator.eval;
       return runtime(
         allocating(type),
         (frame) => {
           const list = listOf(emptyList());
+          list.allocator = allocatorState(evaluateAllocator(frame));
           if (!reallocate(frame, list, Number(evaluate(frame) as bigint), child)) return ERROR_OUT_OF_MEMORY;
           return list.struct;
         },
@@ -164,8 +188,7 @@ function defineMembers(type: StructType, child: Type): void {
       );
     }),
     deinit: method('deinit', { args: [], result: VOID, allocator: true }, (list) => {
-      list.struct.slots[0] = new Slice(new ZArray([]), 0, 0);
-      list.struct.slots[1] = 0n;
+      freeList(list);
       return;
     }),
     append: method('append', { args: [child], result: allocating(VOID), allocator: true }, (list, [item], frame) => {
@@ -244,8 +267,7 @@ function defineMembers(type: StructType, child: Type): void {
       return;
     }),
     clearAndFree: method('clearAndFree', { args: [], result: VOID, allocator: true }, (list) => {
-      list.struct.slots[0] = new Slice(new ZArray([]), 0, 0);
-      list.struct.slots[1] = 0n;
+      freeList(list);
       return;
     }),
     shrinkRetainingCapacity: method('shrinkRetainingCapacity', { args: [USIZE], result: VOID }, (list, [length]) => {
@@ -291,16 +313,22 @@ function defineMembers(type: StructType, child: Type): void {
         return new Pointer(list.items.target, list.items.start + list.items.length - 1);
       }
     ),
-    toOwnedSlice: method('toOwnedSlice', { args: [], result: allocating(items), allocator: true }, (list) => {
+    toOwnedSlice: method('toOwnedSlice', { args: [], result: allocating(items), allocator: true }, (list, _, frame) => {
+      // The memory shrinks to the items, in place where the allocator can.
       const values = list.items.values();
+      const owned = new ZArray(values, 0, values.length);
+      if (!allocateMemory(frame, list.allocator, owned, values.length, child, list.items.target)) {
+        return ERROR_OUT_OF_MEMORY;
+      }
       list.struct.slots[0] = new Slice(new ZArray([]), 0, 0);
       list.struct.slots[1] = 0n;
-      return new Slice(new ZArray(values, 0, values.length), 0, values.length);
+      return new Slice(owned, 0, values.length);
     }),
     clone: method('clone', { args: [], result: allocating(type), byValue: true, allocator: true }, (list, _, frame) => {
       const copy = listOf(
         new ZStruct([new Slice(new ZArray(list.items.values()), 0, list.items.length), 0n, new ZStruct([0n])])
       );
+      copy.allocator = list.allocator;
       if (!reallocate(frame, copy, list.capacity, child)) return ERROR_OUT_OF_MEMORY;
       return copy.struct;
     }),
@@ -332,14 +360,17 @@ function defineMembers(type: StructType, child: Type): void {
   if (child === U8) {
     members.print = fnMember('ArrayList.print', (sema, call) => {
       const [allocatorArg, format, args] = expectArgs(sema, call, 3, 'print');
-      compileArgs(sema, [allocatorArg], [ALLOCATOR]);
+      const [allocator] = compileArgs(sema, [allocatorArg], [ALLOCATOR]);
+      const evaluateAllocator = allocator.eval;
       const list = receiverOf(sema, call.receiver, type, call.span, true);
       const print = compilePrint(sema, format, args, call.span);
       return runtime(
         allocating(VOID),
         (frame) => {
           const bytes = print(frame).map(BigInt);
-          return insertValues(frame, listOf(list(frame)), listOf(list(frame)).items.length, bytes);
+          const received = listOf(list(frame));
+          received.allocator = allocatorState(evaluateAllocator(frame));
+          return insertValues(frame, received, received.items.length, bytes);
         },
         call.span
       );

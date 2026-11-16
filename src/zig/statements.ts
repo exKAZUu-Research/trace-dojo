@@ -34,7 +34,9 @@ import {
   VOID,
 } from './types';
 import {
+  copyValue,
   ErrorValue,
+  isAggregate,
   NULL,
   Pointer,
   type Slice,
@@ -528,7 +530,9 @@ export abstract class StatementCompiler extends CallCompiler {
     const [target] = expression.targets;
     if (target.kind === 'identifier' && target.name === '_') {
       const value = this.compile(expression.value);
-      if (value.type.kind === 'void') this.error(expression, 'void の値は捨てられません（_ = は要りません）。');
+      if (value.type.kind === 'error_union') {
+        this.error(expression.value, 'エラーになりうる値は、_ = では捨てられません（try か catch で扱ってください）。');
+      }
       const evaluate = value.eval;
       return {
         exec: this.simple(row, isCallOnly(expression.value), (frame) => void evaluate(frame)),
@@ -567,29 +571,43 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** `x op= value`, computed as `x op value` with the value of `x` read once. */
+  /**
+   * The new value of `target op= value`. Zig coerces the right operand to the target's type, except for shifts, whose
+   * amount has its own type.
+   */
   private compoundValue(current: TExpr, operator: string, value: Expression, span: Span): TExpr {
     const holder = '\u0000compound';
     const binding = this.declareTemporary(holder, current);
     const position = { row: span.row, col: span.col, endRow: span.endRow };
+    const isShift = operator.startsWith('<<') || operator.startsWith('>>');
+    const right = isShift ? undefined : this.coerce(this.compile(value, current.type), current.type, value);
+    const rightHolder = '\u0000compoundValue';
+    const rightBinding = right ? this.declareTemporary(rightHolder, right) : undefined;
     const synthetic: Expression = {
       kind: 'binary',
       ...position,
       operator: operator as ExpressionOf<'binary'>['operator'],
       left: { kind: 'identifier', ...position, name: holder },
-      right: value,
+      right: rightBinding ? { kind: 'identifier', ...position, name: rightHolder } : value,
     };
-    const result = this.withScope({ locals: new Map([[holder, binding.binding]]), parent: this.scope }, () =>
+    const locals = new Map([[holder, binding.binding]]);
+    if (rightBinding) locals.set(rightHolder, rightBinding.binding);
+    const result = this.withScope({ locals, parent: this.scope }, () =>
       this.coerce(this.compile(synthetic, current.type), current.type, span)
     );
     const read = current.eval;
+    const readRight = right?.eval;
     const slot = binding.binding.slot;
+    const rightSlot = rightBinding?.binding.slot;
     const evaluate = result.eval;
     return runtime(
       current.type,
       (frame) => {
         frame.slots[slot] = read(frame);
+        if (readRight && rightSlot !== undefined) frame.slots[rightSlot] = readRight(frame);
         const computed = evaluate(frame);
         frame.slots[slot] = UNASSIGNED;
+        if (rightSlot !== undefined) frame.slots[rightSlot] = UNASSIGNED;
         return computed;
       },
       span
@@ -706,7 +724,7 @@ export abstract class StatementCompiler extends CallCompiler {
     };
     target.breaks.push(site);
     if (target.resultType) site.final = site.value;
-    return (frame) => new Jump('break', id, (site.final ?? site.value).eval(frame));
+    return (frame) => new Jump('break', id, copiedIfStored(site.final ?? site.value)(frame));
   }
 
   private returnMaker(expression: ExpressionOf<'return'>): (frame: Frame) => Jump {
@@ -720,7 +738,7 @@ export abstract class StatementCompiler extends CallCompiler {
     let value = this.compile(expression.value, returnType);
     this.recordErrors(value.type, value);
     value = this.coerceReturn(value, returnType, expression.value);
-    const evaluate = value.eval;
+    const evaluate = copiedIfStored(value);
     return (frame) => new Jump('return', target, evaluate(frame));
   }
 
@@ -985,6 +1003,16 @@ export abstract class StatementCompiler extends CallCompiler {
     );
   }
 
+  /** A value whose type exists only at compile time, such as `comptime_int`, cannot depend on a runtime condition. */
+  private rejectRuntimeComptime(type: Type, span: Span): void {
+    if (type.kind === 'comptime_int' || type.kind === 'comptime_float') {
+      this.error(
+        span,
+        `${typeName(type)} 型の値が、実行時の条件で変わります（@as(i32, ...) のように型を決めてください）。`
+      );
+    }
+  }
+
   private branch(
     expression: Expression,
     _capture: undefined,
@@ -1034,6 +1062,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const otherwiseValue = otherwise?.value ?? known(VOID, undefined, span);
     const type =
       resultType && !isComptimeOnly(resultType) ? resultType : this.peerType([thenValue, otherwiseValue], span);
+    this.rejectRuntimeComptime(type, span);
     const a = this.coerce(thenValue, type, thenValue.span);
     const b = this.coerce(otherwiseValue, type, otherwiseValue.span);
     const evaluateA = a.eval;
@@ -1083,7 +1112,7 @@ export abstract class StatementCompiler extends CallCompiler {
     return {
       binding,
       bind: (frame, value) => {
-        frame.slots[binding.slot] = value;
+        frame.slots[binding.slot] = copyAggregate(value);
       },
     };
   }
@@ -1314,7 +1343,8 @@ export abstract class StatementCompiler extends CallCompiler {
           lengthOf: evaluateEnd
             ? (_frame, value) => {
                 const [from, to] = value as unknown as [bigint, bigint];
-                if (to < from) panic(`start index ${from} is larger than end index ${to}`);
+                // Zig computes the length as `end - start` in usize.
+                if (to < from) panic(PANIC.overflow);
                 return Number(to - from);
               }
             : undefined,
@@ -1463,6 +1493,10 @@ export abstract class StatementCompiler extends CallCompiler {
     if (compiled.known && type.kind === 'array') {
       const value = compiled.value;
       evaluate = () => value;
+    } else if (type.kind === 'array' && compiled.place) {
+      // Zig loops over a copy of an array value, which the body's writes to the variable do not change.
+      const read = evaluate;
+      evaluate = (frame) => copyValue(read(frame));
     }
     return {
       type: byPointer ? pointerTo(child, isConst) : child,
@@ -1476,7 +1510,7 @@ export abstract class StatementCompiler extends CallCompiler {
           }
         : (value, index) => {
             const view = viewOf(value);
-            return view.slots.slots[view.start + index];
+            return copyAggregate(view.slots.slots[view.start + index]);
           },
     };
   }
@@ -1686,6 +1720,7 @@ export abstract class StatementCompiler extends CallCompiler {
           : all.length > 0
             ? this.peerType(all, expression)
             : VOID;
+      if (!operand.known) this.rejectRuntimeComptime(type, expression);
       for (const site of target.breaks) site.final = this.coerce(site.value, type, site.value.span);
     }
     const coerced = new Map<TExpr, TExpr>();
@@ -1793,16 +1828,27 @@ export abstract class StatementCompiler extends CallCompiler {
           'switch の枝の値'
         ) as bigint;
         if (last < (first as bigint)) this.error(item, '範囲の始まりが終わりより大きくなっています。');
-        for (const [low, high] of ranges)
-          if (!(last < low || (first as bigint) > high)) this.error(item, '同じ値の枝が2つあります。');
-        for (const [key] of seen)
-          if (typeof key === 'bigint' && key >= (first as bigint) && key <= last)
-            this.error(item, '同じ値の枝が2つあります。');
+        // Ranges are kept in `seen` under a key of their own, with their bounds, to compare with later items.
+        for (const [key] of seen) {
+          const overlaps = Array.isArray(key)
+            ? !(last < (key[0] as bigint) || (first as bigint) > (key[1] as bigint))
+            : typeof key === 'bigint' && key >= (first as bigint) && key <= last;
+          if (overlaps) this.error(item, '同じ値の枝が2つあります。');
+        }
         ranges.push([first as bigint, last]);
-        seen.set(`range ${first}..${last}`, item);
+        seen.set([first as bigint, last], item);
         continue;
       }
       const key = union ? (first as bigint) : keyOf(first);
+      // Zig checks single values before ranges, so it reports a value inside an earlier range at the range.
+      const range = [...seen.entries()].find(
+        ([seenKey]) =>
+          typeof key === 'bigint' &&
+          Array.isArray(seenKey) &&
+          key >= (seenKey[0] as bigint) &&
+          key <= (seenKey[1] as bigint)
+      );
+      if (range) this.error(range[1], '同じ値の枝が2つあります。');
       if (seen.has(key)) this.error(item, '同じ値の枝が2つあります。');
       seen.set(key, item);
       values.push(key);
@@ -1840,7 +1886,7 @@ export abstract class StatementCompiler extends CallCompiler {
           const binding = this.newLocal(capture.name, captureType, true);
           locals.set(capture.name, binding);
           bind = (frame, value) => {
-            frame.slots[binding.slot] = union ? (value as ZUnion).slots[0] : value;
+            frame.slots[binding.slot] = copyAggregate(union ? (value as ZUnion).slots[0] : value);
           };
         }
       }
@@ -1932,7 +1978,7 @@ export abstract class StatementCompiler extends CallCompiler {
     } else if (tagType.kind === 'int') {
       complete = coversRange(seen, tagType);
       if (!complete && !hasElse) this.error(expression, 'switch には、すべての値を扱うための else の枝が要ります。');
-      if (complete && hasElse) this.error(expression, 'すべての値を扱っているので、else の枝には決して来ません。');
+      if (complete && hasElse) this.unreachableElse(expression);
       return;
     } else if (!hasElse) {
       this.error(expression, 'switch には else の枝が要ります。');
@@ -1946,8 +1992,12 @@ export abstract class StatementCompiler extends CallCompiler {
       const what = union ? 'union' : tagType.kind === 'enum' ? 'enum' : '値';
       this.error(expression, `switch で扱っていない${what}の値があります: ${missing.join(', ')}`);
     }
-    if (missing.length === 0 && hasElse)
-      this.error(expression, 'すべての値を扱っているので、else の枝には決して来ません。');
+    if (missing.length === 0 && hasElse) this.unreachableElse(expression);
+  }
+
+  private unreachableElse(expression: ExpressionOf<'switch'>): never {
+    const prong = expression.cases.find((each) => each.isElse) ?? expression;
+    return this.error(prong, 'すべての値を扱っているので、else の枝には決して来ません。');
   }
 
   // Try and catch -----------------------------------------------------------------------------------------------------
@@ -2155,10 +2205,7 @@ function coversRange(seen: Map<unknown, Span>, type: IntType): boolean {
   let covered = 0n;
   for (const key of seen.keys()) {
     if (typeof key === 'bigint') covered++;
-    else if (typeof key === 'string' && key.startsWith('range ')) {
-      const [from, to] = key.slice(6).split('..').map(BigInt);
-      covered += to - from + 1n;
-    }
+    else if (Array.isArray(key)) covered += (key[1] as bigint) - (key[0] as bigint) + 1n;
   }
   return covered >= count;
 }
@@ -2171,3 +2218,18 @@ function isSelfType(type: Type, namespace: { name: string }): boolean {
 }
 
 export { isObjectCreation };
+
+/**
+ * Evaluates a returned or broken value, copying an aggregate read from storage: Zig copies it to the result before
+ * deferred code runs, which may change the storage.
+ */
+function copiedIfStored(value: TExpr): (frame: Frame) => Value {
+  const evaluate = value.eval;
+  if (!value.place) return evaluate;
+  return (frame) => copyAggregate(evaluate(frame));
+}
+
+/** A value captured or returned by value: an aggregate is copied, so that later writes to its source do not show. */
+function copyAggregate(value: Value): Value {
+  return isAggregate(value) ? copyValue(value) : value;
+}

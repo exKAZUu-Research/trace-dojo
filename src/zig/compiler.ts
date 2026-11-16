@@ -1,4 +1,4 @@
-import { CompileError } from '../interpreter/diagnostics';
+import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type { FunctionDeclaration, SourceFile, Span } from './ast';
 import { checkSource } from './astCheck';
@@ -32,9 +32,22 @@ export interface CompileOptions {
 
 /** Checks and compiles a file, starting from `main` and analyzing only what it uses, as Zig does. */
 export function compileProgram(file: SourceFile, options: CompileOptions = {}): CompiledProgram {
-  checkSource(file, ['Turtle']);
-  const compiler = new Compiler(file, options);
-  return compiler.compileMain();
+  const astErrors = checkSource(file, ['Turtle']);
+  if (astErrors.fatal) throw new CompileError(firstErrors(astErrors.errors));
+  let compiled: CompiledProgram;
+  try {
+    compiled = new Compiler(file, options).compileMain();
+  } catch (error) {
+    // Zig reports type errors together with unused locals and similar errors, which do not stop its analysis.
+    if (!(error instanceof CompileError) || astErrors.errors.length === 0) throw error;
+    throw new CompileError(firstErrors([...astErrors.errors, ...error.diagnostics]));
+  }
+  if (astErrors.errors.length > 0) throw new CompileError(firstErrors(astErrors.errors));
+  return compiled;
+}
+
+function firstErrors(errors: readonly SourceDiagnostic[]): SourceDiagnostic[] {
+  return errors.toSorted((a, b) => a.row - b.row).slice(0, 5);
 }
 
 class Compiler extends StatementCompiler {

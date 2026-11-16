@@ -220,13 +220,12 @@ export function checkFormat(spec: string, type: Type, info: TypeInfo, hasOptions
           return;
         return invalid();
       }
-      case 'c': {
-        if (kind === 'int' || kind === 'comptime_int') return;
-        throw new FormatError(`expected type 'u8', found '${typeName(type)}'`);
-      }
+      case 'c':
       case 'u': {
-        if (kind === 'int' || kind === 'comptime_int') return;
-        throw new FormatError(`expected type 'u21', found '${typeName(type)}'`);
+        // The value goes to a `u8` or `u21` parameter, which only narrower unsigned integers coerce to.
+        const bits = spec === 'c' ? 8 : 21;
+        if (kind === 'comptime_int' || (kind === 'int' && !type.signed && type.bits <= bits)) return;
+        throw new FormatError(`expected type 'u${bits}', found '${typeName(type)}'`);
       }
       case 'b':
       case 'o': {

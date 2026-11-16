@@ -3,8 +3,10 @@ import { byteValues } from '../builtins';
 import { checkFormat, FormatError, type Options, parseFormat, printValue, type Segment, type TypeInfo } from '../fmt';
 import type { Frame } from '../runtime';
 import type { SemaApi } from '../semaBase';
-import { CONST_U8_SLICE, type StructField, type Type, typeName } from '../types';
-import type { Value, ZStruct } from '../values';
+import { CONST_U8_SLICE, pointerTo, type StructField, type Type, typeName } from '../types';
+import { Pointer, type Value, type ZStruct } from '../values';
+import { handle } from './native';
+import { WRITER } from './writer';
 
 /** Compiles `print(format, args)`: checks the format against the arguments and returns code giving the bytes. */
 export function compilePrint(
@@ -35,18 +37,46 @@ export function compilePrint(
     throw error;
   }
   const info = typeInfo(sema, span);
+  const formatMethods = new Map<number, FormatMethod>();
   for (const segment of segments) {
     if (segment.kind !== 'placeholder') continue;
     const hasOptions = segment.width.kind !== 'none' || segment.precision.kind !== 'none';
     try {
-      checkFormat(segment.spec, fields[segment.arg].type, info, hasOptions);
+      if (segment.spec === 'f') formatMethods.set(segment.arg, formatMethod(sema, fields[segment.arg].type, span));
+      else checkFormat(segment.spec, fields[segment.arg].type, info, hasOptions);
     } catch (error) {
       if (error instanceof FormatError) return sema.error(span, `書式に誤りがあります: ${error.message}`);
       throw error;
     }
   }
   const evaluate = args.eval;
-  return (frame) => formatBytesOf(segments, fields, evaluate(frame) as ZStruct, info);
+  return (frame) =>
+    formatBytesOf(segments, fields, evaluate(frame) as ZStruct, info, (arg, value) =>
+      (formatMethods.get(arg) as FormatMethod)(frame, value)
+    );
+}
+
+type FormatMethod = (frame: Frame, value: Value) => number[];
+
+/** `{f}`: calls the value's `format(self, *std.Io.Writer)` method with a writer that collects the bytes. */
+function formatMethod(sema: SemaApi, type: Type, span: Span): FormatMethod {
+  const invalid = new FormatError(`invalid format string 'f' for type '${typeName(type)}'`);
+  if (type.kind !== 'struct' && type.kind !== 'union' && type.kind !== 'enum') throw invalid;
+  const decl = sema.findDecl(type, 'format');
+  if (!decl) throw invalid;
+  const fn = sema.functionOf(sema.resolveDecl(decl, span), span);
+  const [selfType, writerType] = fn.params;
+  if (fn.params.length !== 2 || writerType !== pointerTo(WRITER, false)) {
+    throw new FormatError(`format には (self: ${typeName(type)}, w: *std.Io.Writer) を受け取らせてください`);
+  }
+  const byPointer = selfType.kind === 'pointer';
+  return (frame, value) => {
+    // A writer without a file or buffer to fill keeps every byte, as writeTo in std.ts handles it.
+    const state = { fd: undefined, buffered: [] as number[], capacity: Number.POSITIVE_INFINITY };
+    const writer = new Pointer({ slots: [handle('writer', state)] }, 0);
+    fn.call(frame, [byPointer ? new Pointer({ slots: [value] }, 0) : value, writer]);
+    return state.buffered;
+  };
 }
 
 export function typeInfo(sema: SemaApi, span: Span): TypeInfo {
@@ -61,7 +91,8 @@ function formatBytesOf(
   segments: readonly Segment[],
   fields: readonly StructField[],
   args: ZStruct,
-  info: TypeInfo
+  info: TypeInfo,
+  formatWithMethod: (arg: number, value: Value) => number[]
 ): number[] {
   const out: number[] = [];
   const argValue = (index: number): Value => fields[index].comptimeValue ?? args.slots[index];
@@ -75,7 +106,8 @@ function formatBytesOf(
     else if (segment.width.kind === 'arg') options.width = Number(argValue(segment.width.index) as bigint);
     if (segment.precision.kind === 'number') options.precision = segment.precision.value;
     else if (segment.precision.kind === 'arg') options.precision = Number(argValue(segment.precision.index) as bigint);
-    printValue(out, segment.spec, options, argValue(segment.arg), fields[segment.arg].type as Type, info);
+    if (segment.spec === 'f') out.push(...formatWithMethod(segment.arg, argValue(segment.arg)));
+    else printValue(out, segment.spec, options, argValue(segment.arg), fields[segment.arg].type as Type, info);
   }
   return out;
 }

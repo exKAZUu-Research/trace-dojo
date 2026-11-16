@@ -1,5 +1,5 @@
 // code-gauge-allow-file fileNcss 563 -- The file holds one layer of the compiler, whose parts share its private state.
-import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
+import type { SourceDiagnostic } from '../interpreter/diagnostics';
 import type {
   Capture,
   Container,
@@ -19,7 +19,10 @@ import { primitiveType } from './types';
  * and captures, variables never mutated, pointless discards, shadowing, undeclared names, misplaced jumps and labels,
  * and code after a statement that never completes.
  */
-export function checkSource(file: SourceFile, predeclared: readonly string[]): void {
+export function checkSource(
+  file: SourceFile,
+  predeclared: readonly string[]
+): { errors: SourceDiagnostic[]; fatal: boolean } {
   const checker = new AstChecker();
   const environment: NamespaceScope = {
     kind: 'namespace',
@@ -27,10 +30,14 @@ export function checkSource(file: SourceFile, predeclared: readonly string[]): v
     parent: undefined,
   };
   checker.checkContainer(file.members, file.fields, environment, undefined);
-  if (checker.errors.length > 0) {
-    throw new CompileError(checker.errors.toSorted((a, b) => a.row - b.row).slice(0, 5));
-  }
+  return { errors: checker.errors, fatal: checker.fatal };
 }
+
+/**
+ * Thrown by an error that stops AstGen's work on a function, as Zig's does: the rest of the function, and the unused
+ * locals of the scopes still open, are not checked.
+ */
+const FATAL = Symbol('fatal');
 
 type Category = 'local constant' | 'local variable' | 'function parameter' | 'capture';
 
@@ -47,7 +54,8 @@ interface LocalBinding {
   category: Category;
   span: Span;
   used: boolean;
-  discarded: boolean;
+  /** Where `_ = name;` discards the local, which Zig reports when the local is also used. */
+  discardSpan: Span | undefined;
   usedAsLvalue: boolean;
 }
 
@@ -99,9 +107,19 @@ type Use = 'value' | 'ref' | 'discard';
 
 class AstChecker {
   readonly errors: SourceDiagnostic[] = [];
+  /** Whether an error other than an unused or never-mutated local, a pointless discard, or unreachable code arose. */
+  fatal = false;
   private scope: Scope | undefined;
+  private functionDepth = 0;
 
   private error(span: Span, message: string): void {
+    this.errors.push({ row: span.row, message });
+    this.fatal = true;
+    if (this.functionDepth > 0) throw FATAL;
+  }
+
+  /** An error after which Zig still analyzes types, so that the compiler reports both. */
+  private minorError(span: Span, message: string): void {
     this.errors.push({ row: span.row, message });
   }
 
@@ -193,6 +211,7 @@ class AstChecker {
     const outer = this.scope;
     this.scope = { kind: 'function', parent: outer };
     const params: BlockScope = { kind: 'block', locals: [], parent: this.scope };
+    this.functionDepth++;
     try {
       // Each parameter is in scope for the types of the later ones and the return type.
       this.scope = params;
@@ -203,7 +222,10 @@ class AstChecker {
       this.expression(fn.returnType, 'value');
       this.blockStatements(fn.body.statements);
       this.checkUsed(params);
+    } catch (error) {
+      if (error !== FATAL) throw error;
     } finally {
+      this.functionDepth--;
       this.scope = outer;
     }
   }
@@ -233,7 +255,7 @@ class AstChecker {
       category,
       span,
       used: false,
-      discarded: false,
+      discardSpan: undefined,
       usedAsLvalue: false,
     };
     const block = this.scope as BlockScope;
@@ -244,13 +266,19 @@ class AstChecker {
   private checkUsed(block: BlockScope): void {
     for (const local of block.locals) {
       const what = CATEGORY_NAMES[local.category];
-      if (!local.used && !local.discarded) {
-        this.error(local.span, `${what}「${local.name}」を使っていません。`);
-      } else if (local.used && local.discarded) {
-        this.error(local.span, `${what}「${local.name}」を使っているので、_ = ${local.name}; は要りません。`);
+      if (!local.used && !local.discardSpan) {
+        this.minorError(local.span, `${what}「${local.name}」を使っていません。`);
+      } else if (local.used && local.discardSpan) {
+        this.minorError(
+          local.discardSpan,
+          `${what}「${local.name}」を使っているので、_ = ${local.name}; は要りません。`
+        );
       }
-      if (local.category === 'local variable' && (local.used || local.discarded) && !local.usedAsLvalue) {
-        this.error(local.span, `変数「${local.name}」は変更していないので、var ではなく const で宣言してください。`);
+      if (local.category === 'local variable' && (local.used || local.discardSpan) && !local.usedAsLvalue) {
+        this.minorError(
+          local.span,
+          `変数「${local.name}」は変更していないので、var ではなく const で宣言してください。`
+        );
       }
     }
   }
@@ -292,7 +320,7 @@ class AstChecker {
         if (crossedNamespace && local.category === 'local variable') {
           this.error(span, `変数「${name}」は、型の中の関数からは使えません。`);
         }
-        if (use === 'discard') local.discarded = true;
+        if (use === 'discard') local.discardSpan ??= span;
         else local.used = true;
         if (use === 'ref') local.usedAsLvalue = true;
         return;
@@ -316,7 +344,7 @@ class AstChecker {
     let diverted = false;
     for (const statement of statements) {
       if (diverted) {
-        this.error(statement, 'この文には、決して実行がたどり着きません。');
+        this.minorError(statement, 'この文には、決して実行がたどり着きません。');
         diverted = false;
       }
       this.statement(statement);

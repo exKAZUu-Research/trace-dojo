@@ -23,7 +23,7 @@ import {
   USIZE,
   VOID,
 } from '../types';
-import { Cell, ErrorValue, NativeHandle, Pointer, Slice, ZArray, ZStruct } from '../values';
+import { Cell, ErrorValue, NativeHandle, Pointer, Slice, type Value, ZArray, ZStruct } from '../values';
 import {
   compileArgs,
   expectArgs,
@@ -44,7 +44,7 @@ export const ALLOCATOR_ERROR = errorSetOf(['OutOfMemory']);
 export const ALLOCATOR: StructType = nativeStruct('mem.Allocator', {});
 
 /** What an allocator handle keeps: the bytes a fixed buffer allows, and the live allocations for leak checks. */
-interface AllocatorState extends Record<string, unknown> {
+export interface AllocatorState extends Record<string, unknown> {
   name: string;
   /** The struct of an allocator instance (`DebugAllocator`, `FixedBufferAllocator`), whose fields count its use. */
   owner?: Pointer;
@@ -75,12 +75,13 @@ export function allocatorMembers(): Record<string, () => Member> {
         errorUnionOf(ALLOCATOR_ERROR, sliceOf(child, false)),
         (frame) => {
           const n = Number(evaluate(frame) as bigint);
-          if (!reserve(frame, allocator(frame), n, child)) return OUT_OF_MEMORY;
+          if (!frame.runtime.canAllocate(n)) return OUT_OF_MEMORY;
           const array = new ZArray(
             Array.from({ length: n }, () => undefinedValue(child)),
             0,
             n
           );
+          if (!allocateMemory(frame, allocator(frame), array, n, child)) return OUT_OF_MEMORY;
           return new Slice(array, 0, n);
         },
         call.span
@@ -93,8 +94,9 @@ export function allocatorMembers(): Record<string, () => Member> {
       return runtime(
         errorUnionOf(ALLOCATOR_ERROR, pointerTo(child, false)),
         (frame) => {
-          if (!reserve(frame, allocator(frame), 1, child)) return OUT_OF_MEMORY;
-          return new Pointer(new Cell(undefinedValue(child)), 0);
+          const cell = new Cell(undefinedValue(child));
+          if (!allocateMemory(frame, allocator(frame), cell, 1, child)) return OUT_OF_MEMORY;
+          return new Pointer(cell, 0);
         },
         call.span
       );
@@ -109,8 +111,9 @@ export function allocatorMembers(): Record<string, () => Member> {
         errorUnionOf(ALLOCATOR_ERROR, sliceOf(child, false)),
         (frame) => {
           const slice = evaluate(frame) as Slice;
-          if (!reserve(frame, allocator(frame), slice.length, child)) return OUT_OF_MEMORY;
-          return new Slice(new ZArray(slice.values(), 0, slice.length), 0, slice.length);
+          const array = new ZArray(slice.values(), 0, slice.length);
+          if (!allocateMemory(frame, allocator(frame), array, slice.length, child)) return OUT_OF_MEMORY;
+          return new Slice(array, 0, slice.length);
         },
         call.span
       );
@@ -122,8 +125,8 @@ export function allocatorMembers(): Record<string, () => Member> {
       if (compiled.type.kind !== 'pointer' || compiled.type.size !== 'slice') {
         sema.error(memory, `free にはスライスを渡してください（${typeName(compiled.type)} 型です）。`);
       }
-      return nativeCall(VOID, [compiled], call.span, (_, frame) => {
-        release(allocator(frame));
+      return nativeCall(VOID, [compiled], call.span, ([slice], frame) => {
+        freeMemory(allocator(frame), (slice as Slice).target);
         return;
       });
     }),
@@ -134,8 +137,8 @@ export function allocatorMembers(): Record<string, () => Member> {
       if (compiled.type.kind !== 'pointer' || compiled.type.size !== 'one') {
         sema.error(pointer, `destroy にはポインタを渡してください（${typeName(compiled.type)} 型です）。`);
       }
-      return nativeCall(VOID, [compiled], call.span, (_, frame) => {
-        release(allocator(frame));
+      return nativeCall(VOID, [compiled], call.span, ([pointer], frame) => {
+        freeMemory(allocator(frame), (pointer as Pointer).target);
         return;
       });
     }),
@@ -155,10 +158,12 @@ export function allocatorMembers(): Record<string, () => Member> {
         ([value, size], frame) => {
           const slice = value as Slice;
           const n = Number(size as bigint);
-          if (n > slice.length && !reserve(frame, allocator(frame), n - slice.length, child)) return OUT_OF_MEMORY;
+          if (!frame.runtime.canAllocate(n)) return OUT_OF_MEMORY;
           const values = slice.values().slice(0, n);
           while (values.length < n) values.push(undefinedValue(child));
-          return new Slice(new ZArray(values, 0, n), 0, n);
+          const array = new ZArray(values, 0, n);
+          if (!allocateMemory(frame, allocator(frame), array, n, child, slice.target)) return OUT_OF_MEMORY;
+          return new Slice(array, 0, n);
         }
       );
     }),
@@ -188,28 +193,60 @@ function allocatorOf(sema: SemaApi, call: NativeCall): (frame: Parameters<TExpr[
   return sema.error(call.span, 'std.mem.Allocator の値に対して呼び出してください。');
 }
 
-/** Allocates `count` elements of a type, counting slots against the run's limit and bytes against a fixed buffer. */
-function reserve(frame: Parameters<TExpr['eval']>[0], state: AllocatorState, count: number, type: Type): boolean {
+/** The state of an `Allocator` value. */
+export function allocatorState(value: Value): AllocatorState {
+  return (value as NativeHandle).state as AllocatorState;
+}
+
+/** Where an allocation of a fixed buffer allocator lies in its buffer, by the object that holds the memory. */
+const fixedPlaces = new WeakMap<object, { start: bigint; end: bigint }>();
+
+/**
+ * Allocates `count` elements of a type held by `memory`, counting slots against the run's limit and bytes against a
+ * fixed buffer. With `previous`, the memory replaces it as `remap` or `realloc` does: a fixed buffer resizes its last
+ * allocation in place, and otherwise allocates anew and frees the previous memory. False when memory runs out.
+ */
+export function allocateMemory(
+  frame: Parameters<TExpr['eval']>[0],
+  state: AllocatorState | undefined,
+  memory: object,
+  count: number,
+  type: Type,
+  previous?: object
+): boolean {
   if (!frame.runtime.canAllocate(count)) return false;
-  const owner = state.owner?.load();
-  if (owner instanceof ZStruct && state.name === 'fixed') {
+  const owner = state?.owner?.load();
+  if (owner instanceof ZStruct && state?.name === 'fixed') {
     const capacity = owner.slots[0] as bigint;
     const used = owner.slots[1] as bigint;
-    const align = BigInt(alignOf(type));
-    const start = ((used + align - 1n) / align) * align;
-    const end = start + BigInt(sizeOf(type) * count);
-    if (end > capacity) return false;
-    owner.slots[1] = end;
-  } else if (owner instanceof ZStruct && state.name === 'debug') {
+    const size = BigInt(sizeOf(type) * count);
+    const place = previous ? fixedPlaces.get(previous) : undefined;
+    if (place && place.end === used && place.start + size <= capacity) {
+      owner.slots[1] = place.start + size;
+      fixedPlaces.set(memory, { start: place.start, end: place.start + size });
+    } else {
+      const align = BigInt(alignOf(type));
+      const start = ((used + align - 1n) / align) * align;
+      if (start + size > capacity) return false;
+      owner.slots[1] = start + size;
+      fixedPlaces.set(memory, { start, end: start + size });
+    }
+  } else if (owner instanceof ZStruct && state?.name === 'debug' && !previous) {
     owner.slots[0] = (owner.slots[0] as bigint) + 1n;
   }
   frame.runtime.allocate(count);
   return true;
 }
 
-function release(state: AllocatorState): void {
-  const owner = state.owner?.load();
-  if (owner instanceof ZStruct && state.name === 'debug') owner.slots[0] = (owner.slots[0] as bigint) - 1n;
+/** Frees memory: a fixed buffer takes back its last allocation, and a debug allocator counts one fewer live one. */
+export function freeMemory(state: AllocatorState | undefined, memory: object): void {
+  const owner = state?.owner?.load();
+  if (owner instanceof ZStruct && state?.name === 'fixed') {
+    const place = fixedPlaces.get(memory);
+    if (place && place.end === owner.slots[1]) owner.slots[1] = place.start;
+  } else if (owner instanceof ZStruct && state?.name === 'debug') {
+    owner.slots[0] = (owner.slots[0] as bigint) - 1n;
+  }
 }
 
 /** A native type of an allocator instance, whose `allocator()` method gives an Allocator using it. */

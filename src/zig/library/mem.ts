@@ -434,6 +434,50 @@ const MEMBERS: Record<string, () => Member> = {
   findMax: extremeIndex('std.mem.findMax', 1),
   indexOfMin: extremeIndex('std.mem.indexOfMin', -1),
   findMin: extremeIndex('std.mem.findMin', -1),
+  indexOfDiff: () => diffMember('std.mem.indexOfDiff'),
+  findDiff: () => diffMember('std.mem.findDiff'),
+  lastIndexOfNone: sliceSearch('std.mem.lastIndexOfNone', 'slice', OPTIONAL_USIZE, (h, set) =>
+    optionalIndex(h.findLastIndex((x) => !(set as unknown as Value[]).some((y) => equalValues(x, y))))
+  ),
+  findLastNone: sliceSearch('std.mem.findLastNone', 'slice', OPTIONAL_USIZE, (h, set) =>
+    optionalIndex(h.findLastIndex((x) => !(set as unknown as Value[]).some((y) => equalValues(x, y))))
+  ),
+  containsAtLeastScalar: generic(
+    'std.mem.containsAtLeastScalar',
+    4,
+    (sema, call, type, [listArg, elementArg, minArg]) => {
+      const list = constSlice(sema, listArg, type);
+      const element = sema.coerce(sema.compile(elementArg, type), type, elementArg);
+      const minimum = sema.coerce(sema.compile(minArg, USIZE), USIZE, minArg);
+      return computed(
+        BOOL,
+        [list, element, minimum],
+        call.span,
+        ([value, x, n]) => BigInt(elements(value).filter((item) => equalValues(item, x)).length) >= (n as bigint)
+      );
+    }
+  ),
+  rotate: generic('std.mem.rotate', 3, (sema, call, type, [itemsArg, amountArg]) => {
+    const items = mutableSlice(sema, itemsArg, type);
+    const amount = sema.coerce(sema.compile(amountArg, USIZE), USIZE, amountArg);
+    const evaluateItems = items.eval;
+    const evaluateAmount = amount.eval;
+    return runtime(
+      VOID,
+      (frame) => {
+        const slice = evaluateItems(frame) as Slice;
+        const shift = Number(evaluateAmount(frame) as bigint);
+        // `items[0..amount]` panics as Zig's slicing does when the amount is past the end.
+        if (shift > slice.length) panic(`end index ${shift} out of bounds for slice of length ${slice.length}`);
+        const values = slice.values();
+        frame.runtime.spend(values.length);
+        for (const [index, value] of [...values.slice(shift), ...values.slice(0, shift)].entries())
+          slice.set(index, value);
+        return;
+      },
+      call.span
+    );
+  }),
   reverse: generic('std.mem.reverse', 2, (sema, call, type, [itemsArg]) => {
     const items = mutableSlice(sema, itemsArg, type);
     const evaluate = items.eval;
@@ -706,6 +750,21 @@ export function zeroValue(type: Type, fieldsOf: (type: StructType) => readonly S
       return undefinedValue(type);
     }
   }
+}
+
+/** `findDiff(T, a, b)`: the first index where two slices differ, or where the shorter one ends. */
+function diffMember(name: string): Member {
+  return generic(name, 3, (sema, call, type, [aArg, bArg]) => {
+    const a = constSlice(sema, aArg, type);
+    const b = constSlice(sema, bArg, type);
+    return computed(OPTIONAL_USIZE, [a, b], call.span, ([x, y]) => {
+      const xs = elements(x);
+      const ys = elements(y);
+      const shorter = Math.min(xs.length, ys.length);
+      for (let index = 0; index < shorter; index++) if (!equalValues(xs[index], ys[index])) return BigInt(index);
+      return xs.length === ys.length ? NULL : BigInt(shorter);
+    });
+  })();
 }
 
 let mem: StructType | undefined;

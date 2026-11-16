@@ -95,6 +95,56 @@ pub fn main() void {
   expect(executeProgram('zig', program)).toMatchObject({ stderr: '35 3 4 2 { 3, 5, 7 } error.TooBig\n' });
 });
 
+test('format methods, copies of returned and looped values, and integer builtins follow Zig', () => {
+  const program = `const std = @import("std");
+const P = struct {
+    x: i32,
+    pub fn format(self: P, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        try w.print("P({d})", .{self.x});
+    }
+};
+fn pair() [2]i32 {
+    var a = [_]i32{ 1, 1 };
+    defer a[0] = 9;
+    return a;
+}
+pub fn main() void {
+    var sum: i32 = 0;
+    for (0..4) |i| sum += @intCast(i);
+    var o: ?u8 = 5;
+    _ = &o;
+    var arr = [_]i32{ 1, 2, 3 };
+    for (arr) |v| {
+        arr[2] = 100;
+        sum += v;
+    }
+    std.debug.print("{f} {d} {d} {d} {} {any}\\n", .{ P{ .x = sum }, @rem(@as(i32, 10), -3), @mod(@as(i32, 10), -3), @min(@as(u8, 7), 1000), o == 5, pair() });
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({ stderr: 'P(12) 1 -2 7 true { 1, 1 }\n' });
+});
+
+test('compile errors are reported on the rows Zig reports them', () => {
+  const missingSemicolon = `const std = @import("std");
+pub fn main() void {
+    const a: i32 = 1
+    std.debug.print("{d}\\n", .{a});
+}`;
+  const unusedAndTypeError = `pub fn main() void {
+    const x = 5;
+    const y: u8 = 300;
+    _ = y;
+}`;
+  const pointlessDiscard = `const std = @import("std");
+pub fn main() void {
+    const x: i32 = 5;
+    _ = x;
+    std.debug.print("{d}\\n", .{x});
+}`;
+  expect(rows(missingSemicolon)).toEqual([2]);
+  expect(rows(unusedAndTypeError)).toEqual([1, 2]);
+  expect(rows(pointlessDiscard)).toEqual([3]);
+});
+
 test('assigning an anonymous literal writes each field in turn, as result locations do', () => {
   const program = `const std = @import("std");
 pub fn main() void {
@@ -181,3 +231,8 @@ pub fn main() void {
     diagnostics: [{ row: 0, message: 'comptime の引数は、この採点環境では使えません。' }],
   });
 });
+
+function rows(program: string): number[] {
+  const result = executeProgram('zig', program);
+  return result.kind === 'compileError' ? result.diagnostics.map((diagnostic) => diagnostic.row) : [];
+}

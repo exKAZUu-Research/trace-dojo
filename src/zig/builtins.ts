@@ -20,6 +20,7 @@ import {
   asBigFloat,
   BigFloat,
   compareFloats,
+  floatArithmetic,
   type FloatBits,
   floatFromBigInt,
   floatOf,
@@ -543,9 +544,6 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       return this.error(expression, `${name} は数の型にだけ使えます（${typeName(type)} 型です）。`);
     }
     const int = type.kind === 'int' ? type : undefined;
-    if ((name === '@mod' || name === '@rem') && right.known && (right.value as bigint) <= 0n) {
-      this.error(rightSyntax, `${name} の割る数は、正の数にしてください。`);
-    }
     if (right.known && (right.value as bigint) === 0n) this.error(rightSyntax, '0 で割っています。');
     const operation = (a: Value, b: Value): Value => {
       const x = a as bigint;
@@ -564,11 +562,9 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
           return divExact(x, y, int);
         }
         case '@mod': {
-          if (y < 0n) panic('remainder division by zero or negative value');
           return mod(x, y);
         }
         default: {
-          if (y < 0n) panic('remainder division by zero or negative value');
           return rem(x, y);
         }
       }
@@ -589,9 +585,11 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     if (args.length < 2) this.error(expression, `${name} には2つ以上の引数が要ります。`);
     let operands = args.map((arg) => this.compile(arg));
     const runtimeType = operands.find((operand) => !operand.type.kind.startsWith('comptime'))?.type;
-    if (runtimeType) operands = args.map((arg) => this.compile(arg, runtimeType));
+    // Integers of any types combine by their ranges, so only other operands need a common type.
+    const integers = operands.every((operand) => operand.type.kind === 'int' || operand.type.kind === 'comptime_int');
+    if (runtimeType && !integers) operands = args.map((arg) => this.compile(arg, runtimeType));
     void resultType;
-    const peer = this.peerType(operands, expression);
+    const peer = integers && runtimeType ? runtimeType : this.peerType(operands, expression);
     if (
       peer.kind !== 'int' &&
       peer.kind !== 'comptime_int' &&
@@ -625,9 +623,10 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       }
       type = intFittingRange(low, high);
     }
-    const coerced = operands.map((operand) =>
-      operand.type === peer ? operand : this.coerce(operand, peer, operand.span)
-    );
+    const coerced =
+      peer.kind === 'int'
+        ? operands
+        : operands.map((operand) => (operand.type === peer ? operand : this.coerce(operand, peer, operand.span)));
     const all = coerced.every((operand) => operand.known);
     const pickAll = (values: Value[]): Value => {
       let result = values[0];
@@ -978,7 +977,7 @@ function floatDivision(name: string, x: AnyFloat, y: AnyFloat, bits: FloatBits):
 
 function floatOperationFor(x: AnyFloat, y: AnyFloat, bits: FloatBits): AnyFloat {
   if (bits <= 64) return roundNumber((x as number) / (y as number), bits as 16 | 32 | 64);
-  return floatOf(asBigFloat(roundTo(asBigFloat(x), 128)), bits);
+  return floatArithmetic(x, y, '/', bits);
 }
 
 function convertFloat(value: AnyFloat, bits: FloatBits): AnyFloat {
@@ -986,7 +985,7 @@ function convertFloat(value: AnyFloat, bits: FloatBits): AnyFloat {
   return floatOf(asBigFloat(value), bits);
 }
 
-function fusedMultiplyAdd(a: BigFloat, b: BigFloat, c: BigFloat, bits: FloatBits): AnyFloat {
+export function fusedMultiplyAdd(a: BigFloat, b: BigFloat, c: BigFloat, bits: FloatBits): AnyFloat {
   // Exact product and sum in 128-bit... the exact rational is rounded once.
   const product = {
     sign: a.sign !== b.sign,

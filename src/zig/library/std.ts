@@ -29,6 +29,7 @@ import {
   unavailableMember,
 } from './native';
 import { compilePrint, decodeOutput } from './print';
+import { WRITER } from './writer';
 
 let std: StructType | undefined;
 
@@ -151,9 +152,6 @@ export const IO: StructType = nativeStruct('Io', {});
 /** `std.Io.File`, of which only the standard output and standard error are available. */
 const FILE: StructType = nativeStruct('Io.File', {});
 
-/** `std.Io.Writer`, an interface that buffers bytes until it drains them to its stream. */
-export const WRITER: StructType = nativeStruct('Io.Writer', {});
-
 /** `std.Io.File.Writer`, whose `interface` field is the `std.Io.Writer` to write through. */
 const FILE_WRITER: StructType = nativeStruct('Io.File.Writer', {}, [
   { name: 'interface', type: WRITER, hasDefault: false },
@@ -209,6 +207,7 @@ function addIoMembers(): void {
     reader: unavailableMember('標準入力やファイルからの読み込み'),
   });
   addMembers(WRITER, {
+    Error: typeMember(() => WRITE_ERROR),
     print: fnMember('Writer.print', (sema, call) => {
       const [format, args] = expectArgs(sema, call, 2, 'print');
       const writer = writerOf(sema, call);

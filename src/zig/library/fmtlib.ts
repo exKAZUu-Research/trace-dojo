@@ -16,7 +16,7 @@ import {
 } from '../types';
 import { ErrorValue, Slice, type Value } from '../values';
 import { allocating, allocatorArg, computed, constSlice, elements, generic, mutableSlice, newSlice } from './common';
-import { ERROR_OUT_OF_MEMORY } from './heap';
+import { allocateMemory, allocatorState, ERROR_OUT_OF_MEMORY } from './heap';
 import { compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
 import { compilePrint } from './print';
 
@@ -171,16 +171,17 @@ const MEMBERS: Record<string, () => Member> = {
   }),
   allocPrint: fnMember('std.fmt.allocPrint', (sema, call) => {
     const [allocatorArgument, format, args] = expectArgs(sema, call, 3, 'std.fmt.allocPrint');
-    allocatorArg(sema, allocatorArgument);
+    const evaluateAllocator = allocatorArg(sema, allocatorArgument).eval;
     const print = compilePrint(sema, format, args, call.span);
     return runtime(
       allocating(sliceOf(U8, false)),
       (frame) => {
+        const allocator = allocatorState(evaluateAllocator(frame));
         const bytes = print(frame);
         frame.runtime.spend();
-        if (!frame.runtime.canAllocate(bytes.length)) return ERROR_OUT_OF_MEMORY;
-        frame.runtime.allocate(bytes.length);
-        return newSlice(bytes.map(BigInt));
+        const slice = newSlice(bytes.map(BigInt));
+        if (!allocateMemory(frame, allocator, slice.target, bytes.length, U8)) return ERROR_OUT_OF_MEMORY;
+        return slice;
       },
       call.span
     );

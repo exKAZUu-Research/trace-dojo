@@ -492,7 +492,8 @@ export function expression(node: Node): Expression {
       const member = node.childForFieldName('member') as Node;
       const object = node.childForFieldName('object');
       if (!object) return { kind: 'enumLiteral', ...span, name: decodeIdentifier(member) };
-      return { kind: 'field', ...span, object: expression(object), name: decodeIdentifier(member) };
+      const name = decodeIdentifier(member);
+      return intoPrefixType(expression(object), (inner) => ({ kind: 'field', ...span, object: inner, name }));
     }
     case 'error_type': {
       const name = node.namedChildren.find((child) => child.type === 'identifier') as Node;
@@ -510,12 +511,8 @@ export function expression(node: Node): Expression {
     case 'call_expression': {
       const callee = node.childForFieldName('function') as Node;
       const args = expressionChildren(node).filter((child) => child.id !== callee.id);
-      return {
-        kind: 'call',
-        ...span,
-        callee: expression(callee),
-        args: args.map((arg) => expression(arg)),
-      };
+      const converted = args.map((arg) => expression(arg));
+      return intoPrefixType(expression(callee), (inner) => ({ kind: 'call', ...span, callee: inner, args: converted }));
     }
     case 'builtin_function': {
       const name = (node.namedChildren.find((child) => child.type === 'builtin_identifier') as Node).text;
@@ -702,6 +699,24 @@ function single(captures: Capture[], node: Node): Capture {
 }
 
 const COMPARISONS = new Set(['==', '!=', '<', '>', '<=', '>=']);
+
+/**
+ * Applies a field access or call to the operand of a prefix type such as `*std.Io.Writer`. tree-sitter's grammar binds
+ * `*`, `?`, `[]`, and `[N]` tighter than `.` and calls (`(*std).Io.Writer`), while Zig's binds them looser.
+ */
+function intoPrefixType(object: Expression, build: (inner: Expression) => Expression): Expression {
+  switch (object.kind) {
+    case 'optionalType':
+    case 'pointerType':
+    case 'sliceType':
+    case 'arrayType': {
+      return { ...object, child: intoPrefixType(object.child, build) };
+    }
+    default: {
+      return build(object);
+    }
+  }
+}
 
 function binaryExpression(node: Node, span: Span): Expression {
   return binaryWith(
