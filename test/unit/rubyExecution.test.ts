@@ -14865,3 +14865,148 @@ test.each(prettyRecordDispatchCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const methodOccurrenceCases = [
+  [
+    'module M;def m;$n+=1;C.include N if $n==1;[:M]+super;end;end;module N;def m;[:N]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;end;$n=0;p C.new.m;p $n',
+    '[:M, :C, :N, :M, :S]\n2\n',
+  ],
+  [
+    'module M;def m;$n+=1;C.include N if $n==1;[:M]+super;end;end;module N;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;end;$n=0;p C.new.m;p $n',
+    '[:M, :C, :M, :S]\n2\n',
+  ],
+  [
+    'module M;def m;$n+=1;C.include N if $n==2;[:M]+super;end;end;module N;def m;[:N]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;end;$n=0;p C.new.m;p $n',
+    '[:M, :C, :M, :S]\n2\n',
+  ],
+  [
+    'module M;def m;$n+=1;C.include N if $n==2;[:M]+super;end;end;module N;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;end;$n=0;p C.new.m;p $n',
+    '[:M, :C, :M, :S]\n2\n',
+  ],
+  [
+    'module M;def m;$n+=1;C.prepend N if $n==1;[:M]+super;end;end;module N;def m;[:N]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;end;$n=0;p C.new.m;p $n',
+    '[:M, :C, :M, :S]\n2\n',
+  ],
+  [
+    'module M;def m;$n+=1;C.prepend N if $n==1;[:M]+super;end;end;module N;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;end;$n=0;p C.new.m;p $n',
+    '[:M, :C, :M, :S]\n2\n',
+  ],
+  [
+    'module M;def m;$n+=1;C.prepend N if $n==2;[:M]+super;end;end;module N;def m;[:N]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;end;$n=0;p C.new.m;p $n',
+    '[:M, :C, :M, :S]\n2\n',
+  ],
+  [
+    'module M;def m;$n+=1;C.prepend N if $n==2;[:M]+super;end;end;module N;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;end;$n=0;p C.new.m;p $n',
+    '[:M, :C, :M, :S]\n2\n',
+  ],
+  [
+    'module M;def m;$n+=1;M.include N if $n==1;[:M]+super;end;end;module N;def m;[:N]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;end;$n=0;p C.new.m;p $n',
+    '[:M, :N, :C, :M, :N, :S]\n2\n',
+  ],
+  [
+    'module M;def m;$n+=1;M.include N if $n==1;[:M]+super;end;end;module N;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;end;$n=0;p C.new.m;p $n',
+    '[:M, :C, :M, :S]\n2\n',
+  ],
+  [
+    'module M;def m;$n+=1;M.include N if $n==2;[:M]+super;end;end;module N;def m;[:N]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;end;$n=0;p C.new.m;p $n',
+    '[:M, :C, :M, :N, :S]\n2\n',
+  ],
+  [
+    'module M;def m;$n+=1;M.include N if $n==2;[:M]+super;end;end;module N;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;end;$n=0;p C.new.m;p $n',
+    '[:M, :C, :M, :S]\n2\n',
+  ],
+  [
+    'module M;def m;$n+=1;M.prepend N if $n==1;[:M]+super;end;end;module N;def m;[:N]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;end;$n=0;p C.new.m;p $n',
+    '[:M, :C, :N, :M, :S]\n2\n',
+  ],
+  [
+    'module M;def m;$n+=1;M.prepend N if $n==1;[:M]+super;end;end;module N;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;end;$n=0;p C.new.m;p $n',
+    '[:M, :C, :M, :S]\n2\n',
+  ],
+  [
+    'module M;def m;$n+=1;M.prepend N if $n==2;[:M]+super;end;end;module N;def m;[:N]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;end;$n=0;p C.new.m;p $n',
+    '[:M, :C, :M, :S]\n2\n',
+  ],
+  [
+    'module M;def m;$n+=1;M.prepend N if $n==2;[:M]+super;end;end;module N;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;end;$n=0;p C.new.m;p $n',
+    '[:M, :C, :M, :S]\n2\n',
+  ],
+  [
+    'module M;def m;[:M]+super;end;end;module N;def m;[:N]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;alias_method :call_m,:m;end;K=C;o=K.new;p o.call_m;K.prepend N;p o.call_m;p o.m',
+    '[:M, :C, :M, :S]\n[:M, :C, :M, :S]\n[:N, :M, :C, :M, :S]\n',
+  ],
+  [
+    'module M;def m;[:M]+super;end;end;module N;def m;[:N]+super;end;end;class S;def m;[:S];end;end;class C<S;prepend M;include M;def m;[:C]+super;end;alias_method :call_m,:m;end;K=C;o=K.new;p o.call_m;K.prepend N;p o.call_m;p o.m',
+    '[:M, :C, :S]\n[:M, :C, :S]\n[:N, :M, :C, :S]\n',
+  ],
+  [
+    'module M;def m;[:M]+super;end;end;module N;def m;[:N]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;define_method :call_m,instance_method(:m);end;K=C;o=K.new;p o.call_m;K.prepend N;p o.call_m;p o.m',
+    '[:M, :M, :S]\n[:M, :M, :S]\n[:N, :M, :C, :M, :S]\n',
+  ],
+  [
+    'module M;def m;[:M]+super;end;end;module N;def m;[:N]+super;end;end;class S;def m;[:S];end;end;class C<S;prepend M;include M;def m;[:C]+super;end;define_method :call_m,instance_method(:m);end;K=C;o=K.new;p o.call_m;K.prepend N;p o.call_m;p o.m',
+    '[:M, :S]\n[:M, :S]\n[:N, :M, :C, :S]\n',
+  ],
+  [
+    'module M;def m;[:M]+super;end;end;module N;def m;[:N]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;alias_method :call_m,:m;end;K=C.dup;o=K.new;p o.call_m;K.prepend N;p o.call_m;p o.m',
+    '[:M, :C, :M, :S]\n[:M, :C, :M, :S]\n[:N, :M, :C, :M, :S]\n',
+  ],
+  [
+    'module M;def m;[:M]+super;end;end;module N;def m;[:N]+super;end;end;class S;def m;[:S];end;end;class C<S;prepend M;include M;def m;[:C]+super;end;alias_method :call_m,:m;end;K=C.dup;o=K.new;p o.call_m;K.prepend N;p o.call_m;p o.m',
+    '[:M, :C, :S]\n[:M, :C, :S]\n[:N, :M, :C, :S]\n',
+  ],
+  [
+    'module M;def m;[:M]+super;end;end;module N;def m;[:N]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;def m;[:C]+super;end;end;o=C.new;a=o.method(:m);b=M.instance_method(:m).bind(o);C.prepend N;p a.call,b.call,o.m',
+    '[:C, :M, :S]\n[:M, :S]\n[:N, :C, :M, :S]\n',
+  ],
+  [
+    'module M;def m;[:M]+super;end;end;module N;def m;[:N]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;def m;[:C]+super;end;end;o=C.new;a=o.method(:m);b=M.instance_method(:m).bind(o);M.prepend N;p a.call,b.call,o.m',
+    '[:C, :N, :M, :S]\n[:M, :S]\n[:C, :N, :M, :S]\n',
+  ],
+  [
+    'module A;def m;[:A]+super;end;end\nmodule B;def m;[:B]+super;end;end\nmodule D;def m;[:D]+super;end;end\nclass S;def m;[:S];end;end\nclass C<S;def m;[:C]+super;end;end\nD.prepend A\nC.include D\nB.prepend A\nS.include B\nD.prepend B\np C.ancestors,C.new.m',
+    '[C, A, B, D, B, S, A, B, Object, Kernel, BasicObject]\n[:C, :A, :B, :D, :S]\n',
+  ],
+  [
+    'module A;end\nmodule B;def m;[:B]+super;end;end\nmodule D;def m;[:D]+super;end;end\nclass S;def m;[:S];end;end\nclass C<S;def m;[:C]+super;end;end\nD.prepend A\nC.include D\nB.prepend A\nS.include B\nD.prepend B\np C.ancestors,C.new.m',
+    '[C, A, B, D, B, S, A, B, Object, Kernel, BasicObject]\n[:C, :B, :D, :S]\n',
+  ],
+  [
+    'module M\n def m\n  $n+=1\n  C.prepend N if $n==2\n  [:M]+super\n end\nend\nmodule N;def m;[:N]+super;end;end\nclass S;def m;[:S];end;end\nclass C<S;include M;prepend M;def m;[:C]+super;end;end\n$n=0;p C.new.m,p($n)',
+    '2\n[:M, :C, :M, :S]\n2\n',
+  ],
+  [
+    'module M\n def m\n  $n+=1\n  C.prepend N if $n==2\n  [:M]+super\n end\nend\nmodule N;end\nclass S;def m;[:S];end;end\nclass C<S;include M;prepend M;def m;[:C]+super;end;end\n$n=0;p C.new.m,p($n)',
+    '2\n[:M, :C, :M, :S]\n2\n',
+  ],
+] as const;
+
+test.each(methodOccurrenceCases)('Method occurrences retain tables and super continuations: %s', (source, stdout) => {
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test.each(['chunk', 'chunk_while', 'slice_before', 'slice_after', 'slice_when'])(
+  'Unavailable Lazy aliases preserve identity and diagnostics: %s',
+  (name) => {
+    expect(
+      run(
+        `base=Enumerator::Lazy.instance_method(:chunk);m=Enumerator::Lazy.instance_method(:${name});p [m==base,m.hash==base.hash,m.owner,m.name];[1].lazy.public_send(:${name})`
+      )
+    ).toMatchObject({
+      kind: 'executed',
+      stdout: `[true, true, Enumerator::Lazy, :${name}]\n`,
+      uncaughtException: `Enumerator::Lazy#${name} は、この採点環境では使えません。`,
+    });
+  }
+);
+
+test('Repeated super dispatch reuses hierarchy positions within the execution budget', () => {
+  const classes = Array.from({ length: 30 }, (_, index) => `class C${index + 1}<C${index};def m;1+super;end;end;`).join(
+    ''
+  );
+  expect(run(`class C0;def m;0;end;end;${classes}1000.times{C30.new.m};p C30.new.m`)).toMatchObject({
+    kind: 'executed',
+    stdout: '30\n',
+    uncaughtException: undefined,
+  });
+});

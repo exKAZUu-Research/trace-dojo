@@ -60,6 +60,7 @@ import {
   type Value,
 } from './objects';
 import { type Frame, rt, RubyError, UnsupportedFeatureError } from './runtime';
+import { unavailableMethod } from './unavailableMethod';
 import { arr, isA, newHash, realClassOf, str, stringBytes, stringCharacterCount, sym, truthy } from './values';
 
 /** What an enumerator iterates: a method of a receiver, called with the block it is given. */
@@ -1205,9 +1206,7 @@ for (const name of ['each_with_object', 'with_object']) {
   });
 }
 for (const name of ['slice_when', 'slice_before', 'slice_after', 'chunk', 'chunk_while'])
-  def('Enumerator::Lazy', name, [0, -1], () => {
-    throw new UnsupportedFeatureError(`Enumerator::Lazy#${name}`);
-  });
+  def('Enumerator::Lazy', name, [0, -1], unavailableMethod(`Enumerator::Lazy#${name}`));
 def('Enumerator::Lazy', 'zip', [0, -1], function* (self: RObject, others, block) {
   if (block) return yield* zipCollections(self, others, block);
   const converted: Value[] = [];

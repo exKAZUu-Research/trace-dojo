@@ -1312,7 +1312,11 @@ function* definedText(e: Expr, frame: Frame): Gen {
       const method = frame.home.extra.method;
       return text(
         method &&
-          classOf(frame.home.self).findSuperMethod(method.superName ?? method.name, method.owner, method.lookupIndex)
+          classOf(frame.home.self).findSuperMethod(
+            method.superName ?? method.name,
+            method.owner,
+            method.lookupOccurrence
+          )
           ? 'super'
           : undefined
       );
@@ -2087,7 +2091,7 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
     if (e.block) block = makeBlock(e.block, frame);
     else if (e.blockArg) block = yield* toBlock(yield* ev(e.blockArg, frame));
     const superName = method.superName ?? method.name;
-    const superMethod = classOf(home.self).findSuperMethod(superName, method.owner, method.lookupIndex);
+    const superMethod = classOf(home.self).findSuperMethod(superName, method.owner, method.lookupOccurrence);
     if (!superMethod) {
       throw noMethodError(
         `super: no superclass method '${superName}' for ${receiverDescription(home.self)}`,

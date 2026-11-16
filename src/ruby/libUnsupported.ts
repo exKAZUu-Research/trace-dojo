@@ -1,7 +1,7 @@
 import { def, sdef } from './define';
-import type { NativeFn } from './objects';
-import { coreMethodAliases, corePrivateMethods, RUBY_CORE_METHODS } from './rubyCoreMethods';
+import { corePrivateMethods, RUBY_CORE_METHODS } from './rubyCoreMethods';
 import { UnsupportedFeatureError } from './runtime';
+import { unavailableMethod } from './unavailableMethod';
 
 for (const [owner, methods] of Object.entries({
   String: [
@@ -44,13 +44,6 @@ for (const [owner, methods] of Object.entries({
       throw new UnsupportedFeatureError(`${owner}#${name}`);
     });
 
-const unavailableIdentities = new Map<string, object>();
-const aliasNames = new Map<string, string>(
-  coreMethodAliases.flatMap(([owner, names]) =>
-    names.map((name) => [`${owner}#${name}`, `${owner}#${names[0]}`] as const)
-  )
-);
-
 for (const [owner, methods] of Object.entries(RUBY_CORE_METHODS)) {
   for (const name of methods.instance)
     def(owner, name, [0, -1], unavailableMethod(`${owner}#${name}`), {
@@ -59,19 +52,4 @@ for (const [owner, methods] of Object.entries(RUBY_CORE_METHODS)) {
     });
   for (const name of methods.singleton)
     sdef(owner, name, [0, -1], unavailableMethod(`${owner}.${name}`), { ifMissing: true });
-}
-
-function unavailableMethod(feature: string): NativeFn {
-  const key = aliasNames.get(feature) ?? feature;
-  let nativeIdentity = unavailableIdentities.get(key);
-  if (!nativeIdentity) {
-    nativeIdentity = {};
-    unavailableIdentities.set(key, nativeIdentity);
-  }
-  return Object.assign(
-    (): never => {
-      throw new UnsupportedFeatureError(feature);
-    },
-    { unavailable: true, nativeIdentity }
-  );
 }

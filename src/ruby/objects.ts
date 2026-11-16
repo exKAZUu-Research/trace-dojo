@@ -1,6 +1,6 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { BlockDef, MethodDef } from './ast';
-import { hierarchyAncestors, initializeHierarchy } from './classHierarchy';
+import { hierarchyEntries, type HierarchyEntry, initializeHierarchy } from './classHierarchy';
 import type { NativeSignature } from './nativeSignatures';
 import { rt } from './runtime';
 
@@ -283,7 +283,7 @@ export interface RMethod {
   owner: RClass;
   visibility: Visibility;
   body: MethodBody;
-  lookupIndex?: number;
+  lookupOccurrence?: HierarchyEntry;
 }
 
 /** A class or module. */
@@ -300,7 +300,12 @@ export class RClass extends RBasic {
   /** The module whose constant first named this one, for names such as `Outer::Inner`. */
   lexicalParent?: RClass;
   nameString?: { text: string; value: RString };
-  private ancestorCache?: { version: number; list: RClass[] };
+  private hierarchyCache?: {
+    version: number;
+    list: RClass[];
+    entries: HierarchyEntry[];
+    positions: Map<HierarchyEntry, number>;
+  };
   private methodCache?: { version: number; map: Map<string, RMethod | undefined> };
   /** Whether the program defined this class rather than the library, which decides what the trace shows. */
   isUserDefined = false;
@@ -333,10 +338,7 @@ export class RClass extends RBasic {
 
   /** The classes and modules that method lookup visits, in order, as Ruby's `ancestors` lists them. */
   ancestors(): RClass[] {
-    if (this.ancestorCache?.version === hierarchyVersion.value) return this.ancestorCache.list;
-    const list = hierarchyAncestors(this);
-    this.ancestorCache = { version: hierarchyVersion.value, list };
-    return list;
+    return this.hierarchy().list;
   }
 
   findMethod(name: string): RMethod | undefined {
@@ -347,15 +349,12 @@ export class RClass extends RBasic {
     if (cache.has(name)) return cache.get(name);
     let found: RMethod | undefined;
     let visibility: Visibility | undefined;
-    for (const [index, module] of this.ancestors().entries()) {
-      const method = module.methods.get(name);
+    for (const occurrence of this.hierarchy().entries) {
+      const method = occurrence.table.get(name);
       if (method) {
         if (method.body.kind === 'visibility') visibility ??= method.visibility;
         else {
-          found =
-            method.body.kind === 'undefined'
-              ? undefined
-              : { ...method, lookupIndex: index, visibility: visibility ?? method.visibility };
+          found = method.body.kind === 'undefined' ? undefined : locatedMethod(method, occurrence, visibility);
           break;
         }
       }
@@ -364,16 +363,15 @@ export class RClass extends RBasic {
     return found;
   }
 
-  /** The method after `owner`'s in this class's ancestors, which `super` calls. */
-  findSuperMethod(name: string, owner: RClass, lookupIndex?: number): RMethod | undefined {
-    const ancestors = this.ancestors();
-    const index =
-      lookupIndex !== undefined && ancestors[lookupIndex] === owner ? lookupIndex : ancestors.indexOf(owner);
-    for (let position = index + 1; position < ancestors.length; position++) {
-      const module = ancestors[position];
-      const method = module.methods.get(name);
+  findSuperMethod(name: string, owner: RClass, occurrence?: HierarchyEntry): RMethod | undefined {
+    const { entries, positions } = this.hierarchy();
+    let index = occurrence ? (positions.get(occurrence.origin ?? occurrence) ?? -1) : -1;
+    if (index === -1) index = entries.findIndex((entry) => entry.value === owner && entry.table === owner.methods);
+    for (let position = index + 1; position < entries.length; position++) {
+      const entry = entries[position];
+      const method = entry.table.get(name);
       if (method && method.body.kind !== 'visibility')
-        return method.body.kind === 'undefined' ? undefined : { ...method, lookupIndex: position };
+        return method.body.kind === 'undefined' ? undefined : locatedMethod(method, entry);
     }
     return undefined;
   }
@@ -381,6 +379,27 @@ export class RClass extends RBasic {
   isSubclassOf(other: RClass): boolean {
     return this.ancestors().includes(other);
   }
+
+  private hierarchy(): NonNullable<RClass['hierarchyCache']> {
+    if (this.hierarchyCache?.version === hierarchyVersion.value) return this.hierarchyCache;
+    const entries = [...hierarchyEntries(this)];
+    const list: RClass[] = [];
+    const positions = new Map<HierarchyEntry, number>();
+    for (const [index, entry] of entries.entries()) {
+      positions.set(entry, index);
+      if (!entry.origin) list.push(entry.value);
+    }
+    this.hierarchyCache = { version: hierarchyVersion.value, entries, list, positions };
+    return this.hierarchyCache;
+  }
+}
+
+function locatedMethod(method: RMethod, occurrence: HierarchyEntry, visibility = method.visibility): RMethod {
+  return {
+    ...method,
+    lookupOccurrence: method.owner === occurrence.value ? occurrence : (method.lookupOccurrence ?? occurrence),
+    visibility,
+  };
 }
 
 /** Changes whenever a method, a module inclusion, or a class changes, which empties the lookup caches. */

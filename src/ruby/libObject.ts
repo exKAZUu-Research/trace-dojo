@@ -253,7 +253,7 @@ function copyClass(source: RClass): RClass {
   copy.isUserDefined = source.isUserDefined;
   for (const included of source.includes) copy.includes.push(included);
   for (const prepended of source.prepends) copy.prepends.push(prepended);
-  copyHierarchy(source, copy);
+  const occurrences = copyHierarchy(source, copy);
   for (const [name, value] of source.constants) copy.constants.set(name, value);
   for (const [name, row] of source.constantRows) copy.constantRows.set(name, row);
   for (const [name, value] of source.classVariables) copy.classVariables.set(name, value);
@@ -261,6 +261,8 @@ function copyClass(source: RClass): RClass {
     copy.methods.set(name, {
       ...method,
       owner: method.owner === source ? copy : method.owner,
+      lookupOccurrence:
+        method.lookupOccurrence && (occurrences.get(method.lookupOccurrence) ?? method.lookupOccurrence),
       body:
         method.body.kind === 'user'
           ? { ...method.body, cref: method.body.cref.map((scope) => (scope === source ? copy : scope)) }
@@ -275,9 +277,14 @@ function copySingleton(original: RClass, copy: RBasic): void {
   singleton.attached = copy;
   for (const included of original.includes) singleton.includes.push(included);
   for (const prepended of original.prepends) singleton.prepends.push(prepended);
-  copyHierarchy(original, singleton);
+  const occurrences = copyHierarchy(original, singleton);
   for (const [name, method] of original.methods)
-    singleton.methods.set(name, { ...method, owner: method.owner === original ? singleton : method.owner });
+    singleton.methods.set(name, {
+      ...method,
+      owner: method.owner === original ? singleton : method.owner,
+      lookupOccurrence:
+        method.lookupOccurrence && (occurrences.get(method.lookupOccurrence) ?? method.lookupOccurrence),
+    });
   copy.singleton = singleton;
   invalidateMethodCaches();
 }
