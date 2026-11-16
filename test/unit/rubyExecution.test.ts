@@ -12816,3 +12816,155 @@ test('Data converts keyword names before reporting missing and unknown members',
     uncaughtException: undefined,
   });
 });
+
+test('Active first iterator activation refuses copying 0', () => {
+  expect(
+    run(
+      'e=nil;first=true;e=Enumerator.new{|y|if first;first=false;begin;e.each(3);puts :accepted;rescue=>x;p x.class,x.message;end;end;y<<1};p e.next'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'TypeError\n"can\'t copy execution context"\n1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Active first iterator activation refuses copying 1', () => {
+  expect(
+    run(
+      'e=nil;first=true;e=Enumerator.new{|y|if first;first=false;begin;e.each(3){|v|p v};puts :accepted;rescue=>x;p x.class,x.message;end;end;y<<1};p e.next'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'TypeError\n"can\'t copy execution context"\n1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Active first iterator activation refuses copying 2', () => {
+  expect(
+    run(
+      'e=nil;first=true;e=Enumerator.new{|y|if first;first=false;begin;e.dup;puts :accepted;rescue=>x;p x.class,x.message;end;end;y<<1};p e.next'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'TypeError\n"can\'t copy execution context"\n1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Active first iterator activation refuses copying 3', () => {
+  expect(
+    run(
+      'e=nil;first=true;e=Enumerator.new{|y|if first;first=false;begin;e.clone;puts :accepted;rescue=>x;p x.class,x.message;end;end;y<<1};p e.next'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'TypeError\n"can\'t copy execution context"\n1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Active first iterator activation refuses copying 4', () => {
+  expect(
+    run(
+      'e=nil;first=true;e=Enumerator.new{|y|if first;first=false;begin;e.each(3);puts :accepted;rescue=>x;p x.class,x.message;end;end;y<<1}.lazy;p e.next'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'TypeError\n"can\'t copy execution context"\n1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Active first iterator activation refuses copying 5', () => {
+  expect(
+    run(
+      'e=nil;first=true;e=Enumerator.new{|y|if first;first=false;begin;e.each(3){|v|p v};puts :accepted;rescue=>x;p x.class,x.message;end;end;y<<1}.lazy;p e.next'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'TypeError\n"can\'t copy execution context"\n1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Active first iterator activation refuses copying 6', () => {
+  expect(
+    run(
+      'e=nil;first=true;e=Enumerator.new{|y|if first;first=false;begin;e.dup;puts :accepted;rescue=>x;p x.class,x.message;end;end;y<<1}.lazy;p e.next'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'TypeError\n"can\'t copy execution context"\n1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Active first iterator activation refuses copying 7', () => {
+  expect(
+    run(
+      'e=nil;first=true;e=Enumerator.new{|y|if first;first=false;begin;e.clone;puts :accepted;rescue=>x;p x.class,x.message;end;end;y<<1}.lazy;p e.next'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'TypeError\n"can\'t copy execution context"\n1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Active first iterator activation refuses copying 8', () => {
+  expect(
+    run(
+      'e=nil;first=true;e=Enumerator.new{|y|if first;first=false;begin;e.each(3);puts :accepted;rescue=>x;p x.class,x.message;end;end;y<<1}.lazy.map{|v|v};p e.next'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'TypeError\n"can\'t copy execution context"\n1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Active first iterator activation refuses copying 9', () => {
+  expect(
+    run(
+      'e=nil;first=true;e=Enumerator.new{|y|if first;first=false;begin;e.each(3){|v|p v};puts :accepted;rescue=>x;p x.class,x.message;end;end;y<<1}.lazy.map{|v|v};p e.next'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'TypeError\n"can\'t copy execution context"\n1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Active first iterator activation refuses copying 10', () => {
+  expect(
+    run(
+      'e=nil;first=true;e=Enumerator.new{|y|if first;first=false;begin;e.dup;puts :accepted;rescue=>x;p x.class,x.message;end;end;y<<1}.lazy.map{|v|v};p e.next'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'TypeError\n"can\'t copy execution context"\n1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Active first iterator activation refuses copying 11', () => {
+  expect(
+    run(
+      'e=nil;first=true;e=Enumerator.new{|y|if first;first=false;begin;e.clone;puts :accepted;rescue=>x;p x.class,x.message;end;end;y<<1}.lazy.map{|v|v};p e.next'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'TypeError\n"can\'t copy execution context"\n1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  [String.raw`p /s/i.match?("ß"), /f/i.match?("ﬃ"), /s/i.match?("straße")`, 'false\nfalse\ntrue\n'],
+  [String.raw`p /[s]/i.match?("ß"), /s?/i.match?("ß"), /s{0,1}/i.match?("ß")`, 'false\ntrue\ntrue\n'],
+  [String.raw`p /s|f/i.match?("ßﬃ"), /[sf]/i.match?("ßﬃ"), /s{0}/i.match?("ß")`, 'false\nfalse\ntrue\n'],
+])('Single-character regexp searches preserve fold boundaries: %s', (source, stdout) => {
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});

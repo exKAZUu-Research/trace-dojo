@@ -384,7 +384,7 @@ function* runSource(source: EnumeratorSource, block: RProc, args: Value[] = []):
 }
 
 function hasExecutionContext(cursor: Cursor | undefined): boolean {
-  return cursor?.started === true && cursor.result === undefined;
+  return cursor !== undefined && (cursor.running || (cursor.started && cursor.result === undefined));
 }
 
 def('Enumerator', 'each', [0, -1], function* (self: RObject, args, block) {
