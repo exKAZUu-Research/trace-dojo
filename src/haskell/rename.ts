@@ -318,8 +318,8 @@ class Renamer {
     origins.add(source);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Each branch is one form of an import item.
-  // code-gauge-allow functionNcss 32 -- Import selection distinguishes names, children, hiding and unsupported APIs.
+  // code-gauge-allow functionCognitiveComplexity 25 -- Import items distinguish values, type children, unsupported entries and hiding.
+  // code-gauge-allow functionNcss 34 -- Import selection distinguishes names, children, hiding and unsupported APIs.
   private selectImportItem(exports: ExportTable, item: ImportItem, imp: Import, into: ExportTable): void {
     const { name } = item.name;
     if (item.kind === 'value') {
@@ -328,6 +328,7 @@ class Renamer {
         if (imp.hiding) return;
         throw compileError(item.name.span, `モジュール ${imp.module} は ${name} を export していません。`);
       }
+      if (!imp.hiding && entity.unsupported) throw unsupportedError(item.name.span, entity.unsupported);
       into.values.set(name, entity);
       return;
     }
@@ -567,7 +568,7 @@ class Renamer {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Fixities apply to values, constructors, and class methods alike.
+  // code-gauge-allow functionCognitiveComplexity 26 -- Fixity validation shares duplicate checks while keeping class method ownership explicit.
   private applyTopFixities(decls: Decl[]): void {
     const seen = new Set<string>();
     const apply = (
@@ -587,7 +588,10 @@ class Renamer {
       if (decl.kind === 'class') {
         for (const member of decl.decls) {
           if (member.kind === 'fixity') {
-            apply(member, (name) => this.ownValues.get(name)?.method && this.ownValues.get(name));
+            apply(member, (name) => {
+              const entity = this.ownValues.get(name);
+              return entity?.method?.cls.name === decl.name.name ? entity : undefined;
+            });
           }
         }
       }

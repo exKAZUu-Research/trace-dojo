@@ -230,3 +230,11 @@ main = do
     s: { kind: 'array', entries: { 0: { kind: 'value', value: 'h' }, 1: { kind: 'value', value: 'i' } } },
   });
 });
+
+test.each([
+  ['head', '1\n'],
+  ['take 1', '[1]\n'],
+])('large literal tails stay lazy under %s', (operation, stdout) => {
+  const source = `main=print(${operation} [${Array.from({ length: 30_000 }, () => 1).join(',')}])`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});

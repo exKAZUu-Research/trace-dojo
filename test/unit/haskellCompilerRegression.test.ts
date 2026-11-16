@@ -202,3 +202,31 @@ test('ambiguous imports exclude origins from other qualified scopes', () => {
     diagnostics: [{ row: 2, message: 'filter が、Prelude.filter と Main.filter のどれを指すか決まりません。' }],
   });
 });
+
+test.each(['disjoint', 'compose'])('explicit imports reject unsupported values: %s', (name) => {
+  expect(executeProgram('haskell', `import Data.Map (${name})\nmain=print 1`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 0, message: `ライブラリ関数（Data.Map.${name}）は、この採点環境では使えません。` }],
+  });
+  expect(executeProgram('haskell', `import Data.Map hiding (${name})\nmain=print 1`)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('class fixities cannot change another class method', () => {
+  const source =
+    'class A a where\n  foo :: a -> a -> a\nclass B a where\n  infixl 4 `foo`\n  bar :: a -> a\nmain=print 1';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 3, message: expect.stringContaining('foo') }],
+  });
+});
+
+test.each([
+  ['import Numeric\nf :: Floating a => a -> a\nf x=sqrt x\nmain=print(f 4,showHex 255 "")', '(2.0,"ff")\n'],
+  ['import Text.Read\ng :: ReadS Int\ng=reads\nmain=print(g "1 x",readMaybe "2"::Maybe Int)', '([(1," x")],Just 2)\n'],
+])('public type re-exports retain their implementation identity: %s', (source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});

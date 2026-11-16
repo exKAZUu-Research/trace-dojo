@@ -163,7 +163,7 @@ class LibraryCompiler {
     }
   }
 
-  /** The modules a program may import, each re-exporting part of a library module. */
+  // code-gauge-allow functionCognitiveComplexity 19 -- The export pass combines explicit selections, implemented identities and unsupported API entries.
   publicModules(): Map<string, CompiledModuleInfo> {
     const modules = new Map<string, CompiledModuleInfo>();
     for (const [name, spec] of Object.entries(PUBLIC_MODULES)) {
@@ -185,6 +185,14 @@ class LibraryCompiler {
       }
       for (const type of KNOWN_LIBRARY_TYPES[name] ?? []) {
         if (!exports.types.has(type)) {
+          const implemented = source.exports.types.get(type);
+          if (implemented) {
+            exports.types.set(type, {
+              entity: implemented.entity,
+              children: implemented.children.filter((child) => exports.values.get(child.name) === child),
+            });
+            continue;
+          }
           exports.types.set(type, {
             entity: {
               kind: 'type',

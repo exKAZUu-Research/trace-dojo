@@ -149,7 +149,7 @@ export class Machine {
         this.runtime.allocate(code.args.length);
         return new ConValue(
           code.con,
-          code.args.map((arg) => this.makeSlot(arg, env))
+          code.args.map((arg) => this.makeLetSlot(arg, env))
         );
       }
       case 'iodo': {
@@ -165,7 +165,7 @@ export class Machine {
    * Creates the slot of a `let` binding, which may refer to bindings of the same group not yet made: only code that
    * reads no variables when it is made is evaluated at once.
    */
-  makeLetSlot(code: Core, env: Env): Slot {
+  makeLetSlot(code: Core, env: Env | undefined): Slot {
     if (code.k === 'lit' || code.k === 'lam' || code.k === 'global' || code.k === 'prim' || code.k === 'iodo') {
       return this.makeSlot(code, env);
     }
