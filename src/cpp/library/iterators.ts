@@ -2,18 +2,7 @@ import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import type { Eval } from '../runtime';
-import {
-  BOOL,
-  ClassInfo,
-  classType,
-  isInteger,
-  LONG,
-  PTRDIFF_T,
-  type Type,
-  typeName,
-  unqualified,
-  withConst,
-} from '../types';
+import { BOOL, ClassInfo, classType, isInteger, LONG, PTRDIFF_T, type Type, typeName, withConst } from '../types';
 import { Ptr } from '../values';
 import { nativeConstructor } from './support';
 
@@ -88,23 +77,6 @@ function iteratorOperator(
   const value = (expr: Expr): Eval<Ptr> => compiler.rvalue(expr).run as Eval<Ptr>;
   const type = classType(cls);
   switch (operator) {
-    case '=': {
-      // An iterator's value is a position, which assignment replaces rather than changes in place.
-      compiler.checkAssignable(first, row, operator);
-      const location = first.run;
-      const source = compiler.convert(second, unqualified(first.type), row).run;
-      return {
-        type: first.type,
-        isLvalue: true,
-        row,
-        run: (frame) => {
-          const result = source(frame) as Ptr;
-          const place = location(frame) as Ptr;
-          place.write(result);
-          return place;
-        },
-      };
-    }
     case '*':
     case '->': {
       if (operands.length !== 1) return undefined;
