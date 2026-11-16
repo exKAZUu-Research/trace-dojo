@@ -109,6 +109,8 @@ const SIMPLE_ESCAPES: Record<string, string> = {
 function escapeBytes(text: string): string {
   const body = text.slice(1);
   if (body in SIMPLE_ESCAPES) return SIMPLE_ESCAPES[body];
+  // A backslash at the end of a line splices the lines (C++20 [lex.phases]), which the grammar reads as an escape.
+  if (/^\r?\n$/.test(body)) return '';
   if (/^[0-7]{1,3}$/.test(body)) return String.fromCodePoint(Number.parseInt(body, 8) & 0xff);
   if (/^x[\da-fA-F]+$/.test(body)) return String.fromCodePoint(Number.parseInt(body.slice(1), 16) & 0xff);
   if (/^u[\da-fA-F]{4}$|^U[\da-fA-F]{8}$/.test(body))

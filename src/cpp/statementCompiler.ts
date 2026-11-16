@@ -23,6 +23,12 @@ import {
 } from './types';
 import { Box, type CObject, Liveness, Ptr, type Store, UNINIT, type Value } from './values';
 
+/** The type an `auto` declarator deduced, which the declaration's other declarators must agree with. */
+export interface AutoDeduction {
+  name: string;
+  type: Type;
+}
+
 /** Compiles statements to closures that run them and tell how they completed. */
 export abstract class StatementCompiler extends ExpressionCompiler {
   /** Whether the program is compiled for tracing, where statements record steps. */
@@ -184,8 +190,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     let recordsStep = false;
     let allCreate = true;
     const parts: Exec[] = [];
+    let firstDeduced: AutoDeduction | undefined;
     for (const declarator of declarators) {
-      const { exec, hasInitializer, createsObject } = this.localDeclarator(base, declarator, node);
+      const { exec, hasInitializer, createsObject, deduced } = this.localDeclarator(base, declarator, node);
+      firstDeduced = this.checkAutoDeduction(firstDeduced, deduced, declarator.row);
       parts.push(exec);
       if (hasInitializer || createsObject) recordsStep = true;
       if (!createsObject) allCreate = false;
@@ -201,7 +209,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     base: Type,
     declarator: Syntax,
     declaration: Syntax
-  ): { exec: Exec; hasInitializer: boolean; createsObject: boolean } {
+  ): { exec: Exec; hasInitializer: boolean; createsObject: boolean; deduced?: AutoDeduction } {
     const declared = this.applyDeclarator(base, declarator);
     const reread = declared.function ? this.asDirectInitialization(declarator, declared.function) : undefined;
     if (reread) return this.localDeclarator(base, reread, declaration);
@@ -221,6 +229,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     let init: Eval<Value>;
     let createsObject = false;
     let entity: Extract<Entity, { kind: 'local' }>;
+    let deduced: AutoDeduction | undefined;
     if (isAuto(type)) {
       let constant: number | bigint | undefined;
       if (!value || value.type === 'initializer_list' || value.type === 'argument_list') {
@@ -233,6 +242,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
           type = this.deduceAuto(type, expr, declarator.row);
           init = this.copyInitializer(type, expr, declarator.row, true);
         } else {
+          this.rejectInitializerListDeduction(declarator, value);
           return this.error(declarator.row, `auto の変数 ${name} には、= のあとに初期値を1つ書いてください。`);
         }
       } else {
@@ -244,6 +254,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       }
       entity = this.declareVariable(name, type);
       entity.constant = constant;
+      deduced = { name, type };
     } else {
       if (type.kind === 'array' && type.length === undefined && value) type = this.completeArrayType(type, value);
       if (type.kind === 'array' && type.length === undefined)
@@ -271,7 +282,31 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       exec: this.fullExpression(exec),
       hasInitializer: value !== undefined,
       createsObject: createsObject || (type.kind === 'class' && !value),
+      deduced,
     };
+  }
+
+  /** Rejects `auto x = 1, y = 2.0;`, whose declarators deduce `auto` differently, and returns the first deduction. */
+  protected checkAutoDeduction(
+    first: AutoDeduction | undefined,
+    next: AutoDeduction | undefined,
+    row: number
+  ): AutoDeduction | undefined {
+    if (!first || !next) return first ?? next;
+    if (!sameType(first.type, next.type)) {
+      this.error(
+        row,
+        `auto が、${first.name} の宣言では ${typeName(first.type)} 型、${next.name} の宣言では ${typeName(next.type)} 型と、違う型になりました。`
+      );
+    }
+    return first;
+  }
+
+  /** Rejects `auto x = {1, 2};`, which deduces `std::initializer_list`. */
+  protected rejectInitializerListDeduction(declarator: Syntax, value: Syntax | undefined): void {
+    if (value?.type === 'initializer_list' && value.children.length > 0 && hasToken(declarator, '=')) {
+      this.unsupported(declarator.row, 'std::initializer_list（auto x = {1, 2}; など）');
+    }
   }
 
   private declareVariable(name: string, type: Type): Extract<Entity, { kind: 'local' }> {

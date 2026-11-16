@@ -42,7 +42,8 @@ import {
 } from './types';
 import { ArrayStore, Box, CObject, FunctionRef, Liveness, NULL_PTR, Ptr, type Store, type Value } from './values';
 
-const COMPARISONS = new Set(['==', '!=', '<', '<=', '>', '>=']);
+const RELATIONAL_OPERATORS = ['<', '<=', '>', '>='];
+const COMPARISONS = new Set(['==', '!=', ...RELATIONAL_OPERATORS]);
 const ARITHMETIC_OPERATORS = new Set(['+', '-', '*', '/', '%', '&', '|', '^', '<<', '>>']);
 
 /** Compiles expressions to closures that evaluate them. */
@@ -504,9 +505,27 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       ]) ?? '';
     const normalized = ALTERNATIVE_TOKENS[operator] ?? operator;
     if (normalized === '<=>') return this.unsupported(node.row, '三方比較演算子（<=>）');
-    const left = this.compileExpression(fieldOf(node, 'left') as Syntax);
+    const leftNode = fieldOf(node, 'left') as Syntax;
+    const left = this.compileExpression(leftNode);
     const right = this.compileExpression(fieldOf(node, 'right') as Syntax);
+    if (RELATIONAL_OPERATORS.includes(normalized))
+      this.checkChainedComparison(normalized, leftNode, left, right, node.row);
     return this.binary(normalized, left, right, node.row);
+  }
+
+  /** Rejects `a < b < c` as clang++ does, which makes its -Wparentheses warning for it an error. */
+  private checkChainedComparison(operator: string, leftNode: Syntax, left: Expr, right: Expr, row: number): void {
+    const isBuiltinComparison =
+      leftNode.type === 'binary_expression' &&
+      tokenOf(leftNode, RELATIONAL_OPERATORS) !== undefined &&
+      left.type.kind === 'int' &&
+      left.type.name === 'bool';
+    if (isBuiltinComparison && right.type.kind !== 'class') {
+      this.error(
+        row,
+        `比較を連ねた ${leftNode.text} ${operator} ... は、数学の式とは違い、${leftNode.text} の結果（bool）と比べます。&& で2つの比較をつないでください。`
+      );
+    }
   }
 
   /** Compiles a binary operator on two compiled operands. */
@@ -1104,7 +1123,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         const base = p(frame) as Ptr;
         const at = base.index + Number(n(frame));
         const store = base.target();
-        if (at < 0 || at >= store.length) throw new CppRuntimeError('outOfBounds');
+        // `&a[n]` may form the address one past the end, which only reading or writing through rejects.
+        if (at < 0 || at > store.length) throw new CppRuntimeError('outOfBounds');
         return new Ptr(store, at);
       },
     };
@@ -1208,6 +1228,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type = this.typeOfUnevaluated(value);
     }
     if (type.kind === 'function') return this.error(node.row, '関数には sizeof を使えません。');
+    if (type.kind === 'void') return this.error(node.row, 'void 型には sizeof を使えません。');
     if (type.kind === 'array' && type.length === undefined)
       return this.error(node.row, '大きさの決まっていない配列には sizeof を使えません。');
     return constantExpr(SIZE_T, BigInt(sizeOf(type)), node.row);
@@ -1326,10 +1347,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const objectClass = !resolved.fn.isStatic && object?.type.kind === 'class' ? object.type.cls : undefined;
       this.checkAccess(resolved.fn.access, owner, candidates.namingClass, row, resolved.fn.name, objectClass);
     }
-    if (resolved.fn.isPure && candidates.isQualified) {
-      return this.error(row, `純粋仮想関数 ${resolved.fn.displayName} は、名前を指定して呼び出せません。`);
-    }
-    this.checkDefined(resolved.fn, row);
+    // A virtual call never reaches a pure virtual function, but a qualified call needs its definition.
+    if (!resolved.fn.isPure || candidates.isQualified) this.checkDefined(resolved.fn, row);
     return this.callExpr(resolved, args, object, row, candidates.isQualified === true);
   }
 
