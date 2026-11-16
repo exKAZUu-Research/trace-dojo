@@ -3,8 +3,8 @@ import { RArray, RBasic, RClass, RHash, RObject, RProc, RRange, type Value } fro
 import type { Frame, Runtime, Scope } from './runtime';
 
 /** Removes the turtles that nothing the program can still reach refers to, as Java's garbage collection would. */
-// code-gauge-allow functionCognitiveComplexity 19 -- The ordered cases for runtime reachability traversal share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 33 -- The ordered cases for runtime reachability traversal share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity 24 -- The root walker keeps live and suspended value/array lifecycles explicit; elementwise insertion avoids host argument limits.
+// code-gauge-allow functionNcss 35 -- Reachability traversal shares one pending stack and preserves roots for frames, handlers and suspended cursors.
 export function collectGarbage(runtime: Runtime): void {
   if (!runtime.world.hasTurtles) return;
   const reached = new Set<TurtleState>();
@@ -17,8 +17,8 @@ export function collectGarbage(runtime: Runtime): void {
   for (const handler of runtime.completedExitHandlers) pending.push(handler);
   for (const values of runtime.heldArrays) for (const value of values) pending.push(value);
   for (const snapshot of runtime.heldSnapshots) {
-    pending.push(...snapshot.values);
-    for (const values of snapshot.arrays) pending.push(...values);
+    for (const value of snapshot.values) pending.push(value);
+    for (const values of snapshot.arrays) for (const value of values) pending.push(value);
   }
   pending.push(runtime.c.Object);
   while (pending.length > 0) {

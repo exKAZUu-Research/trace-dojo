@@ -1069,3 +1069,37 @@ test('Singleton copies retain captured turtles through the shared origin', () =>
     'module M;def go;super;end;end;def make;t=Turtle.new;o=Object.new;o.define_singleton_method(:go){t.forward};o.singleton_class.prepend M;o.clone;end;b=make;x=1;b.go';
   expect(traceProgram('ruby', program, program).finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
 });
+
+const largeSuspendedRootCases = [
+  [
+    'one large selected array',
+    't=Turtle.new\n$s=Struct.new(:a).new(t)\nt=nil\n$e=Enumerator.new{|y|(1..1).lazy.each{|x|y<<x};q=1;y<<0}\n$e.next\ni=Object.new\ndef i.to_int;$s.a=nil;$s=nil;$e.next;0;end\nv=$s.values_at(0..200000,i)\np v.size\nv[0].forward',
+    '200002\n',
+  ],
+  [
+    'multiple smaller selections',
+    't=Turtle.new\n$s=Struct.new(:a).new(t)\nt=nil\n$e=Enumerator.new{|y|(1..1).lazy.each{|x|y<<x};q=1;y<<0}\n$e.next\ni=Object.new\ndef i.to_int;$s.a=nil;$s=nil;$e.next;0;end\nv=$s.values_at(0..70000,0..70000,i)\np v.size\nv[0].forward',
+    '140003\n',
+  ],
+  [
+    'large caller argument roots',
+    't=Turtle.new\n$e=Enumerator.new{|y|x=1;y<<0}\ni=Object.new\ndef i.to_s;$e.next;"ready";end\na=Array.new(140000,i)\na.fill("",1)\nprint(*a)\nt.forward',
+    'ready',
+  ],
+  [
+    'large resumed cursor roots',
+    't=Turtle.new\n$y=nil\ni=Object.new\ndef i.to_s;$y<<1;"ready";end\na=Array.new(140000,i)\na.fill("",1)\ne=Enumerator.new{|y|$y=y;print(*a);y<<2}\np e.next\np e.next\nt.forward',
+    '1\nready2\n',
+  ],
+] as const;
+
+test.each(largeSuspendedRootCases)(
+  'large suspended roots retain turtles through cursor transfer: %s',
+  (_name, program, stdout) => {
+    const result = traceProgram('ruby', program, program);
+    expect(result.uncaughtException).toBeUndefined();
+    expect(result.stdout).toBe(stdout);
+    expect(result.finalTurtles).toHaveLength(1);
+    expect(result.finalTurtles[0]).toMatchObject({ x: 0, y: 1 });
+  }
+);

@@ -814,10 +814,10 @@ function nextValues(self: RObject): Value[] {
   const callerTags = runtime.catchTags.splice(0);
   runtime.globals.set('$!', cursor.exception);
   if (cursor.frames[0]?.callRow !== undefined) cursor.frames[0].callRow = row;
-  runtime.frames.push(...cursor.frames);
-  runtime.held.push(...cursor.held);
-  runtime.heldArrays.push(...cursor.heldArrays);
-  runtime.catchTags.push(...cursor.catchTags);
+  for (const frame of cursor.frames) runtime.frames.push(frame);
+  for (const value of cursor.held) runtime.held.push(value);
+  for (const values of cursor.heldArrays) runtime.heldArrays.push(values);
+  for (const tag of cursor.catchTags) runtime.catchTags.push(tag);
   let step: IteratorResult<unknown, Value>;
   const previousCursor = runtime.activeCursor;
   try {
@@ -836,15 +836,15 @@ function nextValues(self: RObject): Value[] {
     throw error;
   } finally {
     runtime.activeCursor = previousCursor;
-    runtime.held.splice(0, heldBase, ...callerHeld);
-    runtime.heldArrays.splice(0, arraysBase, ...callerArrays);
+    for (let index = 0; index < heldBase; index++) runtime.held[index] = callerHeld[index];
+    for (let index = 0; index < arraysBase; index++) runtime.heldArrays[index] = callerArrays[index];
     cursor.frames = runtime.frames.splice(frameBase);
     cursor.held = runtime.held.splice(heldBase);
     cursor.heldArrays = runtime.heldArrays.splice(arraysBase);
     cursor.catchTags = runtime.catchTags.splice(0);
     cursor.exception = runtime.globals.get('$!') ?? NIL;
     runtime.globals.set('$!', callerException);
-    runtime.catchTags.push(...callerTags);
+    for (const tag of callerTags) runtime.catchTags.push(tag);
     runtime.currentRow = row;
     runtime.heldSnapshots.pop();
   }
