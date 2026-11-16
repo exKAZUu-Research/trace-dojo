@@ -27200,3 +27200,1378 @@ test.each(nativePatternFailureCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeInternalIdentityCases = [
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;true;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;true;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;true;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;true;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;false;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;false;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;false;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;false;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;nil;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;nil;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;nil;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;nil;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;:yes;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;:yes;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;:yes;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;:yes;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;raise("called");end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;raise("called");end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;raise("called");end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"called"\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def ==(x);puts :called;raise("called");end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"called"\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;true;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;true;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;true;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;true;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;false;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;false;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;false;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;false;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;nil;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;nil;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;nil;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;nil;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;:yes;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;:yes;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;:yes;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;:yes;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;raise("called");end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;raise("called");end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;raise("called");end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"called"\n',
+  ],
+  [
+    'class X;def hash;1;end;public;def eql?(x);puts :called;raise("called");end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"called"\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;true;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;true;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;true;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;true;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;false;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;false;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;false;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;false;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;nil;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;nil;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;nil;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;nil;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;:yes;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;:yes;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;:yes;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;:yes;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;raise("called");end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;raise("called");end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;raise("called");end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"called"\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def ==(x);puts :called;raise("called");end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"called"\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;true;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;true;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;true;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;true;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;false;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;false;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;false;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;false;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;nil;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;nil;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;nil;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;nil;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;:yes;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;:yes;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;:yes;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;:yes;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;raise("called");end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;raise("called");end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;raise("called");end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"called"\n',
+  ],
+  [
+    'class X;def hash;1;end;private;def eql?(x);puts :called;raise("called");end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"called"\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;true;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;true;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;true;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;true;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;false;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;false;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;false;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;false;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;nil;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;nil;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;nil;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;nil;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;:yes;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;:yes;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;:yes;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;:yes;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;raise("called");end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;raise("called");end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;raise("called");end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"called"\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def ==(x);puts :called;raise("called");end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"called"\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;true;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;true;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;true;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;true;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;false;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;false;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;false;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;false;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;nil;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;nil;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;nil;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;nil;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;:yes;end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;:yes;end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;:yes;end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;:yes;end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;raise("called");end;end;x=X.new;y=x;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;raise("called");end;end;x=X.new;y=x;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;raise("called");end;end;x=X.new;y=X.new;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"called"\n',
+  ],
+  [
+    'class X;def hash;1;end;protected;def eql?(x);puts :called;raise("called");end;end;x=X.new;y=X.new;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"called"\n',
+  ],
+  [
+    'x,y=[Float::NAN,Float::NAN];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[Float::NAN,Float::NAN];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[Float::NAN,Float::NAN];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[Float::NAN,Float::NAN];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[Float::NAN,Float::NAN];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'x,y=[Float::NAN,Float::NAN];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[Float::NAN,Float::NAN];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[Float::NAN,Float::NAN];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[Float::NAN,Float::NAN];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[Float::NAN,Float::NAN];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'x,y=[Float::NAN,Float::NAN];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[Float::NAN,Float::NAN];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[Float::NAN,Float::NAN];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[Float::NAN,Float::NAN];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[Float::NAN,Float::NAN];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'x,y=[Float::NAN,Float::NAN];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[Float::NAN,Float::NAN];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[Float::NAN,Float::NAN];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[Float::NAN,Float::NAN];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[Float::NAN,Float::NAN];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'x,y=begin;x=0.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=begin;x=0.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=begin;x=0.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=begin;x=0.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=begin;x=0.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'x,y=begin;x=0.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=begin;x=0.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=begin;x=0.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=begin;x=0.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=begin;x=0.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'x,y=begin;x=0.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=begin;x=0.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=begin;x=0.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=begin;x=0.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=begin;x=0.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'x,y=begin;x=0.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=begin;x=0.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=begin;x=0.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=begin;x=0.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=begin;x=0.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'x,y=[0.0/0.0,0.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[0.0/0.0,0.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[0.0/0.0,0.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[0.0/0.0,0.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[0.0/0.0,0.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'x,y=[0.0/0.0,0.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[0.0/0.0,0.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[0.0/0.0,0.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[0.0/0.0,0.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[0.0/0.0,0.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'x,y=[0.0/0.0,0.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[0.0/0.0,0.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[0.0/0.0,0.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[0.0/0.0,0.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[0.0/0.0,0.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'x,y=[0.0/0.0,0.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[0.0/0.0,0.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[0.0/0.0,0.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[0.0/0.0,0.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[0.0/0.0,0.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  ['x,y=[0.0,-0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end', 'true\n'],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[0.0,-0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[0.0,-0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[0.0,-0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[0.0,-0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  ['x,y=[0.0,-0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end', 'true\n'],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[0.0,-0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[0.0,-0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[0.0,-0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[0.0,-0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  ['x,y=[0.0,-0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end', 'true\n'],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[0.0,-0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[0.0,-0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[0.0,-0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[0.0,-0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'x,y=[0.0,-0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[0.0,-0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[0.0,-0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[0.0,-0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[0.0,-0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  ['x,y=[-0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end', 'true\n'],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[-0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[-0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[-0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[-0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  ['x,y=[-0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end', 'true\n'],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[-0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[-0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[-0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[-0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  ['x,y=[-0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end', 'true\n'],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[-0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[-0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[-0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[-0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'x,y=[-0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[-0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[-0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[-0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[-0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  ['x,y=[0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end', 'true\n'],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  ['x,y=[0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end', 'true\n'],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[0.0,0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  ['x,y=[0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end', 'true\n'],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  ['x,y=[0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end', 'true\n'],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[0.0,0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'x,y=begin;x=1.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=begin;x=1.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=begin;x=1.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=begin;x=1.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=begin;x=1.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'x,y=begin;x=1.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=begin;x=1.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=begin;x=1.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=begin;x=1.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=begin;x=1.0/0.0;[x,x];end;S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'x,y=begin;x=1.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=begin;x=1.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=begin;x=1.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=begin;x=1.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=begin;x=1.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'x,y=begin;x=1.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=begin;x=1.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=begin;x=1.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=begin;x=1.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=begin;x=1.0/0.0;[x,x];end;S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'x,y=[1.0/0.0,1.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[1.0/0.0,1.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[1.0/0.0,1.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[1.0/0.0,1.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[1.0/0.0,1.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'x,y=[1.0/0.0,1.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[1.0/0.0,1.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[1.0/0.0,1.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[1.0/0.0,1.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[1.0/0.0,1.0/0.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'x,y=[1.0/0.0,1.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[1.0/0.0,1.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[1.0/0.0,1.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[1.0/0.0,1.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[1.0/0.0,1.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'x,y=[1.0/0.0,1.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[1.0/0.0,1.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[1.0/0.0,1.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[1.0/0.0,1.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[1.0/0.0,1.0/0.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  ['x,y=[1,1];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end', 'true\n'],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[1,1];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[1,1];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[1,1];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[1,1];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  ['x,y=[1,1];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end', 'true\n'],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[1,1];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[1,1];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[1,1];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[1,1];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  ['x,y=[1,1];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end', 'true\n'],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[1,1];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[1,1];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[1,1];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[1,1];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  ['x,y=[1,1];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end', 'true\n'],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[1,1];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[1,1];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[1,1];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[1,1];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  ['x,y=[1,2];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end', 'false\n'],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[1,2];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[1,2];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'integer\nfalse\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[1,2];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[1,2];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'integer\nfalse\n',
+  ],
+  ['x,y=[1,2];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end', 'false\n'],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[1,2];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[1,2];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[1,2];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[1,2];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'integer\nfalse\n',
+  ],
+  ['x,y=[1,2];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end', 'false\n'],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[1,2];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[1,2];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'integer\nfalse\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[1,2];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[1,2];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'integer\nfalse\n',
+  ],
+  ['x,y=[1,2];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end', 'false\n'],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[1,2];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[1,2];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[1,2];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[1,2];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'integer\nfalse\n',
+  ],
+  ['x,y=[0.5,0.5];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end', 'true\n'],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[0.5,0.5];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[0.5,0.5];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[0.5,0.5];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[0.5,0.5];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  ['x,y=[0.5,0.5];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end', 'true\n'],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[0.5,0.5];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[0.5,0.5];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[0.5,0.5];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[0.5,0.5];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  ['x,y=[0.5,0.5];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end', 'true\n'],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[0.5,0.5];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[0.5,0.5];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[0.5,0.5];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[0.5,0.5];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  ['x,y=[0.5,0.5];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end', 'true\n'],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[0.5,0.5];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[0.5,0.5];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[0.5,0.5];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[0.5,0.5];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'true\n',
+  ],
+  ['x,y=[0.5,1.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end', 'false\n'],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[0.5,1.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[0.5,1.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[0.5,1.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[0.5,1.0];S=Struct.new(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  ['x,y=[0.5,1.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end', 'false\n'],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[0.5,1.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[0.5,1.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[0.5,1.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[0.5,1.0];S=Struct.new(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  ['x,y=[0.5,1.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end', 'false\n'],
+  [
+    'class Float;private;def ==(x);puts :float;false;end;end;x,y=[0.5,1.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;private;def ==(x);puts :integer;false;end;end;x,y=[0.5,1.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def ==(x);puts :float;false;end;end;x,y=[0.5,1.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def ==(x);puts :integer;false;end;end;x,y=[0.5,1.0];S=Data.define(:a);begin;p S.new(x).send(:==,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'x,y=[0.5,1.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Float;private;def eql?(x);puts :float;false;end;end;x,y=[0.5,1.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Integer;private;def eql?(x);puts :integer;false;end;end;x,y=[0.5,1.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Float;def ==(x);true;end;private;def eql?(x);puts :float;false;end;end;x,y=[0.5,1.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'float\nfalse\n',
+  ],
+  [
+    'class Integer;def ==(x);true;end;private;def eql?(x);puts :integer;false;end;end;x,y=[0.5,1.0];S=Data.define(:a);begin;p S.new(x).send(:eql?,S.new(y));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+] as const;
+
+test.each(nativeInternalIdentityCases)(
+  'Internal equality checks identity before callbacks and preserves numeric fast paths: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);

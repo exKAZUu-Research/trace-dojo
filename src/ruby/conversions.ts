@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 658 -- Ruby value conversion and encoded inspection share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 672 -- Ruby conversions, encoded inspection and internal equality share value representations; splitting by size would scatter those protocols.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { isCoreMethod } from './define';
 import { argumentError, implicitConversionError, rangeError, rubyError, typeError } from './errors';
@@ -29,6 +29,7 @@ import {
   frozenCoreString,
   isA,
   realClassOf,
+  sameIdentity,
   str,
   stringBytes,
   stringFromBytes,
@@ -660,7 +661,7 @@ export function quotedSymbolName(symbol: string | RSymbol): string {
 
 export function* rEquals(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = new Map()): Gen<boolean> {
   rt().spend();
-  if (a === b) return !isRubyFloat(a) || !Number.isNaN(Number(a));
+  if (sameIdentity(a, b)) return true;
   if (isOverridden(a, '==')) return truthy(yield* callMethod(a, '==', [b], undefined, undefined, { fcall: true }));
   if (typeof a === 'bigint' || isRubyFloat(a)) {
     if (typeof b === 'bigint' || isRubyFloat(b)) {
@@ -746,11 +747,13 @@ export function numericEquals(a: bigint | number, b: bigint | number): boolean {
   return Number.isInteger(float) && Number.isFinite(float) && BigInt(float) === integer;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- The ordered cases for Ruby value conversion and encoded inspection share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity 19 -- Identity and VM numeric fast paths must precede dynamic callbacks and recursion-aware container comparisons.
 export function* rEql(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = new Map()): Gen<boolean> {
   rt().spend();
-  if (a instanceof RBasic && isOverridden(a, 'eql?'))
-    return truthy(yield* callMethod(a, 'eql?', [b], undefined, undefined, { fcall: true }));
+  if (sameIdentity(a, b)) return true;
+  const numeric = optimizedNumericEql(a, b);
+  if (numeric !== undefined) return numeric;
+  if (isOverridden(a, 'eql?')) return truthy(yield* callMethod(a, 'eql?', [b], undefined, undefined, { fcall: true }));
   if (isRubyFloat(a) && isRubyFloat(b)) return Number(a) === Number(b);
   if (typeof a !== typeof b) return false;
   if (a instanceof RString)
@@ -764,6 +767,24 @@ export function* rEql(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = new 
       return truthy(yield* callMethod(a, 'eql?', [b], undefined, undefined, { fcall: true }));
   }
   return a === b;
+}
+
+function optimizedNumericEql(a: Value, b: Value): boolean | undefined {
+  if (
+    typeof a === 'bigint' &&
+    typeof b === 'bigint' &&
+    a >= -(1n << 62n) &&
+    a < 1n << 62n &&
+    b >= -(1n << 62n) &&
+    b < 1n << 62n &&
+    isCoreMethod(rt().c.Integer.findMethod('=='), rt().c.Integer, '==')
+  )
+    return a === b;
+  if (isRubyFloat(a) && isRubyFloat(b) && isCoreMethod(rt().c.Float.findMethod('=='), rt().c.Float, '==')) {
+    if (typeof a === 'number' && typeof b === 'number') return sameIdentity(a, b);
+    if (a instanceof RFloat) return Number(a) === Number(b);
+  }
+  return undefined;
 }
 
 function* eqlArray(a: RArray, b: RArray, pairs: Map<RBasic, Set<RBasic>>): Gen<boolean> {
