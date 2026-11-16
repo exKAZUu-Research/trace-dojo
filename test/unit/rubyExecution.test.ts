@@ -20060,7 +20060,6 @@ test.each(nativeWordBoundaryCases)(
 test.each([
   'Object.new.method_missing(:foo)',
   'Object.new.send(:method_missing,:foo)',
-  'Object.new.public_send(:method_missing,:foo)',
   'Object.new.send(:method_missing,*[:foo])',
 ])('missing root handlers fail explicitly instead of approximating VM arguments: %s', (call) => {
   expect(run(`class BasicObject;undef_method :method_missing;end;${call}`)).toMatchObject({
@@ -20780,6 +20779,432 @@ const nativeEnumeratorInitializationCases = [
 
 test.each(nativeEnumeratorInitializationCases)(
   'borrowed Enumerator initialization preserves native validation order: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
+
+const reflectedMissingIdentityCases = [
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;private :method_missing;end;begin;C.new.method_missing(){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;private :method_missing;end;begin;C.new.public_send(:method_missing){puts :block};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"no method name given"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;private :method_missing;end;begin;C.new.method_missing(:foo){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, :foo], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;private :method_missing;end;begin;C.new.public_send(:method_missing,:foo){puts :block};rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"private method \'foo\' called for an instance of C"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;private :method_missing;end;begin;C.new.method_missing(:foo,1,tag:2){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, :foo, 1], {tag: 2}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;private :method_missing;end;begin;C.new.public_send(:method_missing,:foo,1,tag:2){puts :block};rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"private method \'foo\' called for an instance of C"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;private :method_missing;end;begin;C.new.method_missing("foo"){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, "foo"], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;private :method_missing;end;begin;C.new.public_send(:method_missing,"foo"){puts :block};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"method name must be a Symbol but String is given"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;private :method_missing;end;begin;C.new.method_missing([1]){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, [1]], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;private :method_missing;end;begin;C.new.public_send(:method_missing,[1]){puts :block};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"method name must be a Symbol but Array is given"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;private :method_missing;end;begin;C.new.method_missing(**{tag:1}){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing], {tag: 1}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;private :method_missing;end;begin;C.new.public_send(:method_missing,**{tag:1}){puts :block};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"method name must be a Symbol but Hash is given"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;private :method_missing;end;begin;C.new.method_missing(*[:foo,2]){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, :foo, 2], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;private :method_missing;end;begin;C.new.public_send(:method_missing,*[:foo,2]){puts :block};rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"private method \'foo\' called for an instance of C"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;private :method_missing;end;begin;C.new.method_missing(:foo,*[],**{}){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, :foo], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;private :method_missing;end;begin;C.new.public_send(:method_missing,:foo,*[],**{}){puts :block};rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"private method \'foo\' called for an instance of C"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;protected :method_missing;end;begin;C.new.method_missing(){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;protected :method_missing;end;begin;C.new.public_send(:method_missing){puts :block};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"no method name given"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;protected :method_missing;end;begin;C.new.method_missing(:foo){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, :foo], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;protected :method_missing;end;begin;C.new.public_send(:method_missing,:foo){puts :block};rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"protected method \'foo\' called for an instance of C"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;protected :method_missing;end;begin;C.new.method_missing(:foo,1,tag:2){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, :foo, 1], {tag: 2}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;protected :method_missing;end;begin;C.new.public_send(:method_missing,:foo,1,tag:2){puts :block};rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"protected method \'foo\' called for an instance of C"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;protected :method_missing;end;begin;C.new.method_missing("foo"){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, "foo"], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;protected :method_missing;end;begin;C.new.public_send(:method_missing,"foo"){puts :block};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"method name must be a Symbol but String is given"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;protected :method_missing;end;begin;C.new.method_missing([1]){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, [1]], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;protected :method_missing;end;begin;C.new.public_send(:method_missing,[1]){puts :block};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"method name must be a Symbol but Array is given"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;protected :method_missing;end;begin;C.new.method_missing(**{tag:1}){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing], {tag: 1}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;protected :method_missing;end;begin;C.new.public_send(:method_missing,**{tag:1}){puts :block};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"method name must be a Symbol but Hash is given"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;protected :method_missing;end;begin;C.new.method_missing(*[:foo,2]){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, :foo, 2], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;protected :method_missing;end;begin;C.new.public_send(:method_missing,*[:foo,2]){puts :block};rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"protected method \'foo\' called for an instance of C"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;protected :method_missing;end;begin;C.new.method_missing(:foo,*[],**{}){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, :foo], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;protected :method_missing;end;begin;C.new.public_send(:method_missing,:foo,*[],**{}){puts :block};rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"protected method \'foo\' called for an instance of C"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;public :method_missing;end;begin;C.new.method_missing(){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;public :method_missing;end;begin;C.new.public_send(:method_missing){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;public :method_missing;end;begin;C.new.method_missing(:foo){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:foo], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;public :method_missing;end;begin;C.new.public_send(:method_missing,:foo){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:foo], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;public :method_missing;end;begin;C.new.method_missing(:foo,1,tag:2){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:foo, 1], {tag: 2}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;public :method_missing;end;begin;C.new.public_send(:method_missing,:foo,1,tag:2){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:foo, 1], {tag: 2}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;public :method_missing;end;begin;C.new.method_missing("foo"){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[["foo"], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;public :method_missing;end;begin;C.new.public_send(:method_missing,"foo"){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[["foo"], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;public :method_missing;end;begin;C.new.method_missing([1]){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[[1]], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;public :method_missing;end;begin;C.new.public_send(:method_missing,[1]){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[[1]], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;public :method_missing;end;begin;C.new.method_missing(**{tag:1}){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[], {tag: 1}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;public :method_missing;end;begin;C.new.public_send(:method_missing,**{tag:1}){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[], {tag: 1}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;public :method_missing;end;begin;C.new.method_missing(*[:foo,2]){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:foo, 2], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;public :method_missing;end;begin;C.new.public_send(:method_missing,*[:foo,2]){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:foo, 2], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;public :method_missing;end;begin;C.new.method_missing(:foo,*[],**{}){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:foo], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;alias method_missing foo;public :method_missing;end;begin;C.new.public_send(:method_missing,:foo,*[],**{}){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:foo], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));private :method_missing;end;begin;C.new.method_missing(){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));private :method_missing;end;begin;C.new.public_send(:method_missing){puts :block};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"no method name given"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));private :method_missing;end;begin;C.new.method_missing(:foo){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, :foo], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));private :method_missing;end;begin;C.new.public_send(:method_missing,:foo){puts :block};rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"private method \'foo\' called for an instance of C"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));private :method_missing;end;begin;C.new.method_missing(:foo,1,tag:2){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, :foo, 1], {tag: 2}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));private :method_missing;end;begin;C.new.public_send(:method_missing,:foo,1,tag:2){puts :block};rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"private method \'foo\' called for an instance of C"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));private :method_missing;end;begin;C.new.method_missing("foo"){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, "foo"], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));private :method_missing;end;begin;C.new.public_send(:method_missing,"foo"){puts :block};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"method name must be a Symbol but String is given"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));private :method_missing;end;begin;C.new.method_missing([1]){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, [1]], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));private :method_missing;end;begin;C.new.public_send(:method_missing,[1]){puts :block};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"method name must be a Symbol but Array is given"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));private :method_missing;end;begin;C.new.method_missing(**{tag:1}){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing], {tag: 1}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));private :method_missing;end;begin;C.new.public_send(:method_missing,**{tag:1}){puts :block};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"method name must be a Symbol but Hash is given"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));private :method_missing;end;begin;C.new.method_missing(*[:foo,2]){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, :foo, 2], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));private :method_missing;end;begin;C.new.public_send(:method_missing,*[:foo,2]){puts :block};rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"private method \'foo\' called for an instance of C"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));private :method_missing;end;begin;C.new.method_missing(:foo,*[],**{}){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, :foo], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));private :method_missing;end;begin;C.new.public_send(:method_missing,:foo,*[],**{}){puts :block};rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"private method \'foo\' called for an instance of C"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));protected :method_missing;end;begin;C.new.method_missing(){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));protected :method_missing;end;begin;C.new.public_send(:method_missing){puts :block};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"no method name given"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));protected :method_missing;end;begin;C.new.method_missing(:foo){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, :foo], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));protected :method_missing;end;begin;C.new.public_send(:method_missing,:foo){puts :block};rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"protected method \'foo\' called for an instance of C"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));protected :method_missing;end;begin;C.new.method_missing(:foo,1,tag:2){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, :foo, 1], {tag: 2}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));protected :method_missing;end;begin;C.new.public_send(:method_missing,:foo,1,tag:2){puts :block};rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"protected method \'foo\' called for an instance of C"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));protected :method_missing;end;begin;C.new.method_missing("foo"){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, "foo"], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));protected :method_missing;end;begin;C.new.public_send(:method_missing,"foo"){puts :block};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"method name must be a Symbol but String is given"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));protected :method_missing;end;begin;C.new.method_missing([1]){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, [1]], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));protected :method_missing;end;begin;C.new.public_send(:method_missing,[1]){puts :block};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"method name must be a Symbol but Array is given"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));protected :method_missing;end;begin;C.new.method_missing(**{tag:1}){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing], {tag: 1}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));protected :method_missing;end;begin;C.new.public_send(:method_missing,**{tag:1}){puts :block};rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"method name must be a Symbol but Hash is given"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));protected :method_missing;end;begin;C.new.method_missing(*[:foo,2]){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, :foo, 2], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));protected :method_missing;end;begin;C.new.public_send(:method_missing,*[:foo,2]){puts :block};rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"protected method \'foo\' called for an instance of C"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));protected :method_missing;end;begin;C.new.method_missing(:foo,*[],**{}){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:method_missing, :foo], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));protected :method_missing;end;begin;C.new.public_send(:method_missing,:foo,*[],**{}){puts :block};rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"protected method \'foo\' called for an instance of C"\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));public :method_missing;end;begin;C.new.method_missing(){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));public :method_missing;end;begin;C.new.public_send(:method_missing){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));public :method_missing;end;begin;C.new.method_missing(:foo){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:foo], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));public :method_missing;end;begin;C.new.public_send(:method_missing,:foo){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:foo], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));public :method_missing;end;begin;C.new.method_missing(:foo,1,tag:2){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:foo, 1], {tag: 2}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));public :method_missing;end;begin;C.new.public_send(:method_missing,:foo,1,tag:2){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:foo, 1], {tag: 2}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));public :method_missing;end;begin;C.new.method_missing("foo"){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[["foo"], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));public :method_missing;end;begin;C.new.public_send(:method_missing,"foo"){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[["foo"], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));public :method_missing;end;begin;C.new.method_missing([1]){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[[1]], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));public :method_missing;end;begin;C.new.public_send(:method_missing,[1]){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[[1]], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));public :method_missing;end;begin;C.new.method_missing(**{tag:1}){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[], {tag: 1}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));public :method_missing;end;begin;C.new.public_send(:method_missing,**{tag:1}){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[], {tag: 1}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));public :method_missing;end;begin;C.new.method_missing(*[:foo,2]){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:foo, 2], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));public :method_missing;end;begin;C.new.public_send(:method_missing,*[:foo,2]){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:foo, 2], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));public :method_missing;end;begin;C.new.method_missing(:foo,*[],**{}){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:foo], {}]\nblock\n',
+  ],
+  [
+    'class C;def foo(*a,**k,&b);puts :handler;p [a,k];b.call if b;end;define_method(:method_missing,instance_method(:foo));public :method_missing;end;begin;C.new.public_send(:method_missing,:foo,*[],**{}){puts :block};rescue=>e;p e.class,e.message;end',
+    'handler\n[[:foo], {}]\nblock\n',
+  ],
+  [
+    'class BasicObject;undef_method :method_missing;end;begin;Object.new.public_send(:method_missing);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"no method name given"\n',
+  ],
+  [
+    'class BasicObject;undef_method :method_missing;end;begin;Object.new.public_send(:method_missing,:foo);rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"undefined method \'foo\' for an instance of Object"\n',
+  ],
+  [
+    'class BasicObject;undef_method :method_missing;end;begin;Object.new.public_send(:method_missing,:foo,1,tag:2);rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"undefined method \'foo\' for an instance of Object"\n',
+  ],
+  [
+    'class BasicObject;undef_method :method_missing;end;begin;Object.new.public_send(:method_missing,"foo");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"method name must be a Symbol but String is given"\n',
+  ],
+  [
+    'class BasicObject;undef_method :method_missing;end;begin;Object.new.public_send(:method_missing,[1]);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"method name must be a Symbol but Array is given"\n',
+  ],
+  [
+    'class BasicObject;undef_method :method_missing;end;begin;Object.new.public_send(:method_missing,**{tag:1});rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"method name must be a Symbol but Hash is given"\n',
+  ],
+  [
+    'class BasicObject;undef_method :method_missing;end;begin;Object.new.public_send(:method_missing,*[:foo,2]);rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"undefined method \'foo\' for an instance of Object"\n',
+  ],
+  [
+    'class BasicObject;undef_method :method_missing;end;begin;Object.new.public_send(:method_missing,:foo,*[],**{});rescue=>e;p e.class,e.message;end',
+    'NoMethodError\n"undefined method \'foo\' for an instance of Object"\n',
+  ],
+] as const;
+
+test.each(reflectedMissingIdentityCases)(
+  'public_send respects both sides of missing-handler original identity: %s',
   (source, stdout) => {
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }

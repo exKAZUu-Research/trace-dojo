@@ -1903,6 +1903,8 @@ function* callMethodMissing(
   reason: MissingReason | undefined = options.vcall ? 'vcall' : undefined
 ): Gen {
   rt().missingReason = reason;
+  if (name === 'method_missing' && options.publicOnly)
+    raiseMethodMissing(recv, keywords ? [...args, keywords] : args, reason);
   const handler = classOf(recv).findMethod('method_missing');
   if (name === 'method_missing' && (reason === 'super' || !handler))
     throw new UnsupportedFeatureError('既定ハンドラがない method_missing のフォールバック');
