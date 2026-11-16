@@ -432,12 +432,14 @@ function defineMembers(type: StructType, child: Type): void {
     members.print = fnMember('ArrayList.print', (sema, call) => {
       const [allocatorArg, format, args] = expectArgs(sema, call, 3, 'print');
       const [allocator] = compileArgs(sema, [allocatorArg], [ALLOCATOR]);
-      const evaluateAllocator = allocator.eval;
       const list = receiverOf(sema, call.receiver, type, call.span, true);
       const print = compilePrint(sema, format, args, call.span);
-      return runtime(
+      return nativeStateCall(
         allocating(VOID),
-        (frame) => {
+        [allocator],
+        call.span,
+        (frame) => ({ receiver: list(frame) }),
+        (state, [allocator], frame) => {
           let bytes: bigint[];
           try {
             bytes = print(frame).map(BigInt);
@@ -445,11 +447,10 @@ function defineMembers(type: StructType, child: Type): void {
             if (error instanceof PrintWriteError) return ERROR_OUT_OF_MEMORY;
             throw error;
           }
-          const received = listOf(list(frame));
-          received.allocator = allocatorState(evaluateAllocator(frame));
+          const received = listOf(state.receiver);
+          received.allocator = allocatorState(allocator);
           return insertValues(frame, received, received.items.length, bytes);
-        },
-        call.span
+        }
       );
     });
   }

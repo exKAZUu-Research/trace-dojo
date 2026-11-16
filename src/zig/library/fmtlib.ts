@@ -18,7 +18,7 @@ import {
 import { ErrorValue, Slice, type Value } from '../values';
 import { allocating, allocatorArg, computed, constSlice, elements, generic, mutableSlice, newSlice } from './common';
 import { allocatorState, ERROR_OUT_OF_MEMORY, reserveNativeAllocation } from './heap';
-import { compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
+import { compileArgs, expectArgs, fnMember, type Member, nativeCall, nativeStruct } from './native';
 import { compilePrint, PrintWriteError } from './print';
 import type { WriterState } from './writer';
 
@@ -157,11 +157,12 @@ const MEMBERS: Record<string, () => Member> = {
     const [bufferArg, format, args] = expectArgs(sema, call, 3, 'std.fmt.bufPrint');
     const buffer = mutableSlice(sema, bufferArg, U8);
     const print = compilePrint(sema, format, args, call.span);
-    const evaluate = buffer.eval;
-    return runtime(
+    return nativeCall(
       errorUnionOf(errorSetOf(['NoSpaceLeft']), sliceOf(U8, false)),
-      (frame) => {
-        const target = evaluate(frame) as Slice;
+      [buffer],
+      call.span,
+      ([value], frame) => {
+        const target = value as Slice;
         const state: WriterState = { fd: undefined, buffer: target, end: 0, capacity: target.length };
         try {
           print(frame, state);
@@ -170,34 +171,29 @@ const MEMBERS: Record<string, () => Member> = {
           throw error;
         }
         return new Slice(target.target, target.start, state.end);
-      },
-      call.span
+      }
     );
   }),
   allocPrint: fnMember('std.fmt.allocPrint', (sema, call) => {
     const [allocatorArgument, format, args] = expectArgs(sema, call, 3, 'std.fmt.allocPrint');
-    const evaluateAllocator = allocatorArg(sema, allocatorArgument).eval;
+    const allocator = allocatorArg(sema, allocatorArgument);
     const print = compilePrint(sema, format, args, call.span);
-    return runtime(
-      allocating(sliceOf(U8, false)),
-      (frame) => {
-        const allocator = allocatorState(evaluateAllocator(frame));
-        let bytes: number[];
-        try {
-          bytes = print(frame);
-        } catch (error) {
-          if (error instanceof PrintWriteError) return ERROR_OUT_OF_MEMORY;
-          throw error;
-        }
-        frame.runtime.spend();
-        const complete = reserveNativeAllocation(frame, allocator, bytes.length, U8);
-        if (!complete) return ERROR_OUT_OF_MEMORY;
-        const slice = newSlice(bytes.map(BigInt));
-        complete(slice.target);
-        return slice;
-      },
-      call.span
-    );
+    return nativeCall(allocating(sliceOf(U8, false)), [allocator], call.span, ([value], frame) => {
+      const allocator = allocatorState(value);
+      let bytes: number[];
+      try {
+        bytes = print(frame);
+      } catch (error) {
+        if (error instanceof PrintWriteError) return ERROR_OUT_OF_MEMORY;
+        throw error;
+      }
+      frame.runtime.spend();
+      const complete = reserveNativeAllocation(frame, allocator, bytes.length, U8);
+      if (!complete) return ERROR_OUT_OF_MEMORY;
+      const slice = newSlice(bytes.map(BigInt));
+      complete(slice.target);
+      return slice;
+    });
   }),
   count: fnMember('std.fmt.count', (sema, call) => {
     const [format, args] = expectArgs(sema, call, 2, 'std.fmt.count');

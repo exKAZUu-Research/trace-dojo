@@ -1527,3 +1527,35 @@ pub fn main() void {
     uncaughtException: undefined,
   });
 });
+
+test('native formatting evaluates receivers, allocator prefixes and value arguments once in order', () => {
+  const source = `const std=@import("std");
+var n:u32=0;
+fn listOf(p:*std.ArrayList(u8)) *std.ArrayList(u8) { n=n*10+1; return p; }
+fn allocator() std.mem.Allocator { n=n*10+2; return std.heap.page_allocator; }
+fn buffer(p:[]u8) []u8 { n=n*10+2; return p; }
+fn writerOf(p:*std.Io.Writer) *std.Io.Writer { n=n*10+2; return p; }
+fn arg() u8 { n=n*10+3; return 7; }
+pub fn main() !void {
+    var list:std.ArrayList(u8)=.empty;
+    defer list.deinit(std.heap.page_allocator);
+    try listOf(&list).print(allocator(),"{}",.{arg()});
+    std.debug.print("{} {s}|",.{n,list.items});
+    n=0; try list.print(allocator(),"{}",.{arg()});
+    std.debug.print("{} {s}|",.{n,list.items});
+    n=0; const allocated=try std.fmt.allocPrint(allocator(),"{}",.{arg()});
+    defer std.heap.page_allocator.free(allocated);
+    std.debug.print("{} {s}|",.{n,allocated});
+    var bytes:[8]u8=undefined;
+    n=0; const text=try std.fmt.bufPrint(buffer(&bytes),"{}",.{arg()});
+    std.debug.print("{} {s}|",.{n,text});
+    var writer=std.Io.Writer.fixed(&bytes);
+    n=0; try writerOf(&writer).print("{}",.{arg()});
+    std.debug.print("{} {s}|",.{n,writer.buffered()});
+}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '123 7|23 77|23 7|23 7|23 7|',
+    uncaughtException: undefined,
+  });
+});

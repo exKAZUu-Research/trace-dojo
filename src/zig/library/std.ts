@@ -251,41 +251,33 @@ function addWriterMembers(): void {
       const [format, args] = expectArgs(sema, call, 2, 'print');
       const writer = writerOf(sema, call);
       const print = compilePrint(sema, format, args, call.span);
-      return runtime(errorUnionOf(WRITE_ERROR, VOID), (frame) => printInto(frame, writer(frame), print), call.span);
+      return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), [], call.span, writer, (state, _, frame) =>
+        printInto(frame, state, print)
+      );
     }),
     writeAll: fnMember('Writer.writeAll', (sema, call) => {
       const writer = writerOf(sema, call);
       const [bytes] = compileArgs(sema, expectArgs(sema, call, 1, 'writeAll'), [CONST_U8_SLICE]);
-      const evaluate = bytes.eval;
-      return runtime(
-        errorUnionOf(WRITE_ERROR, VOID),
-        (frame) => writeTo(frame, writer(frame), byteValues(evaluate(frame)).map(Number)),
-        call.span
+      return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), [bytes], call.span, writer, (state, [value], frame) =>
+        writeTo(frame, state, byteValues(value).map(Number))
       );
     }),
     writeByte: fnMember('Writer.writeByte', (sema, call) => {
       const writer = writerOf(sema, call);
       const [byte] = compileArgs(sema, expectArgs(sema, call, 1, 'writeByte'), [U8]);
-      const evaluate = byte.eval;
-      return runtime(
-        errorUnionOf(WRITE_ERROR, VOID),
-        (frame) => writeTo(frame, writer(frame), [Number(evaluate(frame) as bigint)]),
-        call.span
+      return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), [byte], call.span, writer, (state, [value], frame) =>
+        writeTo(frame, state, [Number(value as bigint)])
       );
     }),
     splatByteAll: fnMember('Writer.splatByteAll', (sema, call) => {
       const writer = writerOf(sema, call);
       const [byte, count] = compileArgs(sema, expectArgs(sema, call, 2, 'splatByteAll'), [U8, USIZE]);
-      const evaluateByte = byte.eval;
-      const evaluateCount = count.eval;
-      return runtime(
+      return nativeStateCall(
         errorUnionOf(WRITE_ERROR, VOID),
-        (frame) => {
-          const state = writer(frame);
-          const byte = Number(evaluateByte(frame) as bigint);
-          return writeRepeated(frame, state, [byte], Number(evaluateCount(frame) as bigint));
-        },
-        call.span
+        [byte, count],
+        call.span,
+        writer,
+        (state, [byte, count], frame) => writeRepeated(frame, state, [Number(byte as bigint)], Number(count as bigint))
       );
     }),
     write: fnMember('Writer.write', (sema, call) => {
