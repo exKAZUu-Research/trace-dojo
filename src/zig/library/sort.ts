@@ -1,6 +1,5 @@
-import type { Span } from '../ast';
 import { type Frame, withHeldValues } from '../runtime';
-import { copyForFrame, known, type SemaApi } from '../semaBase';
+import { copyForFrame, known } from '../semaBase';
 import { BOOL, fnType, optionalOf, type StructType, type Type, typeName, USIZE, VOID } from '../types';
 import { FnValue, NULL, optionalSome, Slice, type Value, ZStruct } from '../values';
 import { blockSortFunction, runBlockSort } from './blockSort';
@@ -15,7 +14,7 @@ import {
   ORDER_LT,
   tupleOf,
 } from './common';
-import { type Member, nativeCall, nativeFunction, nativeStruct } from './native';
+import { callbackFunction, checkCallback, type Member, nativeCall, nativeFunction, nativeStruct } from './native';
 import { type SortAlgorithm, sortValues } from './sorting';
 
 /** `std.sort.asc(T)` and `desc(T)`: comparison functions for `std.mem.sort`. */
@@ -43,9 +42,8 @@ export function sorter(name: string, algorithm: SortAlgorithm): () => Member {
   return generic(name, 4, (sema, call, type, [itemsArg, contextArg, lessThanArg]) => {
     const items = mutableSlice(sema, itemsArg, type);
     const context = sema.compile(contextArg);
-    const lessThan = sema.functionOf(sema.compile(lessThanArg), lessThanArg);
-    checkParams(sema, name, lessThan.params, [context.type, type, type], lessThanArg);
-    if (lessThan.returnType !== BOOL) sema.error(lessThanArg, '比べる関数の戻り値は bool にしてください。');
+    const lessThan = callbackFunction(sema, sema.compile(lessThanArg), lessThanArg);
+    checkCallback(sema, name, lessThan, [context.type, type, type], BOOL, lessThanArg);
     const block = algorithm === 'block' ? blockSortFunction(sema, type, context.type, call.span) : undefined;
     return nativeCall(VOID, [items, context], call.span, ([value, contextValue], frame) => {
       const slice = value as Slice;
@@ -63,17 +61,26 @@ export function sorter(name: string, algorithm: SortAlgorithm): () => Member {
 }
 
 /** Functions of `(T, items, context, f)` that read the items with a function of the context and elements. */
+// code-gauge-allow duplicateLines 15 -- Reader and range-query registrations share setup but generate different search loops.
 function reader(
   name: string,
   elementCount: 1 | 2,
+  callbackReturn: Type,
   resultType: (type: Type) => Type,
   compute: (items: Slice, call: (args: Value[]) => Value, frame: Frame, type: Type) => Value
 ): () => Member {
   return generic(name, 4, (sema, call, type, [itemsArg, contextArg, fnArg]) => {
     const items = constSlice(sema, itemsArg, type);
     const context = sema.compile(contextArg);
-    const fn = sema.functionOf(sema.compile(fnArg), fnArg);
-    checkParams(sema, name, fn.params, [context.type, ...Array.from({ length: elementCount }, () => type)], fnArg);
+    const fn = callbackFunction(sema, sema.compile(fnArg), fnArg);
+    checkCallback(
+      sema,
+      name,
+      fn,
+      [context.type, ...Array.from({ length: elementCount }, () => type)],
+      callbackReturn,
+      fnArg
+    );
     return nativeCall(resultType(type), [items, context], call.span, ([slice, contextValue], frame: Frame) => {
       return compute(
         slice as Slice,
@@ -86,21 +93,6 @@ function reader(
       );
     });
   });
-}
-
-/** Zig requires the function's parameters to be exactly the context's type followed by the element type. */
-function checkParams(
-  sema: SemaApi,
-  name: string,
-  params: readonly Type[],
-  expected: readonly Type[],
-  span: Span
-): void {
-  if (params.length === expected.length && params.every((param, index) => param === expected[index])) return;
-  sema.error(
-    span,
-    `${name} に渡す関数の引数は、(${expected.map((type) => typeName(type)).join(', ')}) にしてください。`
-  );
 }
 
 function binarySearch(items: Slice, order: (item: Value) => bigint): Value {
@@ -152,12 +144,13 @@ function extremum(items: Slice, call: (args: Value[]) => Value, frame: Frame, ty
 }
 
 /** `equalRange(T, items, context, compareFn)`: the bounds of the items the function finds equal. */
+// code-gauge-allow duplicateLines 15 -- Reader and range-query registrations share setup but generate different search loops.
 function equalRangeMember(): Member {
   return generic('std.sort.equalRange', 4, (sema, call, type, [itemsArg, contextArg, fnArg]) => {
     const items = constSlice(sema, itemsArg, type);
     const context = sema.compile(contextArg);
-    const fn = sema.functionOf(sema.compile(fnArg), fnArg);
-    checkParams(sema, 'std.sort.equalRange', fn.params, [context.type, type], fnArg);
+    const fn = callbackFunction(sema, sema.compile(fnArg), fnArg);
+    checkCallback(sema, 'std.sort.equalRange', fn, [context.type, type], ORDER, fnArg);
     return nativeCall(
       tupleOf(sema, [USIZE, USIZE]),
       [items, context],
@@ -197,6 +190,7 @@ const MEMBERS: Record<string, () => Member> = {
   isSorted: reader(
     'std.sort.isSorted',
     2,
+    BOOL,
     () => BOOL,
     (items, call) => {
       for (let index = 1; index < items.length; index++)
@@ -207,6 +201,7 @@ const MEMBERS: Record<string, () => Member> = {
   binarySearch: reader(
     'std.sort.binarySearch',
     1,
+    ORDER,
     () => optionalOf(USIZE),
     (items, call) => binarySearch(items, (item) => call([item]) as bigint)
   ),
@@ -214,36 +209,42 @@ const MEMBERS: Record<string, () => Member> = {
   lowerBound: reader(
     'std.sort.lowerBound',
     1,
+    ORDER,
     () => USIZE,
     (items, call) => BigInt(partitionPoint(items, (item) => (call([item]) as bigint) === ORDER_GT))
   ),
   upperBound: reader(
     'std.sort.upperBound',
     1,
+    ORDER,
     () => USIZE,
     (items, call) => BigInt(partitionPoint(items, (item) => (call([item]) as bigint) !== ORDER_LT))
   ),
   partitionPoint: reader(
     'std.sort.partitionPoint',
     1,
+    BOOL,
     () => USIZE,
     (items, call) => BigInt(partitionPoint(items, (item) => call([item]) as boolean))
   ),
   argMin: reader(
     'std.sort.argMin',
     2,
+    BOOL,
     () => optionalOf(USIZE),
     (items, call, frame, type) => extremum(items, call, frame, type, false)
   ),
   argMax: reader(
     'std.sort.argMax',
     2,
+    BOOL,
     () => optionalOf(USIZE),
     (items, call, frame, type) => extremum(items, call, frame, type, true)
   ),
   min: reader(
     'std.sort.min',
     2,
+    BOOL,
     (type) => optionalOf(type),
     (items, call, frame, type) => {
       const index = extremum(items, call, frame, type, false);
@@ -253,6 +254,7 @@ const MEMBERS: Record<string, () => Member> = {
   max: reader(
     'std.sort.max',
     2,
+    BOOL,
     (type) => optionalOf(type),
     (items, call, frame, type) => {
       const index = extremum(items, call, frame, type, true);

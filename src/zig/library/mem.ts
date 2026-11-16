@@ -53,6 +53,7 @@ import {
   type Member,
   nativeCall,
   nativeStruct,
+  structReceiver,
   typeMember,
 } from './native';
 import { sorter } from './sort';
@@ -197,7 +198,8 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
   ): (() => Member) =>
     fnMember(`${key}.${name}`, (sema, call) => {
       expectArgs(sema, call, 0, name);
-      const state = iteratorState(sema, call.receiver, created, call.span);
+      const mutable = name !== 'rest' && !(kind === 'split' && name === 'peek');
+      const state = structReceiver(sema, call, created, mutable);
       return runtime(
         returnType,
         (frame) => {
@@ -248,6 +250,8 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
             return subSlice(state.slots[0] as Slice, start, end - start);
           }),
           first: method('first', resultSlice, (state, equal) => {
+            if (state.slots[1] === NULL) panic(PANIC.nullUnwrap);
+            if (state.slots[1] !== 0n) panic(PANIC.unreachable);
             const buffer = elements(state.slots[0]);
             let end = buffer.length;
             for (let index = 0; index < buffer.length; index++) {
@@ -310,24 +314,6 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
         };
   addMembers(created, members);
   return created;
-}
-
-function iteratorState(
-  sema: SemaApi,
-  receiver: TExpr | undefined,
-  type: StructType,
-  span: Span
-): (frame: Frame) => ZStruct {
-  if (!receiver) return sema.error(span, 'イテレータの値に対して呼び出してください。');
-  const evaluate = receiver.eval;
-  if (receiver.type.kind === 'pointer' && receiver.type.child === type)
-    return (frame) => (evaluate(frame) as Pointer).load() as ZStruct;
-  if (receiver.type !== type) return sema.error(span, 'イテレータの値に対して呼び出してください。');
-  const address = sema.addressOf(receiver);
-  if (address.type.kind === 'pointer' && address.type.isConst)
-    sema.error(span, 'イテレータは var で宣言してください。');
-  const locate = address.eval;
-  return (frame) => (locate(frame) as Pointer).load() as ZStruct;
 }
 
 function iteratorFactory(name: string, kind: 'split' | 'token', delimiter: DelimiterKind): () => Member {
@@ -534,12 +520,16 @@ const MEMBERS: Record<string, () => Member> = {
       const list = constSlice(sema, listArg, type);
       const element = sema.coerce(sema.compile(elementArg, type), type, elementArg);
       const minimum = sema.coerce(sema.compile(minArg, USIZE), USIZE, minArg);
-      return computed(
-        BOOL,
-        [list, element, minimum],
-        call.span,
-        ([value, x, n]) => BigInt(elements(value).filter((item) => equalValues(item, x)).length) >= (n as bigint)
-      );
+      return computed(BOOL, [list, element, minimum], call.span, ([value, x, n], frame) => {
+        const list = value as Slice;
+        let count = 0n;
+        const equal = comparisonBudget(sema, frame);
+        for (let index = 0; index < list.length; index++) {
+          if (equal(list.get(index), x)) count++;
+          if (count >= (n as bigint)) return true;
+        }
+        return false;
+      });
     }
   ),
   rotate: generic('std.mem.rotate', 3, (sema, call, type, [itemsArg, amountArg]) => {

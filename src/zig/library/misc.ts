@@ -1,5 +1,6 @@
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Span } from '../ast';
+import { isIntegerType } from '../operands';
 import { type Frame, withHeldValues } from '../runtime';
 import { copyForStorage, FnRef, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
@@ -7,6 +8,7 @@ import {
   CONST_U8_SLICE,
   errorSetOf,
   errorUnionOf,
+  fitsInt,
   intType,
   optionalOf,
   sliceOf,
@@ -43,6 +45,7 @@ import {
   equalValues,
   mutableSlice,
   newSlice,
+  ORDER,
   ORDER_GT,
   ORDER_LT,
   storeSliceValue,
@@ -56,7 +59,18 @@ import {
   freeMemory,
   reserveNativeAllocation,
 } from './heap';
-import { addMembers, compileArgs, expectArgs, fnMember, type Member, nativeStateCall, nativeStruct } from './native';
+import {
+  addMembers,
+  callbackFunction,
+  checkCallback,
+  compileArgs,
+  expectArgs,
+  fnMember,
+  type Member,
+  nativeStateCall,
+  nativeStruct,
+  structReceiver,
+} from './native';
 
 // std.unicode -----------------------------------------------------------------------------------------------------------
 
@@ -351,11 +365,9 @@ const ENUMS: Record<string, () => Member> = {
     if (type.kind !== 'enum') return sema.error(typeArg, 'fromInt には enum の型を渡してください。');
     const fields = sema.enumFields(type);
     const value = sema.compile(valueArg);
-    return computed(
-      optionalOf(type),
-      [value],
-      call.span,
-      ([n]) => fields.find((field) => field.value === n)?.value ?? NULL
+    if (!isIntegerType(value.type)) return sema.error(valueArg, 'fromInt の値は整数にしてください。');
+    return computed(optionalOf(type), [value], call.span, ([n]) =>
+      fitsInt(n as bigint, type.tagType!) && (!type.exhaustive || fields.some((field) => field.value === n)) ? n : NULL
     );
   }),
   values: fnMember('std.enums.values', (sema, call) => {
@@ -446,7 +458,7 @@ function priorityQueueType(
       sema.resolveStorage(element, call.span);
       const expected = allocator ? [ALLOCATOR, ...args] : args;
       const compiled = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
-      const queue = queueState(sema, call.receiver, type, call.span);
+      const queue = structReceiver(sema, call, type, !['peek', 'count', 'capacity'].includes(name));
       return nativeStateCall(
         result,
         compiled,
@@ -534,21 +546,6 @@ function priorityQueueType(
   return type;
 }
 
-function queueState(
-  sema: SemaApi,
-  receiver: TExpr | undefined,
-  type: StructType,
-  span: Span
-): (frame: Frame) => ZStruct {
-  if (!receiver) return sema.error(span, 'PriorityQueue に対して呼び出してください。');
-  let pointer = receiver;
-  if (receiver.type === type) pointer = sema.addressOf(receiver);
-  if (pointer.type.kind !== 'pointer' || pointer.type.child !== type)
-    return sema.error(span, 'PriorityQueue に対して呼び出してください。');
-  const evaluate = pointer.eval;
-  return (frame) => (evaluate(frame) as Pointer).load() as ZStruct;
-}
-
 let queueKeys = 0;
 const compareKeys = new WeakMap<object, number>();
 
@@ -557,7 +554,8 @@ export const PRIORITY_QUEUE = fnMember('std.PriorityQueue', (sema, call) => {
   const element = sema.compileType(elementArg);
   const context = sema.compileType(contextArg);
   const compareExpression = sema.compile(compareArg);
-  const compare = sema.functionOf(compareExpression, compareArg);
+  const compare = callbackFunction(sema, compareExpression, compareArg);
+  checkCallback(sema, 'std.PriorityQueue', compare, [context, element, element], ORDER, compareArg);
   // The same function, named twice, gives the same queue type.
   const named = compareExpression.value as unknown;
   const identity = (

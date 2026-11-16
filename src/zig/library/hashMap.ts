@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 415 -- Keeps hash-map state, storage layout, and public method registration together.
+// code-gauge-allow-file fileNcss 417 -- Keeps hash-map state, storage layout, and public method registration together.
 import { allocationSlots } from '../allocation';
 import { reserveAllocatorBytes } from '../allocatorStorage';
 // code-gauge-allow-file duplicateLines 19 -- Library types repeat the same shape of method on purpose, each over its own state.
@@ -438,7 +438,7 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       (state, [key, value], frame) => {
         const slot = getOrPut(frame, state, key, keyType, valueType, kind);
         if (!slot) return ERROR_OUT_OF_MEMORY;
-        storeInto(state.keys, slot.index, key);
+        if (!slot.found) storeInto(state.keys, slot.index, key);
         storeInto(state.values, slot.index, value);
         return;
       }
@@ -469,7 +469,7 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
         const previous = slot.found
           ? new ZStruct([copyForStorage(state.keys.slots[slot.index]), copyForStorage(state.values.slots[slot.index])])
           : NULL;
-        storeInto(state.keys, slot.index, key);
+        if (!slot.found) storeInto(state.keys, slot.index, key);
         storeInto(state.values, slot.index, value);
         return previous;
       }

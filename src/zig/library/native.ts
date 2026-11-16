@@ -13,14 +13,16 @@ import {
 } from '../semaBase';
 import {
   type Decl,
+  fnType,
   type Namespace,
   type StructField,
   type StructType,
   TYPE,
   type Type,
+  typeName,
   VOID as VOID_TYPE,
 } from '../types';
-import { NativeHandle, type NativeState, type Value } from '../values';
+import { NativeHandle, type NativeState, type Pointer, type Value, type ZStruct } from '../values';
 import { PUBLIC_STD_MEMBERS } from './publicMembers';
 
 /** A declaration's type and value, which a native namespace resolves on first use. */
@@ -109,6 +111,55 @@ export function expectArgs(sema: SemaApi, call: NativeCall, count: number, name:
 /** Compiles arguments with their expected types, coercing each. */
 export function compileArgs(sema: SemaApi, args: readonly Expression[], types: readonly Type[]): TExpr[] {
   return args.map((arg, index) => sema.coerce(sema.compile(arg, types[index]), types[index], arg));
+}
+
+export function structReceiver(
+  sema: SemaApi,
+  call: Pick<NativeCall, 'receiver' | 'span'>,
+  type: StructType,
+  mutable: boolean
+): (frame: Frame) => ZStruct {
+  const receiver = call.receiver;
+  if (!mutable && receiver?.type === type) return (frame) => receiver.eval(frame) as ZStruct;
+  const evaluate = receiverAddress(sema, call, type, mutable).eval;
+  return (frame) => (evaluate(frame) as Pointer).load() as ZStruct;
+}
+
+export function receiverAddress(
+  sema: SemaApi,
+  call: Pick<NativeCall, 'receiver' | 'span'>,
+  type: StructType,
+  mutable = true
+): TExpr {
+  const receiver = call.receiver;
+  if (!receiver) return sema.error(call.span, `${typeName(type)} の値に対して呼び出してください。`);
+  const pointer = receiver.type === type ? sema.addressOf(receiver) : receiver;
+  if (pointer.type.kind !== 'pointer' || pointer.type.size !== 'one' || pointer.type.child !== type)
+    return sema.error(call.span, `${typeName(type)} の値に対して呼び出してください。`);
+  if (mutable && pointer.type.isConst) return sema.error(call.span, `定数の ${typeName(type)} は変更できません。`);
+  return pointer;
+}
+
+export function callbackFunction(sema: SemaApi, value: TExpr, span: Span): ReturnType<SemaApi['functionOf']> {
+  if (value.type.kind !== 'fn') return sema.error(span, '関数へのポインタではなく、関数の値を渡してください。');
+  return sema.functionOf(value, span);
+}
+
+export function checkCallback(
+  sema: SemaApi,
+  name: string,
+  callback: { params: readonly Type[]; returnType: Type },
+  expected: readonly Type[],
+  result: Type,
+  span: Span
+): void {
+  if (
+    callback.returnType === result &&
+    callback.params.length === expected.length &&
+    callback.params.every((param, index) => param === expected[index])
+  )
+    return;
+  sema.error(span, `${name} に渡す関数は ${typeName(fnType(expected, result))} にしてください。`);
 }
 
 /** A call computed natively from its arguments' values at run time. */

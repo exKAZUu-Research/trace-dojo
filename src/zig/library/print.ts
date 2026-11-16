@@ -119,10 +119,14 @@ function formatMethod(sema: SemaApi, type: Type, span: Span): FormatMethod {
   const invalid = new FormatError(`invalid format string 'f' for type '${typeName(type)}'`);
   if (type.kind !== 'struct' && type.kind !== 'union' && type.kind !== 'enum') throw invalid;
   const decl = sema.findDecl(type, 'format');
-  if (!decl) throw invalid;
+  if (!decl || (decl.kind !== 'native' && !decl.syntax.isPub)) throw invalid;
   const fn = sema.functionOf(sema.resolveDecl(decl, span), span);
   const [selfType, writerType] = fn.params;
-  if (fn.params.length !== 2 || writerType !== pointerTo(WRITER, false)) {
+  if (
+    fn.params.length !== 2 ||
+    writerType !== pointerTo(WRITER, false) ||
+    (selfType !== type && selfType !== pointerTo(type, true))
+  ) {
     throw new FormatError(`format には (self: ${typeName(type)}, w: *std.Io.Writer) を受け取らせてください`);
   }
   sema.coerce(

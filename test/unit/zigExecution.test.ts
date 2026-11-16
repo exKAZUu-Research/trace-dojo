@@ -3082,3 +3082,122 @@ test.each(['void', 'struct{}'])(
     });
   }
 );
+
+test.each(['put', 'fetchPut'])('StringHashMap %s preserves the original stored key on update', (method) => {
+  const update =
+    method === 'put'
+      ? 'try m.put(&b,2);'
+      : 'const old=(try m.fetchPut(&b,2)).?;std.debug.print("{} {}|",.{&old.key[0]==&a[0],old.value});';
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a=[_]u8{97,98,99};var b=[_]u8{97,98,99};var m=std.StringHashMap(u8).init(init.gpa);try m.put(&a,1);${update}var it=m.iterator();const e=it.next().?;std.debug.print("{} {}",.{&e.key_ptr.*[0]==&a[0],e.value_ptr.*});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: method === 'put' ? 'true 2' : 'true 1|true 2',
+    uncaughtException: undefined,
+  });
+});
+
+test('split readonly queries and token rest accept constant iterators', () => {
+  const source = `const std=@import("std");pub fn main()void{const s=std.mem.splitScalar(u8,"a,b",44);const t=std.mem.tokenizeScalar(u8," a b",32);std.debug.print("{s}|{s}|{s}",.{s.peek().?,s.rest(),t.rest()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'a|a,b|a b',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['next', 'first', 'reset'])('split %s rejects a const pointer receiver', (method) => {
+  const call = method === 'reset' ? 'p.reset();' : `_=p.${method}();`;
+  const source = `const std=@import("std");pub fn main()void{var it=std.mem.splitScalar(u8,"a,b",44);const p:*const @TypeOf(it)=&it;${call}}`;
+  expect(executeProgram('zig', source).kind).toBe('compileError');
+});
+
+test.each(['_=it.next();', '_=it.next();_=it.next();'])(
+  'split first checks the current iteration state: %s',
+  (advance) => {
+    const source = `const std=@import("std");pub fn main()void{var it=std.mem.splitScalar(u8,"a,b",44);${advance}std.debug.print("{s}",.{it.first()});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '',
+      uncaughtException: expect.stringContaining(
+        advance.includes('_=it.next();_=it.next();') ? 'attempt to use null value' : 'reached unreachable code'
+      ),
+    });
+  }
+);
+
+test('containsAtLeastScalar checks thresholds during iteration and returns false for empty input', () => {
+  const source = `const std=@import("std");pub fn main()void{std.debug.print("{} {} {} {}",.{std.mem.containsAtLeastScalar(u8,"",97,0),std.mem.containsAtLeastScalar(u8,"b",97,0),std.mem.containsAtLeastScalar(u8,"a",97,1),std.mem.containsAtLeastScalar(u8,"b",97,1)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'false true true false',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['isSorted', 'fn compare(_:void,a:u8,b:u8)u8{return @intFromBool(a<b);}'],
+  ['binarySearch', 'fn compare(_:void,a:u8)bool{return a<2;}'],
+  ['partitionPoint', 'fn compare(_:void,a:u8)std.math.Order{return std.math.order(a,2);}'],
+  ['equalRange', 'fn compare(_:void,a:u8)bool{return a<2;}'],
+])('sort query %s requires its complete callback signature', (method, compare) => {
+  const source = `const std=@import("std");${compare}pub fn main()void{const a=[_]u8{1,2};_=std.sort.${method}(u8,&a,{},compare);}`;
+  expect(executeProgram('zig', source).kind).toBe('compileError');
+});
+
+test('enums fromInt accepts representable unnamed tags and retains exhaustive membership checks', () => {
+  const source = `const std=@import("std");const E=enum(u8){a=1,_};const S=enum(i8){a=1,_};const F=enum(u8){a=1};pub fn main()void{std.debug.print("{} {} {} {}",.{@intFromEnum(std.enums.fromInt(E,2).?),@intFromEnum(std.enums.fromInt(S,-2).?),std.enums.fromInt(S,200)==null,std.enums.fromInt(F,2)==null});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '2 -2 true true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['push(init.gpa,1)', 'pop()'])('priority queue %s rejects const value and pointer receivers', (operation) => {
+  for (const receiver of ['q', 'p']) {
+    const source = `const std=@import("std");fn cmp(_:void,a:u8,b:u8)std.math.Order{return std.math.order(a,b);}pub fn main(init:std.process.Init)!void{${operation === 'pop()' ? '_=init;' : ''}const q:std.PriorityQueue(u8,void,cmp)=.empty;${receiver === 'p' ? 'const p=&q;' : ''}${operation === 'pop()' ? '_=' : 'try '}${receiver}.${operation};}`;
+    expect(executeProgram('zig', source).kind).toBe('compileError');
+  }
+});
+
+test('priority queue readonly queries accept constant values and pointers', () => {
+  const source = `const std=@import("std");fn cmp(_:void,a:u8,b:u8)std.math.Order{return std.math.order(a,b);}pub fn main()void{const q:std.PriorityQueue(u8,void,cmp)=.empty;const p=&q;std.debug.print("{} {} {}",.{q.count(),p.capacity(),p.peek()==null});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '0 0 true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['u8', '*P'])('custom format rejects an incompatible receiver type %s', (self) => {
+  const source = `const std=@import("std");const P=struct{pub fn format(self:${self},w:*std.Io.Writer)void{_=self;_=w;}};pub fn main()void{std.debug.print("{f}",.{P{}});}`;
+  expect(executeProgram('zig', source).kind).toBe('compileError');
+});
+
+test('custom format permits a const pointer receiver', () => {
+  const source = `const std=@import("std");const P=struct{x:u8,pub fn format(self:*const P,w:*std.Io.Writer)std.Io.Writer.Error!void{try w.print("{}",.{self.x});}};pub fn main()void{std.debug.print("{f}",.{P{.x=3}});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '3', uncaughtException: undefined });
+});
+
+test('priority queue comparator requires the declared context, element and Order types', () => {
+  for (const compare of [
+    'fn cmp(_:void,a:u8,b:u8)bool{return a<b;}',
+    'fn cmp(_:void,a:u16,b:u16)std.math.Order{return std.math.order(a,b);}',
+  ]) {
+    const source = `const std=@import("std");${compare}pub fn main()void{const q:std.PriorityQueue(u8,void,cmp)=.empty;_=q;}`;
+    expect(executeProgram('zig', source).kind).toBe('compileError');
+  }
+});
+
+test.each(['std.mem.sort', 'std.sort.block', 'std.sort.isSorted'])(
+  '%s requires a function value rather than a function pointer',
+  (method) => {
+    const source = `const std=@import("std");fn less(_:void,a:i32,b:i32)bool{return a<b;}pub fn main()void{var a=[_]i32{3,2,1};${method.endsWith('isSorted') ? '_=' : ''}${method}(i32,&a,{},&less);}`;
+    expect(executeProgram('zig', source).kind).toBe('compileError');
+  }
+);
+
+test('custom formatting requires a public format method', () => {
+  const source = `const std=@import("std");const P=struct{fn format(_:P,w:*std.Io.Writer)std.Io.Writer.Error!void{try w.writeAll("x");}};pub fn main()void{std.debug.print("{f}",.{P{}});}`;
+  expect(executeProgram('zig', source).kind).toBe('compileError');
+});

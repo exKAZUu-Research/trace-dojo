@@ -57,6 +57,7 @@ import {
   nativeCall,
   nativeStateCall,
   nativeStruct,
+  receiverAddress,
   typeMember,
   unavailableDeclarations,
   unavailableMember,
@@ -273,18 +274,7 @@ function allocatorInstanceType(
 }
 
 function instancePointer(sema: SemaApi, call: NativeCall, type: StructType): TExpr {
-  const receiver = call.receiver;
-  if (!receiver) return sema.error(call.span, `${type.namespace.name} の値に対して呼び出してください。`);
-  if (receiver.type.kind === 'pointer' && receiver.type.child === type) {
-    if (receiver.type.isConst)
-      return sema.error(call.span, `定数の ${type.namespace.name} は使えません（var で宣言してください）。`);
-    return receiver;
-  }
-  if (receiver.type !== type) return sema.error(call.span, `${type.namespace.name} の値に対して呼び出してください。`);
-  const address = sema.addressOf(receiver);
-  if (address.type.kind === 'pointer' && address.type.isConst)
-    sema.error(call.span, `定数の ${type.namespace.name} は使えません（var で宣言してください）。`);
-  return address;
+  return receiverAddress(sema, call, type);
 }
 
 function instanceValue(sema: SemaApi, call: NativeCall, type: StructType): TExpr {

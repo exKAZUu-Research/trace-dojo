@@ -42,7 +42,16 @@ import {
   nativeEnum,
   reserveNativeAllocation,
 } from './heap';
-import { addMembers, compileArgs, expectArgs, fnMember, type Member, nativeStateCall, nativeStruct } from './native';
+import {
+  addMembers,
+  compileArgs,
+  expectArgs,
+  fnMember,
+  type Member,
+  nativeStateCall,
+  nativeStruct,
+  structReceiver,
+} from './native';
 import { compilePrint, PrintWriteError } from './print';
 import type { WriterState } from './writer';
 
@@ -564,23 +573,7 @@ function receiverOf(
   span: Span,
   mutable: boolean
 ): (frame: Frame) => ZStruct {
-  if (!receiver) return sema.error(span, 'ArrayList の値に対して呼び出してください。');
-  const evaluate = receiver.eval;
-  if (receiver.type.kind === 'pointer' && receiver.type.child === type) {
-    if (mutable && receiver.type.isConst)
-      sema.error(span, '定数の ArrayList は変更できません（var で宣言してください）。');
-    return (frame) => (evaluate(frame) as Pointer).load() as ZStruct;
-  }
-  if (receiver.type !== type) return sema.error(span, 'ArrayList の値に対して呼び出してください。');
-  if (mutable) {
-    const address = sema.addressOf(receiver);
-    if (address.type.kind === 'pointer' && address.type.isConst) {
-      sema.error(span, '定数の ArrayList は変更できません（var で宣言してください）。');
-    }
-    const locate = address.eval;
-    return (frame) => (locate(frame) as Pointer).load() as ZStruct;
-  }
-  return (frame) => evaluate(frame) as ZStruct;
+  return structReceiver(sema, { receiver, span }, type, mutable);
 }
 
 export function arrayListFactory(): () => Member {
