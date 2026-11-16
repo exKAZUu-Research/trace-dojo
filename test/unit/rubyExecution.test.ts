@@ -15945,3 +15945,66 @@ test.each(nativeLazyMethodBoundaryCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeArithmeticEachDisplayCases = [
+  [
+    's=(1..5).step(2);a=[];r=s.each{|x|a<<x};p [a,r.equal?(s),r];p s.each.equal?(s);p s.method(:each).owner;begin;s.each(1);rescue=>e;p e.class,e.message;end;p s.each{|x|break :done};p Enumerator.instance_method(:each).bind(s).call{|x|}',
+    '[[1, 3, 5], true, ((1..5).step(2))]\ntrue\nEnumerator::ArithmeticSequence\nArgumentError\n"wrong number of arguments (given 1, expected 0)"\n:done\n1..5\n',
+  ],
+  [
+    's=(1r..5).step(2);a=[];r=s.each{|x|a<<x};p [a,r.equal?(s),r];p s.each.equal?(s);p s.method(:each).owner;begin;s.each(1);rescue=>e;p e.class,e.message;end;p s.each{|x|break :done};p Enumerator.instance_method(:each).bind(s).call{|x|}',
+    '[[(1/1), (3/1), (5/1)], true, ((1/1..5).step(2))]\ntrue\nEnumerator::ArithmeticSequence\nArgumentError\n"wrong number of arguments (given 1, expected 0)"\n:done\n(1/1)..5\n',
+  ],
+  [
+    's=(1r..10.0).step(2);a=[];r=s.each{|x|a<<x};p [a,r.equal?(s),r];p s.each.equal?(s);p s.method(:each).owner;begin;s.each(1);rescue=>e;p e.class,e.message;end;p s.each{|x|break :done};p Enumerator.instance_method(:each).bind(s).call{|x|}',
+    '[[1.0, 3.0, 5.0, 7.0, 9.0], true, ((1/1..10.0).step(2))]\ntrue\nEnumerator::ArithmeticSequence\nArgumentError\n"wrong number of arguments (given 1, expected 0)"\n:done\n(1/1)..10.0\n',
+  ],
+  [
+    's=(1r/2..3r).step(1);a=[];r=s.each{|x|a<<x};p [a,r.equal?(s),r];p s.each.equal?(s);p s.method(:each).owner;begin;s.each(1);rescue=>e;p e.class,e.message;end;p s.each{|x|break :done};p Enumerator.instance_method(:each).bind(s).call{|x|}',
+    '[[(1/2), (3/2), (5/2)], true, ((1/2..3/1).step(1))]\ntrue\nEnumerator::ArithmeticSequence\nArgumentError\n"wrong number of arguments (given 1, expected 0)"\n:done\n(1/2)..(3/1)\n',
+  ],
+  [
+    's=(1r...5).step(2r);a=[];r=s.each{|x|a<<x};p [a,r.equal?(s),r];p s.each.equal?(s);p s.method(:each).owner;begin;s.each(1);rescue=>e;p e.class,e.message;end;p s.each{|x|break :done};p Enumerator.instance_method(:each).bind(s).call{|x|}',
+    '[[(1/1), (3/1)], true, ((1/1...5).step((2/1)))]\ntrue\nEnumerator::ArithmeticSequence\nArgumentError\n"wrong number of arguments (given 1, expected 0)"\n:done\n(1/1)...5\n',
+  ],
+  [
+    's=(5r..1).step(-2);a=[];r=s.each{|x|a<<x};p [a,r.equal?(s),r];p s.each.equal?(s);p s.method(:each).owner;begin;s.each(1);rescue=>e;p e.class,e.message;end;p s.each{|x|break :done};p Enumerator.instance_method(:each).bind(s).call{|x|}',
+    '[[(5/1), (3/1), (1/1)], true, ((5/1..1).step(-2))]\ntrue\nEnumerator::ArithmeticSequence\nArgumentError\n"wrong number of arguments (given 1, expected 0)"\n:done\n(5/1)..1\n',
+  ],
+  [
+    's=1.step(9,2);a=[];r=s.each{|x|a<<x};p [a,r.equal?(s),r];p s.each.equal?(s);p s.method(:each).owner;begin;s.each(1);rescue=>e;p e.class,e.message;end;p s.each{|x|break :done};p Enumerator.instance_method(:each).bind(s).call{|x|}',
+    '[[1, 3, 5, 7, 9], true, (1.step(9, 2))]\ntrue\nEnumerator::ArithmeticSequence\nArgumentError\n"wrong number of arguments (given 1, expected 0)"\n:done\n1\n',
+  ],
+  [
+    's=1.0.step(3.0,0.5);a=[];r=s.each{|x|a<<x};p [a,r.equal?(s),r];p s.each.equal?(s);p s.method(:each).owner;begin;s.each(1);rescue=>e;p e.class,e.message;end;p s.each{|x|break :done};p Enumerator.instance_method(:each).bind(s).call{|x|}',
+    '[[1.0, 1.5, 2.0, 2.5, 3.0], true, (1.0.step(3.0, 0.5))]\ntrue\nEnumerator::ArithmeticSequence\nArgumentError\n"wrong number of arguments (given 1, expected 0)"\n:done\n1.0\n',
+  ],
+  [
+    's=(1..5)%2;a=[];r=s.each{|x|a<<x};p [a,r.equal?(s),r];p s.each.equal?(s);p s.method(:each).owner;begin;s.each(1);rescue=>e;p e.class,e.message;end;p s.each{|x|break :done};p Enumerator.instance_method(:each).bind(s).call{|x|}',
+    '[[1, 3, 5], true, ((1..5).%(2))]\ntrue\nEnumerator::ArithmeticSequence\nArgumentError\n"wrong number of arguments (given 1, expected 0)"\n:done\n1..5\n',
+  ],
+  [
+    's=(1r..5)%2;a=[];r=s.each{|x|a<<x};p [a,r.equal?(s),r];p s.each.equal?(s);p s.method(:each).owner;begin;s.each(1);rescue=>e;p e.class,e.message;end;p s.each{|x|break :done};p Enumerator.instance_method(:each).bind(s).call{|x|}',
+    '[[(1/1), (3/1), (5/1)], true, ((1/1..5).%(2))]\ntrue\nEnumerator::ArithmeticSequence\nArgumentError\n"wrong number of arguments (given 1, expected 0)"\n:done\n(1/1)..5\n',
+  ],
+  ['s=(1r..).step(2);p s;p s.each; p s.each{|x|break nil}', '((1/1..).step(2))\n((1/1..).step(2))\nnil\n'],
+  ['s=(1r..).step(2r);p s;p s.each; p s.each{|x|break nil}', '((1/1..).step((2/1)))\n((1/1..).step((2/1)))\nnil\n'],
+  [
+    's=(0r..1).step(1r/3r);p s;p s.each; p s.each{|x|break nil}',
+    '((0/1..1).step((1/3)))\n((0/1..1).step((1/3)))\nnil\n',
+  ],
+  ['s=(1..5).step(2);p s;p s.each; p s.each{|x|break nil}', '((1..5).step(2))\n((1..5).step(2))\nnil\n'],
+  ['s=(1.0..5.0).step(2);p s;p s.each; p s.each{|x|break nil}', '((1.0..5.0).step(2))\n((1.0..5.0).step(2))\nnil\n'],
+  ['s=(1r..5)%2;p s;p s.each; p s.each{|x|break nil}', '((1/1..5).%(2))\n((1/1..5).%(2))\nnil\n'],
+  ['s=(1r/2...3r).step(1);p s;p s.each; p s.each{|x|break nil}', '((1/2...3/1).step(1))\n((1/2...3/1).step(1))\nnil\n'],
+  ['class Range;def to_s;"range";end;def inspect;"inspected";end;end;p (1r..5).step(2)', '((range).step(2))\n'],
+  ['class Rational;def to_s;"rational";end;end;p (1r..5).step(2)', '((rational..5).step(2))\n'],
+  ['r=(1..5);p r.step(2){|x|};p r.each{|x|};e=[1,2].each;p e.each{|x|}', '1..5\n1..5\n[1, 2]\n'],
+] as const;
+
+test.each(nativeArithmeticEachDisplayCases)(
+  'ArithmeticSequence owns each returns and receiver string conversion: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);

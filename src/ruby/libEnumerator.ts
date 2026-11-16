@@ -11,6 +11,7 @@ import {
   toIndex,
   toIndexExact,
   toInt,
+  toS,
   toStepFloat,
   tryImplicitConversion,
 } from './conversions';
@@ -457,6 +458,11 @@ def('Enumerator', 'size', 0, function* (self: RObject) {
   const result = source.size();
   return isGenerator(result) ? yield* result : result;
 });
+def('Enumerator::ArithmeticSequence', 'each', 0, function* (self: RObject, _args, block) {
+  if (!block) return self;
+  yield* runSource(sourceOf(self), block);
+  return self;
+});
 for (const name of ['begin', 'end', 'step'] as const)
   def('Enumerator::ArithmeticSequence', name, 0, (self: RObject) => {
     const source = sourceOf(self);
@@ -665,7 +671,7 @@ def('Enumerator', 'inspect', 0, function* (self: RObject) {
     return str(`${prefix}${argumentsText.count > 0 ? `(${argumentsText.text()})` : ''}>`);
   }
   if (source.arithmetic) {
-    const receiver = yield* inspect(source.recv);
+    const receiver = yield* toS(source.recv);
     const prefix = `(${source.recv instanceof RRange ? `(${receiver})` : receiver}.${source.method}`;
     const argumentsText = new BoundedTextParts(prefix.length + 3);
     for (const arg of source.args) argumentsText.add(yield* inspect(arg));
