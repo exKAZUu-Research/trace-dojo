@@ -180,13 +180,13 @@ intersection (SBin _ x l r) b = case splitMember x b of
                    in left ${BT}seq${BT} right ${BT}seq${BT} if found then link x left right else link2 left right
 
 difference :: Ord a => Set a -> Set a -> Set a
-difference a b = fromDistinctAscList (go (toAscList a) (toAscList b))
-  where go [] _ = []
-        go xs [] = xs
-        go xs@(x:xt) ys@(y:yt) = case compare x y of
-          LT -> x : go xt ys
-          GT -> go xs yt
-          EQ -> go xt yt
+difference STip _ = STip
+difference a STip = a
+difference a (SBin _ x l r) = case split x a of
+  (al,ar) -> let left = difference al l
+                 right = difference ar r
+             in right ${BT}seq${BT} left ${BT}seq${BT}
+                if size left + size right == size a then a else link2 left right
 
 (\\) :: Ord a => Set a -> Set a -> Set a
 m1 \\ m2 = difference m1 m2
@@ -204,7 +204,11 @@ map :: Ord b => (a -> b) -> Set a -> Set b
 map f s = fromList (B.map f (toAscList s))
 
 filter :: (a -> Bool) -> Set a -> Set a
-filter p s = fromDistinctAscList (B.filter p (toAscList s))
+filter _ STip = STip
+filter p (SBin _ x l r) =
+  let left = filter p l
+      right = filter p r
+  in right ${BT}seq${BT} left ${BT}seq${BT} if p x then link x left right else link2 left right
 
 partition :: (a -> Bool) -> Set a -> (Set a, Set a)
 partition _ STip = (STip,STip)
@@ -270,10 +274,22 @@ lookupIndex x tree = x ${BT}seq${BT} go 0 tree
           GT -> go (offset + size l + 1) r
 
 take :: Int -> Set a -> Set a
-take n s = fromDistinctAscList (B.take n (toAscList s))
+take n tree = if n >= size tree then tree else go n tree
+  where go i t | i <= 0 = t ${BT}seq${BT} STip
+        go _ STip = STip
+        go i (SBin _ x l r) = case compare i (size l) of
+          LT -> go i l
+          GT -> link x l (go (i-size l-1) r)
+          EQ -> l
 
 drop :: Int -> Set a -> Set a
-drop n s = fromDistinctAscList (B.drop n (toAscList s))
+drop n tree = if n >= size tree then STip else go n tree
+  where go i t | i <= 0 = t
+        go _ STip = STip
+        go i (SBin _ x l r) = case compare i (size l) of
+          LT -> link x (go i l) r
+          GT -> go (i-size l-1) r
+          EQ -> insertMin x r
 
 splitAt :: Int -> Set a -> (Set a, Set a)
 splitAt n s = if n >= size s then (s,STip) else go n s
@@ -385,7 +401,11 @@ cartesianProduct :: Set a -> Set b -> Set (a,b)
 cartesianProduct a b = fromDistinctAscList [(x,y) | x <- toAscList a, y <- toAscList b]
 
 mapMonotonic :: (a -> b) -> Set a -> Set b
-mapMonotonic f s = fromDistinctAscList (B.map f (toAscList s))
+mapMonotonic _ STip = STip
+mapMonotonic f (SBin count x l r) =
+  let left = mapMonotonic f l
+      right = mapMonotonic f r
+  in right ${BT}seq${BT} left ${BT}seq${BT} SBin count (f x) left right
 
 symmetricDifference :: Ord a => Set a -> Set a -> Set a
 symmetricDifference a b = union (difference a b) (difference b a)
@@ -485,37 +505,43 @@ adjustWithKey :: Ord k => (k -> a -> a) -> k -> Map k a -> Map k a
 adjustWithKey = adjustUsing False
 
 adjustUsing :: Ord k => Bool -> (k -> a -> a) -> k -> Map k a -> Map k a
-adjustUsing _ _ k Tip = k ${BT}seq${BT} Tip
-adjustUsing strict f k (Bin count key x l r) = case compare k key of
-  LT -> Bin count key x (adjustUsing strict f k l) r
-  GT -> Bin count key x l (adjustUsing strict f k r)
-  EQ -> let y = f key x in forceValue strict y (Bin count key y l r)
+adjustUsing strict f k m = k ${BT}seq${BT} go m
+  where
+    go Tip = Tip
+    go (Bin count key x l r) = case compare k key of
+      LT -> Bin count key x (adjustUsing strict f k l) r
+      GT -> Bin count key x l (adjustUsing strict f k r)
+      EQ -> let y = f key x in forceValue strict y (Bin count key y l r)
 
 update :: Ord k => (a -> Maybe a) -> k -> Map k a -> Map k a
 update f = updateWithKey (\_ x -> f x)
 
 updateUsing :: Ord k => Bool -> (k -> a -> Maybe a) -> k -> Map k a -> Map k a
-updateUsing _ _ k Tip = k ${BT}seq${BT} Tip
-updateUsing strict f k (Bin count key x l r) = case compare k key of
-  LT -> balance key x (updateUsing strict f k l) r
-  GT -> balance key x l (updateUsing strict f k r)
-  EQ -> case f key x of
-    Nothing -> glue l r
-    Just y -> forceValue strict y (Bin count key y l r)
+updateUsing strict f k m = k ${BT}seq${BT} go m
+  where
+    go Tip = Tip
+    go (Bin count key x l r) = case compare k key of
+      LT -> balance key x (updateUsing strict f k l) r
+      GT -> balance key x l (updateUsing strict f k r)
+      EQ -> case f key x of
+        Nothing -> glue l r
+        Just y -> forceValue strict y (Bin count key y l r)
 
 alter :: Ord k => (Maybe a -> Maybe a) -> k -> Map k a -> Map k a
 alter = alterUsing False
 
 alterUsing :: Ord k => Bool -> (Maybe a -> Maybe a) -> k -> Map k a -> Map k a
-alterUsing strict f k Tip = k ${BT}seq${BT} case f Nothing of
-  Nothing -> Tip
-  Just x -> forceValue strict x (singleton k x)
-alterUsing strict f k (Bin count key x l r) = case compare k key of
-  LT -> balance key x (alterUsing strict f k l) r
-  GT -> balance key x l (alterUsing strict f k r)
-  EQ -> case f (Just x) of
-    Nothing -> glue l r
-    Just y -> forceValue strict y (Bin count key y l r)
+alterUsing strict f k m = k ${BT}seq${BT} go m
+  where
+    go Tip = case f Nothing of
+      Nothing -> Tip
+      Just x -> forceValue strict x (singleton k x)
+    go (Bin count key x l r) = case compare k key of
+      LT -> balance key x (alterUsing strict f k l) r
+      GT -> balance key x l (alterUsing strict f k r)
+      EQ -> case f (Just x) of
+        Nothing -> glue l r
+        Just y -> forceValue strict y (Bin count key y l r)
 
 bin :: k -> a -> Map k a -> Map k a -> Map k a
 bin k x l r = Bin (size l + size r + 1) k x l r
@@ -685,7 +711,11 @@ filter :: (a -> Bool) -> Map k a -> Map k a
 filter p = filterWithKey (\_ x -> p x)
 
 filterWithKey :: (k -> a -> Bool) -> Map k a -> Map k a
-filterWithKey p m = fromDistinctAscList [(k, x) | (k, x) <- toAscList m, p k x]
+filterWithKey _ Tip = Tip
+filterWithKey p (Bin _ k x l r) =
+  let left = filterWithKey p l
+      right = filterWithKey p r
+  in right ${BT}seq${BT} left ${BT}seq${BT} if p k x then link k x left right else link2 left right
 
 partition :: (a -> Bool) -> Map k a -> (Map k a, Map k a)
 partition p = partitionWithKey (\_ x -> p x)
@@ -767,7 +797,13 @@ intersectionUsing strict f (Bin _ k x l r) b = case splitLookup k b of
                      Just y -> let z = f k x y in forceValue strict z (link k z left right)
 
 difference :: Ord k => Map k a -> Map k b -> Map k a
-difference a b = fromDistinctAscList [(k, x) | (k, x) <- toAscList a, notMember k b]
+difference Tip _ = Tip
+difference a Tip = a
+difference a (Bin _ k _ l r) = case split k a of
+  (al,ar) -> let left = difference al l
+                 right = difference ar r
+             in right ${BT}seq${BT} left ${BT}seq${BT}
+                if size left + size right == size a then a else link2 left right
 
 differenceWith :: Ord k => (a -> b -> Maybe a) -> Map k a -> Map k b -> Map k a
 differenceWith = differenceUsing False
@@ -860,10 +896,22 @@ findIndex k m = case lookupIndex k m of
   Nothing -> errorWithoutStackTrace "Map.findIndex: element is not in the map"
 
 take :: Int -> Map k a -> Map k a
-take n m = fromDistinctAscList (B.take n (toAscList m))
+take n tree = if n >= size tree then tree else go n tree
+  where go i t | i <= 0 = t ${BT}seq${BT} Tip
+        go _ Tip = Tip
+        go i (Bin _ k x l r) = case compare i (size l) of
+          LT -> go i l
+          GT -> link k x l (go (i-size l-1) r)
+          EQ -> l
 
 drop :: Int -> Map k a -> Map k a
-drop n m = fromDistinctAscList (B.drop n (toAscList m))
+drop n tree = if n >= size tree then Tip else go n tree
+  where go i t | i <= 0 = t
+        go _ Tip = Tip
+        go i (Bin _ k x l r) = case compare i (size l) of
+          LT -> link k x (go i l) r
+          GT -> go (i-size l-1) r
+          EQ -> insertMin k x r
 
 splitAt :: Int -> Map k a -> (Map k a, Map k a)
 splitAt n m = if n >= size m then (m,Tip) else go n m
@@ -1024,7 +1072,12 @@ mapEitherUsing strict f (Bin _ k x l r) =
   in if strict then classify else left ${BT}seq${BT} right ${BT}seq${BT} classify
 
 alterF :: (Functor f, Ord k) => (Maybe a -> f (Maybe a)) -> k -> Map k a -> f (Map k a)
-alterF f k m = fmap (\result -> alter (const result) k m) (f (lookup k m))
+alterF = alterFUsing False
+
+alterFUsing :: (Functor f, Ord k) => Bool -> (Maybe a -> f (Maybe a)) -> k -> Map k a -> f (Map k a)
+alterFUsing strict f k m = k ${BT}seq${BT}
+  let found = lookup k m
+  in found ${BT}seq${BT} fmap (\result -> alterUsing strict (const result) k m) (f found)
 
 mapKeysMonotonic :: (k1 -> k2) -> Map k1 a -> Map k2 a
 mapKeysMonotonic f m = fromDistinctAscList [(f k,x) | (k,x) <- toAscList m]
@@ -1195,7 +1248,7 @@ mapEitherWithKey :: (k -> a -> Either b c) -> Map k a -> (Map k b,Map k c)
 mapEitherWithKey = L.mapEitherUsing True
 
 alterF :: (Functor f, Ord k) => (Maybe a -> f (Maybe a)) -> k -> Map k a -> f (Map k a)
-alterF f k m = fmap (\result -> alter (const result) k m) (f (L.lookup k m))
+alterF = L.alterFUsing True
 
 fromDescList :: Eq k => [(k,a)] -> Map k a
 fromDescList xs = L.fromDistinctDescList (reverse (collapseOrdered xs))

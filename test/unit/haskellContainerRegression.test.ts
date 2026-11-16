@@ -134,6 +134,7 @@ test.each(['Data.Map', 'Data.Map.Strict'])('alter searches the tree before invok
   for (const [key, tree, uncaughtException] of [
     ['error "key"', 'M.empty', 'key'],
     ['1', 'error "tree"', 'tree'],
+    ['error "key"', 'error "tree"', 'key'],
   ]) {
     const source = `import qualified ${module} as M\nmain=print(M.alter (\\_->error "callback") (${key}::Int) (${tree}::M.Map Int Int) \`seq\` 1)`;
     expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
@@ -213,4 +214,51 @@ a=L.fromDistinctAscList[(K k,())|k<-[1..7]]
 b=L.fromDistinctAscList[(K k,())|k<-[0,1,3,4,5,7,8]]
 main=print(M.size(M.union a b))`;
   expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: '(6,7)' });
+});
+
+test.each(['Data.Set', 'Data.Map', 'Data.Map.Strict'])(
+  'repeated differences retain unaffected %s subtrees',
+  (module) => {
+    const isSet = module === 'Data.Set';
+    const initial = isSet ? 'M.fromList[1..500::Int]' : 'M.fromList[(k,k)|k<-[1..500::Int]]';
+    const single = isSet ? 'M.singleton k' : 'M.singleton k ()';
+    const source = `import qualified ${module} as M\nimport Data.List(foldl')\nmain=print(M.size(foldl' (\\tree k->M.difference tree (${single})) (${initial}) [1..500]))`;
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: '0\n',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['Data.Set', 'Data.Map', 'Data.Map.Strict'])('ordered take/drop use %s subtree sizes', (module) => {
+  const initial = module === 'Data.Set' ? 'M.fromList[1..500::Int]' : 'M.fromList[(k,k)|k<-[1..500::Int]]';
+  for (const [operation, stdout] of [
+    ['take', '125250\n'],
+    ['drop', '124750\n'],
+  ]) {
+    const source = `import qualified ${module} as M\nm=${initial}\nmain=print(sum[M.size(M.${operation} n m)|n<-[1..500]])`;
+    expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+});
+
+test.each([
+  ['Data.Set', String.raw`M.filter (\x->error(show x)) (M.fromList[1,2,3::Int])`],
+  ['Data.Set', String.raw`M.mapMonotonic (\x->error(show x)::Int) (M.fromList[1,2,3::Int])`],
+  ['Data.Map', String.raw`M.filterWithKey (\k _->error(show k)) m`],
+  ['Data.Map.Strict', String.raw`M.filterWithKey (\k _->error(show k)) m`],
+])('collection transformations retain containers traversal order: %s %s', (module, expression) => {
+  const source = `import qualified ${module} as M\n${module === 'Data.Set' ? '' : 'm=M.fromList[(k,())|k<-[1,2,3::Int]]\n'}main=print(M.size(${expression}))`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: '3' });
+});
+
+test.each(['Data.Map', 'Data.Map.Strict'])('alterF searches before invoking the callback in %s', (module) => {
+  for (const [key, tree, uncaughtException] of [
+    ['error "key"', 'M.empty', 'key'],
+    ['1', 'error "tree"', 'tree'],
+    ['error "key"', 'error "tree"', 'key'],
+  ]) {
+    const source = `import qualified ${module} as M\nmain=print(M.alterF (\\_->error "function"::Maybe(Maybe Int)) (${key}::Int) (${tree}::M.Map Int Int) \`seq\` 1)`;
+    expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
+  }
 });
