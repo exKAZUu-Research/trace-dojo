@@ -97,11 +97,6 @@ export class RunNext {
 /** The result of a primitive: a value or slot, or a function to apply in its place. */
 export type PrimResult = Slot | TailCall;
 
-/** Thrown when a thunk demands its own value, which GHC reports as `<<loop>>`. */
-function loopError(): HaskellException {
-  return new HaskellException('<<loop>>', 'NonTermination');
-}
-
 /**
  * Evaluates Core with an explicit stack, so that deep recursion in a program does not exhaust the host's stack.
  * Evaluation may nest (a primitive forcing a value), each level running until the stack returns to its base.
@@ -304,7 +299,7 @@ export class Machine {
       state.returnValue(slot.value as Value);
       return;
     }
-    if (slot.state === 'evaluating') throw loopError();
+    if (slot.state === 'evaluating') throw this.runtime.selfDependencyError();
     this.squeezeUpdateFrame(slot);
     slot.state = 'evaluating';
     this.stack.push({

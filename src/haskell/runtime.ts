@@ -84,6 +84,14 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     }
   }
 
+  /**
+   * The error for a thunk that demands its own value, which never finishes: runghc keeps running instead of reporting
+   * `<<loop>>` as compiled programs do, so the run ends as any endless loop does, and a display leaves the value as it is.
+   */
+  selfDependencyError(): Error {
+    return this.displayRemaining === undefined ? new ExecutionLimitError('operations') : new DisplayAbort();
+  }
+
   /** Counts slots a run allocates, bounding its memory. */
   allocate(count: number): void {
     this.allocated += count;

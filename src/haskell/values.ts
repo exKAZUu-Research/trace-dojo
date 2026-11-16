@@ -190,7 +190,7 @@ export class HaskellException extends Error {
     /** The message `displayException` gives, which an uncaught exception reports. */
     readonly display: string,
     /** The kind of exception, for `Control.Exception`-style matching. */
-    readonly kind: 'ErrorCall' | 'ArithException' | 'PatternMatchFail' | 'IOException' | 'NonTermination' | 'Other'
+    readonly kind: 'ErrorCall' | 'ArithException' | 'PatternMatchFail' | 'IOException' | 'Other'
   ) {
     super(display);
     this.name = 'HaskellException';
