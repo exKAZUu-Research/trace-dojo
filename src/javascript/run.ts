@@ -12,6 +12,7 @@ export function executeJavaScriptProgram(source: string, input?: ProgramInput): 
 }
 
 /** Parses a program with `parse`, which throws a `CompileError` to reject it, and runs it. */
+// code-gauge-allow duplicateLines 15 -- Each language's runner wraps its own parser and runtime.
 export function executeParsedProgram(parse: () => Program, input?: ProgramInput): ProgramExecution {
   let program: Program;
   try {
@@ -33,7 +34,7 @@ export function executeParsedProgram(parse: () => Program, input?: ProgramInput)
  *
  * @param onEnd Called when the program ends, while its scope still holds its variables.
  */
-// code-gauge-allow duplicateLines 16 -- Each language's runner wraps its own runtime and collects the same output contract.
+// code-gauge-allow duplicateLines 20 -- Each language's runner wraps its own runtime and collects the same output contract.
 export function runProgram(runtime: Runtime, program: Program, onEnd?: (scope: Scope) => void): ProgramRun {
   const scope = new Scope(runtime.realm.globals, {
     thisValue: undefined,

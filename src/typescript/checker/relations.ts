@@ -271,7 +271,7 @@ export class Relations {
   }
 
   private objectRelated(source: Type, target: ObjectType, relation: Relation): boolean {
-    if (target.objectKind === 'mapped') return false;
+    if (target.objectKind === 'mapped') return source.kind === 'object' && this.sameMapped(source, target, relation);
     const byElements = this.elementsRelated(source, target, relation);
     if (byElements !== undefined) return byElements;
     const sourceStructure = this.c.structureOf(source);
@@ -361,6 +361,16 @@ export class Relations {
       (sourceStructure.properties.size > 0 || sourceStructure.callSignatures.length > 0) &&
       ![...targetStructure.properties.keys()].some((name) => sourceStructure.properties.has(name))
     );
+  }
+
+  /** Whether two generic mapped types map the same keys to related templates. */
+  private sameMapped(source: ObjectType, target: ObjectType, relation: Relation): boolean {
+    const a = source.mapped;
+    const b = target.mapped;
+    if (!a || !b || source.objectKind !== 'mapped') return false;
+    if (!this.identical(a.constraint, b.constraint) || Boolean(a.nameType) !== Boolean(b.nameType)) return false;
+    const template = this.c.instantiate(a.template, new Map([[a.typeParameter.id, b.typeParameter]]));
+    return this.isRelated(template, b.template, relation);
   }
 
   private propertyRelated(source: Property, target: Property, relation: Relation): boolean {

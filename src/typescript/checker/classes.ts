@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 432 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 440 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -686,9 +686,19 @@ export class ClassChecker {
     return false;
   }
 
+  /** Reports `new` of a class whose constructor is private or protected, outside the class (or its subclasses). */
   checkConstructorAccessibility(node: TreeNode, type: Type): void {
-    void node;
-    void type;
+    const info = type.kind === 'object' && type.isClassStatic ? type.classInfo : undefined;
+    const ctor = info && this.constructorNode(info.declaration);
+    const modifier = ctor?.namedChildren.find((child) => child?.type === 'accessibility_modifier')?.text;
+    if (!info || (modifier !== 'private' && modifier !== 'protected')) return;
+    const enclosing = this.enclosingClass(node);
+    const enclosingInfo = enclosing ? this.classInfoOfNode(enclosing) : undefined;
+    if (enclosingInfo?.declaration.id === info.declaration.id) return;
+    this.c.error(
+      node,
+      `クラス '${info.name}' のコンストラクタは ${modifier} なので、クラスの宣言の中でしか使えません。`
+    );
   }
 
   /** Whether assigning to a property is an error: it is read-only, outside its class's constructor. */

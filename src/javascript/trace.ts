@@ -23,7 +23,6 @@ import {
   valueOfElement,
 } from './values';
 
-// code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceJavaScriptProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   return recordProgram(parseJavaScript(program, trace), input);
 }
@@ -66,6 +65,7 @@ class Snapshotter {
   }
 
   /** The static fields of the classes the program declares at its top level, as `Class.field`. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Skips each kind of member that is no static field.
   private addStatics(variables: Variables, scope: Scope): void {
     let top: Scope | undefined = scope;
     while (top?.parent && top.parent !== this.runtime.realm.globals) top = top.parent;

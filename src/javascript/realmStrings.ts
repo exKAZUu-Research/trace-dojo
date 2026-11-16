@@ -16,7 +16,7 @@ import {
 const collator = new Intl.Collator('en');
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Lists the String builtins, each a small closure of its own.
-// code-gauge-allow functionNcss 38 -- Lists the String builtins, each a small closure of its own.
+// code-gauge-allow functionNcss 40 -- Lists the String builtins, each a small closure of its own.
 export function defineStringBuiltins(builder: RealmBuilder): void {
   const { stringPrototype } = builder.realm;
   const stringConstructor = builder.defineClass('String', 1, stringPrototype, constructString);
@@ -73,6 +73,7 @@ export function defineStringBuiltins(builder: RealmBuilder): void {
 }
 
 /** The locale-aware case conversions, the well-formedness checks, and the legacy `substr` and HTML methods. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Lists the String methods, each a small closure of its own.
 function defineLocaleAndLegacy(method: StringMethod): void {
   // Node.js formats for its default locale, en-US, when no locale is given.
   method('toLocaleUpperCase', 0, ({ runtime, args }, text) =>

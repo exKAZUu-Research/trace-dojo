@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 410 -- One port of Node.js's util.inspect, whose formatters share its context.
+// code-gauge-allow-file fileNcss 413 -- One port of Node.js's util.inspect, whose formatters share its context.
 import { eastAsianWidthType } from 'get-east-asian-width';
 
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
@@ -178,7 +178,8 @@ interface Frame {
   braces: [string, string];
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionCognitiveComplexity 19 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionNcss 33 -- Ports Node.js's util.inspect, so the two stay comparable.
 function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string {
   const { runtime } = ctx;
   const constructor = constructorName(runtime, value);

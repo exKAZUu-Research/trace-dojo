@@ -12,6 +12,7 @@ import {
   type Property,
   regularOf,
   type Type,
+  type TypeParameter,
   unionOf,
   unknownType,
 } from './types';
@@ -267,13 +268,26 @@ export class LiteralChecker {
     const literals = (type.kind === 'union' ? type.types : [type]).filter((member) => member.kind === 'literal');
     return members.some(
       (member) =>
-        member.kind === 'typeParameter' ||
+        (member.kind === 'typeParameter' && this.hasPrimitiveConstraint(member)) ||
         member.kind === 'templateLiteral' ||
         member.kind === 'stringMapping' ||
         member.kind === 'keyof' ||
         member.kind === 'indexedAccess' ||
         (member.kind === 'literal' &&
           literals.some((literal) => typeof (literal as { value: unknown }).value === typeof member.value))
+    );
+  }
+
+  /** Whether a type parameter is constrained to primitives, which keeps the literals inferred for it. */
+  private hasPrimitiveConstraint(parameter: TypeParameter): boolean {
+    const constraint = parameter.constraint?.();
+    if (!constraint) return false;
+    return (constraint.kind === 'union' ? constraint.types : [constraint]).some(
+      (member) =>
+        member.kind === 'literal' ||
+        member.kind === 'keyof' ||
+        (member.kind === 'intrinsic' && ['string', 'number', 'bigint', 'symbol'].includes(member.name)) ||
+        (member.kind === 'union' && member.types.every((part) => part.kind === 'literal'))
     );
   }
 

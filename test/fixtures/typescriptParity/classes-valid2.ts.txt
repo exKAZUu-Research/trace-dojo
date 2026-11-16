@@ -1,0 +1,88 @@
+class Temp {
+  private _c = 0;
+  get celsius(): number {
+    return this._c;
+  }
+  set celsius(v: number) {
+    if (v < -273.15) throw new RangeError("too cold");
+    this._c = v;
+  }
+  get fahrenheit() {
+    return (this._c * 9) / 5 + 32;
+  }
+}
+const tt = new Temp();
+tt.celsius = 25;
+console.log(tt.celsius, tt.fahrenheit);
+interface Shape {
+  area(): number;
+  perimeter?(): number;
+}
+class Sq implements Shape {
+  constructor(private s: number) {}
+  area() {
+    return this.s ** 2;
+  }
+}
+const shapes: Shape[] = [new Sq(2), { area: () => 1, perimeter: () => 4 }];
+console.log(shapes.map((s) => [s.area(), s.perimeter?.() ?? -1]));
+class Registry<T extends { id: number }> {
+  private items = new Map<number, T>();
+  add(item: T): void {
+    this.items.set(item.id, item);
+  }
+  find(id: number): T | undefined {
+    return this.items.get(id);
+  }
+  all(): T[] {
+    return [...this.items.values()];
+  }
+}
+const reg = new Registry<{ id: number; name: string }>();
+reg.add({ id: 1, name: "a" });
+console.log(reg.find(1)?.name, reg.find(2), reg.all().length);
+class Counter {
+  static instances = 0;
+  readonly id: number;
+  constructor() {
+    Counter.instances++;
+    this.id = Counter.instances;
+  }
+}
+new Counter();
+const c2 = new Counter();
+console.log(c2.id, Counter.instances);
+function isString(v: unknown): v is string {
+  return typeof v === "string";
+}
+const inputs: unknown[] = ["a", 1, "b", null];
+const strs = inputs.filter(isString).map((s) => s.toUpperCase());
+console.log(strs);
+type Handler = (event: { type: string; payload?: number }) => void;
+const handlers: Record<string, Handler[]> = {};
+function on(type: string, h: Handler): void {
+  (handlers[type] ??= []).push(h);
+}
+on("x", (e) => console.log(e.type, e.payload ?? 0));
+for (const h of handlers["x"] ?? []) h({ type: "x", payload: 5 });
+class Base {
+  greet(): string {
+    return "base";
+  }
+}
+class Child extends Base {
+  greet(): string {
+    return `child of ${super.greet()}`;
+  }
+}
+const items: Base[] = [new Base(), new Child()];
+for (const it of items) console.log(it.greet(), it instanceof Child);
+const point = { x: 1, y: 2 };
+const { x, ...others } = point;
+const copy = { ...point, z: 3 };
+console.log(x, others, copy);
+let total = 0;
+[1, 2, 3].forEach((n) => {
+  total += n;
+});
+console.log(total);

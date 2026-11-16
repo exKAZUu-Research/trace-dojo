@@ -1,0 +1,80 @@
+interface Comparable<T> {
+  compareTo(other: T): number;
+}
+class Version implements Comparable<Version> {
+  constructor(private readonly major: number, private readonly minor: number) {}
+  compareTo(other: Version): number {
+    return this.major - other.major || this.minor - other.minor;
+  }
+  toString(): string {
+    return `${this.major}.${this.minor}`;
+  }
+}
+function maxOf<T extends Comparable<T>>(items: T[]): T | undefined {
+  let best: T | undefined;
+  for (const item of items) {
+    if (best === undefined || item.compareTo(best) > 0) best = item;
+  }
+  return best;
+}
+console.log(String(maxOf([new Version(1, 2), new Version(2, 0), new Version(1, 9)])));
+type Tree<T> = { value: T; children: Tree<T>[] };
+function sumTree(t: Tree<number>): number {
+  return t.value + t.children.reduce((s, c) => s + sumTree(c), 0);
+}
+const tree: Tree<number> = { value: 1, children: [{ value: 2, children: [] }, { value: 3, children: [{ value: 4, children: [] }] }] };
+console.log(sumTree(tree));
+abstract class Account {
+  protected balance = 0;
+  constructor(readonly id: string) {}
+  abstract fee(): number;
+  deposit(n: number): this {
+    this.balance += n - this.fee();
+    return this;
+  }
+  get total(): number {
+    return this.balance;
+  }
+}
+class Savings extends Account {
+  fee(): number {
+    return 1;
+  }
+}
+const acc = new Savings("s1").deposit(100).deposit(50);
+console.log(acc.id, acc.total, acc instanceof Account);
+const pairs: [string, number][] = [["a", 2], ["b", 1]];
+pairs.sort(([, x], [, y]) => x - y);
+const lookup = new Map(pairs);
+console.log(pairs, lookup.get("a"), Object.fromEntries(lookup));
+function groupBy<T, K extends string>(xs: T[], key: (x: T) => K): Record<K, T[]> {
+  const out = {} as Record<K, T[]>;
+  for (const x of xs) (out[key(x)] ??= []).push(x);
+  return out;
+}
+console.log(groupBy([1, 2, 3, 4, 5], (n) => (n % 2 ? "odd" : "even")));
+const enumLike = { Up: 0, Down: 1 } as const;
+type Dir = keyof typeof enumLike;
+function move(d: Dir): number {
+  return enumLike[d];
+}
+console.log(move("Down"));
+let cached: number | null = null;
+function compute(): number {
+  if (cached === null) cached = 42;
+  return cached;
+}
+console.log(compute(), compute());
+class Matrix {
+  constructor(private readonly rows: number[][]) {}
+  static identity(n: number): Matrix {
+    return new Matrix(Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 1 : 0))));
+  }
+  multiply(o: Matrix): Matrix {
+    return new Matrix(this.rows.map((row) => o.rows[0].map((_, j) => row.reduce((s, v, k) => s + v * o.rows[k][j], 0))));
+  }
+  toString(): string {
+    return this.rows.map((r) => r.join(" ")).join("\n");
+  }
+}
+console.log(new Matrix([[1, 2], [3, 4]]).multiply(Matrix.identity(2)).toString());

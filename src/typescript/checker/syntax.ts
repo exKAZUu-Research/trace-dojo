@@ -46,6 +46,18 @@ export function patternIdentifiers(pattern: TreeNode): TreeNode[] {
   }
 }
 
+/** The elements of an array pattern with their positions, which holes such as `[, x]` skip. */
+export function arrayPatternElements(pattern: TreeNode): { element: TreeNode; index: number }[] {
+  const elements: { element: TreeNode; index: number }[] = [];
+  let index = 0;
+  for (const child of pattern.children) {
+    if (!child || child.type === '[' || child.type === ']' || child.type === 'comment') continue;
+    if (child.type === ',') index++;
+    else elements.push({ element: child, index });
+  }
+  return elements;
+}
+
 /** The expression inside parentheses. */
 export function skipParentheses(node: TreeNode): TreeNode {
   let current = node;

@@ -13,6 +13,7 @@ import {
   undefinedType,
   unionOf,
   unknownType,
+  voidType,
 } from './types';
 
 interface Resolution {
@@ -29,8 +30,8 @@ export class Calls {
 
   constructor(private readonly c: Checker) {}
 
-  // code-gauge-allow functionNcss 35 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
   // code-gauge-allow functionCognitiveComplexity 19 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
+  // code-gauge-allow functionNcss 36 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
   call(node: TreeNode, contextual?: Type): Type {
     const callee = node.childForFieldName('function') as TreeNode;
     const argumentsNode = node.childForFieldName('arguments');
@@ -71,6 +72,7 @@ export class Calls {
     );
     if (!resolution) return errorType;
     this.resolved.set(node.id, resolution.signature);
+    this.checkThisContext(callee, resolution.signature);
     const result = resolution.returnType;
     return chained || (optional && this.c.relations.isNullable(this.c.silently(() => this.c.expressions.check(callee))))
       ? unionOf([result, undefinedType])
@@ -201,6 +203,20 @@ export class Calls {
     this.c.classes.checkConstructorAccessibility(node, calleeType);
     const resolution = this.resolve(node, callee, signatures, args, this.explicitTypeArguments(node), contextual);
     return resolution?.returnType ?? errorType;
+  }
+
+  /** Reports a call whose `this`, the object it is called on (or `void`), does not fit the `this` parameter. */
+  private checkThisContext(callee: TreeNode, signature: Signature): void {
+    const { thisType } = signature;
+    if (!thisType || isAnyLike(thisType)) return;
+    const expression = skipParentheses(callee);
+    const object = expression.type === 'member_expression' ? expression.childForFieldName('object') : undefined;
+    const context = object ? this.c.silently(() => this.c.expressions.check(object)) : voidType;
+    if (this.c.relations.isAssignable(context, thisType)) return;
+    this.c.error(
+      callee,
+      `'this' の型 '${this.c.print(context)}' は、このメソッドの 'this' の型 '${this.c.print(thisType)}' に代入できません。`
+    );
   }
 
   /** Resolves a call to one of `signatures`, as `super(...)` does with its base class's constructors. */

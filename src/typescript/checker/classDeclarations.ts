@@ -4,7 +4,16 @@ import type { Checker } from './checker';
 import { checkDuplicateMembers } from './declarations';
 import { FlowState, type State } from './flow';
 import { hasToken, named } from './syntax';
-import { anyType, type ClassInfo, errorType, isAnyLike, isIntrinsic, undefinedType, voidType } from './types';
+import {
+  anyType,
+  type ClassInfo,
+  errorType,
+  isAnyLike,
+  isIntrinsic,
+  type Type,
+  undefinedType,
+  voidType,
+} from './types';
 
 /** Checks class declarations: their members, constructors, and the types they implement and extend. */
 export class ClassDeclarationChecker {
@@ -126,6 +135,7 @@ export class ClassDeclarationChecker {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Reports an incompatible member at itself and a missing one at the class, as TypeScript does.
   private checkImplements(node: TreeNode, info: ClassInfo): void {
     const heritage = node.namedChildren.find((child) => child?.type === 'class_heritage');
     const clause = heritage?.namedChildren.find((child) => child?.type === 'implements_clause');
@@ -133,6 +143,7 @@ export class ClassDeclarationChecker {
     for (const typeNode of named(clause)) {
       const target = this.c.typeNodes.typeFromNode(typeNode);
       if (target === errorType || isAnyLike(target)) continue;
+      if (this.reportIncompatibleMembers(info, target)) continue;
       if (!this.c.relations.isAssignable(info.instanceType, target)) {
         const missing =
           target.kind === 'object'
@@ -150,6 +161,24 @@ export class ClassDeclarationChecker {
         );
       }
     }
+  }
+
+  /** Reports, at each member, the members a class declares with types its interface does not allow. */
+  private reportIncompatibleMembers(info: ClassInfo, target: Type): boolean {
+    if (target.kind !== 'object') return false;
+    let reported = false;
+    for (const property of target.resolve().properties.values()) {
+      const own = this.c.propertyOf(info.instanceType, property.name);
+      if (!own || own.declaringClass !== info) continue;
+      const targetType = property.optional ? this.c.relations.removeUndefined(property.type()) : property.type();
+      if (this.c.relations.isAssignable(own.type(), targetType)) continue;
+      this.c.error(
+        own.declaration?.childForFieldName('name') ?? own.declaration ?? info.declaration,
+        `型 '${info.name}' のプロパティ '${property.name}' は、基底の型 '${this.c.print(target)}' の同じプロパティに代入できません。`
+      );
+      reported = true;
+    }
+    return reported;
   }
 
   private checkAbstractMembers(node: TreeNode, info: ClassInfo): void {

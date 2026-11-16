@@ -321,7 +321,7 @@ function defineNumber(builder: RealmBuilder): void {
   builder.method(numberPrototype, 'valueOf', 0, ({ runtime, thisValue }) => thisNumber(runtime, thisValue));
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity 18 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function defineNumberFormats(builder: RealmBuilder): void {
   const { numberPrototype } = builder.realm;
   builder.method(numberPrototype, 'toPrecision', 1, ({ runtime, thisValue, args }) => {
@@ -431,6 +431,8 @@ function defineMath(builder: RealmBuilder): void {
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 29 -- Lists the console methods, each a small closure sharing the group indentation and counts.
+// code-gauge-allow functionNcss 52 -- Lists the console methods, each a small closure sharing the group indentation and counts.
 function defineConsole(builder: RealmBuilder): void {
   const console = builder.namespace('console');
   // Grouping indents everything printed after it, on every line, as Node.js does.
@@ -499,6 +501,23 @@ function defineConsole(builder: RealmBuilder): void {
     else write(runtime, 'stderr', `Count for '${label}' does not exist`);
     return;
   });
+  defineConsoleOutputs(builder, console, write);
+  builder.method(console, 'assert', 0, ({ runtime, args }) => {
+    const [condition, ...data] = args;
+    if (toBoolean(condition)) return;
+    const message =
+      typeof data[0] === 'string' ? [`Assertion failed: ${data[0]}`, ...data.slice(1)] : ['Assertion failed', ...data];
+    write(runtime, 'stderr', formatLogArguments(runtime, message));
+    return;
+  });
+}
+
+/** The console methods that print as `console.log` does in a form of their own: tables, traces, and clearing. */
+function defineConsoleOutputs(
+  builder: RealmBuilder,
+  console: JsObject,
+  write: (runtime: Runtime, stream: 'stdout' | 'stderr', text: string) => void
+): void {
   builder.method(console, 'table', 1, ({ runtime, args }) => {
     write(runtime, 'stdout', formatTable(runtime, args[0], args[1]) ?? formatLogArguments(runtime, args.slice(0, 1)));
     return;
@@ -511,14 +530,6 @@ function defineConsole(builder: RealmBuilder): void {
   builder.method(console, 'clear', 0, () => {});
   builder.method(console, 'trace', 0, ({ runtime, args }) => {
     write(runtime, 'stderr', `Trace${args.length > 0 ? `: ${formatLogArguments(runtime, args)}` : ''}`);
-    return;
-  });
-  builder.method(console, 'assert', 0, ({ runtime, args }) => {
-    const [condition, ...data] = args;
-    if (toBoolean(condition)) return;
-    const message =
-      typeof data[0] === 'string' ? [`Assertion failed: ${data[0]}`, ...data.slice(1)] : ['Assertion failed', ...data];
-    write(runtime, 'stderr', formatLogArguments(runtime, message));
     return;
   });
 }

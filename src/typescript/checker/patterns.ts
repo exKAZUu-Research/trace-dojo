@@ -1,7 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { named, propertyNameText } from './syntax';
+import { arrayPatternElements, named, propertyNameText } from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -139,15 +139,13 @@ export class BindingPatterns {
   }
 
   private bindArrayPattern(pattern: TreeNode, type: Type, bind: (identifier: TreeNode, type: Type) => void): void {
-    let index = 0;
-    for (const element of named(pattern)) {
+    for (const { element, index } of arrayPatternElements(pattern)) {
       if (element.type === 'rest_pattern') {
         const target = named(element)[0];
         if (target) this.bindPattern(target, this.restOfIterable(type, index), bind);
         break;
       }
       this.bindPattern(element, this.elementAt(element, type, index), bind);
-      index++;
     }
   }
 

@@ -2,7 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import type { Sym } from './scopes';
-import { named, propertyNameText, skipParentheses } from './syntax';
+import { arrayPatternElements, named, propertyNameText, skipParentheses } from './syntax';
 import {
   bigintType,
   errorType,
@@ -102,8 +102,7 @@ export class AssignmentChecker {
       this.assignReference(skipParentheses(target), declared, valueType);
     };
     if (pattern.type === 'array' || pattern.type === 'array_pattern') {
-      let index = 0;
-      for (const element of named(pattern)) {
+      for (const { element, index } of arrayPatternElements(pattern)) {
         if (element.type === 'spread_element' || element.type === 'rest_pattern') {
           assign(named(element)[0], this.c.patterns.restOfIterable(type, index));
           break;
@@ -119,7 +118,6 @@ export class AssignmentChecker {
         } else {
           assign(element, elementType);
         }
-        index++;
       }
       return;
     }

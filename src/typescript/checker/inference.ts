@@ -55,15 +55,20 @@ export class TypeInference {
     const mapper: Mapper = new Map();
     for (const parameter of parameters) {
       const inference = inferences.get(parameter.id) as Inference;
-      let type: Type =
+      mapper.set(
+        parameter.id,
         inference.candidates.length > 0 || inference.contravariant.length > 0
           ? this.inferredType(parameter, inference, !this.isTopLevelInReturn(signature, parameter))
-          : (parameter.default?.() ?? parameter.constraint?.() ?? unknownType);
+          : (parameter.default?.() ?? parameter.constraint?.() ?? unknownType)
+      );
+    }
+    // A constraint may mention the parameters themselves, as `T extends Comparable<T>` does, so it sees them all.
+    for (const parameter of parameters) {
       const constraint = parameter.constraint?.();
-      if (constraint && !this.c.relations.isAssignable(type, this.c.instantiate(constraint, mapper))) {
-        type = this.c.instantiate(constraint, mapper);
-      }
-      mapper.set(parameter.id, type);
+      if (!constraint) continue;
+      const instantiated = this.c.instantiate(constraint, mapper);
+      if (!this.c.relations.isAssignable(mapper.get(parameter.id) as Type, instantiated))
+        mapper.set(parameter.id, instantiated);
     }
     return mapper;
   }

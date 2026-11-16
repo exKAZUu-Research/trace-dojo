@@ -3,6 +3,8 @@ import type { Runtime } from './runtime';
 import { isObject, JsArray, JsObject, type Value } from './values';
 
 /** The text `console.table` prints for its arguments, or undefined when it prints them as `console.log` does. */
+// code-gauge-allow functionCognitiveComplexity 19 -- Ports Node.js's console.table, so the two stay comparable.
+// code-gauge-allow functionNcss 32 -- Ports Node.js's console.table, so the two stay comparable.
 export function formatTable(runtime: Runtime, data: Value, properties: Value): string | undefined {
   if (!(data instanceof JsObject)) return undefined;
   const selected =

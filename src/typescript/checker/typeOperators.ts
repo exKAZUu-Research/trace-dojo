@@ -275,8 +275,14 @@ export class TypeOperators {
   }
 
   /** `object[index]`, reporting a missing property at `node` when given. */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Follows TypeScript's rules for each kind of index type.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Follows TypeScript's rules for each kind of index type.
   indexedAccess(object: Type, index: Type, node?: TreeNode): Type {
+    // A mapped type indexed by its own keys, `{ [P in K]: X }[K]`, is its template for those keys.
+    if (object.kind === 'object' && object.objectKind === 'mapped' && object.mapped && !object.mapped.nameType) {
+      const { constraint, typeParameter, template } = object.mapped;
+      if (this.c.relations.isAssignable(index, constraint))
+        return this.c.instantiate(template, new Map([[typeParameter.id, index]]));
+    }
     if (this.c.relations.isGeneric(object) || this.c.relations.isGeneric(index)) {
       return { kind: 'indexedAccess', id: newTypeId(), objectType: object, indexType: index };
     }

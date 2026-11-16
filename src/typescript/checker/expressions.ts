@@ -162,7 +162,8 @@ export class ExpressionChecker {
     const key = `s${symbol.id}`;
     this.c.flow.declaredTypes.set(key, declared);
     const entry = this.c.flow.entry(key);
-    if (this.isOuterVariable(node, symbol)) return this.outerVariableType(symbol, declared);
+    // A nested function narrows a variable of an enclosing one from the type it sees, never checking its assignment.
+    if (this.isOuterVariable(node, symbol)) return entry?.type ?? this.outerVariableType(symbol, declared);
     if (entry) {
       const unassignedAuto =
         !entry.assigned && this.c.assignments.isAutoTyped(symbol) && isIntrinsic(entry.type, 'undefined');
