@@ -299,6 +299,8 @@ function intMethod(
     const type = sema.compileType(typeArg);
     if (type.kind !== 'int')
       return sema.error(typeArg, `${name} には整数の型を渡してください（${typeName(type)} です）。`);
+    if (name.startsWith('uint') && type.signed)
+      return sema.error(typeArg, `${name} には符号なし整数の型を渡してください。`);
     const args = compileArgs(
       sema,
       rest,

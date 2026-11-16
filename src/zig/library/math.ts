@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 521 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 524 -- Groups the related standard library operations that share this module.
 import { checked, divCeil, divExact, divFloor, divTrunc, floatMod, floatRem, mod, PANIC, panic, rem } from '../arith';
 import type { Expression } from '../ast';
 import { fusedMultiplyAdd, intFittingRange, roundFloat } from '../builtins';
@@ -27,7 +27,7 @@ import {
   toNumber,
   truncateToBigInt,
 } from '../floats';
-import { known, type NativeCall, type SemaApi, type TExpr } from '../semaBase';
+import { known, type NativeCall, runtime, type SemaApi, type TExpr } from '../semaBase';
 import {
   BOOL,
   COMPTIME_FLOAT,
@@ -247,6 +247,9 @@ function rotate(name: string, left: boolean): () => Member {
       if (amount.type.kind !== 'int' && amount.type.kind !== 'comptime_int')
         return sema.error(amountArg, `${name} の回転量は整数にしてください。`);
       if (amount.type.kind === 'comptime_int') amount = sema.coerce(amount, intType(false, 16), amountArg);
+      const countType = intType(false, 16);
+      const peer = sema.peerType([amount, runtime(countType, () => BigInt(type.bits), call.span)], amountArg);
+      amount = sema.coerce(amount, peer, amountArg);
     }
     return computed(type, [x, amount], call.span, ([value, n]) => {
       if (type.bits === 0) return 0n;
@@ -611,7 +614,12 @@ const MEMBERS: Record<string, () => Member> = {
       if (type.kind === 'float' || type.kind === 'comptime_float') {
         const order = compareFloats(low as AnyFloat, high as AnyFloat);
         if (order === undefined || order > 0) panic(PANIC.unreachable);
-        return minMaxFloat(low as AnyFloat, minMaxFloat(v as AnyFloat, high as AnyFloat, false), true);
+        return minMaxFloat(
+          low as AnyFloat,
+          minMaxFloat(v as AnyFloat, high as AnyFloat, false, type.kind === 'comptime_float'),
+          true,
+          type.kind === 'comptime_float'
+        );
       }
       if (compareScalarsAny(low, high) > 0) panic(PANIC.unreachable);
       return compareScalarsAny(v, low) < 0 ? low : compareScalarsAny(v, high) > 0 ? high : v;

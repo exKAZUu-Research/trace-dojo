@@ -85,7 +85,7 @@ function layoutOf(type: Type): Layout {
       };
     }
     case 'optional': {
-      if (type.child.kind === 'pointer') return layoutOf(type.child);
+      if (optionalNicheBits(type.child)) return layoutOf(type.child);
       const child = layoutOf(type.child);
       return { size: alignTo(child.size + 1, child.align), align: child.align };
     }
@@ -133,6 +133,10 @@ function layoutOf(type: Type): Layout {
       return { size: 0, align: 1 };
     }
   }
+}
+
+export function optionalNicheBits(child: Type): number | undefined {
+  return child.kind === 'pointer' ? 64 : child.kind === 'error_set' ? 16 : undefined;
 }
 
 function bitSizeOf(type: Type): number {

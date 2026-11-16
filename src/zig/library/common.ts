@@ -6,6 +6,7 @@ import {
   BOOL,
   type EnumType,
   errorUnionOf,
+  isComptimeOnly,
   optionalOf,
   sliceOf,
   type StructType,
@@ -106,14 +107,14 @@ export function optionalIndex(index: number): Value {
   return index < 0 ? NULL : BigInt(index);
 }
 
-/** Computes a value from arguments, at compile time when they are all known. */
+/** Calls a native function, evaluating at compilation only when its return type requires it. */
 export function computed(
   type: Type,
   args: readonly TExpr[],
   span: Span,
   compute: (values: Value[], frame?: Frame) => Value
 ): TExpr {
-  if (args.every((arg) => arg.known && compileTimeReadable(arg.value))) {
+  if (isComptimeOnly(type) && args.every((arg) => arg.known && compileTimeReadable(arg.value))) {
     try {
       return known(type, compute(args.map((arg) => arg.value)), span);
     } catch (error) {

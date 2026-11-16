@@ -2747,3 +2747,134 @@ test('ArrayList allocating writer retains partial output when later growth fails
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  'const x=std.fmt.parseInt(u8,"12",10) catch "bad";_=x;',
+  'std.fmt.parseInt(u8,"12",10) catch |err|{_=err;return;};',
+  'if(std.fmt.parseInt(u8,"12",10))|x|{_=x;}else|err|{_=err;}',
+  'if(std.mem.indexOf(u8,"abc","b"))|i|{_=i;}else{const z:u8=300;_=z;}',
+])('native calls with runtime result types retain semantic branch checks: %s', (body) => {
+  expect(executeProgram('zig', `const std=@import("std");pub fn main()void{${body}}`).kind).toBe('compileError');
+});
+
+test.each(['f64', 'f128'])('opposite signed-zero %s sentinels conflict during concatenation', (type) => {
+  for (const [left, right] of [
+    ['0.0', '-0.0'],
+    ['-0.0', '0.0'],
+  ]) {
+    const source = `const std=@import("std");pub fn main()void{const a=[_:${left}]${type}{1};const b=[_:${right}]${type}{2};std.debug.print("{}",.{@TypeOf(a++b)});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: `[2]${type}`,
+      uncaughtException: undefined,
+    });
+  }
+});
+
+test('clamp numeric folds preserve compile-time and runtime signed-zero rules', () => {
+  const source = `const std=@import("std");pub fn main()void{std.debug.print("{d} {d}|{d}",.{std.math.clamp(-0.0,-0.0,0.0),std.math.clamp(-0.0,0.0,0.1),std.math.clamp(@as(f64,-0.0),@as(f64,-0.0),@as(f64,0.0))});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '0 -0|-0',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['v', 'if(flag) v else other'])('switch continue snapshots %s before deferred mutation', (value) => {
+  const source = `const std=@import("std");const S=struct{x:u8};const U=union(enum){start:void,next:S};pub fn main()void{const u=U{.start={}};sw:switch(u){.start=>{var v=U{.next=.{.x=1}};${value === 'v' ? '' : 'const other=U{.next=.{.x=2}};var flag=true;_=&flag;'}defer v.next.x=9;continue :sw ${value};},.next=>|s|std.debug.print("{}",.{s.x}),}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '1', uncaughtException: undefined });
+});
+
+test('optional error sets use their null niche in allocation layout and fixed-buffer storage', () => {
+  const source = `const std=@import("std");const E=error{A,B};const S=struct{e:?E};pub fn main(init:std.process.Init)!void{var l:std.ArrayList(?E)=.empty;try l.append(init.gpa,null);var b:[4]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&b);const p=try f.allocator().create(S);p.*=.{.e=error.A};std.debug.print("{} {s}|",.{l.capacity,@errorName(p.e.?)});p.e=null;std.debug.print("{} {}",.{p.e==null,f.end_index});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '65 A|true 2',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['upperString', 'a', 'b', 'c', 'd', 'aAAA'],
+  ['lowerString', 'A', 'B', 'C', 'D', 'Aaaa'],
+])('ascii %s observes forward-overlapping writes', (method, a, b, c, d, expected) => {
+  const source = `const std=@import("std");pub fn main()void{var a=[_]u8{'${a}','${b}','${c}','${d}'};_=std.ascii.${method}(a[1..4],a[0..3]);std.debug.print("{s}",.{a});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['rotl', 'rotr'])('%s checks signed amount peer types against u16', (name) => {
+  for (const type of ['i8', 'i16'])
+    expect(
+      executeProgram(
+        'zig',
+        `const std=@import("std");pub fn main()void{var n:${type}=-1;_=&n;std.debug.print("{}",.{std.math.${name}(u8,1,n)});}`
+      ).kind
+    ).toBe('compileError');
+  expect(
+    executeProgram(
+      'zig',
+      `const std=@import("std");pub fn main()void{var n:i32=-1;_=&n;std.debug.print("{}",.{std.math.${name}(u8,1,n)});}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: name === 'rotl' ? '128' : '2', uncaughtException: undefined });
+});
+
+test.each(['uintLessThan', 'uintAtMost', 'uintLessThanBiased', 'uintAtMostBiased'])(
+  '%s rejects signed result types',
+  (name) => {
+    expect(
+      executeProgram(
+        'zig',
+        `const std=@import("std");pub fn main()void{var p=std.Random.DefaultPrng.init(1);std.debug.print("{}",.{p.random().${name}(i8,10)});}`
+      ).kind
+    ).toBe('compileError');
+  }
+);
+
+test.each(['u', 'U{.a=1}'])('union switches allow readonly pointer captures from %s', (operand) => {
+  const source = `const std=@import("std");const U=union(enum){a:u8,b:u8};pub fn main()void{${operand === 'u' ? 'const u:U=.{.a=1};' : ''}switch(${operand}){.a=>|*p|std.debug.print("{}",.{p.*}),.b=>{}}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '1', uncaughtException: undefined });
+  expect(executeProgram('zig', source.replace('std.debug.print("{}",.{p.*})', '{p.*=2;}')).kind).toBe('compileError');
+});
+
+test.each(['if(flag) a else b', 'switch(flag){true=>a,false=>b}'])('for loops snapshot array-valued %s', (operand) => {
+  const source = `const std=@import("std");pub fn main()void{var a=[_]u8{1,2};const b=[_]u8{3,4};var flag=true;_=&flag;for(${operand})|x|{std.debug.print("{} ",.{x});a[1]=9;}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 2 ',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['.{}', 'std.AutoHashMapUnmanaged(u8,u8){}'])(
+  'unmanaged map default initializer %s produces an independent usable header',
+  (initializer) => {
+    const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a:std.AutoHashMapUnmanaged(u8,u8)=${initializer};var b:std.AutoHashMapUnmanaged(u8,u8)=.{};try a.put(init.gpa,1,3);std.debug.print("{} {}",.{a.get(1).?,b.count()});b.deinit(init.gpa);a.deinit(init.gpa);}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '3 0',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('string unmanaged maps and debug allocators accept reference default initialization', () => {
+  const source = `const std=@import("std");pub fn main()!void{var d=std.heap.DebugAllocator(.{}){};const g=d.allocator();var m:std.StringHashMapUnmanaged(u8)=.{};try m.put(g,"a",3);std.debug.print("{} ",.{m.get("a").?});m.deinit(g);std.debug.print("{}",.{d.deinit()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '3 .ok',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['std.AutoHashMap(u8,u8)', 'std.Io.Writer', 'std.Random'])(
+  'native type %s requires its reference initializer',
+  (type) => {
+    expect(executeProgram('zig', `const std=@import("std");pub fn main()void{const x:${type}=.{};_=x;}`).kind).toBe(
+      'compileError'
+    );
+  }
+);

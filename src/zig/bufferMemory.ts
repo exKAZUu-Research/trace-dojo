@@ -1,6 +1,6 @@
 import { panic } from './arith';
 import { asBigFloat, BigFloat, type FloatBits, floatOf, FORMATS } from './floats';
-import { errorUnionOffsets, fieldOffsets, sizeOf, unionOffsets } from './layout';
+import { errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
 import { copyForStorage, undefinedValue } from './semaBase';
 import { type Type, typeId } from './types';
 import {
@@ -94,8 +94,8 @@ class BufferMemory {
     return slots;
   }
 
-  // code-gauge-allow functionNcss 37 -- Decodes each scalar representation and transparent wrapper from shared bytes.
-  // code-gauge-allow functionCognitiveComplexity 20 -- Decodes each scalar representation and transparent wrapper from shared bytes.
+  // code-gauge-allow functionNcss 38 -- Decodes each scalar representation and transparent wrapper from shared bytes.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Decodes each scalar representation and transparent wrapper from shared bytes.
   private read(type: Type, offset: number, packed?: number): Value {
     if (type.kind === 'array' || type.kind === 'struct' || type.kind === 'union')
       return this.readAggregate(type, offset);
@@ -120,8 +120,8 @@ class BufferMemory {
         return pointer instanceof Pointer ? new Slice(pointer.target, pointer.index, length) : undefinedValue(type);
       }
       case 'optional': {
-        if (type.child.kind === 'pointer')
-          return this.readBits(offset, 64) === 0n ? NULL : this.read(type.child, offset);
+        const niche = optionalNicheBits(type.child);
+        if (niche) return this.readBits(offset, niche) === 0n ? NULL : this.read(type.child, offset);
         const child = sizeOf(type.child);
         if (this.readBits(offset + child * 8, 1) === 0n) return NULL;
         const value = this.read(type.child, offset);
@@ -234,16 +234,13 @@ class BufferMemory {
         return;
       }
       case 'optional': {
+        const niche = optionalNicheBits(type.child);
         if (value === NULL) {
-          this.writeBits(
-            offset + (type.child.kind === 'pointer' ? 0 : sizeOf(type.child) * 8),
-            type.child.kind === 'pointer' ? 64 : 8,
-            0n
-          );
+          this.writeBits(offset + (niche ? 0 : sizeOf(type.child) * 8), niche ?? 8, 0n);
           return;
         }
         this.write(type.child, offset, value instanceof Some ? value.value : value);
-        if (type.child.kind !== 'pointer') this.writeBits(offset + sizeOf(type.child) * 8, 8, 1n);
+        if (!niche) this.writeBits(offset + sizeOf(type.child) * 8, 8, 1n);
         return;
       }
       case 'error_union': {

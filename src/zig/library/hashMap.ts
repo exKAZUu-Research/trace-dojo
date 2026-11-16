@@ -340,6 +340,7 @@ function hashMapType(name: string, keyType: Type, valueType: Type, kind: KeyKind
   ]);
   const map = nativeStruct(`${name}(${typeName(keyType)},${typeName(valueType)})`, {}, [], {
     kind: 'hashMap',
+    defaultValue: managed ? undefined : () => emptyMapValue(),
     storageSlots: managed ? 5 : 4,
     byteSize: managed ? 40 : 24,
     args: [keyType, valueType],

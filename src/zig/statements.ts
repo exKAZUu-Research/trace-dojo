@@ -801,7 +801,7 @@ export abstract class StatementCompiler extends CallCompiler {
           target.operandType as Type,
           expression
         );
-        const evaluate = operand.eval;
+        const evaluate = copyJumpValue(operand);
         return (frame) => new Jump('continue', id, evaluate(frame));
       }
       return () => new Jump('continue', id, undefined);
@@ -1621,7 +1621,6 @@ export abstract class StatementCompiler extends CallCompiler {
 
   /** How a `for` reads an array, a pointer to one, or a slice, by value or by pointer. */
   // code-gauge-allow functionNcss 51 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private forOperand(
     compiled: TExpr,
     byPointer: boolean,
@@ -1672,8 +1671,7 @@ export abstract class StatementCompiler extends CallCompiler {
     if (compiled.known && type.kind === 'array') {
       const value = compiled.value;
       evaluate = () => value;
-    } else if (type.kind === 'array' && compiled.place) {
-      // Zig loops over a copy of an array value, which the body's writes to the variable do not change.
+    } else if (type.kind === 'array') {
       const read = evaluate;
       evaluate = (frame) => copyForFrame(frame, read(frame), type);
     }
@@ -2081,9 +2079,8 @@ export abstract class StatementCompiler extends CallCompiler {
       const capture = each.capture;
       if (capture && !isDiscardName(capture)) {
         if (capture.byPointer) {
-          if (!operand.place || operand.place.isConst)
-            this.error(capture, '|*x| で受け取るには、変数の値を switch してください。');
-          const binding = this.newLocal(capture.name, pointerTo(captureType, false), true);
+          if (!union && !operand.place) this.error(capture, '|*x| で受け取るには、値の場所が要ります。');
+          const binding = this.newLocal(capture.name, pointerTo(captureType, operand.place?.isConst ?? true), true);
           locals.set(capture.name, binding);
           bind = (frame, value, pointer) => {
             frame.slots[binding.slot] = union ? new Pointer(value as ZUnion, 0) : pointer;

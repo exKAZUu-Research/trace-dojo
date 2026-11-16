@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 909 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 917 -- The file holds one layer of the compiler, whose parts share its private state.
 // code-gauge-allow-file duplicateLines 18 -- Undefined and zero initializers share aggregate shapes but differ in scalar and optional values.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
@@ -907,6 +907,8 @@ export abstract class SemaBase implements SemaApi {
     if (from.kind !== 'struct' || !isAnonymous(from)) return undefined;
     const sourceFields = from.fields ?? [];
     const targetFields = this.structFields(to, span);
+    if (sourceFields.length === 0 && targetFields.length === 0 && to.native)
+      return this.nativeDefault(to, span, expression);
     if (to.isTuple) {
       if (sourceFields.length !== targetFields.length) return undefined;
       const elements = targetFields.map((field, index) =>
@@ -928,6 +930,13 @@ export abstract class SemaBase implements SemaApi {
       return this.coerce(this.tupleElement(expression, index, sourceFields[index], span), field.type, span);
     });
     return this.aggregate(to, elements, span, (values) => new ZStruct(values));
+  }
+
+  protected nativeDefault(type: StructType, span: Span, operand?: TExpr): TExpr {
+    const initialize = type.native?.defaultValue;
+    if (!initialize) return this.error(span, `${typeName(type)} 型には初期化に必要なフィールドがあります。`);
+    this.storage.reserve(type);
+    return operand ? this.fixedResult(operand, type, initialize(), span) : known(type, initialize(), span);
   }
 
   /** The `index`th field of a tuple or anonymous struct value. */

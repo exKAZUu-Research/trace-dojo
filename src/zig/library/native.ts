@@ -3,7 +3,6 @@ import { FunctionInstance } from '../functions';
 import { type Frame, withHeldValues } from '../runtime';
 import {
   evaluateHeld,
-  known,
   NATIVE_FN_TYPE,
   type NativeCall,
   NativeFn,
@@ -21,7 +20,7 @@ import {
   type Type,
   VOID as VOID_TYPE,
 } from '../types';
-import { compileTimeReadable, NativeHandle, type NativeState, type Value } from '../values';
+import { NativeHandle, type NativeState, type Value } from '../values';
 import { PUBLIC_STD_MEMBERS } from './publicMembers';
 
 /** A declaration's type and value, which a native namespace resolves on first use. */
@@ -129,13 +128,6 @@ export function nativeCall(
     },
     span
   );
-}
-
-/** A call computed at compile time when every argument is known, else at run time. */
-export function pureCall(type: Type, args: readonly TExpr[], span: Span, compute: (values: Value[]) => Value): TExpr {
-  if (args.every((arg) => arg.known && compileTimeReadable(arg.value)))
-    return known(type, compute(args.map((arg) => arg.value)), span);
-  return nativeCall(type, args, span, (values) => compute(values));
 }
 
 export function handle(kind: string, state: Record<string, unknown>): NativeHandle {

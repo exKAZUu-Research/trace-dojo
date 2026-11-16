@@ -90,6 +90,7 @@ import {
   markConstantStorage,
   NULL,
   Pointer,
+  scalarValueKey,
   scalarValuesEqual,
   Slice,
   type Slots,
@@ -314,10 +315,6 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Field access ----------------------------------------------------------------------------------------------------
 
-  private typeOnlyOperand(value: TExpr): TExpr {
-    return value.place ? this.addressOf(value) : value;
-  }
-
   // code-gauge-allow functionNcss 41 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected fieldAccess(expression: ExpressionOf<'field'>): TExpr {
@@ -399,6 +396,10 @@ export abstract class ExpressionCompiler extends SemaBase {
       if (field && type.tagType) return this.typeMember(type.tagType, name, span);
     }
     return this.error(span, `${typeName(type)} には、「${name}」という宣言がありません。`);
+  }
+
+  private typeOnlyOperand(value: TExpr): TExpr {
+    return value.place ? this.addressOf(value) : value;
   }
 
   protected structField(base: TExpr, type: StructType, name: string, span: Span): TExpr {
@@ -1262,7 +1263,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const sentinel =
       a.sentinel === undefined
         ? b.sentinel
-        : b.sentinel === undefined || scalarValuesEqual(a.sentinel, b.sentinel)
+        : b.sentinel === undefined || scalarValueKey(a.sentinel) === scalarValueKey(b.sentinel)
           ? a.sentinel
           : undefined;
     const length = a.length + b.length;
@@ -1377,6 +1378,8 @@ export abstract class ExpressionCompiler extends SemaBase {
       if (!expression.type && resultType) return this.anonymousStruct(expression);
       return this.error(expression, `${typeName(type)} 型は、{ .x = ... } の形では初期化できません。`);
     }
+    if (expression.fields.length === 0 && type.native && this.structFields(type, expression).length === 0)
+      return this.nativeDefault(type, expression);
     const fields = this.structFields(type, expression);
     for (const init of expression.fields) {
       if (!fields.some((field) => field.name === init.name)) {

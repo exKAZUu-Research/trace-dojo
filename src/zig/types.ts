@@ -116,6 +116,7 @@ export interface StructType {
 }
 
 export interface NativeStruct {
+  readonly defaultValue?: () => Value;
   readonly byteSize?: number;
   readonly byteAlignment?: number;
   readonly storageSlots?: number;

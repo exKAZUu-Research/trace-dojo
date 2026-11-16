@@ -1,7 +1,7 @@
 import { PANIC, panic } from '../arith';
 import { Constant } from '../expressions';
 import { arrayOf, BOOL, pointerTo, sliceOf, type StructType, type Type, U8 } from '../types';
-import { markConstantStorage, Pointer, type Slice, type Value, ZArray } from '../values';
+import { markConstantStorage, Pointer, Slice, type Value, ZArray } from '../values';
 import {
   allocating,
   allocatorArg,
@@ -65,12 +65,12 @@ function stringMapper(name: string, map: (c: number) => number): () => Member {
     const output = mutableSlice(sema, outArg, U8);
     const input = constSlice(sema, inArg, U8);
     return computed(sliceOf(U8, false), [output, input], call.span, ([out, value]) => {
-      const source = bytes(value);
+      const source = value as Slice;
       const target = out as Slice;
       // `std.debug.assert(output.len >= ascii_string.len)`.
       if (target.length < source.length) panic(PANIC.unreachable);
-      for (const [index, byte] of source.entries()) target.set(index, BigInt(map(byte)));
-      return new (target.constructor as typeof Slice)(target.target, target.start, source.length);
+      for (let index = 0; index < source.length; index++) target.set(index, BigInt(map(Number(source.get(index)))));
+      return new Slice(target.target, target.start, source.length);
     });
   });
 }

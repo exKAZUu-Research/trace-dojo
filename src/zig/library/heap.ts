@@ -252,7 +252,7 @@ export function reserveNativeAllocation(
 function allocatorInstanceType(
   name: string,
   kind: string,
-  fields: { name: string; type: Type }[],
+  fields: { name: string; type: Type; defaultValue?: Value }[],
   members: Record<string, () => Member>
 ): StructType {
   const type = nativeStruct(
@@ -267,7 +267,7 @@ function allocatorInstanceType(
       }),
       ...members,
     },
-    fields.map((field) => ({ ...field, hasDefault: false }))
+    fields.map((field) => ({ ...field, hasDefault: 'defaultValue' in field }))
   );
   return type;
 }
@@ -295,7 +295,7 @@ function instanceValue(sema: SemaApi, call: NativeCall, type: StructType): TExpr
 const DEBUG_ALLOCATOR: StructType = allocatorInstanceType(
   'heap.DebugAllocator',
   'debug',
-  [{ name: 'live', type: USIZE }],
+  [{ name: 'live', type: USIZE, defaultValue: 0n }],
   {
     init: () => ({ type: DEBUG_ALLOCATOR_TYPE(), value: new ZStruct([0n]) }),
     deinit: fnMember('DebugAllocator.deinit', (sema, call) => {
