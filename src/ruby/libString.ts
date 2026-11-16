@@ -263,6 +263,11 @@ export function copyStringEncoding(self: RString): RString {
 }
 
 export function sliceStringEncoding(self: RString, from: number, to = self.s.length): RString {
+  if (!self.rawBytes || self.binary) {
+    const result = self.binary ? stringFromBytes(stringBytes(self).slice(from, to), true) : str(self.s.slice(from, to));
+    result.usAscii = self.usAscii;
+    return result;
+  }
   const mode = stringTextMode(self);
   const begin = textByteLength(self.s.slice(0, from), mode);
   const end = textByteLength(self.s.slice(0, to), mode);
@@ -1401,11 +1406,11 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
   let text = self.s;
   const sourceLength = stringBytes(self).length;
   let position = 0;
-  let lastIndex = -1;
+  let lastStart = -1;
   for (;;) {
     const index = text.indexOf(target, position);
     if (index === -1) break;
-    lastIndex = index;
+    lastStart = position;
     setLiteralMatch(self, text, target, index);
     const mode = stringTextMode(self);
     const foundByte = textByteLength(text.slice(0, index), mode);
@@ -1421,7 +1426,7 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
     position = modified ? textIndexAtByte(text, nextByte, mode) : index + target.length;
     if (position > text.length) break;
   }
-  setLiteralMatch(self, text, target, lastIndex);
+  setLiteralMatch(self, text, target, lastStart < 0 ? -1 : text.indexOf(target, lastStart));
   if (!block) return arr(found);
   return self;
 });

@@ -23,7 +23,7 @@ import type {
   Use,
 } from './ast';
 import { decodeDoubleQuoted, decodeSingleQuoted } from './escapes';
-import { hasVariableLengthLookbehind, translate } from './libRegexp';
+import { translate } from './libRegexp';
 import { regexpCaptureNames, regexpHasNumberedBackref } from './regexpCaptureNames';
 import { UnsupportedFeatureError } from './runtime';
 
@@ -151,6 +151,8 @@ export class Converter {
 
   convertProgram(root: Node): Program {
     if (hasFrozenStringLiteralDirective(this.source)) this.unsupported(root, 'frozen_string_literal: true');
+    const encoding = sourceEncodingDirective(this.source);
+    if (encoding && !/^UTF-8$/i.test(encoding)) this.unsupported(root, `ソースコードの文字コード（${encoding}）`);
     this.collectHeredocs(root);
     const children = namedChildren(root);
     const data = children.find((child) => child.type === 'uninterpreted');
@@ -184,9 +186,7 @@ export class Converter {
    * Converts a sequence of statements whose value is used as `use` says: only the last statement's value can be.
    */
   private body(nodes: Node[], use: Use): Body {
-    const statements = nodes.filter(
-      (node) => node.type !== 'comment' && node.type !== 'empty_statement' && node.type !== 'heredoc_body'
-    );
+    const statements = nodes.filter((node) => node.type !== 'comment' && node.type !== 'empty_statement');
     return statements.map((node, index) => this.statement(node, index === statements.length - 1 ? use : 0));
   }
 
@@ -493,22 +493,21 @@ export class Converter {
             const parts: StrPart[] = interpolates
               ? this.stringParts(child)
               : [decodePercentLiteral(child.text, delimiter, true)];
-            return node.type === 'symbol_array' ? { k: 'dsym', parts } : { k: 'str', parts };
+            return node.type === 'symbol_array' ? this.symbol(child, parts) : { k: 'str', parts };
           });
         return { k: 'array', items };
       }
       case 'delimited_symbol': {
         const text = node.text;
         const raw = text.startsWith('%s') ? decodePercentLiteral(text.slice(3, -1), text[2], false) : undefined;
-        return {
-          k: 'dsym',
-          parts:
-            raw !== undefined
-              ? [raw]
-              : text.startsWith(":'")
-                ? [decodeSingleQuoted(text.slice(2, -1))]
-                : this.stringParts(node),
-        };
+        return this.symbol(
+          node,
+          raw !== undefined
+            ? [raw]
+            : text.startsWith(":'")
+              ? [decodeSingleQuoted(text.slice(2, -1))]
+              : this.stringParts(node)
+        );
       }
       case 'rational': {
         return this.rational(node);
@@ -715,7 +714,6 @@ export class Converter {
         regexpHasNumberedBackref(source, flags.includes('x'))
       )
         this.fail(node, '名前付きキャプチャと番号付き後方参照は一緒に使えません。');
-      if (hasVariableLengthLookbehind(source)) this.fail(node, '正規表現の書き方に誤りがあります。');
       try {
         new RegExp(translate(source, flags.includes('x'), flags.includes('m')), 'u');
       } catch (error) {
@@ -762,6 +760,24 @@ export class Converter {
       parts.push(decoded.bytes ? { text: decoded.text, bytes: decoded.bytes } : decoded.text);
     }
     return parts;
+  }
+
+  private symbol(node: Node, parts: StrPart[]): Expr {
+    if (parts.every((part) => typeof part === 'string' || !('k' in part))) {
+      const bytes = parts.flatMap((part) =>
+        typeof part === 'string'
+          ? [...new TextEncoder().encode(part)]
+          : 'text' in part
+            ? (part.bytes ?? [...new TextEncoder().encode(part.text)])
+            : []
+      );
+      try {
+        new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(Uint8Array.from(bytes));
+      } catch {
+        this.fail(node, 'シンボルの文字コードに誤りがあります。');
+      }
+    }
+    return { k: 'dsym', parts };
   }
 
   private decode(node: Node, text: string): { text: string; binary: boolean; bytes?: number[] } {
@@ -817,7 +833,7 @@ export class Converter {
       const parts = keyNode.text.startsWith("'")
         ? [decodeSingleQuoted(keyNode.text.slice(1, -1))]
         : this.stringParts(keyNode);
-      key = { k: 'dsym', parts };
+      key = this.symbol(keyNode, parts);
     } else {
       key = this.valueExpr(keyNode);
     }
@@ -943,6 +959,7 @@ export class Converter {
         return { k: 'cvar', name: node.text };
       }
       case 'global_variable': {
+        if (/^\$(?:[1-9]\d*|[&`'+])$/.test(node.text)) this.fail(node, `${node.text} には代入できません。`);
         return { k: 'gvar', name: node.text };
       }
       case 'constant': {
@@ -1780,6 +1797,8 @@ export class Converter {
           : keyNode.text.startsWith("'")
             ? decodeSingleQuoted(rawKey)
             : this.decode(keyNode, rawKey).text;
+      if (keyNode.type !== 'hash_key_symbol' && !keyNode.text.startsWith("'"))
+        this.symbol(keyNode, [this.decode(keyNode, rawKey)]);
       if (keys.has(key)) this.fail(keyNode, 'パターンのキーが重複しています。');
       keys.add(key);
       const valueNode = child.childForFieldName('value');
@@ -1810,7 +1829,11 @@ export class Converter {
     if (node.type !== 'delimited_symbol') return node.text;
     const text = node.text;
     if (text.startsWith(":'")) return decodeSingleQuoted(text.slice(2, -1));
-    if (text.startsWith(':"')) return this.decode(node, text.slice(2, -1)).text;
+    if (text.startsWith(':"')) {
+      const decoded = this.decode(node, text.slice(2, -1));
+      this.symbol(node, [decoded]);
+      return decoded.text;
+    }
     if (text.startsWith('%s')) return decodePercentLiteral(text.slice(3, -1), text[2], false);
     return text;
   }
@@ -2167,6 +2190,12 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   subshell: '外部コマンドの実行（`...`）',
 };
 
+function sourceEncodingDirective(source: string): string | undefined {
+  const [first = '', second = ''] = source.split(/\r?\n/, 2);
+  const header = first.startsWith('#!') ? second : first;
+  return /^\s*#.*?\b(?:en)?coding\s*:\s*([-\w]+)/i.exec(header)?.[1];
+}
+
 function hasFrozenStringLiteralDirective(source: string): boolean {
   let offset = 0;
   while (offset < source.length) {
@@ -2185,7 +2214,7 @@ function hasFrozenStringLiteralDirective(source: string): boolean {
 }
 
 function namedChildren(node: Node): Node[] {
-  return node.namedChildren.filter((child): child is Node => child !== null);
+  return node.namedChildren.filter((child): child is Node => child !== null && child.type !== 'heredoc_body');
 }
 
 function onlyNamedChild(node: Node): Node {

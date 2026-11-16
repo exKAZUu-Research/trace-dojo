@@ -1,32 +1,11 @@
-import { toIndexExact } from './conversions';
+import { toIndexExact, tryImplicitConversion } from './conversions';
 import { argumentError, typeError } from './errors';
-import { callMethod, type Gen, respondsTo } from './interp';
+import { callMethod, type Gen } from './interp';
 import { isRubyFloat, NIL, type RObject, RString, type Value } from './objects';
-import { rt, RubyError } from './runtime';
-import { classOf, sym, truthy } from './values';
+import { truthy } from './values';
 
 export function* customReceiverSize(recv: RObject): Gen<Value> {
-  const responder = respondsTo(recv, 'respond_to?', true);
-  const declared = respondsTo(recv, 'size', true);
-  const missing = classOf(recv).findMethod('method_missing');
-  const available = responder
-    ? truthy(yield* callMethod(recv, 'respond_to?', [sym('size'), true], undefined, undefined, { fcall: true }))
-    : declared || (missing !== undefined && missing.body.kind !== 'native');
-  if (!available) return NIL;
-  try {
-    return yield* callMethod(recv, 'size', [], undefined, undefined, { fcall: true });
-  } catch (error) {
-    if (
-      !responder &&
-      !declared &&
-      error instanceof RubyError &&
-      error.exception.cls === rt().c.NoMethodError &&
-      error.exception.ivars?.get('@__name') === sym('size') &&
-      error.exception.ivars.get('@__receiver') === recv
-    )
-      return NIL;
-    throw error;
-  }
+  return (yield* tryImplicitConversion(recv, 'size')) ?? NIL;
 }
 
 export function* windowSize(base: Value, method: 'each_slice' | 'each_cons', requested: Value): Gen<Value> {

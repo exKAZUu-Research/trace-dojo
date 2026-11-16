@@ -21,10 +21,9 @@ import {
   setClassVariable,
 } from './interp';
 import { procArity } from './libObject';
+import { type NativeSignature, nativeSignatures } from './nativeSignatures';
 import {
   invalidateMethodCaches,
-  isRubyFloat,
-  type MethodBody,
   type NativeFn,
   NIL,
   RBasic,
@@ -38,7 +37,18 @@ import {
   type Visibility,
 } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
-import { arr, classOf, isA, realClassOf, singletonClassOf, str, stringBytes, sym, truthy } from './values';
+import {
+  arr,
+  classOf,
+  isA,
+  realClassOf,
+  singletonClassOf,
+  singletonDefinitionClass,
+  str,
+  stringBytes,
+  sym,
+  truthy,
+} from './values';
 
 for (const owner of ['Method', 'UnboundMethod']) {
   sundef(owner, 'new');
@@ -152,7 +162,9 @@ function methodIdentity(value: object): number {
   return id;
 }
 
-function methodBodyIdentity(body: MethodBody): object {
+function methodBodyIdentity(method: RMethod): object {
+  if (method.missing) return sym(method.name);
+  const { body } = method;
   return body.kind === 'native' ? body.fn : body;
 }
 
@@ -163,10 +175,10 @@ function* findForMethodObject(self: Value, name: string, publicOnly = false): Ge
     throw nameError(`method '${name}' for class '${realClassOf(self).name}' is ${method.visibility}`, self, name);
   }
   if (yield* respondsToName(self, name, !publicOnly)) {
-    const missing = classOf(self).findMethod('method_missing') as RMethod;
     return {
       name,
-      owner: missing.owner,
+      owner: classOf(self),
+      missing: true,
       visibility: 'public',
       body: {
         kind: 'native',
@@ -224,6 +236,7 @@ function unboundMethod(method: RMethod, name = method.name): RObject {
   return unbound;
 }
 
+// code-gauge-allow functionCognitiveComplexity 25 -- Ruby method descriptions distinguish native signatures, user parameters, aliases, owners, and source locations.
 function* methodDescription(self: RObject): Gen<string> {
   const { recv, method, name } = self.data as MethodData;
   const unbound = self.cls === rt().c.UnboundMethod;
@@ -245,18 +258,20 @@ function* methodDescription(self: RObject): Gen<string> {
         ...(params.keywordRest === undefined ? [] : [`**${params.keywordRest}`]),
         ...(params.block === undefined ? [] : [`&${params.block}`]),
       ].join(', ')
-    : methodArity(method) === 0
-      ? ''
-      : methodArity(method) === 1
-        ? '_'
-        : '*';
+    : methodArity(method) < 0
+      ? '*'
+      : Array.from({ length: methodArity(method) }, () => '_').join(', ');
   const row = definition?.row;
   const kind = unbound ? 'UnboundMethod' : 'Method';
   return `#<${kind}: ${owner}${name}${name === method.name ? '' : `(${method.name})`}(${signature})${row === undefined ? '' : ` main.rb:${row + 1}`}>`;
 }
 
 function* methodOwnerPrefix(method: RMethod, recv: Value, unbound: boolean): Gen<string> {
-  if (!method.owner.isSingleton) return `${className(method.owner)}#`;
+  if (!method.owner.isSingleton) {
+    const owner = className(method.owner);
+    const receiver = unbound ? owner : className(realClassOf(recv));
+    return `${receiver}${receiver === owner ? '' : `(${owner})`}#`;
+  }
   const attached = method.owner.attached as Value;
   const name = attached instanceof RClass ? className(attached) : yield* inspect(attached);
   if (unbound) return `#<Class:${name}>#`;
@@ -316,7 +331,10 @@ function callParameters(proc: RProc, isLambda = true): Value {
 function methodParameterList(method: RMethod, isLambda = true): Value {
   if (method.body.kind === 'user') return parameterList(method.body.def.params, isLambda);
   if (method.body.kind === 'proc') return callParameters(method.body.proc, isLambda);
-  return nativeParameterList(methodArity(method));
+  const parameters = nativeSignature(method)?.parameters;
+  return parameters
+    ? arr(parameters.map(([kind, name]) => arr(name === undefined ? [sym(kind)] : [sym(kind), sym(name)])))
+    : nativeParameterList(methodArity(method));
 }
 
 for (const owner of ['Method', 'UnboundMethod']) {
@@ -327,7 +345,7 @@ for (const owner of ['Method', 'UnboundMethod']) {
     return (
       left.recv === right.recv &&
       left.method.owner === right.method.owner &&
-      methodBodyIdentity(left.method.body) === methodBodyIdentity(right.method.body)
+      methodBodyIdentity(left.method) === methodBodyIdentity(right.method)
     );
   });
   def(owner, 'hash', 0, (self: RObject) => {
@@ -341,7 +359,7 @@ for (const owner of ['Method', 'UnboundMethod']) {
             ? `${typeof recv}:${recv}`
             : 'nil';
     return BigInt(
-      `0x${digest(`${receiver}:${methodIdentity(method.owner)}:${methodIdentity(methodBodyIdentity(method.body))}`)}`
+      `0x${digest(`${receiver}:${methodIdentity(method.owner)}:${methodIdentity(methodBodyIdentity(method))}`)}`
     );
   });
   def(owner, 'arity', 0, (self: RObject) => BigInt(methodArity((self.data as MethodData).method)));
@@ -365,7 +383,7 @@ export function methodArity(method: RMethod): number {
       return methodParamsArity(body.def.params);
     }
     case 'native': {
-      return body.min === body.max ? body.min : -body.min - 1;
+      return nativeSignature(method)?.arity ?? (body.min === body.max ? body.min : -1);
     }
     case 'reader': {
       return 0;
@@ -380,6 +398,12 @@ export function methodArity(method: RMethod): number {
       return 0;
     }
   }
+}
+
+function nativeSignature(method: RMethod): NativeSignature | undefined {
+  const owner = method.owner;
+  const name = owner.isSingleton && owner.attached instanceof RClass ? `${owner.attached.name}.` : `${owner.name}#`;
+  return nativeSignatures[name + method.name];
 }
 
 function methodParamsArity(params: Params | undefined): number {
@@ -432,7 +456,7 @@ function refuseStringEval(name: string, args: Value[], block: RProc | undefined)
 
 def('BasicObject', 'instance_eval', [0, -1], function* (self, args, block, _keywords, used) {
   const body = refuseStringEval('instance_eval', args, block);
-  const definee = self instanceof RBasic && !isRubyFloat(self) ? singletonClassOf(self) : undefined;
+  const definee = singletonDefinitionClass(self);
   return yield* callProc(body, [self], { self, definee, forbidSingletonDefinition: !definee, used });
 });
 def(
@@ -440,7 +464,7 @@ def(
   'instance_exec',
   [0, -1],
   function* (self, args, block, keywords, used) {
-    const definee = self instanceof RBasic && !isRubyFloat(self) ? singletonClassOf(self) : undefined;
+    const definee = singletonDefinitionClass(self);
     return yield* callProc(requireBlock(block), args, {
       self,
       definee,
@@ -464,8 +488,9 @@ def(
   { keywords: true }
 );
 def('Kernel', 'define_singleton_method', [1, 2], function* (self, args, block) {
-  if (!(self instanceof RBasic) || isRubyFloat(self)) throw typeError("can't define singleton");
-  return yield* defineMethodFrom(singletonClassOf(self), args, block, 'public');
+  const owner = singletonDefinitionClass(self);
+  if (!owner) throw typeError("can't define singleton");
+  return yield* defineMethodFrom(owner, args, block, 'public');
 });
 
 // Defining methods -----------------------------------------------------------------------------------------------------
@@ -652,7 +677,7 @@ def('Module', 'prepend', [1, -1], function* (self: RClass, modules) {
 
 function* constantName(value: Value): Gen<string> {
   const name = yield* nameOf(value);
-  if (!/^[A-Z][\w\u0080-￿]*$/u.test(name)) throw nameError(`wrong constant name ${name}`, NIL, name);
+  if (!/^[\p{Uppercase}\p{Lt}][\w\P{ASCII}]*$/u.test(name)) throw nameError(`wrong constant name ${name}`, NIL, name);
   return name;
 }
 

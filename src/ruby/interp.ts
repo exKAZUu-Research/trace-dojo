@@ -19,7 +19,6 @@ import {
   combinedStringEncoding,
   inspect,
   numericCompare,
-  toS,
   toSValue,
   tryImplicitConversion,
 } from './conversions';
@@ -36,7 +35,7 @@ import {
 } from './errors';
 import { hashGet, hashSet, hashSetStored } from './hashes';
 import { makeRational } from './libRational';
-import { lastMatch, makeRegexp, matchGlobal, normalizeSlashLiteralSource } from './libRegexp';
+import { lastMatch, matchGlobal, normalizeSlashLiteralSource, regexpFromString } from './libRegexp';
 import {
   boxFloat,
   invalidateMethodCaches,
@@ -80,6 +79,7 @@ import {
   range,
   realClassOf,
   singletonClassOf,
+  singletonDefinitionClass,
   str,
   stringBytes,
   stringFromBytes,
@@ -372,8 +372,9 @@ export function* ev(e: Expr, frame: Frame): Gen {
     }
     case 'sclass': {
       const target = yield* ev(e.target, frame);
-      if (!(target instanceof RBasic)) throw typeError("can't define singleton");
-      return yield* runModuleBody(singletonClassOf(target), e.body, frame);
+      const owner = singletonDefinitionClass(target);
+      if (!owner) throw typeError("can't define singleton");
+      return yield* runModuleBody(owner, e.body, frame);
     }
     case 'alias': {
       const owner = frame.definitionOwner ?? frame.cref[0];
@@ -450,16 +451,11 @@ export function* ev(e: Expr, frame: Frame): Gen {
       const staticLiteral = e.parts.every((part) => typeof part === 'string' || 'text' in part);
       const cached = staticLiteral ? rt().regexpLiterals.get(e) : undefined;
       if (cached) return cached;
-      let source = '';
-      for (const part of e.parts) {
-        if (typeof part === 'string') source += e.slashDelimited ? normalizeSlashLiteralSource(part) : part;
-        else if ('text' in part) source += e.slashDelimited ? normalizeSlashLiteralSource(part.text) : part.text;
-        else {
-          const value = yield* ev(part, frame);
-          source += yield* toS(value);
-        }
-      }
-      const regexp = makeRegexp(source, {
+      const parts = e.slashDelimited
+        ? e.parts.map((part) => (typeof part === 'string' ? normalizeSlashLiteralSource(part) : part))
+        : e.parts;
+      const source = yield* interpolateString(parts, frame);
+      const regexp = regexpFromString(source, {
         ignoreCase: e.flags.includes('i'),
         multiline: e.flags.includes('m'),
         extended: e.flags.includes('x'),
@@ -1506,8 +1502,9 @@ function* defineMethod(def: MethodDef, singleton: Expr | undefined, frame: Frame
   let visibility: Visibility = 'public';
   if (singleton) {
     const object = yield* ev(singleton, frame);
-    if (!(object instanceof RBasic)) throw typeError(`can't define singleton`);
-    owner = singletonClassOf(object);
+    const target = singletonDefinitionClass(object);
+    if (!target) throw typeError("can't define singleton");
+    owner = target;
   } else if (frame.extra.forbidSingletonDefinition) {
     throw typeError("can't define singleton");
   } else if (frame.definitionOwner) {

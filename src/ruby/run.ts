@@ -5,8 +5,9 @@ import type { ProgramInput } from '../interpreter/programIo';
 import type { Program } from './ast';
 import { bootstrap } from './bootstrap';
 import { describeException } from './describe';
+import { runAtExit } from './exitHandlers';
 import { evalBody, runToEnd, STACK_OVERFLOW } from './interp';
-import { makeData, runAtExit } from './libEncoding';
+import { makeData } from './libData';
 import { parseRuby } from './parse';
 import {
   BreakSignal,

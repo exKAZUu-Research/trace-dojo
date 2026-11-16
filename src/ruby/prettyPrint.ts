@@ -1,6 +1,7 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { addressOf, anonymousClassName, inspect, quotedSymbolName, symInspect } from './conversions';
 import type { Gen } from './interp';
+import { structEntriesOf } from './libStruct';
 import { type HashEntry, RArray, RBasic, RClass, RHash, RObject, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
 import { classOf, realClassOf, stringBytes, stringFromBytes } from './values';
@@ -295,6 +296,30 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = fa
     }
     return { kind: 'group', indent: 0, parts };
   }
+  if (value instanceof RObject && !showsItself(value)) {
+    const members = structEntriesOf(value);
+    if (members && members.length > 0) {
+      const cls = realClassOf(value);
+      const kind = cls.isSubclassOf(rt().c.Data) ? 'data' : 'struct';
+      const head = `#<${kind}${cls.name === undefined ? '' : ` ${cls.name}`}`;
+      if (seen.has(value)) return text(`${head}:...>`, budget);
+      seen.add(value);
+      try {
+        const parts: Doc[] = [];
+        for (const [index, [name, member]] of members.entries()) {
+          if (index > 0) parts.push(text(',', budget));
+          parts.push(breakable(), text(`${name}=`, budget), {
+            kind: 'group',
+            indent: 1,
+            parts: [breakable(''), yield* build(member, seen, budget, defer)],
+          });
+        }
+        return group(1, head, parts, '>', budget);
+      } finally {
+        seen.delete(value);
+      }
+    }
+  }
   if (
     value instanceof RObject &&
     !value.exception &&
@@ -325,6 +350,8 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = fa
   return text(yield* inspect(value), budget);
 }
 
+// code-gauge-allow functionCognitiveComplexity 25 -- Callback counting follows each supported container's observable inspection order and stops after two callbacks.
+// code-gauge-allow functionNcss 31 -- Each container representation contributes its children through a distinct protocol.
 function inspectionCallbackCount(value: Value, seen: Set<object>, budget: BuildBudget, depth = 0): number {
   rt().spend();
   if (depth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
@@ -345,7 +372,8 @@ function inspectionCallbackCount(value: Value, seen: Set<object>, budget: BuildB
       if (count >= 2) return 2;
     }
   } else {
-    for (const item of value.ivars?.values() ?? []) {
+    const members = value instanceof RObject ? structEntriesOf(value) : undefined;
+    for (const item of members?.map(([, item]) => item) ?? value.ivars?.values() ?? []) {
       count += inspectionCallbackCount(item, seen, budget, depth + 1);
       if (count >= 2) return 2;
     }

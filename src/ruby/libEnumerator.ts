@@ -12,7 +12,7 @@ import {
   toStepFloat,
   tryImplicitConversion,
 } from './conversions';
-import { def, iundef, sdef } from './define';
+import { coreMethod, def, iundef, sdef } from './define';
 import { customReceiverSize, cycleSize, windowSize } from './enumeratorSize';
 import { argumentCountError, argumentError, floatDomainError, rangeError, rubyError, typeError } from './errors';
 import { floatStepCount } from './floatMath';
@@ -23,6 +23,7 @@ import {
   callProc,
   flattenGenerator,
   type Gen,
+  invoke,
   isGenerator,
   nativeProc,
   requireBlock,
@@ -1049,6 +1050,9 @@ function makeLazy(source: Value, steps: LazyStep[]): RObject {
 
 def('Enumerable', 'lazy', 0, (self) => makeLazy(self, []));
 def('Enumerator::Lazy', 'lazy', 0, (self) => self);
+def('Enumerator::Lazy', ['to_enum', 'enum_for'], [0, -1], function* (self, args, block) {
+  return makeLazy(yield* invoke(coreMethod(rt().c.Kernel, 'to_enum'), self, args, undefined, block, true), []);
+});
 
 for (const kind of [
   'map',

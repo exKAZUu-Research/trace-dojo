@@ -237,6 +237,11 @@ export function realClassOf(value: Value): RClass {
   return cls;
 }
 
+export function singletonDefinitionClass(value: Value): RClass | undefined {
+  if (value === NIL || typeof value === 'boolean') return realClassOf(value);
+  return value instanceof RBasic && !(value instanceof RFloat) ? singletonClassOf(value) : undefined;
+}
+
 /** The singleton class of an object, created on first use; a class's chains to its superclass's. */
 export function singletonClassOf(value: Value): RClass {
   const { c } = rt();

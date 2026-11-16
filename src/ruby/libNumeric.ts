@@ -16,6 +16,7 @@ import {
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, floatDomainError, rangeError, rubyError, typeError, zeroDivisionError } from './errors';
+import { exceptionOption } from './exceptionOption';
 import { roundFloatDigits, roundHalfAway } from './floatFormat';
 import {
   bigintRatio,
@@ -812,16 +813,6 @@ function floorCeilDigits(value: number, digits: number, rounding: (x: number) =>
 }
 
 // Kernel conversions --------------------------------------------------------------------------------------------------
-
-function* exceptionOption(keywords: RHash | undefined): Gen<boolean> {
-  if (!keywords) return true;
-  let selected = true;
-  for (const entry of keywords.map.values()) {
-    if (entry.key instanceof RSymbol && entry.key.name === 'exception') selected = truthy(entry.value);
-    else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
-  }
-  return selected;
-}
 
 export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen {
   const raise = yield* exceptionOption(keywords);

@@ -9516,3 +9516,290 @@ end
   });
   expect(run(String.raw`puts "before"; /\xC3/`)).toMatchObject({ kind: 'compileError' });
 });
+
+test('lazy enum_for preserves pipelines, arguments, size blocks and receiver probes', () => {
+  expect(
+    run(`e=Enumerator.produce(1){|x|x+1}.lazy.to_enum
+p e.class,e.map{|x|x*2}.take(3).force
+p [1,2,3].lazy.enum_for(:each_slice,2){|n| 12/n}.size
+p [1,2,3].lazy.enum_for(:each_slice,2).map{|x|x.reverse}.force
+class Bag
+ include Enumerable
+ def each(&b);[1,2,3].each(&b);end
+ def respond_to?(name);super;end
+end
+p Bag.new.map.size,Bag.new.each_slice(2).size,Bag.new.each_cons(2).size
+class SizedBag<Bag;def size;3;end;end
+p SizedBag.new.map.size,SizedBag.new.each_slice(2).size,SizedBag.new.each_cons(2).size
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'Enumerator::Lazy\n[2, 4, 6]\n6\n[[2, 1], [3]]\nnil\nnil\nnil\n3\n2\n2\n',
+  });
+});
+
+test('dynamic Method identities, native signatures and Unicode reflection follow Ruby', () => {
+  expect(
+    run(`class C
+ def respond_to_missing?(*);true;end
+ def method_missing(n,*);n;end
+end
+class D<C;end
+o=D.new;a=o.method(:foo);b=o.method(:foo)
+p a==b,a.hash==b.hash,a==o.method(:bar),a.owner,a.call
+h={a=>1};p h[b]
+class D;def method_missing(*);42;end;end
+p a==o.method(:foo),a.hash==o.method(:foo).hash,a.call
+class A;def foo;end;end
+class B<A;end
+p B.new.method(:foo),method(:puts),5.method(:between?)
+p "".method(:center).arity,Object.new.method(:respond_to?).arity,"".method(:upcase).parameters
+m="".method(:center);p m.to_proc.arity,m.unbind.arity,m.to_proc.call(3)
+p method(:Integer).arity,method(:Integer).parameters,Time.method(:at).parameters
+class C;Éclair=42;Δ=1;end
+p C.const_get(:Éclair),C.const_defined?(:Δ)
+C.const_set(:Ⓐfoo,2);C.const_set(:"X😀",3);p C.const_get(:Ⓐfoo),C.const_get(:"X😀")
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'true\ntrue\nfalse\nD\n:foo\n1\ntrue\ntrue\n42\n#<Method: B(A)#foo() main.rb:11>\n#<Method: Object(Kernel)#puts(*)>\n#<Method: Integer(Comparable)#between?(_, _)>\n-1\n-1\n[[:rest]]\n-1\n-1\n"   "\n-2\n[[:req, :arg], [:opt, :base], [:key, :exception]]\n[[:req, :time], [:opt, :subsec], [:opt, :unit], [:key, :in]]\n42\ntrue\n2\n3\n',
+  });
+});
+
+test('Rational conversion honors hooks, exception options and fraction grammar', () => {
+  expect(
+    run(`p Rational("1/2",exception:false),Rational(1,2,exception:false),Rational("bad",exception:false),Rational(nil,exception:false)
+class N;def to_r;Rational(1,3);end;end
+class V<Numeric;def to_r;Rational(2,3);end;end
+p Rational(N.new),Rational(V.new),Rational(2,N.new)
+class Invalid;def to_r;1;end;end
+begin;p Rational(Invalid.new);rescue=>e;p e.class,e.message;end
+p Rational(Invalid.new,exception:false)
+['1/-2','1/+2'].each do |s|
+ begin;p Rational(s);rescue=>e;p e.class,e.message;end
+ p s.to_r,Rational(s,exception:false)
+end
+[1,nil].each do |flag|
+ begin;p Rational('bad',exception:flag);rescue=>e;p e.class,e.message;end
+end
+begin;p Rational(1,0,exception:false);rescue=>e;p e.class,e.message;end
+begin;p Rational(1,other:true);rescue=>e;p e.class,e.message;end
+class Broken;def to_r;raise 'oops';end;end
+p Rational(Broken.new,exception:false)
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '(1/2)\n(1/2)\nnil\nnil\n(1/3)\n(2/3)\n(6/1)\nTypeError\n"can\'t convert Invalid to Rational (Invalid#to_r gives Integer)"\nnil\nArgumentError\n"invalid value for convert(): \\"1/-2\\""\n(1/1)\nnil\nArgumentError\n"invalid value for convert(): \\"1/+2\\""\n(1/1)\nnil\nArgumentError\n"expected true or false as exception: 1"\nArgumentError\n"expected true or false as exception: nil"\nZeroDivisionError\n"divided by 0"\nArgumentError\n"unknown keyword: :other"\nnil\n',
+  });
+});
+
+test('String scan rechecks its final literal and regexp matches after mutation', () => {
+  expect(
+    run(`['a',/a/].each do |pattern|
+ s='ab';s.scan(pattern){s[0]='c'};p s,$~
+ s='ba';s.scan(pattern){s[1]='c'};p s,$~
+ s='ab';s.scan(pattern){s[0]='c';s[1]='a'};p s,$&,$~.begin(0)
+ s='ba';s.scan(pattern){s[0]='a';s[1]='c'};p s,$&,$~.begin(0)
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '"cb"\nnil\n"bc"\nnil\n"ca"\n"a"\n1\n"ac"\n"a"\n0\n"cb"\nnil\n"bc"\nnil\n"ca"\n"a"\n1\n"ac"\n"a"\n0\n',
+  });
+});
+
+test('nil and Boolean singleton definitions share their class targets', () => {
+  expect(
+    run(`class << nil;def label;:nil_label;end;end
+class << true;def label;:true_label;end;end
+false.instance_eval{def label;:false_label;end}
+p nil.label,true.label,false.label
+nil.define_singleton_method(:other){42};p nil.other
+false.instance_exec{def another;12;end};p false.another
+p nil.singleton_class,true.singleton_class,false.singleton_class
+def nil.direct;:direct;end;p nil.direct
+begin;1.instance_eval{def nope;end};rescue=>e;p e.class,e.message;end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      ':nil_label\n:true_label\n:false_label\n42\n12\nNilClass\nTrueClass\nFalseClass\n:direct\nTypeError\n"can\'t define singleton"\n',
+  });
+});
+
+test('match result globals reject every assignment form before execution', () => {
+  for (const target of ['$1', '$20', '$&', '$`', "$'", '$+']) {
+    for (const assignment of [
+      `${target} = 1`,
+      `${target} += 1`,
+      `${target} ||= 1`,
+      `a, ${target} = 1, 2`,
+      `for ${target} in [1];end`,
+    ])
+      expect(run(`puts "before";${assignment}`)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test('Regexp rejects backreferences whose captures may not participate', () => {
+  for (const pattern of [
+    String.raw`\A(?:(a)|b)\1\z`,
+    String.raw`(a)|(b)\1`,
+    String.raw`\1(a)`,
+    String.raw`(?:(a))?\1`,
+  ]) {
+    expect(run(`p "b".match?(/${pattern}/)`)).toMatchObject({
+      uncaughtException: '正規表現の省略可能なキャプチャへの後方参照は、この採点環境では使えません。',
+    });
+  }
+  expect(run(String.raw`p "aa".match?(/(a)\1/),"aa".match?(/(a)\1|b/)`)).toMatchObject({ stdout: 'true\ntrue\n' });
+});
+
+test('Regexp construction preserves encoded patterns, initialization, BOMs and syntax diagnostics', () => {
+  expect(
+    run(String.raw`p Regexp.new('\\xEF\\xBB\\xBF').match?("\uFEFF"),/\xEF\xBB\xBF/.match?("\uFEFF")
+p /(?<=(?:ab))c/.match?("abc"),/(?<=(?:a|b))x/.match?("bx"),/(?<=a|bc)x/.match?("bcx")
+['(?<!(a))b','(?<!a(b))c','(?<=a+)b','(', '[', '*', '?', 'a{2,1}', ')', '[b-a]'].each do |s|
+ begin;Regexp.new(s);rescue=>e;p e.class,e.message;end
+end
+class R<Regexp
+ def initialize(s);puts :regexp_init;@tag=1;super(s);end
+ def tag;@tag;end
+end
+r=R.new('a');p r.class,r.tag,r.match?('a');p R.compile('a').tag
+class T<Time
+ def initialize(y);puts :time_init;@tag=2;super(y);end
+ def tag;@tag;end
+end
+t=T.new(2024);p t.class,t.tag,t.year,T.at(0).class
+s=255.chr;r=Regexp.new(s)
+p r.source.bytes,r.source.encoding,Regexp.new(r.source).match?(s)
+p r.inspect.bytes,r.inspect.encoding,r.to_s.bytes,r.to_s.encoding
+p s.match?(s),s.match(s)[0].bytes
+p Regexp.escape(s).bytes,Regexp.escape(s).encoding,Regexp.union(s).match?(s)
+r=/#{s}/;p r.encoding,r.match?(s)
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'true\ntrue\ntrue\ntrue\ntrue\nRegexpError\n"invalid pattern in look-behind: /(?<!(a))b/"\nRegexpError\n"invalid pattern in look-behind: /(?<!a(b))c/"\nRegexpError\n"invalid pattern in look-behind: /(?<=a+)b/"\nRegexpError\n"end pattern with unmatched parenthesis: /(/"\nRegexpError\n"premature end of char-class: /[/"\nRegexpError\n"target of repeat operator is not specified: /*/"\nRegexpError\n"target of repeat operator is not specified: /?/"\nRegexpError\n"upper is smaller than lower in repeat range: /a{2,1}/"\nRegexpError\n"unmatched close parenthesis: /)/"\nRegexpError\n"empty range in char class: /[b-a]/"\nregexp_init\nR\n1\ntrue\nregexp_init\n1\ntime_init\nT\n2\n2024\nT\n[255]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[47, 92, 120, 70, 70, 47]\n#<Encoding:BINARY (ASCII-8BIT)>\n[40, 63, 45, 109, 105, 120, 58, 255, 41]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[255]\n[255]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  });
+});
+
+test('Struct and Data inspection preserves member encoding and pretty layouts', () => {
+  expect(
+    run(String.raw`S=Struct.new(:name,:tags)
+s=S.new('a'*40,(1..20).to_a)
+pp s,[s,s],{s:s}
+D=Data.define(:name,:tags)
+pp D.new('a'*40,(1..20).to_a)
+a=S.new('x',nil);a.tags=a;pp a
+s=Struct.new(255.chr.to_sym).new(1)
+d=Data.define(233.chr.to_sym).new(1)
+p s.inspect.bytes,s.inspect.encoding,d.inspect.bytes,d.inspect.encoding
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '#<struct S\n name="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",\n tags=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]>\n[#<struct S\n  name="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",\n  tags=\n   [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]>,\n #<struct S\n  name="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",\n  tags=\n   [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]>]\n{s:\n  #<struct S\n   name="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",\n   tags=\n    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]>}\n#<data D\n name="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",\n tags=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]>\n#<struct S name="x", tags=#<struct S:...>>\n[35, 60, 115, 116, 114, 117, 99, 116, 32, 255, 61, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\n[35, 60, 100, 97, 116, 97, 32, 233, 61, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  });
+});
+
+test('DATA bounded reads count bytes and retain EOF behavior', () => {
+  expect(
+    run(String.raw`a=DATA.read(1);b=DATA.read(1)
+p a.bytes,a.encoding,b.bytes,b.encoding
+p DATA.read(0),DATA.read(3),DATA.read,DATA.read(1),DATA.read(0),DATA.read
+__END__
+éhello
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[195]\n#<Encoding:BINARY (ASCII-8BIT)>\n[169]\n#<Encoding:BINARY (ASCII-8BIT)>\n""\n"hel"\n"lo\\n"\nnil\n""\n""\n',
+  });
+});
+
+test('heredoc values work inside multiline collections and argument lists', () => {
+  expect(
+    run(String.raw`x=[
+  1,
+  <<~E
+    a
+  E
+]
+p x
+config={
+  name: 'x',
+  text: <<~E,
+    body
+  E
+  z:1
+}
+p config
+puts(
+  <<~E
+    a
+  E
+)
+p Struct.new(:a).new(
+  <<~E
+    a
+  E
+)
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '[1, "a\\n"]\n{name: "x", text: "body\\n", z: 1}\na\n#<struct a="a\\n">\n',
+  });
+});
+
+test('static symbols reject invalid UTF-8 before executing their program', () => {
+  for (const expression of [String.raw`:"\xFF"`, String.raw`{"\xFF":1}`, String.raw`case {}; in "\xFF": x;end`]) {
+    expect(run(`puts :before;${expression}`)).toMatchObject({ kind: 'compileError' });
+  }
+  expect(run(String.raw`p :"\xC3\xA9"`)).toMatchObject({ stdout: ':é\n' });
+});
+
+test('source encoding directives explicitly reject unsupported source encodings', () => {
+  for (const header of ['# coding: binary', '# encoding: Shift_JIS', '#!/usr/bin/ruby\n# coding: ASCII-8BIT']) {
+    const result = run(`${header}\np __ENCODING__`);
+    expect(result).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ message: expect.stringContaining('ソースコードの文字コード') }],
+    });
+  }
+  expect(run('# coding: UTF-8\np __ENCODING__')).toMatchObject({ stdout: '#<Encoding:UTF-8>\n' });
+  expect(run('# ordinary comment\n# coding: binary\np __ENCODING__')).toMatchObject({ stdout: '#<Encoding:UTF-8>\n' });
+});
+
+test('Regexp collection operations and Rational keys stay within execution limits at scale', () => {
+  expect(
+    run(`p ("a,b;c "*6000).split(/[,; ]/).size
+p ("ab "*12000).scan(/a|b/).size
+p ("😀a "*2000).scan(/😀|a/).size
+words=("😀a "*2000).split(/ /)
+p words.size,words[100].bytes
+h={};1500.times{|i|n=2*i;h[Rational(n,n+1)]=i};p h.size,h[Rational(4,6)]
+`)
+  ).toMatchObject({ stdout: '18000\n24000\n4000\n2000\n[240, 159, 152, 128, 97]\n1500\n1\n' });
+});
+
+test('regexp string assignment replaces selected captures and preserves match state', () => {
+  expect(
+    run(String.raw`s='éabc';p s.send(:[]=,/(a)(b)/,-1,'X'),s,$~.to_a
+s='abc';p s.send(:[]=,/(?<x>b)/,:x,'\\1'),s,$~.to_a
+[1,2,-2,'missing'].each do |group|
+  begin;'b'[/((a))?b/,group]='X';rescue IndexError=>e;p e.message;end
+end
+begin;'b'[/z/]='X';rescue IndexError=>e;p e.message,$~;end
+s=255.chr+'a';s[/a/]='b';p s.bytes,s.encoding
+p 'hello'.start_with?(/he/)
+begin;p 'hello'.end_with?(/lo/);rescue TypeError=>e;p e.message;end
+`)
+  ).toMatchObject({
+    stdout:
+      '"X"\n"éaXc"\n["ab", "a", "b"]\n"\\\\1"\n"a\\\\1c"\n["b", "b"]\n"regexp group 1 not matched"\n"regexp group 2 not matched"\n"regexp group 1 not matched"\n"undefined group name reference: missing"\n"regexp not matched"\nnil\n[255, 98]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n"no implicit conversion of Regexp into String"\n',
+  });
+});

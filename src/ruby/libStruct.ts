@@ -3,6 +3,7 @@ import {
   addressOf,
   className,
   inspect,
+  inspectValue,
   rEql,
   rEquals,
   rubyEncodingName,
@@ -14,13 +15,14 @@ import {
   toStrValue,
   tryImplicitConversion,
 } from './conversions';
-import { def, sdef, sundef } from './define';
+import { coreMethod, def, sdef, sundef } from './define';
 import { argumentError, frozenError, indexError, nameError, rubyError, typeError } from './errors';
 import { digest, hashKeyOf, hashSet } from './hashes';
 import { addMethod, assertMutableClass, callBlock, callMethod, callProc, type Gen, invoke } from './interp';
 import { tryAry } from './libArray';
 import { sizedEnumerator } from './libEnumerator';
 import { symbolNameOf } from './libMeta';
+import { symbolString } from './libString';
 import { NIL, RArray, RClass, type RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
 import {
@@ -489,16 +491,19 @@ function* inspectMembers(self: RObject, kind: 'struct' | 'data'): Gen {
   if (inspecting.has(self)) return str(`${head.trimEnd()}:...>`);
   inspecting.add(self);
   try {
-    const parts: string[] = [];
+    const parts: RString[] = [];
     let length = head.length + 1;
-    for (const [index, member] of layoutOf(self.cls).members.entries()) {
-      const value = yield* inspect(valuesOf(self)[index]);
-      length += member.length + 1 + value.length + (parts.length > 0 ? 2 : 0);
+    for (const [index, member] of layoutOf(self.cls).memberSymbols.entries()) {
+      const value = yield* inspectValue(valuesOf(self)[index]);
+      const memberName = symbolString(member);
+      length += stringBytes(memberName).length + 1 + stringBytes(value).length + (index > 0 ? 2 : 0);
       rt().checkStringLength(length);
-      parts.push(`${member}=${value}`);
+      if (index > 0) parts.push(str(', '));
+      parts.push(memberName, str('='), value);
     }
     if (parts.length === 0) return str(`${name === undefined ? head : head.trimEnd()}>`);
-    return str(`${head}${parts.join(', ')}>`);
+    parts.push(str('>'));
+    return yield* invoke(coreMethod(rt().c.String, 'concat'), str(head), parts, undefined, undefined, false);
   } finally {
     inspecting.delete(self);
   }

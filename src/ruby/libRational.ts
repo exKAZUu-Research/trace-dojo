@@ -2,12 +2,14 @@ import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { formatFloat, toFloat, toInt, toStr, tryImplicitConversion } from './conversions';
 import { def } from './define';
 import { argumentError, floatDomainError, typeError, zeroDivisionError } from './errors';
+import { exceptionOption } from './exceptionOption';
 import { exactDecimal } from './floatFormat';
 import { bigintRatio } from './floatMath';
+import { digest } from './hashes';
 import { chargeIntegerResult, integerBits } from './integerBudget';
 import { callMethod, type Gen } from './interp';
 import { isRubyFloat, NIL, RArray, RObject, RString, RSymbol, type Value } from './objects';
-import { rt, UnsupportedFeatureError } from './runtime';
+import { rt, RubyError, UnsupportedFeatureError } from './runtime';
 import { arr, realClassOf, str } from './values';
 
 /** A Rational's value in lowest terms, with a positive denominator. */
@@ -243,7 +245,11 @@ def('Rational', 'rationalize', [0, 1], (self: RObject, args) => {
 });
 def('Rational', ['to_i', 'to_int'], 0, (self: RObject) => fractionOf(self).numerator / fractionOf(self).denominator);
 def('Rational', 'truncate', [0, 1], (self: RObject, args) => roundTo(self, args, 'truncate'));
-def('Rational', 'hash', 0, (self: RObject) => fractionOf(self).numerator ^ fractionOf(self).denominator);
+def('Rational', 'hash', 0, (self: RObject) => {
+  const fraction = fractionOf(self);
+  rt().spend(Math.ceil((integerBits(fraction.numerator) + integerBits(fraction.denominator)) / 64));
+  return BigInt(`0x${digest(fraction.hashKey())}`);
+});
 def(
   'Rational',
   'eql?',
@@ -321,29 +327,43 @@ def('Float', 'rationalize', [0, 1], () => {
   throw new UnsupportedFeatureError('Float#rationalize（有理数）');
 });
 
-/** `Rational(...)`, which reads Integers, Rationals, Floats, and strings such as `"1/3"`. */
-function* rationalOf(value: Value): Gen<RObject> {
+function* rationalOf(value: Value, raise: boolean): Gen<RObject | undefined> {
   if (typeof value === 'bigint') return makeRational(value, 1n);
   if (isRubyFloat(value)) return floatToRational(Number(value));
   if (isRational(value)) return value;
-  const text = (yield* toStr(value)).replaceAll(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, '');
-  const result = parseRationalText(text, true);
-  if (!result) throw argumentError(`invalid value for convert(): ${JSON.stringify(text)}`);
-  return result;
+  try {
+    if (value === NIL) throw typeError("can't convert nil into Rational");
+    if (!(value instanceof RString)) {
+      const converted = yield* tryImplicitConversion(value, 'to_r');
+      if (converted !== undefined) {
+        if (isRational(converted)) return converted;
+        throw typeError(
+          `can't convert ${realClassOf(value).name} to Rational (${realClassOf(value).name}#to_r gives ${realClassOf(converted).name})`
+        );
+      }
+    }
+    const text = (yield* toStr(value)).replaceAll(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, '');
+    const result = parseRationalText(text, true);
+    if (!result) throw argumentError(`invalid value for convert(): ${JSON.stringify(text)}`);
+    return result;
+  } catch (error) {
+    if (!raise && error instanceof RubyError) return undefined;
+    throw error;
+  }
 }
 
 function parseRationalText(text: string, exact: boolean): RObject | undefined {
   const digits = String.raw`\d(?:_?\d)*`;
   const component = `(?:${digits}(?:\\.${digits})?|\\.${digits})`;
   const pattern = new RegExp(
-    `^([+-]?)(${component})(?:[eE]([+-]?${digits}))?(?:/([+-]?)(${component})(?:[eE]([+-]?${digits}))?)?`
+    `^([+-]?)(${component})(?:[eE]([+-]?${digits}))?(?:/(${component})(?:[eE]([+-]?${digits}))?)?`
   );
   const match = pattern.exec(text);
   if (!match || (exact && match[0].length !== text.length)) return undefined;
-  const [, sign, decimal, exponentText, denominatorSign, denominatorDecimal, denominatorExponent] = match;
+  const [, sign, decimal, exponentText, denominatorDecimal, denominatorExponent] = match;
   const numerator = decimalComponent(sign, decimal, exponentText);
   const denominator = denominatorDecimal
-    ? decimalComponent(denominatorSign, denominatorDecimal, denominatorExponent)
+    ? decimalComponent('', denominatorDecimal, denominatorExponent)
     : { numerator: 1n, denominator: 1n };
   return makeRational(numerator.numerator * denominator.denominator, numerator.denominator * denominator.numerator);
 }
@@ -378,12 +398,15 @@ def(
   'Kernel',
   'Rational',
   [1, 2],
-  function* (_self, args) {
-    const first = yield* rationalOf(args[0]);
+  function* (_self, args, _block, keywords) {
+    const raise = yield* exceptionOption(keywords);
+    const first = yield* rationalOf(args[0], raise);
+    if (first === undefined) return NIL;
     if (args.length === 1) return first;
-    return yield* arithmetic(first, yield* rationalOf(args[1]), '/');
+    const second = yield* rationalOf(args[1], raise);
+    return second === undefined ? NIL : yield* arithmetic(first, second, '/');
   },
-  { visibility: 'private' }
+  { visibility: 'private', keywords: true }
 );
 def('String', 'to_r', 0, function* (self: RString) {
   return parseRationalText(self.s.replace(/^[ \t\n\r\f\v]+/, ''), false) ?? makeRational(0n, 1n);

@@ -13,7 +13,7 @@ import { argumentError, floatDomainError, frozenError, rangeError, rubyError, ty
 import { bigintRatio } from './floatMath';
 import { callMethod, type Gen } from './interp';
 import { floatToRational, isRational } from './libRational';
-import { isRubyFloat, NIL, type RClass, RObject, RString, type Value } from './objects';
+import { isRubyFloat, NIL, type RClass, type RHash, RObject, RString, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { arr, isA, realClassOf, str, stringBytes, stringFromBytes } from './values';
 
@@ -247,7 +247,7 @@ function* buildTime(
   zone: TimeData['zone'],
   microseconds?: Value,
   exact?: Value
-): Gen {
+): Gen<RObject> {
   const { fields, seconds } = yield* fieldArgs(args);
   const [year, month, day, hour, minute] = fields;
   const whole = Math.floor(seconds);
@@ -307,25 +307,44 @@ sdef(
 sdef(
   'Time',
   'new',
-  [0, 7],
-  function* (self: RClass, args, _block, keywords) {
-    if (keywords) throw new UnsupportedFeatureError('Time.new の in: 指定');
-    if (args.length === 0) return makeTime(self, nowNanoseconds());
-    if (args.length === 1 && args[0] instanceof RString && /^\d{4}-\d{2}-\d{2}(?:[ T].*)?$/.test(args[0].s))
-      throw new UnsupportedFeatureError('Time.new の文字列形式');
-    if (args.length === 7 && args[6] !== NIL)
-      return yield* buildTime(
-        self,
-        args.slice(0, 6),
-        yield* parseOffset(args[6]),
-        zoneFromOffset(args[6]),
-        undefined,
-        exactOffset(args[6])
-      );
-    return yield* buildTime(self, args, LOCAL_OFFSET, 'local');
+  [0, -1],
+  function* (self: RClass, args, block, keywords) {
+    const value = new RObject(self);
+    yield* callMethod(value, 'initialize', args, keywords, block, { fcall: true, used: false });
+    return value;
   },
   { keywords: true }
 );
+def(
+  'Time',
+  'initialize',
+  [0, 7],
+  function* (self: RObject, args, _block, keywords) {
+    if (self.data) throw typeError('already initialized Time');
+    const value = yield* initializeTime(realClassOf(self), args, keywords);
+    self.data = value.data;
+    return self;
+  },
+  { visibility: 'private', keywords: true }
+);
+
+function* initializeTime(cls: RClass, args: Value[], keywords: RHash | undefined): Gen<RObject> {
+  if (keywords) throw new UnsupportedFeatureError('Time.new の in: 指定');
+  if (args.length === 0) return makeTime(cls, nowNanoseconds());
+  if (args.length === 1 && args[0] instanceof RString && /^\d{4}-\d{2}-\d{2}(?:[ T].*)?$/.test(args[0].s))
+    throw new UnsupportedFeatureError('Time.new の文字列形式');
+  if (args.length === 7 && args[6] !== NIL)
+    return yield* buildTime(
+      cls,
+      args.slice(0, 6),
+      yield* parseOffset(args[6]),
+      zoneFromOffset(args[6]),
+      undefined,
+      exactOffset(args[6])
+    );
+  return yield* buildTime(cls, args, LOCAL_OFFSET, 'local');
+}
+
 sdef('Time', ['local', 'mktime'], [1, 10], function* (self: RClass, args) {
   return yield* buildTime(self, calendarArgs(args), LOCAL_OFFSET, 'local', args.length === 7 ? args[6] : undefined);
 });

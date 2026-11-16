@@ -32,7 +32,6 @@ import {
   RClass,
   RFloat,
   RHash,
-  type RMethod,
   RObject,
   RProc,
   RRange,
@@ -52,6 +51,7 @@ import {
   realClassOf,
   sameIdentity,
   singletonClassOf,
+  singletonDefinitionClass,
   str,
   sym,
   truthy,
@@ -115,9 +115,9 @@ function hashString(text: string): number {
 
 def('Kernel', 'class', 0, (self) => realClassOf(self));
 def('Kernel', 'singleton_class', 0, (self) => {
-  if (self === NIL || typeof self === 'boolean') return realClassOf(self);
-  if (!(self instanceof RBasic) || self instanceof RFloat) throw typeError("can't define singleton");
-  return singletonClassOf(self);
+  const owner = singletonDefinitionClass(self);
+  if (!owner) throw typeError("can't define singleton");
+  return owner;
 });
 def('Kernel', 'frozen?', 0, (self) => (self instanceof RBasic ? self.frozen : true));
 def('Kernel', 'freeze', 0, (self) => {
@@ -841,7 +841,8 @@ function* setVisibility(self: RClass, args: Value[], visibility: Visibility): Ge
           name
         );
       }
-      if (method.owner === self) (self.methods.get(name) as RMethod).visibility = visibility;
+      const local = self.methods.get(name);
+      if (local) local.visibility = visibility;
       else addMethod(self, { name, owner: self, visibility, body: { kind: 'visibility' } });
       invalidateMethodCaches();
     }
