@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 885 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 886 -- The file holds one layer of the compiler, whose parts share its private state.
 // code-gauge-allow-file duplicateLines 18 -- Undefined and zero initializers share aggregate shapes but differ in scalar and optional values.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
@@ -71,6 +71,7 @@ export interface Place {
   /** Whether the place may not be written: a constant, or what a `*const` pointer or a slice of constants refers to. */
   readonly isConst: boolean;
   readonly locate: (frame: Frame) => Pointer;
+  readonly compileTimePointer?: Pointer;
 }
 
 /** An analyzed expression: its type, its value when the compiler knows it, and the code that computes it. */
@@ -341,6 +342,7 @@ export abstract class SemaBase implements SemaApi {
         return runtime(type, () => cell.slots[0], span, {
           isConst: false,
           locate: () => new Pointer(cell, 0),
+          compileTimePointer: new Pointer(cell, 0),
         });
       }
     }

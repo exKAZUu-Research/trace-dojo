@@ -48,14 +48,15 @@ function bytes(value: Value): number[] {
   return elements(value).map((byte) => Number(byte as bigint));
 }
 
-function caseFold(a: number[], b: number[]): number {
-  const length = Math.min(a.length, b.length);
+function caseFold(a: number[], b: number[], spend: () => void, start = 0, end = a.length): number {
+  const length = Math.min(end - start, b.length);
   for (let index = 0; index < length; index++) {
-    const x = toLower(a[index]);
+    spend();
+    const x = toLower(a[start + index]);
     const y = toLower(b[index]);
     if (x !== y) return x < y ? -1 : 1;
   }
-  return a.length - b.length;
+  return end - start - b.length;
 }
 
 /** `upperString(output, ascii_string)`, which writes into output and returns the written part. */
@@ -95,13 +96,48 @@ function allocMapper(name: string, map: (c: number) => number): () => Member {
   });
 }
 
-function comparer(name: string, compute: (a: number[], b: number[]) => Value, resultType: Type = BOOL): () => Member {
+function comparer(
+  name: string,
+  compute: (a: number[], b: number[], spend: (cost?: number) => void) => Value,
+  resultType: Type = BOOL
+): () => Member {
   return fnMember(name, (sema, call) => {
     const [aArg, bArg] = expectArgs(sema, call, 2, name);
     const a = constSlice(sema, aArg, U8);
     const b = constSlice(sema, bArg, U8);
-    return computed(resultType, [a, b], call.span, ([x, y]) => compute(bytes(x), bytes(y)));
+    return computed(resultType, [a, b], call.span, ([x, y], frame) => {
+      const spend = (cost = 1): void => {
+        if (frame) frame.runtime.spend(cost);
+        else sema.spendCompilation(cost);
+      };
+      const left = bytes(x);
+      const right = bytes(y);
+      spend(left.length + right.length);
+      return compute(left, right, spend);
+    });
   });
+}
+
+function findIgnoreCase(text: number[], pattern: number[], spend: () => void): number {
+  if (pattern.length === 0) return 0;
+  const prefix = new Uint32Array(pattern.length);
+  let matched = 0;
+  for (let index = 1; index < pattern.length;) {
+    spend();
+    if (toLower(pattern[index]) === toLower(pattern[matched])) prefix[index++] = ++matched;
+    else if (matched > 0) matched = prefix[matched - 1];
+    else index++;
+  }
+  matched = 0;
+  for (let index = 0; index < text.length;) {
+    spend();
+    if (toLower(text[index]) === toLower(pattern[matched])) {
+      index++;
+      if (++matched === pattern.length) return index - matched;
+    } else if (matched > 0) matched = prefix[matched - 1];
+    else index++;
+  }
+  return -1;
 }
 
 const MEMBERS: Record<string, () => Member> = {
@@ -123,24 +159,23 @@ const MEMBERS: Record<string, () => Member> = {
   lowerString: stringMapper('std.ascii.lowerString', toLower),
   allocUpperString: allocMapper('std.ascii.allocUpperString', toUpper),
   allocLowerString: allocMapper('std.ascii.allocLowerString', toLower),
-  eqlIgnoreCase: comparer('std.ascii.eqlIgnoreCase', (a, b) => a.length === b.length && caseFold(a, b) === 0),
+  eqlIgnoreCase: comparer(
+    'std.ascii.eqlIgnoreCase',
+    (a, b, spend) => a.length === b.length && caseFold(a, b, spend) === 0
+  ),
   startsWithIgnoreCase: comparer(
     'std.ascii.startsWithIgnoreCase',
-    (a, b) => b.length <= a.length && caseFold(a.slice(0, b.length), b) === 0
+    (a, b, spend) => b.length <= a.length && caseFold(a, b, spend, 0, b.length) === 0
   ),
   endsWithIgnoreCase: comparer(
     'std.ascii.endsWithIgnoreCase',
-    (a, b) => b.length <= a.length && caseFold(a.slice(a.length - b.length), b) === 0
+    (a, b, spend) => b.length <= a.length && caseFold(a, b, spend, a.length - b.length) === 0
   ),
-  lessThanIgnoreCase: comparer('std.ascii.lessThanIgnoreCase', (a, b) => caseFold(a, b) < 0),
-  orderIgnoreCase: comparer('std.ascii.orderIgnoreCase', (a, b) => orderValue(caseFold(a, b)), ORDER),
+  lessThanIgnoreCase: comparer('std.ascii.lessThanIgnoreCase', (a, b, spend) => caseFold(a, b, spend) < 0),
+  orderIgnoreCase: comparer('std.ascii.orderIgnoreCase', (a, b, spend) => orderValue(caseFold(a, b, spend)), ORDER),
   findIgnoreCase: comparer(
     'std.ascii.findIgnoreCase',
-    (a, b) => {
-      for (let index = 0; index + b.length <= a.length; index++)
-        if (caseFold(a.slice(index, index + b.length), b) === 0) return optionalIndex(index);
-      return optionalIndex(-1);
-    },
+    (a, b, spend) => optionalIndex(findIgnoreCase(a, b, spend)),
     OPTIONAL_USIZE
   ),
   lowercase: () => stringConstant('abcdefghijklmnopqrstuvwxyz'),

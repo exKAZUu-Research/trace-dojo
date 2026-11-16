@@ -1,9 +1,9 @@
 import type { Span } from '../ast';
 // code-gauge-allow-file duplicateLines 26 -- Library types repeat the same shape of method on purpose, each over its own state.
-import type { Frame } from '../runtime';
-import { known, type SemaApi } from '../semaBase';
+import { type Frame, withHeldValues } from '../runtime';
+import { copyForFrame, known, type SemaApi } from '../semaBase';
 import { BOOL, fnType, optionalOf, type StructType, type Type, typeName, USIZE, VOID } from '../types';
-import { FnValue, NULL, type Slice, type Value, ZStruct } from '../values';
+import { FnValue, NULL, Slice, type Value, ZStruct } from '../values';
 import { blockSortFunction, runBlockSort } from './blockSort';
 import { compareScalars, constSlice, generic, mutableSlice, ORDER, tupleOf } from './common';
 import { type Member, nativeCall, nativeFunction, nativeStruct } from './native';
@@ -58,7 +58,7 @@ function reader(
   name: string,
   elementCount: 1 | 2,
   resultType: (type: Type) => Type,
-  compute: (items: Value[], call: (args: Value[]) => Value) => Value
+  compute: (items: Slice, call: (args: Value[]) => Value, frame: Frame, type: Type) => Value
 ): () => Member {
   return generic(name, 4, (sema, call, type, [itemsArg, contextArg, fnArg]) => {
     const items = constSlice(sema, itemsArg, type);
@@ -66,11 +66,15 @@ function reader(
     const fn = sema.functionOf(sema.compile(fnArg), fnArg);
     checkParams(sema, name, fn.params, [context.type, ...Array.from({ length: elementCount }, () => type)], fnArg);
     return nativeCall(resultType(type), [items, context], call.span, ([slice, contextValue], frame: Frame) => {
-      const values = (slice as Slice).values();
-      return compute(values, (args) => {
-        frame.runtime.spend();
-        return fn.call(frame, [contextValue, ...args]);
-      });
+      return compute(
+        slice as Slice,
+        (args) => {
+          frame.runtime.spend();
+          return fn.call(frame, [contextValue, ...args]);
+        },
+        frame,
+        type
+      );
     });
   });
 }
@@ -90,12 +94,12 @@ function checkParams(
   );
 }
 
-function binarySearch(items: Value[], order: (item: Value) => bigint): Value {
+function binarySearch(items: Slice, order: (item: Value) => bigint): Value {
   let low = 0;
   let high = items.length;
   while (low < high) {
     const middle = low + Math.floor((high - low) / 2);
-    const comparison = order(items[middle]);
+    const comparison = order(items.get(middle));
     if (comparison === 1n) return BigInt(middle);
     if (comparison === 2n) low = middle + 1;
     else high = middle;
@@ -104,20 +108,38 @@ function binarySearch(items: Value[], order: (item: Value) => bigint): Value {
 }
 
 /** `partitionPoint`: the first index whose element the predicate rejects. */
-function partitionPoint(items: Value[], predicate: (item: Value) => boolean): number {
-  let low = 0;
-  let size = items.length;
-  while (size > 0) {
-    const half = Math.floor(size / 2);
-    const middle = low + half;
-    if (predicate(items[middle])) {
-      low = middle + 1;
-      size -= half + 1;
-    } else {
-      size = half;
-    }
+function partitionPoint(items: Slice, predicate: (item: Value) => boolean): number {
+  let position = 0;
+  let length = items.length;
+  while (length > 1) {
+    const half = Math.floor(length / 2);
+    length -= half;
+    if (predicate(items.get(position + half - 1))) position += half;
   }
-  return low;
+  if (position < items.length && predicate(items.get(position))) position++;
+  return position;
+}
+
+function subSlice(items: Slice, start: number, end: number): Slice {
+  return new Slice(items.target, items.start + start, end - start);
+}
+
+function extremum(items: Slice, call: (args: Value[]) => Value, frame: Frame, type: Type, maximum: boolean): Value {
+  if (items.length === 0) return NULL;
+  const saved = new ZStruct([copyForFrame(frame, items.get(0), type), undefined]);
+  return withHeldValues(frame, [saved], () => {
+    let best = 0;
+    for (let index = 1; index < items.length; index++) {
+      saved.slots[1] = copyForFrame(frame, items.get(index), type);
+      const args = maximum ? [saved.slots[0], saved.slots[1]] : [saved.slots[1], saved.slots[0]];
+      if (call(args) as boolean) {
+        saved.slots[0] = saved.slots[1];
+        best = index;
+      }
+      saved.slots[1] = undefined;
+    }
+    return BigInt(best);
+  });
 }
 
 /** `equalRange(T, items, context, compareFn)`: the bounds of the items the function finds equal. */
@@ -132,7 +154,7 @@ function equalRangeMember(): Member {
       [items, context],
       call.span,
       ([slice, contextValue], frame: Frame) => {
-        const values = (slice as Slice).values();
+        const values = slice as Slice;
         const order = (item: Value): bigint => {
           frame.runtime.spend();
           return fn.call(frame, [contextValue, item]) as bigint;
@@ -141,12 +163,12 @@ function equalRangeMember(): Member {
         let high = values.length;
         while (low < high) {
           const middle = low + Math.floor((high - low) / 2);
-          const comparison = order(values[middle]);
+          const comparison = order(values.get(middle));
           if (comparison === 2n) low = middle + 1;
           else if (comparison === 0n) high = middle;
           else {
-            const lower = low + partitionPoint(values.slice(low, middle), (item) => order(item) === 2n);
-            const upper = middle + partitionPoint(values.slice(middle, high), (item) => order(item) !== 0n);
+            const lower = low + partitionPoint(subSlice(values, low, middle), (item) => order(item) === 2n);
+            const upper = middle + partitionPoint(subSlice(values, middle, high), (item) => order(item) !== 0n);
             return new ZStruct([BigInt(lower), BigInt(upper)]);
           }
         }
@@ -169,7 +191,7 @@ const MEMBERS: Record<string, () => Member> = {
     () => BOOL,
     (items, call) => {
       for (let index = 1; index < items.length; index++)
-        if (call([items[index], items[index - 1]]) as boolean) return false;
+        if (call([items.get(index), items.get(index - 1)]) as boolean) return false;
       return true;
     }
   ),
@@ -202,44 +224,30 @@ const MEMBERS: Record<string, () => Member> = {
     'std.sort.argMin',
     2,
     () => optionalOf(USIZE),
-    (items, call) => {
-      if (items.length === 0) return NULL;
-      let best = 0;
-      for (let index = 1; index < items.length; index++) if (call([items[index], items[best]]) as boolean) best = index;
-      return BigInt(best);
-    }
+    (items, call, frame, type) => extremum(items, call, frame, type, false)
   ),
   argMax: reader(
     'std.sort.argMax',
     2,
     () => optionalOf(USIZE),
-    (items, call) => {
-      if (items.length === 0) return NULL;
-      let best = 0;
-      for (let index = 1; index < items.length; index++) if (call([items[best], items[index]]) as boolean) best = index;
-      return BigInt(best);
-    }
+    (items, call, frame, type) => extremum(items, call, frame, type, true)
   ),
   min: reader(
     'std.sort.min',
     2,
     (type) => optionalOf(type),
-    (items, call) => {
-      if (items.length === 0) return NULL;
-      let best = 0;
-      for (let index = 1; index < items.length; index++) if (call([items[index], items[best]]) as boolean) best = index;
-      return items[best];
+    (items, call, frame, type) => {
+      const index = extremum(items, call, frame, type, false);
+      return index === NULL ? NULL : items.get(Number(index as bigint));
     }
   ),
   max: reader(
     'std.sort.max',
     2,
     (type) => optionalOf(type),
-    (items, call) => {
-      if (items.length === 0) return NULL;
-      let best = 0;
-      for (let index = 1; index < items.length; index++) if (call([items[best], items[index]]) as boolean) best = index;
-      return items[best];
+    (items, call, frame, type) => {
+      const index = extremum(items, call, frame, type, true);
+      return index === NULL ? NULL : items.get(Number(index as bigint));
     }
   ),
 };

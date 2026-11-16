@@ -1559,3 +1559,132 @@ pub fn main() !void {
     uncaughtException: undefined,
   });
 });
+
+test('constant addresses preserve typed parent storage, offsets and hash identity', () => {
+  const source = `const std=@import("std");
+pub fn main(init:std.process.Init) !void {
+    const a=[_]i32{1,1}; const b=[_]i32{1,1};
+    const P=struct{x:u8,y:u8}; const p=P{.x=1,.y=1};
+    const x:i32=7; const y:i32=7;
+    const q=&a[1];
+    std.debug.print("{} {} {} {} {} {} {} {}|", .{&a[0]==&a[1],&a[0]==&b[0],&p.x==&p.y,&x==&y,&@as(i32,5)==&@as(i32,5),&a==&b,q==&a[1],&p.x==&p.x});
+    var map=std.AutoHashMap(*const i32,u8).init(init.gpa);
+    defer map.deinit();
+    try map.put(&a[1],1); try map.put(q,2); try map.put(&b[1],3);
+    std.debug.print("{} {}", .{map.count(),map.get(q).?});
+}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'false true false true true true true true|1 3',
+    uncaughtException: undefined,
+  });
+});
+
+test('global variable addresses retain known slice bounds without folding mutable contents', () => {
+  const header = 'const std=@import("std"); var g=[_]i32{1,2,3};';
+  for (const tail of [
+    'const s:[]i32=&g; _=s[3];',
+    'const s:[]i32=&g; _=s[1..4];',
+    'const s=@as([]i32,&g); _=s[3];',
+    'const s:[]i32=&g; var b:[4]i32=undefined; @memcpy(&b,s);',
+    'const s:[]i32=&g; for(s,0..4) |x,i| {_=x;_=i;}',
+    'const s:[]i32=g[1..]; const alias=s; _=alias[2];',
+  ])
+    expect(executeProgram('zig', `${header} pub fn main() void {${tail}}`).kind).toBe('compileError');
+  expect(
+    executeProgram('zig', `${header} pub fn main() void { const s:[]i32=&g; g[0]=9; std.debug.print("{}",.{s[0]}); }`)
+  ).toMatchObject({ kind: 'executed', stderr: '9', uncaughtException: undefined });
+});
+
+test('case-insensitive search scans repetitive compile-time and runtime data within the shared budget', () => {
+  const text = 'a'.repeat(100_000);
+  const pattern = 'a'.repeat(49_999) + 'b';
+  for (const value of [`"${text}"`, 'input()']) {
+    const source = `const std=@import("std"); fn input() []const u8 {return "${text}";} pub fn main() void {std.debug.print("{any}",.{std.ascii.findIgnoreCase(${value},"${pattern}")});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'null',
+      uncaughtException: undefined,
+    });
+  }
+  expect(
+    executeProgram(
+      'zig',
+      `const std=@import("std"); pub fn main() void {std.debug.print("{any} {any} {any}", .{std.ascii.findIgnoreCase("aAaAB","aaab"),std.ascii.findIgnoreCase("x", ""),std.ascii.findIgnoreCase("a","longer")});}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: '1 0 null', uncaughtException: undefined });
+});
+
+test('non-power-of-two shift widths reject known invalid amounts and panic for runtime amounts', () => {
+  for (const operator of ['<<', '>>']) {
+    for (const width of [3, 5, 9]) {
+      for (const declaration of [`const a: u${width} = 1;`, `var a: u${width} = 1; _ = &a;`]) {
+        expect(executeProgram('zig', `pub fn main() void {${declaration} _=a ${operator} ${width};}`).kind).toBe(
+          'compileError'
+        );
+      }
+      expect(
+        executeProgram(
+          'zig',
+          `pub fn main() void {const a: u${width}=1;var amount:u${Math.ceil(Math.log2(width))}=${width};_= &amount;_=a ${operator} amount;}`
+        )
+      ).toMatchObject({ kind: 'executed', uncaughtException: 'panic: shift amount is greater than the type size' });
+    }
+  }
+});
+
+test('optional slices use their pointer niche for list growth and fixed-buffer allocations', () => {
+  const source = `const std=@import("std"); const P=struct{s:?[]const u8};
+pub fn main(init:std.process.Init) !void {
+    var list:std.ArrayList(?[]const u8)=.empty; defer list.deinit(init.gpa);
+    try list.append(init.gpa,null);
+    var records:std.ArrayList(P)=.empty; defer records.deinit(init.gpa);
+    try records.append(init.gpa,.{.s=null});
+    var bytes:[32]u8=undefined; var fba=std.heap.FixedBufferAllocator.init(&bytes);
+    const slots=try fba.allocator().alloc(?[]const u8,2);
+    std.debug.print("{} {} {}", .{list.capacity,records.capacity,slots.len});
+}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '9 9 2',
+    uncaughtException: undefined,
+  });
+});
+
+test('sort queries read live storage while retaining the reference saved extrema', () => {
+  const source = `const std=@import("std");
+fn less(p:*[3]u8,a:u8,b:u8) bool {p[2]=0;return a<b;}
+fn order(p:*[3]u8,a:u8) std.math.Order {p[0]=9;p[2]=0;return std.math.order(@as(u8,2),a);}
+fn predicate(p:*[3]u8,a:u8) bool {p[0]=9;p[2]=0;return a<2;}
+pub fn main() void {
+ var a=[_]u8{1,2,3};
+ std.debug.print("{}|", .{std.sort.isSorted(u8,&a,&a,less)});
+ a=.{1,2,3};std.debug.print("{any}|", .{std.sort.argMin(u8,&a,&a,less)});
+ a=.{1,2,3};std.debug.print("{any}|", .{std.sort.argMax(u8,&a,&a,less)});
+ a=.{1,2,3};std.debug.print("{any}|", .{std.sort.min(u8,&a,&a,less)});
+ a=.{1,2,3};std.debug.print("{any}|", .{std.sort.max(u8,&a,&a,less)});
+ a=.{1,2,3};std.debug.print("{any}|", .{std.sort.binarySearch(u8,&a,&a,order)});
+ a=.{1,2,3};std.debug.print("{}|", .{std.sort.lowerBound(u8,&a,&a,order)});
+ a=.{1,2,3};std.debug.print("{}|", .{std.sort.upperBound(u8,&a,&a,order)});
+ a=.{1,2,3};const range=std.sort.equalRange(u8,&a,&a,order);std.debug.print("{} {}|", .{range[0],range[1]});
+ a=.{1,2,3};std.debug.print("{}|", .{std.sort.partitionPoint(u8,&a,&a,predicate)});
+}
+`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'false|2|1|0|2|1|1|3|0 3|1|',
+    uncaughtException: undefined,
+  });
+});
+
+test('constant union and optional projections keep their parent addresses', () => {
+  const source = `const std=@import("std");pub fn main() void {
+    const U=union(enum){a:u8,b:u8}; const u:U=.{.a=5}; const o:?u8=5; const p:?u8=6;
+    std.debug.print("{} {} {}", .{&u.a==&u.a,&o.?==&o.?,&o.?==&p.?});
+}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true true false',
+    uncaughtException: undefined,
+  });
+});

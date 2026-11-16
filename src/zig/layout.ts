@@ -52,7 +52,7 @@ function layoutOf(type: Type): Layout {
       };
     }
     case 'optional': {
-      if (type.child.kind === 'pointer' && type.child.size === 'one') return { size: 8, align: 8 };
+      if (type.child.kind === 'pointer') return layoutOf(type.child);
       const child = layoutOf(type.child);
       return { size: alignTo(child.size + 1, child.align), align: child.align };
     }

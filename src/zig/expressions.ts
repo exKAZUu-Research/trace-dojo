@@ -110,7 +110,7 @@ class Constant {
 }
 
 export abstract class ExpressionCompiler extends SemaBase {
-  private readonly stringConstants = new Map<string, Constant>();
+  private readonly constants = new Map<string, Constant>();
 
   // Abstract parts that later layers compile.
   protected abstract compileCall(expression: ExpressionOf<'call'>, resultType: Type | undefined): TExpr;
@@ -294,15 +294,19 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   protected stringLiteral(bytes: readonly number[], span: Span): TExpr {
-    // Equal literals share their constant data, so their pointers compare equal as in Zig.
-    const key = bytes.join(',');
-    let constant = this.stringConstants.get(key);
-    if (!constant) {
-      constant = new Constant(new ZArray([...bytes.map(BigInt), 0n], 0, bytes.length, true));
-      this.stringConstants.set(key, constant);
+    const type = arrayOf(bytes.length, U8, 0n);
+    const value = new ZArray([...bytes.map(BigInt), 0n], 0, bytes.length, true);
+    return known(pointerTo(type, true), this.constantPointer(type, value), span);
+  }
+
+  private constantPointer(type: Type, value: Value): Pointer {
+    const key = `${typeId(type)} ${constantKey(value, () => this.spendCompilation())}`;
+    let storage = this.constants.get(key);
+    if (!storage) {
+      storage = new Constant(copyForStorage(value));
+      this.constants.set(key, storage);
     }
-    const type = pointerTo(arrayOf(bytes.length, U8, 0n), true);
-    return known(type, new Pointer(constant, 0), span);
+    return new Pointer(storage, 0);
   }
 
   // Field access ----------------------------------------------------------------------------------------------------
@@ -398,13 +402,16 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     if (field.comptimeValue !== undefined) return known(field.type, field.comptimeValue, span);
     if (base.known) {
-      return known(field.type, (base.value as ZStruct).slots[index], span);
+      const parent = this.addressOf(base).value as Pointer;
+      const pointer = new Pointer(parent.load() as ZStruct, index);
+      return knownAt(field.type, pointer, span);
     }
     const evaluate = base.eval;
     const place = base.place;
     const fieldPlace: Place | undefined = place && {
       isConst: place.isConst,
       locate: (frame) => new Pointer(place.locate(frame).load() as ZStruct, index),
+      compileTimePointer: place.compileTimePointer && new Pointer(place.compileTimePointer.load() as ZStruct, index),
     };
     return runtime(field.type, (frame) => (evaluate(frame) as ZStruct).slots[index], span, fieldPlace);
   }
@@ -429,7 +436,8 @@ export abstract class ExpressionCompiler extends SemaBase {
           `union のフィールド「${name}」を読もうとしましたが、有効なのは「${fields[union.tag].name}」です。`
         );
       }
-      return known(field.type, union.slots[0], span);
+      const parent = this.addressOf(base).value as Pointer;
+      return knownAt(field.type, new Pointer(parent.load() as ZUnion, 0), span);
     }
     const evaluate = base.eval;
     const place = base.place;
@@ -449,7 +457,11 @@ export abstract class ExpressionCompiler extends SemaBase {
       return this.error(span, `${typeName(type)} 型はポインタではないので、.* で参照できません。`);
     }
     const evaluate = pointer.eval;
-    const place: Place = { isConst: type.isConst, locate: (frame) => evaluate(frame) as Pointer };
+    const place: Place = {
+      isConst: type.isConst,
+      locate: (frame) => evaluate(frame) as Pointer,
+      compileTimePointer: pointer.known && pointer.value instanceof Pointer ? pointer.value : undefined,
+    };
     if (pointer.known && pointer.value instanceof Pointer && type.isConst && pointer.value.target instanceof Constant) {
       return { ...known(type.child, pointer.value.load(), span), place };
     }
@@ -471,17 +483,11 @@ export abstract class ExpressionCompiler extends SemaBase {
         span
       );
     }
-    if (place) {
-      const type = pointerTo(expression.type, place.isConst);
-      return {
-        ...runtime(type, (frame) => place.locate(frame), span),
-        knownLength: expression.known && expression.type.kind === 'array' ? expression.type.length : undefined,
-      };
-    }
-    if (expression.known) {
-      const storage = new Constant(copyForStorage(expression.value));
-      return known(pointerTo(expression.type, true), new Pointer(storage, 0), span);
-    }
+    if (place?.compileTimePointer)
+      return known(pointerTo(expression.type, place.isConst), place.compileTimePointer, span);
+    if (expression.known)
+      return known(pointerTo(expression.type, true), this.constantPointer(expression.type, expression.value), span);
+    if (place) return runtime(pointerTo(expression.type, place.isConst), (frame) => place.locate(frame), span);
     const evaluate = expression.eval;
     return runtime(pointerTo(expression.type, true), (frame) => new Pointer(new Constant(evaluate(frame)), 0), span);
   }
@@ -505,7 +511,8 @@ export abstract class ExpressionCompiler extends SemaBase {
       return this.error(expression, `${typeName(type)} 型は optional ではないので、.? は使えません。`);
     const child = type.child;
     // A known null still panics only when the program runs, as in Zig.
-    if (operand.known && operand.value !== NULL) return known(child, unwrapOptionalValue(operand.value), expression);
+    if (operand.known && operand.value !== NULL)
+      return knownAt(child, this.optionalPayloadPointer(this.addressOf(operand).value as Pointer), expression);
     const evaluate = operand.eval;
     const place = operand.place;
     const unwrapPlace: Place | undefined = place && {
@@ -526,6 +533,8 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Indexing and slicing ----------------------------------------------------------------------------------------------
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps static bounds and the corresponding storage location together.
+  // code-gauge-allow functionNcss 32 -- Keeps static bounds and the corresponding storage location together.
   protected index(expression: ExpressionOf<'index'>): TExpr {
     const object = this.compile(expression.object);
     const index = this.coerce(this.compile(expression.index, USIZE), USIZE, expression.index);
@@ -546,8 +555,10 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     const isConst = isConstIndexable(type, object.place);
     if (object.known && index.known && (type.kind === 'array' || isConstantData(object.value))) {
-      const elements = elementSlots(object.value, type);
-      return known(child, elements.slots[elements.start + Number(index.value)], expression);
+      const source = type.kind === 'array' ? (this.addressOf(object).value as Pointer).load() : object.value;
+      const elements = elementSlots(source, type);
+      const pointer = new Pointer({ slots: elements.slots }, elements.start + Number(index.value));
+      return knownAt(child, pointer, expression);
     }
     const evaluateObject =
       type.kind === 'array' && object.place ? (frame: Frame) => object.place!.locate(frame).load() : object.eval;
@@ -556,12 +567,16 @@ export abstract class ExpressionCompiler extends SemaBase {
       const value = evaluateObject(frame);
       return withHeldValues(frame, [value], () => access(value, index.eval(frame) as bigint));
     };
+    const staticSource = object.known ? object.value : object.place?.compileTimePointer?.load();
+    const staticElement =
+      index.known && staticSource !== undefined ? access(staticSource, index.value as bigint) : undefined;
     const place: Place = {
       isConst,
       locate: (frame) => {
         const { slots, position } = locate(frame);
         return new Pointer(slots, position);
       },
+      compileTimePointer: staticElement ? new Pointer(staticElement.slots, staticElement.position) : undefined,
     };
     return runtime(
       child,
@@ -1168,6 +1183,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Checks compile-time and fixed-width shift contracts together.
   private shift(expression: ExpressionOf<'binary'>, resultType: Type | undefined): TExpr {
     const left = this.compile(expression.left, resultType);
     const type = left.type;
@@ -1194,6 +1210,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     const int = type;
     const amountType = log2IntType(int);
     const right = this.coerce(this.compile(expression.right, amountType), amountType, expression.right);
+    if (expression.operator !== '<<|' && right.known && (right.value as bigint) >= BigInt(int.bits))
+      this.error(expression.right, `シフトの量 ${right.value as bigint} は、${typeName(int)} 型のビット数以上です。`);
     const operation =
       expression.operator === '<<'
         ? (a: Value, b: Value): Value => shiftLeft(a as bigint, b as bigint, int)
@@ -1560,6 +1578,29 @@ function valueKey(value: Value): string {
   if (value === NULL) return 'null';
   if (isType(value)) return `type ${typeId(value)}`;
   return `object ${objectId(value)}`;
+}
+
+function knownAt(type: Type, pointer: Pointer, span: Span): TExpr {
+  return {
+    ...known(type, pointer.load(), span),
+    place: { isConst: true, locate: () => pointer, compileTimePointer: pointer },
+  };
+}
+
+function constantKey(value: Value, spend: () => void): string {
+  spend();
+  if (value instanceof ZArray)
+    return `array ${JSON.stringify(value.values(true).map((item) => constantKey(item, spend)))}`;
+  if (value instanceof ZStruct) return `struct ${JSON.stringify(value.slots.map((item) => constantKey(item, spend)))}`;
+  if (value instanceof ZUnion) return `union ${value.tag} ${constantKey(value.slots[0], spend)}`;
+  if (value instanceof Some) return `some ${constantKey(value.value, spend)}`;
+  if (value instanceof Pointer) {
+    const location = value.storageLocation();
+    return `pointer ${objectId(location.storage)} ${location.index}`;
+  }
+  if (value instanceof Slice) return `slice ${objectId(value.target.slots)} ${value.start} ${value.length}`;
+  if (value instanceof FnValue) return `fn ${objectId(value.fn)}`;
+  return valueKey(value);
 }
 
 const objectIds = new WeakMap<object, number>();
