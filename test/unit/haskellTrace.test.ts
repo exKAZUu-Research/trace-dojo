@@ -247,6 +247,28 @@ test('shared acyclic constructor graphs use one cumulative display allowance', (
   });
 });
 
+test.each([
+  { count: 100, body: 'id(f(n-1))' },
+  { count: 200, body: 'id(f(n-1))' },
+  { count: 400, body: 'id(f(n-1))' },
+  { count: 400, body: 'let y=f(n-1) in y' },
+  { count: 400, body: String.raw`(\x->x)(f(n-1))` },
+])('display aborts leave finite thunk chains usable: $count, $body', ({ count, body }) => {
+  const source = `f :: Int -> Int\nf 0=0\nf n=${body}\nmain=do\n  let x=f ${count}\n  print x`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.stdout).toBe('0\n');
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.traceItems).toHaveLength(3);
+});
+
+test.each([100, 200, 400])('aborted polymorphic displays leave repeated reads usable: %i', (count) => {
+  const source = `f :: Int -> [a]\nf 0=[]\nf n=id(f(n-1))\nmain=do\n  let x=f ${count}\n  print(length x)\n  print(length x)`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.stdout).toBe('0\n0\n');
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.traceItems).toHaveLength(4);
+});
+
 test('recursive instance methods retain independent call frames', () => {
   const source = `class C a where c::a->IO ()
 instance C Int where

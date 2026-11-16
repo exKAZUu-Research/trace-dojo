@@ -60,6 +60,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   private readonly dictCache = new Map<InstanceInfo, Dict>();
   private allocated = 0;
   private gcMilliseconds = 0;
+  private typeRemaining = LIMITS.maxOperations;
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
@@ -83,6 +84,21 @@ export class Runtime implements TracedRuntime<TraceFrame> {
       return this.budget.excludingTime(() => withTypeWorkBudget(() => this.spend(), run));
     } finally {
       this.displayRemaining = undefined;
+    }
+  }
+
+  withDisplayTypes<T>(fallback: T, work: () => T): T {
+    if (this.displayRemaining !== undefined) return work();
+    if (this.typeRemaining <= 0) return fallback;
+    try {
+      return this.budget.excludingTime(() =>
+        withTypeWorkBudget(() => {
+          if (--this.typeRemaining < 0) throw new DisplayAbort();
+        }, work)
+      );
+    } catch (error) {
+      if (error instanceof DisplayAbort) return fallback;
+      throw error;
     }
   }
 

@@ -115,10 +115,6 @@ export class Machine {
     return this.run({ mode: 'enter', slot }) as Value;
   }
 
-  evaluate(code: Core, env: Env | undefined): Value {
-    return this.run({ mode: 'eval', code, env }) as Value;
-  }
-
   apply(fn: Value, args: Slot[]): Value {
     return this.run({ mode: 'apply', fn, args }) as Value;
   }
@@ -130,7 +126,8 @@ export class Machine {
 
   /** Creates the slot for an argument or binding: a value when it needs no evaluation, else a thunk. */
   makeSlot(code: Core, env: Env | undefined): Slot {
-    return typedSlot(this.makeUntypedSlot(code, env), code.displayType);
+    const slot = this.makeUntypedSlot(code, env);
+    return this.runtime.withDisplayTypes(slot, () => typedSlot(slot, code.displayType));
   }
 
   private makeUntypedSlot(code: Core, env: Env | undefined): Slot {
@@ -175,7 +172,8 @@ export class Machine {
     if (code.k === 'lit' || code.k === 'lam' || code.k === 'global' || code.k === 'prim' || code.k === 'iodo') {
       return this.makeSlot(code, env);
     }
-    return typedSlot(new Thunk(code, env), code.displayType);
+    const slot = new Thunk(code, env);
+    return this.runtime.withDisplayTypes<Slot>(slot, () => typedSlot(slot, code.displayType));
   }
 
   // code-gauge-allow functionNcss 35 -- The main loop dispatches on the machine mode and handles limits and exceptions in one place.
@@ -339,10 +337,12 @@ export class Machine {
   private squeezeUpdateFrame(entered: Thunk): void {
     const top = this.stack.at(-1);
     if (top?.k !== 'update') return;
-    this.stack.pop();
     if (this.runtime.steps.recorder && (entered.displayType || top.thunk.displayType))
-      top.thunk.displayType = slotDisplayType(entered, top.thunk.displayType ?? UNKNOWN_TYPE);
+      top.thunk.displayType = this.runtime.withDisplayTypes(top.thunk.displayType, () =>
+        slotDisplayType(entered, top.thunk.displayType ?? UNKNOWN_TYPE)
+      );
     top.thunk.redirect(entered);
+    this.stack.pop();
   }
 
   /** Applies a function to arguments: a call when it has them all, a partial application when it lacks some. */
@@ -457,22 +457,24 @@ export class Machine {
     if (!this.runtime.steps.recorder) return;
     const type =
       code.k === 'local'
-        ? slotDisplayType((env as Env).at(code.depth).slots[code.index] as Slot, code.displayType ?? UNKNOWN_TYPE)
+        ? this.runtime.withDisplayTypes(code.displayType, () =>
+            slotDisplayType((env as Env).at(code.depth).slots[code.index] as Slot, code.displayType ?? UNKNOWN_TYPE)
+          )
         : code.displayType;
     return type && (type.tag === 'tvar' || type.tag === 'tgen') ? undefined : type;
   }
 
   private selectAlternative(state: RunState, core: CaseCore, env: Env, type: Type | undefined): void {
     const scrutinee = state.value as ConValue;
-    if (core.bindIndex !== undefined) env.slots[core.bindIndex] = typedSlot(scrutinee, type);
+    if (core.bindIndex !== undefined)
+      env.slots[core.bindIndex] = this.runtime.withDisplayTypes<Slot>(scrutinee, () => typedSlot(scrutinee, type));
     const alt = core.alts.get(scrutinee.con.tag);
     if (alt) {
       const { slots } = alt;
       for (let index = 0; index < slots.length; index++) {
         if (slots[index] >= 0)
-          env.slots[slots[index]] = typedSlot(
-            scrutinee.fields[index],
-            type ? constructorFieldType(scrutinee.con, type, index) : undefined
+          env.slots[slots[index]] = this.runtime.withDisplayTypes(scrutinee.fields[index], () =>
+            typedSlot(scrutinee.fields[index], type ? constructorFieldType(scrutinee.con, type, index) : undefined)
           );
       }
       state.evaluate(alt.body, env);

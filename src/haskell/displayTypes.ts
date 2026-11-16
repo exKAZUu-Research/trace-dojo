@@ -1,11 +1,12 @@
 import { IO_TYPE } from './builtinTypes';
 import type { ConInfo } from './entities';
-import { mapGraphPairs } from './typeGraph';
-import { instantiateType, prune, splitApp, type Type } from './types';
+import { mapGraph, mapGraphPairs } from './typeGraph';
+import { instantiateType, prune, splitApp, type Type, typeChildren } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 import { type Slot, Thunk, TypedSlot, untypedSlot } from './values';
 
 export const UNKNOWN_TYPE: Type = { tag: 'tgen', index: -1 };
+const concreteTypes = new WeakSet<Type>();
 
 export function typedSlot(slot: Slot, type: Type | undefined): Slot {
   if (!type) return slot;
@@ -19,7 +20,7 @@ export function typedSlot(slot: Slot, type: Type | undefined): Slot {
 export function slotDisplayType(slot: Slot, fallback: Type = UNKNOWN_TYPE): Type {
   let result = fallback;
   let seen: Set<Thunk> | undefined;
-  while (slot instanceof TypedSlot || slot instanceof Thunk) {
+  while (!isConcreteType(result) && (slot instanceof TypedSlot || slot instanceof Thunk)) {
     chargeTypeWork();
     if (slot instanceof TypedSlot) {
       result = refineType(result, slot.type);
@@ -33,6 +34,20 @@ export function slotDisplayType(slot: Slot, fallback: Type = UNKNOWN_TYPE): Type
     slot = slot.target;
   }
   return result;
+}
+
+function isConcreteType(type: Type): boolean {
+  return mapGraph<Type, boolean>(
+    type,
+    prune,
+    (node) => (concreteTypes.has(node) ? [] : typeChildren(node)),
+    (node, children) => {
+      const concrete =
+        concreteTypes.has(node) || node.tag === 'tcon' || (node.tag === 'tap' && children.every(Boolean));
+      if (concrete) concreteTypes.add(node);
+      return concrete;
+    }
+  );
 }
 
 function refineType(template: Type, actual: Type): Type {
