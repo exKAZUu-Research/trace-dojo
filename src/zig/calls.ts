@@ -5,6 +5,7 @@ import { FunctionInstance } from './functions';
 import { Frame, Jump } from './runtime';
 import {
   copyForStorage,
+  evaluateHeld,
   FnRef,
   isType,
   known,
@@ -125,12 +126,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
       fnType.returnType,
       (frame) => {
         const fn = (evaluateCallee(frame) as FnValue).fn;
-        return this.invoke(
-          fn,
-          evaluators.map((evaluate) => evaluate(frame)),
-          row,
-          frame
-        );
+        return this.invoke(fn, evaluateHeld(frame, evaluators), row, frame);
       },
       expression
     );
@@ -183,13 +179,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
     const row = expression.row;
     return runtime(
       instance.returnType,
-      (frame) =>
-        this.invoke(
-          instance,
-          evaluators.map((evaluate) => evaluate(frame)),
-          row,
-          frame
-        ),
+      (frame) => this.invoke(instance, evaluateHeld(frame, evaluators), row, frame),
       expression
     );
   }

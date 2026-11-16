@@ -762,7 +762,7 @@ export abstract class SemaBase implements SemaApi {
       return known(type, build(elements.map((element) => copyForStorage(element.value))), span);
     }
     const evaluators = elements.map((element) => element.eval);
-    return runtime(type, (frame) => build(evaluators.map((evaluate) => copyForStorage(evaluate(frame)))), span);
+    return runtime(type, (frame) => build(evaluateHeld(frame, evaluators, copyForStorage)), span);
   }
 
   /** An expression of another type whose value a function computes from the original's. */
@@ -968,6 +968,29 @@ export function withSentinel(values: Value[], sentinel: Value | undefined): Valu
 /** A new array of the elements, followed by the sentinel of a sentinel-terminated array type. */
 export function newArray(values: Value[], sentinel: Value | undefined): ZArray {
   return new ZArray(withSentinel(values, sentinel), 0, values.length);
+}
+
+/**
+ * Evaluates parts in order, keeping each part's value reachable while the later ones run, so that a turtle an earlier
+ * part holds stays on the board while a later part's calls record steps.
+ */
+export function evaluateHeld(
+  frame: Frame,
+  evaluators: readonly Eval[],
+  convert: (value: Value) => Value = (value) => value
+): Value[] {
+  const mark = frame.temporaries.length;
+  const values: Value[] = [];
+  try {
+    for (const evaluate of evaluators) {
+      const value = convert(evaluate(frame));
+      values.push(value);
+      frame.temporaries.push(value);
+    }
+  } finally {
+    frame.temporaries.length = mark;
+  }
+  return values;
 }
 
 /** A value about to be stored, whose aggregates must not be shared with the value it came from. */
