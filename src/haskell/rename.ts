@@ -1188,7 +1188,12 @@ class Renamer {
     return this.pickOne(candidates, name, 'value');
   }
 
-  private pickOne<T extends { module: string; name: string }>(candidates: T[], name: QName, what: 'value' | 'type'): T {
+  private pickOne<T extends { module: string; name: string }>(
+    candidates: T[],
+    name: QName,
+    what: 'value' | 'type',
+    originOf: (candidate: T) => object = (candidate) => candidate
+  ): T {
     let found = candidates;
     if (found.length > 1) found = found.filter((entity) => !(entity as { weak?: boolean }).weak);
     if (found.length > 1 && this.options.ownShadowsImports) {
@@ -1206,7 +1211,7 @@ class Renamer {
     }
     const sources = found
       .flatMap((entity) =>
-        [...(this.importOrigins.get(entity) ?? [entity.module])].map((source) => `${source}.${entity.name}`)
+        [...(this.importOrigins.get(originOf(entity)) ?? [entity.module])].map((source) => `${source}.${entity.name}`)
       )
       .join(' と ');
     throw compileError(name.span, `${text} が、${sources} のどれを指すか決まりません。`);
@@ -1268,7 +1273,8 @@ class Renamer {
     const picked = this.pickOne(
       candidates.map((candidate) => ({ module: candidate.entity.module, name: candidate.entity.name, candidate })),
       name,
-      'type'
+      'type',
+      (item) => item.candidate.entity
     );
     if (picked.candidate.kind === 'type' && picked.candidate.entity.unsupported) {
       throw unsupportedError(name.span, picked.candidate.entity.unsupported);

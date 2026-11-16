@@ -130,3 +130,34 @@ main = do
       "([1,3,2],[2,1])\n(Just 2,Just Nothing,Just 5,Just (1,True,'x'))\n(8,-9223372036854775808,64,63,3)\n(fromList [fromList [],fromList [1],fromList [1,2],fromList [2]],fromList [(1,'a'),(1,'b'),(2,'a'),(2,'b')])\n(5,fromList [(1,0),(2,2)])\n",
   });
 });
+
+test.each([
+  ['data Either a b = L a | R b\nf :: Either Int Int -> Int\nf _ = 1\nmain = print 1', 'Prelude.Either', 'Main.Either'],
+  [
+    'class Show a where sh :: a -> String\ninstance Show Int where sh = const ""\nmain = putStrLn (sh (1::Int))',
+    'Prelude.Show',
+    'Main.Show',
+  ],
+  ['import Data.Map\ndata Map = Map\nf :: Map -> Int\nf _ = 1\nmain = print 1', 'Data.Map.Map', 'Main.Map'],
+])('type/class ambiguity diagnostics retain public origins: %s', (source, imported, own) => {
+  const result = executeProgram('haskell', source);
+  expect(result.kind).toBe('compileError');
+  if (result.kind === 'compileError') {
+    expect(result.diagnostics[0].message).toContain(imported);
+    expect(result.diagnostics[0].message).toContain(own);
+    expect(result.diagnostics[0].message).not.toContain('Base.');
+    expect(result.diagnostics[0].message).not.toContain('Internal.');
+  }
+});
+
+test.each([
+  ['data T = A | B\ninstance Show T where\n  show A = "A"\nmain = putStrLn (show B)', 'show'],
+  ['data T = A | B\ninstance Eq T where\n  A == A = True\nmain = print (A == B)', '=='],
+  ['class C a where\n  f :: Bool -> a\n  f True = undefined\ninstance C Int\nmain = print (f False :: Int)', 'f'],
+])('partial instance/default methods report their source name: %s', (source, name) => {
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: expect.stringMatching(new RegExp(`Non-exhaustive patterns in function ${name}$`)),
+  });
+});

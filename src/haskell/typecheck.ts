@@ -407,7 +407,7 @@ function checkInstanceMethods(checker: Checker, declared: DeclaredInstance): Che
     }
     const implementation: ValueEntity = {
       id: nextId(),
-      name: `$c${method.name}`,
+      name: method.name,
       module: info.module,
       sort: 'var',
       span: binding.span,
@@ -473,7 +473,7 @@ function checkDefaults(checker: Checker, decl: RClassDecl): RBinding[] {
     const index = method.method?.index as number;
     const implementation: ValueEntity = {
       id: nextId(),
-      name: `$dm${method.name}`,
+      name: method.name,
       module: decl.entity.module,
       sort: 'var',
       span: binding.span,
