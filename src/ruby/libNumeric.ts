@@ -187,6 +187,8 @@ for (const owner of ['Integer', 'Float']) {
       function* (self: Num, args) {
         const [other] = args;
         if (op === '**' && args.length === 2) return modPow(self, other, args[1]);
+        if (op === '**' && typeof self !== 'bigint' && isRational(other))
+          throw new UnsupportedFeatureError('Rational を含む Float の累乗');
         if (isNum(other)) return arithmetic(op, self, other);
         return yield* coerceBinary(self, other, op);
       }

@@ -5,7 +5,6 @@ import { argumentError, floatDomainError, typeError, zeroDivisionError } from '.
 import { exceptionOption } from './exceptionOption';
 import { exactDecimal } from './floatFormat';
 import { bigintRatio } from './floatMath';
-import { floatPower } from './floatPower';
 import { digest } from './hashes';
 import { chargeIntegerResult, integerBits, integerGcd } from './integerBudget';
 import { callMethod, type Gen } from './interp';
@@ -196,7 +195,6 @@ function* numericRemainder(self: RObject, other: Value): Gen {
   return yield* callMethod(remainder, '-', [right]);
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Exact powers, fractional domains and custom coercion retain Ruby numeric dispatch order.
 def('Rational', '**', 1, function* (self: RObject, [exponent]) {
   const { numerator, denominator } = fractionOf(self);
   const rationalPower = isRational(exponent) ? fractionOf(exponent) : undefined;
@@ -207,25 +205,25 @@ def('Rational', '**', 1, function* (self: RObject, [exponent]) {
     if (identity) return identity;
   }
   if (typeof exponent === 'bigint') {
-    if (denominator === 1n && numerator === -1n) return makeRational(exponent % 2n !== 0n ? -1n : 1n, 1n);
-    const magnitude = exponent < 0n ? -exponent : exponent;
-    const bits = [numerator, denominator]
-      .map((value) => (value < 0n ? -value : value))
-      .filter((value) => value > 1n)
-      .reduce((total, value) => total + value.toString(2).length, 0);
-    rt().spend(Math.ceil((bits * Number(magnitude)) / 256));
-    if (exponent >= 0n) return makeRational(numerator ** exponent, denominator ** exponent);
-    return makeRational(denominator ** -exponent, numerator ** -exponent);
+    return rationalIntegerPower(numerator, denominator, exponent);
   }
-  if (!isRubyFloat(exponent) && !isRational(exponent)) {
-    const [left, right] = yield* coercePair(self, exponent);
-    return yield* callMethod(left, '**', [right]);
-  }
-  const power = yield* toFloat(exponent);
-  if (numerator < 0n && (Number.isNaN(power) || (!Number.isInteger(power) && Number.isFinite(power))))
-    throw new UnsupportedFeatureError('複素数（Rational の小数乗）');
-  return floatPower(toNumber(fractionOf(self)), power);
+  if (isRubyFloat(exponent) || rationalPower) throw new UnsupportedFeatureError('Rational を含む Float の累乗');
+  const [left, right] = yield* coercePair(self, exponent);
+  return yield* callMethod(left, '**', [right]);
 });
+
+function rationalIntegerPower(numerator: bigint, denominator: bigint, exponent: bigint): RObject {
+  if (denominator === 1n && numerator === -1n) return makeRational(exponent % 2n !== 0n ? -1n : 1n, 1n);
+  const magnitude = exponent < 0n ? -exponent : exponent;
+  const bits = [numerator, denominator]
+    .map((value) => (value < 0n ? -value : value))
+    .filter((value) => value > 1n)
+    .reduce((total, value) => total + value.toString(2).length, 0);
+  rt().spend(Math.ceil((bits * Number(magnitude)) / 256));
+  if (exponent >= 0n) return makeRational(numerator ** exponent, denominator ** exponent);
+  return makeRational(denominator ** -exponent, numerator ** -exponent);
+}
+
 function exactPowerIdentity(numerator: bigint, denominator: bigint, power: bigint): RObject | undefined {
   if (power === 0n || numerator === denominator) return makeRational(1n, 1n);
   if (numerator !== 0n) return undefined;

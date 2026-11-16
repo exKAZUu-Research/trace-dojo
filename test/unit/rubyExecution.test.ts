@@ -6039,7 +6039,6 @@ test('Regexp substitution enforces cumulative output storage', () => {
 test('negative Integer and Rational powers charge before large allocation', () => {
   expect(run('p 2 ** -1000000000000')).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
   expect(run('p Rational(2) ** 1000000000000')).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
-  expect(run('p Rational(2) ** Rational(1,2)')).toMatchObject({ stdout: '1.4142135623730951\n' });
 });
 
 test('define_method bodies use their own method context for super', () => {
@@ -14467,16 +14466,16 @@ test.each(nativeProtocolRegressions)(
 );
 
 test('Repeated native Unicode comparisons return within the process deadline', () => {
-  const entry = new URL('../../src/interpreter/program.ts', import.meta.url).href;
+  const entry = new URL('../../src/ruby/run.ts', import.meta.url).href;
   const programs = [
     'r=/s/i;s="ß";500.times{r.match?(s)};puts :done',
     'r=/[s]/i;s="ß";500.times{r.match?(s)};puts :done',
     '500.times{ /s/i.match?("ß"); /s/i.match?("ßx") };puts :done',
     'p ("ß"+"s"*20).scan(/s/i).size;p ("ß"*200).gsub(/ß/i,"S");p 20.times.map{|i| /s/i.match?("ß#{i}")}.any?',
   ];
-  const source = `import {executeProgram} from ${JSON.stringify(entry)};
+  const source = `import {executeRubyProgram} from ${JSON.stringify(entry)};
     for (const program of ${JSON.stringify(programs)}) {
-      const result = executeProgram('ruby', program);
+      const result = executeRubyProgram(program);
       if (result.kind !== 'executed' || result.uncaughtException) throw new Error(JSON.stringify(result));
       process.stdout.write(result.stdout);
     }`;
@@ -15042,24 +15041,11 @@ const rationalPowerIdentityCases = [
   ['begin;v=(1r)**(-1/2r);p v,v.class;rescue=>e;p e.class,e.message;end', '(1/1)\nRational\n'],
   ['begin;v=(1r)**(1/3r);p v,v.class;rescue=>e;p e.class,e.message;end', '(1/1)\nRational\n'],
   ['begin;v=(1r)**(1/2r);p v,v.class;rescue=>e;p e.class,e.message;end', '(1/1)\nRational\n'],
-  ['begin;v=(0r)**(-0.5);p v,v.class;rescue=>e;p e.class,e.message;end', 'Infinity\nFloat\n'],
-  ['begin;v=(0r)**(0.5);p v,v.class;rescue=>e;p e.class,e.message;end', '0.0\nFloat\n'],
-  ['begin;v=(1r)**(-0.5);p v,v.class;rescue=>e;p e.class,e.message;end', '1.0\nFloat\n'],
-  ['begin;v=(1r)**(0.5);p v,v.class;rescue=>e;p e.class,e.message;end', '1.0\nFloat\n'],
-  ['begin;v=(1r)**(Float::INFINITY);p v,v.class;rescue=>e;p e.class;end', '1.0\nFloat\n'],
-  ['begin;v=(1r)**(-Float::INFINITY);p v,v.class;rescue=>e;p e.class;end', '1.0\nFloat\n'],
-  ['begin;v=(1r)**(Float::NAN);p v,v.class;rescue=>e;p e.class;end', '1.0\nFloat\n'],
-  ['begin;v=(-1r)**(Float::INFINITY);p v,v.class;rescue=>e;p e.class;end', '1.0\nFloat\n'],
-  ['begin;v=(-1r)**(-Float::INFINITY);p v,v.class;rescue=>e;p e.class;end', '1.0\nFloat\n'],
-  ['begin;v=(Rational(10))**(23.0);p v,v.class;rescue=>e;p e.class;end', '1.0e+23\nFloat\n'],
 ] as const;
 
-test.each(rationalPowerIdentityCases)(
-  'Rational powers retain exact identities and native Float dispatch: %s',
-  (source, stdout) => {
-    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
-  }
-);
+test.each(rationalPowerIdentityCases)('Rational powers retain exact identities: %s', (source, stdout) => {
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
 
 const nativeCopyBoundaryCases = [
   [
@@ -16560,3 +16546,31 @@ test.each(nativeEachEntryForcedBlockCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const floatingRationalPowerCases = [
+  'p Rational(2) ** Rational(1,2)',
+  'begin;v=(0r)**(-0.5);p v,v.class;rescue=>e;p e.class,e.message;end',
+  'begin;v=(0r)**(0.5);p v,v.class;rescue=>e;p e.class,e.message;end',
+  'begin;v=(1r)**(-0.5);p v,v.class;rescue=>e;p e.class,e.message;end',
+  'begin;v=(1r)**(0.5);p v,v.class;rescue=>e;p e.class,e.message;end',
+  'begin;v=(1r)**(Float::INFINITY);p v,v.class;rescue=>e;p e.class;end',
+  'begin;v=(1r)**(-Float::INFINITY);p v,v.class;rescue=>e;p e.class;end',
+  'begin;v=(1r)**(Float::NAN);p v,v.class;rescue=>e;p e.class;end',
+  'begin;v=(-1r)**(Float::INFINITY);p v,v.class;rescue=>e;p e.class;end',
+  'begin;v=(-1r)**(-Float::INFINITY);p v,v.class;rescue=>e;p e.class;end',
+  'begin;v=(Rational(10))**(23.0);p v,v.class;rescue=>e;p e.class;end',
+  'p 2 ** Rational(-1,2)',
+  'p 3 ** Rational(-1,2)',
+  'p 15 ** Rational(-1,2)',
+  'p Rational(2,3) ** 0.5',
+  'p 2.0 ** Rational(2,1)',
+  'p 2.0 ** Rational(-1,2)',
+] as const;
+
+test.each(floatingRationalPowerCases)('Rational powers reject Float conversion paths explicitly: %s', (source) => {
+  expect(run(source)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: 'Rational を含む Float の累乗は、この採点環境では使えません。',
+  });
+});
