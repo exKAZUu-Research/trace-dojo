@@ -11,6 +11,7 @@ import {
   callMethod,
   callProc,
   constInModule,
+  constSet,
   type Gen,
   invoke,
   ivarGet,
@@ -868,14 +869,9 @@ def('Module', 'const_get', [1, 2], function* (self: RClass, args) {
   return module;
 });
 def('Module', 'const_set', 2, function* (self: RClass, [name, value]) {
+  const row = rt().currentRow;
   const constant = yield* constantName(name);
-  assertMutableClass(self);
-  assertNoDefinitionHook(self, 'const');
-  self.constants.set(constant, value);
-  if (value instanceof RClass && value.baseName === undefined) {
-    value.baseName = constant;
-    if (self !== rt().c.Object) value.lexicalParent = self;
-  }
+  constSet(self, constant, value, row);
   return value;
 });
 def('Module', 'const_defined?', [1, 2], function* (self: RClass, args) {

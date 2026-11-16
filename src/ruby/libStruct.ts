@@ -263,6 +263,7 @@ sdef(
           `main.rb:${rt().currentRow + 1}: warning: redefining constant ${className(self)}::${name}\n`
         );
       self.constants.set(name, cls);
+      self.constantRows.set(name, rt().currentRow);
     }
     if (block) yield* callProc(block, [cls], { self: cls, definee: cls });
     return cls;

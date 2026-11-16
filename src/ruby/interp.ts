@@ -48,7 +48,7 @@ import {
   regexpPatternEncoding,
   validateRegexpInterpolation,
 } from './libRegexp';
-import { symbolFromString } from './libString';
+import { identifierKeyString, symbolFromString } from './libString';
 import {
   boxFloat,
   invalidateMethodCaches,
@@ -852,13 +852,19 @@ export function missingConstant(module: RClass, name: string, scoped = false): n
   throw nameError(`uninitialized constant ${prefix}${name}`, module, name);
 }
 
-function constSet(module: RClass, name: string, value: Value): void {
+export function constSet(module: RClass, name: string, value: Value, row = rt().currentRow): void {
   assertMutableClass(module);
   assertNoDefinitionHook(module, 'const');
   if (module.constants.has(name)) {
-    rt().io.stderr.write(`warning: already initialized constant ${name}\n`);
+    const label = identifierKeyString(name).s;
+    const owner = module === rt().c.Object ? '' : `${className(module)}::`;
+    rt().io.stderr.write(`main.rb:${row + 1}: warning: already initialized constant ${owner}${label}\n`);
+    const previous = module.constantRows.get(name);
+    if (previous !== undefined)
+      rt().io.stderr.write(`main.rb:${previous + 1}: warning: previous definition of ${label} was here\n`);
   }
   module.constants.set(name, value);
+  module.constantRows.set(name, row);
   if (value instanceof RClass && value.baseName === undefined) {
     value.baseName = name;
     if (module !== rt().c.Object) value.lexicalParent = module;
@@ -913,7 +919,7 @@ function* prepareAssignment(target: Target, frame: Frame): Gen<PreparedAssignmen
       roots: [module],
       *write(value) {
         yield* [];
-        constSet(module, target.name, value);
+        constSet(module, target.name, value, target.row);
       },
     };
   }
@@ -1002,7 +1008,7 @@ export function* assign(target: Target, value: Value, frame: Frame): Gen<void> {
       } else if (target.top) {
         module = rt().c.Object;
       }
-      constSet(module, target.name, value);
+      constSet(module, target.name, value, target.row);
       return;
     }
     case 'index': {
@@ -1132,7 +1138,7 @@ function* operatorAssignInner(e: Extract<Expr, { k: 'opasgn' }>, frame: Frame): 
       };
       write = function* (value) {
         yield* [];
-        constSet(module, target.name, value);
+        constSet(module, target.name, value, target.row);
       };
       break;
     }
@@ -1674,6 +1680,7 @@ function* defineClass(e: Extract<Expr, { k: 'class' }>, frame: Frame): Gen {
     if (container !== runtime.c.Object) cls.lexicalParent = container;
     assertMutableClass(container);
     container.constants.set(e.name, cls);
+    container.constantRows.set(e.name, e.row);
     invalidateMethodCaches();
     yield* callHook(parent, 'inherited', [cls]);
   }
@@ -1707,6 +1714,7 @@ function* defineModule(e: Extract<Expr, { k: 'module' }>, frame: Frame): Gen {
     if (container !== runtime.c.Object) module.lexicalParent = container;
     assertMutableClass(container);
     container.constants.set(e.name, module);
+    container.constantRows.set(e.name, e.row);
   }
   return yield* runModuleBody(module, e.body, frame);
 }

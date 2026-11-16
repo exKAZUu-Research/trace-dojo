@@ -11141,3 +11141,30 @@ test.each(['Age=1.1', 'Age=17.0', 'Grapheme_Cluster_Break=Control', 'InCB=Conson
     }
   }
 );
+
+test('Constant reflection retains definition locations across assignment, copying and named factories', () => {
+  expect(
+    run(String.raw`class A
+ X=1
+end
+A.const_set(:X,2)
+A.const_set('X',3)
+class A
+ X=4
+end
+B=A.dup
+B.const_set(:X,5)
+class A;class C;end;end
+A.const_set(:C,0)
+Struct.new('WarningItem',:x)
+Struct.const_set(:WarningItem,0)
+p A::X,B::X
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '4\n5\n',
+    stderr:
+      'main.rb:4: warning: already initialized constant A::X\nmain.rb:2: warning: previous definition of X was here\nmain.rb:5: warning: already initialized constant A::X\nmain.rb:4: warning: previous definition of X was here\nmain.rb:7: warning: already initialized constant A::X\nmain.rb:5: warning: previous definition of X was here\nmain.rb:10: warning: already initialized constant B::X\nmain.rb:7: warning: previous definition of X was here\nmain.rb:12: warning: already initialized constant A::C\nmain.rb:11: warning: previous definition of C was here\nmain.rb:14: warning: already initialized constant Struct::WarningItem\nmain.rb:13: warning: previous definition of WarningItem was here\n',
+    uncaughtException: undefined,
+  });
+});

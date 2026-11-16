@@ -260,6 +260,7 @@ function copyClass(source: RClass): RClass {
   for (const [included, prepends] of source.includePrependSnapshots)
     copy.includePrependSnapshots.set(included, new Set(prepends));
   for (const [name, value] of source.constants) copy.constants.set(name, value);
+  for (const [name, row] of source.constantRows) copy.constantRows.set(name, row);
   for (const [name, value] of source.classVariables) copy.classVariables.set(name, value);
   for (const [name, method] of source.methods)
     copy.methods.set(name, {

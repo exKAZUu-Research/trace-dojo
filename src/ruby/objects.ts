@@ -289,6 +289,7 @@ export interface RMethod {
 export class RClass extends RBasic {
   readonly methods = new Map<string, RMethod>();
   readonly constants = new Map<string, Value>();
+  readonly constantRows = new Map<string, number>();
   readonly classVariables = new Map<string, Value>();
   /** The modules this module includes directly, the last included first. */
   readonly includes: RClass[] = [];
