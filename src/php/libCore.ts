@@ -3,6 +3,7 @@
 import { lower } from './bytes';
 import { callStack, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
+import * as conversionsModule from './conversions';
 import { declForKey, findClass, lookupMethod, propNameOf, visibleProps } from './classes';
 import { debugType, getType, isNumericString, normalizeKeyString, numericPrefix } from './conversions';
 import {
@@ -38,7 +39,7 @@ import {
 import { defineAlias, defineConstant, defineFunction } from './native';
 import { toFloat, toInt, toStr } from './operators';
 import { printR, varDump, varExport } from './output';
-import { rt } from './runtime';
+import { PhpThrow, rt } from './runtime';
 import { formatPrintf } from './sprintf';
 import { setCallableCheck } from './types';
 import { UnsupportedFeatureError } from './unsupported';
@@ -418,8 +419,11 @@ defineFunction('get_class_methods(object|string $object_or_class): array', ({ ar
   const names: string[] = [];
   const seen = new Set<string>();
   const scope = rt().frame.scope;
-  for (let current: typeof cls | undefined = cls; current; current = current.parent) {
-    for (const method of current.methods.values()) {
+  const owners = [];
+  for (let current: typeof cls | undefined = cls; current; current = current.parent) owners.push(current);
+  if (cls.kind === 'interface') owners.push(...cls.interfaces);
+  for (const owner of owners) {
+    for (const method of owner.methods.values()) {
       if (seen.has(method.lname)) continue;
       seen.add(method.lname);
       if (classesModule.canCall(method, scope)) names.push(method.name);
@@ -651,3 +655,10 @@ defineFunction(
   },
   true
 );
+
+defineFunction('assert(mixed $assertion, Throwable|string|null $description = null): bool', ({ args }) => {
+  const [assertion, description] = args;
+  if (conversionsModule.toBool(assertion)) return true;
+  if (description instanceof PhpObject) throw new PhpThrow(description);
+  throwError('AssertionError', typeof description === 'string' ? description : 'assert(false)');
+});

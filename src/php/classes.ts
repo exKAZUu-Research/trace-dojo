@@ -93,22 +93,20 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
     cls.parent = parent;
     inherit(cls, parent);
   }
-  for (const name of decl.interfaces) {
+  const declared = [...decl.interfaces];
+  // A class that declares __toString implements Stringable, as if it had named it last.
+  if (decl.methods.some((method) => lower(method.fn.name) === '__tostring') && !declared.some((name) => lower(name) === 'stringable')) {
+    declared.push('Stringable');
+  }
+  for (const name of declared) {
     const iface = findClass(name);
-    if (!iface) {
-      throwError('Error', `${decl.kind === 'interface' ? 'Interface' : 'Interface'} "${name}" not found`);
-    }
+    if (!iface) throwError('Error', `Interface "${name}" not found`);
     if (iface.kind !== 'interface') {
-      throw new FatalError(
-        decl.kind === 'interface'
-          ? `${decl.name} cannot implement ${iface.name} - it is not an interface`
-          : `${decl.name} cannot implement ${iface.name} - it is not an interface`,
-        row
-      );
+      throw new FatalError(`${decl.name} cannot implement ${iface.name} - it is not an interface`, row);
     }
     cls.ownInterfaces.push(iface);
-    addInterface(cls, iface);
   }
+  cls.interfaces = linkInterfaces(cls.parent, cls.ownInterfaces);
   for (const use of decl.traits) {
     for (const name of use.names) {
       const trait = findClass(name);
@@ -131,13 +129,22 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
   return cls;
 }
 
-function addInterface(cls: PhpClass, iface: PhpClass): void {
-  if (!cls.interfaces.includes(iface)) cls.interfaces.push(iface);
-  for (const parent of iface.interfaces) if (!cls.interfaces.includes(parent)) cls.interfaces.push(parent);
+/**
+ * Orders a class's interfaces as PHP's `class_implements` lists them: without interfaces of its own, a class inherits
+ * its parent's in reverse; with them, it keeps its parent's, adds its own, then each one's parents in reverse.
+ */
+export function linkInterfaces(parent: PhpClass | undefined, own: PhpClass[]): PhpClass[] {
+  if (own.length === 0) return parent ? parent.interfaces.toReversed() : [];
+  const interfaces = [...(parent?.interfaces ?? [])];
+  const add = (iface: PhpClass): void => {
+    if (!interfaces.includes(iface)) interfaces.push(iface);
+  };
+  for (const iface of own) add(iface);
+  for (const iface of own) for (const inherited of iface.interfaces.toReversed()) add(inherited);
+  return interfaces;
 }
 
 function inherit(cls: PhpClass, parent: PhpClass): void {
-  for (const iface of parent.interfaces) addInterface(cls, iface);
   cls.props = [...parent.props];
   for (const [name, decl] of parent.propByName) cls.propByName.set(name, decl);
   for (const [name, constant] of parent.consts) cls.consts.set(name, constant);

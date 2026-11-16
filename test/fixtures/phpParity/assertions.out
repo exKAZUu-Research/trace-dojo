@@ -1,0 +1,8 @@
+AssertionError: assert(1 > 2)
+custom message
+assert($x < 3 && strlen('ab') > 1)
+
+Warning: Attempt to read property "y" on int in /main.php on line 6
+AssertionErrorassert(in_array('x', ['a' => 1], true) || $x->y ?? false)
+assert(!($x > 1) && -$x == [1, 2.5, null])
+custom exception

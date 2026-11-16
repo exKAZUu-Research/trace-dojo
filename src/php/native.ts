@@ -79,17 +79,16 @@ function buildClass(definition: ClassDefinition): PhpClass {
     cls.parent = parent;
     cls.props = [...parent.props];
     for (const [name, decl] of parent.propByName) cls.propByName.set(name, decl);
-    for (const iface of parent.interfaces) cls.interfaces.push(iface);
     for (const [name, constant] of parent.consts) cls.consts.set(name, constant);
     cls.createInternal = parent.createInternal;
   }
+  // A builtin class lists every interface it implements in PHP's order; a subclass without any inherits them reversed.
   for (const name of definition.interfaces ?? []) {
     const iface = runtime.classes.get(lower(name));
     if (!iface) throw new Error(`Unknown builtin interface ${name}`);
     cls.ownInterfaces.push(iface);
-    if (!cls.interfaces.includes(iface)) cls.interfaces.push(iface);
-    for (const parent of iface.interfaces) if (!cls.interfaces.includes(parent)) cls.interfaces.push(parent);
   }
+  cls.interfaces = cls.ownInterfaces.length > 0 ? [...cls.ownInterfaces] : (cls.parent?.interfaces.toReversed() ?? []);
   if (definition.createInternal) cls.createInternal = definition.createInternal;
   for (const prop of definition.props ?? []) {
     const decl: PropDecl = {

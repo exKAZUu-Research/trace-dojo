@@ -1,0 +1,70 @@
+66.6667
+Array
+(
+    [101] => 1
+    [104] => 1
+    [108] => 2
+    [111] => 1
+)
+ehlo
+abc-def-g- O\'Re\"il\\y O'Re\il
+JelloabXa123bc
+Array
+(
+    [0] => aXa
+    [1] => bXb
+)
+22
+bool(true)
+bool(false)
+bool(false)
+bool(true)
+bool(true)
+bool(false)
+bool(true)
+bool(true)
+bool(true)
+bool(true)
+5えお2*あ*5
+Hello World àéî 3 UTF-8
+Array
+(
+    [0] => 日本語
+    [1] => テキス
+    [2] => ト
+)
+HellohelloHello_World-Foo
+hi1.5abcx|3
+3 Array
+(
+    [0] => Hello
+    [1] => World
+    [2] => again
+)
+Array
+(
+    [0] => Hi
+    [3] => there
+)
+A very
+long
+wooooooo
+ooooord.
+A very
+long
+woooooooooooord.
+and
+something
+palindrome 00000101
+line1<br />
+line2 a &amp; b &lt; c &gt; &quot;d&quot; &#039;e&#039; <p> &amp;
+01-1
+a,b,,c |1
+........42|42xxxxxxxx|18446744073709551615|99.50%
+b-a -0001.50 +0 +0
+11|X
+48656c6c6f Äbc da39a3ee5e6b4b0d3255bfef95601890afd80709
+30T5220000|
+====================
+Item                Price
+Coffee               3.50

@@ -24,6 +24,7 @@ import type {
   TraitRule,
 } from './ast';
 import { codePointBytes, enc, lower } from './bytes';
+import { exportExpr } from './export';
 import { unsupportedMessage } from './unsupported';
 import type { TypeDecl, Visibility } from './values';
 
@@ -1677,6 +1678,10 @@ export class Converter {
     const { args, fcc } = this.args(argumentsNode);
     if (fnNode.type === 'name' || fnNode.type === 'qualified_name' || fnNode.type === 'relative_name') {
       const name = this.resolveFunctionName(this.nameText(fnNode));
+      // PHP passes `assert` the source of its assertion, as code it writes back from the syntax tree.
+      if (lower(name.fallback ?? name.name) === 'assert' && args.length === 1 && !args[0].spread && !args[0].name) {
+        args.push({ e: { k: 'lit', v: `assert(${exportExpr(args[0].e)})`, row }, spread: false });
+      }
       return { k: 'call', fn: name, args, fcc, row };
     }
     return { k: 'call', fn: this.expr(fnNode), args, fcc, row };

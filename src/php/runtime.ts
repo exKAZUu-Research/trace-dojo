@@ -113,7 +113,7 @@ export class Runtime {
   row = 0;
   /** How many `@` operators are active. */
   silence = 0;
-  errorReporting = 32_767n;
+  errorReporting = 30_719n;
   errorHandlers: { handler: Value; mask: bigint }[] = [];
   exceptionHandler: Value = null;
   readonly mt = new MersenneTwister();

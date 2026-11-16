@@ -226,7 +226,7 @@ defineClass({
 for (const base of ['Exception', 'Error']) {
   defineClass({
     name: base,
-    interfaces: ['Throwable'],
+    interfaces: ['Stringable', 'Throwable'],
     props: throwableProps(),
     methods: throwableMethods(base),
     createInternal: initThrowable,

@@ -8,6 +8,7 @@ import { defineClass, type NativeMethod } from './native';
 import { compare, toKey } from './operators';
 import { share } from './places';
 import { rt } from './runtime';
+import { UnsupportedFeatureError } from './unsupported';
 import { type Key, PhpArray, PhpObject, type Value } from './values';
 
 /** The storage of an ArrayObject or ArrayIterator, with the position an iterator is at. */
@@ -36,6 +37,14 @@ class ArrayStorage {
 }
 
 const storageOf = (object: PhpObject): ArrayStorage => object.internal as ArrayStorage;
+
+/** The methods of the Serializable interface, which this grader does not provide. */
+const serializationMethods: NativeMethod[] = ['serialize()', 'unserialize(string $data)'].map((signature) => ({
+  signature,
+  impl: () => {
+    throw new UnsupportedFeatureError('直列化');
+  },
+}));
 
 function arrayInput(value: Value | undefined, name: string): PhpArray {
   if (value === undefined) return new PhpArray();
@@ -170,15 +179,16 @@ function iteratorMethods(): NativeMethod[] {
 
 defineClass({
   name: 'ArrayIterator',
-  interfaces: ['Iterator', 'ArrayAccess', 'Countable'],
-  methods: [...arrayMethods('ArrayIterator'), ...iteratorMethods()],
+  interfaces: ['SeekableIterator', 'Traversable', 'Iterator', 'ArrayAccess', 'Serializable', 'Countable'],
+  methods: [...arrayMethods('ArrayIterator'), ...iteratorMethods(), ...serializationMethods],
   createInternal: () => new ArrayStorage(new PhpArray()),
 });
 defineClass({
   name: 'ArrayObject',
-  interfaces: ['IteratorAggregate', 'ArrayAccess', 'Countable'],
+  interfaces: ['IteratorAggregate', 'Traversable', 'ArrayAccess', 'Serializable', 'Countable'],
   methods: [
     ...arrayMethods('ArrayObject'),
+    ...serializationMethods,
     {
       signature: 'getIterator(): Iterator',
       impl: ({ thisObj }) => {
@@ -342,8 +352,8 @@ const listMethods: NativeMethod[] = [
 
 defineClass({
   name: 'SplDoublyLinkedList',
-  interfaces: ['Iterator', 'Countable', 'ArrayAccess'],
-  methods: listMethods,
+  interfaces: ['Iterator', 'Traversable', 'Countable', 'ArrayAccess', 'Serializable'],
+  methods: [...listMethods, ...serializationMethods],
   createInternal: () => new ListStorage(),
 });
 defineClass({
@@ -454,7 +464,7 @@ function heapMethods(): NativeMethod[] {
 defineClass({
   name: 'SplHeap',
   isAbstract: true,
-  interfaces: ['Iterator', 'Countable'],
+  interfaces: ['Iterator', 'Traversable', 'Countable'],
   methods: [
     ...heapMethods(),
     {
@@ -507,7 +517,7 @@ function extractPriority(object: PhpObject): Value {
 
 defineClass({
   name: 'SplPriorityQueue',
-  interfaces: ['Iterator', 'Countable'],
+  interfaces: ['Iterator', 'Traversable', 'Countable'],
   methods: [
     {
       signature: 'insert(mixed $value, mixed $priority): true',
@@ -582,7 +592,7 @@ function fixedIndex(object: PhpObject, index: Value, method: string): number {
 
 defineClass({
   name: 'SplFixedArray',
-  interfaces: ['IteratorAggregate', 'ArrayAccess', 'Countable', 'JsonSerializable'],
+  interfaces: ['IteratorAggregate', 'Traversable', 'ArrayAccess', 'Countable', 'JsonSerializable'],
   methods: [
     {
       signature: '__construct(int $size = 0)',
@@ -706,8 +716,19 @@ function storageKey(value: Value): PhpObject {
 
 defineClass({
   name: 'SplObjectStorage',
-  interfaces: ['Countable', 'Iterator', 'ArrayAccess'],
+  interfaces: ['Countable', 'SeekableIterator', 'Traversable', 'Iterator', 'Serializable', 'ArrayAccess'],
   methods: [
+    ...serializationMethods,
+    {
+      signature: 'seek(int $offset): void',
+      impl: ({ thisObj, args }) => {
+        const storage = objectStorageOf(thisObj);
+        const offset = Number(args[0]);
+        if (offset < 0 || offset >= storage.entries.size) throwError('OutOfBoundsException', `Seek position ${offset} is out of range`);
+        storage.position = offset;
+        return null;
+      },
+    },
     {
       signature: 'attach(object $object, mixed $info = null): void',
       impl: ({ thisObj, args }) => {

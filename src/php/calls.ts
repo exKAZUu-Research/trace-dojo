@@ -4,6 +4,7 @@ import type { FunctionDecl } from './ast';
 import { lower } from './bytes';
 import { throwError } from './errors';
 import { share } from './places';
+import { collectGarbage } from './garbage';
 import { FatalError, Frame, rt, SCRIPT_PATH, setCallCapture } from './runtime';
 import { coerce, describeType, givenType, NO_MATCH, typeToString } from './types';
 import {
@@ -320,6 +321,7 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
   const outerNative = nativeDepth;
   nativeMarks.push(nativeDepth);
   nativeDepth = 0;
+  let returned: Value;
   try {
     runtime.row = decl.row;
     bindParams(frame, fn, args, positional, name, strict, row);
@@ -339,7 +341,7 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
     if (decl.returnType) result = checkReturn(result, decl.returnType, name, frame);
     else if (decl.byRefReturn === false) result = share(result);
     runtime.lastReturnRef = decl.byRefReturn ? frame.returnRef : undefined;
-    return result;
+    returned = result;
   } finally {
     nativeDepth = outerNative;
     nativeMarks.pop();
@@ -349,8 +351,13 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
     for (const ref of frame.vars.values()) ref.rc--;
     runtime.row = savedRow;
     if (decl.isAtomic) runtime.steps.completeAtomicCall();
-    void caller;
   }
+  // PHP destroys a function's locals when it returns, so their destructors run before the caller goes on.
+  if (runtime.destructibles > 0) {
+    caller.temporaries.push(returned);
+    collectGarbage(runtime);
+  }
+  return returned;
 }
 
 function checkNamedArgs(params: Param[], args: ArgValue[], positionalCount: number): void {

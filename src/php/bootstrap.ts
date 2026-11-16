@@ -30,6 +30,17 @@ defineClass({
   })),
 });
 defineClass({
+  name: 'SeekableIterator',
+  kind: 'interface',
+  interfaces: ['Iterator', 'Traversable'],
+  methods: [{ signature: 'seek(int $offset): void', impl: () => null, isAbstract: true }],
+});
+defineClass({
+  name: 'Serializable',
+  kind: 'interface',
+  methods: ['serialize()', 'unserialize(string $data)'].map((signature) => ({ signature, impl: () => null, isAbstract: true })),
+});
+defineClass({
   name: 'IteratorAggregate',
   kind: 'interface',
   interfaces: ['Traversable'],

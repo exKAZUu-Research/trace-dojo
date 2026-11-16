@@ -1826,7 +1826,7 @@ function binary(e: Extract<Expr, { k: 'bin' }>): Value {
       return toBool(ev(e.l)) !== toBool(ev(e.r));
     }
     case '??': {
-      return (isset(e.l) ? evQuiet(e.l) : null) ?? ev(e.r);
+      return evQuiet(e.l) ?? ev(e.r);
     }
   }
   const left = ev(e.l);
