@@ -8,6 +8,7 @@ import type { InstanceInfo } from './entities';
 import { markReachable } from './gc';
 import type { TraceContext } from './ioBlocks';
 import { Machine } from './machine';
+import { withTypeWorkBudget } from './typeWorkBudget';
 import { Dict, type Env, type Slot, Thunk } from './values';
 
 /** Stops evaluating a value for a trace's display, which leaves the value as it was. */
@@ -79,7 +80,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     if (this.displayRemaining !== undefined) return run();
     this.displayRemaining = operations;
     try {
-      return this.budget.excludingTime(run);
+      return this.budget.excludingTime(() => withTypeWorkBudget(() => this.spend(), run));
     } finally {
       this.displayRemaining = undefined;
     }

@@ -698,6 +698,17 @@ test('compact shared types compile without exponential memory growth', { timeout
   expect(result.peakRatio).toBeLessThan(1.5);
 });
 
+test.each([2, 3])('shared %i-way types remain bounded while recording', { timeout: 30_000 }, (branches) => {
+  const output = execFileSync('bun', ['run', 'test/helpers/haskellCompilerMemory.ts', 'trace', String(branches)], {
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  const result = z
+    .object({ traceItemCount: z.literal(3), stdout: z.literal('1\n'), peakRatio: z.number() })
+    .parse(JSON.parse(output));
+  expect(result.peakRatio).toBeLessThan(1.5);
+});
+
 test('shared polymorphic types remain independent across instantiations', () => {
   const count = 24;
   const duplicate = 'f ('.repeat(count) + 'x' + ')'.repeat(count);

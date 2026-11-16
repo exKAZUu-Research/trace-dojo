@@ -1,15 +1,50 @@
-import { chargeCompilationWork } from './compilationBudget';
+import { chargeTypeWork } from './typeWorkBudget';
 
 type Resolve<T> = (node: T) => T;
 type Children<T> = (node: T) => readonly T[];
 
-export function mapGraph<T>(
+export function mapGraphPairs<T>(
+  a: T,
+  b: T,
+  resolve: Resolve<T>,
+  children: (left: T, right: T) => [T, T][],
+  rebuild: (left: T, right: T, mapped: T[]) => T
+): T {
+  interface Pair {
+    left: T;
+    right: T;
+  }
+  const pairs = new Map<T, Map<T, Pair>>();
+  const pairOf = (a: T, b: T): Pair => {
+    const left = resolve(a);
+    const right = resolve(b);
+    let matches = pairs.get(left);
+    if (!matches) {
+      matches = new Map();
+      pairs.set(left, matches);
+    }
+    let pair = matches.get(right);
+    if (!pair) {
+      pair = { left, right };
+      matches.set(right, pair);
+    }
+    return pair;
+  };
+  return mapGraph<Pair, T>(
+    pairOf(a, b),
+    (pair) => pair,
+    ({ left, right }) => children(left, right).map(([x, y]) => pairOf(x, y)),
+    ({ left, right }, mapped) => rebuild(left, right, mapped)
+  );
+}
+
+export function mapGraph<T, R = T>(
   root: T,
   resolve: Resolve<T>,
   children: Children<T>,
-  rebuild: (node: T, mapped: T[]) => T
-): T {
-  const result = new Map<T, T>();
+  rebuild: (node: T, mapped: R[]) => R
+): R {
+  const result = new Map<T, R>();
   const first = resolve(root);
   const work = [first];
   while (work.length > 0) {
@@ -18,7 +53,7 @@ export function mapGraph<T>(
       work.pop();
       continue;
     }
-    chargeCompilationWork();
+    chargeTypeWork();
     const inputs = children(node).map(resolve);
     const missing = inputs.find((child) => !result.has(child));
     if (missing !== undefined) {
@@ -43,7 +78,7 @@ export function* walkGraph<T>(root: T, resolve: Resolve<T>, children: Children<T
   while (work.length > 0) {
     const node = resolve(work.pop()!);
     if (seen.has(node)) continue;
-    chargeCompilationWork();
+    chargeTypeWork();
     seen.add(node);
     yield node;
     const next = children(node);
@@ -60,7 +95,7 @@ export function* walkGraphPairs<T>(a: T, b: T, resolve: Resolve<T>, children: Ch
     const y = resolve(right);
     let matches = seen.get(x);
     if (matches?.has(y)) continue;
-    chargeCompilationWork();
+    chargeTypeWork();
     if (!matches) {
       matches = new Set();
       seen.set(x, matches);

@@ -1,7 +1,7 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { chargeCompilationWork } from './compilationBudget';
 import type { ClassEntity, TypeEntity } from './entities';
 import { mapGraph, walkGraph, walkGraphPairs } from './typeGraph';
+import { chargeTypeWork } from './typeWorkBudget';
 
 export type Kind = { tag: 'star' } | { tag: 'arrow'; from: Kind; to: Kind } | KindVar;
 
@@ -14,7 +14,7 @@ export interface KindVar {
 export const STAR: Kind = { tag: 'star' };
 
 export function kindArrow(from: Kind, to: Kind): Kind {
-  chargeCompilationWork();
+  chargeTypeWork();
   return { tag: 'arrow', from, to };
 }
 
@@ -28,7 +28,7 @@ export function simpleKind(arity: number): Kind {
 let nextKindVar = 0;
 
 export function freshKindVar(): KindVar {
-  chargeCompilationWork();
+  chargeTypeWork();
   return { tag: 'kvar', id: nextKindVar++ };
 }
 
@@ -36,7 +36,7 @@ export function pruneKind(kind: Kind): Kind {
   if (kind.tag !== 'kvar' || !kind.ref) return kind;
   const path: KindVar[] = [];
   while (kind.tag === 'kvar' && kind.ref) {
-    chargeCompilationWork();
+    chargeTypeWork();
     path.push(kind);
     kind = kind.ref;
   }
@@ -83,7 +83,7 @@ export function showKind(kind: Kind): string {
 }
 
 function printKind(kind: Kind, depth: number): string {
-  chargeCompilationWork();
+  chargeTypeWork();
   if (depth > LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
   const pruned = pruneKind(kind);
   switch (pruned.tag) {
@@ -138,24 +138,24 @@ export interface TGen {
 let nextTypeVar = 0;
 
 export function freshTypeVar(kind: Kind, level: number, name?: string): TVar {
-  chargeCompilationWork();
+  chargeTypeWork();
   return { tag: 'tvar', id: nextTypeVar++, kind, level, name };
 }
 
 export function freshSkolem(kind: Kind, level: number, name: string): TVar {
-  chargeCompilationWork();
+  chargeTypeWork();
   return { tag: 'tvar', id: nextTypeVar++, kind, level, name, skolem: true };
 }
 
 export function tcon(entity: TypeEntity): TCon {
-  chargeCompilationWork();
+  chargeTypeWork();
   return { tag: 'tcon', entity };
 }
 
 export function tap(fn: Type, ...args: Type[]): Type {
   let type = fn;
   for (const arg of args) {
-    chargeCompilationWork();
+    chargeTypeWork();
     type = { tag: 'tap', fn: type, arg };
   }
   return type;
@@ -165,7 +165,7 @@ export function prune(type: Type): Type {
   if (type.tag !== 'tvar' || !type.ref) return type;
   const path: TVar[] = [];
   while (type.tag === 'tvar' && type.ref) {
-    chargeCompilationWork();
+    chargeTypeWork();
     path.push(type);
     type = type.ref;
   }
@@ -191,7 +191,7 @@ export function splitApp(type: Type): { head: Type; args: Type[] } {
   const args: Type[] = [];
   let head = prune(type);
   while (head.tag === 'tap') {
-    chargeCompilationWork();
+    chargeTypeWork();
     args.push(head.arg);
     head = prune(head.fn);
   }
@@ -202,7 +202,7 @@ export function kindOfType(type: Type): Kind {
   let node = prune(type);
   let applications = 0;
   while (node.tag === 'tap') {
-    chargeCompilationWork();
+    chargeTypeWork();
     applications++;
     node = prune(node.fn);
   }

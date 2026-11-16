@@ -1,6 +1,6 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { chargeCompilationWork } from './compilationBudget';
 import { type Pred, prune, splitApp, type TVar, type Type } from './types';
+import { chargeTypeWork } from './typeWorkBudget';
 
 /** Names the variables of the types printed in one message alike: `a`, `b`, ... in order of appearance. */
 export class TypePrinter {
@@ -12,7 +12,7 @@ export class TypePrinter {
   constructor(private readonly genNames: readonly string[] = []) {}
 
   show(type: Type, precedence = 0): string {
-    chargeCompilationWork();
+    chargeTypeWork();
     if (++this.depth > LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
     try {
       const text = this.showInner(type, precedence);
@@ -76,7 +76,7 @@ export class TypePrinter {
     const base = variable.name ?? 'a';
     name = base;
     for (let index = 0; this.used.has(name); index++) {
-      chargeCompilationWork();
+      chargeTypeWork();
       name = `${base}${index}`;
     }
     this.used.add(name);

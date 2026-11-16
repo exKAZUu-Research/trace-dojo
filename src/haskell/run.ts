@@ -4,6 +4,7 @@ import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import { type CompiledProgram, compileProgram } from './compile';
 import { Runtime, type TraceFrame } from './runtime';
+import { withTypeWorkBudget } from './typeWorkBudget';
 import { HaskellException } from './values';
 
 // code-gauge-allow duplicateLines 15 -- The interpreter entry points mirror the other languages so callers use one contract.
@@ -36,7 +37,10 @@ export function runProgram(
 ): ProgramRun {
   let uncaughtException: string | undefined;
   try {
-    runtime.machine.runIO(runtime.global(program.main));
+    withTypeWorkBudget(
+      () => runtime.spend(),
+      () => runtime.machine.runIO(runtime.global(program.main))
+    );
   } catch (error) {
     if (!(error instanceof HaskellException)) throw error;
     uncaughtException = error.display;

@@ -1,6 +1,8 @@
 import { IO_TYPE } from './builtinTypes';
 import type { ConInfo } from './entities';
+import { mapGraphPairs } from './typeGraph';
 import { instantiateType, prune, splitApp, type Type } from './types';
+import { chargeTypeWork } from './typeWorkBudget';
 import { type Slot, Thunk, TypedSlot, untypedSlot } from './values';
 
 export const UNKNOWN_TYPE: Type = { tag: 'tgen', index: -1 };
@@ -18,6 +20,7 @@ export function slotDisplayType(slot: Slot, fallback: Type = UNKNOWN_TYPE): Type
   let result = fallback;
   let seen: Set<Thunk> | undefined;
   while (slot instanceof TypedSlot || slot instanceof Thunk) {
+    chargeTypeWork();
     if (slot instanceof TypedSlot) {
       result = refineType(result, slot.type);
       slot = slot.slot;
@@ -33,13 +36,26 @@ export function slotDisplayType(slot: Slot, fallback: Type = UNKNOWN_TYPE): Type
 }
 
 function refineType(template: Type, actual: Type): Type {
-  const left = prune(template);
-  const right = prune(actual);
-  if (left === right) return left;
-  if (left.tag === 'tgen' || left.tag === 'tvar') return right;
-  if (left.tag === 'tap' && right.tag === 'tap')
-    return { tag: 'tap', fn: refineType(left.fn, right.fn), arg: refineType(left.arg, right.arg) };
-  return left;
+  return mapGraphPairs(
+    template,
+    actual,
+    prune,
+    (left, right) =>
+      left !== right && left.tag === 'tap' && right.tag === 'tap'
+        ? [
+            [left.fn, right.fn],
+            [left.arg, right.arg],
+          ]
+        : [],
+    (left, right, mapped) => {
+      if (left.tag === 'tgen' || left.tag === 'tvar') return right;
+      if (mapped.length === 0) return left;
+      const [fn, arg] = mapped;
+      if (left.tag === 'tap' && fn === left.fn && arg === left.arg) return left;
+      if (right.tag === 'tap' && fn === right.fn && arg === right.arg) return right;
+      return { tag: 'tap', fn, arg };
+    }
+  );
 }
 
 export function constructorFieldType(con: ConInfo, type: Type, position: number): Type {

@@ -5,7 +5,6 @@ import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { PRIMITIVE_TYPES, TURTLE_TYPE, UNIT_TYPE } from './builtinTypes';
 import { ClassEnv } from './classEnv';
 import { Codegen, type CodegenSupport } from './codegen';
-import { withCompilationBudget } from './compilationBudget';
 import type { GlobalDef } from './core';
 import { type ClassEntity, type ConInfo, nextId, type TypeEntity, type ValueEntity } from './entities';
 import type { Builtins } from './infer';
@@ -22,6 +21,7 @@ import { setPrimitiveTypes } from './primitives';
 import { renameModule, type RModule } from './rename';
 import { typecheckModule } from './typecheck';
 import { STAR, tcon } from './types';
+import { withCompilationBudget } from './typeWorkBudget';
 
 /** The library compiled once per process: its modules, instances, and the entities the compiler refers to. */
 interface Library {

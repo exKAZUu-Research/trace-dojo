@@ -1,6 +1,5 @@
 import { FUNCTION_TYPE } from './builtinTypes';
 import type { ClassEnv } from './classEnv';
-import { chargeCompilationWork } from './compilationBudget';
 import { DERIVABLE_CLASSES, deriveInstance } from './deriving';
 import {
   type ClassEntity,
@@ -45,6 +44,7 @@ import {
   unifyKinds,
   zonk,
 } from './types';
+import { chargeTypeWork } from './typeWorkBudget';
 
 /** An instance whose methods a module defines, with the bindings that implement them. */
 export interface CheckedInstance {
@@ -191,7 +191,7 @@ function orderSynonyms(decls: RSynonymDecl[]): RSynonymDecl[] {
 function* synonymDependencies(type: RType, byEntity: ReadonlyMap<TypeEntity, RSynonymDecl>): Generator<RSynonymDecl> {
   const work = [type];
   while (work.length > 0) {
-    chargeCompilationWork();
+    chargeTypeWork();
     const node = work.pop()!;
     if (node.k === 'con') {
       const dependency = byEntity.get(node.entity);
@@ -322,7 +322,7 @@ function validateInstanceTermination(info: InstanceInfo, span: Span): void {
 }
 
 function instanceTypeSize(type: Type, vars: Map<number, number>): number {
-  chargeCompilationWork();
+  chargeTypeWork();
   const current = prune(type);
   if (current.tag === 'tgen') vars.set(current.index, (vars.get(current.index) ?? 0) + 1);
   if (current.tag === 'tap') return instanceTypeSize(current.fn, vars) + instanceTypeSize(current.arg, vars);

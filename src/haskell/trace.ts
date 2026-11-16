@@ -53,7 +53,7 @@ function variablesOf(runtime: Runtime, frame: TraceFrame): TraceVariables {
   for (const visible of context.visible) {
     const slot = context.env.at(visible.depth).slots[visible.index];
     if (slot === undefined) continue;
-    let displayType = slotDisplayType(slot, visible.type);
+    let displayType = visible.type;
     const value = displayAttempt(runtime, () => {
       const forced = forceForDisplay(runtime, slot);
       if (forced !== undefined) {
