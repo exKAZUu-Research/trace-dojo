@@ -535,11 +535,10 @@ primDoubleFromInteger :: Integer -> Double
 primDoubleFromInteger = primitive "doubleFromInteger"
 
 roundDouble :: Double -> Integer
-roundDouble x = let n = primDoubleTruncate x
-                    r = x - primDoubleFromInteger n
-                    m = if r < 0.0 then n - 1 else n + 1
-                    half = abs r - 0.5
-                in if half < 0.0 then n else if half == 0.0 then (if even n then n else m) else m
+roundDouble x = primDoubleTruncate (primDoubleRint x)
+
+primDoubleRint :: Double -> Double
+primDoubleRint = primitive "doubleRint"
 
 ceilingDouble :: Double -> Integer
 ceilingDouble x = let n = primDoubleTruncate x in if x - primDoubleFromInteger n > 0.0 then n + 1 else n
@@ -614,11 +613,10 @@ primFloatFromInteger :: Integer -> Float
 primFloatFromInteger = primitive "floatFromInteger"
 
 roundFloat :: Float -> Integer
-roundFloat x = let n = primFloatTruncate x
-                   r = x - primFloatFromInteger n
-                   m = if r < 0.0 then n - 1 else n + 1
-                   half = abs r - 0.5
-               in if half < 0.0 then n else if half == 0.0 then (if even n then n else m) else m
+roundFloat x = primFloatTruncate (primFloatRint x)
+
+primFloatRint :: Float -> Float
+primFloatRint = primitive "floatRint"
 
 instance RealFloat Float where
   floatRadix _ = 2

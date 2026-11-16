@@ -297,6 +297,7 @@ function defineFloating(prefix: 'double' | 'float', round: (value: number) => nu
     if (!Number.isFinite(value)) return truncateNonFinite(value, prefix);
     return BigInt(Math.trunc(value));
   });
+  strict(`${prefix}Rint`, 1, ([a]) => roundHalfEven(a as number));
   strict(`${prefix}FromInteger`, 1, ([a]) => round(bigintToDouble(a as bigint)));
   strict(`${prefix}Digits`, 1, ([a]) => {
     const { digits, exponent } = floatToDigits(a as number, prefix === 'float');
@@ -310,6 +311,15 @@ function defineFloating(prefix: 'double' | 'float', round: (value: number) => nu
   strict(`${prefix}FromRational`, 2, ([n, d]) =>
     prefix === 'float' ? rationalToFloat(n as bigint, d as bigint) : rationalToDouble(n as bigint, d as bigint)
   );
+}
+
+/** C's `rint`, which GHC's `round` applies before converting: the nearest integer, a tie going to the even one. */
+function roundHalfEven(value: number): number {
+  if (!Number.isFinite(value)) return value;
+  const floor = Math.floor(value);
+  const fraction = value - floor;
+  if (fraction !== 0.5) return fraction < 0.5 ? floor : floor + 1;
+  return floor % 2 === 0 ? floor : floor + 1;
 }
 
 /** GHC's `truncate` of an infinity or NaN, which converts the mantissa and exponent as they are. */
