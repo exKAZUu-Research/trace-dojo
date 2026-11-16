@@ -181,6 +181,7 @@ function* secondsValue(arg: Value): Gen<number | bigint | RObject> {
 }
 
 function* exactNumber(value: Value): Gen<number | bigint | RObject> {
+  if (typeof value === 'bigint' || isRational(value)) return value;
   if (value instanceof RString) throw typeError("can't convert String into an exact number");
   if (isRubyFloat(value)) return Number(value);
   const rational = yield* exactRational(value);

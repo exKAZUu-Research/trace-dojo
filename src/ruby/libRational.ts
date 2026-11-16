@@ -1,10 +1,11 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { formatFloat, rEquals, toFloat, toInt, toStr, tryImplicitConversion } from './conversions';
+import { formatFloat, rEquals, toFloat, toInt, toStrValue, tryImplicitConversion } from './conversions';
 import { def } from './define';
-import { argumentError, floatDomainError, typeError, zeroDivisionError } from './errors';
+import { floatDomainError, rubyError, typeError, zeroDivisionError } from './errors';
 import { exceptionOption } from './exceptionOption';
 import { exactDecimal } from './floatFormat';
 import { bigintRatio } from './floatMath';
+import { formatString } from './format';
 import { digest } from './hashes';
 import { chargeIntegerResult, integerBits, integerGcd } from './integerBudget';
 import { callMethod, type Gen } from './interp';
@@ -255,7 +256,7 @@ def('Rational', '==', 1, function* (self: RObject, [other]) {
   const b = asFraction(other);
   if (b !== undefined)
     return b.numerator === fractionOf(self).numerator && b.denominator === fractionOf(self).denominator;
-  return yield* callMethod(other, '==', [self]);
+  return truthy(yield* callMethod(other, '==', [self]));
 });
 def('Rational', 'coerce', 1, (self: RObject, [other]) => {
   if (isRational(other)) return arr([other, self]);
@@ -376,14 +377,20 @@ function* rationalOf(value: Value, raise: boolean): Gen<RObject | undefined> {
         );
       }
     }
-    const text = (yield* toStr(value)).replaceAll(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, '');
-    const result = parseRationalText(text, true);
-    if (!result) throw argumentError(`invalid value for convert(): ${JSON.stringify(text)}`);
-    return result;
+    return yield* rationalFromString(yield* toStrValue(value), raise);
   } catch (error) {
     if (!raise && error instanceof RubyError) return undefined;
     throw error;
   }
+}
+
+function* rationalFromString(source: RString, raise: boolean): Gen<RObject | undefined> {
+  const text = source.s.replaceAll(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, '');
+  const result = parseRationalText(text, true);
+  if (result || !raise) return result;
+  const messageFormat = str('invalid value for convert(): %p');
+  messageFormat.binary = true;
+  throw rubyError(rt().c.ArgumentError, yield* formatString(messageFormat, [source]));
 }
 
 function parseRationalText(text: string, exact: boolean): RObject | undefined {

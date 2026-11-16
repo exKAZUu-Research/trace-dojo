@@ -22435,3 +22435,927 @@ test.each(nativeCalendarBoundaryCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeExactValueProtocolCases = [
+  ['s=" bad ";begin;p Rational(s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end', 'nil\n'],
+  [
+    's=" bad ";begin;p Rational(s);rescue=>e;p e.class,e.message,e.message.encoding;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  ['s=" bad ";begin;p Rational(1,s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end', 'nil\n'],
+  [
+    's=" bad ";begin;p Rational(1,s);rescue=>e;p e.class,e.message,e.message.encoding;end',
+    'ArgumentError\n"invalid value for convert(): \\" bad \\""\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    String.raw`s="\tbad\n";begin;p Rational(s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'nil\n',
+  ],
+  [
+    String.raw`s="\tbad\n";begin;p Rational(s);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'ArgumentError\n"invalid value for convert(): \\"\\\\tbad\\\\n\\""\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    String.raw`s="\tbad\n";begin;p Rational(1,s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'nil\n',
+  ],
+  [
+    String.raw`s="\tbad\n";begin;p Rational(1,s);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'ArgumentError\n"invalid value for convert(): \\"\\\\tbad\\\\n\\""\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    String.raw`s="bad\0";begin;p Rational(s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'nil\n',
+  ],
+  [
+    String.raw`s="bad\0";begin;p Rational(s);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'ArgumentError\n"invalid value for convert(): \\"bad\\\\u0000\\""\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    String.raw`s="bad\0";begin;p Rational(1,s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'nil\n',
+  ],
+  [
+    String.raw`s="bad\0";begin;p Rational(1,s);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'ArgumentError\n"invalid value for convert(): \\"bad\\\\u0000\\""\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  ['s="ébad";begin;p Rational(s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end', 'nil\n'],
+  [
+    's="ébad";begin;p Rational(s);rescue=>e;p e.class,e.message,e.message.encoding;end',
+    'ArgumentError\n"invalid value for convert(): \\"ébad\\""\n#<Encoding:UTF-8>\n',
+  ],
+  ['s="ébad";begin;p Rational(1,s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end', 'nil\n'],
+  [
+    's="ébad";begin;p Rational(1,s);rescue=>e;p e.class,e.message,e.message.encoding;end',
+    'ArgumentError\n"invalid value for convert(): \\"ébad\\""\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    String.raw`s="\u0001bad";begin;p Rational(s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'nil\n',
+  ],
+  [
+    String.raw`s="\u0001bad";begin;p Rational(s);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'ArgumentError\n"invalid value for convert(): \\"\\\\u0001bad\\""\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    String.raw`s="\u0001bad";begin;p Rational(1,s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'nil\n',
+  ],
+  [
+    String.raw`s="\u0001bad";begin;p Rational(1,s);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'ArgumentError\n"invalid value for convert(): \\"\\\\u0001bad\\""\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    String.raw`s=String.new("bad\xff",encoding:"ASCII-8BIT");begin;p Rational(s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'nil\n',
+  ],
+  [
+    String.raw`s=String.new("bad\xff",encoding:"ASCII-8BIT");begin;p Rational(s);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'ArgumentError\n"invalid value for convert(): \\"bad\\\\xFF\\""\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    String.raw`s=String.new("bad\xff",encoding:"ASCII-8BIT");begin;p Rational(1,s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'nil\n',
+  ],
+  [
+    String.raw`s=String.new("bad\xff",encoding:"ASCII-8BIT");begin;p Rational(1,s);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'ArgumentError\n"invalid value for convert(): \\"bad\\\\xFF\\""\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    String.raw`s=String.new("bad\xff",encoding:"US-ASCII");begin;p Rational(s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'nil\n',
+  ],
+  [
+    String.raw`s=String.new("bad\xff",encoding:"US-ASCII");begin;p Rational(s);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'ArgumentError\n"invalid value for convert(): \\"bad\\\\xFF\\""\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    String.raw`s=String.new("bad\xff",encoding:"US-ASCII");begin;p Rational(1,s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'nil\n',
+  ],
+  [
+    String.raw`s=String.new("bad\xff",encoding:"US-ASCII");begin;p Rational(1,s);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'ArgumentError\n"invalid value for convert(): \\"bad\\\\xFF\\""\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    String.raw`s="#\{bad}";begin;p Rational(s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'nil\n',
+  ],
+  [
+    String.raw`s="#\{bad}";begin;p Rational(s);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'ArgumentError\n"invalid value for convert(): \\"\\\\\\#{bad}\\""\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    String.raw`s="#\{bad}";begin;p Rational(1,s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'nil\n',
+  ],
+  [
+    String.raw`s="#\{bad}";begin;p Rational(1,s);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'ArgumentError\n"invalid value for convert(): \\"\\\\\\#{bad}\\""\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    String.raw`s="\"bad\\";begin;p Rational(s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'nil\n',
+  ],
+  [
+    String.raw`s="\"bad\\";begin;p Rational(s);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'ArgumentError\n"invalid value for convert(): \\"\\\\\\"bad\\\\\\\\\\""\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    String.raw`s="\"bad\\";begin;p Rational(1,s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'nil\n',
+  ],
+  [
+    String.raw`s="\"bad\\";begin;p Rational(1,s);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'ArgumentError\n"invalid value for convert(): \\"\\\\\\"bad\\\\\\\\\\""\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  ['s="";begin;p Rational(s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end', 'nil\n'],
+  [
+    's="";begin;p Rational(s);rescue=>e;p e.class,e.message,e.message.encoding;end',
+    'ArgumentError\n"invalid value for convert(): \\"\\""\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  ['s="";begin;p Rational(1,s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end', 'nil\n'],
+  [
+    's="";begin;p Rational(1,s);rescue=>e;p e.class,e.message,e.message.encoding;end',
+    'ArgumentError\n"invalid value for convert(): \\"\\""\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  ['s="  1/2  ";begin;p Rational(s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end', '(1/2)\n'],
+  ['s="  1/2  ";begin;p Rational(s);rescue=>e;p e.class,e.message,e.message.encoding;end', '(1/2)\n'],
+  ['s="  1/2  ";begin;p Rational(1,s,exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end', '(2/1)\n'],
+  ['s="  1/2  ";begin;p Rational(1,s);rescue=>e;p e.class,e.message,e.message.encoding;end', '(2/1)\n'],
+  [
+    'class S<String;def inspect;puts :inspect;"custom";end;end;begin;p Rational(S.new(" bad "),exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end',
+    'nil\n',
+  ],
+  [
+    'class S<String;def inspect;puts :inspect;"custom";end;end;begin;p Rational(S.new(" bad "));rescue=>e;p e.class,e.message,e.message.encoding;end',
+    'inspect\nArgumentError\n"invalid value for convert(): custom"\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class S<String;def inspect;puts :inspect;"é";end;end;begin;p Rational(S.new(" bad "),exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end',
+    'nil\n',
+  ],
+  [
+    'class S<String;def inspect;puts :inspect;"é";end;end;begin;p Rational(S.new(" bad "));rescue=>e;p e.class,e.message,e.message.encoding;end',
+    'inspect\nArgumentError\n"invalid value for convert(): é"\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    String.raw`class S<String;def inspect;puts :inspect;String.new("\xff",encoding:"ASCII-8BIT");end;end;begin;p Rational(S.new(" bad "),exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'nil\n',
+  ],
+  [
+    String.raw`class S<String;def inspect;puts :inspect;String.new("\xff",encoding:"ASCII-8BIT");end;end;begin;p Rational(S.new(" bad "));rescue=>e;p e.class,e.message,e.message.encoding;end`,
+    'inspect\nArgumentError\n"invalid value for convert(): \\\\xFF"\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class S<String;def inspect;puts :inspect;42;end;end;begin;p Rational(S.new(" bad "),exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end',
+    'nil\n',
+  ],
+  [
+    'class S<String;def inspect;puts :inspect;42;end;end;begin;p Rational(S.new(" bad "));rescue=>e;p e.class,e.message,e.message.encoding;end',
+    'inspect\nArgumentError\n"invalid value for convert(): 42"\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class S<String;def inspect;puts :inspect;:tag;end;end;begin;p Rational(S.new(" bad "),exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end',
+    'nil\n',
+  ],
+  [
+    'class S<String;def inspect;puts :inspect;:tag;end;end;begin;p Rational(S.new(" bad "));rescue=>e;p e.class,e.message,e.message.encoding;end',
+    'inspect\nArgumentError\n"invalid value for convert(): tag"\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class S<String;def inspect;puts :inspect;raise "inspect failure";end;end;begin;p Rational(S.new(" bad "),exception:false);rescue=>e;p e.class,e.message,e.message.encoding;end',
+    'nil\n',
+  ],
+  [
+    'class S<String;def inspect;puts :inspect;raise "inspect failure";end;end;begin;p Rational(S.new(" bad "));rescue=>e;p e.class,e.message,e.message.encoding;end',
+    'inspect\nRuntimeError\n"inspect failure"\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;true;end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;true;end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;true;end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;false;end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\nfalse\nRational\ntrue\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;false;end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\nfalse\nRational\ntrue\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;false;end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\nfalse\nRational\ntrue\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;nil;end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\nfalse\nRational\ntrue\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;nil;end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\nfalse\nRational\ntrue\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;nil;end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\nfalse\nRational\ntrue\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;:yes;end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;:yes;end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;:yes;end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;0;end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;0;end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;0;end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;"";end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;"";end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;"";end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;[];end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;[];end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;[];end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;{};end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;{};end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;{};end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;1r;end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;1r;end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;1r;end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;1.5;end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;1.5;end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;1.5;end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;Object.new;end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;Object.new;end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C;def ==(other);$calls+=1;p other.class;Object.new;end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;true;end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;true;end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;true;end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;false;end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\nfalse\nRational\ntrue\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;false;end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\nfalse\nRational\ntrue\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;false;end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\nfalse\nRational\ntrue\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;nil;end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\nfalse\nRational\ntrue\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;nil;end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\nfalse\nRational\ntrue\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;nil;end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\nfalse\nRational\ntrue\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;:yes;end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;:yes;end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;:yes;end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;0;end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;0;end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;0;end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;"";end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;"";end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;"";end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;[];end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;[];end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;[];end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;{};end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;{};end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;{};end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;1r;end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;1r;end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;1r;end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;1.5;end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;1.5;end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;1.5;end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;Object.new;end;end;x=C.new;p(1r==x);p(1r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;Object.new;end;end;x=C.new;p(0r==x);p(0r!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    '$calls=0;class C<Numeric;def ==(other);$calls+=1;p other.class;Object.new;end;end;x=C.new;p(Rational(-1,2)==x);p(Rational(-1,2)!=x);p $calls',
+    'Rational\ntrue\nRational\nfalse\n2\n',
+  ],
+  [
+    'class Integer;def to_r;puts :converted;3r;end;end;begin;p Time.utc(2024,1,1,0,0,1);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:01 UTC\n',
+  ],
+  [
+    'class Integer;def to_r;puts :converted;3r;end;end;begin;p Time.utc(2024,1,1,0,0,Rational(1,2));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 UTC\n',
+  ],
+  [
+    'class Integer;def to_r;puts :converted;3r;end;end;begin;p Time.utc(2024,1,1,0,0,61r-Rational(1,10**20));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 UTC\n',
+  ],
+  [
+    'class Integer;def to_r;puts :converted;3r;end;end;begin;p Time.utc(2024,1,1,0,0,61r);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'class Integer;def to_r;puts :converted;3r;end;end;begin;p Time.utc(2024,1,1,0,0,0r);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 UTC\n',
+  ],
+  [
+    'class Integer;def to_r;puts :converted;3r;end;end;begin;p Time.utc(2024,1,1,0,0,Rational(-1,3));rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Integer;def to_r;puts :converted;3r;end;end;begin;p Time.local(2024,1,1,0,0,1);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:01 +0900\n',
+  ],
+  [
+    'class Integer;def to_r;puts :converted;3r;end;end;begin;p Time.local(2024,1,1,0,0,Rational(1,2));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 +0900\n',
+  ],
+  [
+    'class Integer;def to_r;puts :converted;3r;end;end;begin;p Time.local(2024,1,1,0,0,61r-Rational(1,10**20));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 +0900\n',
+  ],
+  [
+    'class Integer;def to_r;puts :converted;3r;end;end;begin;p Time.local(2024,1,1,0,0,61r);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'class Integer;def to_r;puts :converted;3r;end;end;begin;p Time.local(2024,1,1,0,0,0r);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 +0900\n',
+  ],
+  [
+    'class Integer;def to_r;puts :converted;3r;end;end;begin;p Time.local(2024,1,1,0,0,Rational(-1,3));rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Integer;def to_r;puts :converted;3r;end;end;begin;p Time.new(2024,1,1,0,0,1,"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:01 +0000\n',
+  ],
+  [
+    'class Integer;def to_r;puts :converted;3r;end;end;begin;p Time.new(2024,1,1,0,0,Rational(1,2),"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 +0000\n',
+  ],
+  [
+    'class Integer;def to_r;puts :converted;3r;end;end;begin;p Time.new(2024,1,1,0,0,61r-Rational(1,10**20),"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 +0000\n',
+  ],
+  [
+    'class Integer;def to_r;puts :converted;3r;end;end;begin;p Time.new(2024,1,1,0,0,61r,"+00:00");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'class Integer;def to_r;puts :converted;3r;end;end;begin;p Time.new(2024,1,1,0,0,0r,"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 +0000\n',
+  ],
+  [
+    'class Integer;def to_r;puts :converted;3r;end;end;begin;p Time.new(2024,1,1,0,0,Rational(-1,3),"+00:00");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Integer;def to_r;raise "must not convert";end;end;begin;p Time.utc(2024,1,1,0,0,1);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:01 UTC\n',
+  ],
+  [
+    'class Integer;def to_r;raise "must not convert";end;end;begin;p Time.utc(2024,1,1,0,0,Rational(1,2));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 UTC\n',
+  ],
+  [
+    'class Integer;def to_r;raise "must not convert";end;end;begin;p Time.utc(2024,1,1,0,0,61r-Rational(1,10**20));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 UTC\n',
+  ],
+  [
+    'class Integer;def to_r;raise "must not convert";end;end;begin;p Time.utc(2024,1,1,0,0,61r);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'class Integer;def to_r;raise "must not convert";end;end;begin;p Time.utc(2024,1,1,0,0,0r);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 UTC\n',
+  ],
+  [
+    'class Integer;def to_r;raise "must not convert";end;end;begin;p Time.utc(2024,1,1,0,0,Rational(-1,3));rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Integer;def to_r;raise "must not convert";end;end;begin;p Time.local(2024,1,1,0,0,1);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:01 +0900\n',
+  ],
+  [
+    'class Integer;def to_r;raise "must not convert";end;end;begin;p Time.local(2024,1,1,0,0,Rational(1,2));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 +0900\n',
+  ],
+  [
+    'class Integer;def to_r;raise "must not convert";end;end;begin;p Time.local(2024,1,1,0,0,61r-Rational(1,10**20));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 +0900\n',
+  ],
+  [
+    'class Integer;def to_r;raise "must not convert";end;end;begin;p Time.local(2024,1,1,0,0,61r);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'class Integer;def to_r;raise "must not convert";end;end;begin;p Time.local(2024,1,1,0,0,0r);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 +0900\n',
+  ],
+  [
+    'class Integer;def to_r;raise "must not convert";end;end;begin;p Time.local(2024,1,1,0,0,Rational(-1,3));rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Integer;def to_r;raise "must not convert";end;end;begin;p Time.new(2024,1,1,0,0,1,"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:01 +0000\n',
+  ],
+  [
+    'class Integer;def to_r;raise "must not convert";end;end;begin;p Time.new(2024,1,1,0,0,Rational(1,2),"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 +0000\n',
+  ],
+  [
+    'class Integer;def to_r;raise "must not convert";end;end;begin;p Time.new(2024,1,1,0,0,61r-Rational(1,10**20),"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 +0000\n',
+  ],
+  [
+    'class Integer;def to_r;raise "must not convert";end;end;begin;p Time.new(2024,1,1,0,0,61r,"+00:00");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'class Integer;def to_r;raise "must not convert";end;end;begin;p Time.new(2024,1,1,0,0,0r,"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 +0000\n',
+  ],
+  [
+    'class Integer;def to_r;raise "must not convert";end;end;begin;p Time.new(2024,1,1,0,0,Rational(-1,3),"+00:00");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Integer;def to_r;0.5;end;end;begin;p Time.utc(2024,1,1,0,0,1);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:01 UTC\n',
+  ],
+  [
+    'class Integer;def to_r;0.5;end;end;begin;p Time.utc(2024,1,1,0,0,Rational(1,2));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 UTC\n',
+  ],
+  [
+    'class Integer;def to_r;0.5;end;end;begin;p Time.utc(2024,1,1,0,0,61r-Rational(1,10**20));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 UTC\n',
+  ],
+  [
+    'class Integer;def to_r;0.5;end;end;begin;p Time.utc(2024,1,1,0,0,61r);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'class Integer;def to_r;0.5;end;end;begin;p Time.utc(2024,1,1,0,0,0r);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 UTC\n',
+  ],
+  [
+    'class Integer;def to_r;0.5;end;end;begin;p Time.utc(2024,1,1,0,0,Rational(-1,3));rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Integer;def to_r;0.5;end;end;begin;p Time.local(2024,1,1,0,0,1);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:01 +0900\n',
+  ],
+  [
+    'class Integer;def to_r;0.5;end;end;begin;p Time.local(2024,1,1,0,0,Rational(1,2));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 +0900\n',
+  ],
+  [
+    'class Integer;def to_r;0.5;end;end;begin;p Time.local(2024,1,1,0,0,61r-Rational(1,10**20));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 +0900\n',
+  ],
+  [
+    'class Integer;def to_r;0.5;end;end;begin;p Time.local(2024,1,1,0,0,61r);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'class Integer;def to_r;0.5;end;end;begin;p Time.local(2024,1,1,0,0,0r);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 +0900\n',
+  ],
+  [
+    'class Integer;def to_r;0.5;end;end;begin;p Time.local(2024,1,1,0,0,Rational(-1,3));rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Integer;def to_r;0.5;end;end;begin;p Time.new(2024,1,1,0,0,1,"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:01 +0000\n',
+  ],
+  [
+    'class Integer;def to_r;0.5;end;end;begin;p Time.new(2024,1,1,0,0,Rational(1,2),"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 +0000\n',
+  ],
+  [
+    'class Integer;def to_r;0.5;end;end;begin;p Time.new(2024,1,1,0,0,61r-Rational(1,10**20),"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 +0000\n',
+  ],
+  [
+    'class Integer;def to_r;0.5;end;end;begin;p Time.new(2024,1,1,0,0,61r,"+00:00");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'class Integer;def to_r;0.5;end;end;begin;p Time.new(2024,1,1,0,0,0r,"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 +0000\n',
+  ],
+  [
+    'class Integer;def to_r;0.5;end;end;begin;p Time.new(2024,1,1,0,0,Rational(-1,3),"+00:00");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Rational;def to_r;puts :converted;3r;end;end;begin;p Time.utc(2024,1,1,0,0,1);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:01 UTC\n',
+  ],
+  [
+    'class Rational;def to_r;puts :converted;3r;end;end;begin;p Time.utc(2024,1,1,0,0,Rational(1,2));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 UTC\n',
+  ],
+  [
+    'class Rational;def to_r;puts :converted;3r;end;end;begin;p Time.utc(2024,1,1,0,0,61r-Rational(1,10**20));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 UTC\n',
+  ],
+  [
+    'class Rational;def to_r;puts :converted;3r;end;end;begin;p Time.utc(2024,1,1,0,0,61r);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'class Rational;def to_r;puts :converted;3r;end;end;begin;p Time.utc(2024,1,1,0,0,0r);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 UTC\n',
+  ],
+  [
+    'class Rational;def to_r;puts :converted;3r;end;end;begin;p Time.utc(2024,1,1,0,0,Rational(-1,3));rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Rational;def to_r;puts :converted;3r;end;end;begin;p Time.local(2024,1,1,0,0,1);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:01 +0900\n',
+  ],
+  [
+    'class Rational;def to_r;puts :converted;3r;end;end;begin;p Time.local(2024,1,1,0,0,Rational(1,2));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 +0900\n',
+  ],
+  [
+    'class Rational;def to_r;puts :converted;3r;end;end;begin;p Time.local(2024,1,1,0,0,61r-Rational(1,10**20));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 +0900\n',
+  ],
+  [
+    'class Rational;def to_r;puts :converted;3r;end;end;begin;p Time.local(2024,1,1,0,0,61r);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'class Rational;def to_r;puts :converted;3r;end;end;begin;p Time.local(2024,1,1,0,0,0r);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 +0900\n',
+  ],
+  [
+    'class Rational;def to_r;puts :converted;3r;end;end;begin;p Time.local(2024,1,1,0,0,Rational(-1,3));rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Rational;def to_r;puts :converted;3r;end;end;begin;p Time.new(2024,1,1,0,0,1,"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:01 +0000\n',
+  ],
+  [
+    'class Rational;def to_r;puts :converted;3r;end;end;begin;p Time.new(2024,1,1,0,0,Rational(1,2),"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 +0000\n',
+  ],
+  [
+    'class Rational;def to_r;puts :converted;3r;end;end;begin;p Time.new(2024,1,1,0,0,61r-Rational(1,10**20),"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 +0000\n',
+  ],
+  [
+    'class Rational;def to_r;puts :converted;3r;end;end;begin;p Time.new(2024,1,1,0,0,61r,"+00:00");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'class Rational;def to_r;puts :converted;3r;end;end;begin;p Time.new(2024,1,1,0,0,0r,"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 +0000\n',
+  ],
+  [
+    'class Rational;def to_r;puts :converted;3r;end;end;begin;p Time.new(2024,1,1,0,0,Rational(-1,3),"+00:00");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Rational;def to_r;raise "must not convert";end;end;begin;p Time.utc(2024,1,1,0,0,1);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:01 UTC\n',
+  ],
+  [
+    'class Rational;def to_r;raise "must not convert";end;end;begin;p Time.utc(2024,1,1,0,0,Rational(1,2));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 UTC\n',
+  ],
+  [
+    'class Rational;def to_r;raise "must not convert";end;end;begin;p Time.utc(2024,1,1,0,0,61r-Rational(1,10**20));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 UTC\n',
+  ],
+  [
+    'class Rational;def to_r;raise "must not convert";end;end;begin;p Time.utc(2024,1,1,0,0,61r);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'class Rational;def to_r;raise "must not convert";end;end;begin;p Time.utc(2024,1,1,0,0,0r);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 UTC\n',
+  ],
+  [
+    'class Rational;def to_r;raise "must not convert";end;end;begin;p Time.utc(2024,1,1,0,0,Rational(-1,3));rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Rational;def to_r;raise "must not convert";end;end;begin;p Time.local(2024,1,1,0,0,1);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:01 +0900\n',
+  ],
+  [
+    'class Rational;def to_r;raise "must not convert";end;end;begin;p Time.local(2024,1,1,0,0,Rational(1,2));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 +0900\n',
+  ],
+  [
+    'class Rational;def to_r;raise "must not convert";end;end;begin;p Time.local(2024,1,1,0,0,61r-Rational(1,10**20));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 +0900\n',
+  ],
+  [
+    'class Rational;def to_r;raise "must not convert";end;end;begin;p Time.local(2024,1,1,0,0,61r);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'class Rational;def to_r;raise "must not convert";end;end;begin;p Time.local(2024,1,1,0,0,0r);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 +0900\n',
+  ],
+  [
+    'class Rational;def to_r;raise "must not convert";end;end;begin;p Time.local(2024,1,1,0,0,Rational(-1,3));rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Rational;def to_r;raise "must not convert";end;end;begin;p Time.new(2024,1,1,0,0,1,"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:01 +0000\n',
+  ],
+  [
+    'class Rational;def to_r;raise "must not convert";end;end;begin;p Time.new(2024,1,1,0,0,Rational(1,2),"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 +0000\n',
+  ],
+  [
+    'class Rational;def to_r;raise "must not convert";end;end;begin;p Time.new(2024,1,1,0,0,61r-Rational(1,10**20),"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 +0000\n',
+  ],
+  [
+    'class Rational;def to_r;raise "must not convert";end;end;begin;p Time.new(2024,1,1,0,0,61r,"+00:00");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'class Rational;def to_r;raise "must not convert";end;end;begin;p Time.new(2024,1,1,0,0,0r,"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 +0000\n',
+  ],
+  [
+    'class Rational;def to_r;raise "must not convert";end;end;begin;p Time.new(2024,1,1,0,0,Rational(-1,3),"+00:00");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Rational;def to_r;0.5;end;end;begin;p Time.utc(2024,1,1,0,0,1);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:01 UTC\n',
+  ],
+  [
+    'class Rational;def to_r;0.5;end;end;begin;p Time.utc(2024,1,1,0,0,Rational(1,2));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 UTC\n',
+  ],
+  [
+    'class Rational;def to_r;0.5;end;end;begin;p Time.utc(2024,1,1,0,0,61r-Rational(1,10**20));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 UTC\n',
+  ],
+  [
+    'class Rational;def to_r;0.5;end;end;begin;p Time.utc(2024,1,1,0,0,61r);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'class Rational;def to_r;0.5;end;end;begin;p Time.utc(2024,1,1,0,0,0r);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 UTC\n',
+  ],
+  [
+    'class Rational;def to_r;0.5;end;end;begin;p Time.utc(2024,1,1,0,0,Rational(-1,3));rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Rational;def to_r;0.5;end;end;begin;p Time.local(2024,1,1,0,0,1);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:01 +0900\n',
+  ],
+  [
+    'class Rational;def to_r;0.5;end;end;begin;p Time.local(2024,1,1,0,0,Rational(1,2));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 +0900\n',
+  ],
+  [
+    'class Rational;def to_r;0.5;end;end;begin;p Time.local(2024,1,1,0,0,61r-Rational(1,10**20));rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 +0900\n',
+  ],
+  [
+    'class Rational;def to_r;0.5;end;end;begin;p Time.local(2024,1,1,0,0,61r);rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'class Rational;def to_r;0.5;end;end;begin;p Time.local(2024,1,1,0,0,0r);rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 +0900\n',
+  ],
+  [
+    'class Rational;def to_r;0.5;end;end;begin;p Time.local(2024,1,1,0,0,Rational(-1,3));rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Rational;def to_r;0.5;end;end;begin;p Time.new(2024,1,1,0,0,1,"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:01 +0000\n',
+  ],
+  [
+    'class Rational;def to_r;0.5;end;end;begin;p Time.new(2024,1,1,0,0,Rational(1,2),"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 +0000\n',
+  ],
+  [
+    'class Rational;def to_r;0.5;end;end;begin;p Time.new(2024,1,1,0,0,61r-Rational(1,10**20),"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 +0000\n',
+  ],
+  [
+    'class Rational;def to_r;0.5;end;end;begin;p Time.new(2024,1,1,0,0,61r,"+00:00");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'class Rational;def to_r;0.5;end;end;begin;p Time.new(2024,1,1,0,0,0r,"+00:00");rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 +0000\n',
+  ],
+  [
+    'class Rational;def to_r;0.5;end;end;begin;p Time.new(2024,1,1,0,0,Rational(-1,3),"+00:00");rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Integer;def to_r;raise "integer conversion";end;end;class Rational;def to_r;raise "rational conversion";end;end;class Seconds;def to_r;puts :wrapped;Rational(1,2);end;def to_int;puts :integer;99;end;end;begin;p Time.utc(2024,1,1,0,0,Seconds.new);rescue=>e;p e.class,e.message;end',
+    'wrapped\n2024-01-01 00:00:00.5 UTC\n',
+  ],
+  [
+    'class Integer;def to_r;raise "integer conversion";end;end;class Rational;def to_r;raise "rational conversion";end;end;class Seconds;def to_r;puts :wrapped;61r-Rational(1,10**20);end;def to_int;puts :integer;99;end;end;begin;p Time.utc(2024,1,1,0,0,Seconds.new);rescue=>e;p e.class,e.message;end',
+    'wrapped\n2024-01-01 00:01:00 99999999999999999999/100000000000000000000 UTC\n',
+  ],
+  [
+    'class Integer;def to_r;raise "integer conversion";end;end;class Rational;def to_r;raise "rational conversion";end;end;class Seconds;def to_r;puts :wrapped;Rational(1,2);end;def to_int;puts :integer;99;end;end;begin;p Time.local(2024,1,1,0,0,Seconds.new);rescue=>e;p e.class,e.message;end',
+    'wrapped\n2024-01-01 00:00:00.5 +0900\n',
+  ],
+  [
+    'class Integer;def to_r;raise "integer conversion";end;end;class Rational;def to_r;raise "rational conversion";end;end;class Seconds;def to_r;puts :wrapped;61r-Rational(1,10**20);end;def to_int;puts :integer;99;end;end;begin;p Time.local(2024,1,1,0,0,Seconds.new);rescue=>e;p e.class,e.message;end',
+    'wrapped\n2024-01-01 00:01:00 99999999999999999999/100000000000000000000 +0900\n',
+  ],
+  [
+    'class Integer;def to_r;raise "integer conversion";end;end;class Rational;def to_r;raise "rational conversion";end;end;class Seconds;def to_r;puts :wrapped;Rational(1,2);end;def to_int;puts :integer;99;end;end;begin;p Time.new(2024,1,1,0,0,Seconds.new,"+00:00");rescue=>e;p e.class,e.message;end',
+    'wrapped\n2024-01-01 00:00:00.5 +0000\n',
+  ],
+  [
+    'class Integer;def to_r;raise "integer conversion";end;end;class Rational;def to_r;raise "rational conversion";end;end;class Seconds;def to_r;puts :wrapped;61r-Rational(1,10**20);end;def to_int;puts :integer;99;end;end;begin;p Time.new(2024,1,1,0,0,Seconds.new,"+00:00");rescue=>e;p e.class,e.message;end',
+    'wrapped\n2024-01-01 00:01:00 99999999999999999999/100000000000000000000 +0000\n',
+  ],
+] as const;
+
+test.each(nativeExactValueProtocolCases)(
+  'exact values preserve native conversion diagnostics and equality protocols: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
