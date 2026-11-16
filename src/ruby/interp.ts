@@ -432,20 +432,21 @@ export function* ev(e: Expr, frame: Frame): Gen {
       const arraysMark = rt().heldArrays.length;
       frame.temporaries.push(subject);
       const cache: DeconstructionCache = { subject };
+      const context = { detailed: e.clauses.length === 1 && !e.else };
       try {
         for (const clause of e.clauses) {
           rt().currentRow = clause.row;
-          const matched = yield* matchPattern(clause.pattern, subject, frame, cache);
+          const matched = yield* matchPattern(clause.pattern, subject, frame, context, cache);
           if (cache.array) frame.temporaries.push(cache.array);
           if (!matched) continue;
           if (clause.guard && truthy(yield* ev(clause.guard.cond, frame)) === clause.guard.unless) {
-            guardFailed();
+            guardFailed(context);
             continue;
           }
           return yield* evalBody(clause.body, frame);
         }
         if (e.else) return yield* evalBody(e.else, frame);
-        throw yield* noMatchingPattern(subject, e.clauses.length === 1);
+        throw yield* noMatchingPattern(subject, context);
       } finally {
         frame.temporaries.length = mark;
         rt().heldArrays.length = arraysMark;
@@ -453,8 +454,9 @@ export function* ev(e: Expr, frame: Frame): Gen {
     }
     case 'matchPattern': {
       const value = yield* ev(e.value, frame);
-      const matched = yield* matchPattern(e.pattern, value, frame, { subject: value });
-      if (e.raise && !matched) throw yield* noMatchingPattern(value, true);
+      const context = { detailed: e.raise };
+      const matched = yield* matchPattern(e.pattern, value, frame, context, { subject: value });
+      if (e.raise && !matched) throw yield* noMatchingPattern(value, context);
       return e.raise ? NIL : matched;
     }
     case 'rational': {

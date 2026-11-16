@@ -24912,3 +24912,2291 @@ test.each(nativeCopiedOriginStackCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeInternalProtocolCases = [
+  [
+    'begin;class X;private;def ==(x);puts :equal;true;end;def eql?(x);puts :eql;true;end;def hash;puts :hash;1;end;end;a=X.new;b=a;p(a==b);rescue=>e;p e.class;end',
+    'NoMethodError\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :equal;true;end;def eql?(x);puts :eql;true;end;def hash;puts :hash;1;end;end;a=X.new;b=X.new;p(a==b);rescue=>e;p e.class;end',
+    'NoMethodError\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :equal;true;end;def eql?(x);puts :eql;true;end;def hash;puts :hash;1;end;end;a=X.new;b=a;p(a.==(b));rescue=>e;p e.class;end',
+    'NoMethodError\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :equal;true;end;def eql?(x);puts :eql;true;end;def hash;puts :hash;1;end;end;a=X.new;b=X.new;p(a.==(b));rescue=>e;p e.class;end',
+    'NoMethodError\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :equal;true;end;def eql?(x);puts :eql;true;end;def hash;puts :hash;1;end;end;a=X.new;b=a;p(a.eql?(b));rescue=>e;p e.class;end',
+    'NoMethodError\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :equal;true;end;def eql?(x);puts :eql;true;end;def hash;puts :hash;1;end;end;a=X.new;b=X.new;p(a.eql?(b));rescue=>e;p e.class;end',
+    'NoMethodError\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :equal;true;end;def eql?(x);puts :eql;true;end;def hash;puts :hash;1;end;end;a=X.new;b=a;p(a.hash);rescue=>e;p e.class;end',
+    'NoMethodError\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :equal;true;end;def eql?(x);puts :eql;true;end;def hash;puts :hash;1;end;end;a=X.new;b=X.new;p(a.hash);rescue=>e;p e.class;end',
+    'NoMethodError\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;true;end;def eql?(x);puts :eql;true;end;def hash;puts :hash;1;end;end;a=X.new;b=a;p(a==b);rescue=>e;p e.class;end',
+    'NoMethodError\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;true;end;def eql?(x);puts :eql;true;end;def hash;puts :hash;1;end;end;a=X.new;b=X.new;p(a==b);rescue=>e;p e.class;end',
+    'NoMethodError\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;true;end;def eql?(x);puts :eql;true;end;def hash;puts :hash;1;end;end;a=X.new;b=a;p(a.==(b));rescue=>e;p e.class;end',
+    'NoMethodError\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;true;end;def eql?(x);puts :eql;true;end;def hash;puts :hash;1;end;end;a=X.new;b=X.new;p(a.==(b));rescue=>e;p e.class;end',
+    'NoMethodError\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;true;end;def eql?(x);puts :eql;true;end;def hash;puts :hash;1;end;end;a=X.new;b=a;p(a.eql?(b));rescue=>e;p e.class;end',
+    'NoMethodError\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;true;end;def eql?(x);puts :eql;true;end;def hash;puts :hash;1;end;end;a=X.new;b=X.new;p(a.eql?(b));rescue=>e;p e.class;end',
+    'NoMethodError\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;true;end;def eql?(x);puts :eql;true;end;def hash;puts :hash;1;end;end;a=X.new;b=a;p(a.hash);rescue=>e;p e.class;end',
+    'NoMethodError\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;true;end;def eql?(x);puts :eql;true;end;def hash;puts :hash;1;end;end;a=X.new;b=X.new;p(a.hash);rescue=>e;p e.class;end',
+    'NoMethodError\n',
+  ],
+
+  [
+    'begin;class X;public;def ==(x);puts :equal;true;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X;public;def ==(x);puts :equal;false;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\ntrue\n',
+  ],
+  [
+    'begin;class X;public;def ==(x);puts :equal;nil;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\ntrue\n',
+  ],
+  [
+    'begin;class X;public;def ==(x);puts :equal;:yes;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X;public;def ==(x);puts :equal;0;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X;public;def ==(x);puts :equal;[];end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X<Numeric;public;def ==(x);puts :equal;true;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X<Numeric;public;def ==(x);puts :equal;false;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\ntrue\n',
+  ],
+  [
+    'begin;class X<Numeric;public;def ==(x);puts :equal;nil;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\ntrue\n',
+  ],
+  [
+    'begin;class X<Numeric;public;def ==(x);puts :equal;:yes;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X<Numeric;public;def ==(x);puts :equal;0;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X<Numeric;public;def ==(x);puts :equal;[];end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class N;public;def +(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:+,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;public;def +(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:+,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;public;def -(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:-,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;public;def -(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:-,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;public;def *(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:*,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;public;def *(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:*,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;public;def /(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:/,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;public;def /(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:/,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;public;def /(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:quo,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;public;def /(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:quo,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;public;def **(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:**,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;public;def **(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:**,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;public;def <=>(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:<=>,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;public;def <=>(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:<=>,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  ['begin;class Float;public;def +(x);puts :override;4.0;end;end;p 1r.send(:+,1.0);rescue=>e;p e.class;end', '2.0\n'],
+  ['begin;class Float;public;def -(x);puts :override;4.0;end;end;p 1r.send(:-,1.0);rescue=>e;p e.class;end', '0.0\n'],
+  ['begin;class Float;public;def *(x);puts :override;4.0;end;end;p 1r.send(:*,1.0);rescue=>e;p e.class;end', '1.0\n'],
+  ['begin;class Float;public;def /(x);puts :override;4.0;end;end;p 1r.send(:/,1.0);rescue=>e;p e.class;end', '1.0\n'],
+  ['begin;class Float;public;def /(x);puts :override;4.0;end;end;p 1r.send(:quo,1.0);rescue=>e;p e.class;end', '1.0\n'],
+  [
+    'begin;class Rational;public;def /(x);puts :divide;5;end;end;p 1r.div(2);p 1r.divmod(2);rescue=>e;p e.class;end',
+    'divide\n5\ndivide\ndivide\n[5, (-9/1)]\n',
+  ],
+  [
+    'begin;class Q;public;def floor;puts :floor;3;end;end;class Rational;def /(x);Q.new;end;end;p 1r.div(2);rescue=>e;p e.class;end',
+    'floor\n3\n',
+  ],
+  [
+    'begin;class Integer;public;def *(x);puts :multiply;0;end;end;p 1r.send(:%,2);rescue=>e;p e.class;end',
+    'multiply\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;public;def div(x);puts :divide;0;end;end;p 1r.send(:%,2);rescue=>e;p e.class;end',
+    'divide\n(1/1)\n',
+  ],
+  ['begin;class Rational;public;def -(x);puts :minus;7;end;end;p 1r.send(:%,2);rescue=>e;p e.class;end', 'minus\n7\n'],
+  [
+    'begin;class Integer;public;def *(x);puts :multiply;0;end;end;p 1r.send(:modulo,2);rescue=>e;p e.class;end',
+    'multiply\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;public;def div(x);puts :divide;0;end;end;p 1r.send(:modulo,2);rescue=>e;p e.class;end',
+    'divide\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;public;def -(x);puts :minus;7;end;end;p 1r.send(:modulo,2);rescue=>e;p e.class;end',
+    'minus\n7\n',
+  ],
+  [
+    'begin;class Integer;public;def *(x);puts :multiply;0;end;end;p 1r.send(:divmod,2);rescue=>e;p e.class;end',
+    'multiply\n[0, (1/1)]\n',
+  ],
+  [
+    'begin;class Rational;public;def div(x);puts :divide;0;end;end;p 1r.send(:divmod,2);rescue=>e;p e.class;end',
+    'divide\n[0, (1/1)]\n',
+  ],
+  [
+    'begin;class Rational;public;def -(x);puts :minus;7;end;end;p 1r.send(:divmod,2);rescue=>e;p e.class;end',
+    'minus\n[0, 7]\n',
+  ],
+  [
+    'begin;class Rational;public;def %(x);puts :modulo;1r;end;end;p 5r.remainder(2);rescue=>e;p e.class;end',
+    'modulo\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;public;def <(x);puts :compare;false;end;end;p 5r.remainder(2);rescue=>e;p e.class;end',
+    'compare\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;public;def >(x);puts :compare;false;end;end;p 5r.remainder(2);rescue=>e;p e.class;end',
+    'compare\n(1/1)\n',
+  ],
+  [
+    'begin;class X;public;def ==(x);puts :equal;false;end;public;def coerce(x);puts :coerce;[2,4];end;def *(x);0;end;end;p 1r.send(:fdiv,X.new);rescue=>e;p e.class;end',
+    'equal\ncoerce\n0.0\n',
+  ],
+  [
+    'begin;class X;public;def ==(x);puts :equal;false;end;public;def coerce(x);puts :coerce;[2,4];end;def *(x);0;end;end;p 1r.send(:div,X.new);rescue=>e;p e.class;end',
+    'equal\ncoerce\n0\n',
+  ],
+  [
+    'begin;class X;public;def ==(x);puts :equal;false;end;public;def coerce(x);puts :coerce;[2,4];end;def *(x);0;end;end;p 1r.send(:divmod,X.new);rescue=>e;p e.class;end',
+    'equal\ncoerce\nequal\ncoerce\n[0, (1/1)]\n',
+  ],
+  [
+    'begin;class X;public;def ==(x);puts :equal;false;end;public;def coerce(x);puts :coerce;[2,4];end;def *(x);0;end;end;p 1r.send(:%,X.new);rescue=>e;p e.class;end',
+    'equal\ncoerce\n(1/1)\n',
+  ],
+  [
+    'begin;class X;public;def ==(x);puts :equal;false;end;public;def coerce(x);puts :coerce;[2,4];end;def *(x);0;end;end;p 1r.send(:modulo,X.new);rescue=>e;p e.class;end',
+    'equal\ncoerce\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;public;def *(x);puts :multiply;42;end;end;p (1r/2).abs2;rescue=>e;p e.class;end',
+    'multiply\n42\n',
+  ],
+  [
+    'begin;class Rational;public;def ==(x);puts :equal;true;end;end;p 0r.zero?;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nnil\n',
+  ],
+  [
+    'begin;class Rational;public;def zero?;puts :zero;true;end;end;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'zero\nnil\n',
+  ],
+  [
+    'begin;class Rational;public;def ==(x);puts :equal;false;end;end;p 0r.zero?;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\n(0/1)\n',
+  ],
+  [
+    'begin;class Rational;public;def zero?;puts :zero;false;end;end;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'zero\n(0/1)\n',
+  ],
+  [
+    'begin;class Rational;public;def ==(x);puts :equal;nil;end;end;p 0r.zero?;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\n(0/1)\n',
+  ],
+  [
+    'begin;class Rational;public;def zero?;puts :zero;nil;end;end;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'zero\n(0/1)\n',
+  ],
+  [
+    'begin;class Rational;public;def ==(x);puts :equal;:yes;end;end;p 0r.zero?;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nnil\n',
+  ],
+  [
+    'begin;class Rational;public;def zero?;puts :zero;:yes;end;end;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'zero\nnil\n',
+  ],
+  [
+    'begin;class Rational;public;def ==(x);puts :equal;true;end;end;p 1r.zero?;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nnil\n',
+  ],
+  [
+    'begin;class Rational;public;def zero?;puts :zero;true;end;end;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'zero\nnil\n',
+  ],
+  [
+    'begin;class Rational;public;def ==(x);puts :equal;false;end;end;p 1r.zero?;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;public;def zero?;puts :zero;false;end;end;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'zero\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;public;def ==(x);puts :equal;nil;end;end;p 1r.zero?;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;public;def zero?;puts :zero;nil;end;end;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'zero\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;public;def ==(x);puts :equal;:yes;end;end;p 1r.zero?;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nnil\n',
+  ],
+  [
+    'begin;class Rational;public;def zero?;puts :zero;:yes;end;end;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'zero\nnil\n',
+  ],
+  [
+    'begin;class X;public;def ==(x);puts :compare;true;end;end;S=Struct.new(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;public;def ==(x);puts :compare;false;end;end;S=Struct.new(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;public;def ==(x);puts :compare;nil;end;end;S=Struct.new(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;public;def ==(x);puts :compare;:yes;end;end;S=Struct.new(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;public;def eql?(x);puts :compare;true;end;end;S=Struct.new(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;public;def eql?(x);puts :compare;false;end;end;S=Struct.new(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;public;def eql?(x);puts :compare;nil;end;end;S=Struct.new(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;public;def eql?(x);puts :compare;:yes;end;end;S=Struct.new(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;public;def ==(x);puts :compare;true;end;end;S=Data.define(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;public;def ==(x);puts :compare;false;end;end;S=Data.define(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;public;def ==(x);puts :compare;nil;end;end;S=Data.define(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;public;def ==(x);puts :compare;:yes;end;end;S=Data.define(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;public;def eql?(x);puts :compare;true;end;end;S=Data.define(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;public;def eql?(x);puts :compare;false;end;end;S=Data.define(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;public;def eql?(x);puts :compare;nil;end;end;S=Data.define(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;public;def eql?(x);puts :compare;:yes;end;end;S=Data.define(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;public;def hash;puts :hash;1;end;def to_int;puts :integer;1;end;end;S=Struct.new(:x);p S.new(X.new).hash.class;h={};h[S.new(X.new)]=3;p h.values;rescue=>e;p e.class;end',
+    'hash\nInteger\nhash\n[3]\n',
+  ],
+  [
+    'begin;class X;public;def hash;puts :hash;X.new;end;def to_int;puts :integer;1;end;end;S=Struct.new(:x);p S.new(X.new).hash.class;h={};h[S.new(X.new)]=3;p h.values;rescue=>e;p e.class;end',
+    'hash\ninteger\nInteger\nhash\ninteger\n[3]\n',
+  ],
+  [
+    'begin;class X;public;def hash;puts :hash;1;end;def to_int;puts :integer;1;end;end;S=Data.define(:x);p S.new(X.new).hash.class;h={};h[S.new(X.new)]=3;p h.values;rescue=>e;p e.class;end',
+    'hash\nInteger\nhash\n[3]\n',
+  ],
+  [
+    'begin;class X;public;def hash;puts :hash;X.new;end;def to_int;puts :integer;1;end;end;S=Data.define(:x);p S.new(X.new).hash.class;h={};h[S.new(X.new)]=3;p h.values;rescue=>e;p e.class;end',
+    'hash\ninteger\nInteger\nhash\ninteger\n[3]\n',
+  ],
+  [
+    'begin;class P;public;def ===(x);puts :check;true;end;def inspect;"predicate";end;end;v=P.new;puts((1 in ^v));rescue=>e;p e.class;end',
+    'check\ntrue\n',
+  ],
+  [
+    'begin;class P;public;def ===(x);puts :check;true;end;def inspect;"predicate";end;end;v=P.new;1 => ^v;puts :matched;rescue=>e;p e.class;end',
+    'check\nmatched\n',
+  ],
+  [
+    'begin;class P;public;def ===(x);puts :check;false;end;def inspect;"predicate";end;end;v=P.new;puts((1 in ^v));rescue=>e;p e.class;end',
+    'check\nfalse\n',
+  ],
+  [
+    'begin;class P;public;def ===(x);puts :check;false;end;def inspect;"predicate";end;end;v=P.new;1 => ^v;puts :matched;rescue=>e;p e.class;end',
+    'check\nNoMatchingPatternError\n',
+  ],
+  [
+    'begin;class P;public;def ===(x);puts :check;nil;end;def inspect;"predicate";end;end;v=P.new;puts((1 in ^v));rescue=>e;p e.class;end',
+    'check\nfalse\n',
+  ],
+  [
+    'begin;class P;public;def ===(x);puts :check;nil;end;def inspect;"predicate";end;end;v=P.new;1 => ^v;puts :matched;rescue=>e;p e.class;end',
+    'check\nNoMatchingPatternError\n',
+  ],
+  [
+    'begin;class P;public;def ===(x);puts :check;:yes;end;def inspect;"predicate";end;end;v=P.new;puts((1 in ^v));rescue=>e;p e.class;end',
+    'check\ntrue\n',
+  ],
+  [
+    'begin;class P;public;def ===(x);puts :check;:yes;end;def inspect;"predicate";end;end;v=P.new;1 => ^v;puts :matched;rescue=>e;p e.class;end',
+    'check\nmatched\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :equal;true;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :equal;false;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\ntrue\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :equal;nil;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\ntrue\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :equal;:yes;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :equal;0;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :equal;[];end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X<Numeric;private;def ==(x);puts :equal;true;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X<Numeric;private;def ==(x);puts :equal;false;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\ntrue\n',
+  ],
+  [
+    'begin;class X<Numeric;private;def ==(x);puts :equal;nil;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\ntrue\n',
+  ],
+  [
+    'begin;class X<Numeric;private;def ==(x);puts :equal;:yes;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X<Numeric;private;def ==(x);puts :equal;0;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X<Numeric;private;def ==(x);puts :equal;[];end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class N;private;def +(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:+,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;private;def +(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:+,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;private;def -(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:-,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;private;def -(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:-,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;private;def *(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:*,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;private;def *(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:*,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;private;def /(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:/,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;private;def /(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:/,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;private;def /(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:quo,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;private;def /(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:quo,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;private;def **(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:**,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;private;def **(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:**,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;private;def <=>(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:<=>,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;private;def <=>(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:<=>,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  ['begin;class Float;private;def +(x);puts :override;4.0;end;end;p 1r.send(:+,1.0);rescue=>e;p e.class;end', '2.0\n'],
+  ['begin;class Float;private;def -(x);puts :override;4.0;end;end;p 1r.send(:-,1.0);rescue=>e;p e.class;end', '0.0\n'],
+  ['begin;class Float;private;def *(x);puts :override;4.0;end;end;p 1r.send(:*,1.0);rescue=>e;p e.class;end', '1.0\n'],
+  ['begin;class Float;private;def /(x);puts :override;4.0;end;end;p 1r.send(:/,1.0);rescue=>e;p e.class;end', '1.0\n'],
+  [
+    'begin;class Float;private;def /(x);puts :override;4.0;end;end;p 1r.send(:quo,1.0);rescue=>e;p e.class;end',
+    '1.0\n',
+  ],
+  [
+    'begin;class Rational;private;def /(x);puts :divide;5;end;end;p 1r.div(2);p 1r.divmod(2);rescue=>e;p e.class;end',
+    'divide\n5\ndivide\ndivide\n[5, (-9/1)]\n',
+  ],
+  [
+    'begin;class Q;private;def floor;puts :floor;3;end;end;class Rational;def /(x);Q.new;end;end;p 1r.div(2);rescue=>e;p e.class;end',
+    'floor\n3\n',
+  ],
+  [
+    'begin;class Integer;private;def *(x);puts :multiply;0;end;end;p 1r.send(:%,2);rescue=>e;p e.class;end',
+    'multiply\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;private;def div(x);puts :divide;0;end;end;p 1r.send(:%,2);rescue=>e;p e.class;end',
+    'divide\n(1/1)\n',
+  ],
+  ['begin;class Rational;private;def -(x);puts :minus;7;end;end;p 1r.send(:%,2);rescue=>e;p e.class;end', 'minus\n7\n'],
+  [
+    'begin;class Integer;private;def *(x);puts :multiply;0;end;end;p 1r.send(:modulo,2);rescue=>e;p e.class;end',
+    'multiply\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;private;def div(x);puts :divide;0;end;end;p 1r.send(:modulo,2);rescue=>e;p e.class;end',
+    'divide\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;private;def -(x);puts :minus;7;end;end;p 1r.send(:modulo,2);rescue=>e;p e.class;end',
+    'minus\n7\n',
+  ],
+  [
+    'begin;class Integer;private;def *(x);puts :multiply;0;end;end;p 1r.send(:divmod,2);rescue=>e;p e.class;end',
+    'multiply\n[0, (1/1)]\n',
+  ],
+  [
+    'begin;class Rational;private;def div(x);puts :divide;0;end;end;p 1r.send(:divmod,2);rescue=>e;p e.class;end',
+    'divide\n[0, (1/1)]\n',
+  ],
+  [
+    'begin;class Rational;private;def -(x);puts :minus;7;end;end;p 1r.send(:divmod,2);rescue=>e;p e.class;end',
+    'minus\n[0, 7]\n',
+  ],
+  [
+    'begin;class Rational;private;def %(x);puts :modulo;1r;end;end;p 5r.remainder(2);rescue=>e;p e.class;end',
+    'modulo\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;private;def <(x);puts :compare;false;end;end;p 5r.remainder(2);rescue=>e;p e.class;end',
+    'compare\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;private;def >(x);puts :compare;false;end;end;p 5r.remainder(2);rescue=>e;p e.class;end',
+    'compare\n(1/1)\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :equal;false;end;public;def coerce(x);puts :coerce;[2,4];end;def *(x);0;end;end;p 1r.send(:fdiv,X.new);rescue=>e;p e.class;end',
+    'equal\ncoerce\n0.0\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :equal;false;end;public;def coerce(x);puts :coerce;[2,4];end;def *(x);0;end;end;p 1r.send(:div,X.new);rescue=>e;p e.class;end',
+    'equal\ncoerce\n0\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :equal;false;end;public;def coerce(x);puts :coerce;[2,4];end;def *(x);0;end;end;p 1r.send(:divmod,X.new);rescue=>e;p e.class;end',
+    'equal\ncoerce\nequal\ncoerce\n[0, (1/1)]\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :equal;false;end;public;def coerce(x);puts :coerce;[2,4];end;def *(x);0;end;end;p 1r.send(:%,X.new);rescue=>e;p e.class;end',
+    'equal\ncoerce\n(1/1)\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :equal;false;end;public;def coerce(x);puts :coerce;[2,4];end;def *(x);0;end;end;p 1r.send(:modulo,X.new);rescue=>e;p e.class;end',
+    'equal\ncoerce\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;private;def *(x);puts :multiply;42;end;end;p (1r/2).abs2;rescue=>e;p e.class;end',
+    'multiply\n42\n',
+  ],
+  [
+    'begin;class Rational;private;def ==(x);puts :equal;true;end;end;p 0r.zero?;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nnil\n',
+  ],
+  [
+    'begin;class Rational;private;def zero?;puts :zero;true;end;end;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'zero\nnil\n',
+  ],
+  [
+    'begin;class Rational;private;def ==(x);puts :equal;false;end;end;p 0r.zero?;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\n(0/1)\n',
+  ],
+  [
+    'begin;class Rational;private;def zero?;puts :zero;false;end;end;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'zero\n(0/1)\n',
+  ],
+  [
+    'begin;class Rational;private;def ==(x);puts :equal;nil;end;end;p 0r.zero?;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\n(0/1)\n',
+  ],
+  [
+    'begin;class Rational;private;def zero?;puts :zero;nil;end;end;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'zero\n(0/1)\n',
+  ],
+  [
+    'begin;class Rational;private;def ==(x);puts :equal;:yes;end;end;p 0r.zero?;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nnil\n',
+  ],
+  [
+    'begin;class Rational;private;def zero?;puts :zero;:yes;end;end;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'zero\nnil\n',
+  ],
+  [
+    'begin;class Rational;private;def ==(x);puts :equal;true;end;end;p 1r.zero?;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nnil\n',
+  ],
+  [
+    'begin;class Rational;private;def zero?;puts :zero;true;end;end;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'zero\nnil\n',
+  ],
+  [
+    'begin;class Rational;private;def ==(x);puts :equal;false;end;end;p 1r.zero?;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;private;def zero?;puts :zero;false;end;end;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'zero\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;private;def ==(x);puts :equal;nil;end;end;p 1r.zero?;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;private;def zero?;puts :zero;nil;end;end;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'zero\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;private;def ==(x);puts :equal;:yes;end;end;p 1r.zero?;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nnil\n',
+  ],
+  [
+    'begin;class Rational;private;def zero?;puts :zero;:yes;end;end;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'zero\nnil\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :compare;true;end;end;S=Struct.new(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :compare;false;end;end;S=Struct.new(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :compare;nil;end;end;S=Struct.new(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :compare;:yes;end;end;S=Struct.new(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;private;def eql?(x);puts :compare;true;end;end;S=Struct.new(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;private;def eql?(x);puts :compare;false;end;end;S=Struct.new(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;private;def eql?(x);puts :compare;nil;end;end;S=Struct.new(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;private;def eql?(x);puts :compare;:yes;end;end;S=Struct.new(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :compare;true;end;end;S=Data.define(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :compare;false;end;end;S=Data.define(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :compare;nil;end;end;S=Data.define(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;private;def ==(x);puts :compare;:yes;end;end;S=Data.define(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;private;def eql?(x);puts :compare;true;end;end;S=Data.define(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;private;def eql?(x);puts :compare;false;end;end;S=Data.define(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;private;def eql?(x);puts :compare;nil;end;end;S=Data.define(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;private;def eql?(x);puts :compare;:yes;end;end;S=Data.define(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;private;def hash;puts :hash;1;end;def to_int;puts :integer;1;end;end;S=Struct.new(:x);p S.new(X.new).hash.class;h={};h[S.new(X.new)]=3;p h.values;rescue=>e;p e.class;end',
+    'hash\nInteger\nhash\n[3]\n',
+  ],
+  [
+    'begin;class X;private;def hash;puts :hash;X.new;end;def to_int;puts :integer;1;end;end;S=Struct.new(:x);p S.new(X.new).hash.class;h={};h[S.new(X.new)]=3;p h.values;rescue=>e;p e.class;end',
+    'hash\ninteger\nInteger\nhash\ninteger\n[3]\n',
+  ],
+  [
+    'begin;class X;private;def hash;puts :hash;1;end;def to_int;puts :integer;1;end;end;S=Data.define(:x);p S.new(X.new).hash.class;h={};h[S.new(X.new)]=3;p h.values;rescue=>e;p e.class;end',
+    'hash\nInteger\nhash\n[3]\n',
+  ],
+  [
+    'begin;class X;private;def hash;puts :hash;X.new;end;def to_int;puts :integer;1;end;end;S=Data.define(:x);p S.new(X.new).hash.class;h={};h[S.new(X.new)]=3;p h.values;rescue=>e;p e.class;end',
+    'hash\ninteger\nInteger\nhash\ninteger\n[3]\n',
+  ],
+  [
+    'begin;class P;private;def ===(x);puts :check;true;end;def inspect;"predicate";end;end;v=P.new;puts((1 in ^v));rescue=>e;p e.class;end',
+    'check\ntrue\n',
+  ],
+  [
+    'begin;class P;private;def ===(x);puts :check;true;end;def inspect;"predicate";end;end;v=P.new;1 => ^v;puts :matched;rescue=>e;p e.class;end',
+    'check\nmatched\n',
+  ],
+  [
+    'begin;class P;private;def ===(x);puts :check;false;end;def inspect;"predicate";end;end;v=P.new;puts((1 in ^v));rescue=>e;p e.class;end',
+    'check\nfalse\n',
+  ],
+  [
+    'begin;class P;private;def ===(x);puts :check;false;end;def inspect;"predicate";end;end;v=P.new;1 => ^v;puts :matched;rescue=>e;p e.class;end',
+    'check\nNoMatchingPatternError\n',
+  ],
+  [
+    'begin;class P;private;def ===(x);puts :check;nil;end;def inspect;"predicate";end;end;v=P.new;puts((1 in ^v));rescue=>e;p e.class;end',
+    'check\nfalse\n',
+  ],
+  [
+    'begin;class P;private;def ===(x);puts :check;nil;end;def inspect;"predicate";end;end;v=P.new;1 => ^v;puts :matched;rescue=>e;p e.class;end',
+    'check\nNoMatchingPatternError\n',
+  ],
+  [
+    'begin;class P;private;def ===(x);puts :check;:yes;end;def inspect;"predicate";end;end;v=P.new;puts((1 in ^v));rescue=>e;p e.class;end',
+    'check\ntrue\n',
+  ],
+  [
+    'begin;class P;private;def ===(x);puts :check;:yes;end;def inspect;"predicate";end;end;v=P.new;1 => ^v;puts :matched;rescue=>e;p e.class;end',
+    'check\nmatched\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;true;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;false;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\ntrue\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;nil;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\ntrue\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;:yes;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;0;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;[];end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X<Numeric;protected;def ==(x);puts :equal;true;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X<Numeric;protected;def ==(x);puts :equal;false;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\ntrue\n',
+  ],
+  [
+    'begin;class X<Numeric;protected;def ==(x);puts :equal;nil;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\ntrue\n',
+  ],
+  [
+    'begin;class X<Numeric;protected;def ==(x);puts :equal;:yes;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X<Numeric;protected;def ==(x);puts :equal;0;end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class X<Numeric;protected;def ==(x);puts :equal;[];end;end;p(1r==X.new);p(1r!=X.new);rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nfalse\n',
+  ],
+  [
+    'begin;class N;protected;def +(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:+,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;protected;def +(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:+,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;protected;def -(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:-,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;protected;def -(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:-,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;protected;def *(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:*,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;protected;def *(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:*,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;protected;def /(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:/,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;protected;def /(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:/,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;protected;def /(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:quo,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;protected;def /(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:quo,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;protected;def **(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:**,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;protected;def **(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:**,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;protected;def <=>(x);puts :operator;7;end;end;class X;public;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:<=>,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class N;protected;def <=>(x);puts :operator;7;end;end;class X;private;def coerce(x);puts :coerce;[N.new,1];end;end;p 1r.send(:<=>,X.new);rescue=>e;p e.class;end',
+    'coerce\noperator\n7\n',
+  ],
+  [
+    'begin;class Float;protected;def +(x);puts :override;4.0;end;end;p 1r.send(:+,1.0);rescue=>e;p e.class;end',
+    '2.0\n',
+  ],
+  [
+    'begin;class Float;protected;def -(x);puts :override;4.0;end;end;p 1r.send(:-,1.0);rescue=>e;p e.class;end',
+    '0.0\n',
+  ],
+  [
+    'begin;class Float;protected;def *(x);puts :override;4.0;end;end;p 1r.send(:*,1.0);rescue=>e;p e.class;end',
+    '1.0\n',
+  ],
+  [
+    'begin;class Float;protected;def /(x);puts :override;4.0;end;end;p 1r.send(:/,1.0);rescue=>e;p e.class;end',
+    '1.0\n',
+  ],
+  [
+    'begin;class Float;protected;def /(x);puts :override;4.0;end;end;p 1r.send(:quo,1.0);rescue=>e;p e.class;end',
+    '1.0\n',
+  ],
+  [
+    'begin;class Rational;protected;def /(x);puts :divide;5;end;end;p 1r.div(2);p 1r.divmod(2);rescue=>e;p e.class;end',
+    'divide\n5\ndivide\ndivide\n[5, (-9/1)]\n',
+  ],
+  [
+    'begin;class Q;protected;def floor;puts :floor;3;end;end;class Rational;def /(x);Q.new;end;end;p 1r.div(2);rescue=>e;p e.class;end',
+    'floor\n3\n',
+  ],
+  [
+    'begin;class Integer;protected;def *(x);puts :multiply;0;end;end;p 1r.send(:%,2);rescue=>e;p e.class;end',
+    'multiply\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;protected;def div(x);puts :divide;0;end;end;p 1r.send(:%,2);rescue=>e;p e.class;end',
+    'divide\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;protected;def -(x);puts :minus;7;end;end;p 1r.send(:%,2);rescue=>e;p e.class;end',
+    'minus\n7\n',
+  ],
+  [
+    'begin;class Integer;protected;def *(x);puts :multiply;0;end;end;p 1r.send(:modulo,2);rescue=>e;p e.class;end',
+    'multiply\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;protected;def div(x);puts :divide;0;end;end;p 1r.send(:modulo,2);rescue=>e;p e.class;end',
+    'divide\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;protected;def -(x);puts :minus;7;end;end;p 1r.send(:modulo,2);rescue=>e;p e.class;end',
+    'minus\n7\n',
+  ],
+  [
+    'begin;class Integer;protected;def *(x);puts :multiply;0;end;end;p 1r.send(:divmod,2);rescue=>e;p e.class;end',
+    'multiply\n[0, (1/1)]\n',
+  ],
+  [
+    'begin;class Rational;protected;def div(x);puts :divide;0;end;end;p 1r.send(:divmod,2);rescue=>e;p e.class;end',
+    'divide\n[0, (1/1)]\n',
+  ],
+  [
+    'begin;class Rational;protected;def -(x);puts :minus;7;end;end;p 1r.send(:divmod,2);rescue=>e;p e.class;end',
+    'minus\n[0, 7]\n',
+  ],
+  [
+    'begin;class Rational;protected;def %(x);puts :modulo;1r;end;end;p 5r.remainder(2);rescue=>e;p e.class;end',
+    'modulo\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;protected;def <(x);puts :compare;false;end;end;p 5r.remainder(2);rescue=>e;p e.class;end',
+    'compare\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;protected;def >(x);puts :compare;false;end;end;p 5r.remainder(2);rescue=>e;p e.class;end',
+    'compare\n(1/1)\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;false;end;public;def coerce(x);puts :coerce;[2,4];end;def *(x);0;end;end;p 1r.send(:fdiv,X.new);rescue=>e;p e.class;end',
+    'equal\ncoerce\n0.0\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;false;end;public;def coerce(x);puts :coerce;[2,4];end;def *(x);0;end;end;p 1r.send(:div,X.new);rescue=>e;p e.class;end',
+    'equal\ncoerce\n0\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;false;end;public;def coerce(x);puts :coerce;[2,4];end;def *(x);0;end;end;p 1r.send(:divmod,X.new);rescue=>e;p e.class;end',
+    'equal\ncoerce\nequal\ncoerce\n[0, (1/1)]\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;false;end;public;def coerce(x);puts :coerce;[2,4];end;def *(x);0;end;end;p 1r.send(:%,X.new);rescue=>e;p e.class;end',
+    'equal\ncoerce\n(1/1)\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :equal;false;end;public;def coerce(x);puts :coerce;[2,4];end;def *(x);0;end;end;p 1r.send(:modulo,X.new);rescue=>e;p e.class;end',
+    'equal\ncoerce\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;protected;def *(x);puts :multiply;42;end;end;p (1r/2).abs2;rescue=>e;p e.class;end',
+    'multiply\n42\n',
+  ],
+  [
+    'begin;class Rational;protected;def ==(x);puts :equal;true;end;end;p 0r.zero?;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nnil\n',
+  ],
+  [
+    'begin;class Rational;protected;def zero?;puts :zero;true;end;end;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'zero\nnil\n',
+  ],
+  [
+    'begin;class Rational;protected;def ==(x);puts :equal;false;end;end;p 0r.zero?;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\n(0/1)\n',
+  ],
+  [
+    'begin;class Rational;protected;def zero?;puts :zero;false;end;end;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'zero\n(0/1)\n',
+  ],
+  [
+    'begin;class Rational;protected;def ==(x);puts :equal;nil;end;end;p 0r.zero?;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\n(0/1)\n',
+  ],
+  [
+    'begin;class Rational;protected;def zero?;puts :zero;nil;end;end;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'zero\n(0/1)\n',
+  ],
+  [
+    'begin;class Rational;protected;def ==(x);puts :equal;:yes;end;end;p 0r.zero?;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nnil\n',
+  ],
+  [
+    'begin;class Rational;protected;def zero?;puts :zero;:yes;end;end;p 0r.nonzero?;rescue=>e;p e.class;end',
+    'zero\nnil\n',
+  ],
+  [
+    'begin;class Rational;protected;def ==(x);puts :equal;true;end;end;p 1r.zero?;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nnil\n',
+  ],
+  [
+    'begin;class Rational;protected;def zero?;puts :zero;true;end;end;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'zero\nnil\n',
+  ],
+  [
+    'begin;class Rational;protected;def ==(x);puts :equal;false;end;end;p 1r.zero?;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;protected;def zero?;puts :zero;false;end;end;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'zero\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;protected;def ==(x);puts :equal;nil;end;end;p 1r.zero?;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'equal\nfalse\nequal\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;protected;def zero?;puts :zero;nil;end;end;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'zero\n(1/1)\n',
+  ],
+  [
+    'begin;class Rational;protected;def ==(x);puts :equal;:yes;end;end;p 1r.zero?;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'equal\ntrue\nequal\nnil\n',
+  ],
+  [
+    'begin;class Rational;protected;def zero?;puts :zero;:yes;end;end;p 1r.nonzero?;rescue=>e;p e.class;end',
+    'zero\nnil\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :compare;true;end;end;S=Struct.new(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :compare;false;end;end;S=Struct.new(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :compare;nil;end;end;S=Struct.new(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :compare;:yes;end;end;S=Struct.new(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;protected;def eql?(x);puts :compare;true;end;end;S=Struct.new(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;protected;def eql?(x);puts :compare;false;end;end;S=Struct.new(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;protected;def eql?(x);puts :compare;nil;end;end;S=Struct.new(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;protected;def eql?(x);puts :compare;:yes;end;end;S=Struct.new(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :compare;true;end;end;S=Data.define(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :compare;false;end;end;S=Data.define(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :compare;nil;end;end;S=Data.define(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;protected;def ==(x);puts :compare;:yes;end;end;S=Data.define(:x);p S.new(X.new).send(:==,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;protected;def eql?(x);puts :compare;true;end;end;S=Data.define(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;protected;def eql?(x);puts :compare;false;end;end;S=Data.define(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;protected;def eql?(x);puts :compare;nil;end;end;S=Data.define(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\nfalse\n',
+  ],
+  [
+    'begin;class X;protected;def eql?(x);puts :compare;:yes;end;end;S=Data.define(:x);p S.new(X.new).send(:eql?,S.new(X.new));rescue=>e;p e.class;end',
+    'compare\ntrue\n',
+  ],
+  [
+    'begin;class X;protected;def hash;puts :hash;1;end;def to_int;puts :integer;1;end;end;S=Struct.new(:x);p S.new(X.new).hash.class;h={};h[S.new(X.new)]=3;p h.values;rescue=>e;p e.class;end',
+    'hash\nInteger\nhash\n[3]\n',
+  ],
+  [
+    'begin;class X;protected;def hash;puts :hash;X.new;end;def to_int;puts :integer;1;end;end;S=Struct.new(:x);p S.new(X.new).hash.class;h={};h[S.new(X.new)]=3;p h.values;rescue=>e;p e.class;end',
+    'hash\ninteger\nInteger\nhash\ninteger\n[3]\n',
+  ],
+  [
+    'begin;class X;protected;def hash;puts :hash;1;end;def to_int;puts :integer;1;end;end;S=Data.define(:x);p S.new(X.new).hash.class;h={};h[S.new(X.new)]=3;p h.values;rescue=>e;p e.class;end',
+    'hash\nInteger\nhash\n[3]\n',
+  ],
+  [
+    'begin;class X;protected;def hash;puts :hash;X.new;end;def to_int;puts :integer;1;end;end;S=Data.define(:x);p S.new(X.new).hash.class;h={};h[S.new(X.new)]=3;p h.values;rescue=>e;p e.class;end',
+    'hash\ninteger\nInteger\nhash\ninteger\n[3]\n',
+  ],
+  [
+    'begin;class P;protected;def ===(x);puts :check;true;end;def inspect;"predicate";end;end;v=P.new;puts((1 in ^v));rescue=>e;p e.class;end',
+    'check\ntrue\n',
+  ],
+  [
+    'begin;class P;protected;def ===(x);puts :check;true;end;def inspect;"predicate";end;end;v=P.new;1 => ^v;puts :matched;rescue=>e;p e.class;end',
+    'check\nmatched\n',
+  ],
+  [
+    'begin;class P;protected;def ===(x);puts :check;false;end;def inspect;"predicate";end;end;v=P.new;puts((1 in ^v));rescue=>e;p e.class;end',
+    'check\nfalse\n',
+  ],
+  [
+    'begin;class P;protected;def ===(x);puts :check;false;end;def inspect;"predicate";end;end;v=P.new;1 => ^v;puts :matched;rescue=>e;p e.class;end',
+    'check\nNoMatchingPatternError\n',
+  ],
+  [
+    'begin;class P;protected;def ===(x);puts :check;nil;end;def inspect;"predicate";end;end;v=P.new;puts((1 in ^v));rescue=>e;p e.class;end',
+    'check\nfalse\n',
+  ],
+  [
+    'begin;class P;protected;def ===(x);puts :check;nil;end;def inspect;"predicate";end;end;v=P.new;1 => ^v;puts :matched;rescue=>e;p e.class;end',
+    'check\nNoMatchingPatternError\n',
+  ],
+  [
+    'begin;class P;protected;def ===(x);puts :check;:yes;end;def inspect;"predicate";end;end;v=P.new;puts((1 in ^v));rescue=>e;p e.class;end',
+    'check\ntrue\n',
+  ],
+  [
+    'begin;class P;protected;def ===(x);puts :check;:yes;end;def inspect;"predicate";end;end;v=P.new;1 => ^v;puts :matched;rescue=>e;p e.class;end',
+    'check\nmatched\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"1/2";end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert X into Rational"\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"1/2";end;end;begin;p Rational(1,X.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"1/2";end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class X;def to_str;puts :string;" bad ";end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert X into Rational"\n',
+  ],
+  [
+    'class X;def to_str;puts :string;" bad ";end;end;begin;p Rational(1,X.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def to_str;puts :string;" bad ";end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class X;def to_str;puts :string;nil;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert X into Rational"\n',
+  ],
+  [
+    'class X;def to_str;puts :string;nil;end;end;begin;p Rational(1,X.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def to_str;puts :string;nil;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class X;def to_str;puts :string;raise("stop");end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"can\'t convert X into Rational"\n',
+  ],
+  [
+    'class X;def to_str;puts :string;raise("stop");end;end;begin;p Rational(1,X.new);rescue=>e;p e.class,e.message;end',
+    'TypeError\n"not an integer"\n',
+  ],
+  [
+    'class X;def to_str;puts :string;raise("stop");end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'nil\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"3/4";end;public;def to_r;puts :rational;1r/2;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'rational\n(1/2)\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"3/4";end;public;def to_r;puts :rational;1r/2;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\n(1/2)\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"3/4";end;private;def to_r;puts :rational;1r/2;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'rational\n(1/2)\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"3/4";end;private;def to_r;puts :rational;1r/2;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\n(1/2)\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"3/4";end;protected;def to_r;puts :rational;1r/2;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'rational\n(1/2)\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"3/4";end;protected;def to_r;puts :rational;1r/2;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\n(1/2)\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"3/4";end;public;def to_r;puts :rational;nil;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'rational\nTypeError\n"can\'t convert X to Rational (X#to_r gives NilClass)"\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"3/4";end;public;def to_r;puts :rational;nil;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\nnil\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"3/4";end;private;def to_r;puts :rational;nil;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'rational\nTypeError\n"can\'t convert X to Rational (X#to_r gives NilClass)"\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"3/4";end;private;def to_r;puts :rational;nil;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\nnil\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"3/4";end;protected;def to_r;puts :rational;nil;end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'rational\nTypeError\n"can\'t convert X to Rational (X#to_r gives NilClass)"\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"3/4";end;protected;def to_r;puts :rational;nil;end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\nnil\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"3/4";end;public;def to_r;puts :rational;raise("stop");end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'rational\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"3/4";end;public;def to_r;puts :rational;raise("stop");end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\nnil\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"3/4";end;private;def to_r;puts :rational;raise("stop");end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'rational\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"3/4";end;private;def to_r;puts :rational;raise("stop");end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\nnil\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"3/4";end;protected;def to_r;puts :rational;raise("stop");end;end;begin;p Rational(X.new);rescue=>e;p e.class,e.message;end',
+    'rational\nRuntimeError\n"stop"\n',
+  ],
+  [
+    'class X;def to_str;puts :string;"3/4";end;protected;def to_r;puts :rational;raise("stop");end;end;begin;p Rational(X.new,exception:false);rescue=>e;p e.class,e.message;end',
+    'rational\nnil\n',
+  ],
+] as const;
+
+test.each(nativeInternalProtocolCases)(
+  'Native internal protocols preserve visibility, core arithmetic and conversion boundaries: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
+
+const nativePatternFailureCases = [
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;else;puts :other;end;rescue=>e;p e.class,e.message;end',
+    'other\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;in nil;puts :nil;end;rescue=>e;p e.class,e.message;end',
+    'NoMatchingPatternError\n"subject-text"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;puts((v in [a]));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => [0,*];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [0,*];puts :matched;else;puts :other;end;rescue=>e;p e.class,e.message;end',
+    'other\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [0,*];puts :matched;in nil;puts :nil;end;rescue=>e;p e.class,e.message;end',
+    'NoMatchingPatternError\n"subject-text"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;puts((v in [0,*]));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => [*,0,*];rescue=>e;p e.class,e.message;end',
+    'item\nitem\nsubject\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [*,0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nitem\nsubject\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [*,0,*];puts :matched;else;puts :other;end;rescue=>e;p e.class,e.message;end',
+    'other\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [*,0,*];puts :matched;in nil;puts :nil;end;rescue=>e;p e.class,e.message;end',
+    'NoMatchingPatternError\n"subject-text"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;puts((v in [*,0,*]));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => {a:0};rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in {a:0};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in {a:0};puts :matched;else;puts :other;end;rescue=>e;p e.class,e.message;end',
+    'other\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in {a:0};puts :matched;in nil;puts :nil;end;rescue=>e;p e.class,e.message;end',
+    'NoMatchingPatternError\n"subject-text"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;puts((v in {a:0}));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => {a:,**nil};rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in {a:,**nil};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in {a:,**nil};puts :matched;else;puts :other;end;rescue=>e;p e.class,e.message;end',
+    'other\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in {a:,**nil};puts :matched;in nil;puts :nil;end;rescue=>e;p e.class,e.message;end',
+    'NoMatchingPatternError\n"subject-text"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;puts((v in {a:,**nil}));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => String[a];rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in String[a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in String[a];puts :matched;else;puts :other;end;rescue=>e;p e.class,e.message;end',
+    'other\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in String[a];puts :matched;in nil;puts :nil;end;rescue=>e;p e.class,e.message;end',
+    'NoMatchingPatternError\n"subject-text"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;puts((v in String[a]));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => [0,*];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in [0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => [*,0,*];rescue=>e;p e.class,e.message;end',
+    'item\nitem\nsubject\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in [*,0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nitem\nsubject\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => {a:0};rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in {a:0};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => {a:,**nil};rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in {a:,**nil};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => String[a];rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in String[a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => [0,*];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in [0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => [*,0,*];rescue=>e;p e.class,e.message;end',
+    'item\nitem\nsubject\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in [*,0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nitem\nsubject\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => {a:0};rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in {a:0};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => {a:,**nil};rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in {a:,**nil};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => String[a];rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in String[a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => [0,*];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in [0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => [*,0,*];rescue=>e;p e.class,e.message;end',
+    'item\nitem\nsubject\nfalse\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in [*,0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nitem\nsubject\nfalse\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => {a:0};rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in {a:0};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => {a:,**nil};rescue=>e;p e.class,e.message;end',
+    'subject\nfalse\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in {a:,**nil};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nfalse\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => String[a];rescue=>e;p e.class,e.message;end',
+    'subject\nfalse\nsubject\nfalse\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in String[a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nfalse\nsubject\nfalse\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [x] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [x] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => [0,*];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => [*,0,*];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [*,0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => {a:0};rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in {a:0};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => {a:,**nil};rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in {a:,**nil};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => String[a];rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in String[a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [x] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [x] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => [0,*];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in [0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => [*,0,*];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in [*,0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => {a:0};rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in {a:0};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => {a:,**nil};rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in {a:,**nil};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => String[a];rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in String[a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [x] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [x] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => [0,*];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in [0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => [*,0,*];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in [*,0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => {a:0};rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in {a:0};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => {a:,**nil};rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in {a:,**nil};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => String[a];rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in String[a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: [x] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: [x] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => [0,*];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in [0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => [*,0,*];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: [] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in [*,0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: [] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => {a:0};rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in {a:0};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => {a:,**nil};rescue=>e;p e.class,e.message;end',
+    'subject\nfalse\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in {a:,**nil};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nfalse\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => String[a];rescue=>e;p e.class,e.message;end',
+    'subject\nfalse\nsubject\nfalse\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$a.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in String[a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nfalse\nsubject\nfalse\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => [0,*];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => [*,0,*];rescue=>e;p e.class,e.message;end',
+    'item\nitem\nsubject\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [*,0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nitem\nsubject\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => {a:0};rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in {a:0};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => {a:,**nil};rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in {a:,**nil};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => String[a];rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in String[a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => [0,*];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in [0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => [*,0,*];rescue=>e;p e.class,e.message;end',
+    'item\nitem\nsubject\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in [*,0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nitem\nsubject\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => {a:0};rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in {a:0};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => {a:,**nil};rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in {a:,**nil};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => String[a];rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in String[a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => [0,*];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in [0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => [*,0,*];rescue=>e;p e.class,e.message;end',
+    'item\nitem\nsubject\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in [*,0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nitem\nsubject\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => {a:0};rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in {a:0};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => {a:,**nil};rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in {a:,**nil};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => String[a];rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in String[a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => [0,*];rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in [0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => [*,0,*];rescue=>e;p e.class,e.message;end',
+    'item\nitem\nsubject\nfalse\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in [*,0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nitem\nsubject\nfalse\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => {a:0};rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in {a:0};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nsubject\nfalse\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => {a:,**nil};rescue=>e;p e.class,e.message;end',
+    'subject\nfalse\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in {a:,**nil};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nfalse\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => String[a];rescue=>e;p e.class,e.message;end',
+    'subject\nfalse\nsubject\nfalse\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;$h.clear;"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in String[a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nfalse\nsubject\nfalse\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => [0,*];rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => [*,0,*];rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nitem\nfalse\nsubject\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [*,0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nitem\nfalse\nsubject\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => {a:0};rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in {a:0};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => {a:,**nil};rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in {a:,**nil};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => String[a];rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in String[a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => [0,*];rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in [0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => [*,0,*];rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nitem\nfalse\nsubject\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in [*,0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nitem\nfalse\nsubject\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => {a:0};rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in {a:0};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => {a:,**nil};rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in {a:,**nil};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;v => String[a];rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$a.clear;"obj";end;end;v=D.new;begin;case v;in String[a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => [0,*];rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in [0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => [*,0,*];rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nitem\nfalse\nsubject\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in [*,0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nitem\nfalse\nsubject\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => {a:0};rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in {a:0};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => {a:,**nil};rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in {a:,**nil};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;v => String[a];rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;$h.clear;"obj";end;end;v=D.new;begin;case v;in String[a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nfalse\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nfalse\nNoMatchingPatternError\n"obj: [x, 2] length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => [0,*];rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nfalse\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in [0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nfalse\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => [*,0,*];rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nitem\nfalse\nsubject\nfalse\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in [*,0,*];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nitem\nfalse\nsubject\nfalse\nNoMatchingPatternError\n"obj: [x, 2] does not match to find pattern"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => {a:0};rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nfalse\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in {a:0};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nfalse\nsubject\nfalse\nNoMatchingPatternError\n"obj: 0 === x does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => {a:,**nil};rescue=>e;p e.class,e.message;end',
+    'subject\nfalse\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in {a:,**nil};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nfalse\nNoMatchingPatternError\n"obj: rest of {b: 2} is not empty"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;v => String[a];rescue=>e;p e.class,e.message;end',
+    'subject\nfalse\nsubject\nfalse\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class X;def inspect;puts :item;puts((1 in 2));"x";end;end;$a=[X.new,2];$h={a:X.new,b:2};class D;def deconstruct;$a;end;def deconstruct_keys(keys);$h;end;def to_s;"subject-text";end;def inspect;puts :subject;puts((1 in 2));"obj";end;end;v=D.new;begin;case v;in String[a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nfalse\nsubject\nfalse\nNoMatchingPatternError\n"obj: String === obj does not return true"\n',
+  ],
+  [
+    'class D;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: obj does not respond to #deconstruct"\n',
+  ],
+  [
+    'class D;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: obj does not respond to #deconstruct"\n',
+  ],
+  [
+    'class D;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;else;puts :other;end;rescue=>e;p e.class,e.message;end',
+    'other\n',
+  ],
+  [
+    'class D;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [a];puts :matched;in nil;puts :nil;end;rescue=>e;p e.class,e.message;end',
+    'NoMatchingPatternError\n"subject-text"\n',
+  ],
+  [
+    'class D;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;puts((v in [a]));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class D;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => {a:};rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: obj does not respond to #deconstruct_keys"\n',
+  ],
+  [
+    'class D;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in {a:};puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'subject\nsubject\nNoMatchingPatternError\n"obj: obj does not respond to #deconstruct_keys"\n',
+  ],
+  [
+    'class D;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in {a:};puts :matched;else;puts :other;end;rescue=>e;p e.class,e.message;end',
+    'other\n',
+  ],
+  [
+    'class D;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in {a:};puts :matched;in nil;puts :nil;end;rescue=>e;p e.class,e.message;end',
+    'NoMatchingPatternError\n"subject-text"\n',
+  ],
+  [
+    'class D;def to_s;"subject-text";end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;puts((v in {a:}));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class Integer;def inspect;puts :inspect;puts((1 in 2));"one";end;end;begin;1 => [a];rescue=>e;p e.class,e.message;end',
+    'inspect\nfalse\ninspect\nfalse\nNoMatchingPatternError\n"one: one does not respond to #deconstruct"\n',
+  ],
+  [
+    'class Integer;def inspect;puts :inspect;puts((1 in 2));"one";end;end;begin;case 1;in [a];end;rescue=>e;p e.class,e.message;end',
+    'inspect\nfalse\ninspect\nfalse\nNoMatchingPatternError\n"one: one does not respond to #deconstruct"\n',
+  ],
+  [
+    'class Integer;def inspect;puts :inspect;puts((1 in 2));"one";end;end;begin;case 1;in [a];else;puts :other;end;rescue=>e;p e.class,e.message;end',
+    'other\n',
+  ],
+  [
+    'class Integer;def inspect;puts :inspect;puts((1 in 2));"one";end;end;begin;puts((1 in [a]));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'array\nsubject\nNoMatchingPatternError\n"obj: array length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [a];end;rescue=>e;p e.class,e.message;end',
+    'array\nsubject\nNoMatchingPatternError\n"obj: array length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [0,*] | [*,2];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nmatched\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [a,b] if (puts :guard;false);end;rescue=>e;p e.class,e.message;end',
+    'guard\nsubject\nNoMatchingPatternError\n"obj: guard clause does not return true"\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;puts((v in [a]));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;$a.clear;"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'array\nsubject\nNoMatchingPatternError\n"obj: array length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;$a.clear;"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [a];end;rescue=>e;p e.class,e.message;end',
+    'array\nsubject\nNoMatchingPatternError\n"obj: array length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;$a.clear;"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [0,*] | [*,2];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\narray\nsubject\nNoMatchingPatternError\n"obj: array length mismatch (given 0, expected 1+)"\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;$a.clear;"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [a,b] if (puts :guard;false);end;rescue=>e;p e.class,e.message;end',
+    'guard\nsubject\nNoMatchingPatternError\n"obj: guard clause does not return true"\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;$a.clear;"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;puts((v in [a]));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;begin;1 => 2;rescue=>e;puts :nested;end;"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'array\nsubject\nNoMatchingPatternError\n"obj: array length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;begin;1 => 2;rescue=>e;puts :nested;end;"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [a];end;rescue=>e;p e.class,e.message;end',
+    'array\nsubject\nNoMatchingPatternError\n"obj: array length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;begin;1 => 2;rescue=>e;puts :nested;end;"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [0,*] | [*,2];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nnested\nmatched\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;begin;1 => 2;rescue=>e;puts :nested;end;"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [a,b] if (puts :guard;false);end;rescue=>e;p e.class,e.message;end',
+    'guard\nsubject\nNoMatchingPatternError\n"obj: guard clause does not return true"\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;begin;1 => 2;rescue=>e;puts :nested;end;"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;puts((v in [a]));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;raise "inspection";"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;v => [a];rescue=>e;p e.class,e.message;end',
+    'array\nsubject\nNoMatchingPatternError\n"obj: array length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;raise "inspection";"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [a];end;rescue=>e;p e.class,e.message;end',
+    'array\nsubject\nNoMatchingPatternError\n"obj: array length mismatch (given 2, expected 1)"\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;raise "inspection";"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [0,*] | [*,2];puts :matched;end;rescue=>e;p e.class,e.message;end',
+    'item\nRuntimeError\n"inspection"\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;raise "inspection";"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;case v;in [a,b] if (puts :guard;false);end;rescue=>e;p e.class,e.message;end',
+    'guard\nsubject\nNoMatchingPatternError\n"obj: guard clause does not return true"\n',
+  ],
+  [
+    'class A<Array;def inspect;puts :array;"array";end;end;class X;def inspect;puts :item;raise "inspection";"x";end;end;$a=A.new([X.new,2]);class D;def deconstruct;$a;end;def inspect;puts :subject;"obj";end;end;v=D.new;begin;puts((v in [a]));rescue=>e;p e.class,e.message;end',
+    'false\n',
+  ],
+] as const;
+
+test.each(nativePatternFailureCases)(
+  'Pattern failures preserve inspection order, mutation and scoped detail state: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);

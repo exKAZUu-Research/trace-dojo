@@ -50,7 +50,7 @@ export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], traversal?: H
     }
   }
   if (value instanceof RBasic && !(value instanceof RString)) traversal.callbacks++;
-  return digest(String(yield* toInt(yield* callMethod(value, 'hash', []))));
+  return digest(String(yield* toInt(yield* callMethod(value, 'hash', [], undefined, undefined, { fcall: true }))));
 }
 
 export function* structuralHashValue(value: RArray | RRange | RHash): Gen<bigint> {

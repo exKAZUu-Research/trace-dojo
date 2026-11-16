@@ -1,6 +1,6 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { formatFloat, rEquals, toFloat, toInt, toStrValue, tryImplicitConversion } from './conversions';
-import { def } from './define';
+import { formatFloat, rEquals, toFloat, toInt, tryImplicitConversion } from './conversions';
+import { coreMethod, def } from './define';
 import { floatDomainError, rubyError, typeError, zeroDivisionError } from './errors';
 import { exceptionOption } from './exceptionOption';
 import { exactDecimal } from './floatFormat';
@@ -8,7 +8,7 @@ import { bigintRatio } from './floatMath';
 import { formatString } from './format';
 import { digest } from './hashes';
 import { chargeIntegerResult, integerBits, integerGcd } from './integerBudget';
-import { callMethod, type Gen } from './interp';
+import { callMethod, type Gen, invoke } from './interp';
 import { isRubyFloat, NIL, RArray, RObject, RString, RSymbol, type Value } from './objects';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
 import { arr, isA, realClassOf, str, truthy } from './values';
@@ -99,11 +99,12 @@ function addFractions(
 
 function* arithmetic(self: RObject, other: Value, op: string): Gen {
   const a = fractionOf(self);
-  if (isRubyFloat(other)) return yield* callMethod(toNumber(a), op, [other]);
+  if (isRubyFloat(other))
+    return yield* invoke(coreMethod(rt().c.Float, op), toNumber(a), [other], undefined, undefined, true);
   const b = asFraction(other);
   if (!b) {
     const [left, right] = yield* coercePair(self, other);
-    return yield* callMethod(left, op, [right]);
+    return yield* callMethod(left, op, [right], undefined, undefined, { fcall: true });
   }
   switch (op) {
     case '+': {
@@ -174,26 +175,28 @@ function* rationalDivision(
 
 function* numericDiv(left: Value, right: Value): Gen {
   if (yield* rEquals(0n, right)) throw zeroDivisionError();
-  const quotient = yield* callMethod(left, '/', [right]);
-  return yield* callMethod(quotient, 'floor', []);
+  const quotient = yield* callMethod(left, '/', [right], undefined, undefined, { fcall: true });
+  return yield* callMethod(quotient, 'floor', [], undefined, undefined, { fcall: true });
 }
 
 function* numericModulo(left: Value, right: Value): Gen {
-  const quotient = yield* callMethod(left, 'div', [right]);
-  const product = yield* callMethod(right, '*', [quotient]);
-  return yield* callMethod(left, '-', [product]);
+  const quotient = yield* callMethod(left, 'div', [right], undefined, undefined, { fcall: true });
+  const product = yield* callMethod(right, '*', [quotient], undefined, undefined, { fcall: true });
+  return yield* callMethod(left, '-', [product], undefined, undefined, { fcall: true });
 }
 
 function* numericRemainder(self: RObject, other: Value): Gen {
   const [left, right] = isA(other, rt().c.Numeric) ? [self, other] : yield* coercePair(self, other);
-  const remainder = yield* callMethod(left, '%', [right]);
+  const remainder = yield* callMethod(left, '%', [right], undefined, undefined, { fcall: true });
   if (yield* rEquals(remainder, 0n)) return remainder;
   const opposite =
-    (truthy(yield* callMethod(left, '<', [0n])) && truthy(yield* callMethod(right, '>', [0n]))) ||
-    (truthy(yield* callMethod(left, '>', [0n])) && truthy(yield* callMethod(right, '<', [0n])));
+    (truthy(yield* callMethod(left, '<', [0n], undefined, undefined, { fcall: true })) &&
+      truthy(yield* callMethod(right, '>', [0n], undefined, undefined, { fcall: true }))) ||
+    (truthy(yield* callMethod(left, '>', [0n], undefined, undefined, { fcall: true })) &&
+      truthy(yield* callMethod(right, '<', [0n], undefined, undefined, { fcall: true })));
   if (!opposite) return remainder;
   if (isRubyFloat(right) && Math.abs(Number(right)) === Infinity) return left;
-  return yield* callMethod(remainder, '-', [right]);
+  return yield* callMethod(remainder, '-', [right], undefined, undefined, { fcall: true });
 }
 
 def('Rational', '**', 1, function* (self: RObject, [exponent]) {
@@ -210,7 +213,7 @@ def('Rational', '**', 1, function* (self: RObject, [exponent]) {
   }
   if (isRubyFloat(exponent) || rationalPower) throw new UnsupportedFeatureError('Rational を含む Float の累乗');
   const [left, right] = yield* coercePair(self, exponent);
-  return yield* callMethod(left, '**', [right]);
+  return yield* callMethod(left, '**', [right], undefined, undefined, { fcall: true });
 });
 
 function rationalIntegerPower(numerator: bigint, denominator: bigint, exponent: bigint): RObject {
@@ -246,7 +249,7 @@ def('Rational', '<=>', 1, function* (self: RObject, [other]) {
     const pair = yield* tryImplicitConversion(other, 'coerce', [self]);
     if (pair === undefined || pair === NIL) return NIL;
     if (!(pair instanceof RArray) || pair.items.length !== 2) throw typeError('coerce must return [x, y]');
-    return yield* callMethod(pair.items[0], '<=>', [pair.items[1]]);
+    return yield* callMethod(pair.items[0], '<=>', [pair.items[1]], undefined, undefined, { fcall: true });
   }
   const difference = a.numerator * b.denominator - b.numerator * a.denominator;
   return difference < 0n ? -1n : difference > 0n ? 1n : 0n;
@@ -256,7 +259,7 @@ def('Rational', '==', 1, function* (self: RObject, [other]) {
   const b = asFraction(other);
   if (b !== undefined)
     return b.numerator === fractionOf(self).numerator && b.denominator === fractionOf(self).denominator;
-  return truthy(yield* callMethod(other, '==', [self]));
+  return yield* rEquals(other, self);
 });
 def('Rational', 'coerce', 1, (self: RObject, [other]) => {
   if (isRational(other)) return arr([other, self]);
@@ -298,8 +301,10 @@ def('Rational', ['abs', 'magnitude'], 0, (self: RObject) => {
   return makeRational(numerator < 0n ? -numerator : numerator, denominator);
 });
 def('Rational', '+@', 0, (self: RObject) => self);
-def('Rational', 'abs2', 0, (self: RObject) => arithmetic(self, self, '*'));
-def('Rational', 'nonzero?', 0, (self: RObject) => (fractionOf(self).numerator === 0n ? NIL : self));
+def('Rational', 'abs2', 0, (self: RObject) => callMethod(self, '*', [self], undefined, undefined, { fcall: true }));
+def('Rational', 'nonzero?', 0, function* (self: RObject) {
+  return truthy(yield* callMethod(self, 'zero?', [], undefined, undefined, { fcall: true })) ? NIL : self;
+});
 def('Rational', 'infinite?', 0, () => NIL);
 def('Rational', 'real?', 0, () => true);
 def('Rational', 'real', 0, (self: RObject) => self);
@@ -309,7 +314,7 @@ for (const name of ['to_c', 'rect', 'polar', 'arg', 'conj', 'i']) {
     throw new UnsupportedFeatureError(`Rational#${name}（複素数）`);
   });
 }
-def('Rational', 'zero?', 0, (self: RObject) => fractionOf(self).numerator === 0n);
+def('Rational', 'zero?', 0, (self: RObject) => rEquals(self, 0n));
 def('Rational', 'positive?', 0, (self: RObject) => fractionOf(self).numerator > 0n);
 def('Rational', 'negative?', 0, (self: RObject) => fractionOf(self).numerator < 0n);
 def('Rational', 'integer?', 0, () => false);
@@ -362,22 +367,22 @@ def('Float', 'rationalize', [0, 1], () => {
   throw new UnsupportedFeatureError('Float#rationalize（有理数）');
 });
 
-function* rationalOf(value: Value, raise: boolean): Gen<RObject | undefined> {
+function* rationalOf(value: Value, raise: boolean, allowMissing = false): Gen<RObject | typeof NIL | undefined> {
   if (typeof value === 'bigint') return makeRational(value, 1n);
   if (isRubyFloat(value)) return floatToRational(Number(value));
   if (isRational(value)) return value;
   try {
     if (value === NIL) throw typeError("can't convert nil into Rational");
-    if (!(value instanceof RString)) {
-      const converted = yield* tryImplicitConversion(value, 'to_r');
-      if (converted !== undefined) {
-        if (isRational(converted)) return converted;
-        throw typeError(
-          `can't convert ${realClassOf(value).name} to Rational (${realClassOf(value).name}#to_r gives ${realClassOf(converted).name})`
-        );
-      }
+    if (value instanceof RString) return yield* rationalFromString(value, raise);
+    const converted = yield* tryImplicitConversion(value, 'to_r');
+    if (converted !== undefined) {
+      if (isRational(converted)) return converted;
+      throw typeError(
+        `can't convert ${realClassOf(value).name} to Rational (${realClassOf(value).name}#to_r gives ${realClassOf(converted).name})`
+      );
     }
-    return yield* rationalFromString(yield* toStrValue(value), raise);
+    if (allowMissing) return NIL;
+    throw typeError(`can't convert ${realClassOf(value).name} into Rational`);
   } catch (error) {
     if (!raise && error instanceof RubyError) return undefined;
     throw error;
@@ -441,11 +446,16 @@ def(
   [1, 2],
   function* (_self, args, _block, keywords) {
     const raise = yield* exceptionOption(keywords);
-    const first = yield* rationalOf(args[0], raise);
+    const first = yield* rationalOf(args[0], raise, args.length === 2);
     if (first === undefined) return NIL;
     if (args.length === 1) return first;
-    const second = yield* rationalOf(args[1], raise);
-    return second === undefined ? NIL : yield* arithmetic(first, second, '/');
+    const second = yield* rationalOf(args[1], raise, true);
+    if (second === undefined) return NIL;
+    if (!(first instanceof RObject) || !(second instanceof RObject)) {
+      if (!raise) return NIL;
+      throw typeError('not an integer');
+    }
+    return yield* arithmetic(first, second, '/');
   },
   { visibility: 'private', keywords: true }
 );

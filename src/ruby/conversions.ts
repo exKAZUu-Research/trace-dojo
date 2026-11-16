@@ -658,23 +658,24 @@ export function quotedSymbolName(symbol: string | RSymbol): string {
 
 // Comparisons ---------------------------------------------------------------------------------------------------------
 
-/** `a == b`, with the library's own types compared without calling methods unless the program redefined them. */
 export function* rEquals(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = new Map()): Gen<boolean> {
   rt().spend();
   if (a === b) return !isRubyFloat(a) || !Number.isNaN(Number(a));
-  if (isOverridden(a, '==')) return truthy(yield* callMethod(a, '==', [b]));
+  if (isOverridden(a, '==')) return truthy(yield* callMethod(a, '==', [b], undefined, undefined, { fcall: true }));
   if (typeof a === 'bigint' || isRubyFloat(a)) {
     if (typeof b === 'bigint' || isRubyFloat(b)) {
-      if (b instanceof RFloat && isOverridden(b, '==')) return truthy(yield* callMethod(b, '==', [a]));
+      if (b instanceof RFloat && isOverridden(b, '=='))
+        return truthy(yield* callMethod(b, '==', [a], undefined, undefined, { fcall: true }));
       return numericEquals(typeof a === 'bigint' ? a : Number(a), typeof b === 'bigint' ? b : Number(b));
     }
     const equality = classOf(b).findMethod('==');
     if (equality && equality.owner !== rt().c.BasicObject && equality.owner !== rt().c.Kernel)
-      return truthy(yield* callMethod(b, '==', [a]));
+      return truthy(yield* callMethod(b, '==', [a], undefined, undefined, { fcall: true }));
     return false;
   }
   if (typeof a !== 'object' || a === NIL || a instanceof RSymbol) return false;
-  if (a instanceof RString) return b instanceof RString && truthy(yield* callMethod(a, '==', [b]));
+  if (a instanceof RString)
+    return b instanceof RString && truthy(yield* callMethod(a, '==', [b], undefined, undefined, { fcall: true }));
   if (a instanceof RArray) return b instanceof RArray && (yield* equalsArrays(a, b, pairs));
   if (a instanceof RHash)
     return b instanceof RHash && (yield* eqlContainer(a, b, pairs, () => hashEquals(a, b, pairs)));
@@ -692,7 +693,7 @@ export function* rEquals(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = n
   }
   const method = classOf(a).findMethod('==');
   if (method && method.owner !== rt().c.BasicObject && method.owner !== rt().c.Kernel) {
-    return truthy(yield* callMethod(a, '==', [b]));
+    return truthy(yield* callMethod(a, '==', [b], undefined, undefined, { fcall: true }));
   }
   return false;
 }
@@ -745,20 +746,22 @@ export function numericEquals(a: bigint | number, b: bigint | number): boolean {
   return Number.isInteger(float) && Number.isFinite(float) && BigInt(float) === integer;
 }
 
-/** `a.eql?(b)`: equal values of the same type, as Hash keys compare. */
 // code-gauge-allow functionCognitiveComplexity 18 -- The ordered cases for Ruby value conversion and encoded inspection share state; splitting them solely for the metric would hide their sequencing.
 export function* rEql(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = new Map()): Gen<boolean> {
   rt().spend();
-  if (a instanceof RBasic && isOverridden(a, 'eql?')) return truthy(yield* callMethod(a, 'eql?', [b]));
+  if (a instanceof RBasic && isOverridden(a, 'eql?'))
+    return truthy(yield* callMethod(a, 'eql?', [b], undefined, undefined, { fcall: true }));
   if (isRubyFloat(a) && isRubyFloat(b)) return Number(a) === Number(b);
   if (typeof a !== typeof b) return false;
-  if (a instanceof RString) return b instanceof RString && truthy(yield* callMethod(a, 'eql?', [b]));
+  if (a instanceof RString)
+    return b instanceof RString && truthy(yield* callMethod(a, 'eql?', [b], undefined, undefined, { fcall: true }));
   if (a instanceof RArray) return b instanceof RArray && (yield* eqlArray(a, b, pairs));
   if (a instanceof RHash) return b instanceof RHash && (yield* eqlHash(a, b, pairs));
   if (a instanceof RRange) return b instanceof RRange && (yield* eqlRange(a, b, pairs));
   if (a instanceof RObject && b instanceof RObject) {
     const method = classOf(a).findMethod('eql?');
-    if (method && method.owner !== rt().c.Kernel) return truthy(yield* callMethod(a, 'eql?', [b]));
+    if (method && method.owner !== rt().c.Kernel)
+      return truthy(yield* callMethod(a, 'eql?', [b], undefined, undefined, { fcall: true }));
   }
   return a === b;
 }
@@ -899,14 +902,14 @@ export function compareBytes(a: Uint8Array, b: Uint8Array): number {
   return a.length === b.length ? 0 : a.length < b.length ? -1 : 1;
 }
 
-/** `pattern === value`, as `case` and `when` compare. */
 export function* caseEquals(pattern: Value, value: Value): Gen<boolean> {
-  if (isOverridden(pattern, '===')) return truthy(yield* callMethod(pattern, '===', [value]));
+  if (isOverridden(pattern, '==='))
+    return truthy(yield* callMethod(pattern, '===', [value], undefined, undefined, { fcall: true }));
   if (pattern instanceof RClass) return isA(value, pattern);
   if (pattern instanceof RRange) return yield* rangeCovers(pattern, value);
   if (pattern instanceof RProc) return truthy(yield* callProc(pattern, [value]));
   if (pattern instanceof RObject && classOf(pattern).findMethod('===')?.body.kind === 'native') {
-    return truthy(yield* callMethod(pattern, '===', [value]));
+    return truthy(yield* callMethod(pattern, '===', [value], undefined, undefined, { fcall: true }));
   }
   return yield* rEquals(pattern, value);
 }
