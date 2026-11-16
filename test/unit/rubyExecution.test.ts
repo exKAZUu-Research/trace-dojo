@@ -10389,3 +10389,161 @@ test('later valid frozen-string directives override earlier headers', () => {
     uncaughtException: undefined,
   });
 });
+
+test('interpolation preserves encoded symbols and distinct reflective identifiers', () => {
+  expect(
+    run(String.raw`s=String.new(255.chr,encoding:'US-ASCII')
+p :"#{s}".encoding,:"#{s}".to_s.bytes,{"#{s}": 1}.keys.first.encoding
+p :"#{s}" == 255.chr.to_sym
+["#{s}","x#{s}","#{s}x", "#{s}#{'a'}", "#{'a'}#{s}"].each {|v|p v.encoding,v.bytes}
+['UTF-8','US-ASCII','BINARY'].each {|encoding|['','a'].each {|text|v=String.new(text,encoding:encoding);p [encoding,text,"#{v}".encoding,"#{v}x".encoding,"x#{v}".encoding]}}
+b=:"#{s}";c=Class.new {define_method(b){1};define_method(255.chr.to_sym){2}};o=c.new;p o.send(b),o.send(255.chr.to_sym),o.method(b).name.encoding
+p o.method(b).inspect.encoding
+begin;c.define_method(s){3};rescue EncodingError=>error;p error.class,error.message;end
+begin;o.send(:"#{s}missing");rescue EncodingError=>error;p error.class,error.message;end
+[255.chr.to_sym,b].each {|name|begin;Object.new.send(name);rescue NoMethodError=>error;p error.message,error.message.encoding;end}
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: String.raw`#<Encoding:US-ASCII>
+[255]
+#<Encoding:US-ASCII>
+false
+#<Encoding:US-ASCII>
+[255]
+#<Encoding:US-ASCII>
+[120, 255]
+#<Encoding:UTF-8>
+[255, 120]
+#<Encoding:UTF-8>
+[255, 97]
+#<Encoding:US-ASCII>
+[97, 255]
+["UTF-8", "", #<Encoding:UTF-8>, #<Encoding:UTF-8>, #<Encoding:UTF-8>]
+["UTF-8", "a", #<Encoding:UTF-8>, #<Encoding:UTF-8>, #<Encoding:UTF-8>]
+["US-ASCII", "", #<Encoding:UTF-8>, #<Encoding:UTF-8>, #<Encoding:UTF-8>]
+["US-ASCII", "a", #<Encoding:UTF-8>, #<Encoding:UTF-8>, #<Encoding:UTF-8>]
+["BINARY", "", #<Encoding:UTF-8>, #<Encoding:BINARY (ASCII-8BIT)>, #<Encoding:UTF-8>]
+["BINARY", "a", #<Encoding:UTF-8>, #<Encoding:BINARY (ASCII-8BIT)>, #<Encoding:UTF-8>]
+1
+2
+#<Encoding:US-ASCII>
+#<Encoding:US-ASCII>
+EncodingError
+"invalid symbol in encoding US-ASCII :\"\\xFF\""
+EncodingError
+"invalid symbol in encoding UTF-8 :\"\\xFFmissing\""
+"undefined method '\xFF' for an instance of Object"
+#<Encoding:BINARY (ASCII-8BIT)>
+"undefined method '\xFF' for an instance of Object"
+#<Encoding:US-ASCII>
+`,
+    stderr: String.raw``,
+    uncaughtException: undefined,
+  });
+});
+
+test('byte cursors retain matches inside moved UTF-8 characters', () => {
+  expect(
+    run(String.raw`['é','あ','😀'].each do |character|
+ [/(?=.)/,/(?:)/,/(.)/].each do |regexp|
+  s='a'+character;n=0;p [character,regexp]
+  s.scan(regexp) do |value|
+   m=$~
+   p [m.offset(0),m.to_a.map{|x|x.bytes},m.pre_match.bytes,m.post_match.bytes,m==m.dup,m.hash==m.dup.hash]
+   n+=1;s[0,2]=character+'a' if n==1
+  end
+  p n,$~ && $~.offset(0)
+ end
+ s='a'+character;n=0
+ result=s.gsub(/(?=.)/){n+=1;s[0,2]=character+'a' if n==1;'X'}
+ p [result.bytes,n,$~.offset(0),$~.pre_match.bytes]
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: String.raw`["é", /(?=.)/]
+[[0, 0], [[]], [], [97, 195, 169], true, true]
+[[1, 1], [[]], [195], [169, 97], true, true]
+[[1, 1], [[]], [195, 169], [97], true, true]
+3
+[1, 1]
+["é", /(?:)/]
+[[0, 0], [[]], [], [97, 195, 169], true, true]
+[[1, 1], [[]], [195], [169, 97], true, true]
+[[1, 1], [[]], [195, 169], [97], true, true]
+[[2, 2], [[]], [195, 169, 97], [], true, true]
+4
+[2, 2]
+["é", /(.)/]
+[[0, 1], [[97], [97]], [], [195, 169], true, true]
+[[1, 2], [[169], [169]], [195], [97], true, true]
+[[1, 2], [[97], [97]], [195, 169], [], true, true]
+3
+[1, 2]
+[[88, 195, 169, 88, 97], 2, [1, 1], [195, 169]]
+["あ", /(?=.)/]
+[[0, 0], [[]], [], [97, 227, 129, 130], true, true]
+[[1, 1], [[]], [227], [129, 130, 97], true, true]
+[[2, 2], [[]], [227, 129], [130, 97], true, true]
+[[1, 1], [[]], [227, 129, 130], [97], true, true]
+4
+[1, 1]
+["あ", /(?:)/]
+[[0, 0], [[]], [], [97, 227, 129, 130], true, true]
+[[1, 1], [[]], [227], [129, 130, 97], true, true]
+[[2, 2], [[]], [227, 129], [130, 97], true, true]
+[[1, 1], [[]], [227, 129, 130], [97], true, true]
+[[2, 2], [[]], [227, 129, 130, 97], [], true, true]
+5
+[2, 2]
+["あ", /(.)/]
+[[0, 1], [[97], [97]], [], [227, 129, 130], true, true]
+[[1, 2], [[129], [129]], [227], [130, 97], true, true]
+[[2, 3], [[130], [130]], [227, 129], [97], true, true]
+[[1, 2], [[97], [97]], [227, 129, 130], [], true, true]
+4
+[1, 2]
+[[88, 227, 129, 130, 88, 97], 2, [1, 1], [227, 129, 130]]
+["😀", /(?=.)/]
+[[0, 0], [[]], [], [97, 240, 159, 152, 128], true, true]
+[[1, 1], [[]], [240], [159, 152, 128, 97], true, true]
+[[2, 2], [[]], [240, 159], [152, 128, 97], true, true]
+[[3, 3], [[]], [240, 159, 152], [128, 97], true, true]
+[[1, 1], [[]], [240, 159, 152, 128], [97], true, true]
+5
+[1, 1]
+["😀", /(?:)/]
+[[0, 0], [[]], [], [97, 240, 159, 152, 128], true, true]
+[[1, 1], [[]], [240], [159, 152, 128, 97], true, true]
+[[2, 2], [[]], [240, 159], [152, 128, 97], true, true]
+[[3, 3], [[]], [240, 159, 152], [128, 97], true, true]
+[[1, 1], [[]], [240, 159, 152, 128], [97], true, true]
+[[2, 2], [[]], [240, 159, 152, 128, 97], [], true, true]
+6
+[2, 2]
+["😀", /(.)/]
+[[0, 1], [[97], [97]], [], [240, 159, 152, 128], true, true]
+[[1, 2], [[159], [159]], [240], [152, 128, 97], true, true]
+[[2, 3], [[152], [152]], [240, 159], [128, 97], true, true]
+[[3, 4], [[128], [128]], [240, 159, 152], [97], true, true]
+[[1, 2], [[97], [97]], [240, 159, 152, 128], [], true, true]
+5
+[1, 2]
+[[88, 240, 159, 152, 128, 88, 97], 2, [1, 1], [240, 159, 152, 128]]
+`,
+    stderr: String.raw``,
+    uncaughtException: undefined,
+  });
+});
+
+test.each([String.raw`/\b/`, String.raw`/\p{L}/`])(
+  'context-dependent interior-byte matches fail explicitly: %s',
+  (pattern) => {
+    const result = run(`s="aé";n=0;s.scan(${pattern}){n+=1;s[0,2]="éa" if n==1};p n`);
+    expect(result).toMatchObject({
+      kind: 'executed',
+      uncaughtException: 'UTF-8 の文字途中からの文脈依存の正規表現検索は、この採点環境では使えません。',
+    });
+  }
+);

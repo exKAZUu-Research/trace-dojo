@@ -9,6 +9,35 @@ import {
 import { ExecutionLimitError } from '../interpreter/limits';
 import { UnsupportedFeatureError } from './runtime';
 
+export function supportsRegexpByteView(source: string, extended: boolean): boolean {
+  try {
+    return byteViewNode(
+      parseOniguruma(normalizeRubyUnicodeEscapes(source), {
+        flags: extended ? 'x' : '',
+        skipLookbehindValidation: true,
+        skipBackrefValidation: true,
+        skipPropertyNameValidation: true,
+      }),
+      false
+    );
+  } catch {
+    return false;
+  }
+}
+
+function byteViewNode(node: SourceNode, inClass: boolean): boolean {
+  if (node.type === 'LookaroundAssertion' && node.kind === 'lookbehind') return false;
+  if (node.type === 'Assertion' && node.kind === 'word_boundary') return false;
+  if (node.type === 'CharacterSet' && !['any', 'digit', 'dot', 'hex', 'space', 'word'].includes(node.kind))
+    return false;
+  if (node.type === 'Group' && node.flags?.enable?.ignoreCase) return false;
+  if (inClass && node.type === 'Character' && node.value >= 128) return false;
+  if (node.type === 'CharacterClassRange') return node.max.value < 128;
+  if (node.type === 'Quantifier') return byteViewNode(node.body, inClass);
+  if ('body' in node) return node.body.every((child) => byteViewNode(child, inClass || node.type === 'CharacterClass'));
+  return true;
+}
+
 export function validateSourceRanges(source: string, extended: boolean): void {
   if (!source.includes('[')) return;
   try {

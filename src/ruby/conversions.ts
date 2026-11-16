@@ -217,6 +217,11 @@ export function combinedStringEncoding(
   return leftAscii && !rightAscii ? right.binary : leftBinary;
 }
 
+export function stringEncodingName(value: Pick<RString, 'binary' | 'usAscii'>): string {
+  if (value.usAscii) return 'US-ASCII';
+  return rubyEncodingName(value.binary);
+}
+
 export function rubyEncodingName(binary: boolean): string {
   return binary ? 'BINARY (ASCII-8BIT)' : String.raw`UTF-8`;
 }

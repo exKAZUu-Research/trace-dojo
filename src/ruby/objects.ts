@@ -25,15 +25,21 @@ export class RSymbol {
   ) {}
 
   get key(): string {
-    return this.binary
-      ? Array.from(this.bytes ?? [], (byte) => String.fromCodePoint(byte < 128 ? byte : 0xdc_00 + byte)).join('')
-      : this.name;
+    if (!this.binary && !this.usAscii) return this.name;
+    const prefix = this.usAscii ? 0xdd_00 : 0xdc_00;
+    return Array.from(this.bytes ?? new TextEncoder().encode(this.name), (byte) =>
+      String.fromCodePoint(byte < 128 ? byte : prefix + byte)
+    ).join('');
   }
 
   static fromKey(key: string): RSymbol {
-    if (!/[\uDC80-\uDCFF]/u.test(key)) return RSymbol.of(key);
+    if (!/[\uDC80-\uDCFF\uDD80-\uDDFF]/u.test(key)) return RSymbol.of(key);
+    const usAscii = /[\uDD80-\uDDFF]/u.test(key);
     const bytes = Uint8Array.from(key, (char) => char.codePointAt(0)! & 255);
-    return RSymbol.of(Array.from(bytes, (byte) => String.fromCodePoint(byte)).join(''), true, false, bytes);
+    const name = Array.from(bytes, (byte) => String.fromCodePoint(usAscii && byte >= 128 ? 0xdc_00 + byte : byte)).join(
+      ''
+    );
+    return RSymbol.of(name, !usAscii, usAscii, bytes);
   }
 
   static of(name: string, binary = false, usAscii = false, sourceBytes?: Uint8Array): RSymbol {

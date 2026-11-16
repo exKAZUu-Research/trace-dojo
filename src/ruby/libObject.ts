@@ -22,8 +22,8 @@ import { hashSet } from './hashes';
 import { addMethod, callMethod, callProc, type Gen, invoke, ivarSet, makeBlock, requireBlock } from './interp';
 import { curry, makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { writeStderrLine } from './libIo';
+import { identifierSymbol } from './libMeta';
 import { kernelFloat, kernelInteger } from './libNumeric';
-import { symbolFromString } from './libString';
 import { copyStructLayout } from './libStruct';
 import {
   invalidateMethodCaches,
@@ -325,7 +325,7 @@ def('Kernel', ['to_enum', 'enum_for'], [0, -1], function* (self, args, block) {
   if (method instanceof RSymbol) return makeEnumerator(self, method.key, rest, undefined, { sizeBlock: block });
   const converted = method instanceof RString ? method : yield* tryImplicitConversion(method, 'to_str');
   if (converted instanceof RString)
-    return makeEnumerator(self, symbolFromString(converted).key, rest, undefined, { sizeBlock: block });
+    return makeEnumerator(self, identifierSymbol(converted).key, rest, undefined, { sizeBlock: block });
   if (converted !== undefined && converted !== NIL)
     throw typeError(
       `can't convert ${realClassOf(method).name} to String (${realClassOf(method).name}#to_str gives ${realClassOf(converted).name})`
@@ -777,9 +777,9 @@ function* symbolNames(args: Value[], expandArrays = false): Gen<string[]> {
 
 function* symbolName(value: Value): Gen<string> {
   if (value instanceof RSymbol) return value.key;
-  if (value instanceof RString) return symbolFromString(value).key;
+  if (value instanceof RString) return identifierSymbol(value).key;
   const converted = yield* tryImplicitConversion(value, 'to_str');
-  if (converted instanceof RString) return symbolFromString(converted).key;
+  if (converted instanceof RString) return identifierSymbol(converted).key;
   if (converted !== undefined && converted !== NIL)
     throw typeError(
       `can't convert ${realClassOf(value).name} to String (${realClassOf(value).name}#to_str gives ${realClassOf(converted).name})`

@@ -19,6 +19,7 @@ import {
   combinedStringEncoding,
   inspect,
   numericCompare,
+  stringEncodingName,
   toSValue,
   tryImplicitConversion,
 } from './conversions';
@@ -522,7 +523,7 @@ function* interpolateString(
 ): Gen<RString> {
   const chunks: Uint8Array[] = [];
   let length = 0;
-  let binary = false;
+  let encoding = { binary: false, usAscii: false };
   let ascii = true;
   for (const [index, part] of parts.entries()) {
     const segment =
@@ -533,7 +534,11 @@ function* interpolateString(
           : yield* toSValue(yield* ev(part, frame));
     validate?.(segment);
     const bytes = stringBytes(segment);
-    binary = index === 0 ? segment.binary && (bytes.length > 0 || parts.length > 1) : combine(binary, ascii, segment);
+    const rightAscii = bytes.every((byte) => byte < 0x80);
+    encoding =
+      index === 0 && (parts.length > 1 || !rightAscii)
+        ? { binary: segment.binary, usAscii: segment.usAscii }
+        : interpolationEncoding(encoding, ascii, segment, rightAscii, combine);
     length += bytes.length;
     if (length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
     rt().spend(Math.ceil(bytes.length / 256));
@@ -546,7 +551,24 @@ function* interpolateString(
     joined.set(bytes, offset);
     offset += bytes.length;
   }
-  return stringFromBytes(joined, binary);
+  return stringFromBytes(joined, encoding.binary, encoding.usAscii);
+}
+
+function interpolationEncoding(
+  left: Pick<RString, 'binary' | 'usAscii'>,
+  leftAscii: boolean,
+  right: RString,
+  rightAscii: boolean,
+  combine: typeof combinedStringEncoding
+): Pick<RString, 'binary' | 'usAscii'> {
+  if (left.usAscii !== right.usAscii && !leftAscii && !rightAscii)
+    throw rubyError(
+      rt().c['Encoding::CompatibilityError'],
+      `incompatible character encodings: ${stringEncodingName(left)} and ${stringEncodingName(right)}`
+    );
+  if (left.usAscii) return { binary: right.binary, usAscii: right.usAscii };
+  const binary = combine(left.binary, leftAscii, right);
+  return { binary, usAscii: !binary && leftAscii && !rightAscii && right.usAscii };
 }
 
 /** The values of a list of expressions, with splats (`*a`) expanded. */

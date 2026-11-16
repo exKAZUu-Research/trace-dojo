@@ -21,7 +21,7 @@ import { digest, hashKeyOf, hashSet } from './hashes';
 import { addMethod, assertMutableClass, callBlock, callMethod, callProc, type Gen, invoke } from './interp';
 import { tryAry } from './libArray';
 import { sizedEnumerator } from './libEnumerator';
-import { symbolNameOf } from './libMeta';
+import { identifierSymbol, symbolNameOf } from './libMeta';
 import { symbolString } from './libString';
 import { NIL, RArray, RClass, type RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
@@ -137,6 +137,8 @@ function defineAccessors(cls: RClass, members: string[], writable: boolean): voi
       body: { kind: 'native', fn: (self: RObject) => valuesOf(self)[index], min: 0, max: 0, takesKeywords: false },
     });
     if (!writable) continue;
+    const symbol = RSymbol.fromKey(`${name}=`);
+    identifierSymbol(symbolString(symbol));
     addMethod(cls, {
       name: `${name}=`,
       owner: cls,

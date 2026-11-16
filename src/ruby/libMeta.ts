@@ -1,7 +1,7 @@
 import type { Params } from './ast';
-import { addressOf, className, combinedStringEncoding, inspect, tryImplicitConversion } from './conversions';
+import { addressOf, className, inspect, stringEncodingName, tryImplicitConversion } from './conversions';
 import { def, findCoreMethod, isCoreMethod, sdef, sundef } from './define';
-import { argumentError, frozenError, nameError, typeError, undefinedMethodError } from './errors';
+import { argumentError, frozenError, nameError, rubyError, typeError, undefinedMethodError } from './errors';
 import { digest, hashGet } from './hashes';
 import {
   addMethod,
@@ -22,7 +22,7 @@ import {
   setClassVariable,
 } from './interp';
 import { procArity } from './libObject';
-import { symbolFromString, symbolString } from './libString';
+import { inspectStringEncoding, symbolFromString, symbolString } from './libString';
 import { nativeOwners } from './nativeOwners';
 import { type NativeSignature, nativeSignatures } from './nativeSignatures';
 import {
@@ -40,7 +40,19 @@ import {
   type Visibility,
 } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
-import { arr, classOf, isA, realClassOf, singletonClassOf, singletonDefinitionClass, str, sym, truthy } from './values';
+import {
+  arr,
+  classOf,
+  isA,
+  realClassOf,
+  singletonClassOf,
+  singletonDefinitionClass,
+  str,
+  stringBytes,
+  stringFromBytes,
+  sym,
+  truthy,
+} from './values';
 
 for (const owner of ['Method', 'UnboundMethod']) {
   sundef(owner, 'new');
@@ -50,14 +62,14 @@ for (const owner of ['Method', 'UnboundMethod']) {
 }
 
 export function* methodKeyOf(value: Value): Gen<string> {
-  return (yield* symbolNameOf(value)).key;
+  return (yield* symbolNameOf(value, true)).key;
 }
 
-export function* symbolNameOf(value: Value): Gen<RSymbol> {
+export function* symbolNameOf(value: Value, identifier = false): Gen<RSymbol> {
   if (value instanceof RSymbol) return value;
-  if (value instanceof RString) return symbolFromString(value);
+  if (value instanceof RString) return identifier ? identifierSymbol(value) : symbolFromString(value);
   const converted = yield* tryImplicitConversion(value, 'to_str');
-  if (converted instanceof RString) return symbolFromString(converted);
+  if (converted instanceof RString) return identifier ? identifierSymbol(converted) : symbolFromString(converted);
   if (converted !== undefined) {
     const name = realClassOf(value).name;
     throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
@@ -65,8 +77,14 @@ export function* symbolNameOf(value: Value): Gen<RSymbol> {
   throw typeError(`${yield* inspect(value)} is not a symbol nor a string`);
 }
 
+export function identifierSymbol(value: RString): RSymbol {
+  if (value.usAscii && stringBytes(value).some((byte) => byte >= 128))
+    throw rubyError(rt().c.EncodingError, `invalid symbol in encoding US-ASCII :${inspectStringEncoding(value)}`);
+  return symbolFromString(value);
+}
+
 function* ivarName(value: Value): Gen<string> {
-  const symbol = yield* symbolNameOf(value);
+  const symbol = yield* symbolNameOf(value, true);
   const name = symbol.name;
   if (!/^@[A-Za-z_\u0080-\u{10FFFF}][\w\u0080-\u{10FFFF}]*$/u.test(name)) {
     throw nameError(`'${name}' is not allowed as an instance variable name`, NIL, name);
@@ -75,7 +93,7 @@ function* ivarName(value: Value): Gen<string> {
 }
 
 function* classVariableName(value: Value): Gen<string> {
-  const symbol = yield* symbolNameOf(value);
+  const symbol = yield* symbolNameOf(value, true);
   const name = symbol.name;
   if (!/^@@[A-Za-z_\u0080-\u{10FFFF}][\w\u0080-\u{10FFFF}]*$/u.test(name))
     throw nameError(`'${name}' is not allowed as a class variable name`, NIL, name);
@@ -309,17 +327,37 @@ function* methodDescription(self: RObject): Gen<RString> {
       : Array.from({ length: methodArity(method) }, () => '_').join(', ');
   const row = definition?.row ?? method.row;
   const kind = unbound ? 'UnboundMethod' : 'Method';
-  const result = str(
-    `#<${kind}: ${owner}${name}${name === method.name ? '' : `(${method.name})`}(${signature})${row === undefined ? '' : ` main.rb:${row + 1}`}>`
-  );
-  const utf8Ascii = !/[^\u0000-\u007F]/.test(owner + signature);
-  result.binary = combinedStringEncoding(false, utf8Ascii, symbolString(sym(name)));
-  result.binary = combinedStringEncoding(
-    result.binary,
-    utf8Ascii && !/[^\u0000-\u007F]/.test(name),
-    symbolString(sym(method.name))
-  );
-  return result;
+  return joinMethodDescription([
+    str(`#<${kind}: ${owner}`),
+    symbolString(sym(name)),
+    ...(name === method.name ? [] : [str('('), symbolString(sym(method.name)), str(')')]),
+    str(`(${signature})${row === undefined ? '' : ` main.rb:${row + 1}`}>`),
+  ]);
+}
+
+function joinMethodDescription(parts: RString[]): RString {
+  const chunks = parts.map(stringBytes);
+  const length = chunks.reduce((sum, bytes) => sum + bytes.length, 0);
+  rt().checkStringLength(length);
+  let selected = parts[0];
+  let ascii = true;
+  for (const [index, part] of parts.entries()) {
+    const rightAscii = chunks[index].every((byte) => byte < 128);
+    if (!ascii && !rightAscii && stringEncodingName(selected) !== stringEncodingName(part))
+      throw rubyError(
+        rt().c['Encoding::CompatibilityError'],
+        `incompatible character encodings: ${stringEncodingName(selected)} and ${stringEncodingName(part)}`
+      );
+    if (ascii && !rightAscii) selected = part;
+    ascii &&= rightAscii;
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return stringFromBytes(bytes, selected.binary, selected.usAscii);
 }
 
 function* methodOwnerPrefix(definingOwner: RClass, recv: Value, unbound: boolean): Gen<string> {
@@ -754,10 +792,10 @@ def('Module', 'prepend', [1, -1], function* (self: RClass, modules) {
 // Constants and class variables ----------------------------------------------------------------------------------------
 
 function* constantName(value: Value): Gen<string> {
-  const symbol = yield* symbolNameOf(value);
+  const symbol = yield* symbolNameOf(value, true);
   const name = symbol.name;
   const valid = symbol.binary ? /^[A-Z][\w\P{ASCII}]*$/u : /^[\p{Uppercase}\p{Lt}][\w\P{ASCII}]*$/u;
-  if (!valid.test(name)) throw nameError(`wrong constant name ${name}`, NIL, name);
+  if (!valid.test(name)) throw nameError(`wrong constant name ${symbol.key}`, NIL, symbol.key);
   return name;
 }
 
@@ -774,7 +812,7 @@ function reflectedConstant(module: RClass, name: string, inherit: boolean, neste
 
 def('Module', 'const_get', [1, 2], function* (self: RClass, args) {
   const inherit = args.length < 2 || truthy(args[1]);
-  const input = yield* symbolNameOf(args[0]);
+  const input = yield* symbolNameOf(args[0], true);
   const requested = input.name;
   const absolute = requested.startsWith('::');
   const parts = (absolute ? requested.slice(2) : requested).split('::');
@@ -811,7 +849,7 @@ def('Module', 'const_set', 2, function* (self: RClass, [name, value]) {
   return value;
 });
 def('Module', 'const_defined?', [1, 2], function* (self: RClass, args) {
-  const input = yield* symbolNameOf(args[0]);
+  const input = yield* symbolNameOf(args[0], true);
   const requested = input.name;
   const inherit = args.length < 2 || truthy(args[1]);
   const absolute = requested.startsWith('::');

@@ -48,8 +48,13 @@ import {
   regexpLineCommentEnd,
 } from './regexpCaptureNames';
 import { RegexpCursor } from './regexpCursor';
-import { charIndex, unitIndex } from './regexpPositions';
-import { regexpSyntaxReason, validateRegexpStructure, validateSourceRanges } from './regexpStructure';
+import { charIndex, regexpByteIndex, unitIndex } from './regexpPositions';
+import {
+  regexpSyntaxReason,
+  supportsRegexpByteView,
+  validateRegexpStructure,
+  validateSourceRanges,
+} from './regexpStructure';
 import { type Frame, rt, UnsupportedFeatureError } from './runtime';
 import { arr, asciiString, newHash, realClassOf, str, stringBytes, stringFromBytes, sym, truthy } from './values';
 
@@ -65,6 +70,7 @@ export interface RegexpData {
   /** The translated expression; its `lastIndex` is set before each use. */
   js: RegExp;
   binaryJs?: RegExp;
+  byteViewSafe?: boolean;
   safeNative: boolean;
   captureNames?: string[];
   foldCheck?: { text: string; unsupported: boolean };
@@ -738,6 +744,7 @@ export interface MatchState {
   snapshot?: RString;
   literal?: boolean;
   groups: (readonly [number, number] | undefined)[];
+  byteView?: { groups: (readonly [number, number] | undefined)[]; bytes: Uint8Array };
   names: string[];
   namedGroups: Record<string, number>;
   regexp: RObject;
@@ -812,6 +819,12 @@ function regexpForMatch(data: RegexpData, source?: RString): RegExp {
   ));
 }
 
+export function validateRegexpByteView(regexp: RObject): void {
+  const data = dataOf(regexp);
+  data.byteViewSafe ??= !data.ignoreCase && supportsRegexpByteView(data.source, data.extended);
+  if (!data.byteViewSafe) throw new UnsupportedFeatureError('UTF-8 の文字途中からの文脈依存の正規表現検索');
+}
+
 export function validateRegexpSubject(regexp: RObject, source: RString): void {
   if (!validStringEncoding(source))
     throw argumentError(`invalid byte sequence in ${source.usAscii ? 'US-ASCII' : RUBY_UTF8}`);
@@ -868,8 +881,35 @@ function stateOf(match: RObject): MatchState {
 }
 
 function groupText(state: MatchState, group: number): Value {
+  if (state.byteView) {
+    const range = state.byteView.groups[group];
+    return range ? byteViewSlice(state, range[0], range[1]) : NIL;
+  }
   const range = state.groups[group];
   return range ? sliceStringEncoding(state.snapshot ?? str(state.text), range[0], range[1]) : NIL;
+}
+
+function matchPrefix(state: MatchState): RString {
+  return state.byteView
+    ? byteViewSlice(state, 0, state.byteView.groups[0]![0])
+    : sliceStringEncoding(state.snapshot ?? str(state.text), 0, state.groups[0]![0]);
+}
+
+function matchSuffix(state: MatchState): RString {
+  return state.byteView
+    ? byteViewSlice(state, state.byteView.groups[0]![1])
+    : sliceStringEncoding(state.snapshot ?? str(state.text), state.groups[0]![1]);
+}
+
+function byteViewSlice(state: MatchState, from: number, to?: number): RString {
+  const snapshot = state.snapshot!;
+  return stringFromBytes(state.byteView!.bytes.subarray(from, to), snapshot.binary, snapshot.usAscii);
+}
+
+function matchByteRanges(state: MatchState): (readonly [number, number] | undefined)[] {
+  if (state.byteView) return state.byteView.groups;
+  const source = state.snapshot ?? str(state.text);
+  return state.groups.map((range) => range && [regexpByteIndex(source, range[0]), regexpByteIndex(source, range[1])]);
 }
 
 /** Sets `$~` for the method frame that called a matching method, as Ruby keeps it per frame. */
@@ -912,16 +952,15 @@ export function matchGlobal(name: string): Value {
   if (name === '$~') return match;
   if (match === NIL) return NIL;
   const state = stateOf(match as RObject);
-  const whole = state.groups[0] as readonly [number, number];
   switch (name) {
     case '$&': {
       return groupText(state, 0);
     }
     case '$`': {
-      return sliceStringEncoding(state.snapshot ?? str(state.text), 0, whole[0]);
+      return matchPrefix(state);
     }
     case "$'": {
-      return sliceStringEncoding(state.snapshot ?? str(state.text), whole[1]);
+      return matchSuffix(state);
     }
     case '$+': {
       for (let group = state.groups.length - 1; group > 0; group--)
@@ -1381,6 +1420,8 @@ def('MatchData', ['==', 'eql?'], 1, (self: RObject, [other]) => {
   const right = stateOf(other);
   const leftRegexp = dataOf(left.regexp);
   const rightRegexp = dataOf(right.regexp);
+  const leftRanges = matchByteRanges(left);
+  const rightRanges = matchByteRanges(right);
   const leftSource = left.snapshot ?? str(left.text);
   const rightSource = right.snapshot ?? str(right.text);
   return (
@@ -1391,10 +1432,10 @@ def('MatchData', ['==', 'eql?'], 1, (self: RObject, [other]) => {
     leftRegexp.multiline === rightRegexp.multiline &&
     leftRegexp.extended === rightRegexp.extended &&
     left.groups.length === right.groups.length &&
-    left.groups.every((range, index) =>
+    leftRanges.every((range, index) =>
       range === undefined
-        ? right.groups[index] === undefined
-        : range[0] === right.groups[index]?.[0] && range[1] === right.groups[index]?.[1]
+        ? rightRanges[index] === undefined
+        : range[0] === rightRanges[index]?.[0] && range[1] === rightRanges[index]?.[1]
     )
   );
 });
@@ -1404,7 +1445,7 @@ def('MatchData', 'hash', 0, (self: RObject) => {
   const source = state.snapshot ?? str(state.text);
   const encoding = source.binary && stringBytes(source).some((byte) => byte >= 0x80) ? 'binary' : 'ascii-compatible';
   return BigInt(
-    `0x${digest(JSON.stringify([String(stringKeyHash(source)), encoding, regexp.source, regexp.encoding, regexp.ignoreCase, regexp.multiline, regexp.extended, state.groups]))}`
+    `0x${digest(JSON.stringify([String(stringKeyHash(source)), encoding, regexp.source, regexp.encoding, regexp.ignoreCase, regexp.multiline, regexp.extended, matchByteRanges(state)]))}`
   );
 });
 def(
@@ -1438,11 +1479,11 @@ def('MatchData', 'names', 0, (self: RObject) => {
 def('MatchData', ['to_s'], 0, (self: RObject) => groupText(stateOf(self), 0));
 def('MatchData', 'pre_match', 0, (self: RObject) => {
   const state = stateOf(self);
-  return sliceStringEncoding(state.snapshot ?? str(state.text), 0, (state.groups[0] as readonly [number, number])[0]);
+  return matchPrefix(state);
 });
 def('MatchData', 'post_match', 0, (self: RObject) => {
   const state = stateOf(self);
-  return sliceStringEncoding(state.snapshot ?? str(state.text), (state.groups[0] as readonly [number, number])[1]);
+  return matchSuffix(state);
 });
 for (const [name, side] of [
   ['begin', 0],
@@ -1508,9 +1549,7 @@ function matchDataInspect(match: RObject): string {
     return `#<MatchData: ${state.text.slice(range[0], range[1])}>`;
   }
   const parts = state.groups.map((range, group) => {
-    const shown = range
-      ? inspectStringEncoding(sliceStringEncoding(state.snapshot ?? str(state.text), range[0], range[1]))
-      : 'nil';
+    const shown = range ? inspectStringEncoding(groupText(state, group) as RString) : 'nil';
     if (group === 0) return shown;
     const name = state.names.find((candidate) => state.namedGroups[candidate] === group);
     return `${name ?? group}:${shown}`;
@@ -1546,8 +1585,6 @@ def('MatchData', 'deconstruct_keys', 1, function* (self: RObject, [keys]) {
 
 /** Expands capture references and match-context escapes in a replacement string. */
 function expand(replacement: RString, state: MatchState, limit: number): RString {
-  const whole = state.groups[0] as readonly [number, number];
-  const source = state.snapshot ?? str(state.text);
   const replacementBytes = stringBytes(replacement);
   const parts: RString[] = [];
   let literalBytes: number[] = [];
@@ -1593,7 +1630,7 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
     } else {
       switch (code) {
         case '&': {
-          part = sliceStringEncoding(source, whole[0], whole[1]);
+          part = groupText(state, 0) as RString;
           break;
         }
         case '+': {
@@ -1609,11 +1646,11 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
           continue;
         }
         case '`': {
-          part = sliceStringEncoding(source, 0, whole[0]);
+          part = matchPrefix(state);
           break;
         }
         case "'": {
-          part = sliceStringEncoding(source, whole[1]);
+          part = matchSuffix(state);
           break;
         }
         default: {
@@ -1665,7 +1702,6 @@ function* substituteRegexp(
   let last: MatchState | undefined;
   while (state) {
     const [from, to] = cursor.range(state)!;
-    const next = cursor.next(state);
     setLastMatch(state);
     let piece: RString;
     if (replacement instanceof RHash) {
@@ -1683,7 +1719,7 @@ function* substituteRegexp(
     position = to;
     lastSearch = search;
     last = state;
-    search = next;
+    search = cursor.next(state, true);
     state = global ? cursor.match(search) : undefined;
   }
   if (global) setLastMatch(lastSearch === undefined ? undefined : cursor.match(lastSearch));
