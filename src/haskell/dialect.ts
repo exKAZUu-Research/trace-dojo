@@ -86,6 +86,12 @@ class DialectValidator {
 
 function validateSyntaxNode(node: Node): void {
   if (node.type === 'variable' && reservedNames.has(node.text)) fail(node);
+  if (node.type === 'arithmetic_sequence') {
+    const value = node.childForFieldName('step') ?? node.childForFieldName('from');
+    const name = value?.type === 'qualified' ? value.childForFieldName('id') : value;
+    const dots = node.children.find((child) => child?.type === '..');
+    if (value && name?.type === 'constructor' && value.endIndex === dots?.startIndex) fail(value);
+  }
   if (node.type !== 'apply') return;
   const argument = node.childForFieldName('argument');
   if (argument && blockArguments.has(argument.type)) fail(argument);

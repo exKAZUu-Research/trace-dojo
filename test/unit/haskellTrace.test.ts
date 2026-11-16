@@ -371,15 +371,17 @@ test('shared polymorphic values keep each call display instantiation separate', 
   ]);
 });
 
-test.each(['c::a->IO () -- atomic', 'c::a\n   ->IO () -- atomic'])(
-  'class defaults retain atomic signature spans: %s',
-  (signature) => {
-    const source = `class C a where\n ${signature}\n c _=do\n   print(1::Int)\n   print(2::Int)\ninstance C Int\nmain=c(0::Int)`;
-    const recording = traceProgram('haskell', source, source);
-    expect(recording.stdout).toBe('1\n2\n');
-    expect(recording.traceItems.every(({ callLines }) => callLines.length === 0)).toBe(true);
-  }
-);
+test.each([
+  'c::a->IO () -- atomic',
+  'c::a\n   ->IO () -- atomic',
+  'c -- atomic\n   ::a->IO ()',
+  'c:: -- atomic\n   a->IO ()',
+])('class defaults retain atomic signature spans: %s', (signature) => {
+  const source = `class C a where\n ${signature}\n c _=do\n   print(1::Int)\n   print(2::Int)\ninstance C Int\nmain=c(0::Int)`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.stdout).toBe('1\n2\n');
+  expect(recording.traceItems.every(({ callLines }) => callLines.length === 0)).toBe(true);
+});
 
 test.each([
   'walk _ 0=return ()\nwalk t n=do\n  forward t\n  walk t(n-1)',

@@ -393,7 +393,8 @@ function convertSignature(node: Node): Decl {
   }
   const names = namesNode ? fields(namesNode, 'name').map(plainName) : nameNode ? [plainName(nameNode)] : [];
   if (names.length === 0) throw syntaxError(spanOf(node), '書き方に誤りがあります。');
-  return { kind: 'sig', names, sig: convertSigType(required(node, 'type')), span: spanOf(node) };
+  const span = spanOf(node);
+  return { kind: 'sig', names, sig: { ...convertSigType(required(node, 'type')), span }, span };
 }
 
 function convertFixity(node: Node): Decl {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 892 -- The Core generator covers every construct of the language in one pass over shared state.
+// code-gauge-allow-file fileNcss 894 -- The Core generator covers every construct of the language in one pass over shared state.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   CHAR_TYPE,
@@ -807,6 +807,7 @@ export class Codegen {
       kind: 'patternMatch',
     };
     const scrutinee = this.compileExpr(expr.scrutinee);
+    if (expr.alts.length === 0) return { k: 'case', scrut: scrutinee, alts: new Map(), default: fail };
     const slot = this.frame.alloc();
     const clauses: RClause[] = expr.alts.map((alt: RAlt) => ({ pats: [alt.pat], rhs: alt.rhs, span: alt.span }));
     const body = this.compileMatch([slot], clauses, fail, ioResult);

@@ -382,3 +382,23 @@ test.each([
     uncaughtException: undefined,
   });
 });
+
+test.each(['[R..B]', '[R..]', '[R,G..B]', '[R,G..]', '[R.. B]', '[Main.R..Main.B]'])(
+  'constructor-adjacent range dots follow qualified lexical syntax: %s',
+  (range) => {
+    expect(executeProgram('haskell', `data C=R|G|B deriving(Show,Enum)\nmain=print ${range}`).kind).toBe(
+      'compileError'
+    );
+  }
+);
+
+test.each(['[R ..B]', '[R,G ..B]', '[x..y]', '[(R)..B]', '[Main.R ..Main.B]'])(
+  'range dots remain valid after whitespace and variables: %s',
+  (range) => {
+    expect(executeProgram('haskell', `data C=R|G|B deriving(Show,Enum)\nx=R\ny=B\nmain=print ${range}`)).toMatchObject({
+      kind: 'executed',
+      stdout: '[R,G,B]\n',
+      uncaughtException: undefined,
+    });
+  }
+);

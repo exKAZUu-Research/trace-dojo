@@ -690,18 +690,20 @@ find p t = listFind (toList t)
         listFind (x:xs) = if p x then Just x else listFind xs
 
 maximumBy :: Foldable t => (a -> a -> Ordering) -> t a -> a
-maximumBy cmp t = case toList t of
-  [] -> errorWithoutStackTrace "maximumBy: empty structure"
-  (x:xs) -> listFoldl (\a b -> case cmp a b of
-                                 GT -> a
-                                 _ -> b) x xs
+maximumBy cmp = fromMaybe (errorWithoutStackTrace "maximumBy: empty structure") . foldl' choose Nothing
+  where choose current y = Just $! case current of
+          Nothing -> y
+          Just x -> case cmp x y of
+            GT -> x
+            _ -> y
 
 minimumBy :: Foldable t => (a -> a -> Ordering) -> t a -> a
-minimumBy cmp t = case toList t of
-  [] -> errorWithoutStackTrace "minimumBy: empty structure"
-  (x:xs) -> listFoldl (\a b -> case cmp a b of
-                                 GT -> b
-                                 _ -> a) x xs
+minimumBy cmp = fromMaybe (errorWithoutStackTrace "minimumBy: empty structure") . foldl' choose Nothing
+  where choose current y = Just $! case current of
+          Nothing -> y
+          Just x -> case cmp x y of
+            GT -> y
+            _ -> x
 
 foldrM :: (Foldable t, Monad m) => (a -> b -> m b) -> b -> t a -> m b
 foldrM f z0 xs = foldl c return xs z0

@@ -334,3 +334,49 @@ test.each(['shiftL', 'shiftR'])('Integer %s validates the count before forcing i
     });
   }
 });
+
+test('empty data deriving retains non-strict equality, ordering and failed reads', () => {
+  const source =
+    'data T deriving (Eq,Ord,Show,Read)\nmain=print((undefined::T)==undefined,compare(undefined::T)undefined,reads "x"::[(T,String)])';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(True,EQ,[])\n',
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('haskell', 'data T deriving Show\nmain=print(1::Int)')).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('haskell', 'data T deriving Show\nmain=print(show(undefined::T))')).toMatchObject({
+    kind: 'executed',
+    stdout: '"',
+    uncaughtException: 'Prelude.undefined',
+  });
+});
+
+test.each([
+  ['maximumBy', 'LT'],
+  ['minimumBy', 'GT'],
+])('%s forces intermediate selections', (name, ordering) => {
+  for (const values of ['[error "bad",2::Int]', '[1,error "bad",3::Int]']) {
+    expect(
+      executeProgram('haskell', `import Data.List\nmain=print(${name} (\\_ _->${ordering}) ${values})`)
+    ).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: 'bad' });
+  }
+});
+
+test.each([
+  ['([]::[Int]) undefined', '', 'Prelude.undefined'],
+  ['(error "needle"::[Int]) (error "haystack")', '', 'needle'],
+  ['[1..] [1,2,3::Int]', 'False\n', undefined],
+  ['[error "element"::Int] []', 'False\n', undefined],
+  ['[2,3::Int] [1,2,3]', 'True\n', undefined],
+  ['[1,2::Int] [1,2,3]', 'False\n', undefined],
+])('suffix checks retain list demand: %s', (args, stdout, uncaughtException) => {
+  expect(executeProgram('haskell', `import Data.List\nmain=print(isSuffixOf ${args})`)).toMatchObject({
+    kind: 'executed',
+    stdout,
+    uncaughtException,
+  });
+});

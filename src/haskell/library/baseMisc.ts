@@ -416,7 +416,15 @@ isPrefixOf _ [] = False
 isPrefixOf (x:xs) (y:ys) = x == y && isPrefixOf xs ys
 
 isSuffixOf :: Eq a => [a] -> [a] -> Bool
-isSuffixOf ns hs = isPrefixOf (reverse ns) (reverse hs)
+isSuffixOf ns hs = case dropNeedle ns hs of
+  Nothing -> False
+  Just delta -> ns == dropDelta delta hs
+  where dropNeedle [] ys = Just ys
+        dropNeedle _ [] = Nothing
+        dropNeedle (_:xs) (_:ys) = dropNeedle xs ys
+        dropDelta [] ys = ys
+        dropDelta _ [] = []
+        dropDelta (_:xs) (_:ys) = dropDelta xs ys
 
 isInfixOf :: Eq a => [a] -> [a] -> Bool
 isInfixOf needle haystack = any (isPrefixOf needle) (tails haystack)

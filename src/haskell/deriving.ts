@@ -22,12 +22,7 @@ export function deriveInstance(decl: RDataDecl, cls: ClassEntity, support: Suppo
       return [builder.method('compare', deriveCompare(builder, cons)), ...deriveComparisons(builder)];
     }
     case 'Show': {
-      return [
-        builder.method(
-          'showsPrec',
-          cons.map((con) => deriveShowClause(builder, con))
-        ),
-      ];
+      return [builder.method('showsPrec', deriveShow(builder, cons))];
     }
     case 'Read': {
       return [builder.method('readsPrec', [deriveReadClause(builder, cons)])];
@@ -141,8 +136,9 @@ function fieldVars(builder: Builder, con: ConInfo, prefix: string): LocalVar[] {
 }
 
 function deriveEq(builder: Builder, cons: ConInfo[]): RClause[] {
+  if (cons.length === 0) return [builder.clause([builder.wild(), builder.wild()], builder.conNamed('True'))];
   const clauses = sameConClauses(builder, cons, '==', 'True', '&&');
-  if (cons.length !== 1) clauses.push(builder.clause([builder.wild(), builder.wild()], builder.conNamed('False')));
+  if (cons.length > 1) clauses.push(builder.clause([builder.wild(), builder.wild()], builder.conNamed('False')));
   return clauses;
 }
 
@@ -211,6 +207,19 @@ function isOperator(name: string): boolean {
 /** A constructor's or field's name as it appears in prefix position: operators in parentheses. */
 function prefixName(name: string): string {
   return isOperator(name) ? `(${name})` : name;
+}
+
+function deriveShow(builder: Builder, cons: ConInfo[]): RClause[] {
+  if (cons.length > 0) return cons.map((con) => deriveShowClause(builder, con));
+  const value = builder.newVar('value');
+  return [
+    builder.clause([builder.wild(), builder.pvar(value)], {
+      k: 'case',
+      scrutinee: builder.local(value),
+      alts: [],
+      span: builder.span,
+    }),
+  ];
 }
 
 function deriveShowClause(builder: Builder, con: ConInfo): RClause {
