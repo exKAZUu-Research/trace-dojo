@@ -10,7 +10,8 @@ export class CompilationStorage {
   }
 }
 
-// code-gauge-allow functionNcss 33 -- Counts the storage of each value representation recursively.
+// code-gauge-allow functionNcss 35 -- Counts the storage of each value representation recursively.
+// code-gauge-allow functionCognitiveComplexity 17 -- Computes nested storage requirements by type without allocating values.
 export function valueSlots(type: Type): number {
   let count = 0;
   switch (type.kind) {
@@ -34,7 +35,8 @@ export function valueSlots(type: Type): number {
       break;
     }
     case 'union': {
-      count = 1 + Math.max(0, ...(type.fields ?? []).map((field) => valueSlots(field.type)));
+      count = 1;
+      for (const field of type.fields ?? []) count = Math.max(count, 1 + valueSlots(field.type));
       break;
     }
     case 'optional': {

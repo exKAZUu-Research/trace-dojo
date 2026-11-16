@@ -1,17 +1,7 @@
-import { allocationSlots } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Span } from '../ast';
 import { type Frame, withHeldValues } from '../runtime';
-import {
-  copyForStorage,
-  evaluateHeld,
-  FnRef,
-  known,
-  runtime,
-  type SemaApi,
-  type TExpr,
-  undefinedValue,
-} from '../semaBase';
+import { copyForStorage, FnRef, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
   BOOL,
   CONST_U8_SLICE,
@@ -38,7 +28,7 @@ import {
   type Pointer,
   Slice,
   Some,
-  UNASSIGNED,
+  storageLocation,
   type Value,
   ZArray,
   ZStruct,
@@ -56,8 +46,16 @@ import {
   ORDER_LT,
   storeSliceValue,
 } from './common';
-import { ALLOCATOR, ALLOCATOR_ERROR, ERROR_OUT_OF_MEMORY } from './heap';
-import { addMembers, compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
+import {
+  ALLOCATOR,
+  ALLOCATOR_ERROR,
+  type AllocatorState,
+  allocatorState,
+  ERROR_OUT_OF_MEMORY,
+  freeMemory,
+  reserveNativeAllocation,
+} from './heap';
+import { addMembers, compileArgs, expectArgs, fnMember, type Member, nativeStateCall, nativeStruct } from './native';
 
 // std.unicode -----------------------------------------------------------------------------------------------------------
 
@@ -294,8 +292,11 @@ function deepEqual(a: Value, b: Value): boolean {
     return a.slots.every((value, index) => deepEqual(value, b.slots[index]));
   if (a instanceof ZUnion && b instanceof ZUnion) return a.tag === b.tag && deepEqual(a.slots[0], b.slots[0]);
   if (a instanceof Some && b instanceof Some) return deepEqual(a.value, b.value);
-  if (a instanceof Slice && b instanceof Slice)
-    return a.target.slots === b.target.slots && a.start === b.start && a.length === b.length;
+  if (a instanceof Slice && b instanceof Slice) {
+    const left = storageLocation(a.target.slots, a.start);
+    const right = storageLocation(b.target.slots, b.start);
+    return left.storage === right.storage && left.index === right.index && a.length === b.length;
+  }
   return equalValues(a, b);
 }
 
@@ -412,16 +413,24 @@ function priorityQueueType(
     }
     storeSliceValue(items, index, element);
   };
-  const reserve = (frame: Frame, queue: ZStruct, wanted: number): boolean => {
+  const reserve = (frame: Frame, queue: ZStruct, wanted: number, allocator: AllocatorState | undefined): boolean => {
     let capacity = Number(queue.slots[1] as bigint);
     if (capacity >= wanted) return true;
     while (capacity < wanted) capacity += Math.floor(capacity / 2) + 8;
-    if (!frame.runtime.canAllocate(allocationSlots(capacity, element))) return false;
-    frame.runtime.allocate(allocationSlots(capacity, element));
     const items = queue.slots[0] as Slice;
-    const values = items.values();
+    const complete = reserveNativeAllocation(
+      frame,
+      allocator,
+      capacity,
+      element,
+      Number(queue.slots[1] as bigint) > 0 ? items.target : undefined
+    );
+    if (!complete) return false;
+    const values = items.values().map(copyForStorage);
     while (values.length < capacity) values.push(undefinedValue(element));
-    queue.slots[0] = new Slice(new ZArray(values, 0, capacity), 0, items.length);
+    const storage = new ZArray(values, 0, capacity);
+    complete(storage, items.length);
+    queue.slots[0] = new Slice(storage, 0, items.length);
     queue.slots[1] = BigInt(capacity);
     return true;
   };
@@ -430,28 +439,25 @@ function priorityQueueType(
     args: Type[],
     result: Type,
     allocator: boolean,
-    run: (frame: Frame, queue: ZStruct, values: Value[]) => Value
+    run: (frame: Frame, queue: ZStruct, values: Value[], allocator: AllocatorState | undefined) => Value
   ): (() => Member) =>
     fnMember(`PriorityQueue.${name}`, (sema, call) => {
       sema.resolveStorage(element, call.span);
       const expected = allocator ? [ALLOCATOR, ...args] : args;
       const compiled = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
       const queue = queueState(sema, call.receiver, type, call.span);
-      const evaluators = compiled.map((arg) => arg.eval);
-      return runtime(
+      return nativeStateCall(
         result,
-        (frame) => {
-          frame.runtime.spend();
-          const received = queue(frame);
-          const values = evaluateHeld(frame, evaluators);
-          return withHeldValues(frame, values, () => run(frame, received, values.slice(allocator ? 1 : 0)));
-        },
-        call.span
+        compiled,
+        call.span,
+        (frame) => ({ receiver: queue(frame) }),
+        (state, values, frame) =>
+          run(frame, state.receiver, values.slice(allocator ? 1 : 0), allocator ? allocatorState(values[0]) : undefined)
       );
     });
-  const push = (frame: Frame, queue: ZStruct, values: Value[]): Value => {
+  const push = (frame: Frame, queue: ZStruct, values: Value[], allocator: AllocatorState | undefined): Value => {
     const items = queue.slots[0] as Slice;
-    if (!reserve(frame, queue, items.length + values.length)) return ERROR_OUT_OF_MEMORY;
+    if (!reserve(frame, queue, items.length + values.length, allocator)) return ERROR_OUT_OF_MEMORY;
     for (const value of values) {
       const current = queue.slots[0] as Slice;
       const grown = new Slice(current.target, current.start, current.length + 1);
@@ -469,7 +475,7 @@ function priorityQueueType(
     storeSliceValue(items, index, last);
     const shrunk = new Slice(items.target, items.start, items.length - 1);
     queue.slots[0] = shrunk;
-    items.target.slots[items.start + shrunk.length] = UNASSIGNED;
+    items.target.slots[items.start + shrunk.length] = undefinedValue(element);
     return withHeldValues(frame, [item, last], () => {
       if (index === shrunk.length) return item;
       if (index === 0) {
@@ -488,23 +494,21 @@ function priorityQueueType(
       const [ctx] = compileArgs(sema, expectArgs(sema, call, 1, 'initContext'), [context]);
       return computed(type, [ctx], call.span, ([value]) => new ZStruct([new Slice(new ZArray([]), 0, 0), 0n, value]));
     }),
-    deinit: method('deinit', [], VOID, true, (_, queue) => {
+    deinit: method('deinit', [], VOID, true, (_, queue, _args, allocator) => {
+      if ((queue.slots[1] as bigint) > 0n) freeMemory(allocator, (queue.slots[0] as Slice).target);
       queue.slots[0] = new Slice(new ZArray([]), 0, 0);
       queue.slots[1] = 0n;
       return;
     }),
-    push: method('push', [element], errorUnionOf(ALLOCATOR_ERROR, VOID), true, (frame, queue, [value]) =>
-      push(frame, queue, [value])
-    ),
-    add: method('add', [element], errorUnionOf(ALLOCATOR_ERROR, VOID), true, (frame, queue, [value]) =>
-      push(frame, queue, [value])
+    push: method('push', [element], errorUnionOf(ALLOCATOR_ERROR, VOID), true, (frame, queue, [value], allocator) =>
+      push(frame, queue, [value], allocator)
     ),
     pushSlice: method(
       'pushSlice',
       [sliceOf(element, true)],
       errorUnionOf(ALLOCATOR_ERROR, VOID),
       true,
-      (frame, queue, [values]) => push(frame, queue, elements(values))
+      (frame, queue, [values], allocator) => push(frame, queue, elements(values), allocator)
     ),
     peek: method('peek', [], optionalOf(element), false, (_, queue) => {
       const items = queue.slots[0] as Slice;
@@ -520,7 +524,8 @@ function priorityQueueType(
     capacity: method('capacity', [], USIZE, false, (_, queue) => queue.slots[1]),
     clearRetainingCapacity: method('clearRetainingCapacity', [], VOID, false, (_, queue) => {
       const items = queue.slots[0] as Slice;
-      for (let index = 0; index < items.length; index++) items.target.slots[items.start + index] = UNASSIGNED;
+      for (let index = 0; index < items.length; index++)
+        items.target.slots[items.start + index] = undefinedValue(element);
       queue.slots[0] = new Slice(items.target, items.start, 0);
       return;
     }),

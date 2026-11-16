@@ -152,7 +152,7 @@ function appendHashBytes(
     case 'fn': {
       const location = value instanceof Pointer ? value.storageLocation() : undefined;
       const address = location
-        ? (identityOf(location.storage) << 32n) + BigInt(location.index)
+        ? (identityOf(location.storage) << 32n) + BigInt(location.index * 8)
         : identityOf((value as FnValue).fn) << 32n;
       appendInteger(bytes, address, 8, spend);
       return;

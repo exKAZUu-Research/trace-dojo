@@ -33,6 +33,19 @@ export interface Slots {
   slots: Value[];
 }
 
+const storageLocations = new WeakMap<object, (index: number) => { storage: object; index: number }>();
+
+export function registerStorageLocation(
+  storage: object,
+  locate: (index: number) => { storage: object; index: number }
+): void {
+  storageLocations.set(storage, locate);
+}
+
+export function storageLocation(storage: object, index: number): { storage: object; index: number } {
+  return storageLocations.get(storage)?.(index) ?? { storage, index };
+}
+
 const immutableStorage = new WeakSet<object>();
 
 export function markConstantStorage(storage: Slots): void {
@@ -167,11 +180,11 @@ export class Pointer {
 
   storageLocation(): { storage: object; index: number } {
     const value = this.load();
-    if (value instanceof ZArray) return { storage: value.slots, index: value.offset };
-    return {
-      storage: this.target instanceof SomeSlots || this.target instanceof SliceLength ? this.target : this.target.slots,
-      index: this.index,
-    };
+    if (value instanceof ZArray) return storageLocation(value.slots, value.offset);
+    return storageLocation(
+      this.target instanceof SomeSlots || this.target instanceof SliceLength ? this.target : this.target.slots,
+      this.index
+    );
   }
 
   equals(other: Pointer): boolean {
@@ -263,6 +276,10 @@ export function storeInto(target: Slots, index: number, value: Value): void {
 }
 
 function storeSnapshotInto(target: Slots, index: number, value: Value): void {
+  if (storageLocations.has(target.slots)) {
+    target.slots[index] = value;
+    return;
+  }
   const current = target.slots[index];
   if (value instanceof ZArray && current instanceof ZArray && current.length === value.length) {
     const source = value.values();

@@ -751,10 +751,9 @@ export abstract class StatementCompiler extends CallCompiler {
     const store = this.slotStore(init.value, fieldType);
     return (frame, holder, index) => {
       const union = holder.slots[index] as ZUnion;
-      if (union.tag !== tag) {
-        union.tag = tag;
-        union.slots[0] = undefinedValue(fieldType);
-      }
+      const changed = union.tag !== tag;
+      union.tag = tag;
+      if (changed) union.slots[0] = undefinedValue(fieldType);
       store(frame, union, 0);
     };
   }

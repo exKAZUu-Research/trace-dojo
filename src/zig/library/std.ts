@@ -70,7 +70,6 @@ export function importStd(): StructType {
       Thread: 'スレッド（std.Thread）',
       atomic: 'アトミック操作（std.atomic）',
       fs: 'ファイルの読み書き（std.fs）',
-      net: 'ネットワーク（std.net）',
       http: 'ネットワーク（std.http）',
       os: 'OS の機能（std.os）',
       posix: 'OS の機能（std.posix）',
@@ -444,10 +443,7 @@ const PROCESS = nativeStruct('std.process', {
     });
   }),
   ...unavailableMembers({
-    args: 'コマンドライン引数（std.process.args）',
-    argsAlloc: 'コマンドライン引数（std.process.argsAlloc）',
     Child: '外部のプロセス（std.process.Child）',
-    getEnvVarOwned: '環境変数（std.process.getEnvVarOwned）',
     Environ: '環境変数（std.process.Environ）',
   }),
 });

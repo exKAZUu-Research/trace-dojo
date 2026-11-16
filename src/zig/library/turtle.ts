@@ -7,7 +7,12 @@ import { NativeHandle, Pointer, type Value } from '../values';
 import { expectArgs, fnMember, type Member, nativeStruct } from './native';
 
 /** `Turtle`, which programs use without importing it, as Java's `Turtle` class. */
-export const TURTLE: StructType = nativeStruct('Turtle', {}, [], { kind: 'turtle', args: [], storageSlots: 1 });
+export const TURTLE: StructType = nativeStruct('Turtle', {}, [], {
+  kind: 'turtle',
+  args: [],
+  storageSlots: 1,
+  byteSize: 8,
+});
 
 const members: Record<string, () => Member> = {
   init: fnMember('Turtle.init', (sema, call) => compileInit(sema, call)),

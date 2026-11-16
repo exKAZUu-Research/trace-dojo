@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 595 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 597 -- The file holds one layer of the compiler, whose parts share its private state.
 import type { SourceDiagnostic } from '../interpreter/diagnostics';
 import { isDiscardName } from './ast';
 import type {
@@ -468,6 +468,8 @@ class AstChecker {
         break;
       }
       case 'unary': {
+        if (expression.operator === '-' && expression.operand.kind === 'integer' && expression.operand.value === 0n)
+          this.error(expression, '整数の -0 は曖昧です（整数のゼロには 0 と書いてください）。');
         this.expression(expression.operand, expression.operator === '&' ? 'ref' : 'value');
         break;
       }

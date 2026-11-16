@@ -220,7 +220,7 @@ function variableHeader(node: Node): VariableDeclaration | undefined {
   };
 }
 
-function containerField(node: Node): ContainerField {
+function containerField(node: Node, tupleElement = false): ContainerField {
   if (hasToken(node, 'comptime')) unavailable(node, 'comptime のフィールド');
   rejectAttributes(node);
   const nameNode = node.childForFieldName('name');
@@ -237,8 +237,7 @@ function containerField(node: Node): ContainerField {
     };
   }
   if (!nameNode) fail(node, '書き方に誤りがあります。');
-  // A bare name is an enum's or a union's field, or the type of a tuple's field; the container decides which.
-  if (nameNode.type === 'identifier') return { ...spanOf(node), ...identifierName(nameNode), value };
+  if (nameNode.type === 'identifier' && !tupleElement) return { ...spanOf(node), ...identifierName(nameNode), value };
   return { ...spanOf(node), type: typeExpression(nameNode), value };
 }
 
@@ -262,7 +261,7 @@ function container(node: Node): Container {
     if (!child.isNamed || isComment(child)) continue;
     if (child.type === 'function_declaration') members.push(functionDeclaration(child));
     else if (child.type === 'variable_declaration') members.push(containerVariable(child));
-    else if (child.type === 'container_field') fields.push(containerField(child));
+    else if (child.type === 'container_field') fields.push(containerField(child, containerKind === 'struct'));
     else if (child.type === 'test_declaration') unavailable(child, 'test 宣言');
     else if (child.type === 'comptime_declaration') unavailable(child, 'comptime');
     else fail(child, '書き方に誤りがあります。');

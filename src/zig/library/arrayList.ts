@@ -28,7 +28,7 @@ import {
   nativeEnum,
   reserveNativeAllocation,
 } from './heap';
-import { compileArgs, expectArgs, fnMember, type Member, nativeStateCall, nativeStruct } from './native';
+import { addMembers, compileArgs, expectArgs, fnMember, type Member, nativeStateCall, nativeStruct } from './native';
 import { compilePrint, PrintWriteError } from './print';
 
 const SAFETY_STATE = nativeEnum('debug.SafetyLock.State', ['unlocked', 'locked']);
@@ -97,7 +97,7 @@ function reallocate(frame: Frame, list: List, capacity: number, child: Type): bo
   const values = list.items.values().map(copyForStorage);
   for (let index = values.length; index < capacity; index++) values.push(undefinedValue(child));
   const storage = new ZArray(values, 0, capacity);
-  complete(storage);
+  complete(storage, list.items.length);
   list.struct.slots[0] = new Slice(storage, 0, list.items.length);
   list.struct.slots[1] = BigInt(capacity);
   list.items = list.struct.slots[0] as Slice;
@@ -457,17 +457,7 @@ function defineMembers(type: StructType, child: Type): void {
       );
     });
   }
-  for (const [name, resolve] of Object.entries(members)) {
-    let resolved: Member | undefined;
-    type.namespace.decls.set(name, {
-      kind: 'native',
-      name,
-      resolve: () => {
-        resolved ??= resolve();
-        return resolved;
-      },
-    });
-  }
+  addMembers(type, members);
 }
 
 function allocating(result: Type): Type {

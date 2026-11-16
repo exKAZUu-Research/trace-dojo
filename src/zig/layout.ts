@@ -1,4 +1,4 @@
-import type { Type } from './types';
+import { intType, type StructType, type Type, type UnionType } from './types';
 
 /** `@sizeOf` and `@alignOf` as on the reference toolchain's target (aarch64), which the library's growth depends on. */
 export function sizeOf(type: Type): number {
@@ -7,6 +7,39 @@ export function sizeOf(type: Type): number {
 
 export function alignOf(type: Type): number {
   return layoutOf(type).align;
+}
+
+export function fieldOffsets(type: StructType): number[] {
+  const fields = type.fields ?? [];
+  const offsets = fields.map(() => 0);
+  const ordered = fields
+    .map((field, index) => ({ field, index }))
+    .filter(({ field }) => field.comptimeValue === undefined);
+  if (type.layout === 'auto') ordered.sort((a, b) => alignOf(b.field.type) - alignOf(a.field.type));
+  let offset = 0;
+  for (const { field, index } of ordered) {
+    if (type.layout === 'packed') {
+      offsets[index] = offset;
+      offset += bitSizeOf(field.type);
+    } else {
+      offset = alignTo(offset, alignOf(field.type));
+      offsets[index] = offset * 8;
+      offset += sizeOf(field.type);
+    }
+  }
+  return offsets;
+}
+
+export function unionOffsets(type: UnionType): { payload: number; tag: number } {
+  const { size: payloadSize, align: payloadAlign } = unionPayload(type);
+  const tag = layoutOf(type.tagType ?? intType(false, 8));
+  return tag.align >= payloadAlign
+    ? { tag: 0, payload: alignTo(tag.size, payloadAlign) }
+    : { payload: 0, tag: alignTo(payloadSize, tag.align) };
+}
+
+export function errorUnionOffsets(payload: Type): { payload: number; error: number } {
+  return alignOf(payload) >= 2 ? { payload: 0, error: sizeOf(payload) } : { payload: 2, error: 0 };
 }
 
 interface Layout {
@@ -27,8 +60,8 @@ function intLayout(bits: number): Layout {
   return { size, align: Math.min(size, 16) };
 }
 
-// code-gauge-allow functionNcss 49 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+// code-gauge-allow functionNcss 51 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+// code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
 function layoutOf(type: Type): Layout {
   switch (type.kind) {
     case 'int': {
@@ -68,6 +101,8 @@ function layoutOf(type: Type): Layout {
       return intLayout(type.tagType?.bits ?? 0);
     }
     case 'struct': {
+      if (type.native?.byteSize !== undefined)
+        return { size: type.native.byteSize, align: type.native.byteAlignment ?? 8 };
       const fields = (type.fields ?? [])
         .filter((field) => field.comptimeValue === undefined)
         .map((field) => layoutOf(field.type));
@@ -84,9 +119,9 @@ function layoutOf(type: Type): Layout {
       return { size: alignTo(size, align), align };
     }
     case 'union': {
-      const fields = (type.fields ?? []).map((field) => layoutOf(field.type));
-      let size = Math.max(0, ...fields.map((field) => field.size));
-      let align = Math.max(1, ...fields.map((field) => field.align));
+      const payload = unionPayload(type);
+      let size = payload.size;
+      let align = payload.align;
       const tag = type.tagType ? intLayout(type.tagType.tagType?.bits ?? 0) : intLayout(8);
       if (tag.size > 0) {
         size = alignTo(size, tag.align) + tag.size;
@@ -104,4 +139,15 @@ function bitSizeOf(type: Type): number {
   if (type.kind === 'int') return type.bits;
   if (type.kind === 'bool') return 1;
   return sizeOf(type) * 8;
+}
+
+function unionPayload(type: UnionType): Layout {
+  let size = 0;
+  let align = 1;
+  for (const field of type.fields ?? []) {
+    const child = layoutOf(field.type);
+    size = Math.max(size, child.size);
+    align = Math.max(align, child.align);
+  }
+  return { size, align };
 }

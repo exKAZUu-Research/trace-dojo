@@ -194,7 +194,8 @@ function basicScalar(value: Value): TraceScalar {
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNode | undefined {
-  if (typeof value !== 'object') return displayValue(value, type, seen);
+  if (typeof value !== 'object' || type.kind === 'optional' || type.kind === 'error_union')
+    return displayValue(value, type, seen);
   if (seen.has(value)) return undefined;
   seen.add(value);
   try {

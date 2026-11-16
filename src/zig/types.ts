@@ -114,6 +114,8 @@ export interface StructType {
 }
 
 export interface NativeStruct {
+  readonly byteSize?: number;
+  readonly byteAlignment?: number;
   readonly storageSlots?: number;
   readonly kind: string;
   /** The type arguments of a generic native type. */

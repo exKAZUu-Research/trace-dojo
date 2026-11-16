@@ -45,7 +45,16 @@ import {
   tupleOf,
 } from './common';
 import { ALLOCATOR, allocatorState, ERROR_OUT_OF_MEMORY, reserveNativeAllocation } from './heap';
-import { compileArgs, expectArgs, fnMember, type Member, nativeCall, nativeStruct, typeMember } from './native';
+import {
+  addMembers,
+  compileArgs,
+  expectArgs,
+  fnMember,
+  type Member,
+  nativeCall,
+  nativeStruct,
+  typeMember,
+} from './native';
 import { type SortAlgorithm, sortValues } from './sorting';
 
 interface AllocationPlan {
@@ -295,17 +304,7 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
             return;
           }),
         };
-  for (const [name, resolve] of Object.entries(members)) {
-    let resolved: Member | undefined;
-    created.namespace.decls.set(name, {
-      kind: 'native',
-      name,
-      resolve: () => {
-        resolved ??= resolve();
-        return resolved;
-      },
-    });
-  }
+  addMembers(created, members);
   return created;
 }
 

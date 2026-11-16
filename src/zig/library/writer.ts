@@ -4,7 +4,12 @@ import type { StructType } from '../types';
 import { ErrorValue, Slice, type Value, ZArray, ZStruct } from '../values';
 import { nativeStruct } from './native';
 
-export const WRITER: StructType = nativeStruct('Io.Writer', {}, [], { kind: 'writer', args: [], storageSlots: 4 });
+export const WRITER: StructType = nativeStruct('Io.Writer', {}, [], {
+  kind: 'writer',
+  args: [],
+  storageSlots: 4,
+  byteSize: 32,
+});
 
 export interface WriterState extends Record<string, unknown> {
   fd: number | undefined;

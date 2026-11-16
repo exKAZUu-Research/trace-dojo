@@ -66,7 +66,9 @@ export function unavailableDeclarations(name: string): Record<string, () => Memb
 
 /** Adds declarations to a native struct, which may refer to the struct itself. */
 export function addMembers(type: { namespace: Namespace }, members: Record<string, () => Member>): void {
+  const allowed = PUBLIC_STD_MEMBERS[type.namespace.name.split('(')[0]];
   for (const [key, resolve] of Object.entries(members)) {
+    if (allowed && !allowed.includes(key)) continue;
     let resolved: Member | undefined;
     const decl: Decl = {
       kind: 'native',

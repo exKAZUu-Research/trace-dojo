@@ -746,32 +746,10 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Operators -------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 37 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+  // code-gauge-allow functionNcss 31 -- Keeps each numeric unary operation with its type checks and evaluation.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps each numeric unary operation with its type checks and evaluation.
   private unary(expression: ExpressionOf<'unary'>, resultType: Type | undefined): TExpr {
-    if (expression.operator === '&') {
-      let operandType = resultType?.kind === 'pointer' ? resultType.child : undefined;
-      // `&.{ 1, 2 }` for a slice points to an array of the slice's elements.
-      if (
-        resultType?.kind === 'pointer' &&
-        resultType.size === 'slice' &&
-        expression.operand.kind === 'arrayInit' &&
-        !expression.operand.type
-      ) {
-        operandType = arrayOf(expression.operand.elements.length, resultType.child, resultType.sentinel);
-      }
-      if (
-        resultType?.kind === 'pointer' &&
-        resultType.size === 'slice' &&
-        expression.operand.kind === 'structInit' &&
-        !expression.operand.type &&
-        expression.operand.fields.length === 0
-      ) {
-        operandType = arrayOf(0, resultType.child, resultType.sentinel);
-      }
-      const address = this.addressOf(this.compile(expression.operand, operandType));
-      return address;
-    }
+    if (expression.operator === '&') return this.addressOperand(expression, resultType);
     const operand = this.compile(expression.operand, expression.operator === '!' ? BOOL : resultType);
     const type = operand.type;
     switch (expression.operator) {
@@ -802,6 +780,38 @@ export abstract class ExpressionCompiler extends SemaBase {
         return this.error(expression, `-% は、整数の型にだけ使えます（${typeName(type)} 型です）。`);
       }
     }
+  }
+
+  private addressOperand(expression: ExpressionOf<'unary'>, resultType: Type | undefined): TExpr {
+    const pointerType = resultType && unwrapResult(resultType);
+    let operandType = pointerType?.kind === 'pointer' ? pointerType.child : undefined;
+    if (
+      pointerType?.kind === 'pointer' &&
+      pointerType.size === 'slice' &&
+      expression.operand.kind === 'arrayInit' &&
+      !expression.operand.type
+    ) {
+      operandType = arrayOf(expression.operand.elements.length, pointerType.child, pointerType.sentinel);
+    }
+    if (
+      pointerType?.kind === 'pointer' &&
+      pointerType.size === 'slice' &&
+      expression.operand.kind === 'structInit' &&
+      !expression.operand.type &&
+      expression.operand.fields.length === 0
+    ) {
+      operandType = arrayOf(0, pointerType.child, pointerType.sentinel);
+    }
+    let operand = this.compile(expression.operand, operandType);
+    if (
+      operand.known &&
+      !operand.place &&
+      operandType &&
+      (operand.type.kind === 'comptime_int' || operand.type.kind === 'comptime_float') &&
+      (operandType.kind === 'int' || operandType.kind === 'float')
+    )
+      operand = this.coerce(operand, operandType, expression.operand);
+    return this.addressOf(operand);
   }
 
   protected checkedKnown(value: bigint, type: IntType, span: Span): bigint {

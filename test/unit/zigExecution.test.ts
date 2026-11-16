@@ -1949,3 +1949,210 @@ test('narrow error casts report the rejected error name', () => {
     uncaughtException: 'panic: unexpected error code, found error.Two',
   });
 });
+
+test.each([
+  {
+    name: 'integers',
+    body: `var bytes:[32]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().alloc(u16,2);p[0]=0x1234;bytes[2]=0x78;bytes[3]=0x56;std.debug.print("{x} {x} {x} {x}",.{bytes[0],bytes[1],p[0],p[1]});`,
+    output: '34 12 1234 5678',
+  },
+  {
+    name: 'narrow',
+    body: `var bytes:[8]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().alloc(u3,2);p[0]=5;std.debug.print("{} {}",.{bytes[0],p[0]});`,
+    output: '5 5',
+  },
+  {
+    name: 'packed',
+    body: `const P=packed struct{x:u3,y:u5};var bytes:[32]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(P);p.*=.{.x=5,.y=17};std.debug.print("{x}|",.{bytes[0]});bytes[0]=0xe3;std.debug.print("{} {}",.{p.x,p.y});`,
+    output: '8d|3 28',
+  },
+  {
+    name: 'record',
+    body: `const P=struct{a:u8,b:u32,c:u16};var bytes:[32]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(P);p.*=.{.a=1,.b=0x12345678,.c=0x90ab};std.debug.print("{} {} {} {}",.{bytes[0],bytes[4],bytes[6],p.b});`,
+    output: '120 171 1 305419896',
+  },
+  {
+    name: 'f64',
+    body: `var bytes:[32]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(f64);p.*=1.5;std.debug.print("{} {}|",.{bytes[6],bytes[7]});bytes[7]=191;std.debug.print("{d}",.{p.*});`,
+    output: '248 63|-1.5',
+  },
+  {
+    name: 'f80',
+    body: `var bytes:[32]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(f80);p.*=1.5;std.debug.print("{} {}|{d}",.{bytes[8],bytes[9],p.*});`,
+    output: '255 63|1.5',
+  },
+  {
+    name: 'f128',
+    body: `var bytes:[32]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(f128);p.*=1.5;std.debug.print("{} {}|{d}",.{bytes[14],bytes[15],p.*});`,
+    output: '255 63|1.5',
+  },
+  {
+    name: 'optional',
+    body: `var bytes:[32]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(?u16);p.*=3;std.debug.print("{} {}|",.{p.*.?,bytes[2]});p.*=null;std.debug.print("{} {}",.{p.*==null,bytes[2]});`,
+    output: '3 1|true 0',
+  },
+  {
+    name: 'nested',
+    body: `var bytes:[32]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(??u16);p.*=@as(?u16,null);std.debug.print("{} {}|",.{p.*==null,p.*.?==null});p.*.?=3;std.debug.print("{}",.{p.*.?.?});`,
+    output: 'false true|3',
+  },
+  {
+    name: 'pointer',
+    body: `var bytes:[32]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(?*u8);var n:u8=7;p.*=&n;std.debug.print("{} ",.{p.*.?.*});n=8;std.debug.print("{} {} ",.{p.*.?.*,p.*.?==&n});p.*=null;std.debug.print("{}",.{p.*==null});`,
+    output: '7 8 true true',
+  },
+  {
+    name: 'enumeration',
+    body: `const E=enum(u16){a=0x10,b=0x200};var bytes:[32]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(E);p.*=.b;std.debug.print("{} {}",.{@intFromEnum(p.*),bytes[1]});`,
+    output: '512 2',
+  },
+  {
+    name: 'unionSmallTag',
+    body: `const U=union(enum){a:u32,b:u8};var bytes:[32]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(U);p.*=.{.a=7};std.debug.print("{} {} {}",.{bytes[0],bytes[4],p.a});`,
+    output: '7 0 7',
+  },
+  {
+    name: 'unionBigTag',
+    body: `const U=union(enum(u32)){a:u8,b:u8};var bytes:[32]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(U);p.*=.{.b=7};std.debug.print("{} {} {}",.{bytes[0],bytes[4],p.b});`,
+    output: '1 7 7',
+  },
+])('fixed buffer typed storage aliases bytes: $name', ({ body, output }) => {
+  const source = `const std=@import("std");pub fn main()!void{${body}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: output,
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  {
+    name: 'arena',
+    body: `var b:[512]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&b);var a=std.heap.ArenaAllocator.init(f.allocator());const g=a.allocator();const p=try g.alloc(u8,10);p[0]=9;std.debug.print("{} {} {}|",.{f.end_index,a.queryCapacity(),p[0]});_=try g.alloc(u64,8);std.debug.print("{} {}|",.{f.end_index,a.queryCapacity()});std.debug.print("{}|",.{a.reset(.retain_capacity)});std.debug.print("{} {}|",.{f.end_index,a.queryCapacity()});_=try g.alloc(u8,10);a.deinit();std.debug.print("{}",.{f.end_index});`,
+    output: '76 52 9|168 144|true|168 144|0',
+  },
+  {
+    name: 'arenaLimit',
+    body: `var b:[512]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&b);var a=std.heap.ArenaAllocator.init(f.allocator());_=try a.allocator().alloc(u8,10);std.debug.print("{}|",.{a.reset(.{.retain_with_limit=10})});std.debug.print("{} {}|",.{f.end_index,a.queryCapacity()});_=a.reset(.free_all);std.debug.print("{} {}",.{f.end_index,a.queryCapacity()});`,
+    output: 'true|34 10|0 0',
+  },
+  {
+    name: 'arenaLeak',
+    body: `var d=std.heap.DebugAllocator(.{}).init;var a=std.heap.ArenaAllocator.init(d.allocator());_=try a.allocator().alloc(u8,100);_=try a.allocator().alloc(u8,1000);a.deinit();std.debug.print("{}",.{d.deinit()});`,
+    output: '.ok',
+  },
+  {
+    name: 'collections',
+    body: `var bytes:[4096]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);var m=std.AutoHashMap(u8,u16).init(f.allocator());try m.put(1,500);try m.put(2,900);std.debug.print("{} {} {}|",.{m.get(1).?,m.get(2).?,f.end_index});m.deinit();std.debug.print("{}|",.{f.end_index});var q:std.PriorityQueue(u8,void,order)=.empty;try q.push(f.allocator(),9);try q.push(f.allocator(),3);std.debug.print("{} {} {}|",.{q.pop().?,q.pop().?,f.end_index});q.deinit(f.allocator());std.debug.print("{}",.{f.end_index});`,
+    output: '500 900 56|0|3 9 8|0',
+  },
+  {
+    name: 'unmanaged',
+    body: `var bytes:[4096]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);var m:std.AutoHashMapUnmanaged(u8,u8)=.empty;try m.put(f.allocator(),1,5);std.debug.print("{} {}|",.{m.get(1).?,f.end_index});m.deinit(f.allocator());std.debug.print("{}",.{f.end_index});`,
+    output: '5 48|0',
+  },
+  {
+    name: 'debugCollections',
+    body: `var d=std.heap.DebugAllocator(.{}).init;const g=d.allocator();var m=std.AutoHashMap(u8,u8).init(g);for(0..100)|i|try m.put(@intCast(i),@intCast(i));var q:std.PriorityQueue(u8,void,order)=.empty;for(0..100)|i|try q.push(g,@intCast(i));std.debug.print("{} {}|",.{m.count(),q.count()});m.deinit();q.deinit(g);std.debug.print("{}",.{d.deinit()});`,
+    output: '100 100|.ok',
+  },
+  {
+    name: 'realloc',
+    body: `var bytes:[64]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const g=f.allocator();var p=try g.alloc(u16,2);p[0]=12;p[1]=34;p=try g.realloc(p,4);std.debug.print("{} {} {}|",.{p[0],p[1],f.end_index});g.free(p);std.debug.print("{}",.{f.end_index});`,
+    output: '12 34 8|0',
+  },
+])('allocator lifecycle follows its supplied backing: $name', ({ body, output }) => {
+  const source = `const std=@import("std");fn order(_:void,a:u8,b:u8)std.math.Order{return std.math.order(a,b);}pub fn main()!void{${body}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: output,
+    uncaughtException: undefined,
+  });
+});
+
+test('collections propagate exhaustion from managed and unmanaged supplied allocators', () => {
+  const source = `const std=@import("std");fn order(_:void,a:u8,b:u8)std.math.Order{return std.math.order(a,b);}pub fn main()void{var bytes:[1]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const g=f.allocator();var m=std.AutoHashMap(u8,u8).init(g);m.put(1,2) catch |e| std.debug.print("{s}|",.{@errorName(e)});var u:std.AutoHashMapUnmanaged(u8,u8)=.empty;u.put(g,1,2) catch |e| std.debug.print("{s}|",.{@errorName(e)});var q:std.PriorityQueue(u8,void,order)=.empty;q.push(g,1) catch |e| std.debug.print("{s}|",.{@errorName(e)});std.debug.print("{} {} {}",.{m.count(),u.count(),q.count()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'OutOfMemory|OutOfMemory|OutOfMemory|0 0 0',
+    uncaughtException: undefined,
+  });
+});
+
+test('arena exhaustion comes from its child allocator', () => {
+  const source = `const std=@import("std");pub fn main()void{var bytes:[8]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);var a=std.heap.ArenaAllocator.init(f.allocator());defer a.deinit();_=a.allocator().alloc(u8,100) catch |e|{std.debug.print("{s} {}",.{@errorName(e),f.end_index});return;};}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'OutOfMemory 0',
+    uncaughtException: undefined,
+  });
+});
+
+test('tuple element types resolve identifiers and repeated aliases', () => {
+  const source = `const std=@import("std");const Q=struct{x:u8};const T=struct{f64,Q,Q};pub fn main()void{var t:T=.{1.5,.{.x=2},.{.x=3}};t[1].x+=4;std.debug.print("{d} {} {}",.{t[0],t[1].x,t[2].x});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1.5 6 3',
+    uncaughtException: undefined,
+  });
+});
+
+test('temporary numeric addresses receive their result pointer type', () => {
+  const source = `const std=@import("std");fn make()*const i32{return &5;}pub fn main()void{const a:*const i32=&-5;const b:?*const i32=&(1+2);const c:*const f64=&1.5;std.debug.print("{} {} {} {d}",.{make().*,a.*,b.?.*,c.*});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '5 -5 3 1.5',
+    uncaughtException: undefined,
+  });
+});
+
+test('parenthesized zero and floating negative zero remain distinct', () => {
+  const source = `const std=@import("std");pub fn main()void{const x=-(0);const y=-0.0;const z=-%0;std.debug.print("{} {d} {}",.{x,y,z});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '0 -0 0',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['-0', '- 0x0'])('direct negative integer zero is ambiguous: %s', (literal) => {
+  expect(executeProgram('zig', `pub fn main()void{const x=${literal};_=x;}`).kind).toBe('compileError');
+});
+
+test('typed temporary addresses keep named comptime constants distinct', () => {
+  expect(executeProgram('zig', `pub fn main()void{const n=5;const p:*const i32=&n;_=p;}`).kind).toBe('compileError');
+});
+
+test('fetchRemove snapshots aggregate keys and values before clearing map storage', () => {
+  const source = `const std=@import("std");const Key=struct{x:u8};const Value=struct{a:[2]u8,p:*u8};pub fn main(init:std.process.Init)!void{var m=std.AutoHashMap(Key,Value).init(init.gpa);defer m.deinit();var n:u8=7;try m.put(.{.x=3},.{.a=.{9,8},.p=&n});const removed=m.fetchRemove(.{.x=3}).?;n=6;std.debug.print("{} {} {} {} {}",.{removed.key.x,removed.value.a[0],removed.value.a[1],removed.value.p.*,m.count()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '3 9 8 6 0',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  {
+    name: 'errorUnion',
+    body: `var bytes:[32]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(error{Oops}!u64);p.*=0x1234;std.debug.print("{} {} {} {}",.{bytes[0],bytes[1],bytes[8],try p.*});`,
+    output: '52 18 0 4660',
+  },
+  {
+    name: 'errorUnion16',
+    body: `var bytes:[32]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(error{Oops}!u16);p.*=0x1234;std.debug.print("{} {} {} {}",.{bytes[0],bytes[1],bytes[2],try p.*});`,
+    output: '52 18 0 4660',
+  },
+  {
+    name: 'errorUnion8',
+    body: `var bytes:[32]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(error{Oops}!u8);p.*=52;std.debug.print("{} {} {} {}",.{bytes[0],bytes[1],bytes[2],try p.*});`,
+    output: '0 0 52 52',
+  },
+])('fixed buffer error unions place payloads and errors according to alignment: $name', ({ body, output }) => {
+  const source = `const std=@import("std");pub fn main()!void{${body}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: output,
+    uncaughtException: undefined,
+  });
+});

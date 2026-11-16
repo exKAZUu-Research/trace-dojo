@@ -1,7 +1,11 @@
+// code-gauge-allow-file fileNcss 415 -- Keeps hash-map state, storage layout, and public method registration together.
 import { allocationSlots } from '../allocation';
+import { reserveAllocatorBytes } from '../allocatorStorage';
 // code-gauge-allow-file duplicateLines 19 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { panic } from '../arith';
 import type { Expression, Span } from '../ast';
+import { bindBufferMemory } from '../bufferMemory';
+import { alignOf, sizeOf } from '../layout';
 import type { Frame } from '../runtime';
 import { copyForFrame, copyForStorage, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
@@ -25,6 +29,7 @@ import {
   NULL,
   optionalSome,
   Pointer,
+  type Slice,
   Some,
   storeInto,
   type Value,
@@ -35,8 +40,24 @@ import {
 import { WeakValueMap } from '../weakValueMap';
 import { elements, equalValues } from './common';
 import { autoHashBytes, wyhash } from './hashing';
-import { ALLOCATOR, ALLOCATOR_ERROR, ERROR_OUT_OF_MEMORY } from './heap';
-import { compileArgs, expectArgs, fnMember, type Member, nativeStateCall, nativeStruct } from './native';
+import {
+  ALLOCATOR,
+  ALLOCATOR_ERROR,
+  type AllocatorState,
+  allocatorState,
+  ERROR_OUT_OF_MEMORY,
+  freeMemory,
+} from './heap';
+import {
+  addMembers,
+  compileArgs,
+  expectArgs,
+  fnMember,
+  type Member,
+  nativeCall,
+  nativeStateCall,
+  nativeStruct,
+} from './native';
 
 type KeyKind = 'auto' | 'string';
 
@@ -48,6 +69,9 @@ interface MapState extends Record<string, unknown> {
   values: ZArray;
   size: number;
   available: number;
+  allocator?: AllocatorState;
+  memory?: object;
+  header?: ZStruct;
 }
 
 const MINIMAL_CAPACITY = 8;
@@ -99,6 +123,7 @@ function emptyState(): MapState {
     values: new ZArray([]),
     size: 0,
     available: 0,
+    memory: undefined,
   };
 }
 
@@ -138,6 +163,7 @@ function putNoClobber(frame: Frame, state: MapState, key: Value, value: Value, k
 }
 
 /** Grows the table to a new capacity, reinserting the used entries in slot order. */
+// code-gauge-allow functionNcss 40 -- Reserves backing bytes before rebuilding the table in reference slot order.
 function grow(
   frame: Frame,
   state: MapState,
@@ -147,14 +173,32 @@ function grow(
   kind: KeyKind
 ): boolean {
   const capacity = Math.max(newCapacity, MINIMAL_CAPACITY);
-  if (!frame.runtime.canAllocate(allocationSlots(capacity, keyType) + allocationSlots(capacity, valueType)))
-    return false;
-  frame.runtime.allocate(allocationSlots(capacity, keyType) + allocationSlots(capacity, valueType));
+  const slots = capacity + allocationSlots(capacity, keyType) + allocationSlots(capacity, valueType);
+  if (!frame.runtime.canAllocate(slots)) return false;
+  const layout = mapAllocationLayout(capacity, keyType, valueType);
+  const reserved = reserveAllocatorBytes(frame, state.allocator, layout.size, layout.alignment);
+  if (!reserved) return false;
+  frame.runtime.allocate(slots);
   const old = { ...state, metadata: state.metadata, keys: state.keys, values: state.values };
+  const memory = {};
+  reserved.complete(memory);
+  const keys = new ZArray(Array.from({ length: capacity }, () => undefinedValue(keyType)));
+  const values = new ZArray(Array.from({ length: capacity }, () => undefinedValue(valueType)));
+  let metadata = Array.from<number>({ length: capacity }).fill(0);
+  if (reserved.region) {
+    const { buffer, offset } = reserved.region;
+    const spend = (): void => frame.runtime.spend();
+    bindBufferMemory(keys, keyType, capacity, buffer, offset + layout.keys, spend, 0);
+    bindBufferMemory(values, valueType, capacity, buffer, offset + layout.values, spend, 0);
+    metadata = byteMetadata(buffer, offset + 24, capacity);
+    metadata.fill(0);
+    for (let index = 0; index < 4; index++) buffer.set(offset + 16 + index, BigInt((capacity >>> (index * 8)) & 255));
+  }
   state.capacity = capacity;
-  state.metadata = Array.from<number>({ length: capacity }).fill(0);
-  state.keys = new ZArray(Array.from({ length: capacity }, () => undefinedValue(keyType)));
-  state.values = new ZArray(Array.from({ length: capacity }, () => undefinedValue(valueType)));
+  state.memory = memory;
+  state.metadata = metadata;
+  state.keys = keys;
+  state.values = values;
   state.available = Math.floor((capacity * MAX_LOAD) / 100);
   const size = old.size;
   state.size = 0;
@@ -162,7 +206,39 @@ function grow(
     if ((old.metadata[index] & 0x80) === 0) continue;
     putNoClobber(frame, state, old.keys.slots[index], old.values.slots[index], keyType, kind);
   }
+  if (old.memory) freeMemory(old.allocator, old.memory);
   return true;
+}
+
+function mapAllocationLayout(
+  capacity: number,
+  key: Type,
+  value: Type
+): { size: number; alignment: number; keys: number; values: number } {
+  const keyAlign = sizeOf(key) === 0 ? 1 : alignOf(key);
+  const valueAlign = sizeOf(value) === 0 ? 1 : alignOf(value);
+  const alignment = Math.max(8, keyAlign, valueAlign);
+  const keys = Math.ceil((24 + capacity) / keyAlign) * keyAlign;
+  const values = Math.ceil((keys + capacity * sizeOf(key)) / valueAlign) * valueAlign;
+  const size = Math.ceil((values + capacity * sizeOf(value)) / alignment) * alignment;
+  return { size, alignment, keys, values };
+}
+
+function byteMetadata(buffer: Slice, offset: number, capacity: number): number[] {
+  return new Proxy(Array.from<number>({ length: capacity }).fill(0), {
+    get: (target, property, receiver) => {
+      if (typeof property === 'string' && /^(0|[1-9]\d*)$/.test(property) && Number(property) < capacity)
+        return Number(buffer.get(offset + Number(property)) as bigint);
+      return Reflect.get(target, property, receiver);
+    },
+    set: (target, property, value: number, receiver) => {
+      if (typeof property === 'string' && /^(0|[1-9]\d*)$/.test(property) && Number(property) < capacity) {
+        buffer.set(offset + Number(property), BigInt(value));
+        return true;
+      }
+      return Reflect.set(target, property, value, receiver);
+    },
+  });
 }
 
 function load(state: MapState): number {
@@ -264,7 +340,8 @@ function hashMapType(name: string, keyType: Type, valueType: Type, kind: KeyKind
   ]);
   const map = nativeStruct(`${name}(${typeName(keyType)},${typeName(valueType)})`, {}, [], {
     kind: 'hashMap',
-    storageSlots: 4,
+    storageSlots: managed ? 5 : 4,
+    byteSize: managed ? 40 : 24,
     args: [keyType, valueType],
   });
   const iterator = nativeStruct(`${name}.Iterator`, {});
@@ -274,20 +351,6 @@ function hashMapType(name: string, keyType: Type, valueType: Type, kind: KeyKind
   mapTypes.set(key, map);
   defineMembers(types, keyType, valueType, kind, managed);
   return map;
-}
-
-function setMembers(type: StructType, members: Record<string, () => Member>): void {
-  for (const [name, resolve] of Object.entries(members)) {
-    let resolved: Member | undefined;
-    type.namespace.decls.set(name, {
-      kind: 'native',
-      name,
-      resolve: () => {
-        resolved ??= resolve();
-        return resolved;
-      },
-    });
-  }
 }
 
 /** The state of the map a method is called on, by value or through a pointer. */
@@ -337,11 +400,11 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       const expected = takesAllocator ? [ALLOCATOR, ...options.args] : options.args;
       const args = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
       const state = stateOf(sema, call.receiver, map, call.span, options.mutable);
-      return nativeStateCall(options.result, args, call.span, state, (received, values, frame) =>
-        run(received, values.slice(takesAllocator ? 1 : 0), frame)
-      );
+      return nativeStateCall(options.result, args, call.span, state, (received, values, frame) => {
+        if (takesAllocator) received.allocator = allocatorState(values[0]);
+        return run(received, values.slice(takesAllocator ? 1 : 0), frame);
+      });
     });
-  const fresh = emptyMapValue;
   const members: Record<string, () => Member> = {
     Entry: () => ({ type: TYPE, value: entry }),
     KV: () => ({ type: TYPE, value: kv }),
@@ -349,6 +412,7 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
     Iterator: () => ({ type: TYPE, value: iterator }),
     Size: () => ({ type: TYPE, value: U32 }),
     deinit: method('deinit', { args: [], result: VOID, mutable: true, allocates: true }, (state) => {
+      if (state.memory) freeMemory(state.allocator, state.memory);
       Object.assign(state, emptyState());
       return;
     }),
@@ -462,7 +526,10 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       (state, [key], frame) => {
         const index = getIndex(frame, state, key, keyType, kind);
         if (index === -1) return NULL;
-        const removed = new ZStruct([state.keys.slots[index], state.values.slots[index]]);
+        const removed = new ZStruct([
+          copyForStorage(state.keys.slots[index]),
+          copyForStorage(state.values.slots[index]),
+        ]);
         removeAt(state, index, keyType, valueType);
         return removed;
       }
@@ -480,6 +547,7 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       return;
     }),
     clearAndFree: method('clearAndFree', { args: [], result: VOID, mutable: true, allocates: true }, (state) => {
+      if (state.memory) freeMemory(state.allocator, state.memory);
       Object.assign(state, emptyState());
       return;
     }),
@@ -512,20 +580,13 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
   if (managed) {
     members.init = fnMember(`${map.namespace.name}.init`, (sema, call) => {
       const [allocator] = compileArgs(sema, expectArgs(sema, call, 1, 'init'), [ALLOCATOR]);
-      return runtime(
-        map,
-        (frame) => {
-          void allocator.eval(frame);
-          return fresh();
-        },
-        call.span
-      );
+      return nativeCall(map, [allocator], call.span, ([value]) => emptyMapValue(value));
     });
   } else {
     members.empty = () => ({ type: map, value: emptyMapValue() });
   }
-  setMembers(map, members);
-  setMembers(
+  addMembers(map, members);
+  addMembers(
     iterator,
     nextMember(
       iterator,
@@ -533,7 +594,7 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       advance((state, index) => new ZStruct([new Pointer(state.keys, index), new Pointer(state.values, index)]))
     )
   );
-  setMembers(
+  addMembers(
     keyIterator,
     nextMember(
       keyIterator,
@@ -541,7 +602,7 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       advance((state, index) => new Pointer(state.keys, index))
     )
   );
-  setMembers(
+  addMembers(
     valueIterator,
     nextMember(
       valueIterator,
@@ -597,19 +658,24 @@ function nextMember(
   };
 }
 
-function emptyMapValue(): ZStruct {
+function emptyMapValue(allocator?: Value): ZStruct {
   const state = emptyState();
-  return new ZStruct([
+  const slots: Value[] = [
     0,
     0,
     0,
     new NativeHandle('hashMapAllocation', { metadata: state.metadata, keys: state.keys, values: state.values }),
-  ]);
+  ];
+  if (allocator !== undefined) slots.push(allocator);
+  return new ZStruct(slots);
 }
 
 function readMapState(value: Value): MapState {
   const header = value as ZStruct;
-  const state = {} as MapState;
+  const state = {
+    header,
+    allocator: header.slots[4] instanceof NativeHandle ? allocatorState(header.slots[4]) : undefined,
+  } as MapState;
   for (const [index, name] of ['capacity', 'size', 'available'].entries()) {
     Object.defineProperty(state, name, {
       enumerable: true,
@@ -619,7 +685,7 @@ function readMapState(value: Value): MapState {
       },
     });
   }
-  for (const name of ['metadata', 'keys', 'values']) {
+  for (const name of ['metadata', 'keys', 'values', 'memory']) {
     Object.defineProperty(state, name, {
       enumerable: true,
       get: () => (header.slots[3] as NativeHandle).state[name],

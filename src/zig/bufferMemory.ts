@@ -1,0 +1,434 @@
+import { panic } from './arith';
+import { asBigFloat, BigFloat, type FloatBits, floatOf, FORMATS } from './floats';
+import { errorUnionOffsets, fieldOffsets, sizeOf, unionOffsets } from './layout';
+import { copyForStorage, undefinedValue } from './semaBase';
+import { type Type, typeId } from './types';
+import {
+  ErrorValue,
+  NULL,
+  Pointer,
+  registerStorageLocation,
+  Slice,
+  type Slots,
+  Some,
+  storageLocation,
+  type Value,
+  ZArray,
+  ZStruct,
+  ZUnion,
+} from './values';
+import { WeakValueMap } from './weakValueMap';
+
+interface FieldLocation {
+  type: Type;
+  offset: number;
+  packed?: number;
+  constant?: Value;
+}
+
+const memories = new WeakMap<Value[], BufferMemory>();
+const referenceIds = new WeakMap<object, bigint>();
+const references = new WeakValueMap<bigint, object>();
+let nextReferenceId = 1n;
+const errorReferenceIds = new WeakMap<object, bigint>();
+let nextErrorReferenceId = 1n;
+
+// code-gauge-allow functionParameterCount 7 -- Binds typed storage, its byte region, work budget, and initialized prefix together.
+export function bindBufferMemory(
+  memory: object,
+  type: Type,
+  count: number,
+  buffer: Slice,
+  offset: number,
+  spend: () => void,
+  initialized = count
+): void {
+  if (!('slots' in memory) || !Array.isArray(memory.slots)) return;
+  const destination = memory as Slots;
+  const initial = destination.slots.slice(0, initialized).map(copyForStorage);
+  const location = storageLocation(buffer.target.slots, buffer.start);
+  const bytes = location.storage as Value[];
+  let backing = memories.get(bytes);
+  if (!backing) {
+    backing = new BufferMemory(bytes, spend);
+    memories.set(bytes, backing);
+  }
+  const start = location.index + offset;
+  for (let index = 0; index < sizeOf(type) * count; index++) {
+    spend();
+    bytes[start + index] = 0xaan;
+  }
+  destination.slots = backing.slots(
+    Array.from({ length: count }, (_, index) => ({ type, offset: (start + sizeOf(type) * index) * 8 }))
+  );
+  for (let index = 0; index < initialized; index++) destination.slots[index] = initial[index];
+}
+
+class BufferMemory {
+  private readonly views = new Map<string, Value>();
+  private readonly referenceHolds = new Map<bigint, object>();
+
+  constructor(
+    private readonly bytes: Value[],
+    private readonly spend: () => void
+  ) {}
+
+  slots(fields: readonly FieldLocation[]): Value[] {
+    const slots = new Proxy(Array.from<Value>({ length: fields.length }).fill(undefined), {
+      get: (target, property, receiver) => {
+        const index = propertyIndex(property);
+        if (index === undefined || index >= fields.length) return Reflect.get(target, property, receiver);
+        const field = fields[index];
+        return field.constant ?? this.read(field.type, field.offset, field.packed);
+      },
+      set: (target, property, value: Value, receiver) => {
+        const index = propertyIndex(property);
+        if (index === undefined) return Reflect.set(target, property, value, receiver);
+        const field = fields[index];
+        if (!field) panic('index out of bounds');
+        this.write(field.type, field.offset, value, field.packed);
+        return true;
+      },
+    });
+    registerStorageLocation(slots, (index) => ({ storage: this.bytes, index: (fields[index]?.offset ?? 0) / 8 }));
+    return slots;
+  }
+
+  // code-gauge-allow functionNcss 37 -- Decodes each scalar representation and transparent wrapper from shared bytes.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Decodes each scalar representation and transparent wrapper from shared bytes.
+  private read(type: Type, offset: number, packed?: number): Value {
+    if (type.kind === 'array' || type.kind === 'struct' || type.kind === 'union')
+      return this.readAggregate(type, offset);
+    switch (type.kind) {
+      case 'int': {
+        const value = this.readBits(offset, packed ?? sizeOf(type) * 8);
+        return type.signed ? BigInt.asIntN(type.bits, value) : BigInt.asUintN(type.bits, value);
+      }
+      case 'bool': {
+        return this.readBits(offset, packed ?? 1) !== 0n;
+      }
+      case 'float': {
+        return decodeFloat(this.readBits(offset, type.bits), type.bits);
+      }
+      case 'enum': {
+        return BigInt.asUintN(type.tagType?.bits ?? 0, this.readBits(offset, packed ?? sizeOf(type) * 8));
+      }
+      case 'pointer': {
+        const pointer = this.reference(offset, type);
+        if (type.size !== 'slice') return pointer;
+        const length = Number(this.readBits(offset + 64, 64));
+        return pointer instanceof Pointer ? new Slice(pointer.target, pointer.index, length) : undefinedValue(type);
+      }
+      case 'optional': {
+        if (type.child.kind === 'pointer')
+          return this.readBits(offset, 64) === 0n ? NULL : this.read(type.child, offset);
+        const child = sizeOf(type.child);
+        if (this.readBits(offset + child * 8, 1) === 0n) return NULL;
+        const value = this.read(type.child, offset);
+        return type.child.kind === 'optional' ? new Some(value) : value;
+      }
+      case 'error_union': {
+        const layout = errorUnionOffsets(type.payload);
+        const code = this.readBits(offset + layout.error * 8, 16);
+        if (code !== 0n) return this.reference(offset + layout.error * 8, type.errorSet, 16);
+        return this.read(type.payload, offset + layout.payload * 8);
+      }
+      case 'error_set': {
+        return this.reference(offset, type, 16);
+      }
+      default: {
+        return undefinedValue(type);
+      }
+    }
+  }
+
+  // code-gauge-allow functionNcss 32 -- Builds stable typed views for arrays, structs, and tagged unions.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Builds stable typed views for arrays, structs, and tagged unions.
+  private readAggregate(type: Extract<Type, { kind: 'array' | 'struct' | 'union' }>, offset: number): Value {
+    const key = `${typeId(type)} ${offset}`;
+    if (type.kind === 'struct' && (type.native?.storageSlots !== undefined || type.native?.kind === 'allocator'))
+      return this.reference(offset, type);
+    const cached = this.views.get(key);
+    if (cached) return cached;
+    let value: Value;
+    if (type.kind === 'array') {
+      const count = type.length + (type.sentinel === undefined ? 0 : 1);
+      const slots = this.slots(
+        Array.from({ length: count }, (_, index) => ({
+          type: type.child,
+          offset: offset + index * sizeOf(type.child) * 8,
+        }))
+      );
+      value = new ZArray(slots, 0, type.length, type.sentinel !== undefined);
+    } else if (type.kind === 'struct') {
+      const offsets = fieldOffsets(type);
+      value = new ZStruct(
+        this.slots(
+          (type.fields ?? []).map((field, index) => ({
+            type: field.type,
+            offset: offset + offsets[index],
+            packed: type.layout === 'packed' ? packedBits(field.type) : undefined,
+            constant: field.comptimeValue,
+          }))
+        )
+      );
+    } else {
+      const layout = unionOffsets(type);
+      const tag = (): number => this.unionTag(type, offset + layout.tag * 8);
+      const union = new ZUnion(0, undefined);
+      Object.defineProperty(union, 'tag', {
+        get: tag,
+        set: (index: number) => {
+          const encoded = type.tagType?.fields?.[index]?.value ?? BigInt(index);
+          this.writeBits(offset + layout.tag * 8, (type.tagType ? sizeOf(type.tagType) : 1) * 8, encoded);
+        },
+      });
+      union.slots = new Proxy([undefined] as Value[], {
+        get: (target, property, receiver) =>
+          property === '0'
+            ? this.read(type.fields![tag()].type, offset + layout.payload * 8)
+            : Reflect.get(target, property, receiver),
+        set: (target, property, value: Value, receiver) => {
+          if (property !== '0') return Reflect.set(target, property, value, receiver);
+          this.write(type.fields![tag()].type, offset + layout.payload * 8, value);
+          return true;
+        },
+      });
+      registerStorageLocation(union.slots, () => ({ storage: this.bytes, index: offset / 8 + layout.payload }));
+      value = union;
+    }
+    this.views.set(key, value);
+    return value;
+  }
+
+  // code-gauge-allow functionNcss 44 -- Encodes each scalar representation and transparent wrapper into shared bytes.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Encodes each scalar representation and transparent wrapper into shared bytes.
+  private write(type: Type, offset: number, value: Value, packed?: number): void {
+    if (type.kind === 'array' || type.kind === 'struct' || type.kind === 'union') {
+      this.writeAggregate(type, offset, value);
+      return;
+    }
+    switch (type.kind) {
+      case 'int': {
+        this.writeBits(offset, packed ?? sizeOf(type) * 8, BigInt.asUintN(type.bits, value as bigint));
+        return;
+      }
+      case 'bool': {
+        this.writeBits(offset, packed ?? 8, value ? 1n : 0n);
+        return;
+      }
+      case 'float': {
+        this.writeBits(offset, type.bits, encodeFloat(value, type.bits));
+        return;
+      }
+      case 'enum': {
+        this.writeBits(offset, packed ?? sizeOf(type) * 8, value as bigint);
+        return;
+      }
+      case 'pointer': {
+        if (type.size === 'slice') {
+          const slice = value as Slice;
+          this.writeReference(offset, new Pointer(slice.target, slice.start));
+          this.writeBits(offset + 64, 64, BigInt(slice.length));
+        } else this.writeReference(offset, value);
+        return;
+      }
+      case 'optional': {
+        if (value === NULL) {
+          this.writeBits(
+            offset + (type.child.kind === 'pointer' ? 0 : sizeOf(type.child) * 8),
+            type.child.kind === 'pointer' ? 64 : 8,
+            0n
+          );
+          return;
+        }
+        this.write(type.child, offset, value instanceof Some ? value.value : value);
+        if (type.child.kind !== 'pointer') this.writeBits(offset + sizeOf(type.child) * 8, 8, 1n);
+        return;
+      }
+      case 'error_union': {
+        const layout = errorUnionOffsets(type.payload);
+        if (value instanceof ErrorValue) this.writeReference(offset + layout.error * 8, value, 16);
+        else {
+          this.writeBits(offset + layout.error * 8, 16, 0n);
+          this.write(type.payload, offset + layout.payload * 8, value);
+        }
+        return;
+      }
+      case 'error_set': {
+        this.writeReference(offset, value, 16);
+        return;
+      }
+    }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 19 -- Writes aggregate contents using their physical layout without replacing interior views.
+  private writeAggregate(
+    type: Extract<Type, { kind: 'array' | 'struct' | 'union' }>,
+    offset: number,
+    value: Value
+  ): void {
+    switch (type.kind) {
+      case 'array': {
+        const array = value as ZArray;
+        for (let index = 0; index < type.length; index++)
+          this.write(type.child, offset + index * sizeOf(type.child) * 8, array.get(index));
+        if (type.sentinel !== undefined)
+          this.write(type.child, offset + type.length * sizeOf(type.child) * 8, type.sentinel);
+        return;
+      }
+      case 'struct': {
+        if (type.native?.storageSlots !== undefined || type.native?.kind === 'allocator') {
+          this.writeReference(offset, value);
+          return;
+        }
+        const offsets = fieldOffsets(type);
+        for (const [index, field] of (type.fields ?? []).entries()) {
+          if (field.comptimeValue !== undefined) continue;
+          this.write(
+            field.type,
+            offset + offsets[index],
+            (value as ZStruct).slots[index],
+            type.layout === 'packed' ? packedBits(field.type) : undefined
+          );
+        }
+        return;
+      }
+      case 'union': {
+        const union = value as ZUnion;
+        const layout = unionOffsets(type);
+        if (type.tagType) this.write(type.tagType, offset + layout.tag * 8, type.tagType.fields![union.tag].value);
+        else this.writeBits(offset + layout.tag * 8, 8, BigInt(union.tag));
+        this.write(type.fields![union.tag].type, offset + layout.payload * 8, union.slots[0]);
+        return;
+      }
+    }
+  }
+
+  private readBits(offset: number, bits: number): bigint {
+    if (offset < 0 || offset + bits > this.bytes.length * 8) panic('index out of bounds');
+    let result = 0n;
+    for (let index = 0; index < bits; index += 8) {
+      this.spend();
+      const position = offset + index;
+      const byte = position >> 3;
+      const shift = position & 7;
+      let value = Number(this.bytes[byte] as bigint) >> shift;
+      if (shift !== 0 && index + 8 < bits + shift)
+        value |= Number((this.bytes[byte + 1] ?? 0n) as bigint) << (8 - shift);
+      result |= BigInt(value & ((1 << Math.min(8, bits - index)) - 1)) << BigInt(index);
+    }
+    return result;
+  }
+
+  private writeBits(offset: number, bits: number, value: bigint): void {
+    if (offset < 0 || offset + bits > this.bytes.length * 8) panic('index out of bounds');
+    for (let index = 0; index < bits;) {
+      this.spend();
+      const position = offset + index;
+      const byte = position >> 3;
+      const shift = position & 7;
+      const count = Math.min(8 - shift, bits - index);
+      const mask = ((1 << count) - 1) << shift;
+      const previous = Number(this.bytes[byte] as bigint);
+      this.bytes[byte] = BigInt(
+        (previous & ~mask) | (Number((value >> BigInt(index)) & BigInt((1 << count) - 1)) << shift)
+      );
+      index += count;
+    }
+  }
+
+  private reference(offset: number, type: Type, bits = 64): Value {
+    const id = this.readBits(offset, bits);
+    const value = this.referenceHolds.get(id) ?? references.get(id);
+    if (value) this.referenceHolds.set(id, value);
+    return (value as Value) ?? undefinedValue(type);
+  }
+
+  private writeReference(offset: number, value: Value, bits = 64): void {
+    if (typeof value !== 'object') {
+      this.writeBits(offset, bits, 0n);
+      return;
+    }
+    let id: bigint;
+    if (bits === 16) {
+      const existing = errorReferenceIds.get(value);
+      id = existing ?? 1n + (nextErrorReferenceId++ % 65_535n);
+      errorReferenceIds.set(value, id);
+    } else {
+      const location = value instanceof Pointer ? value.storageLocation() : { storage: value, index: 0 };
+      let base = referenceIds.get(location.storage);
+      if (base === undefined) {
+        base = nextReferenceId++;
+        referenceIds.set(location.storage, base);
+      }
+      id = (base << 40n) + BigInt(location.index * 8);
+    }
+    references.set(id, value);
+    this.referenceHolds.set(id, value);
+    this.writeBits(offset, bits, id);
+  }
+
+  private unionTag(type: Extract<Type, { kind: 'union' }>, offset: number): number {
+    if (!type.tagType) return Number(this.readBits(offset, 8));
+    const value = this.read(type.tagType, offset);
+    const index = type.tagType.fields!.findIndex((field) => field.value === value);
+    return index;
+  }
+}
+
+function propertyIndex(property: string | symbol): number | undefined {
+  return typeof property === 'string' && /^(0|[1-9]\d*)$/.test(property) ? Number(property) : undefined;
+}
+
+function packedBits(type: Type): number {
+  if (type.kind === 'int') return type.bits;
+  if (type.kind === 'bool') return 1;
+  if (type.kind === 'enum') return type.tagType?.bits ?? 0;
+  return sizeOf(type) * 8;
+}
+
+// code-gauge-allow functionCognitiveComplexity 20 -- Encodes normal, subnormal, infinite, and NaN values across the supported binary formats.
+function encodeFloat(value: Value, bits: FloatBits): bigint {
+  const float = asBigFloat(value as number | BigFloat);
+  const precision = FORMATS[bits].precision;
+  const fractionBits = precision - 1;
+  const exponentBits = bits === 16 ? 5 : bits === 32 ? 8 : bits === 64 ? 11 : 15;
+  const bias = (1 << (exponentBits - 1)) - 1;
+  const explicit = bits === 80;
+  const mantissaBits = fractionBits + (explicit ? 1 : 0);
+  let exponent = 0;
+  let mantissa = 0n;
+  if (float.kind !== 'finite') {
+    exponent = (1 << exponentBits) - 1;
+    mantissa =
+      (explicit ? 1n << BigInt(fractionBits) : 0n) | (float.kind === 'nan' ? 1n << BigInt(fractionBits - 1) : 0n);
+  } else if (float.mantissa !== 0n) {
+    const highest = float.mantissa.toString(2).length - 1 + float.exponent;
+    exponent = Math.max(0, highest + bias);
+    const unitExponent = (exponent === 0 ? 1 - bias : highest) - fractionBits;
+    const shift = float.exponent - unitExponent;
+    mantissa = shift >= 0 ? float.mantissa << BigInt(shift) : float.mantissa >> BigInt(-shift);
+    if (!explicit && exponent !== 0) mantissa -= 1n << BigInt(fractionBits);
+  }
+  return (BigInt(float.sign) << BigInt(bits - 1)) | (BigInt(exponent) << BigInt(mantissaBits)) | mantissa;
+}
+
+function decodeFloat(value: bigint, bits: FloatBits): Value {
+  const fractionBits = FORMATS[bits].precision - 1;
+  const exponentBits = bits === 16 ? 5 : bits === 32 ? 8 : bits === 64 ? 11 : 15;
+  const bias = (1 << (exponentBits - 1)) - 1;
+  const mantissaBits = fractionBits + (bits === 80 ? 1 : 0);
+  const exponent = Number((value >> BigInt(mantissaBits)) & BigInt((1 << exponentBits) - 1));
+  const sign = value >> BigInt(bits - 1) !== 0n;
+  let mantissa = value & ((1n << BigInt(mantissaBits)) - 1n);
+  if (exponent === (1 << exponentBits) - 1) {
+    const fraction = mantissa & ((1n << BigInt(fractionBits)) - 1n);
+    return floatOf(new BigFloat(sign, fraction === 0n ? 'inf' : 'nan', 0n, 0), bits);
+  }
+  if (exponent !== 0 && bits !== 80) mantissa |= 1n << BigInt(fractionBits);
+  return floatOf(
+    new BigFloat(sign, 'finite', mantissa, (exponent === 0 ? 1 - bias : exponent - bias) - fractionBits),
+    bits
+  );
+}

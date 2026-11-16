@@ -336,3 +336,23 @@ test('cyclic slice graphs render without changing execution or losing later step
   expect(recorded.uncaughtException).toBeUndefined();
   expect(recorded.traceItems.length).toBeGreaterThan(1);
 });
+
+test('optional and error union wrappers preserve aggregate and pointer trace children', () => {
+  const source = `const Node=struct{v:u8,next:?*Node=null};pub fn main()void{var a=Node{.v=1};var b=Node{.v=2,.next=&a};const o:?*Node=&a;const s:?Node=.{.v=3,.next=&b};const e:error{Oops}!Node=.{.v=4,.next=&a};_=.{&b,o,s,e};}`;
+  const result = traceProgram('zig', source, source);
+  // oxlint-disable-next-line unicorn/no-null -- Trace nodes represent Zig null with JSON null.
+  const leaf = { kind: 'object', entries: { v: { kind: 'value', value: 1 }, next: { kind: 'value', value: null } } };
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.traceItems.at(-1)?.referenceVars).toMatchObject({
+    b: { kind: 'object', entries: { v: { kind: 'value', value: 2 }, next: leaf } },
+    o: leaf,
+    s: {
+      kind: 'object',
+      entries: {
+        v: { kind: 'value', value: 3 },
+        next: { kind: 'object', entries: { v: { kind: 'value', value: 2 }, next: leaf } },
+      },
+    },
+    e: { kind: 'object', entries: { v: { kind: 'value', value: 4 }, next: leaf } },
+  });
+});
