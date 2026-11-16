@@ -28,7 +28,7 @@ export type Core =
   | { k: 'str'; value: string }
   | { k: 'app'; fn: Core; args: Core[] }
   | LamCore
-  | { k: 'frame'; size: number; body: Core; info: FunctionInfo }
+  | { k: 'frame'; size: number; body: Core; info: FunctionInfo | undefined }
   | { k: 'let'; binds: { index: number; expr: Core }[]; body: Core }
   | CaseCore
   | { k: 'charCase'; scrut: Core; value: string; matched: Core; unmatched: Core }

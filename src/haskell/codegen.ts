@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 833 -- The Core generator covers every construct of the language in one pass over shared state.
+// code-gauge-allow-file fileNcss 834 -- The Core generator covers every construct of the language in one pass over shared state.
 import {
   CHAR_TYPE,
   CONS_CON,
@@ -96,7 +96,9 @@ export function sourceSpanText(span: Span): string {
 
 /** Generates code for a module's bindings and instances, registering its globals and instance dictionaries. */
 export class Codegen {
-  private frame: FrameScope = new FrameScope(undefined);
+  /** The scope of top-level code, which has no frame at run time. */
+  private readonly rootFrame = new FrameScope(undefined);
+  private frame: FrameScope = this.rootFrame;
   private visible: VisibleEntry[] = [];
   /** The dictionary parameters of the bindings whose bodies are being generated, for their recursive uses. */
   private readonly ownDictParams = new Map<LocalVar | ValueEntity, DictParam[]>();
@@ -294,7 +296,8 @@ export class Codegen {
     // function that defines it, as a loop or a block inside a Java method does.
     const info = isTop ? this.infoForBinding(binding, name) : undefined;
     if (dictParams.length + arity === 0) {
-      if (!isTop) return this.compileClauseBody(binding, [], name);
+      // An instance's method has no enclosing frame to hold the slots of its `where` and `let`.
+      if (!isTop && this.frame !== this.rootFrame) return this.compileClauseBody(binding, [], name);
       const frame = new FrameScope(this.frame);
       return this.withFrame(frame, () => {
         const body = this.withVisible([], () => this.compileClauseBody(binding, [], name));

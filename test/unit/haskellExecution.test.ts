@@ -37,6 +37,30 @@ main = do
   });
 });
 
+// An instance's method defined without arguments keeps the slots of its `where`, `let`, and sections in a frame of its own.
+test('instance methods without arguments may use where, let, and sections', () => {
+  const program = `data T = T Int
+
+instance Show T where
+  show = go
+    where go (T n) = "T" ++ show n
+
+class C a where c :: a -> Int
+instance C Int where c = let y = 1 in (+ y)
+
+viaDict :: C a => a -> Int
+viaDict = c
+
+main :: IO ()
+main = print (T 3, c (5 :: Int), viaDict (0 :: Int))
+`;
+  expect(executeProgram('haskell', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '(T3,6,1)\n',
+  });
+});
+
 // GHC 9.14.1 writes what precedes the failing pattern match, and reports the clauses' span in the file.
 test('a failed pattern match stops the program with GHC message', () => {
   const program = `classify :: Int -> String
