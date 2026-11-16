@@ -366,12 +366,12 @@ def('IO', 'fsync', 0, (self: RObject) => {
 });
 def('IO', 'sync', 0, (self: RObject) => {
   checkFrozenIo(self);
-  return self.ivars?.get('@__sync') ?? self.data === 'stderr';
+  return self.internal?.get('sync') ?? self.data === 'stderr';
 });
 def('IO', 'sync=', 1, (self: RObject, [value]) => {
   checkFrozenIo(self);
-  self.ivars ??= new Map();
-  self.ivars.set('@__sync', truthy(value));
+  self.internal ??= new Map();
+  self.internal.set('sync', truthy(value));
   return value;
 });
 def('IO', ['tty?', 'isatty'], 0, (self: RObject) => {

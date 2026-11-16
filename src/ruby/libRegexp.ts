@@ -17,6 +17,7 @@ import { coreMethod, def, extend, sdef, sundef } from './define';
 import { argumentError, frozenError, indexError, rubyError, typeError } from './errors';
 import { digest, hashDefault, hashGet, hashSet, stringKeyEquals, stringKeyHash } from './hashes';
 import { callBlock, callMethod, type Gen, invoke } from './interp';
+import { tryAry } from './libArray';
 import { validStringEncoding } from './libEncoding';
 import { makeEnumerator } from './libEnumerator';
 import {
@@ -24,7 +25,6 @@ import {
   inspectStringEncoding,
   setBytes,
   sliceStringEncoding,
-  stringUnitIndexAtByte,
   symbolString,
   textByteLengthOf,
 } from './libString';
@@ -47,8 +47,9 @@ import {
   regexpHasNumberedBackref,
   regexpLineCommentEnd,
 } from './regexpCaptureNames';
+import { RegexpCursor } from './regexpCursor';
 import { charIndex, unitIndex } from './regexpPositions';
-import { regexpSyntaxReason, validateRegexpStructure } from './regexpStructure';
+import { regexpSyntaxReason, validateRegexpStructure, validateSourceRanges } from './regexpStructure';
 import { type Frame, rt, UnsupportedFeatureError } from './runtime';
 import { arr, asciiString, newHash, realClassOf, str, stringBytes, stringFromBytes, sym, truthy } from './values';
 
@@ -126,6 +127,13 @@ const PROPERTY_NAMES: Record<string, string> = {
   punct: 'P',
 };
 
+interface RegexpOptions {
+  ignoreCase?: boolean;
+  multiline?: boolean;
+  extended?: boolean;
+  sourceBinary?: boolean;
+}
+
 const SYNTAX = String.raw`^$\.*+?()[]{}|/-`;
 
 function unicodeRegexpEscape(source: string): { points: string[]; length: number } | undefined {
@@ -157,6 +165,7 @@ export function translate(
   ascii = false,
   ignoreCase = false
 ): string {
+  validateSourceRanges(source, extended);
   const classes = ascii ? ASCII_POSIX_CLASSES : POSIX_CLASSES;
   for (const name of captureNamesForValidation(source, extended))
     if ((/^[\p{ID_Start}_]/u.test(name) || /^\\u(?:[\dA-Fa-f]{4}|\{[\dA-Fa-f]+\})/.test(name)) && /[-\\]/.test(name))
@@ -164,7 +173,7 @@ export function translate(
   let out = '';
   let inClass = 0;
   let classStart = 0;
-  let negatedClassBodies: string[] = [];
+  let classAlternatives: string[] = [];
   let atomStart = 0;
   const groupStarts: number[] = [];
   const dotallStack: boolean[] = [];
@@ -226,7 +235,10 @@ export function translate(
         (count) => {
           index += count;
         },
-        (body) => negatedClassBodies.push(body),
+        (body, negate = true, noCasefold = false) => {
+          const atom = noCasefold ? `(?-i:[${body}])` : `[${body}]`;
+          classAlternatives.push(negate ? `(?:(?!${atom})[\\s\\S])` : atom);
+        },
         classes,
         casefold
       );
@@ -240,7 +252,7 @@ export function translate(
         if (posix[1]) {
           if (casefold && (posix[2] === 'lower' || posix[2] === 'upper'))
             out += classes === ASCII_POSIX_CLASSES ? String.raw`\x00-\xFF` : String.raw`\s\S`;
-          else negatedClassBodies.push(body);
+          else classAlternatives.push(`(?:(?![${body}])[\\s\\S])`);
         } else out += body;
         index += posix[0].length - 1;
         continue;
@@ -250,32 +262,29 @@ export function translate(
       }
       atomStart = out.length;
       classStart = out.length;
-      negatedClassBodies = [];
+      classAlternatives = [];
       inClass++;
       out += char;
       continue;
     }
     if (char === ']' && inClass > 0) {
-      if (out.length === classStart + 1 && negatedClassBodies.length === 0) {
+      if (out.length === classStart + 1 && classAlternatives.length === 0) {
         if (dynamic && source.includes(']', index + 1)) {
           out += String.raw`\]`;
           continue;
         }
         throw new SyntaxError('empty char-class');
       }
-      if (out.slice(classStart + 1) === '^' && negatedClassBodies.length === 0) {
+      if (out.slice(classStart + 1) === '^' && classAlternatives.length === 0) {
         out += String.raw`\]`;
         continue;
       }
       inClass--;
-      if (negatedClassBodies.length > 0) {
+      if (classAlternatives.length > 0) {
         const regularBody = out.slice(classStart + 1);
         const outerNegated = regularBody.startsWith('^');
         const literalBody = outerNegated ? regularBody.slice(1) : regularBody;
-        const alternatives = [
-          ...(literalBody ? [`[${literalBody}]`] : []),
-          ...negatedClassBodies.map((body) => `(?:(?![${body}])[\\s\\S])`),
-        ];
+        const alternatives = [...(literalBody ? [`[${literalBody}]`] : []), ...classAlternatives];
         const union = alternatives.length === 1 ? alternatives[0] : `(?:${alternatives.join('|')})`;
         out = out.slice(0, classStart) + (outerNegated ? `(?:(?!(?:${union}))[\\s\\S])` : union);
       } else out += char;
@@ -308,7 +317,7 @@ export function translate(
       if (/^[imx-]+[:)]/.test(rest)) throw unsupportedSyntax('中のオプションの指定（(?i) など）');
       if (rest.startsWith('#')) {
         const end = regexpCommentEnd(source, index + 3);
-        if (end === -1) throw rubyError(rt().c.RegexpError, `invalid pattern: /${source}/`);
+        if (end === -1) throw new SyntaxError('end pattern in group');
         index = end;
         continue;
       }
@@ -413,7 +422,7 @@ function translateEscape(
   index: number,
   inClass: boolean,
   skip: (count: number) => void,
-  addNegatedClass: (body: string) => void,
+  addNegatedClass: (body: string, negate?: boolean, noCasefold?: boolean) => void,
   classes: Record<string, string>,
   casefold: boolean
 ): string {
@@ -436,11 +445,17 @@ function translateEscape(
       return '[^0-9a-fA-F]';
     }
     case 'w': {
-      if (inClass && casefold) throw unsupportedClassEscape(String.raw`\w`);
+      if (inClass && casefold) {
+        addNegatedClass('A-Za-z0-9_', false, true);
+        return '';
+      }
       return inClass ? 'A-Za-z0-9_' : casefold ? '(?-i:[A-Za-z0-9_])' : '[A-Za-z0-9_]';
     }
     case 'W': {
-      if (inClass && casefold) throw unsupportedClassEscape(String.raw`\W`);
+      if (inClass && casefold) {
+        addNegatedClass('A-Za-z0-9_', true, true);
+        return '';
+      }
       if (inClass) {
         addNegatedClass('A-Za-z0-9_');
         return '';
@@ -489,7 +504,7 @@ function translateEscape(
           ? undefined
           : classes[key];
       if (classes === ASCII_POSIX_CLASSES && body === undefined)
-        throw rubyError(rt().c.RegexpError, `invalid character property name {${rawName}}: /${source}/`);
+        throw new RegexpEncodingError(`invalid character property name {${rawName}}`);
       if (body !== undefined) {
         if (inClass && negated) {
           if (classes === ASCII_POSIX_CLASSES && casefold && (key === 'lower' || key === 'upper'))
@@ -568,16 +583,14 @@ function unsupportedClassEscape(escape: string): unknown {
   return unsupportedSyntax(`文字クラス内の${escape}`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Encoding checks, syntax diagnostics, and host compilation preserve distinct Ruby errors.
-export function makeRegexp(
-  source: string,
-  options: { ignoreCase?: boolean; multiline?: boolean; extended?: boolean; sourceBinary?: boolean }
-): RObject {
+// code-gauge-allow functionCognitiveComplexity 26 -- Encoding checks, syntax diagnostics, and host compilation preserve distinct Ruby errors.
+export function makeRegexp(source: string, options: RegexpOptions): RObject {
+  const display = `/${source}/${regexpSuffix(options)}`;
   rt().spend(Math.ceil(source.length / 64));
   if (((/\\+$/.exec(source)?.[0].length ?? 0) & 1) === 1)
-    throw rubyError(rt().c.RegexpError, `too short escape sequence: /${source}/`);
+    throw rubyError(rt().c.RegexpError, `too short escape sequence: ${display}`);
   if (regexpCaptureNames(source, options.extended).length > 0 && regexpHasNumberedBackref(source, options.extended))
-    throw rubyError(rt().c.RegexpError, `numbered backref/call is not allowed. (use name): /${source}/`);
+    throw rubyError(rt().c.RegexpError, `numbered backref/call is not allowed. (use name): ${display}`);
   const regexp = new RObject(rt().c.Regexp);
   let translated: string;
   let encoding: RegexpData['encoding'];
@@ -598,12 +611,12 @@ export function makeRegexp(
     );
   } catch (error) {
     if (error instanceof SyntaxError && error.message === 'invalid pattern in look-behind')
-      throw rubyError(rt().c.RegexpError, `${error.message}: /${source}/`);
-    if (error instanceof RegexpEncodingError) throw rubyError(rt().c.RegexpError, `${error.message}: /${source}/`);
+      throw rubyError(rt().c.RegexpError, `${error.message}: ${display}`);
+    if (error instanceof RegexpEncodingError) throw rubyError(rt().c.RegexpError, `${error.message}: ${display}`);
     if (error instanceof SyntaxError)
       throw rubyError(
         rt().c.RegexpError,
-        `${error.message === 'empty char-class' ? error.message : regexpSyntaxReason(source, options.extended)}: /${source}/`
+        `${error.message === 'empty char-class' ? error.message : regexpSyntaxReason(source, options.extended)}: ${display}`
       );
     throw error;
   }
@@ -613,7 +626,7 @@ export function makeRegexp(
   } catch {
     const names = regexpCaptureNames(source, options.extended);
     if (new Set(names).size !== names.length) throw new UnsupportedFeatureError('重複する名前付きキャプチャ');
-    throw rubyError(rt().c.RegexpError, `${regexpSyntaxReason(source, options.extended)}: /${source}/`);
+    throw rubyError(rt().c.RegexpError, `${regexpSyntaxReason(source, options.extended)}: ${display}`);
   }
   const data: RegexpData = {
     source,
@@ -799,7 +812,7 @@ function regexpForMatch(data: RegexpData, source?: RString): RegExp {
   ));
 }
 
-function validateRegexpSubject(regexp: RObject, source: RString): void {
+export function validateRegexpSubject(regexp: RObject, source: RString): void {
   if (!validStringEncoding(source))
     throw argumentError(`invalid byte sequence in ${source.usAscii ? 'US-ASCII' : RUBY_UTF8}`);
   const data = dataOf(regexp);
@@ -841,7 +854,7 @@ function matchData(state: MatchState): RObject {
   return match;
 }
 
-function matchSnapshot(source: RString): RString {
+export function matchSnapshot(source: RString): RString {
   if (source.frozen) return source;
   const snapshot = new RString(source.cls, source.s);
   snapshot.binary = source.binary;
@@ -879,7 +892,7 @@ export function setLiteralMatch(source: RString, text: string, target: string, f
     groups: [[from, from + target.length]],
     names: [],
     namedGroups: Object.create(null) as Record<string, number>,
-    regexp: makeRegexp(escapeRegexpSource(target), {}),
+    regexp: makeRegexp(escapeRegexpSource(target), { sourceBinary: source.binary }),
   };
   setLastMatch(state);
   return state;
@@ -955,7 +968,7 @@ function* optionsOf(value: Value | undefined): Gen<{ ignoreCase: boolean; multil
   return { ignoreCase: true, multiline: false, extended: false };
 }
 
-function invalidPatternMessage(pattern: RString): RString {
+function invalidPatternMessage(pattern: RString, options: RegexpOptions): RString {
   const source = stringBytes(pattern);
   const result = new Uint8Array(LIMITS.maxStringLength);
   const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
@@ -1018,8 +1031,12 @@ function invalidPatternMessage(pattern: RString): RString {
     appendAscii(`\\x${first.toString(16).toUpperCase().padStart(2, '0')}`);
     index++;
   }
-  appendByte(47);
+  appendAscii(`/${regexpSuffix(options)}`);
   return stringFromBytes(result.subarray(0, length), false, pattern.usAscii);
+}
+
+function regexpSuffix(options: RegexpOptions): string {
+  return `${options.multiline ? 'm' : ''}${options.ignoreCase ? 'i' : ''}${options.extended ? 'x' : ''}`;
 }
 
 sdef(
@@ -1037,7 +1054,8 @@ def(
   'Regexp',
   'initialize',
   [1, 2],
-  function* (self: RObject, [source, options]) {
+  function* (self: RObject, [source, options], _block, keywords) {
+    yield* checkRegexpKeywords(keywords);
     if (self.frozen)
       throw frozenError(
         self,
@@ -1054,14 +1072,25 @@ def(
     }
     return self;
   },
-  { visibility: 'private' }
+  { visibility: 'private', keywords: true }
 );
+function* checkRegexpKeywords(keywords: RHash | undefined): Gen<void> {
+  if (keywords) {
+    for (const entry of keywords.map.values())
+      if (!(entry.key instanceof RSymbol) || entry.key.name !== 'timeout')
+        throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
+    const timeout = (yield* hashGet(keywords, sym('timeout')))?.value;
+    if (timeout !== undefined && timeout !== NIL) throw new UnsupportedFeatureError('Regexp のタイムアウト');
+  }
+}
 sdef('Regexp', ['escape', 'quote'], 1, function* (_self, [value]) {
   return escapeRegexpPattern(value instanceof RSymbol ? symbolString(value) : yield* toStrValue(value));
 });
 sdef('Regexp', 'union', [0, -1], function* (_self, args) {
-  const items = args.length === 1 && args[0] instanceof RArray ? args[0].items : args;
+  const items = args.length === 1 ? ((yield* tryAry(args[0]))?.items ?? args) : args;
   if (items.length === 1 && isRegexp(items[0])) return items[0];
+  if (items.length === 1 && items[0] instanceof RSymbol)
+    return regexpFromString(escapeRegexpPattern(symbolString(items[0])));
   const parts: string[] = [];
   let binary = false;
   let ascii = true;
@@ -1077,7 +1106,9 @@ sdef('Regexp', 'union', [0, -1], function* (_self, args) {
     rt().checkStringLength(length);
     parts.push(part.s);
   }
-  return makeRegexp(parts.length === 0 ? '(?!)' : parts.join('|'), { sourceBinary: binary });
+  return regexpFromString(
+    regexpText(parts.length === 0 ? '(?!)' : parts.join('|'), binary ? 'BINARY (ASCII-8BIT)' : RUBY_UTF8)
+  );
 });
 
 export function regexpPatternEncoding(
@@ -1116,11 +1147,8 @@ function regexpText(text: string, encoding: RegexpData['encoding']): RString {
     : str(text);
 }
 
-export function regexpFromString(
-  pattern: RString,
-  options: { ignoreCase?: boolean; multiline?: boolean; extended?: boolean } = {}
-): RObject {
-  if (!validStringEncoding(pattern)) throw rubyError(rt().c.RegexpError, invalidPatternMessage(pattern));
+export function regexpFromString(pattern: RString, options: RegexpOptions = {}): RObject {
+  if (!validStringEncoding(pattern)) throw rubyError(rt().c.RegexpError, invalidPatternMessage(pattern, options));
   return makeRegexp(pattern.s, { ...options, sourceBinary: pattern.binary });
 }
 
@@ -1608,67 +1636,59 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
   return concatRegexpPieces(parts, limit);
 }
 
+// code-gauge-allow functionCognitiveComplexity 25 -- Substitution separates callback, Hash and replacement-string values while preserving each operation's match-state rules.
+// code-gauge-allow functionNcss 49 -- Substitution shares one byte cursor and output builder across the four Ruby operations.
 function* substituteRegexp(
   self: RString,
   regexp: RObject,
   replacement: Value | undefined,
   block: RProc | undefined,
-  global: boolean
+  mode: 'sub' | 'sub!' | 'gsub' | 'gsub!'
 ): Gen<{ value: RString; matched: boolean }> {
   const replacementText =
     replacement === undefined || replacement instanceof RHash ? undefined : yield* toStrValue(replacement);
-  let text = self.s;
-  const sourceLength = stringBytes(self).length;
-  let sourceRawBytes = self.rawBytes;
-  let snapshot = matchSnapshot(self);
-  validateRegexpSubject(regexp, self);
-  const chunks: RString[] = [sliceStringEncoding(self, 0, 0)];
+  const cursor = new RegexpCursor(regexp, self);
+  const global = mode === 'gsub' || mode === 'gsub!';
+  const chunks: RString[] = [cursor.slice(0, 0)];
   let length = 0;
   const append = (part: RString): void => {
-    length += stringBytes(part).length;
+    const bytes = stringBytes(part);
+    length += bytes.length;
     if (length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
-    rt().spend(Math.ceil(stringBytes(part).length / 256));
+    rt().spend(Math.ceil(bytes.length / 256));
     chunks.push(part);
   };
   let position = 0;
-  let state = execAt(regexp, text, 0, self, snapshot, true);
+  let search = 0;
+  let lastSearch: number | undefined;
+  let state = cursor.match(search);
   let last: MatchState | undefined;
   while (state) {
-    const [from, to] = state.groups[0] as readonly [number, number];
+    const [from, to] = cursor.range(state)!;
+    const next = cursor.next(state);
     setLastMatch(state);
     let piece: RString;
     if (replacement instanceof RHash) {
-      const key = sliceStringEncoding(self, from, to);
+      const key = cursor.slice(from, to);
       const entry = yield* hashGet(replacement, key);
       piece = yield* toSValue(entry ? entry.value : yield* hashDefault(replacement, key));
     } else if (replacementText !== undefined) {
       piece = expand(replacementText, state, LIMITS.maxStringLength - length);
     } else {
-      piece = yield* toSValue(yield* callBlock(block as RProc, [sliceStringEncoding(self, from, to)]));
+      piece = yield* toSValue(yield* callBlock(block as RProc, [cursor.slice(from, to)]));
     }
-    if (
-      self.s !== text ||
-      self.rawBytes !== sourceRawBytes ||
-      self.binary !== snapshot.binary ||
-      self.usAscii !== snapshot.usAscii ||
-      self.frozen !== snapshot.frozen
-    ) {
-      if (stringBytes(self).length !== sourceLength) throw rubyError(rt().c.RuntimeError, 'string modified');
-      text = self.s;
-      sourceRawBytes = self.rawBytes;
-      snapshot = matchSnapshot(self);
-      validateRegexpSubject(regexp, self);
-    }
-    if (position < from) append(sliceStringEncoding(self, position, from));
+    if (mode !== 'sub') cursor.refresh();
+    if (position < from) append(cursor.slice(position, from));
     append(piece);
     position = to;
+    lastSearch = search;
     last = state;
-    state = global
-      ? execAt(regexp, text, charIndex(text, to) + (from === to ? 1 : 0), self, snapshot, true)
-      : undefined;
+    search = next;
+    state = global ? cursor.match(search) : undefined;
   }
-  if (global || (!block && !(replacement instanceof RHash)) || !last) setLastMatch(last);
-  append(sliceStringEncoding(self, position));
+  if (global) setLastMatch(lastSearch === undefined ? undefined : cursor.match(lastSearch));
+  else if ((!block && !(replacement instanceof RHash)) || !last) setLastMatch(last);
+  append(cursor.slice(position));
   return { value: concatRegexpPieces(chunks, LIMITS.maxStringLength), matched: last !== undefined };
 }
 
@@ -1721,7 +1741,7 @@ for (const [name, global, bang] of [
       if (global) return makeEnumerator(self, name, args);
       throw argumentError('wrong number of arguments (given 1, expected 2)');
     }
-    const result = yield* substituteRegexp(self, args[0] as RObject, args[1], block, global);
+    const result = yield* substituteRegexp(self, args[0] as RObject, args[1], block, name);
     if (!bang) return result.value;
     if (!result.matched) return NIL;
     setBytes(self, stringBytes(result.value), result.value.binary);
@@ -1736,49 +1756,22 @@ wrapFirst('scan', function* (self, args, block) {
     setLastMatch(matches.at(-1));
     return arr(matches.map(scanValue));
   }
-  const sourceLength = stringBytes(self).length;
-  let text = self.s;
-  let sourceRawBytes = self.rawBytes;
-  let snapshot = matchSnapshot(self);
-  validateRegexpSubject(regexp, self);
-  let state = execAt(regexp, text, 0, self, snapshot, true);
-  let searchStart = 0;
-  let lastStart: number | undefined;
+  const cursor = new RegexpCursor(regexp, self);
+  let search = 0;
+  let lastSearch: number | undefined;
+  let state = cursor.match(search);
   while (state) {
-    const [from, to] = state.groups[0] as readonly [number, number];
-    let nextStart = charIndex(text, to) + (from === to ? 1 : 0);
-    let lastSearchStart = searchStart;
+    const next = cursor.next(state);
     setLastMatch(state);
     yield* callBlock(block, [scanValue(state)], false);
-    if (
-      self.s !== text ||
-      self.rawBytes !== sourceRawBytes ||
-      self.binary !== snapshot.binary ||
-      self.usAscii !== snapshot.usAscii ||
-      self.frozen !== snapshot.frozen
-    ) {
-      if (stringBytes(self).length !== sourceLength) throw rubyError(rt().c.RuntimeError, 'string modified');
-      [lastSearchStart, nextStart] = scanOffsetsAfterMutation(snapshot, self, searchStart, nextStart);
-      text = self.s;
-      sourceRawBytes = self.rawBytes;
-      snapshot = matchSnapshot(self);
-      validateRegexpSubject(regexp, self);
-    }
-    lastStart = lastSearchStart;
-    searchStart = nextStart;
-    state = execAt(regexp, text, searchStart, self, snapshot, true);
+    cursor.refresh();
+    lastSearch = search;
+    search = next;
+    state = cursor.match(search);
   }
-  setLastMatch(lastStart === undefined ? undefined : execAt(regexp, text, lastStart, self, snapshot, true));
+  setLastMatch(lastSearch === undefined ? undefined : cursor.match(lastSearch));
   return self;
 });
-function scanOffsetsAfterMutation(before: RString, after: RString, start: number, next: number): [number, number] {
-  const byteStart = textByteLengthOf(before, before.s.slice(0, unitIndex(before.s, start)));
-  const currentStart = charIndex(after.s, stringUnitIndexAtByte(after, byteStart));
-  if (next > charIndex(before.s, before.s.length)) return [currentStart, charIndex(after.s, after.s.length) + 1];
-  const byteNext = textByteLengthOf(before, before.s.slice(0, unitIndex(before.s, next)));
-  return [currentStart, charIndex(after.s, stringUnitIndexAtByte(after, byteNext))];
-}
-
 function scanValue(state: MatchState): Value {
   return state.groups.length > 1
     ? arr(state.groups.slice(1).map((_range, group) => groupText(state, group + 1)))
@@ -1786,49 +1779,72 @@ function scanValue(state: MatchState): Value {
 }
 
 wrapFirst('split', function* (self, args, block) {
-  const text = self.s;
-  const regexp = args[0] as RObject;
-  const snapshot = matchSnapshot(self);
-  validateRegexpSubject(regexp, self);
   const limit = args.length > 1 ? yield* toIndex(args[1]) : 0;
-  if (limit !== 1) setLastMatch(undefined);
+  if (limit === 1) return yield* splitSingle(self, block);
+  setLastMatch(undefined);
+  const cursor = new RegexpCursor(args[0] as RObject, self);
+  if (cursor.length === 0) return block ? self : arr([]);
   const parts: RString[] = [];
+  const emit = splitEmitter(cursor, limit, block, parts);
   let fields = 0;
   let position = 0;
-  let searchFrom = 0;
-  const length = charIndex(text, text.length);
-  while (searchFrom <= length) {
+  let search = 0;
+  while (search <= cursor.length) {
     if (limit > 0 && fields === limit - 1) break;
-    const state = execAt(regexp, text, searchFrom, self, snapshot, true);
+    const state = cursor.match(search);
     if (!state) break;
-    const [from, to] = state.groups[0] as readonly [number, number];
-    if (from === to) {
-      if (from >= text.length) break;
-      if (from === position) {
-        searchFrom = charIndex(text, from) + 1;
-        if (position === 0 && from === 0) continue;
-      }
+    const [from, to] = cursor.range(state)!;
+    const next = cursor.next(state);
+    if (from === to && from >= cursor.length) break;
+    if (from === to && from === position && position === 0) {
+      search = next;
+      continue;
     }
     if (!(from === to && from === position)) {
-      parts.push(sliceStringEncoding(self, position, from));
+      yield* emit(position, from);
       fields++;
       for (let group = 1; group < state.groups.length; group++) {
-        const value = groupText(state, group);
-        if (value !== NIL) parts.push(value as RString);
+        const range = cursor.range(state, group);
+        if (range) yield* emit(range[0], range[1]);
       }
       position = to;
     }
-    searchFrom = charIndex(text, to) + (from === to ? 1 : 0);
+    search = next;
   }
-  parts.push(sliceStringEncoding(self, position));
-  if (text.length === 0) return block ? self : arr([]);
-  if (limit === 0) while (parts.length > 0 && parts.at(-1)?.s === '') parts.pop();
-  if (block) {
-    for (const part of parts) yield* callBlock(block, [part], false);
-    return self;
-  }
-  return arr(parts);
+  yield* emit(position, cursor.length);
+  return block ? self : arr(parts);
 });
+function* splitSingle(self: RString, block: RProc | undefined): Gen {
+  if (self.s.length === 0) return block ? self : arr([]);
+  const part = copyStringEncoding(self);
+  if (!block) return arr([part]);
+  yield* callBlock(block, [part], false);
+  return self;
+}
+
+function splitEmitter(
+  cursor: RegexpCursor,
+  limit: number,
+  block: RProc | undefined,
+  parts: RString[]
+): (from: number, to: number) => Gen<void> {
+  const emptyRanges: (readonly [number, number])[] = [];
+  return function* (from: number, to: number): Gen<void> {
+    if (limit === 0 && from === to) {
+      emptyRanges.push([from, to]);
+      return;
+    }
+    const ranges = [...emptyRanges.splice(0), [from, to] as const];
+    for (const range of ranges) {
+      const part = cursor.slice(range[0], range[1]);
+      if (block) {
+        yield* callBlock(block, [part], false);
+        cursor.refresh();
+      } else parts.push(part);
+    }
+  };
+}
+
 for (const name of ['index', 'rindex'] as const) {
   wrapFirst(name, function* (self, args) {
     const regexp = args[0] as RObject;

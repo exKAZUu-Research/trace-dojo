@@ -258,9 +258,9 @@ export function* noMatchingPattern(value: Value, single: boolean): Gen<unknown> 
       `${subject}: ${typeof failure.description === 'string' ? failure.description : yield* failure.description()}`
     );
     if (failure.missingKey !== undefined)
-      error.exception.ivars = new Map([
-        ['@__key', failure.missingKey],
-        ['@__matchee', failure.matchee ?? value],
+      error.exception.internal = new Map([
+        ['key', failure.missingKey],
+        ['matchee', failure.matchee ?? value],
       ]);
     return error;
   } finally {

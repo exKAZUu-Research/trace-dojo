@@ -22,6 +22,8 @@ import {
   toSValue,
   tryImplicitConversion,
 } from './conversions';
+import { coreConstants } from './coreConstants';
+import { isCoreMethod } from './define';
 import {
   argumentCountError,
   argumentError,
@@ -32,6 +34,7 @@ import {
   receiverDescription,
   rubyError,
   typeError,
+  undefinedMethodError,
 } from './errors';
 import { hashGet, hashSet, hashSetStored } from './hashes';
 import { aliasedMethod } from './libMeta';
@@ -218,7 +221,15 @@ export function* ev(e: Expr, frame: Frame): Gen {
       return frame.self;
     }
     case 'str': {
-      return yield* interpolateString(e.parts, frame);
+      const value = yield* interpolateString(e.parts, frame);
+      if (!rt().frozenStringLiterals || !e.parts.every((part) => typeof part === 'string' || 'text' in part))
+        return value;
+      const key = `${value.binary}:${value.usAscii}:${value.s}`;
+      const previous = rt().frozenLiteralStrings.get(key);
+      if (previous) return previous;
+      value.frozen = true;
+      rt().frozenLiteralStrings.set(key, value);
+      return value;
     }
     case 'sym': {
       return RSymbol.of(e.name);
@@ -389,7 +400,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
       const owner = frame.definitionOwner ?? frame.cref[0];
       const method = owner.findMethod(e.oldName);
       if (!method) {
-        throw nameError(`undefined method '${e.oldName}' for class '${owner.name}'`, owner, e.oldName);
+        throw undefinedMethodError(owner, e.oldName);
       }
       assertMutableClass(owner);
       assertNoDefinitionHook(owner, 'added');
@@ -400,8 +411,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
     case 'undef': {
       const owner = frame.definitionOwner ?? frame.cref[0];
       for (const name of e.names) {
-        if (!owner.findMethod(name))
-          throw nameError(`undefined method '${name}' for class '${owner.name}'`, owner, name);
+        if (!owner.findMethod(name)) throw undefinedMethodError(owner, name);
         addMethod(owner, { name, owner, visibility: 'public', body: { kind: 'undefined' } });
       }
       return NIL;
@@ -673,6 +683,7 @@ function inspectForFrozen(self: RBasic): string {
 }
 
 function globalGet(name: string): Value {
+  if (name === '$0' || name === '$PROGRAM_NAME') return str('main.rb');
   if (/^\$(?:[~&`'+]|[1-9]\d*)$/.test(name)) return matchGlobal(name);
   const unsupported = unsupportedGlobal(name);
   if (unsupported) throw new UnsupportedFeatureError(unsupported);
@@ -803,7 +814,12 @@ export function findConstInAncestors(module: RClass, name: string): Value | unde
   return undefined;
 }
 
-function missingConstant(module: RClass, name: string, scoped = false): never {
+export function missingConstant(module: RClass, name: string, scoped = false): never {
+  for (const ancestor of module.ancestors()) {
+    const owner = ancestor.name;
+    if (owner && rt().c[owner] === ancestor && coreConstants[owner]?.includes(name))
+      throw new UnsupportedFeatureError(`${owner}::${name}`);
+  }
   const feature = UNSUPPORTED_CONSTANTS[name];
   if (feature && (module === rt().c.Object || !scoped)) throw new UnsupportedFeatureError(feature);
   const plainObjectSingleton =
@@ -1196,6 +1212,8 @@ function* definedText(e: Expr, frame: Frame): Gen {
       const matchVariable = /^\$(?:[~&`'+]|[1-9]\d*)$/.test(e.name);
       return text(
         rt().globals.has(e.name) ||
+          e.name === '$0' ||
+          e.name === '$PROGRAM_NAME' ||
           e.name === '$_' ||
           (matchVariable && (e.name === '$~' || matchGlobal(e.name) !== NIL))
           ? 'global-variable'
@@ -1820,11 +1838,11 @@ function* callMethodMissing(
   visibility?: 'private' | 'protected'
 ): Gen {
   const handler = classOf(recv).findMethod('method_missing');
-  if (handler && handler.body.kind !== 'native') {
+  if (handler && !isCoreMethod(handler, rt().c.BasicObject, 'method_missing')) {
     return yield* invoke(
       handler,
       recv,
-      [RSymbol.of(name), ...args],
+      [RSymbol.fromKey(name), ...args],
       keywords,
       block,
       options.used ?? true,

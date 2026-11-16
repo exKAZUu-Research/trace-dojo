@@ -8114,17 +8114,6 @@ test('regexp constructors reject trailing escapes', () => {
   });
 });
 
-test('frozen string literal header fails explicitly while unavailable', () => {
-  expect(run('# frozen_string_literal: true\np "abc".frozen?')).toMatchObject({ kind: 'compileError' });
-  expect(run('# license\n# note\n# -*- coding: utf-8; frozen_string_literal: true -*-\np "abc".frozen?')).toMatchObject(
-    {
-      kind: 'compileError',
-    }
-  );
-  expect(run('\n\n# frozen-string-literal: true\np "abc".frozen?')).toMatchObject({ kind: 'compileError' });
-  expect(run('x=1\n# frozen_string_literal: true\np "abc".frozen?')).toMatchObject({ stdout: 'false\n' });
-});
-
 test('Hash inspection quotes ASCII control symbol keys consistently', () => {
   expect(run(String.raw`h={:"a\x01"=>1};p h;pp h`)).toMatchObject({
     stdout: '{"a\\x01": 1}\n{"a\\x01": 1}\n',
@@ -10015,5 +10004,388 @@ end
     kind: 'executed',
     stdout:
       '[255, 50, 48, 50, 52]\n#<Encoding:BINARY (ASCII-8BIT)>\n[233, 48, 49]\n#<Encoding:BINARY (ASCII-8BIT)>\n[50, 48, 50, 52]\n#<Encoding:US-ASCII>\n[255, 50, 48, 50, 52]\n#<Encoding:UTF-8>\n[195, 169, 50, 48, 50, 52]\n#<Encoding:UTF-8>\n',
+  });
+});
+
+test('encoded reflective names dispatch independently', () => {
+  expect(
+    run(String.raw`b = 233.chr.to_sym
+u = :é
+c = Class.new do
+ define_method(b) { 1 }
+ define_method(u) { 2 }end
+o = c.new
+p o.send(b), o.send(u), o.method(b).name.to_s.bytes, o.method(u).name.to_s.bytes
+s = Struct.new(b,u).new(3,4)
+p s.send(b), s.send(u), s[b], s[u]
+module C;É=7;À=8;end
+[201.chr,192.chr,201.chr.to_sym].each {|n| [:const_get,:const_defined?].each {|m| begin;p C.send(m,n);rescue NameError;p :invalid;end}}
+p o.method(b).inspect.encoding
+class É;define_method(233.chr) {1};end
+begin;p É.new.method(233.chr).inspect;rescue Encoding::CompatibilityError=>e;p e.class,e.message;end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: String.raw`1
+2
+[233]
+[195, 169]
+3
+4
+3
+4
+:invalid
+:invalid
+:invalid
+:invalid
+:invalid
+:invalid
+#<Encoding:BINARY (ASCII-8BIT)>
+Encoding::CompatibilityError
+"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"
+`,
+    stderr: String.raw``,
+    uncaughtException: undefined,
+  });
+});
+
+test('internal exception metadata stays separate from user variables and native hooks', () => {
+  expect(
+    run(String.raw`o=Object.new
+o.instance_variable_set(:@__value,7)
+p o.instance_variables, o.instance_variable_get(:@__value)
+begin;o.missing(1);rescue NoMethodError=>e
+ e.instance_variable_set(:@__receiver,3)
+ p e.instance_variables,e.receiver==o,e.name
+end
+class Hook
+ alias method_missing puts
+ def respond_to_missing?(n,p=false); true; end
+end
+Hook.new.hello
+p Comparable.method(:name)
+module M;def self.x;end;end
+p M.method(:name)
+class Size
+ def respond_to?(name,*);puts name;super;end
+ def call;7;end
+end
+e=Enumerator.new(Size.new){};puts :made;p e.size,e.size
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: String.raw`[:@__value]
+7
+[:@__receiver]
+true
+:missing
+hello
+#<Method: Module#name()>
+#<Method: #<Class:M>(Module)#name()>
+call
+made
+call
+call
+7
+7
+`,
+    stderr: String.raw``,
+    uncaughtException: undefined,
+  });
+});
+
+test('frozen static literals share identity while interpolated strings and copies remain mutable', () => {
+  expect(
+    run(String.raw`# frozen_string_literal: true
+p "lit".frozen?, %q(a).frozen?, %w(a b).map(&:frozen?), ?a.frozen?
+p "hi".equal?("hi")
+p "#{1}".frozen?
+s=+"";s << "ok";p s
+begin;"f" << "x";rescue FrozenError=>e;p e.class;end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: String.raw`true
+true
+[true, true]
+true
+true
+false
+"ok"
+FrozenError
+`,
+    stderr: String.raw``,
+    uncaughtException: undefined,
+  });
+});
+
+test('regexp block operations retain byte cursors across receiver mutations', () => {
+  expect(
+    run(String.raw`s='a,b,c';s.split(/,/){|x|p x;s[2]='X'};p s
+s='a1b2c';s.split(/(\d)/){|x|p x;s[1]='X'};p s
+s='a,b,c';begin;s.split(/,/){|x|p x;s << 'x'};rescue=>e;p e.class,e.message;end
+['éaa','😀aa'].each {|text| n=0;text.scan('a'){n+=1;text[0]=text.start_with?('é') ? 'xy' : 'abcd' if n==2};p text,n,$~.begin(0)}
+s='éaa';n=0;p s.gsub(/a/){n+=1;s[0]='xy' if n==2;'X'};p s,$~ && $~.begin(0)
+s='a';begin;s.sub!(/a/){s << 'x';'x'};rescue=>e;p e.class,e.message;end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: String.raw`"a"
+"X"
+"c"
+"a,X,c"
+"a"
+"X"
+"b"
+"2"
+"c"
+"aXb2c"
+"a"
+RuntimeError
+"string modified"
+"xyaa"
+2
+3
+"abcdaa"
+2
+5
+"éXX"
+"xyaa"
+3
+RuntimeError
+"string modified"
+`,
+    stderr: String.raw``,
+    uncaughtException: undefined,
+  });
+});
+
+test('substitution variants preserve their own receiver mutation boundaries', () => {
+  expect(
+    run(String.raw`[:sub,:sub!,:gsub,:gsub!].each do |method|
+ [:same,:longer,:shorter].each do |change|
+  s='aba'
+  begin
+   result=s.send(method,/a/){s[1]='c' if change==:same;s << 'd' if change==:longer;s.slice!(1) if change==:shorter;'X'}
+   p [method,change,s,result,$~ && $~.to_a]
+  rescue=>e;p [method,change,s,e.class,e.message,$~ && $~.to_a];end
+ end
+end
+s='ab';r=s.sub(/a/){s[0]='c';'X'};p s,r,$~ && $~.to_a
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: String.raw`[:sub, :same, "aca", "Xba", ["a"]]
+[:sub, :longer, "abad", "Xba", ["a"]]
+[:sub, :shorter, "aa", "Xba", ["a"]]
+[:sub!, :same, "Xca", "Xca", ["a"]]
+[:sub!, :longer, "abad", RuntimeError, "string modified", ["a"]]
+[:sub!, :shorter, "aa", RuntimeError, "string modified", ["a"]]
+[:gsub, :same, "aca", "XcX", ["a"]]
+[:gsub, :longer, "abad", RuntimeError, "string modified", ["a"]]
+[:gsub, :shorter, "aa", RuntimeError, "string modified", ["a"]]
+[:gsub!, :same, "XcX", "XcX", ["a"]]
+[:gsub!, :longer, "abad", RuntimeError, "string modified", ["a"]]
+[:gsub!, :shorter, "aa", RuntimeError, "string modified", ["a"]]
+"cb"
+"Xb"
+["a"]
+`,
+    stderr: String.raw``,
+    uncaughtException: undefined,
+  });
+});
+
+test('regexp source validation preserves lookbehind context and alternative widths', () => {
+  expect(
+    run(String.raw`['(?<=(?<!\\d)\\d)\\d','(?<=b|(?<!a))x','(?<=(?<!(?<!a)))x','(?<=b|\\z)x','(?<!\\Zb)x','(?<=(?:a|bc)|d)x','(?<=b|(?:a|bc))x','(?<=(?:a|bc))x','(?<!((a)))x'].each do |s|
+ begin;p [s,Regexp.new(s).match?('abx 123')];rescue RegexpError=>e;p [s,e.class,e.message];end
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: String.raw`["(?<=(?<!\\d)\\d)\\d", true]
+["(?<=b|(?<!a))x", true]
+["(?<=(?<!(?<!a)))x", false]
+["(?<=b|\\z)x", RegexpError, "invalid pattern in look-behind: /(?<=b|\\z)x/"]
+["(?<!\\Zb)x", RegexpError, "invalid pattern in look-behind: /(?<!\\Zb)x/"]
+["(?<=(?:a|bc)|d)x", RegexpError, "invalid pattern in look-behind: /(?<=(?:a|bc)|d)x/"]
+["(?<=b|(?:a|bc))x", RegexpError, "invalid pattern in look-behind: /(?<=b|(?:a|bc))x/"]
+["(?<=(?:a|bc))x", false]
+["(?<!((a)))x", RegexpError, "invalid pattern in look-behind: /(?<!((a)))x/"]
+`,
+    stderr: String.raw``,
+    uncaughtException: undefined,
+  });
+});
+
+test('regexp classes and constructor diagnostics preserve Ruby options and encoding', () => {
+  expect(
+    run(String.raw`['[\\w-z]','[\\s-z]','[\\h-z]','[a-[:alpha:]]','(?#x','\\p{','\\p{^}','\\P{Alpha','[[:alpha:]','\\u{1 2','\\u{}','a('].each do |source|
+ begin;p Regexp.new(source,Regexp::IGNORECASE);rescue RegexpError=>e;p e.message;end
+end
+p 'foo.bar@example.com'.match?(/\A[\w+\-.]+@[a-z\d\-]+(\.[a-z\d\-]+)*\.[a-z]+\z/i)
+p "ſKk_a!".scan(/[\w]/i), "ſKk_a!".scan(/[\W]/i), "ſKk_a!".scan(/[^\w]/i)
+y="\xFF"; [ [y],['é',y],[y,'é'],['a',y] ].each {|args|begin;Regexp.union(*args);rescue RegexpError=>e;p e.class,e.message;end}
+begin;Regexp.new('a',foo: 1);rescue ArgumentError=>e;p e.message;end
+p Regexp.new('a','i',timeout:nil)
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: String.raw`"unmatched range specifier in char-class: /[\\w-z]/i"
+"unmatched range specifier in char-class: /[\\s-z]/i"
+"unmatched range specifier in char-class: /[\\h-z]/i"
+"char-class value at end of range: /[a-[:alpha:]]/i"
+"end pattern in group: /(?#x/i"
+"invalid character property name {}: /\\p{/i"
+"invalid character property name {}: /\\p{^}/i"
+"invalid character property name {Alph}: /\\P{Alpha/i"
+"premature end of char-class: /[[:alpha:]/i"
+"invalid Unicode list: /\\u{1 2/i"
+"invalid Unicode list: /\\u{}/i"
+"end pattern with unmatched parenthesis: /a(/i"
+true
+["k", "_", "a"]
+["ſ", "K", "!"]
+["ſ", "K", "!"]
+RegexpError
+"invalid multibyte character: /\\xFF/"
+RegexpError
+"invalid multibyte character: /\\u00E9|\\xFF/"
+RegexpError
+"invalid multibyte character: /\\xFF|\\u00E9/"
+RegexpError
+"invalid multibyte character: /a|\\xFF/"
+"unknown keyword: :foo"
+/a/i
+`,
+    stderr: String.raw``,
+    uncaughtException: undefined,
+  });
+});
+
+test('reflective constructors preserve conversion protocols, pattern encoding and diagnostics', () => {
+  expect(
+    run(String.raw`p (__FILE__ == $0), (__FILE__ == $PROGRAM_NAME), defined?($0)
+class Parts
+ def to_ary;[:foo];end
+end
+p Regexp.union(Parts.new).match?('food'),Regexp.union([:foo]).match?('foo')
+class EmptyParts
+ def to_ary;nil;end
+ def to_str;'a.b';end
+end
+p Regexp.union(EmptyParts.new).match?('a.b')
+class WrongParts
+ def to_ary;1;end
+end
+begin;Regexp.union(WrongParts.new);rescue=>e;p e.class,e.message;end
+[233,255].each {|n|s=n.chr;s.scan(s);p $~.regexp.source.bytes,$~.regexp.encoding,$~.regexp.match?(s);s.gsub(s,'x');p $~.regexp.match?(s)}
+Struct.new('Replaced',:a)
+Struct.new('Replaced',:b)
+p Struct::Replaced.members
+module Names
+ [:alias_method,:undef_method,:instance_method].each do |method|
+  begin;method==:alias_method ? send(method,:new_name,:missing) : send(method,:missing);rescue NameError=>e;p e.message;end
+ end
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: String.raw`true
+true
+"global-variable"
+true
+true
+true
+TypeError
+"can't convert WrongParts to Array (WrongParts#to_ary gives Integer)"
+[233]
+#<Encoding:BINARY (ASCII-8BIT)>
+true
+true
+[255]
+#<Encoding:BINARY (ASCII-8BIT)>
+true
+true
+[:b]
+"undefined method 'missing' for module 'Names'"
+"undefined method 'missing' for module 'Names'"
+"undefined method 'missing' for module 'Names'"
+`,
+    stderr: String.raw`main.rb:17: warning: redefining constant Struct::Replaced
+`,
+    uncaughtException: undefined,
+  });
+});
+
+test('regexp split limit and empty captures retain callback boundaries', () => {
+  expect(
+    run(String.raw`[0,1,2,-1].each {|limit|s='a,b,c';begin;r=s.split(/,/,limit){|x|p [limit,x];s << 'x'};p r;rescue=>e;p [limit,e.class,e.message];end}
+['a,,','a,,b','a1b2','a12',''].each {|s|p [s,s.split(/(\d?)/),s.split(/(,?)/)]}
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: String.raw`[0, "a"]
+[0, RuntimeError, "string modified"]
+[1, "a,b,c"]
+"a,b,cx"
+[2, "a"]
+[2, RuntimeError, "string modified"]
+[-1, "a"]
+[-1, RuntimeError, "string modified"]
+["a,,", ["a", "", ",", "", ","], ["a", ",", "", ","]]
+["a,,b", ["a", "", ",", "", ",", "", "b"], ["a", ",", "", ",", "b"]]
+["a1b2", ["a", "1", "b", "2"], ["a", "", "1", "", "b", "", "2"]]
+["a12", ["a", "1", "", "2"], ["a", "", "1", "", "2"]]
+["", [], []]
+`,
+    stderr: String.raw``,
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  '__FILE__ = 1',
+  '__LINE__ += 1',
+  '__ENCODING__ ||= 1',
+  'def f(__FILE__);end',
+  '->(__LINE__) {}',
+  '1.times {|__ENCODING__| }',
+])('reserved pseudo-variable bindings reject before any execution: %s', (source) => {
+  expect(run(`puts "started"; ${source}`)).toMatchObject({ kind: 'compileError' });
+});
+
+test.each([
+  '# comment; frozen_string_literal: true',
+  '# frozen_string_literal: true; ordinary comment',
+  '# note: frozen_string_literal: true',
+])('ordinary header comments leave literals mutable: %s', (header) => {
+  expect(run(`${header}\ns = "a"; s << "b"; p s`)).toMatchObject({
+    kind: 'executed',
+    stdout: '"ab"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  '# coding: UTF-8-unix',
+  '# coding: UTF-8-dos',
+  '# coding: UTF-8-mac',
+  '# coding: CP65001',
+  '# vim: fileencoding=UTF-8',
+])('UTF-8 source aliases retain multibyte literal semantics: %s', (header) => {
+  expect(run(`${header}\np "é".bytes`)).toMatchObject({
+    kind: 'executed',
+    stdout: '[195, 169]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('later valid frozen-string directives override earlier headers', () => {
+  expect(run('# frozen_string_literal: true\n# frozen_string_literal: false\ns="a"; s << "b"; p s')).toMatchObject({
+    kind: 'executed',
+    stdout: '"ab"\n',
+    uncaughtException: undefined,
   });
 });

@@ -803,7 +803,7 @@ function nextValue(self: RObject): Value {
 
 function stopIteration(result: Value): unknown {
   const error = rubyError(rt().c.StopIteration, 'iteration reached an end');
-  error.exception.ivars = new Map([['@result', result]]);
+  error.exception.internal = new Map([['result', result]]);
   return error;
 }
 
@@ -865,7 +865,11 @@ sdef('Enumerator', 'new', [0, 1], function* (self: RClass, args, block) {
   if (size !== undefined) {
     const source = enumerator.data as EnumeratorSource;
     if (size instanceof RProc || (yield* advertisesPublicMethod(size, 'call'))) {
-      source.size = () => callMethod(size, 'call', []);
+      source.size = function* () {
+        return size instanceof RProc || (yield* advertisesPublicMethod(size, 'call'))
+          ? yield* callMethod(size, 'call', [])
+          : size;
+      };
       const previousHeld = source.held;
       source.held = function () {
         return [...previousHeld.call(this), size];

@@ -150,9 +150,9 @@ export class Converter {
   readonly claimedAtomicRows = new Set<number>();
 
   convertProgram(root: Node): Program {
-    if (hasFrozenStringLiteralDirective(this.source)) this.unsupported(root, 'frozen_string_literal: true');
-    const encoding = sourceEncodingDirective(this.source);
-    if (encoding && !/^UTF-8$/i.test(encoding)) this.unsupported(root, `ソースコードの文字コード（${encoding}）`);
+    const { encoding, frozen } = sourceDirectives(this.source);
+    if (encoding && !/^(?:UTF-8(?:-(?:unix|dos|mac))?|CP65001)$/i.test(encoding))
+      this.unsupported(root, `ソースコードの文字コード（${encoding}）`);
     this.collectHeredocs(root);
     const children = namedChildren(root);
     const data = children.find((child) => child.type === 'uninterpreted');
@@ -167,6 +167,7 @@ export class Converter {
     return {
       body,
       locals: this.ctx.scope.names,
+      frozenStringLiterals: frozen,
       data: data ? data.text.replace(/^\r?\n/, '') : undefined,
       dataFile: data ? this.source : undefined,
     };
@@ -1649,6 +1650,7 @@ export class Converter {
 
   private checkReservedBinding(node: Node, name: string): void {
     if (/^_[1-9]$/.test(name)) this.fail(node, `${name} は番号付き引数のため予約されています。`);
+    if (['__FILE__', '__LINE__', '__ENCODING__'].includes(name)) this.fail(node, `${name} には代入できません。`);
   }
 
   private readonly patternBindings = new Set<string>();
@@ -2190,27 +2192,23 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   subshell: '外部コマンドの実行（`...`）',
 };
 
-function sourceEncodingDirective(source: string): string | undefined {
-  const [first = '', second = ''] = source.split(/\r?\n/, 2);
-  const header = first.startsWith('#!') ? second : first;
-  return /^\s*#.*?\b(?:en)?coding\s*:\s*([-\w]+)/i.exec(header)?.[1];
-}
-
-function hasFrozenStringLiteralDirective(source: string): boolean {
-  let offset = 0;
-  while (offset < source.length) {
-    const end = source.indexOf('\n', offset);
-    const line = source.slice(offset, end === -1 ? undefined : end).replace(/\r$/, '');
-    offset = end === -1 ? source.length : end + 1;
+function sourceDirectives(source: string): { encoding?: string; frozen: boolean } {
+  const lines = source.split(/\r?\n/);
+  const header = lines[0]?.startsWith('#!') ? lines[1] : lines[0];
+  let frozen = false;
+  const encoding = /^\s*#.*?coding\s*[:=]\s*([-\w]+)/i.exec(header ?? '')?.[1];
+  for (const line of lines) {
     if (line.trim().length === 0) continue;
-    if (!/^\s*#/.test(line)) return false;
-    const body = line
-      .replace(/^\s*#\s*/, '')
-      .replace(/^-\*-\s*/, '')
-      .replace(/\s*-\*-\s*$/, '');
-    if (body.split(';').some((part) => /^\s*frozen[-_]string[-_]literal\s*:\s*true\b/i.test(part))) return true;
+    if (!/^\s*#/.test(line)) break;
+    const body = line.replace(/^\s*#\s*/, '');
+    const delimited = /-\*-(.*?)-\*-/.exec(body)?.[1];
+    const fields = delimited === undefined ? [body] : delimited.split(';');
+    for (const field of fields) {
+      const value = /^\s*frozen[-_]string[-_]literal\s*:\s*"?(true|false)"?\s*$/i.exec(field)?.[1];
+      if (value !== undefined) frozen = value.toLowerCase() === 'true';
+    }
   }
-  return false;
+  return { encoding, frozen };
 }
 
 function namedChildren(node: Node): Node[] {

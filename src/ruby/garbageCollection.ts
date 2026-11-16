@@ -48,7 +48,7 @@ export function pushFrameReferences(frame: Frame, pending: Value[]): void {
 // code-gauge-allow functionNcss 31 -- The walker visits each runtime value kind and its reachable fields.
 function pushReferences(value: RBasic, pending: Value[]): void {
   pending.push(value.cls);
-  if (value.ivars) for (const item of value.ivars.values()) pending.push(item);
+  for (const fields of [value.ivars, value.internal]) for (const item of fields?.values() ?? []) pending.push(item);
   if (value.singleton) pending.push(value.singleton);
   if (value instanceof RObject) {
     if (value.exception) pending.push(value.exception.message, value.exception.cause);
@@ -62,14 +62,16 @@ function pushReferences(value: RBasic, pending: Value[]): void {
     pending.push(value.begin, value.end);
   } else if (value instanceof RProc) {
     pushProcReferences(value, pending);
-  } else if (value instanceof RClass) {
-    for (const item of value.constants.values()) pending.push(item);
-    for (const item of value.classVariables.values()) pending.push(item);
-    for (const method of value.methods.values()) if (method.body.kind === 'proc') pending.push(method.body.proc);
-    for (const item of value.includes) pending.push(item);
-    for (const item of value.prepends) pending.push(item);
-    if (value.superclass) pending.push(value.superclass);
-  }
+  } else if (value instanceof RClass) pushClassReferences(value, pending);
+}
+
+function pushClassReferences(value: RClass, pending: Value[]): void {
+  for (const item of value.constants.values()) pending.push(item);
+  for (const item of value.classVariables.values()) pending.push(item);
+  for (const method of value.methods.values()) if (method.body.kind === 'proc') pending.push(method.body.proc);
+  for (const item of value.includes) pending.push(item);
+  for (const item of value.prepends) pending.push(item);
+  if (value.superclass) pending.push(value.superclass);
 }
 
 function pushProcReferences(value: RProc, pending: Value[]): void {

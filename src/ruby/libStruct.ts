@@ -165,7 +165,11 @@ function* newStructClass(
   const cls = new RClass(rt().c.Class, undefined, superclass, false);
   cls.isUserDefined = true;
   layouts.set(cls, { ...layout, members, memberSymbols });
-  defineAccessors(cls, members, layout.kind === 'struct');
+  defineAccessors(
+    cls,
+    memberSymbols.map((member) => member.key),
+    layout.kind === 'struct'
+  );
   const singleton = singletonClassOf(cls);
   if (layout.kind === 'data')
     addMethod(singleton, { name: 'define', owner: singleton, visibility: 'public', body: { kind: 'undefined' } });
@@ -250,6 +254,10 @@ sdef(
     if (name !== undefined) {
       cls.baseName = name;
       cls.lexicalParent = self;
+      if (self.constants.has(name))
+        rt().io.stderr.write(
+          `main.rb:${rt().currentRow + 1}: warning: redefining constant ${className(self)}::${name}\n`
+        );
       self.constants.set(name, cls);
     }
     if (block) yield* callProc(block, [cls], { self: cls, definee: cls });

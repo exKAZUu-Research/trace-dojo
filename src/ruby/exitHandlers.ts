@@ -27,7 +27,7 @@ export function* runAtExit(): Gen<(RubyError | ExitSignal | UnsupportedFeatureEr
     } catch (error) {
       if (error instanceof ReturnSignal) {
         const converted = rubyError(runtime.c.LocalJumpError, 'unexpected return');
-        converted.exception.ivars = new Map([['@__hookReturn', true]]);
+        converted.exception.internal = new Map([['hookReturn', true]]);
         error = converted;
       }
       if (error instanceof RubyError) runtime.globals.set('$!', error.exception);

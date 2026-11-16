@@ -36,6 +36,7 @@ import { makeEnumerator } from './libEnumerator';
 import { parseFloatLenient, parseIntegerLenient } from './libNumeric';
 import { type MatchState, setLastMatch, setLiteralMatch } from './libRegexp';
 import { NIL, RArray, RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
+import { regexpByteIndex, regexpByteUnit } from './regexpPositions';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { successorBytes, transformInvalid } from './stringTransforms';
 import {
@@ -277,9 +278,6 @@ export function sliceStringEncoding(self: RString, from: number, to = self.s.len
 }
 export function textByteLengthOf(value: RString, text: string): number {
   return textByteLength(text, stringTextMode(value));
-}
-export function stringUnitIndexAtByte(value: RString, offset: number): number {
-  return textIndexAtByte(value.s, offset, stringTextMode(value));
 }
 export function inspectStringEncoding(self: RString, dump = false): string {
   const bytes = stringBytes(self);
@@ -1415,7 +1413,7 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
   for (;;) {
     const index = text.indexOf(target, position);
     if (index === -1) break;
-    lastStart = position;
+    lastStart = regexpByteIndex(self, position);
     setLiteralMatch(self, text, target, index);
     const mode = stringTextMode(self);
     const foundByte = textByteLength(text.slice(0, index), mode);
@@ -1431,7 +1429,7 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
     position = modified ? textIndexAtByte(text, nextByte, mode) : index + target.length;
     if (position > text.length) break;
   }
-  setLiteralMatch(self, text, target, lastStart < 0 ? -1 : text.indexOf(target, lastStart));
+  setLiteralMatch(self, text, target, lastStart < 0 ? -1 : text.indexOf(target, regexpByteUnit(self, lastStart)));
   if (!block) return arr(found);
   return self;
 });
@@ -1662,8 +1660,6 @@ def('String', 'reverse!', 0, (self: RString) => {
 
 const isSpace = (char: string): boolean => ' \t\n\v\f\r'.includes(char);
 
-// code-gauge-allow functionNcss 40 -- Ruby's method takes these argument forms, which the branches mirror.
-// code-gauge-allow functionCognitiveComplexity 23 -- Ruby's method takes these argument forms, which the branches mirror.
 export function succ(text: string): string {
   return stringFromBytes(successorBytes(stringBytes(str(text)))).s;
 }

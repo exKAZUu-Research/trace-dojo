@@ -55,7 +55,7 @@ function variablesOf(runtime: Runtime, frame: Frame, withContext: boolean): Trac
   if (!withContext) return variables;
   const { self } = frame;
   if (self instanceof RBasic && !(self instanceof RClass) && self.ivars) {
-    for (const [name, value] of self.ivars) if (!name.startsWith('@__')) addVariable(variables, name, value);
+    for (const [name, value] of self.ivars) addVariable(variables, name, value);
   }
   if (self instanceof RClass && self.isUserDefined && self.ivars) {
     for (const [name, value] of self.ivars) addVariable(variables, `${self.name}.${name}`, value);
@@ -268,7 +268,7 @@ function addInstanceEntries(
   budget: { remaining: number }
 ): void {
   for (const [key, item] of value.ivars ?? []) {
-    if (key.startsWith('@__') || !isVariableValue(item)) continue;
+    if (!isVariableValue(item)) continue;
     const node = displayNodeOf(item, seen, budget);
     if (node) entries[key] = node;
     if (budget.remaining <= 0) break;

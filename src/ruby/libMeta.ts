@@ -1,7 +1,7 @@
 import type { Params } from './ast';
-import { addressOf, className, inspect, tryImplicitConversion } from './conversions';
-import { def, findCoreMethod, sdef, sundef } from './define';
-import { argumentError, frozenError, nameError, typeError } from './errors';
+import { addressOf, className, combinedStringEncoding, inspect, tryImplicitConversion } from './conversions';
+import { def, findCoreMethod, isCoreMethod, sdef, sundef } from './define';
+import { argumentError, frozenError, nameError, typeError, undefinedMethodError } from './errors';
 import { digest, hashGet } from './hashes';
 import {
   addMethod,
@@ -15,12 +15,14 @@ import {
   ivarGet,
   ivarSet,
   methodMissing,
+  missingConstant,
   nativeProc,
   PRIVATE_METHOD_NAMES,
   requireBlock,
   setClassVariable,
 } from './interp';
 import { procArity } from './libObject';
+import { symbolFromString, symbolString } from './libString';
 import { nativeOwners } from './nativeOwners';
 import { type NativeSignature, nativeSignatures } from './nativeSignatures';
 import {
@@ -38,18 +40,7 @@ import {
   type Visibility,
 } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
-import {
-  arr,
-  classOf,
-  isA,
-  realClassOf,
-  singletonClassOf,
-  singletonDefinitionClass,
-  str,
-  stringBytes,
-  sym,
-  truthy,
-} from './values';
+import { arr, classOf, isA, realClassOf, singletonClassOf, singletonDefinitionClass, str, sym, truthy } from './values';
 
 for (const owner of ['Method', 'UnboundMethod']) {
   sundef(owner, 'new');
@@ -58,17 +49,15 @@ for (const owner of ['Method', 'UnboundMethod']) {
   });
 }
 
-/** The name a method takes as a Symbol or a String, raising as Ruby does for anything else. */
-export function* nameOf(value: Value): Gen<string> {
-  return (yield* symbolNameOf(value)).name;
+export function* methodKeyOf(value: Value): Gen<string> {
+  return (yield* symbolNameOf(value)).key;
 }
 
 export function* symbolNameOf(value: Value): Gen<RSymbol> {
   if (value instanceof RSymbol) return value;
-  if (value instanceof RString) return RSymbol.of(value.s, value.binary, value.usAscii, stringBytes(value));
+  if (value instanceof RString) return symbolFromString(value);
   const converted = yield* tryImplicitConversion(value, 'to_str');
-  if (converted instanceof RString)
-    return RSymbol.of(converted.s, converted.binary, converted.usAscii, stringBytes(converted));
+  if (converted instanceof RString) return symbolFromString(converted);
   if (converted !== undefined) {
     const name = realClassOf(value).name;
     throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
@@ -77,24 +66,26 @@ export function* symbolNameOf(value: Value): Gen<RSymbol> {
 }
 
 function* ivarName(value: Value): Gen<string> {
-  const name = yield* nameOf(value);
+  const symbol = yield* symbolNameOf(value);
+  const name = symbol.name;
   if (!/^@[A-Za-z_\u0080-\u{10FFFF}][\w\u0080-\u{10FFFF}]*$/u.test(name)) {
     throw nameError(`'${name}' is not allowed as an instance variable name`, NIL, name);
   }
-  return name;
+  return symbol.key;
 }
 
 function* classVariableName(value: Value): Gen<string> {
-  const name = yield* nameOf(value);
+  const symbol = yield* symbolNameOf(value);
+  const name = symbol.name;
   if (!/^@@[A-Za-z_\u0080-\u{10FFFF}][\w\u0080-\u{10FFFF}]*$/u.test(name))
     throw nameError(`'${name}' is not allowed as a class variable name`, NIL, name);
-  return name;
+  return symbol.key;
 }
 
 // Calling by name ------------------------------------------------------------------------------------------------------
 
 const sendByName: NativeFn = function* (self, args, block, keywords, used) {
-  const name = yield* nameOf(args[0]);
+  const name = yield* methodKeyOf(args[0]);
   return yield* callMethod(self, name, args.slice(1), keywords, block, { fcall: true, used });
 };
 def('Kernel', 'send', [1, -1], sendByName, { keywords: true });
@@ -104,7 +95,7 @@ def(
   'public_send',
   [1, -1],
   function* (self, args, block, keywords, used) {
-    const name = yield* nameOf(args[0]);
+    const name = yield* methodKeyOf(args[0]);
     return yield* callMethod(self, name, args.slice(1), keywords, block, { publicOnly: true, used });
   },
   { keywords: true }
@@ -115,7 +106,7 @@ export function* respondsToName(self: Value, name: string, includeAll: boolean):
   const method = classOf(self).findMethod(name);
   if (method && (includeAll || method.visibility === 'public')) return true;
   const missing = classOf(self).findMethod('respond_to_missing?');
-  if (missing && missing.body.kind !== 'native') {
+  if (missing && !isCoreMethod(missing, rt().c.Kernel, 'respond_to_missing?')) {
     return truthy(yield* invoke(missing, self, [sym(name), includeAll], undefined, undefined, true));
   }
   return false;
@@ -132,7 +123,7 @@ export function* advertisesPublicMethod(self: Value, name: string): Gen<boolean>
 
 const builtinRespondTo = Object.assign(
   function* (self: Value, args: Value[]): Gen<boolean> {
-    return yield* respondsToName(self, yield* nameOf(args[0]), args.length > 1 && truthy(args[1]));
+    return yield* respondsToName(self, yield* methodKeyOf(args[0]), args.length > 1 && truthy(args[1]));
   },
   { builtinResponder: true }
 );
@@ -217,7 +208,9 @@ function methodBodyIdentity(method: RMethod, owner: RClass): object {
 function reflectedCallable(method: RMethod, owner: RClass): RMethod {
   if (method.body.kind !== 'native' || method.missing) return method;
   const canonical = findCoreMethod(method.nativeIdentityOwner ?? owner, method.name);
-  return canonical?.body.kind === 'native' ? { ...method, body: canonical.body } : method;
+  return canonical?.body.kind === 'native' && !('unavailable' in canonical.body.fn)
+    ? { ...method, body: canonical.body }
+    : method;
 }
 
 function* findForMethodObject(self: Value, name: string, publicOnly = false): Gen<RMethod> {
@@ -248,11 +241,11 @@ function* findForMethodObject(self: Value, name: string, publicOnly = false): Ge
 }
 
 def('Kernel', 'method', 1, function* (self, [name]) {
-  const requested = yield* nameOf(name);
+  const requested = yield* methodKeyOf(name);
   return methodObject(self, yield* findForMethodObject(self, requested), requested);
 });
 def('Kernel', 'public_method', 1, function* (self, [name]) {
-  const requested = yield* nameOf(name);
+  const requested = yield* methodKeyOf(name);
   return methodObject(self, yield* findForMethodObject(self, requested, true), requested);
 });
 def(
@@ -289,7 +282,7 @@ function unboundMethod(method: RMethod, name: string, owner: RClass): RObject {
 }
 
 // code-gauge-allow functionCognitiveComplexity 26 -- Ruby method descriptions distinguish native signatures, user parameters, aliases, owners, and source locations.
-function* methodDescription(self: RObject): Gen<string> {
+function* methodDescription(self: RObject): Gen<RString> {
   const { recv, method, name, owner: definingOwner, moduleBound } = self.data as MethodData;
   const unbound = self.cls === rt().c.UnboundMethod;
   const inspectedOwner = method.reflectionOwner ? (method.nativeIdentityOwner ?? method.owner) : definingOwner;
@@ -316,13 +309,27 @@ function* methodDescription(self: RObject): Gen<string> {
       : Array.from({ length: methodArity(method) }, () => '_').join(', ');
   const row = definition?.row ?? method.row;
   const kind = unbound ? 'UnboundMethod' : 'Method';
-  return `#<${kind}: ${owner}${name}${name === method.name ? '' : `(${method.name})`}(${signature})${row === undefined ? '' : ` main.rb:${row + 1}`}>`;
+  const result = str(
+    `#<${kind}: ${owner}${name}${name === method.name ? '' : `(${method.name})`}(${signature})${row === undefined ? '' : ` main.rb:${row + 1}`}>`
+  );
+  const utf8Ascii = !/[^\u0000-\u007F]/.test(owner + signature);
+  result.binary = combinedStringEncoding(false, utf8Ascii, symbolString(sym(name)));
+  result.binary = combinedStringEncoding(
+    result.binary,
+    utf8Ascii && !/[^\u0000-\u007F]/.test(name),
+    symbolString(sym(method.name))
+  );
+  return result;
 }
 
 function* methodOwnerPrefix(definingOwner: RClass, recv: Value, unbound: boolean): Gen<string> {
   if (!definingOwner.isSingleton) {
     const owner = className(definingOwner);
-    const receiver = unbound ? owner : className(recv instanceof RClass ? classOf(recv) : realClassOf(recv));
+    const receiver = unbound
+      ? owner
+      : className(
+          recv instanceof RClass && (!recv.isModule || recv.singletonExposed) ? classOf(recv) : realClassOf(recv)
+        );
     return `${receiver}${receiver === owner ? '' : `(${owner})`}#`;
   }
   const attached = definingOwner.attached as Value;
@@ -424,7 +431,7 @@ for (const owner of ['Method', 'UnboundMethod']) {
   def(owner, 'name', 0, (self: RObject) => sym((self.data as MethodData).name));
   def(owner, 'owner', 0, (self: RObject) => (self.data as MethodData).owner);
   def(owner, ['inspect', 'to_s'], 0, function* (self: RObject) {
-    return str(yield* methodDescription(self));
+    return yield* methodDescription(self);
   });
   def(owner, 'source_location', 0, () => {
     throw new UnsupportedFeatureError(`${owner}#source_location`);
@@ -486,7 +493,7 @@ def('Kernel', 'instance_variable_defined?', 1, function* (self, [name]) {
 });
 def('Kernel', 'instance_variables', 0, (self) => {
   if (!(self instanceof RBasic) || !self.ivars) return arr([]);
-  return arr([...self.ivars.keys()].filter((name) => !name.startsWith('@__')).map((name) => sym(name)));
+  return arr([...self.ivars.keys()].map((name) => sym(name)));
 });
 def('Kernel', 'remove_instance_variable', 1, function* (self, [name]) {
   const ivar = yield* ivarName(name);
@@ -551,7 +558,7 @@ def('Kernel', 'define_singleton_method', [1, 2], function* (self, args, block) {
 // Defining methods -----------------------------------------------------------------------------------------------------
 
 function* defineMethodFrom(owner: RClass, args: Value[], block: RProc | undefined, visibility: Visibility): Gen {
-  const name = yield* nameOf(args[0]);
+  const name = yield* methodKeyOf(args[0]);
   if (!owner.isSingleton && PRIVATE_METHOD_NAMES.has(name)) visibility = 'private';
   const body = args.length > 1 ? args[1] : requireBlock(block);
   let method: RMethod;
@@ -573,7 +580,8 @@ def('Module', 'define_method', [1, 2], function* (self: RClass, args, block) {
   const visibility = frame.definitionOwner === self ? frame.defaultVisibility : 'public';
   const result = yield* defineMethodFrom(self, args, block, visibility);
   if (frame.definitionOwner === self && frame.moduleFunction && result instanceof RSymbol) {
-    const method = self.methods.get(result.name) as RMethod;
+    const method = self.methods.get(result.key) as RMethod;
+    self.singletonExposed = true;
     const owner = singletonClassOf(self);
     addMethod(owner, { ...method, owner, visibility: 'public' });
     method.visibility = 'private';
@@ -581,10 +589,10 @@ def('Module', 'define_method', [1, 2], function* (self: RClass, args, block) {
   return result;
 });
 def('Module', 'alias_method', 2, function* (self: RClass, [newName, oldName]) {
-  const name = yield* nameOf(newName);
-  const old = yield* nameOf(oldName);
+  const name = yield* methodKeyOf(newName);
+  const old = yield* methodKeyOf(oldName);
   const method = self.findMethod(old);
-  if (!method) throw nameError(`undefined method '${old}' for class '${className(self)}'`, self, old);
+  if (!method) throw undefinedMethodError(self, old);
   assertMutableClass(self);
   // An alias keeps the original method, whose owner and name `super` in it continues from.
   assertNoDefinitionHook(self, 'added');
@@ -595,7 +603,7 @@ def('Module', 'alias_method', 2, function* (self: RClass, [newName, oldName]) {
 def('Module', 'remove_method', [0, -1], function* (self: RClass, names) {
   assertMutableClass(self);
   for (const value of names) {
-    const name = yield* nameOf(value);
+    const name = yield* methodKeyOf(value);
     const method = self.methods.get(name);
     if (!method || method.body.kind === 'undefined') {
       throw nameError(`method '${name}' not defined in ${className(self)}`, self, name);
@@ -608,9 +616,9 @@ def('Module', 'remove_method', [0, -1], function* (self: RClass, names) {
 });
 def('Module', 'undef_method', [0, -1], function* (self: RClass, names) {
   for (const value of names) {
-    const name = yield* nameOf(value);
+    const name = yield* methodKeyOf(value);
     if (!self.findMethod(name)) {
-      throw nameError(`undefined method '${name}' for class '${className(self)}'`, self, name);
+      throw undefinedMethodError(self, name);
     }
     addMethod(self, { name, owner: self, visibility: 'public', body: { kind: 'undefined' } });
   }
@@ -622,22 +630,28 @@ function reflectedMethod(self: RClass, name: string, inherit: boolean): RMethod 
 }
 
 def('Module', 'method_defined?', [1, 2], function* (self: RClass, args) {
-  const method = reflectedMethod(self, yield* nameOf(args[0]), args.length < 2 || truthy(args[1]));
+  const method = reflectedMethod(self, yield* methodKeyOf(args[0]), args.length < 2 || truthy(args[1]));
   return method !== undefined && method.visibility !== 'private';
 });
 def('Module', 'public_method_defined?', [1, 2], function* (self: RClass, args) {
-  return reflectedMethod(self, yield* nameOf(args[0]), args.length < 2 || truthy(args[1]))?.visibility === 'public';
+  return (
+    reflectedMethod(self, yield* methodKeyOf(args[0]), args.length < 2 || truthy(args[1]))?.visibility === 'public'
+  );
 });
 def('Module', 'private_method_defined?', [1, 2], function* (self: RClass, args) {
-  return reflectedMethod(self, yield* nameOf(args[0]), args.length < 2 || truthy(args[1]))?.visibility === 'private';
+  return (
+    reflectedMethod(self, yield* methodKeyOf(args[0]), args.length < 2 || truthy(args[1]))?.visibility === 'private'
+  );
 });
 def('Module', 'protected_method_defined?', [1, 2], function* (self: RClass, args) {
-  return reflectedMethod(self, yield* nameOf(args[0]), args.length < 2 || truthy(args[1]))?.visibility === 'protected';
+  return (
+    reflectedMethod(self, yield* methodKeyOf(args[0]), args.length < 2 || truthy(args[1]))?.visibility === 'protected'
+  );
 });
 def('Module', 'instance_method', 1, function* (self: RClass, [name]) {
-  const methodName = yield* nameOf(name);
+  const methodName = yield* methodKeyOf(name);
   const method = self.findMethod(methodName);
-  if (!method) throw nameError(`undefined method '${methodName}' for class '${className(self)}'`, self, methodName);
+  if (!method) throw undefinedMethodError(self, methodName);
   return unboundMethod(method, methodName, methodReflectionOwner(method, self));
 });
 def('UnboundMethod', 'bind', 1, function* (self: RObject, [recv]) {
@@ -658,10 +672,11 @@ def(
 function validBoundMethod(self: RObject, recv: Value): RMethod {
   const { method, owner } = self.data as MethodData;
   assertMethodOwner(owner, recv, false);
+  const canonical = findCoreMethod(method.nativeIdentityOwner ?? owner, method.name);
   if (
     method.body.kind === 'native' &&
     !isA(recv, method.owner) &&
-    !findCoreMethod(method.nativeIdentityOwner ?? owner, method.name)
+    (!canonical || (canonical.body.kind === 'native' && 'unavailable' in canonical.body.fn))
   )
     throw new UnsupportedFeatureError('継承元の実装を持たないネイティブメソッドの別クラスへの束縛');
   return method;
@@ -759,24 +774,27 @@ function reflectedConstant(module: RClass, name: string, inherit: boolean, neste
 
 def('Module', 'const_get', [1, 2], function* (self: RClass, args) {
   const inherit = args.length < 2 || truthy(args[1]);
-  const requested = yield* nameOf(args[0]);
+  const input = yield* symbolNameOf(args[0]);
+  const requested = input.name;
   const absolute = requested.startsWith('::');
   const parts = (absolute ? requested.slice(2) : requested).split('::');
   if (parts.some((part) => part.length === 0)) throw nameError(`wrong constant name ${requested}`, NIL, requested);
   let module: Value = absolute ? rt().c.Object : self;
   for (const [index, part] of parts.entries()) {
     if (!(module instanceof RClass)) throw typeError(`${requested} does not refer to class/module`);
-    const constant = yield* constantName(str(part));
+    const constant = yield* constantName(
+      RSymbol.of(
+        part,
+        input.binary,
+        input.usAscii,
+        input.binary ? Uint8Array.from(part, (char) => char.codePointAt(0)!) : undefined
+      )
+    );
     const value: Value | undefined =
       reflectedConstant(module, constant, inherit, index > 0) ??
       (inherit && index === 0 && module.isModule ? rt().c.Object.constants.get(constant) : undefined);
     if (value === undefined && inherit) constInModule(module, constant);
-    if (value === undefined)
-      throw nameError(
-        `uninitialized constant ${module === rt().c.Object ? '' : `${className(module)}::`}${constant}`,
-        module,
-        constant
-      );
+    if (value === undefined) missingConstant(module, constant, true);
     module = value;
   }
   return module;
@@ -793,7 +811,8 @@ def('Module', 'const_set', 2, function* (self: RClass, [name, value]) {
   return value;
 });
 def('Module', 'const_defined?', [1, 2], function* (self: RClass, args) {
-  const requested = yield* nameOf(args[0]);
+  const input = yield* symbolNameOf(args[0]);
+  const requested = input.name;
   const inherit = args.length < 2 || truthy(args[1]);
   const absolute = requested.startsWith('::');
   const parts = (absolute ? requested.slice(2) : requested).split('::');
@@ -801,7 +820,14 @@ def('Module', 'const_defined?', [1, 2], function* (self: RClass, args) {
   let module: Value | undefined = absolute ? rt().c.Object : self;
   for (const [index, part] of parts.entries()) {
     if (!(module instanceof RClass)) throw typeError(`${requested} does not refer to class/module`);
-    const constant = yield* constantName(str(part));
+    const constant = yield* constantName(
+      RSymbol.of(
+        part,
+        input.binary,
+        input.usAscii,
+        input.binary ? Uint8Array.from(part, (char) => char.codePointAt(0)!) : undefined
+      )
+    );
     const value = reflectedConstant(module, constant, inherit, index > 0);
     module = value ?? (inherit && index === 0 && module.isModule ? rt().c.Object.constants.get(constant) : undefined);
     if (module === undefined) return false;

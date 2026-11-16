@@ -24,6 +24,18 @@ export class RSymbol {
     readonly bytes?: Uint8Array
   ) {}
 
+  get key(): string {
+    return this.binary
+      ? Array.from(this.bytes ?? [], (byte) => String.fromCodePoint(byte < 128 ? byte : 0xdc_00 + byte)).join('')
+      : this.name;
+  }
+
+  static fromKey(key: string): RSymbol {
+    if (!/[\uDC80-\uDCFF]/u.test(key)) return RSymbol.of(key);
+    const bytes = Uint8Array.from(key, (char) => char.codePointAt(0)! & 255);
+    return RSymbol.of(Array.from(bytes, (byte) => String.fromCodePoint(byte)).join(''), true, false, bytes);
+  }
+
   static of(name: string, binary = false, usAscii = false, sourceBytes?: Uint8Array): RSymbol {
     const symbols = rt().symbols;
     const bytes = sourceBytes ?? new TextEncoder().encode(name);
@@ -50,8 +62,10 @@ export abstract class RBasic {
   frozen = false;
   readonly id = (nextObjectId += 8);
   ivars?: Map<string, Value>;
+  internal?: Map<string, Value>;
   /** The singleton class, created when the program defines a method on this object alone. */
   singleton?: RClass;
+  singletonExposed = false;
 
   constructor(public cls: RClass) {}
 }

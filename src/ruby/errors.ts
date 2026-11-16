@@ -50,15 +50,23 @@ export function noMethodError(message: string, receiver: Value, name: string): R
   return error;
 }
 
+export function undefinedMethodError(owner: RClass, name: string): RubyError {
+  return nameError(
+    `undefined method '${RSymbol.fromKey(name).name}' for ${owner.isModule ? 'module' : 'class'} '${className(owner)}'`,
+    owner,
+    name
+  );
+}
+
 function setNameErrorFields(exception: RObject, receiver: Value, name: string | undefined): void {
-  exception.ivars ??= new Map();
-  exception.ivars.set('@__receiver', receiver);
-  exception.ivars.set('@__name', name === undefined ? NIL : RSymbol.of(name));
+  exception.internal ??= new Map();
+  exception.internal.set('receiver', receiver);
+  exception.internal.set('name', name === undefined ? NIL : RSymbol.fromKey(name));
 }
 
 export function frozenError(value: Value, shown: string): RubyError {
-  const error = rubyError(rt().c.FrozenError, `can't modify frozen ${realClassOf(value).name}: ${shown}`);
-  error.exception.ivars = new Map([['@__receiver', value]]);
+  const error = rubyError(rt().c.FrozenError, `can't modify frozen ${className(realClassOf(value))}: ${shown}`);
+  error.exception.internal = new Map([['receiver', value]]);
   return error;
 }
 

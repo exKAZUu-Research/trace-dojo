@@ -53,6 +53,7 @@ export function executeRubyProgram(source: string, input?: ProgramInput): Progra
 export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: Frame) => void): ProgramRun {
   return withRuntime(runtime, () => {
     bootstrap(runtime);
+    runtime.frozenStringLiterals = program.frozenStringLiterals ?? false;
     const frame = new Frame('main', runtime.mainObject, new Scope(), [runtime.c.Object], undefined, false, false, {});
     frame.defaultVisibility = 'private';
     runtime.pushFrame(frame);
@@ -100,7 +101,7 @@ function describeUncaught(runtime: Runtime, error: unknown, frame: Frame): strin
   if (error instanceof ReturnSignal && error.target === frame) return undefined;
   if (error instanceof RubyError) {
     if (isA(error.exception, runtime.c.SystemExit)) return undefined;
-    if (error.exception.ivars?.get('@__hookReturn') === true) return 'unexpected return';
+    if (error.exception.internal?.get('hookReturn') === true) return 'unexpected return';
     return describeException(error.exception);
   }
   if (error instanceof ThrowSignal || error instanceof BreakSignal || error instanceof NextSignal) {

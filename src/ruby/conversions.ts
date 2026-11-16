@@ -1,5 +1,6 @@
 // code-gauge-allow-file fileNcss 517 -- The conversions module keeps one concern's cases together.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import { isCoreMethod } from './define';
 import { argumentError, implicitConversionError, rangeError, rubyError, typeError } from './errors';
 import { hashGet } from './hashes';
 import { callMethod, callProc, type Gen, runToEnd } from './interp';
@@ -95,14 +96,17 @@ function* respondsToConversion(
   if (!responder) {
     if (resolved) return { callable: true, advertised: true };
     const missingResponder = classOf(value).findMethod('respond_to_missing?');
-    if (missingResponder && missingResponder.body.kind !== 'native') {
+    if (missingResponder && !isCoreMethod(missingResponder, rt().c.Kernel, 'respond_to_missing?')) {
       const advertised = truthy(
         yield* callMethod(value, 'respond_to_missing?', [RSymbol.of(name), true], undefined, undefined, { fcall: true })
       );
       return { callable: advertised, advertised };
     }
     const missing = classOf(value).findMethod('method_missing');
-    return { callable: missing !== undefined && missing.body.kind !== 'native', advertised: false };
+    return {
+      callable: missing !== undefined && !isCoreMethod(missing, rt().c.BasicObject, 'method_missing'),
+      advertised: false,
+    };
   }
   const onePositional = methodArity(responder) === 1;
   const advertised = truthy(
@@ -119,9 +123,13 @@ function* respondsToConversion(
     return { callable: advertised, advertised };
   if (advertised) return { callable: true, advertised: true };
   const missingResponder = classOf(value).findMethod('respond_to_missing?');
-  if (missingResponder && missingResponder.body.kind !== 'native') return { callable: false, advertised: false };
+  if (missingResponder && !isCoreMethod(missingResponder, rt().c.Kernel, 'respond_to_missing?'))
+    return { callable: false, advertised: false };
   const missing = classOf(value).findMethod('method_missing');
-  return { callable: missing !== undefined && missing.body.kind !== 'native', advertised: false };
+  return {
+    callable: missing !== undefined && !isCoreMethod(missing, rt().c.BasicObject, 'method_missing'),
+    advertised: false,
+  };
 }
 
 export function* tryImplicitConversion(value: Value, name: string, args: Value[] = []): Gen<Value | undefined> {
@@ -133,7 +141,8 @@ export function* tryImplicitConversion(value: Value, name: string, args: Value[]
   } catch (error) {
     if (
       !resolved &&
-      (!availability.advertised || classOf(value).findMethod('method_missing')?.body.kind === 'native') &&
+      (!availability.advertised ||
+        isCoreMethod(classOf(value).findMethod('method_missing'), rt().c.BasicObject, 'method_missing')) &&
       error instanceof RubyError &&
       isA(error.exception, rt().c.NoMethodError)
     )
@@ -452,7 +461,7 @@ export function* inspectRange(value: RRange): Gen<string> {
 
 export function* inspectObject(object: RBasic): Gen<string> {
   const name = realClassOf(object).name ?? anonymousClassName(realClassOf(object));
-  const ivars = [...(object.ivars ?? [])].filter(([key]) => !key.startsWith('@__'));
+  const ivars = [...(object.ivars ?? [])];
   if (ivars.length === 0) return `#<${name}:${addressOf(object)}>`;
   if (inspecting.has(object)) return `#<${name}:${addressOf(object)} ...>`;
   inspecting.add(object);

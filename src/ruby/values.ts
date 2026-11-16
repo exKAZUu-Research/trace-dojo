@@ -190,7 +190,7 @@ export function newHash(): RHash {
 }
 
 export function sym(name: string): RSymbol {
-  return RSymbol.of(name);
+  return RSymbol.fromKey(name);
 }
 
 export function range(begin: Value, end: Value, exclusive: boolean): RRange {
@@ -239,7 +239,9 @@ export function realClassOf(value: Value): RClass {
 
 export function singletonDefinitionClass(value: Value): RClass | undefined {
   if (value === NIL || typeof value === 'boolean') return realClassOf(value);
-  return value instanceof RBasic && !(value instanceof RFloat) ? singletonClassOf(value) : undefined;
+  if (!(value instanceof RBasic) || value instanceof RFloat) return undefined;
+  value.singletonExposed = true;
+  return singletonClassOf(value);
 }
 
 /** The singleton class of an object, created on first use; a class's chains to its superclass's. */

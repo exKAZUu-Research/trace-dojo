@@ -191,6 +191,7 @@ export interface Call {
 }
 
 export interface Program {
+  frozenStringLiterals?: boolean;
   body: Body;
   locals: string[];
   /** The text after `__END__`, which `DATA` reads. */

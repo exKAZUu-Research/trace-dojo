@@ -29,6 +29,11 @@ export function findCoreMethod(owner: RClass, name: string): RMethod | undefined
   return coreMethods.get(owner)?.get(name);
 }
 
+export function isCoreMethod(method: RMethod | undefined, owner: RClass, name: string): boolean {
+  const core = findCoreMethod(owner, name);
+  return method?.body.kind === 'native' && core?.body.kind === 'native' && method.body.fn === core.body.fn;
+}
+
 export interface DefineOptions {
   visibility?: Visibility;
   /** Whether the method receives keyword arguments apart, instead of as a trailing Hash. */

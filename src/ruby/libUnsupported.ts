@@ -1,5 +1,6 @@
 import { def, sdef } from './define';
-import { RUBY_CORE_METHODS } from './rubyCoreMethods';
+import type { NativeFn } from './objects';
+import { coreMethodAliases, corePrivateMethods, RUBY_CORE_METHODS } from './rubyCoreMethods';
 import { UnsupportedFeatureError } from './runtime';
 
 for (const [owner, methods] of Object.entries({
@@ -43,25 +44,33 @@ for (const [owner, methods] of Object.entries({
       throw new UnsupportedFeatureError(`${owner}#${name}`);
     });
 
+const unavailableBodies = new Map<string, NativeFn>();
+const aliasNames = new Map<string, string>(
+  coreMethodAliases.flatMap(([owner, names]) =>
+    names.map((name) => [`${owner}#${name}`, `${owner}#${names[0]}`] as const)
+  )
+);
+
 for (const [owner, methods] of Object.entries(RUBY_CORE_METHODS)) {
   for (const name of methods.instance)
-    def(
-      owner,
-      name,
-      [0, -1],
-      () => {
-        throw new UnsupportedFeatureError(`${owner}#${name}`);
-      },
-      { ifMissing: true }
-    );
+    def(owner, name, [0, -1], unavailableMethod(`${owner}#${name}`), {
+      ifMissing: true,
+      visibility: corePrivateMethods[owner]?.includes(name) ? 'private' : 'public',
+    });
   for (const name of methods.singleton)
-    sdef(
-      owner,
-      name,
-      [0, -1],
-      () => {
-        throw new UnsupportedFeatureError(`${owner}.${name}`);
-      },
-      { ifMissing: true }
-    );
+    sdef(owner, name, [0, -1], unavailableMethod(`${owner}.${name}`), { ifMissing: true });
+}
+
+function unavailableMethod(feature: string): NativeFn {
+  const key = aliasNames.get(feature) ?? feature;
+  const existing = unavailableBodies.get(key);
+  if (existing) return existing;
+  const body = Object.assign(
+    (): never => {
+      throw new UnsupportedFeatureError(feature);
+    },
+    { unavailable: true }
+  );
+  unavailableBodies.set(key, body);
+  return body;
 }

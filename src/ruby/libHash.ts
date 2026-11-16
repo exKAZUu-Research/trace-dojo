@@ -169,9 +169,9 @@ function* fetchValue(self: RHash, key: Value, fallback: Value | undefined, block
   if (block) return yield* callBlock(block, [key]);
   if (fallback !== undefined) return fallback;
   const error = rubyError(rt().c.KeyError, `key not found: ${yield* inspect(key)}`);
-  error.exception.ivars = new Map([
-    ['@__key', key],
-    ['@__receiver', self],
+  error.exception.internal = new Map([
+    ['key', key],
+    ['receiver', self],
   ]);
   throw error;
 }

@@ -335,7 +335,6 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = fa
     const parts: Doc[] = [];
     let first = true;
     for (const [name, item] of value.ivars) {
-      if (name.startsWith('@__')) continue;
       if (!first) parts.push(text(',', budget));
       first = false;
       parts.push(breakable(), text(`${name}=`, budget), {
