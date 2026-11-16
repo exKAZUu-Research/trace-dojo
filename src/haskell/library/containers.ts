@@ -102,13 +102,25 @@ fromAscList :: Eq a => [a] -> Set a
 fromAscList xs = fromDistinctAscList (B.map B.last (group xs))
 
 fromDistinctAscList :: [a] -> Set a
-fromDistinctAscList xs = B.foldr seq () xs ${BT}seq${BT} fst (build (length xs) xs)
-  where build n ys = if n == 0 then (STip, ys)
-                     else let nl = (n - 1) ${BT}div${BT} 2
-                              (l, rest) = build nl ys
-                          in case rest of
-                               (y:rest') -> let (r, rest'') = build (n - 1 - nl) rest' in (bin y l r, rest'')
-                               [] -> (l, [])
+fromDistinctAscList = buildOrderedSet False
+
+data OrderedSetStack a = SetPush !a !(Set a) !(OrderedSetStack a) | SetEnd
+
+buildOrderedSet :: Bool -> [a] -> Set a
+buildOrderedSet descending xs = finish STip (B.foldl' next SetEnd xs)
+  where next (SetPush x STip rest) y = y ${BT}seq${BT} joinStack rest 1 (singleton x) y
+        next stack x = x ${BT}seq${BT} SetPush x STip stack
+        joinStack (SetPush x l@(SBin leftSize _ _ _) rest) rightSize r y =
+          if leftSize == rightSize then
+            let count = leftSize + rightSize + 1
+                tree = if descending then SBin count x r l else SBin count x l r
+            in joinStack rest count tree y
+          else SetPush y r (SetPush x l rest)
+        joinStack stack _ r y = SetPush y r stack
+        finish tree SetEnd = tree
+        finish tree (SetPush x subtree rest) =
+          let nextTree = if descending then link x tree subtree else link x subtree tree
+          in nextTree ${BT}seq${BT} finish nextTree rest
 
 toList :: Set a -> [a]
 toList = toAscList
@@ -160,13 +172,12 @@ unions :: (Foldable f, Ord a) => f (Set a) -> Set a
 unions = B.foldl union empty
 
 intersection :: Ord a => Set a -> Set a -> Set a
-intersection a b = fromDistinctAscList (go (toAscList a) (toAscList b))
-  where go [] _ = []
-        go _ [] = []
-        go xs@(x:xt) ys@(y:yt) = case compare x y of
-          LT -> go xt ys
-          GT -> go xs yt
-          EQ -> x : go xt yt
+intersection STip _ = STip
+intersection _ STip = STip
+intersection (SBin _ x l r) b = case splitMember x b of
+  (bl,found,br) -> let left = intersection l bl
+                       right = intersection r br
+                   in left ${BT}seq${BT} right ${BT}seq${BT} if found then link x left right else link2 left right
 
 difference :: Ord a => Set a -> Set a -> Set a
 difference a b = fromDistinctAscList (go (toAscList a) (toAscList b))
@@ -383,10 +394,10 @@ fold :: (a -> b -> b) -> b -> Set a -> b
 fold = foldr
 
 fromDescList :: Eq a => [a] -> Set a
-fromDescList xs = fromDistinctAscList (reverse (B.map B.last (group xs)))
+fromDescList xs = fromDistinctDescList (B.map B.last (group xs))
 
 fromDistinctDescList :: [a] -> Set a
-fromDistinctDescList = fromDistinctAscList . reverse
+fromDistinctDescList = buildOrderedSet True
 
 `;
 
@@ -471,23 +482,40 @@ adjust :: Ord k => (a -> a) -> k -> Map k a -> Map k a
 adjust f = adjustWithKey (\_ x -> f x)
 
 adjustWithKey :: Ord k => (k -> a -> a) -> k -> Map k a -> Map k a
-adjustWithKey _ k Tip = k ${BT}seq${BT} Tip
-adjustWithKey f k (Bin sx kx x l r) = case compare k kx of
-  LT -> Bin sx kx x (adjustWithKey f k l) r
-  GT -> Bin sx kx x l (adjustWithKey f k r)
-  EQ -> Bin sx kx (f kx x) l r
+adjustWithKey = adjustUsing False
+
+adjustUsing :: Ord k => Bool -> (k -> a -> a) -> k -> Map k a -> Map k a
+adjustUsing _ _ k Tip = k ${BT}seq${BT} Tip
+adjustUsing strict f k (Bin count key x l r) = case compare k key of
+  LT -> Bin count key x (adjustUsing strict f k l) r
+  GT -> Bin count key x l (adjustUsing strict f k r)
+  EQ -> let y = f key x in forceValue strict y (Bin count key y l r)
 
 update :: Ord k => (a -> Maybe a) -> k -> Map k a -> Map k a
-update f k m = case lookup k m of
-  Nothing -> m
-  Just x -> case f x of
-    Nothing -> delete k m
-    Just x' -> insert k x' m
+update f = updateWithKey (\_ x -> f x)
+
+updateUsing :: Ord k => Bool -> (k -> a -> Maybe a) -> k -> Map k a -> Map k a
+updateUsing _ _ k Tip = k ${BT}seq${BT} Tip
+updateUsing strict f k (Bin count key x l r) = case compare k key of
+  LT -> balance key x (updateUsing strict f k l) r
+  GT -> balance key x l (updateUsing strict f k r)
+  EQ -> case f key x of
+    Nothing -> glue l r
+    Just y -> forceValue strict y (Bin count key y l r)
 
 alter :: Ord k => (Maybe a -> Maybe a) -> k -> Map k a -> Map k a
-alter f k m = case f (lookup k m) of
-  Nothing -> delete k m
-  Just x -> insert k x m
+alter = alterUsing False
+
+alterUsing :: Ord k => Bool -> (Maybe a -> Maybe a) -> k -> Map k a -> Map k a
+alterUsing strict f k Tip = k ${BT}seq${BT} case f Nothing of
+  Nothing -> Tip
+  Just x -> forceValue strict x (singleton k x)
+alterUsing strict f k (Bin count key x l r) = case compare k key of
+  LT -> balance key x (alterUsing strict f k l) r
+  GT -> balance key x l (alterUsing strict f k r)
+  EQ -> case f (Just x) of
+    Nothing -> glue l r
+    Just y -> forceValue strict y (Bin count key y l r)
 
 bin :: k -> a -> Map k a -> Map k a -> Map k a
 bin k x l r = Bin (size l + size r + 1) k x l r
@@ -551,13 +579,25 @@ fromAscList xs = fromDistinctAscList (combine xs)
         combine ys = ys
 
 fromDistinctAscList :: [(k, a)] -> Map k a
-fromDistinctAscList xs = B.foldr (\(k, _) rest -> k ${BT}seq${BT} rest) () xs ${BT}seq${BT} fst (build (length xs) xs)
-  where build n ys = if n == 0 then (Tip, ys)
-                     else let nl = (n - 1) ${BT}div${BT} 2
-                              (l, rest) = build nl ys
-                          in case rest of
-                               ((k, x) : rest') -> let (r, rest'') = build (n - 1 - nl) rest' in (bin k x l r, rest'')
-                               [] -> (l, [])
+fromDistinctAscList = buildOrderedMap False
+
+data OrderedMapStack k a = MapPush !k a !(Map k a) !(OrderedMapStack k a) | MapEnd
+
+buildOrderedMap :: Bool -> [(k,a)] -> Map k a
+buildOrderedMap descending xs = finish Tip (B.foldl' next MapEnd xs)
+  where next (MapPush k x Tip rest) (key,y) = key ${BT}seq${BT} joinStack rest 1 (singleton k x) key y
+        next stack (k,x) = k ${BT}seq${BT} MapPush k x Tip stack
+        joinStack (MapPush k x l@(Bin leftSize _ _ _ _) rest) rightSize r key y =
+          if leftSize == rightSize then
+            let count = leftSize + rightSize + 1
+                tree = if descending then Bin count k x r l else Bin count k x l r
+            in joinStack rest count tree key y
+          else MapPush key y r (MapPush k x l rest)
+        joinStack stack _ r k x = MapPush k x r stack
+        finish tree MapEnd = tree
+        finish tree (MapPush k x subtree rest) =
+          let nextTree = if descending then link k x tree subtree else link k x subtree tree
+          in nextTree ${BT}seq${BT} finish nextTree rest
 
 toList :: Map k a -> [(k, a)]
 toList = toAscList
@@ -581,7 +621,12 @@ keysSet :: Map k a -> S.Set k
 keysSet m = S.fromDistinctAscList (keys m)
 
 fromSet :: (k -> a) -> S.Set k -> Map k a
-fromSet f s = fromDistinctAscList [(k, f k) | k <- S.toAscList s]
+fromSet = fromSetUsing False
+
+fromSetUsing :: Bool -> (k -> a) -> S.Set k -> Map k a
+fromSetUsing _ _ S.STip = Tip
+fromSetUsing strict f (S.SBin count k l r) =
+  let x = f k in forceValue strict x (Bin count k x (fromSetUsing strict f l) (fromSetUsing strict f r))
 
 foldr :: (a -> b -> b) -> b -> Map k a -> b
 foldr _ z Tip = z
@@ -657,7 +702,13 @@ mapMaybe :: (a -> Maybe b) -> Map k a -> Map k b
 mapMaybe f = mapMaybeWithKey (\_ x -> f x)
 
 mapMaybeWithKey :: (k -> a -> Maybe b) -> Map k a -> Map k b
-mapMaybeWithKey f m = fromDistinctAscList [(k, y) | (k, x) <- toAscList m, Just y <- [f k x]]
+mapMaybeWithKey = mapMaybeUsing False
+
+mapMaybeUsing :: Bool -> (k -> a -> Maybe b) -> Map k a -> Map k b
+mapMaybeUsing _ _ Tip = Tip
+mapMaybeUsing strict f (Bin _ k x l r) = case f k x of
+  Nothing -> link2 (mapMaybeUsing strict f l) (mapMaybeUsing strict f r)
+  Just y -> forceValue strict y (link k y (mapMaybeUsing strict f l) (mapMaybeUsing strict f r))
 
 union :: Ord k => Map k a -> Map k a -> Map k a
 union = unionWith const
@@ -679,7 +730,7 @@ unionWithKeyUsing strict f (Bin _ k x l r) b = case splitLookup k b of
         left = unionWithKeyUsing strict f l bl
         right = unionWithKeyUsing strict f r br
     in if strict then y ${BT}seq${BT} right ${BT}seq${BT} left ${BT}seq${BT} link k y left right
-       else link k y left right
+       else right ${BT}seq${BT} left ${BT}seq${BT} link k y left right
 
 insertUnion :: Ord k => Bool -> Bool -> (k -> a -> a -> a) -> k -> a -> Map k a -> Map k a
 insertUnion strict _ _ k x Tip = k ${BT}seq${BT} forceValue strict x (singleton k x)
@@ -703,21 +754,36 @@ intersectionWith :: Ord k => (a -> b -> c) -> Map k a -> Map k b -> Map k c
 intersectionWith f = intersectionWithKey (\_ x y -> f x y)
 
 intersectionWithKey :: Ord k => (k -> a -> b -> c) -> Map k a -> Map k b -> Map k c
-intersectionWithKey f a b = fromDistinctAscList (go (toAscList a) (toAscList b))
-  where go [] _ = []
-        go _ [] = []
-        go xs@((kx, x) : xt) ys@((ky, y) : yt) = case compare kx ky of
-          LT -> go xt ys
-          GT -> go xs yt
-          EQ -> (kx, f kx x y) : go xt yt
+intersectionWithKey = intersectionUsing False
+
+intersectionUsing :: Ord k => Bool -> (k -> a -> b -> c) -> Map k a -> Map k b -> Map k c
+intersectionUsing _ _ Tip _ = Tip
+intersectionUsing _ _ _ Tip = Tip
+intersectionUsing strict f (Bin _ k x l r) b = case splitLookup k b of
+  (bl,found,br) -> let left = intersectionUsing strict f l bl
+                       right = intersectionUsing strict f r br
+                   in left ${BT}seq${BT} right ${BT}seq${BT} case found of
+                     Nothing -> link2 left right
+                     Just y -> let z = f k x y in forceValue strict z (link k z left right)
 
 difference :: Ord k => Map k a -> Map k b -> Map k a
 difference a b = fromDistinctAscList [(k, x) | (k, x) <- toAscList a, notMember k b]
 
 differenceWith :: Ord k => (a -> b -> Maybe a) -> Map k a -> Map k b -> Map k a
-differenceWith f a b = fromDistinctAscList [(k, z) | (k, x) <- toAscList a, Just z <- [case lookup k b of
-                                                                                        Nothing -> Just x
-                                                                                        Just y -> f x y]]
+differenceWith = differenceUsing False
+
+differenceUsing :: Ord k => Bool -> (a -> b -> Maybe a) -> Map k a -> Map k b -> Map k a
+differenceUsing _ _ a Tip = a
+differenceUsing _ _ Tip _ = Tip
+differenceUsing strict f (Bin _ k x l r) b = case splitLookup k b of
+  (bl,found,br) -> let left = differenceUsing strict f l bl
+                       right = differenceUsing strict f r br
+                       result = case found of Nothing -> Just x; Just y -> f x y
+                   in right ${BT}seq${BT} left ${BT}seq${BT} case result of
+                     Nothing -> link2 left right
+                     Just z -> case found of
+                       Nothing -> link k z left right
+                       Just _ -> forceValue strict z (link k z left right)
 
 (\\) :: Ord k => Map k a -> Map k b -> Map k a
 m1 \\ m2 = difference m1 m2
@@ -871,12 +937,22 @@ mapAccum :: (a -> b -> (a,c)) -> a -> Map k b -> (a,Map k c)
 mapAccum f = mapAccumWithKey (\a _ x -> f a x)
 
 mapAccumWithKey :: (a -> k -> b -> (a,c)) -> a -> Map k b -> (a,Map k c)
-mapAccumWithKey f a m = let (b, xs) = B.mapAccumL (\acc (k,x) -> let (next,y) = f acc k x in (next,(k,y))) a (toAscList m)
-                      in (b,fromDistinctAscList xs)
+mapAccumWithKey = mapAccumUsing False False
 
 mapAccumRWithKey :: (a -> k -> b -> (a,c)) -> a -> Map k b -> (a,Map k c)
-mapAccumRWithKey f a m = let (b, xs) = B.mapAccumR (\acc (k,x) -> let (next,y) = f acc k x in (next,(k,y))) a (toAscList m)
-                       in (b,fromDistinctAscList xs)
+mapAccumRWithKey = mapAccumUsing False True
+
+mapAccumUsing :: Bool -> Bool -> (a -> k -> b -> (a,c)) -> a -> Map k b -> (a,Map k c)
+mapAccumUsing _ _ _ a Tip = (a,Tip)
+mapAccumUsing strict descending f a (Bin count k x l r) =
+  let first = if descending then r else l
+      second = if descending then l else r
+      (a1,firstResult) = mapAccumUsing strict descending f a first
+      (a2,y) = f a1 k x
+      (a3,secondResult) = mapAccumUsing strict descending f a2 second
+      left = if descending then secondResult else firstResult
+      right = if descending then firstResult else secondResult
+  in forceValue strict y (a3,Bin count k y left right)
 
 splitLookup :: Ord k => k -> Map k a -> (Map k a,Maybe a,Map k a)
 splitLookup k m = k ${BT}seq${BT} case m of
@@ -913,7 +989,7 @@ link2 l@(Bin sl kl xl ll lr) r@(Bin sr kr xr rl rr) =
   else glue l r
 
 updateWithKey :: Ord k => (k -> a -> Maybe a) -> k -> Map k a -> Map k a
-updateWithKey f k = update (f k) k
+updateWithKey = updateUsing False
 
 insertLookupWithKey :: Ord k => (k -> a -> a -> a) -> k -> a -> Map k a -> (Maybe a,Map k a)
 insertLookupWithKey = insertLookupUsing False
@@ -954,10 +1030,10 @@ mapKeysMonotonic :: (k1 -> k2) -> Map k1 a -> Map k2 a
 mapKeysMonotonic f m = fromDistinctAscList [(f k,x) | (k,x) <- toAscList m]
 
 fromDescList :: Eq k => [(k,a)] -> Map k a
-fromDescList xs = fromDistinctAscList (reverse (B.map B.last (groupBy (\(k,_) (l,_) -> k == l) xs)))
+fromDescList xs = fromDistinctDescList (B.map B.last (groupBy (\(k,_) (l,_) -> k == l) xs))
 
 fromDistinctDescList :: [(k,a)] -> Map k a
-fromDistinctDescList = fromDistinctAscList . reverse
+fromDistinctDescList = buildOrderedMap True
 
 `;
 
@@ -1030,21 +1106,13 @@ adjust :: Ord k => (a -> a) -> k -> Map k a -> Map k a
 adjust f = adjustWithKey (\_ x -> f x)
 
 adjustWithKey :: Ord k => (k -> a -> a) -> k -> Map k a -> Map k a
-adjustWithKey f k m = case L.lookup k m of
-  Nothing -> m
-  Just x -> insert k (f k x) m
+adjustWithKey = L.adjustUsing True
 
 update :: Ord k => (a -> Maybe a) -> k -> Map k a -> Map k a
-update f k m = case L.lookup k m of
-  Nothing -> m
-  Just x -> case f x of
-    Nothing -> L.delete k m
-    Just x' -> insert k x' m
+update f = updateWithKey (\_ x -> f x)
 
 alter :: Ord k => (Maybe a -> Maybe a) -> k -> Map k a -> Map k a
-alter f k m = case f (L.lookup k m) of
-  Nothing -> L.delete k m
-  Just x -> insert k x m
+alter = L.alterUsing True
 
 fromList :: Ord k => [(k, a)] -> Map k a
 fromList = B.foldl' (\t (k, x) -> insert k x t) L.empty
@@ -1062,7 +1130,7 @@ fromDistinctAscList :: [(k, a)] -> Map k a
 fromDistinctAscList xs = forceInputValues xs ${BT}seq${BT} L.fromDistinctAscList xs
 
 fromSet :: (k -> a) -> S.Set k -> Map k a
-fromSet f s = forceValues (L.fromSet f s)
+fromSet = L.fromSetUsing True
 
 map :: (a -> b) -> Map k a -> Map k b
 map f = mapWithKey (\_ x -> f x)
@@ -1082,10 +1150,10 @@ mapKeysWith :: Ord k2 => (a -> a -> a) -> (k1 -> k2) -> Map k1 a -> Map k2 a
 mapKeysWith c f m = fromListWith c [(f k, x) | (k, x) <- L.toAscList m]
 
 mapMaybe :: (a -> Maybe b) -> Map k a -> Map k b
-mapMaybe f m = forceValues (L.mapMaybe f m)
+mapMaybe f = mapMaybeWithKey (\_ x -> f x)
 
 mapMaybeWithKey :: (k -> a -> Maybe b) -> Map k a -> Map k b
-mapMaybeWithKey f m = forceValues (L.mapMaybeWithKey f m)
+mapMaybeWithKey = L.mapMaybeUsing True
 
 unionWith :: Ord k => (a -> a -> a) -> Map k a -> Map k a -> Map k a
 unionWith f = unionWithKey (\_ x y -> f x y)
@@ -1097,35 +1165,25 @@ unionsWith :: (Foldable f, Ord k) => (a -> a -> a) -> f (Map k a) -> Map k a
 unionsWith f = B.foldl' (unionWith f) L.empty
 
 intersectionWith :: Ord k => (a -> b -> c) -> Map k a -> Map k b -> Map k c
-intersectionWith f a b = forceValues (L.intersectionWith f a b)
+intersectionWith f = intersectionWithKey (\_ x y -> f x y)
 
 intersectionWithKey :: Ord k => (k -> a -> b -> c) -> Map k a -> Map k b -> Map k c
-intersectionWithKey f a b = forceValues (L.intersectionWithKey f a b)
+intersectionWithKey = L.intersectionUsing True
 
 differenceWith :: Ord k => (a -> b -> Maybe a) -> Map k a -> Map k b -> Map k a
-differenceWith _ a L.Tip = a
-differenceWith _ L.Tip _ = L.Tip
-differenceWith f (L.Bin _ k x l r) b = case L.splitLookup k b of
-  (bl,found,br) -> let left = differenceWith f l bl
-                       right = differenceWith f r br
-                       result = case found of Nothing -> Just x; Just y -> f x y
-                   in right ${BT}seq${BT} left ${BT}seq${BT} case result of
-                     Nothing -> L.link2 left right
-                     Just z -> case found of
-                       Nothing -> L.link k z left right
-                       Just _ -> z ${BT}seq${BT} L.link k z left right
+differenceWith = L.differenceUsing True
 
 mapAccum :: (a -> b -> (a,c)) -> a -> Map k b -> (a,Map k c)
 mapAccum f = mapAccumWithKey (\a _ x -> f a x)
 
 mapAccumWithKey :: (a -> k -> b -> (a,c)) -> a -> Map k b -> (a,Map k c)
-mapAccumWithKey f a m = let (b,n) = L.mapAccumWithKey f a m in (b,forceValues n)
+mapAccumWithKey = L.mapAccumUsing True False
 
 mapAccumRWithKey :: (a -> k -> b -> (a,c)) -> a -> Map k b -> (a,Map k c)
-mapAccumRWithKey f a m = let (b,n) = L.mapAccumRWithKey f a m in (b,forceValues n)
+mapAccumRWithKey = L.mapAccumUsing True True
 
 updateWithKey :: Ord k => (k -> a -> Maybe a) -> k -> Map k a -> Map k a
-updateWithKey f k = update (f k) k
+updateWithKey = L.updateUsing True
 
 insertLookupWithKey :: Ord k => (k -> a -> a -> a) -> k -> a -> Map k a -> (Maybe a,Map k a)
 insertLookupWithKey = L.insertLookupUsing True
@@ -1140,7 +1198,7 @@ alterF :: (Functor f, Ord k) => (Maybe a -> f (Maybe a)) -> k -> Map k a -> f (M
 alterF f k m = fmap (\result -> alter (const result) k m) (f (L.lookup k m))
 
 fromDescList :: Eq k => [(k,a)] -> Map k a
-fromDescList xs = L.fromDistinctAscList (collapseOrdered xs)
+fromDescList xs = L.fromDistinctDescList (reverse (collapseOrdered xs))
 
 collapseOrdered :: Eq k => [(k,a)] -> [(k,a)]
 collapseOrdered = B.foldl' step []

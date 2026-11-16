@@ -108,3 +108,109 @@ main=do
       'fromList [K 1 20,K 2 10,K 3 20]\nfromList [(K 1 20,2),(K 2 10,13),(K 3 20,2)]\nfromList [(K 1 20,2),(K 2 10,13),(K 3 20,2)]\nfromList [(K 1 20,2),(K 2 20,23),(K 3 20,2)]\n',
   });
 });
+
+test.each(['Data.Map', 'Data.Map.Strict'])('tree updates preserve stored key representatives in %s', (module) => {
+  const source = `import qualified ${module} as M
+import Data.Maybe(fromJust)
+data K=K Int String deriving Show
+instance Eq K where K x _==K y _=x==y
+instance Ord K where compare(K x _)(K y _)=compare x y
+stored=M.singleton(K 1 "old")(1::Int)
+key=K 1 "new"
+label(K _ text)=text
+main=do
+  print(M.toList(M.adjustWithKey (\\k _->length(label k)) key stored))
+  print(M.toList(M.updateWithKey (\\k _->Just(length(label k))) key stored))
+  print(M.toList(M.update (Just . (+1)) key stored))
+  print(M.toList(M.alter (Just . (+1) . fromJust) key stored))`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '[(K 1 "old",3)]\n[(K 1 "old",3)]\n[(K 1 "old",2)]\n[(K 1 "old",2)]\n',
+  });
+});
+
+test.each(['Data.Map', 'Data.Map.Strict'])('alter searches the tree before invoking its callback in %s', (module) => {
+  for (const [key, tree, uncaughtException] of [
+    ['error "key"', 'M.empty', 'key'],
+    ['1', 'error "tree"', 'tree'],
+  ]) {
+    const source = `import qualified ${module} as M\nmain=print(M.alter (\\_->error "callback") (${key}::Int) (${tree}::M.Map Int Int) \`seq\` 1)`;
+    expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
+  }
+});
+
+test.each(['Data.Map', 'Data.Map.Strict'])(
+  'map accumulation inspects the input tree before returning its pair in %s',
+  (module) => {
+    for (const call of ['M.mapAccum undefined', 'M.mapAccumWithKey undefined', 'M.mapAccumRWithKey undefined']) {
+      const source = `import qualified ${module} as M\nmain=print((${call} (undefined::Int) (error "tree"::M.Map Int Int)::(Int,M.Map Int Int)) \`seq\` 1)`;
+      expect(executeProgram('haskell', source)).toMatchObject({
+        kind: 'executed',
+        stdout: '',
+        uncaughtException: 'tree',
+      });
+    }
+  }
+);
+
+test('lazy difference inspects the second tree and preserves untouched values', () => {
+  for (const [first, second, uncaughtException] of [
+    ['M.empty', 'error "second"', 'second'],
+    ['error "first"', 'error "second"', 'second'],
+  ]) {
+    const source = `import qualified Data.Map as M\nmain=print(M.differenceWith undefined (${first}::M.Map Int Int) (${second}::M.Map Int Int) \`seq\` 1)`;
+    expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
+  }
+});
+
+test.each([
+  [String.raw`M.fromSet (\k->error(show k)::Int) (S.fromList[1..7::Int])`, '4'],
+  [String.raw`M.mapMaybeWithKey (\k _->Just(error(show k)::Int)) m`, '4'],
+  [String.raw`M.intersectionWithKey (\k _ _->error(show k)::Int) m m`, '1'],
+  [String.raw`M.mapAccumWithKey (\a k _->(a,error(show k)::Int)) () m`, '4'],
+])('strict tree transformations follow containers demand: %s', (expression, uncaughtException) => {
+  const source = `import qualified Data.Map.Strict as M\nimport qualified Data.Set as S\nm=M.fromList[(k,k)|k<-[1..7::Int]]\nmain=print((${expression}) \`seq\` 1)`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
+});
+
+test.each(['Data.Map', 'Data.Map.Strict', 'Data.Set'])(
+  'repeated singleton intersections use %s tree searches',
+  (module) => {
+    const isSet = module === 'Data.Set';
+    const tree = isSet ? 'M.fromList[1..500::Int]' : 'M.fromList[(k,k)|k<-[1..500::Int]]';
+    const single = isSet ? 'M.singleton k' : 'M.singleton k ()';
+    const source = `import qualified ${module} as M\nm=${tree}\nmain=print(sum[M.size(M.intersection m (${single}))|k<-[1..500::Int]])`;
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: '500\n',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([
+  ['fromAscList', 6, '4'],
+  ['fromDistinctAscList', 10, '4'],
+  ['fromDescList', 2, '2'],
+  ['fromDistinctDescList', 4, '3'],
+  ['fromDescList', 8, '5'],
+  ['fromDistinctDescList', 10, '7'],
+])('ordered builder %s retains containers shape at size %i', (builder, count, uncaughtException) => {
+  const descending = builder.includes('Desc');
+  const keys = descending ? `[${count},${count - 1}..1::Int]` : `[1..${count}::Int]`;
+  const source = `import qualified Data.Map as L\nimport qualified Data.Map.Strict as S\nm=L.${builder}[(k,())|k<-${keys}]\nmain=print(S.size(S.mapWithKey (\\k _->error(show k)::Int) m))`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
+});
+
+test.each(['Data.Map', 'Data.Map.Strict'])('lazy union traverses right before left in %s', (module) => {
+  const source = `import qualified ${module} as M
+import qualified Data.Map as L
+data K=K Int deriving Show
+instance Eq K where K a==K b=a==b
+instance Ord K where compare(K a)(K b)=if a==2 || a==6 then error(show(a,b)) else compare a b
+a=L.fromDistinctAscList[(K k,())|k<-[1..7]]
+b=L.fromDistinctAscList[(K k,())|k<-[0,1,3,4,5,7,8]]
+main=print(M.size(M.union a b))`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: '(6,7)' });
+});
