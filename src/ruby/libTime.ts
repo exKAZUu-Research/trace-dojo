@@ -543,7 +543,7 @@ function readTimeDirective(format: string, start: number): StrftimeDirective {
       if (char === '0') flags += '0';
       const begin = cursor;
       while (/\d/.test(format[cursor] ?? '')) cursor++;
-      width = format.slice(begin, cursor);
+      width = format.slice(begin, cursor).replace(/^0+/, '');
     } else if (
       (char === 'E' && 'cCxXyY'.includes(format[cursor + 1] ?? '\0')) ||
       (char === 'O' && 'deHkIlmMSuUVwWy'.includes(format[cursor + 1] ?? '\0'))

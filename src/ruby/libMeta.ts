@@ -71,7 +71,7 @@ export function* symbolNameOf(value: Value, identifier = false): Gen<RSymbol> {
   if (value instanceof RString) return identifier ? identifierSymbol(value) : symbolFromString(value);
   const converted = yield* tryImplicitConversion(value, 'to_str');
   if (converted instanceof RString) return identifier ? identifierSymbol(converted) : symbolFromString(converted);
-  if (converted !== undefined) {
+  if (converted !== undefined && converted !== NIL) {
     const name = realClassOf(value).name;
     throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
   }

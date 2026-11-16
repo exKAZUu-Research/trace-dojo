@@ -11090,3 +11090,54 @@ test.each(['iso8601', 'xmlschema'])('unavailable Time aliases preserve their own
     uncaughtException: `Time#${name} は、この採点環境では使えません。`,
   });
 });
+
+test('Time fractional formatting separates zero flags from positive precision', () => {
+  expect(
+    run(String.raw`t=Time.utc(2024,2,29,13,5,9,123456)
+['%0N','%0L','%00N','%_0L','%000N','%03N','%003L','%0_0N','%_03N','%00d'].each{|f|p t.strftime(f)}
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '"123456000"\n"123"\n"123456000"\n"123"\n"123456000"\n"123"\n"123"\n"123456000"\n"123"\n"29"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Nil String conversion declines encoded method-name coercion', () => {
+  expect(
+    run(String.raw`class Op
+ def to_str;nil;end
+ def inspect;'op';end
+end
+[proc{[1,2].inject(Op.new)},proc{[1,2].reduce(0,Op.new)},proc{Object.new.method(Op.new)},proc{Object.new.send(Op.new)}].each do |f|
+ begin;f.call;rescue=>e;p e.class,e.message;end
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'TypeError\n"op is not a symbol nor a string"\nTypeError\n"op is not a symbol nor a string"\nTypeError\n"op is not a symbol nor a string"\nTypeError\n"op is not a symbol nor a string"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([String.raw`(?=a)?\1`, String.raw`\A+\2(a)`, String.raw`(?:(?=a))*\3(a)(b)`])(
+  'invalid references are rejected before unsupported assertion repetition: %s',
+  (source) => {
+    expect(run(`puts :before;p /${source}/`)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test.each(['Age=1.1', 'Age=17.0', 'Grapheme_Cluster_Break=Control', 'InCB=Consonant'])(
+  'valid property-value syntax is unavailable rather than invalid: %s',
+  (property) => {
+    for (const source of [String.raw`\p{${property}}`, String.raw`[\P{^${property}}]`, String.raw`\X\p{${property}}`]) {
+      const result = run(`puts :before;p /${source}/`);
+      expect(result).toMatchObject({
+        kind: 'executed',
+        stdout: 'before\n',
+        uncaughtException: expect.stringContaining('は、この採点環境では使えません。'),
+      });
+    }
+  }
+);

@@ -509,7 +509,7 @@ function translateEscape(
     }
     case 'p':
     case 'P': {
-      const property = /^\{(\^?)(\w+)\}/.exec(source.slice(index + 1));
+      const property = /^\{(\^?)([^}]+)\}/.exec(source.slice(index + 1));
       if (!property) return `\\${next}`;
       const rawName = property[2];
       const key = rawName.toLowerCase();

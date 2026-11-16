@@ -29,6 +29,7 @@ export function validateRegexpSourceSyntax(source: string, extended: boolean, bi
       throw new UnsupportedFeatureError('正規表現の構文の検証');
     throw new SyntaxError('invalid regexp source');
   }
+  if (hasZeroWidthRepeat(root)) throw new UnsupportedFeatureError('正規表現の量指定されたゼロ幅表明');
   visitSource(root, false, false);
 }
 
@@ -57,7 +58,6 @@ function parseSourceRegexp(source: string, extended: boolean, binary = false): S
     skipBackrefValidation: true,
     skipPropertyNameValidation: true,
   });
-  if (hasZeroWidthRepeat(root)) throw new UnsupportedFeatureError('正規表現の量指定されたゼロ幅表明');
   return root;
 }
 
@@ -66,11 +66,6 @@ function validateSourceTokens(tokens: Token[]): void {
     if (token.type === 'Quantifier') {
       const bounds = /^\{(\d+),(\d+)\}/.exec(token.raw);
       if (bounds && Number(bounds[1]) > Number(bounds[2])) throw new SyntaxError('invalid reversed quantifier range');
-    }
-    if (token.type === 'CharacterSet' && token.kind === 'property') {
-      const name = (token.value ?? '').replaceAll(/[-_ ]/g, '').toLowerCase();
-      if (!regexpPropertyNames.has(name))
-        throw new RegexpEncodingError(`invalid character property name {${token.value ?? ''}}`);
     }
   }
 }
@@ -263,6 +258,15 @@ function normalizedRegexpEscape(
   binary: boolean
 ): { text: string; length: number } {
   const next = source[start + 1];
+  if (next === 'p' || next === 'P') {
+    const property = /^\\[pP]\{(\^?)([^}]*)\}/.exec(source.slice(start));
+    if (property) {
+      const name = property[2].replaceAll(/[-_ ]/g, '').toLowerCase();
+      if (!regexpPropertyNames.has(name))
+        throw new RegexpEncodingError(`invalid character property name {${property[2]}}`);
+      return { text: `\\${next}{${property[1]}Any}`, length: property[0].length };
+    }
+  }
   const byte =
     next === 'x' ||
     next === '0' ||
