@@ -14472,6 +14472,7 @@ test('Repeated native Unicode comparisons return within the process deadline', (
     'r=/s/i;s="ß";500.times{r.match?(s)};puts :done',
     'r=/[s]/i;s="ß";500.times{r.match?(s)};puts :done',
     '500.times{ /s/i.match?("ß"); /s/i.match?("ßx") };puts :done',
+    'p ("ß"+"s"*20).scan(/s/i).size;p ("ß"*200).gsub(/ß/i,"S");p 20.times.map{|i| /s/i.match?("ß#{i}")}.any?',
   ];
   const source = `import {executeProgram} from ${JSON.stringify(entry)};
     for (const program of ${JSON.stringify(programs)}) {
@@ -14485,7 +14486,7 @@ test('Repeated native Unicode comparisons return within the process deadline', (
       timeout: 4000,
       killSignal: 'SIGKILL',
     })
-  ).toBe('done\ndone\ndone\n');
+  ).toBe('done\ndone\ndone\n20\n"' + 'S'.repeat(200) + '"\nfalse\n');
 });
 
 const nestedLazyFeedbackCases = [
@@ -14606,3 +14607,189 @@ test.each(percentLiteralBoundaryCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const lazySegmentBoundaryCases = [
+  ['e=Enumerator.new{|y|y.yield(1,2)}.lazy;e.each{|*v|p v}', '[1, 2]\n'],
+  ['e=Enumerator.new{|y|y.yield(1,2)}.lazy;p e.next_values', '[1, 2]\n'],
+  ['e=Enumerator.new{|y|y.yield(1,2)}.lazy;p e.peek_values', '[1, 2]\n'],
+  ['e=Enumerator.new{|y|y.yield(1,2)}.lazy.select{|x|true};e.each{|*v|p v}', '[[1, 2]]\n'],
+  ['e=Enumerator.new{|y|y.yield(1,2)}.lazy.select{|x|true};p e.next_values', '[[1, 2]]\n'],
+  ['e=Enumerator.new{|y|y.yield(1,2)}.lazy.select{|x|true};p e.peek_values', '[[1, 2]]\n'],
+  ['e=Enumerator.new{|y|y.yield(1,2)}.lazy.take(1);e.each{|*v|p v}', '[[1, 2]]\n'],
+  ['e=Enumerator.new{|y|y.yield(1,2)}.lazy.take(1);p e.next_values', '[[1, 2]]\n'],
+  ['e=Enumerator.new{|y|y.yield(1,2)}.lazy.take(1);p e.peek_values', '[[1, 2]]\n'],
+  ['e=[0].lazy.flat_map{|x|Enumerator.new{|y|y.yield(1,2)}.lazy};e.each{|*v|p v}', '[[1, 2]]\n'],
+  ['e=[0].lazy.flat_map{|x|Enumerator.new{|y|y.yield(1,2)}.lazy};p e.next_values', '[[1, 2]]\n'],
+  ['e=[0].lazy.flat_map{|x|Enumerator.new{|y|y.yield(1,2)}.lazy};p e.peek_values', '[[1, 2]]\n'],
+  ['e=[0].lazy.flat_map{|x|Enumerator.new{|y|y.yield(1,2)}.lazy}.select{|x|true};e.each{|*v|p v}', '[[1, 2]]\n'],
+  ['e=[0].lazy.flat_map{|x|Enumerator.new{|y|y.yield(1,2)}.lazy}.select{|x|true};p e.next_values', '[[1, 2]]\n'],
+  ['e=[0].lazy.flat_map{|x|Enumerator.new{|y|y.yield(1,2)}.lazy}.select{|x|true};p e.peek_values', '[[1, 2]]\n'],
+  ['e=[0].lazy.flat_map{|x|Enumerator.new{|y|y.yield(1,2)}.lazy}.take(1);e.each{|*v|p v}', '[[1, 2]]\n'],
+  ['e=[0].lazy.flat_map{|x|Enumerator.new{|y|y.yield(1,2)}.lazy}.take(1);p e.next_values', '[[1, 2]]\n'],
+  ['e=[0].lazy.flat_map{|x|Enumerator.new{|y|y.yield(1,2)}.lazy}.take(1);p e.peek_values', '[[1, 2]]\n'],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[0].lazy.flat_map{|x|inner}.each_entry;p e.force',
+    '[:feedback, nil]\n[:feedback, 1]\n[:feedback, [2, 3]]\n[nil, 1, [2, 3]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[0].lazy.flat_map{|x|inner}.each_entry;e.each{|*v|p v;7}',
+    '[nil]\n[:feedback, nil]\n[1]\n[:feedback, 1]\n[[2, 3]]\n[:feedback, [2, 3]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[0].lazy.flat_map{|x|inner}.each_entry;e.feed(7);5.times{begin;p e.next_values;rescue StopIteration;p :done;end}',
+    '[nil]\n[:feedback, nil]\n[1]\n[:feedback, 1]\n[[2, 3]]\n[:feedback, [2, 3]]\n:done\n:done\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[0].lazy.flat_map{|x|inner}.each_entry.map{|*x|[:mapped,x]};p e.force',
+    '[:feedback, nil]\n[:feedback, 1]\n[:feedback, [2, 3]]\n[[:mapped, [nil]], [:mapped, [1]], [:mapped, [[2, 3]]]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[0].lazy.flat_map{|x|inner}.each_entry.map{|*x|[:mapped,x]};e.each{|*v|p v;7}',
+    '[[:mapped, [nil]]]\n[:feedback, nil]\n[[:mapped, [1]]]\n[:feedback, 1]\n[[:mapped, [[2, 3]]]]\n[:feedback, [2, 3]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[0].lazy.flat_map{|x|inner}.each_entry.map{|*x|[:mapped,x]};e.feed(7);5.times{begin;p e.next_values;rescue StopIteration;p :done;end}',
+    '[[:mapped, [nil]]]\n[:feedback, nil]\n[[:mapped, [1]]]\n[:feedback, 1]\n[[:mapped, [[2, 3]]]]\n[:feedback, [2, 3]]\n:done\n:done\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[0].lazy.flat_map{|x|inner}.each_slice(1);p e.force',
+    '[:feedback, nil]\n[:feedback, 1]\n[:feedback, [2, 3]]\n[[nil], [1], [[2, 3]]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[0].lazy.flat_map{|x|inner}.each_slice(1);e.each{|*v|p v;7}',
+    '[[nil]]\n[:feedback, nil]\n[[1]]\n[:feedback, 1]\n[[[2, 3]]]\n[:feedback, [2, 3]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[0].lazy.flat_map{|x|inner}.each_slice(1);e.feed(7);5.times{begin;p e.next_values;rescue StopIteration;p :done;end}',
+    '[[nil]]\n[:feedback, nil]\n[[1]]\n[:feedback, 1]\n[[[2, 3]]]\n[:feedback, [2, 3]]\n:done\n:done\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[0].lazy.flat_map{|x|inner}.each_slice(2);p e.force',
+    '[:feedback, nil]\n[:feedback, 1]\n[:feedback, [2, 3]]\n[[nil, 1], [[2, 3]]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[0].lazy.flat_map{|x|inner}.each_slice(2);e.each{|*v|p v;7}',
+    '[:feedback, nil]\n[[nil, 1]]\n[:feedback, 1]\n[:feedback, [2, 3]]\n[[[2, 3]]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[0].lazy.flat_map{|x|inner}.each_slice(2);e.feed(7);5.times{begin;p e.next_values;rescue StopIteration;p :done;end}',
+    '[:feedback, nil]\n[[nil, 1]]\n[:feedback, 1]\n[:feedback, [2, 3]]\n[[[2, 3]]]\n:done\n:done\n:done\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[0].lazy.flat_map{|x|inner}.each_cons(1);p e.force',
+    '[:feedback, nil]\n[:feedback, 1]\n[:feedback, [2, 3]]\n[[nil], [1], [[2, 3]]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[0].lazy.flat_map{|x|inner}.each_cons(1);e.each{|*v|p v;7}',
+    '[[nil]]\n[:feedback, nil]\n[[1]]\n[:feedback, 1]\n[[[2, 3]]]\n[:feedback, [2, 3]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[0].lazy.flat_map{|x|inner}.each_cons(1);e.feed(7);5.times{begin;p e.next_values;rescue StopIteration;p :done;end}',
+    '[[nil]]\n[:feedback, nil]\n[[1]]\n[:feedback, 1]\n[[[2, 3]]]\n[:feedback, [2, 3]]\n:done\n:done\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[0].lazy.flat_map{|x|inner}.each_with_object(:m);p e.force',
+    '[:feedback, nil]\n[:feedback, 1]\n[:feedback, [2, 3]]\n[[nil, :m], [1, :m], [[2, 3], :m]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[0].lazy.flat_map{|x|inner}.each_with_object(:m);e.each{|*v|p v;7}',
+    '[nil, :m]\n[:feedback, nil]\n[1, :m]\n[:feedback, 1]\n[[2, 3], :m]\n[:feedback, [2, 3]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[0].lazy.flat_map{|x|inner}.each_with_object(:m);e.feed(7);5.times{begin;p e.next_values;rescue StopIteration;p :done;end}',
+    '[nil, :m]\n[:feedback, nil]\n[1, :m]\n[:feedback, 1]\n[[2, 3], :m]\n[:feedback, [2, 3]]\n:done\n:done\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.map{|*x|x};e=[0].lazy.flat_map{|x|inner}.each_entry;p e.force',
+    '[:feedback, [nil]]\n[:feedback, [1]]\n[:feedback, [2, 3]]\n[[nil], [1], [2, 3]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.map{|*x|x};e=[0].lazy.flat_map{|x|inner}.each_entry;e.each{|*v|p v;7}',
+    '[[nil]]\n[:feedback, [nil]]\n[[1]]\n[:feedback, [1]]\n[[2, 3]]\n[:feedback, [2, 3]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.map{|*x|x};e=[0].lazy.flat_map{|x|inner}.each_entry;e.feed(7);5.times{begin;p e.next_values;rescue StopIteration;p :done;end}',
+    '[[nil]]\n[:feedback, [nil]]\n[[1]]\n[:feedback, [1]]\n[[2, 3]]\n[:feedback, [2, 3]]\n:done\n:done\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.each_entry;e=[0].lazy.flat_map{|x|inner}.each_entry;p e.force',
+    '[:feedback, nil]\n[:feedback, nil]\n[:feedback, nil]\n[nil, 1, [2, 3]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.each_entry;e=[0].lazy.flat_map{|x|inner}.each_entry;e.each{|*v|p v;7}',
+    '[nil]\n[:feedback, nil]\n[1]\n[:feedback, nil]\n[[2, 3]]\n[:feedback, nil]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.each_entry;e=[0].lazy.flat_map{|x|inner}.each_entry;e.feed(7);5.times{begin;p e.next_values;rescue StopIteration;p :done;end}',
+    '[nil]\n[:feedback, nil]\n[1]\n[:feedback, nil]\n[[2, 3]]\n[:feedback, nil]\n:done\n:done\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.each_slice(2);e=[0].lazy.flat_map{|x|inner}.each_entry;p e.force',
+    '[:feedback, nil]\n[:feedback, [nil, 1]]\n[:feedback, nil]\n[[nil, 1], [[2, 3]]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.each_slice(2);e=[0].lazy.flat_map{|x|inner}.each_entry;e.each{|*v|p v;7}',
+    '[:feedback, nil]\n[[nil, 1]]\n[:feedback, [nil, 1]]\n[:feedback, nil]\n[[[2, 3]]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.each_slice(2);e=[0].lazy.flat_map{|x|inner}.each_entry;e.feed(7);5.times{begin;p e.next_values;rescue StopIteration;p :done;end}',
+    '[:feedback, nil]\n[[nil, 1]]\n[:feedback, [nil, 1]]\n[:feedback, nil]\n[[[2, 3]]]\n:done\n:done\n:done\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.each_with_object(:memo);e=[0].lazy.flat_map{|x|inner}.each_entry;p e.force',
+    '[:feedback, [nil, :memo]]\n[:feedback, [1, :memo]]\n[:feedback, [[2, 3], :memo]]\n[[nil, :memo], [1, :memo], [[2, 3], :memo]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.each_with_object(:memo);e=[0].lazy.flat_map{|x|inner}.each_entry;e.each{|*v|p v;7}',
+    '[[nil, :memo]]\n[:feedback, [nil, :memo]]\n[[1, :memo]]\n[:feedback, [1, :memo]]\n[[[2, 3], :memo]]\n[:feedback, [[2, 3], :memo]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.each_with_object(:memo);e=[0].lazy.flat_map{|x|inner}.each_entry;e.feed(7);5.times{begin;p e.next_values;rescue StopIteration;p :done;end}',
+    '[[nil, :memo]]\n[:feedback, [nil, :memo]]\n[[1, :memo]]\n[:feedback, [1, :memo]]\n[[[2, 3], :memo]]\n[:feedback, [[2, 3], :memo]]\n:done\n:done\n',
+  ],
+] as const;
+
+test.each(lazySegmentBoundaryCases)('Lazy segments preserve feedback and terminal arity: %s', (source, stdout) => {
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test('Malformed POSIX bracket candidates reject before execution', () => {
+  for (const pattern of ['[[:^alpha :]]', '[[:alpha :]]', '[[:word!x:]]', '[[:bogus:]]'])
+    expect(run(`puts :before;p "a_b".scan(/${pattern}/)`)).toMatchObject({ kind: 'compileError' });
+});
+
+test('Dynamic POSIX errors preserve native diagnostics and proper classes', () => {
+  expect(
+    run('begin;Regexp.new("[[:^alpha :]]");rescue=>e;p e.class,e.message;end;p "a_2".scan(/[[:alpha:]]/)')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'RegexpError\n"invalid POSIX bracket type: /[[:^alpha :]]/"\n["a"]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native prefetch retains captures across arbitrary and reverse search positions', () => {
+  expect(run('r=/sx/i;s="ßsxßsx";[0,6,2,4,1,3,5].each{|i|p [i,r.match(s,i)&.offset(0)]}')).toMatchObject({
+    kind: 'executed',
+    stdout: '[0, [1, 3]]\n[6, nil]\n[2, [4, 6]]\n[4, [4, 6]]\n[1, [1, 3]]\n[3, [4, 6]]\n[5, nil]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native batches bound deeply nested capture responses', () => {
+  expect(
+    run('r=Regexp.new("("*150+"s"+")"*150,Regexp::IGNORECASE);p ("ß"+"s"*70).scan(r).map{|v|[v.size,v.uniq]}.uniq')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '[[150, ["s"]]]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('A difficult speculative suffix cannot replace a completed native match', () => {
+  expect(run(String.raw`r=/(a+)+\1z|s/i;p r.match?("s"+"a"*300+"ß!")`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\n',
+    uncaughtException: undefined,
+  });
+});

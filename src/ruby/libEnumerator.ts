@@ -1075,8 +1075,6 @@ interface LazyData {
   copy(): LazyData;
 }
 
-const packedTerminalYields = new WeakSet<Value[]>();
-
 function lazyIterationSource(source: Value, args: Value[], displayArgs: Value[]): RObject {
   const enumerator = makeEnumerator(source, 'each', args);
   setLazyDisplaySource(enumerator, source, displayArgs);
@@ -1348,7 +1346,7 @@ function* streamLazyStep(
   const adapter = step && ['each_slice', 'each_cons', 'each_entry', 'each_with_object'].includes(step.kind);
   const memo = adapter ? undefined : (feedback ?? (step ? { value: item } : undefined));
   const outcome = yield* runLazyStep(steps, states, position, item, visit, yielded, memo);
-  return outcome === STOP ? STOP : memo ? memo.value : outcome;
+  return lazySegmentResult(outcome, memo);
 }
 
 // code-gauge-allow functionParameterCount 7 -- Each transformation uses the current tuple and the shared segment feedback.
@@ -1365,11 +1363,12 @@ function* runLazyStep(
   const rootIndex = held.push(item) - 1;
   try {
     const step = steps[position];
-    if (!step) return yield* visit(item, packedTerminalYields.has(yielded) ? [item] : yielded);
+    if (!step) return yield* visit(item, feedback ? [item] : yielded);
     const state = states[position];
-    const next = (value: Value, args: Value[] = [value]): Gen<IterationResult> => {
+    const next = function* (value: Value, args: Value[] = [value]): Gen<IterationResult> {
       if (feedback) feedback.value = value;
-      return streamLazyStep(steps, states, position + 1, value, visit, args, feedback);
+      const outcome = yield* streamLazyStep(steps, states, position + 1, value, visit, args, feedback);
+      return lazySegmentResult(outcome, feedback);
     };
     switch (step.kind) {
       case 'map': {
@@ -1414,7 +1413,6 @@ function* runLazyStep(
         if (step.block) return yield* next(item);
         const pair = [item, index];
         const packed = arr(pair);
-        packedTerminalYields.add(pair);
         return yield* next(packed, pair);
       }
       case 'grep':
@@ -1462,7 +1460,6 @@ function* runLazyStep(
             }
           }
           const packed = arr(tuple);
-          packedTerminalYields.add(tuple);
           return yield* next(packed, yielded.length > 1 ? tuple : [packed]);
         } finally {
           const root = arrays.lastIndexOf(tuple);
@@ -1611,4 +1608,8 @@ def('Enumerator::Lazy', ['inspect', 'to_s'], 0, function* (self: RObject) {
 
 function packedYield(args: Value[]): Value {
   return args.length === 0 ? NIL : args.length === 1 ? args[0] : arr(args);
+}
+
+function lazySegmentResult(outcome: IterationResult, feedback?: LazyFeedback): IterationResult {
+  return outcome === STOP ? STOP : feedback ? feedback.value : outcome;
 }

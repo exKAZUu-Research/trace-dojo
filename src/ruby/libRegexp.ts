@@ -50,7 +50,7 @@ import { regexpMayExpandCasefold } from './regexpCasefold';
 import { assertCasefoldParity } from './regexpCasefoldParity';
 import { RegexpCursor } from './regexpCursor';
 import { decodeRegexpByteEscape, regexpByteEscape, RegexpEncodingError } from './regexpEscapes';
-import { regexpHasCharacterMode, regexpLexicalSource } from './regexpLexicalSource';
+import { regexpHasCharacterMode, regexpHasLiteralPosixBracket, regexpLexicalSource } from './regexpLexicalSource';
 import { regexpOuterOptions } from './regexpOuterOptions';
 import { charIndex, regexpByteIndex, unitIndex } from './regexpPositions';
 import {
@@ -180,9 +180,11 @@ export function translate(
   ignoreCase = false
 ): string {
   const characterMode = regexpHasCharacterMode(source, extended);
+  const literalPosix = regexpHasLiteralPosixBracket(source, extended);
   source = regexpLexicalSource(source, extended);
   validateRegexpSourceSyntax(source, false, ascii);
   if (characterMode) throw unsupportedSyntax('文字モード');
+  if (literalPosix) throw unsupportedSyntax('曖昧な POSIX 文字クラス');
   const classes = ascii ? ASCII_POSIX_CLASSES : POSIX_CLASSES;
   for (const name of regexpCaptureNames(source))
     if (!/^[\p{ID_Start}_][\p{ID_Continue}_]*$/u.test(name)) throw unsupportedSyntax('特殊なキャプチャ名');

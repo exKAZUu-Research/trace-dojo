@@ -239,6 +239,10 @@ export class Runtime implements TracedRuntime<Frame> {
     this.budget.spend(cost);
   }
 
+  get remainingSlots(): number {
+    return Math.max(0, LIMITS.maxSlots - this.allocatedSlots);
+  }
+
   chargeSlots(count: number): void {
     this.allocatedSlots += count;
     if (this.allocatedSlots > LIMITS.maxSlots) throw new ExecutionLimitError('storage');

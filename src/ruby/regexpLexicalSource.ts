@@ -10,6 +10,13 @@ export function regexpHasCharacterMode(source: string, extended: boolean): boole
   );
 }
 
+export function regexpHasLiteralPosixBracket(source: string, extended: boolean): boolean {
+  return (
+    source.includes('[:') &&
+    regexpSourceTokens(source, extended).some((token) => token.type === 'Character' && token.raw === '[')
+  );
+}
+
 export function regexpLexicalSource(source: string, extended: boolean): string {
   return regexpSourceTokens(source, extended)
     .map((token) => sourceToken(token, source))

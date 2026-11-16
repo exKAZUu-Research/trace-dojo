@@ -433,6 +433,7 @@ function onigurumaSyntaxReason(source: string, extended: boolean): string | unde
   } catch (error) {
     if (!(error instanceof Error)) return undefined;
     const { message } = error;
+    if (message.startsWith('Invalid POSIX class')) return 'invalid POSIX bracket type';
     const escape = escapeSyntaxReason(message, source);
     if (escape) return escape;
     if (message.startsWith('Unclosed comment group')) return 'end pattern in group';
