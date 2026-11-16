@@ -61,6 +61,8 @@
     "@emotion/styled": "11.14.1",
     "@eslint-community/regexpp": "4.12.2",
     "@lezer/highlight": "1.2.5",
+    "@ruby/4.0-wasm-wasi": "2.10.1",
+    "@ruby/wasm-wasi": "2.10.1",
     "@rvf/set-get": "7.0.4",
     "@tanstack/react-query": "5.107.1",
     "@trpc/client": "11.25.0",

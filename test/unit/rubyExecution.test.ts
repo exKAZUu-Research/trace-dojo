@@ -11444,8 +11444,6 @@ test.each(['a{100001}', 'a{0,100001}', 'a{100001,}', 'a{,100001}'])(
 
 test.each([
   String.raw`p "ß".match?(/s{2}/i)`,
-  String.raw`p "ﬀ".match?(/f+/i)`,
-  String.raw`p "ß".match?(/(s)(s)/i)`,
   String.raw`p "ß".match?(/(?i:s{2})/)`,
   String.raw`p "ss".match?(/\u00df/i)`,
 ])('Unicode expansion is refused regardless of regexp structure: %s', (source) => {
@@ -13432,4 +13430,41 @@ test('Native split, record and enumerator protocol boundary 51', () => {
   expect(
     run('class C;def each(*a,**k);p [a,k];yield [a,k];end;end;p C.new.to_enum(:each,1,x:2).each.each{}')
   ).toMatchObject({ kind: 'executed', stdout: '[[1], {x: 2}]\nnil\n', uncaughtException: undefined });
+});
+
+test('Unicode searches compare complete native match paths and captures', () => {
+  expect(
+    run(
+      String.raw`p /sx/i.match?("ß"), /s+x/i.match?("ß"), /s|xy/i.match?("ß"), /f+/i.match?("ﬀ"), /(s)(s)/i.match?("ß");p /ß/i.match?("ß"), /s/i.match?("straße")`
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'false\nfalse\nfalse\nfalse\nfalse\ntrue\ntrue\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Retained native casefold inputs share the program storage budget', () => {
+  expect(run('s="ß"*300000;[/s/i,/[s]/i,/s?/i,/(?:s)/i].each{|r|r.match?(s)}')).toMatchObject({
+    kind: 'limitExceeded',
+    limit: 'storage',
+  });
+});
+
+test('Casefold parity is checked at each search position and for every capture', () => {
+  expect(run('r=/ss/i;p r.match("ssß",0).to_a;puts :before;p r.match("ssß",2)')).toMatchObject({
+    kind: 'executed',
+    stdout: '["ss"]\nbefore\n',
+    uncaughtException: 'Unicode の複数文字 casefold は、この採点環境では使えません。',
+  });
+  expect(run('puts :before;p /(ss)|(.+)/i.match("ß").to_a')).toMatchObject({
+    kind: 'executed',
+    stdout: 'before\n',
+    uncaughtException: 'Unicode の複数文字 casefold は、この採点環境では使えません。',
+  });
+  expect(run('p /s|xy/i.match?("😀ß",1), "ßsx".rindex(/sx/i), "ß".rindex(/sx/i)')).toMatchObject({
+    kind: 'executed',
+    stdout: 'false\n1\nnil\n',
+    uncaughtException: undefined,
+  });
 });

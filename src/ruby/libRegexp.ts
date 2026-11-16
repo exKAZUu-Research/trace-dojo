@@ -46,7 +46,8 @@ import {
   type Value,
 } from './objects';
 import { hostRegexpCaptureNames, regexpCaptureNames, regexpHasNumberedBackref } from './regexpCaptureNames';
-import { regexpHasExpandingCasefold } from './regexpCasefold';
+import { regexpMayExpandCasefold } from './regexpCasefold';
+import { assertCasefoldParity } from './regexpCasefoldParity';
 import { RegexpCursor } from './regexpCursor';
 import { decodeRegexpByteEscape, regexpByteEscape, RegexpEncodingError } from './regexpEscapes';
 import { regexpHasCharacterMode, regexpLexicalSource } from './regexpLexicalSource';
@@ -79,7 +80,7 @@ export interface RegexpData {
   byteViewSafe?: boolean;
   safeNative: boolean;
   captureNames?: string[];
-  foldCheck?: { text: string; unsupported: boolean };
+  foldCheck?: { text: string; needed: boolean };
   reverseSticky?: RegExp;
   binaryReverseSticky?: RegExp;
   context?: vm.Context;
@@ -677,7 +678,6 @@ export interface MatchState {
 }
 
 // code-gauge-allow functionParameterCount 7 -- Search callers select shared subject state, validation and anchoring without rebuilding snapshots.
-// code-gauge-allow functionNcss 31 -- One match boundary retains bounded captures and source snapshots.
 // code-gauge-allow functionCognitiveComplexity 27 -- Match execution retains encoding, bounded forward/reverse searches and numbered/named capture state.
 export function execAt(
   regexp: RObject,
@@ -691,11 +691,8 @@ export function execAt(
   if (start < 0 || start > charIndex(text, text.length)) return undefined;
   const data = dataOf(regexp);
   if (source && !validated) validateRegexpSubject(regexp, source);
-  if (!source?.binary && (data.ignoreCase || /\(\?[ims]*i/.test(data.js.source))) {
-    if (data.foldCheck?.text !== text)
-      data.foldCheck = { text, unsupported: regexpHasExpandingCasefold(data.js.source, text) };
-    if (data.foldCheck.unsupported) throw new UnsupportedFeatureError('Unicode の複数文字 casefold');
-  }
+  if (!source?.binary && (data.ignoreCase || /\(\?[ims]*i/.test(data.js.source)) && data.foldCheck?.text !== text)
+    data.foldCheck = { text, needed: regexpMayExpandCasefold(data.js.source, text) };
   const binaryMatch = source?.binary === true && data.encoding === 'US-ASCII';
   const js = regexpForMatch(data, source, anchored);
   rt().spend();
@@ -710,6 +707,8 @@ export function execAt(
       ? Math.max(1, result ? (result.indices?.[0]?.[1] ?? startUnit) - startUnit : 1)
       : (result?.index ?? text.length) - startUnit;
   rt().spend(Math.ceil(work / 64));
+  if (!source?.binary && data.foldCheck?.text === text && data.foldCheck.needed)
+    assertCasefoldParity(data, text, start, result, anchored);
   if (!result?.indices) return undefined;
   rt().chargeSlots(result.indices.length * 3);
   const names: string[] = [];

@@ -1,4 +1,4 @@
-import { type AST, RegExpParser, RegExpSyntaxError, visitRegExpAST } from '@eslint-community/regexpp';
+import { RegExpParser, RegExpSyntaxError, visitRegExpAST } from '@eslint-community/regexpp';
 
 import { ExecutionLimitError } from '../interpreter/limits';
 import { UnsupportedFeatureError } from './runtime';
@@ -113,25 +113,23 @@ const expandingFolds: ReadonlyMap<string, string> = new Map(
   })
 );
 
-export function regexpHasExpandingCasefold(source: string, subject: string): boolean {
+export function regexpMayExpandCasefold(source: string, subject: string): boolean {
   const { subjectFolds, candidates } = casefoldCandidates(subject);
   let expanding = false;
   try {
     const pattern = new RegExpParser().parsePattern(source, 0, source.length, { unicode: true });
-    const width = maximumScopeWidth(pattern);
-    const possibleSubjectFolds = subjectFolds.filter((fold) => codePointCharacters(fold).length <= width);
     const characterSet = (start: number, end: number): void => {
       const matcher = new RegExp(`^(?:${source.slice(start, end)})$`, 'iu');
       if (
         candidates.some((char) => matcher.test(char)) ||
-        possibleSubjectFolds.some((fold) => codePointCharacters(fold).some((char) => matcher.test(char)))
+        subjectFolds.some((fold) => codePointCharacters(fold).some((char) => matcher.test(char)))
       )
         expanding = true;
     };
     visitRegExpAST(pattern, {
       onCharacterEnter(node) {
         const char = String.fromCodePoint(node.value);
-        if (expandingFolds.has(char) || possibleSubjectFolds.some((fold) => fold.includes(char.toLowerCase())))
+        if (expandingFolds.has(char) || subjectFolds.some((fold) => fold.includes(char.toLowerCase())))
           expanding = true;
       },
       onCharacterClassEnter(node) {
@@ -150,52 +148,16 @@ export function regexpHasExpandingCasefold(source: string, subject: string): boo
 }
 
 function casefoldCandidates(subject: string): { subjectFolds: string[]; candidates: string[] } {
-  const subjectFolds = codePointCharacters(subject).flatMap((char) => {
+  const folds = new Set<string>();
+  for (const char of subject) {
     const fold = expandingFolds.get(char);
-    return fold === undefined ? [] : [fold];
-  });
+    if (fold !== undefined) folds.add(fold);
+  }
+  const subjectFolds = [...folds];
   const upper = subject.toUpperCase();
   const lower = subject.toLowerCase();
   const candidates = [...expandingFolds]
     .filter(([, fold]) => upper.includes(fold.toUpperCase()) || lower.includes(fold.toLowerCase()))
     .map(([char]) => char);
   return { subjectFolds, candidates };
-}
-
-function maximumScopeWidth(pattern: AST.Pattern): number {
-  let width = maximumWidth(pattern);
-  visitRegExpAST(pattern, {
-    onAssertionEnter(node) {
-      if (node.kind === 'lookahead' || node.kind === 'lookbehind')
-        width = Math.max(width, ...node.alternatives.map(maximumWidth));
-    },
-  });
-  return width;
-}
-
-function maximumWidth(node: AST.Node): number {
-  switch (node.type) {
-    case 'Pattern':
-    case 'Group':
-    case 'CapturingGroup': {
-      return Math.max(0, ...node.alternatives.map(maximumWidth));
-    }
-    case 'Alternative': {
-      let width = 0;
-      for (const element of node.elements) width = Math.min(3, width + maximumWidth(element));
-      return width;
-    }
-    case 'Quantifier': {
-      return node.max === 0 ? 0 : Math.min(3, maximumWidth(node.element) * Math.min(3, node.max));
-    }
-    case 'Assertion': {
-      return 0;
-    }
-    case 'Backreference': {
-      return 3;
-    }
-    default: {
-      return 1;
-    }
-  }
 }
