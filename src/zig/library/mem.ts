@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 560 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 576 -- Groups the related standard library operations that share this module.
 // code-gauge-allow-file duplicateLines 25 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
-import { floatFromBigInt } from '../floats';
+import { type AnyFloat, compareFloats, floatFromBigInt, minMaxFloat } from '../floats';
 import type { Frame } from '../runtime';
 import { copyForStorage, known, newArray, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
@@ -21,7 +21,7 @@ import {
   USIZE,
   VOID,
 } from '../types';
-import { NULL, type Pointer, Slice, storeInto, type Value, ZStruct } from '../values';
+import { NULL, type Pointer, Slice, storageLocation, storeInto, type Value, ZStruct } from '../values';
 import { WeakValueMap } from '../weakValueMap';
 import { blockSortFunction, runBlockSort } from './blockSort';
 import {
@@ -63,11 +63,15 @@ interface AllocationPlan {
 }
 
 function comparisonBudget(sema: SemaApi, frame?: Frame): typeof equalValues {
+  const spend = nativeBudget(sema, frame);
   return (a, b) => {
-    if (frame) frame.runtime.spend();
-    else sema.spendCompilation();
+    spend();
     return equalValues(a, b);
   };
+}
+
+function nativeBudget(sema: SemaApi, frame?: Frame): () => void {
+  return frame ? () => frame.runtime.spend() : () => sema.spendCompilation();
 }
 
 function findSequence(haystack: Value[], needle: Value[], from: number, equal: typeof equalValues): number {
@@ -479,16 +483,20 @@ const MEMBERS: Record<string, () => Member> = {
   trim: trimmer('std.mem.trim', true, true),
   trimStart: trimmer('std.mem.trimStart', true, false),
   trimEnd: trimmer('std.mem.trimEnd', false, true),
-  allEqual: sliceSearch('std.mem.allEqual', 'scalar', BOOL, (h, v) => h.every((x) => equalValues(x, v))),
-  lessThan: sliceSearch('std.mem.lessThan', 'slice', BOOL, (a, b) => lexicographic(a, b as unknown as Value[]) < 0),
-  order: sliceSearch('std.mem.order', 'slice', ORDER, (a, b) => orderValue(lexicographic(a, b as unknown as Value[]))),
+  allEqual: sliceSearch('std.mem.allEqual', 'scalar', BOOL, (h, v, equal) => h.every((x) => equal(x, v))),
+  lessThan: () => sliceOrder('std.mem.lessThan', true),
+  order: () => sliceOrder('std.mem.order', false),
   max: generic('std.mem.max', 2, (sema, call, type, [sliceArg]) => {
     const slice = constSlice(sema, sliceArg, type);
-    return computed(type, [slice], call.span, ([value]) => extreme(elements(value), 1));
+    return computed(type, [slice], call.span, ([value], frame) =>
+      extreme(elements(value), 1, type, nativeBudget(sema, frame))
+    );
   }),
   min: generic('std.mem.min', 2, (sema, call, type, [sliceArg]) => {
     const slice = constSlice(sema, sliceArg, type);
-    return computed(type, [slice], call.span, ([value]) => extreme(elements(value), -1));
+    return computed(type, [slice], call.span, ([value], frame) =>
+      extreme(elements(value), -1, type, nativeBudget(sema, frame))
+    );
   }),
   indexOfMax: extremeIndex('std.mem.indexOfMax', 1),
   findMax: extremeIndex('std.mem.findMax', 1),
@@ -496,10 +504,13 @@ const MEMBERS: Record<string, () => Member> = {
   findMin: extremeIndex('std.mem.findMin', -1),
   minMax: generic('std.mem.minMax', 2, (sema, call, type, [sliceArg]) => {
     const slice = constSlice(sema, sliceArg, type);
-    return computed(tupleOf(sema, [type, type]), [slice], call.span, ([value]) => {
+    return computed(tupleOf(sema, [type, type]), [slice], call.span, ([value], frame) => {
       const items = elements(value);
       if (items.length === 0) panic(PANIC.unreachable);
-      return new ZStruct([extreme(items, -1), extreme(items, 1)]);
+      return new ZStruct([
+        extreme(items, -1, type, nativeBudget(sema, frame)),
+        extreme(items, 1, type, nativeBudget(sema, frame)),
+      ]);
     });
   }),
   indexOfMinMax: () => minMaxIndexes('std.mem.indexOfMinMax'),
@@ -510,11 +521,11 @@ const MEMBERS: Record<string, () => Member> = {
   cutScalarLast: () => cutter('std.mem.cutScalarLast', 'scalar', true),
   indexOfDiff: () => diffMember('std.mem.indexOfDiff'),
   findDiff: () => diffMember('std.mem.findDiff'),
-  lastIndexOfNone: sliceSearch('std.mem.lastIndexOfNone', 'slice', OPTIONAL_USIZE, (h, set) =>
-    optionalIndex(h.findLastIndex((x) => !(set as unknown as Value[]).some((y) => equalValues(x, y))))
+  lastIndexOfNone: sliceSearch('std.mem.lastIndexOfNone', 'slice', OPTIONAL_USIZE, (h, set, equal) =>
+    optionalIndex(h.findLastIndex((x) => !(set as unknown as Value[]).some((y) => equal(x, y))))
   ),
-  findLastNone: sliceSearch('std.mem.findLastNone', 'slice', OPTIONAL_USIZE, (h, set) =>
-    optionalIndex(h.findLastIndex((x) => !(set as unknown as Value[]).some((y) => equalValues(x, y))))
+  findLastNone: sliceSearch('std.mem.findLastNone', 'slice', OPTIONAL_USIZE, (h, set, equal) =>
+    optionalIndex(h.findLastIndex((x) => !(set as unknown as Value[]).some((y) => equal(x, y))))
   ),
   containsAtLeastScalar: generic(
     'std.mem.containsAtLeastScalar',
@@ -720,19 +731,45 @@ function cutMember(name: string, suffix: boolean): () => Member {
   });
 }
 
-function lexicographic(a: Value[], b: Value[]): number {
-  const length = Math.min(a.length, b.length);
-  for (let index = 0; index < length; index++) {
-    const comparison = compareScalars(a[index], b[index]);
-    if (comparison !== 0) return comparison;
-  }
-  return a.length - b.length;
+function sliceOrder(name: string, lessThan: boolean): Member {
+  return generic(name, 3, (sema, call, type, [leftArg, rightArg]) => {
+    const left = constSlice(sema, leftArg, type);
+    const right = constSlice(sema, rightArg, type);
+    return computed(lessThan ? BOOL : ORDER, [left, right], call.span, ([a, b], frame) => {
+      const result = lexicographic(a as Slice, b as Slice, type, nativeBudget(sema, frame));
+      return lessThan ? result < 0 : orderValue(result);
+    });
+  })();
 }
 
-function extreme(values: Value[], direction: number): Value {
+function lexicographic(first: Slice, second: Slice, type: Type, spend: () => void): number {
+  const location = storageLocation(first.target.slots, first.start);
+  const other = storageLocation(second.target.slots, second.start);
+  if (location.storage === other.storage && location.index === other.index) return first.length - second.length;
+  const length = Math.min(first.length, second.length);
+  for (let index = 0; index < length; index++) {
+    spend();
+    const x = first.get(index);
+    const y = second.get(index);
+    const order =
+      type.kind === 'float' || type.kind === 'comptime_float'
+        ? compareFloats(x as AnyFloat, y as AnyFloat)
+        : compareScalars(x, y);
+    if (order === undefined) panic(PANIC.unreachable);
+    if (order !== 0) return order;
+  }
+  return first.length - second.length;
+}
+
+function extreme(values: Value[], direction: number, type: Type, spend: () => void): Value {
   if (values.length === 0) panic(PANIC.unreachable);
   let best = values[0];
-  for (const value of values.slice(1)) if (compareScalars(value, best) * direction > 0) best = value;
+  for (const value of values.slice(1)) {
+    spend();
+    if (type.kind === 'float' || type.kind === 'comptime_float')
+      best = minMaxFloat(best as AnyFloat, value as AnyFloat, direction > 0);
+    else if (compareScalars(value, best) * direction > 0) best = value;
+  }
   return best;
 }
 

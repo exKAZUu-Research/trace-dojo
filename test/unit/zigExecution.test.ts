@@ -1942,7 +1942,7 @@ test.each(['false', '@as(u8,1)>2'])(
 );
 
 test('narrow error casts report the rejected error name', () => {
-  const source = `const std=@import("std");const A=error{One,Two};const B=error{One,Three};fn cast(value:A)B{return @errorCast(value);}pub fn main()void{std.debug.print("before|",.{});_=cast(A.Two);}`;
+  const source = `const std=@import("std");const A=error{One,Two};const B=error{One,Three};fn cast(value:A)B{return @errorCast(value);}pub fn main()void{std.debug.print("before|",.{});std.debug.print("{any}",.{cast(A.Two)});}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
     stderr: 'before|',
@@ -2205,7 +2205,7 @@ test.each([
 });
 
 test.each(['anyerror', 'error{One,Two}!u8'])('dynamic error casts retain their runtime panic for %s', (inputType) => {
-  const source = `const std=@import("std");const B=error{One,Three};fn cast(value:${inputType})${inputType.includes('!') ? 'B!u8' : 'B'}{return @errorCast(value);}pub fn main()void{std.debug.print("before|",.{});_=cast(error.Two)${inputType.includes('!') ? ' catch 0' : ''};}`;
+  const source = `const std=@import("std");const B=error{One,Three};fn cast(value:${inputType})${inputType.includes('!') ? 'B!u8' : 'B'}{return @errorCast(value);}pub fn main()void{std.debug.print("before|",.{});std.debug.print("{any}",.{cast(error.Two)});}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
     stderr: 'before|',
@@ -2267,3 +2267,113 @@ test.each(['0x.', '0x1p', '0x1p_1', '0x1p1__0', '0x1_.0', '0x1._0'])(
     });
   }
 );
+
+test.each([
+  'r.uintLessThan(u8,3)',
+  'r.uintAtMost(u8,4)',
+  'r.intRangeLessThan(i8,-1,2)',
+  'r.weightedIndex(u8,&.{1,2})',
+  'r.enumValue(enum{a,b,c})',
+])('zero-state random rejection sampling respects execution limits: %s', (expression) => {
+  const source = `const std=@import("std");pub fn main()void{var p=std.Random.DefaultPrng{.s=.{0,0,0,0}};const r=p.random();_= ${expression};}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded' });
+});
+
+test.each([
+  '_=error.Foo;',
+  'const e:anyerror=error.Foo;_=e;',
+  'const A=error{One,Two};const e:A=A.One;_=e;',
+  'f() catch |err|{_=err;};',
+  'const e:error{Foo}!u8=error.Foo;_=e catch |err| err;',
+])('discarding an error set is a compile error in every expression context: %s', (body) => {
+  const source = `fn f()error{Foo}!void{return error.Foo;}pub fn main()void{${body}}`;
+  expect(executeProgram('zig', source).kind).toBe('compileError');
+});
+
+test('catch handlers can omit errors or use them while ordinary values remain discardable', () => {
+  const source = `const std=@import("std");fn f()error{Foo}!u8{return error.Foo;}pub fn main()void{_=f() catch 0;_=f() catch |err|{std.debug.print("{s}",.{@errorName(err)});return;};}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'Foo',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['f64', 'f128'])('slice ordering panics on distinct unordered values in %s', (type) => {
+  for (const operation of ['order', 'lessThan']) {
+    const source = `const std=@import("std");pub fn main()void{var n=std.math.nan(${type});_=&n;const a=[_]${type}{n};const b=[_]${type}{1};std.debug.print("before|",.{});std.debug.print("{any}",.{std.mem.${operation}(${type},&a,&b)});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'before|',
+      uncaughtException: 'panic: reached unreachable code',
+    });
+  }
+});
+
+test.each(['f64', 'f128'])('slice ordering skips element reads at the same backing address in %s', (type) => {
+  const source = `const std=@import("std");pub fn main()void{var n=std.math.nan(${type});_=&n;const a=[_]${type}{n,1};std.debug.print("{} {} {}",.{std.mem.order(${type},&a,&a),std.mem.order(${type},a[0..1],&a),std.mem.lessThan(${type},&a,&a)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '.eq .lt false',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['f64', 'f128'])('slice extrema select numeric values around NaN in %s', (type) => {
+  for (const items of ['n,1,2', '1,n,2', '1,2,n']) {
+    const source = `const std=@import("std");pub fn main()void{var n=std.math.nan(${type});_=&n;const a=[_]${type}{${items}};const low,const high=std.mem.minMax(${type},&a);std.debug.print("{d} {d}|{d} {d}",.{std.mem.min(${type},&a),std.mem.max(${type},&a),low,high});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '1 2|1 2',
+      uncaughtException: undefined,
+    });
+  }
+});
+
+test.each(['0.0,-0.0', '-0.0,0.0'])('slice extrema preserve signed-zero ordering: %s', (items) => {
+  const source = `const std=@import("std");pub fn main()void{const a=[_]f64{${items}};std.debug.print("{d} {d}",.{std.mem.min(f64,&a),std.mem.max(f64,&a)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '-0 0',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['[_]u8{97}', '[_:0]u8{98}', 'ab'],
+  ['[_:0]u8{97}', '[_]u8{98}', 'ab'],
+  ['[_:0]u8{97}', '[_:0]u8{98}', 'ab'],
+  ['[_]u8{97}', '"bc".*', 'abc'],
+])('array concatenation combines compatible sentinel information: %s ++ %s', (left, right, output) => {
+  const source = `const std=@import("std");pub fn main()void{const a=${left} ++ ${right};const s:[:0]const u8=&a;std.debug.print("{s}",.{s});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: output,
+    uncaughtException: undefined,
+  });
+});
+
+test('conflicting concatenation sentinels require an ordinary slice', () => {
+  expect(
+    executeProgram('zig', `pub fn main()void{const a=[_:1]u8{97} ++ [_:0]u8{98};const s:[:0]const u8=&a;_=s;}`).kind
+  ).toBe('compileError');
+});
+
+test.each(['findLastNone', 'lastIndexOfNone'])('reverse set exclusion searches meter both phases: %s', (operation) => {
+  const input = 'a'.repeat(1000);
+  const set = 'b'.repeat(1999) + 'a';
+  for (const receiver of ['input', 'getInput()']) {
+    const source = `const std=@import("std");const input="${input}";fn getInput()[]const u8{return input;}pub fn main()void{_=std.mem.${operation}(u8,${receiver},"${set}");}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+});
+
+test('allocated opaque native values preserve their state and supported fields', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var bytes:[1024]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const g=f.allocator();var a=std.Random.DefaultPrng.init(7);var b=std.Random.DefaultPrng.init(7);const r=try g.create(std.Random);r.*=a.random();std.debug.print("{}|",.{r.int(u8)==b.random().int(u8)});var m=std.AutoHashMap(u8,u8).init(init.gpa);defer m.deinit();try m.put(1,9);const it=try g.create(@TypeOf(m.iterator()));it.*=m.iterator();const ki=try g.create(@TypeOf(m.keyIterator()));ki.*=m.keyIterator();const vi=try g.create(@TypeOf(m.valueIterator()));vi.*=m.valueIterator();std.debug.print("{} {} {}|",.{it.next().?.value_ptr.*,ki.next().?.*,vi.next().?.*});const saved=try g.create(std.process.Init);saved.*=init;const io=try g.create(std.Io);io.*=saved.io;const file=try g.create(std.Io.File);file.*=std.Io.File.stdout();var buffer:[8]u8=undefined;const w=try g.create(std.Io.File.Writer);w.*=file.writer(io.*,&buffer);try w.interface.writeAll("ok");try w.interface.flush();}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'ok',
+    stderr: 'true|9 1 9|',
+    uncaughtException: undefined,
+  });
+});

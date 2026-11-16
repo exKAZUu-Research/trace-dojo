@@ -295,6 +295,14 @@ export function negate(value: AnyFloat): AnyFloat {
   return new BigFloat(!value.sign, value.kind, value.mantissa, value.exponent);
 }
 
+export function minMaxFloat(a: AnyFloat, b: AnyFloat, isMax: boolean): AnyFloat {
+  if (isNaNFloat(a)) return b;
+  if (isNaNFloat(b)) return a;
+  const order = compareFloats(a, b) ?? 0;
+  if (order === 0 && signBit(a) !== signBit(b)) return isMax === signBit(a) ? b : a;
+  return isMax ? (order >= 0 ? a : b) : order <= 0 ? a : b;
+}
+
 /** Compares two floats: -1, 0, or 1, or undefined when either is NaN. */
 // code-gauge-allow functionCognitiveComplexity 24 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 export function compareFloats(a: AnyFloat, b: AnyFloat): -1 | 0 | 1 | undefined {

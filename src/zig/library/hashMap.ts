@@ -344,9 +344,24 @@ function hashMapType(name: string, keyType: Type, valueType: Type, kind: KeyKind
     byteSize: managed ? 40 : 24,
     args: [keyType, valueType],
   });
-  const iterator = nativeStruct(`${name}.Iterator`, {});
-  const keyIterator = nativeStruct(`${name}.KeyIterator`, {});
-  const valueIterator = nativeStruct(`${name}.ValueIterator`, {});
+  const iterator = nativeStruct(`${name}.Iterator`, {}, [], {
+    kind: 'hashMapIterator',
+    args: [],
+    storageSlots: 2,
+    byteSize: 16,
+  });
+  const keyIterator = nativeStruct(`${name}.KeyIterator`, {}, [], {
+    kind: 'hashMapIterator',
+    args: [],
+    storageSlots: 2,
+    byteSize: 24,
+  });
+  const valueIterator = nativeStruct(`${name}.ValueIterator`, {}, [], {
+    kind: 'hashMapIterator',
+    args: [],
+    storageSlots: 2,
+    byteSize: 24,
+  });
   const types: MapTypes = { map, entry, kv, getOrPutResult, iterator, keyIterator, valueIterator };
   mapTypes.set(key, map);
   defineMembers(types, keyType, valueType, kind, managed);

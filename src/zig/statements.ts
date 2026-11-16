@@ -532,9 +532,7 @@ export abstract class StatementCompiler extends CallCompiler {
   private expressionStatement(expression: Expression, span: Span): Stmt {
     const value = this.compile(expression);
     const type = value.type;
-    if (type.kind === 'error_union' || type.kind === 'error_set') {
-      this.error(expression, 'エラーを無視しています。try・catch・if で受け取ってください。');
-    }
+    this.rejectDiscardedError(type, expression);
     if (type.kind !== 'void' && type.kind !== 'noreturn') {
       this.error(expression, `${typeName(type)} 型の値を使っていません（捨てるときは _ = ... と書きます）。`);
     }
@@ -556,9 +554,7 @@ export abstract class StatementCompiler extends CallCompiler {
       const discarded = unwrapParens(expression.value);
       const value =
         discarded.kind === 'catch' ? this.compileCatch(discarded, undefined, true) : this.compile(expression.value);
-      if (value.type.kind === 'error_union') {
-        this.error(expression.value, 'エラーになりうる値は、_ = では捨てられません（try か catch で扱ってください）。');
-      }
+      this.rejectDiscardedError(value.type, expression.value);
       const evaluate = value.eval;
       return {
         exec: this.simple(row, isCallOnly(expression.value), (frame) => void evaluate(frame)),
@@ -600,7 +596,11 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
-  /** `x op= value`, computed as `x op value` with the value of `x` read once. */
+  private rejectDiscardedError(type: Type, span: Span): void {
+    if (type.kind === 'error_union' || type.kind === 'error_set')
+      this.error(span, 'エラーを無視しています。try・catch・if で受け取ってください。');
+  }
+
   /**
    * The new value of `target op= value`. Zig coerces the right operand to the target's type, except for shifts, whose
    * amount has its own type.
@@ -2215,8 +2215,8 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** `x catch handler`; with `discarded`, as in `_ = x catch handler`, the payload and handler need no common type. */
-  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps error-union analysis and handler evaluation together.
-  // code-gauge-allow functionNcss 40 -- Keeps the success and error result conversions together.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps error-union analysis and handler evaluation together.
+  // code-gauge-allow functionNcss 42 -- Keeps the success and error result conversions together.
   protected compileCatch(expression: ExpressionOf<'catch'>, resultType: Type | undefined, discarded = false): TExpr {
     const operand = this.compile(expression.operand);
     const type = operand.type;
@@ -2261,6 +2261,10 @@ export abstract class StatementCompiler extends CallCompiler {
     const handler = this.withCapture(capture, () =>
       this.compile(expression.handler, discarded ? undefined : (resultType ?? type.payload))
     );
+    if (discarded) {
+      this.rejectDiscardedError(type.payload, expression.operand);
+      this.rejectDiscardedError(handler.type, expression.handler);
+    }
     const payloadSlot = this.localSlot();
     const payloadValue = runtime(type.payload, (frame) => frame.slots[payloadSlot], expression);
     const resultTypeOf = discarded

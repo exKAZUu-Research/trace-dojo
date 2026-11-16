@@ -20,7 +20,6 @@ import {
   type AnyFloat,
   asBigFloat,
   BigFloat,
-  compareFloats,
   floatArithmetic,
   type FloatBits,
   floatFromBigInt,
@@ -28,6 +27,7 @@ import {
   floatSqrt,
   isIntegral,
   isNaNFloat,
+  minMaxFloat,
   roundNumber,
   roundTo,
   signBit,
@@ -641,14 +641,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     const isMax = name === '@max';
     const pick = (a: Value, b: Value): Value => {
       if (typeof a === 'bigint' && typeof b === 'bigint') return isMax ? (a > b ? a : b) : a < b ? a : b;
-      const x = a as AnyFloat;
-      const y = b as AnyFloat;
-      if (isNaNFloat(x)) return y;
-      if (isNaNFloat(y)) return x;
-      const order = compareFloats(x, y) ?? 0;
-      // Zig orders -0 below +0 here, as the CPU's minimum and maximum instructions do.
-      if (order === 0 && signBit(x) !== signBit(y)) return isMax === signBit(x) ? y : x;
-      return isMax ? (order >= 0 ? x : y) : order <= 0 ? x : y;
+      return minMaxFloat(a as AnyFloat, b as AnyFloat, isMax);
     };
     let type: Type = peer;
     if (peer.kind === 'int') {

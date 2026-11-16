@@ -26,6 +26,10 @@ import { NativeHandle, type Pointer, type Slice, type Value, ZArray, ZStruct } f
 import { storeSliceValue } from './common';
 import { addMembers, compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
 
+interface RandomSource {
+  next: () => bigint;
+}
+
 const MASK = (1n << 64n) - 1n;
 
 function rotl(value: bigint, amount: bigint): bigint {
@@ -56,10 +60,10 @@ function next(state: ZArray): bigint {
 }
 
 /** `Xoshiro256.fill`: little-endian bytes of `next()`, a fresh one for a partial last word. */
-function fill(state: ZArray, count: number): number[] {
+function fill(state: RandomSource, count: number): number[] {
   const bytes: number[] = [];
   while (bytes.length < count) {
-    let n = next(state);
+    let n = state.next();
     const take = Math.min(8, count - bytes.length);
     for (let index = 0; index < take; index++) {
       bytes.push(Number(n & 0xffn));
@@ -70,7 +74,7 @@ function fill(state: ZArray, count: number): number[] {
 }
 
 /** `Random.int(T)`. */
-function randomInt(state: ZArray, type: IntType): bigint {
+function randomInt(state: RandomSource, type: IntType): bigint {
   const bytes = Math.ceil(type.bits / 8);
   const raw = fill(state, bytes);
   let value = 0n;
@@ -79,7 +83,7 @@ function randomInt(state: ZArray, type: IntType): bigint {
 }
 
 /** `Random.uintLessThan(T, less_than)`, Lemire's method as Zig adapts it. */
-function uintLessThan(state: ZArray, type: IntType, lessThan: bigint): bigint {
+function uintLessThan(state: RandomSource, type: IntType, lessThan: bigint): bigint {
   if (lessThan <= 0n) panic(PANIC.unreachable);
   const bits = BigInt(type.bits);
   const mask = (1n << bits) - 1n;
@@ -102,19 +106,19 @@ function uintLessThan(state: ZArray, type: IntType, lessThan: bigint): bigint {
 }
 
 /** `uintLessThanBiased`: `limitRangeBiased`, the high half of the product, without rejecting any value. */
-function uintLessThanBiased(state: ZArray, type: IntType, lessThan: bigint): bigint {
+function uintLessThanBiased(state: RandomSource, type: IntType, lessThan: bigint): bigint {
   if (lessThan <= 0n) panic(PANIC.unreachable);
   return (randomInt(state, type) * lessThan) >> BigInt(type.bits);
 }
 
-function uintAtMost(state: ZArray, type: IntType, atMost: bigint, biased = false): bigint {
+function uintAtMost(state: RandomSource, type: IntType, atMost: bigint, biased = false): bigint {
   if (atMost === maxInt(type)) return randomInt(state, type);
   return (biased ? uintLessThanBiased : uintLessThan)(state, type, atMost + 1n);
 }
 
 /** `intRangeLessThan` and `intRangeAtMost` and their biased variants, which work in the unsigned type of the same width. */
 function intRange(
-  state: ZArray,
+  state: RandomSource,
   type: IntType,
   atLeast: bigint,
   upper: bigint,
@@ -133,7 +137,7 @@ function intRange(
 }
 
 /** `weightedIndex` with integer proportions: a point below their sum, found in the running totals. */
-function weightedIntIndex(state: ZArray, type: IntType, proportions: bigint[]): bigint {
+function weightedIntIndex(state: RandomSource, type: IntType, proportions: bigint[]): bigint {
   const sum = proportions.reduce((total, value) => total + value, 0n);
   if (!fitsInt(sum, type)) panic(PANIC.overflow);
   const point = type.signed ? intRange(state, type, 0n, sum, false) : uintLessThan(state, type, sum);
@@ -146,7 +150,7 @@ function weightedIntIndex(state: ZArray, type: IntType, proportions: bigint[]): 
 }
 
 /** `weightedIndex` with float proportions: `@min(r.float(T) * sum, sum - floatEps(T))`, as Zig computes in `T`. */
-function weightedFloatIndex(state: ZArray, bits: 32 | 64, proportions: number[]): bigint {
+function weightedFloatIndex(state: RandomSource, bits: 32 | 64, proportions: number[]): bigint {
   const round = (value: number): number => (bits === 32 ? Math.fround(value) : value);
   let sum = 0;
   for (const proportion of proportions) sum = round(sum + proportion);
@@ -166,7 +170,7 @@ function clz64(value: bigint): number {
 }
 
 /** `Random.float(T)` for f32 and f64. */
-function randomFloat(state: ZArray, bits: 32 | 64): number {
+function randomFloat(state: RandomSource, bits: 32 | 64): number {
   if (bits === 32) {
     const rand = randomInt(state, U64);
     let leading = clz64(rand);
@@ -210,7 +214,7 @@ const STATE_TYPE = arrayOf(4, U64);
 const XOSHIRO: StructType = nativeStruct('Random.Xoshiro256', {}, [{ name: 's', type: STATE_TYPE, hasDefault: false }]);
 
 /** `std.Random`, the interface whose methods draw from the generator it points to. */
-const RANDOM: StructType = nativeStruct('Random', {});
+const RANDOM: StructType = nativeStruct('Random', {}, [], { kind: 'random', args: [], storageSlots: 1, byteSize: 16 });
 
 function xoshiroState(sema: SemaApi, receiver: TExpr | undefined, span: Span): (frame: Frame) => ZArray {
   if (!receiver) return sema.error(span, 'std.Random.DefaultPrng の値に対して呼び出してください。');
@@ -224,7 +228,7 @@ function xoshiroState(sema: SemaApi, receiver: TExpr | undefined, span: Span): (
   return (frame) => ((evaluate(frame) as Pointer).load() as ZStruct).slots[0] as ZArray;
 }
 
-function randomState(sema: SemaApi, receiver: TExpr | undefined, span: Span): (frame: Frame) => ZArray {
+function randomState(sema: SemaApi, receiver: TExpr | undefined, span: Span): (frame: Frame) => RandomSource {
   if (!receiver) return sema.error(span, 'std.Random の値に対して呼び出してください。');
   const evaluate = receiver.eval;
   const pointer = receiver.type.kind === 'pointer';
@@ -235,7 +239,16 @@ function randomState(sema: SemaApi, receiver: TExpr | undefined, span: Span): (f
     const value = evaluate(frame);
     const random = (pointer ? (value as Pointer).load() : value) as ZStruct;
     const generator = (random.slots[0] as NativeHandle).state.generator as Pointer;
-    return (generator.load() as ZStruct).slots[0] as ZArray;
+    return randomSource(frame, (generator.load() as ZStruct).slots[0] as ZArray);
+  };
+}
+
+function randomSource(frame: Frame, state: ZArray): RandomSource {
+  return {
+    next: () => {
+      frame.runtime.spend();
+      return next(state);
+    },
   };
 }
 
@@ -255,7 +268,7 @@ addMembers(XOSHIRO, {
   next: fnMember('Xoshiro256.next', (sema, call) => {
     expectArgs(sema, call, 0, 'next');
     const state = xoshiroState(sema, call.receiver, call.span);
-    return runtime(U64, (frame) => next(state(frame)), call.span);
+    return runtime(U64, (frame) => randomSource(frame, state(frame)).next(), call.span);
   }),
   random: fnMember('Xoshiro256.random', (sema, call) => {
     expectArgs(sema, call, 0, 'random');
@@ -279,7 +292,7 @@ addMembers(XOSHIRO, {
 function intMethod(
   name: string,
   count: number,
-  compute: (state: ZArray, type: IntType, args: bigint[]) => bigint
+  compute: (state: RandomSource, type: IntType, args: bigint[]) => bigint
 ): () => Member {
   return fnMember(`Random.${name}`, (sema, call) => {
     const [typeArg, ...rest] = expectArgs(sema, call, count, name);

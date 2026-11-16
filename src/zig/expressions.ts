@@ -1254,7 +1254,12 @@ export abstract class ExpressionCompiler extends SemaBase {
       this.error(expression, `要素の型が違う配列はつなげられません（${typeName(a.child)} と ${typeName(b.child)}）。`);
     }
     const child = a.child.kind === 'comptime_int' ? b.child : a.child;
-    const sentinel = a.sentinel !== undefined && a.sentinel === b.sentinel ? a.sentinel : undefined;
+    const sentinel =
+      a.sentinel === undefined
+        ? b.sentinel
+        : b.sentinel === undefined || a.sentinel === b.sentinel
+          ? a.sentinel
+          : undefined;
     const length = a.length + b.length;
     const arrayType = arrayOf(length, child, sentinel);
     this.storage.reserve(arrayType);

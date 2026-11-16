@@ -184,15 +184,24 @@ const DEBUG = nativeStruct('std.debug', {
 // std.Io --------------------------------------------------------------------------------------------------------------
 
 /** `std.Io`, whose values (`init.io`) the program passes to I/O functions. */
-export const IO: StructType = nativeStruct('Io', {});
+export const IO: StructType = nativeStruct('Io', {}, [], { kind: 'io', args: [], storageSlots: 1, byteSize: 16 });
 
 /** `std.Io.File`, of which only the standard output and standard error are available. */
-const FILE: StructType = nativeStruct('Io.File', {});
+const FILE: StructType = nativeStruct('Io.File', {}, [], {
+  kind: 'file',
+  args: [],
+  storageSlots: 1,
+  byteSize: 8,
+  byteAlignment: 4,
+});
 
 /** `std.Io.File.Writer`, whose `interface` field is the `std.Io.Writer` to write through. */
-const FILE_WRITER: StructType = nativeStruct('Io.File.Writer', {}, [
-  { name: 'interface', type: WRITER, hasDefault: false },
-]);
+const FILE_WRITER: StructType = nativeStruct(
+  'Io.File.Writer',
+  {},
+  [{ name: 'interface', type: WRITER, hasDefault: false }],
+  { kind: 'fileWriter', args: [], storageSlots: 0, byteSize: 72 }
+);
 
 const WRITE_FAILED = ErrorValue.of('WriteFailed');
 const WRITE_ERROR = errorSetOf(['WriteFailed']);
@@ -425,15 +434,20 @@ function writeRepeated(frame: Parameters<TExpr['eval']>[0], state: WriterState, 
 // std.process ---------------------------------------------------------------------------------------------------------
 
 /** `std.process.Init`, which `main` may take to get `io` and the allocators. */
-export const PROCESS_INIT: StructType = nativeStruct('process.Init', {}, [
-  { name: 'io', type: IO, hasDefault: false },
-  { name: 'gpa', type: ALLOCATOR, hasDefault: false },
-  {
-    name: 'arena',
-    type: { kind: 'pointer', size: 'one', child: ALLOCATOR, isConst: true } as Type,
-    hasDefault: false,
-  },
-]);
+export const PROCESS_INIT: StructType = nativeStruct(
+  'process.Init',
+  {},
+  [
+    { name: 'io', type: IO, hasDefault: false },
+    { name: 'gpa', type: ALLOCATOR, hasDefault: false },
+    {
+      name: 'arena',
+      type: { kind: 'pointer', size: 'one', child: ALLOCATOR, isConst: true } as Type,
+      hasDefault: false,
+    },
+  ],
+  { kind: 'processInit', args: [], storageSlots: 0, byteSize: 80 }
+);
 
 const PROCESS = nativeStruct('std.process', {
   Init: typeMember(() => PROCESS_INIT),
