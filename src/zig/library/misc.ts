@@ -45,7 +45,17 @@ import {
   ZUnion,
 } from '../values';
 import { WeakValueMap } from '../weakValueMap';
-import { computed, constSlice, elements, equalValues, mutableSlice, newSlice, storeSliceValue } from './common';
+import {
+  computed,
+  constSlice,
+  elements,
+  equalValues,
+  mutableSlice,
+  newSlice,
+  ORDER_GT,
+  ORDER_LT,
+  storeSliceValue,
+} from './common';
 import { ALLOCATOR, ALLOCATOR_ERROR, ERROR_OUT_OF_MEMORY } from './heap';
 import { addMembers, compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
 
@@ -285,7 +295,7 @@ function deepEqual(a: Value, b: Value): boolean {
   if (a instanceof ZUnion && b instanceof ZUnion) return a.tag === b.tag && deepEqual(a.slots[0], b.slots[0]);
   if (a instanceof Some && b instanceof Some) return deepEqual(a.value, b.value);
   if (a instanceof Slice && b instanceof Slice)
-    return a.target === b.target && a.start === b.start && a.length === b.length;
+    return a.target.slots === b.target.slots && a.start === b.start && a.length === b.length;
   return equalValues(a, b);
 }
 
@@ -381,7 +391,7 @@ function priorityQueueType(
     while (index > 0) {
       const parentIndex = (index - 1) >> 1;
       const parent = items.get(parentIndex);
-      if (order(frame, queue, child, parent) !== 0n) break;
+      if (order(frame, queue, child, parent) !== ORDER_LT) break;
       storeSliceValue(items, index, parent);
       index = parentIndex;
     }
@@ -395,8 +405,8 @@ function priorityQueueType(
       let lesser = index * 2 + 1;
       if (lesser >= items.length) break;
       const next = lesser + 1;
-      if (next < items.length && order(frame, queue, items.get(next), items.get(lesser)) === 0n) lesser = next;
-      if (order(frame, queue, element, items.get(lesser)) === 0n) break;
+      if (next < items.length && order(frame, queue, items.get(next), items.get(lesser)) === ORDER_LT) lesser = next;
+      if (order(frame, queue, element, items.get(lesser)) === ORDER_LT) break;
       storeSliceValue(items, index, items.get(lesser));
       index = lesser;
     }
@@ -466,7 +476,7 @@ function priorityQueueType(
         siftDown(frame, queue, index);
       } else {
         const parent = shrunk.get((index - 1) >> 1);
-        if (order(frame, queue, last, parent) === 2n) siftDown(frame, queue, index);
+        if (order(frame, queue, last, parent) === ORDER_GT) siftDown(frame, queue, index);
         else siftUp(frame, queue, index);
       }
       return item;

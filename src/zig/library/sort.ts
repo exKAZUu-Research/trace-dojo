@@ -5,7 +5,17 @@ import { copyForFrame, known, type SemaApi } from '../semaBase';
 import { BOOL, fnType, optionalOf, type StructType, type Type, typeName, USIZE, VOID } from '../types';
 import { FnValue, NULL, optionalSome, Slice, type Value, ZStruct } from '../values';
 import { blockSortFunction, runBlockSort } from './blockSort';
-import { compareScalars, constSlice, generic, mutableSlice, ORDER, tupleOf } from './common';
+import {
+  compareScalars,
+  constSlice,
+  generic,
+  mutableSlice,
+  ORDER,
+  ORDER_EQ,
+  ORDER_GT,
+  ORDER_LT,
+  tupleOf,
+} from './common';
 import { type Member, nativeCall, nativeFunction, nativeStruct } from './native';
 import { type SortAlgorithm, sortValues } from './sorting';
 
@@ -100,8 +110,8 @@ function binarySearch(items: Slice, order: (item: Value) => bigint): Value {
   while (low < high) {
     const middle = low + Math.floor((high - low) / 2);
     const comparison = order(items.get(middle));
-    if (comparison === 1n) return BigInt(middle);
-    if (comparison === 2n) low = middle + 1;
+    if (comparison === ORDER_EQ) return BigInt(middle);
+    if (comparison === ORDER_GT) low = middle + 1;
     else high = middle;
   }
   return NULL;
@@ -164,11 +174,11 @@ function equalRangeMember(): Member {
         while (low < high) {
           const middle = low + Math.floor((high - low) / 2);
           const comparison = order(values.get(middle));
-          if (comparison === 2n) low = middle + 1;
-          else if (comparison === 0n) high = middle;
+          if (comparison === ORDER_GT) low = middle + 1;
+          else if (comparison === ORDER_LT) high = middle;
           else {
-            const lower = low + partitionPoint(subSlice(values, low, middle), (item) => order(item) === 2n);
-            const upper = middle + partitionPoint(subSlice(values, middle, high), (item) => order(item) !== 0n);
+            const lower = low + partitionPoint(subSlice(values, low, middle), (item) => order(item) === ORDER_GT);
+            const upper = middle + partitionPoint(subSlice(values, middle, high), (item) => order(item) !== ORDER_LT);
             return new ZStruct([BigInt(lower), BigInt(upper)]);
           }
         }
@@ -206,13 +216,13 @@ const MEMBERS: Record<string, () => Member> = {
     'std.sort.lowerBound',
     1,
     () => USIZE,
-    (items, call) => BigInt(partitionPoint(items, (item) => (call([item]) as bigint) === 2n))
+    (items, call) => BigInt(partitionPoint(items, (item) => (call([item]) as bigint) === ORDER_GT))
   ),
   upperBound: reader(
     'std.sort.upperBound',
     1,
     () => USIZE,
-    (items, call) => BigInt(partitionPoint(items, (item) => (call([item]) as bigint) !== 0n))
+    (items, call) => BigInt(partitionPoint(items, (item) => (call([item]) as bigint) !== ORDER_LT))
   ),
   partitionPoint: reader(
     'std.sort.partitionPoint',

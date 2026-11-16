@@ -46,7 +46,7 @@ import {
   typeName,
 } from '../types';
 import { ErrorValue, NULL, type Value } from '../values';
-import { compareScalars, computed, generic, ORDER, orderValue } from './common';
+import { compareScalars, computed, generic, ORDER, ORDER_EQ, ORDER_GT, ORDER_LT, orderValue } from './common';
 import { nativeEnum } from './heap';
 import { addMembers, expectArgs, fnMember, type Member, nativeStruct, typeMember } from './native';
 
@@ -171,14 +171,16 @@ addMembers(ORDER as unknown as StructType, {
   invert: fnMember('Order.invert', (sema, call) => {
     expectArgs(sema, call, 0, 'invert');
     const self = orderReceiver(sema, call);
-    return computed(ORDER, [self], call.span, ([order]) => 2n - (order as bigint));
+    return computed(ORDER, [self], call.span, ([order]) =>
+      order === ORDER_LT ? ORDER_GT : order === ORDER_GT ? ORDER_LT : ORDER_EQ
+    );
   }),
   compare: fnMember('Order.compare', (sema, call) => {
     const [opArg] = expectArgs(sema, call, 1, 'compare');
     const self = orderReceiver(sema, call);
     const operator = sema.coerce(sema.compile(opArg, COMPARE_OPERATOR), COMPARE_OPERATOR, opArg);
     return computed(BOOL, [self, operator], call.span, ([order, op]) =>
-      compareHolds(Number(order as bigint) - 1, op as bigint)
+      compareHolds(order === ORDER_LT ? -1 : order === ORDER_GT ? 1 : 0, op as bigint)
     );
   }),
 });

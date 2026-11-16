@@ -96,10 +96,14 @@ export function compareScalars(a: Value, b: Value): number {
 }
 
 /** `std.math.Order`. */
-export const ORDER: EnumType = nativeEnum('math.Order', ['lt', 'eq', 'gt']);
+export const ORDER: EnumType = nativeEnum('math.Order', ['gt', 'lt', 'eq']);
+
+export const ORDER_GT = 0n;
+export const ORDER_LT = 1n;
+export const ORDER_EQ = 2n;
 
 export function orderValue(comparison: number): bigint {
-  return comparison < 0 ? 0n : comparison === 0 ? 1n : 2n;
+  return comparison < 0 ? ORDER_LT : comparison === 0 ? ORDER_EQ : ORDER_GT;
 }
 
 export const OPTIONAL_USIZE = optionalOf(USIZE);

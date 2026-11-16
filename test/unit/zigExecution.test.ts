@@ -1910,3 +1910,12 @@ test('memory searches, cuts and delimiter iterators meter unsuccessful compariso
     executeProgram('zig', `const std=@import("std");pub fn main()void{_=std.mem.indexOf(u8,"${text}","${pattern}");}`)
   ).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
+
+test('meta equality compares slice backing locations through aggregate views', () => {
+  const source = `const std=@import("std");const P=struct{items:[]const u8};pub fn main()void{var a=[_]u8{1,2,3};const x:[]const u8=&a;const y:[]const u8=a[0..3];const other:[]const u8=a[1..3];const p=P{.items=x};const q=P{.items=y};std.debug.print("{} {} {}",.{std.meta.eql(x,y),std.meta.eql(p,q),std.meta.eql(x,other)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true true false',
+    uncaughtException: undefined,
+  });
+});
