@@ -196,6 +196,8 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly globals = new Map<string, Value>();
   readonly symbols = new Map<string, RSymbol>();
   readonly coreStrings = new Map<string, RString>();
+  programName?: RString;
+  sleptNanoseconds = 0n;
   frozenStringLiterals = false;
   readonly frozenStrings = new Map<string, RString>();
   readonly regexpLiterals = new WeakMap<object, RObject>();

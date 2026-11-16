@@ -713,7 +713,7 @@ function inspectForFrozen(self: RBasic): string {
 }
 
 function globalGet(name: string): Value {
-  if (name === '$0' || name === '$PROGRAM_NAME') return str('main.rb');
+  if (name === '$0' || name === '$PROGRAM_NAME') return rt().programName ?? NIL;
   if (/^\$(?:[~&`'+]|[1-9]\d*)$/.test(name)) return matchGlobal(name);
   const unsupported = unsupportedGlobal(name);
   if (unsupported) throw new UnsupportedFeatureError(unsupported);

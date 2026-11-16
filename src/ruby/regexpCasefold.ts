@@ -113,7 +113,8 @@ const expandingFolds: ReadonlyMap<string, string> = new Map(
   })
 );
 
-export function regexpMayExpandCasefold(source: string, subject: string): boolean {
+export function regexpNeedsCasefoldParity(source: string, subject: string): boolean {
+  assertOracleCasefoldCharacter(subject);
   const { subjectFolds, candidates } = casefoldCandidates(subject);
   let expanding = false;
   try {
@@ -129,6 +130,7 @@ export function regexpMayExpandCasefold(source: string, subject: string): boolea
     visitRegExpAST(pattern, {
       onCharacterEnter(node) {
         const char = String.fromCodePoint(node.value);
+        assertOracleCasefoldCharacter(char);
         if (expandingFolds.has(char) || subjectFolds.some((fold) => fold.includes(char.toLowerCase())))
           expanding = true;
       },
@@ -144,7 +146,12 @@ export function regexpMayExpandCasefold(source: string, subject: string): boolea
     if (error instanceof RegExpSyntaxError) throw new UnsupportedFeatureError('正規表現の casefold 構文の検証');
     throw error;
   }
-  return expanding;
+  return expanding || /[^\u0000-\u007F]/.test(source + subject);
+}
+
+// The bundled Ruby Wasm disagrees with Ruby 4.0.9 for these mappings, so the parity guard cannot validate them.
+function assertOracleCasefoldCharacter(text: string): void {
+  if (/[\u023A\u023E\u2C65\u2C66]/.test(text)) throw new UnsupportedFeatureError('正規表現の Unicode 17 casefold');
 }
 
 function casefoldCandidates(subject: string): { subjectFolds: string[]; candidates: string[] } {

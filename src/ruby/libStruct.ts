@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 484 -- Record layout and initialization share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 485 -- Record layout and initialization share representation and state; splitting registration by size would scatter that concern.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   addressOf,
@@ -20,7 +20,16 @@ import { coreMethod, def, sdef, sundef } from './define';
 import { argumentError, frozenError, indexError, nameError, rubyError, typeError } from './errors';
 import { validateKeywords } from './exceptionOption';
 import { digest, hashKeyOf, hashSet } from './hashes';
-import { addMethod, assertMutableClass, callBlock, callMethod, callProc, type Gen, invoke } from './interp';
+import {
+  addMethod,
+  assertMutableClass,
+  assertNoDefinitionHook,
+  callBlock,
+  callMethod,
+  callProc,
+  type Gen,
+  invoke,
+} from './interp';
 import { tryAry } from './libArray';
 import { sizedEnumerator } from './libEnumerator';
 import { identifierSymbol, symbolNameOf } from './libMeta';
@@ -289,6 +298,7 @@ sdef(
     }
     const cls = yield* newStructClass(self, yield* membersFrom(names, 'struct'), { keywordInit, kind: 'struct' });
     if (name !== undefined) {
+      assertNoDefinitionHook(self, 'const');
       cls.baseName = name;
       cls.lexicalParent = self;
       if (self.constants.has(name))

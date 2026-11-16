@@ -210,7 +210,7 @@ def(
   'String',
   'initialize',
   [0, 1],
-  // code-gauge-allow functionNcss 44 -- The ordered cases for String encoding and mutation share state; splitting them solely for the metric would hide their sequencing.
+  // code-gauge-allow functionNcss 45 -- The ordered cases for String encoding and mutation share state; splitting them solely for the metric would hide their sequencing.
   function* (self: RString, args, _block, keywords) {
     yield* validateKeywords(keywords, ['capacity', 'encoding']);
     let capacityValue: Value | undefined;
@@ -248,8 +248,9 @@ def(
       if (self.frozen) throw frozenError(self, yield* inspect(self));
       if (capacity > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
     }
-    if (source || binary !== undefined) {
-      setBytes(self, source ? stringBytes(source) : stringBytes(self), binary ?? source?.binary ?? self.binary);
+    if (source || binary !== undefined || capacityValue !== undefined) {
+      const bytes = source ? stringBytes(source) : capacityValue !== undefined ? new Uint8Array() : stringBytes(self);
+      setBytes(self, bytes, binary ?? source?.binary ?? self.binary);
       if (usAscii !== undefined) self.usAscii = usAscii;
       else if (source) self.usAscii = source.usAscii && !self.binary;
     }

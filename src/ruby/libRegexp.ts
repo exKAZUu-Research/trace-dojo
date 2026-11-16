@@ -46,7 +46,7 @@ import {
   type Value,
 } from './objects';
 import { hostRegexpCaptureNames, regexpCaptureNames, regexpHasNumberedBackref } from './regexpCaptureNames';
-import { regexpMayExpandCasefold } from './regexpCasefold';
+import { regexpNeedsCasefoldParity } from './regexpCasefold';
 import { assertCasefoldParity } from './regexpCasefoldParity';
 import { RegexpCursor } from './regexpCursor';
 import { decodeRegexpByteEscape, regexpByteEscape, RegexpEncodingError } from './regexpEscapes';
@@ -57,6 +57,7 @@ import {
   compileHostRegexp,
   hasRegexpProperty,
   regexpSyntaxReason,
+  requiresNativeCaptureParity,
   supportsRegexpByteView,
   validateRegexpSourceSyntax,
   validateRegexpStructure,
@@ -81,6 +82,7 @@ export interface RegexpData {
   safeNative: boolean;
   captureNames?: string[];
   foldCheck?: { text: string; needed: boolean };
+  captureParity?: boolean;
   reverseSticky?: RegExp;
   binaryReverseSticky?: RegExp;
   context?: vm.Context;
@@ -693,8 +695,6 @@ export function execAt(
   if (start < 0 || start > charIndex(text, text.length)) return undefined;
   const data = dataOf(regexp);
   if (source && !validated) validateRegexpSubject(regexp, source);
-  if (!source?.binary && (data.ignoreCase || /\(\?[ims]*i/.test(data.js.source)) && data.foldCheck?.text !== text)
-    data.foldCheck = { text, needed: regexpMayExpandCasefold(data.js.source, text) };
   const binaryMatch = source?.binary === true && data.encoding === 'US-ASCII';
   const js = regexpForMatch(data, source, anchored);
   rt().spend();
@@ -709,8 +709,7 @@ export function execAt(
       ? Math.max(1, result ? (result.indices?.[0]?.[1] ?? startUnit) - startUnit : 1)
       : (result?.index ?? text.length) - startUnit;
   rt().spend(Math.ceil(work / 64));
-  if (!source?.binary && data.foldCheck?.text === text && data.foldCheck.needed)
-    assertCasefoldParity(data, text, start, result, anchored);
+  assertHostMatchParity(data, text, start, result, { binary: source?.binary === true, anchored });
   if (!result?.indices) return undefined;
   rt().chargeSlots(result.indices.length * 3);
   const names: string[] = [];
@@ -728,6 +727,23 @@ export function execAt(
     namedGroups,
     regexp,
   };
+}
+
+function assertHostMatchParity(
+  data: RegexpData,
+  text: string,
+  start: number,
+  result: RegExpExecArray | null,
+  options: { binary: boolean; anchored: boolean }
+): void {
+  if (!options.binary && (data.ignoreCase || /\(\?[ims]*i/.test(data.js.source)) && data.foldCheck?.text !== text)
+    data.foldCheck = { text, needed: regexpNeedsCasefoldParity(data.js.source, text) };
+  const captureParity = (data.captureParity ??= requiresNativeCaptureParity(data.js.source));
+  const feature = captureParity ? '正規表現の繰り返し・後読みキャプチャ' : undefined;
+  if (captureParity && options.binary && /[^\u0000-\u007F]/.test(text))
+    throw new UnsupportedFeatureError('正規表現の繰り返し・後読みキャプチャ');
+  if (captureParity || (!options.binary && data.foldCheck?.text === text && data.foldCheck.needed))
+    assertCasefoldParity(data, text, start, result, options.anchored, feature);
 }
 
 function execWithinBudget(

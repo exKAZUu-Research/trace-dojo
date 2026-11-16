@@ -33,7 +33,19 @@ import { chargeIntegerResult, integerBits, integerGcd } from './integerBudget';
 import { callBlock, callMethod, type Gen } from './interp';
 import { type EnumeratorSource, makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { isRational, makeRational } from './libRational';
-import { boxFloat, NIL, RArray, RFloat, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
+import {
+  boxFloat,
+  isRubyFloat,
+  NIL,
+  RArray,
+  RFloat,
+  type RHash,
+  type RProc,
+  RRange,
+  RString,
+  RSymbol,
+  type Value,
+} from './objects';
 import { platformGamma, platformLog2, platformLog10, platformLogGamma } from './platformMath';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
 import { codePointCharacters } from './unicodeText';
@@ -207,6 +219,8 @@ for (const owner of ['Integer', 'Float']) {
   });
   def(owner, 'eql?', 1, (self: Num, [other]) => typeof self === typeof other && numericEquals(self, other as Num));
   def(owner, '<=>', 1, function* (self: Num, [other]) {
+    if (isRubyFloat(self) && !Number.isFinite(Number(self)) && isRational(other))
+      return Number.isNaN(Number(self)) ? NIL : self > 0 ? 1n : -1n;
     if (isNum(other)) {
       const order = numericCompare(self, other);
       return order === undefined ? NIL : BigInt(order);

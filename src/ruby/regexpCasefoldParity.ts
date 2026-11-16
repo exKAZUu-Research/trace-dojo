@@ -57,13 +57,13 @@ export function assertCasefoldParity(
   text: string,
   start: number,
   result: RegExpExecArray | null,
-  anchored: boolean
+  anchored: boolean,
+  feature = 'Unicode の複数文字 casefold'
 ): void {
   const pattern = nativePattern(data, text);
   const native = nativeSearch(data, pattern, start);
   const ranges = native && (!anchored || native[0]?.[0] === start) ? native : undefined;
-  if (!sameCaptureRanges(ranges, result?.indices, text))
-    throw new UnsupportedFeatureError('Unicode の複数文字 casefold');
+  if (!sameCaptureRanges(ranges, result?.indices, text)) throw new UnsupportedFeatureError(feature);
 }
 
 function nativePattern(data: RegexpData, text: string): NativePattern {

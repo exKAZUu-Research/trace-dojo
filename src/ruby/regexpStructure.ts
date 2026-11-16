@@ -215,6 +215,26 @@ function byteViewNode(node: SourceNode, inClass: boolean): boolean {
   return true;
 }
 
+export function requiresNativeCaptureParity(source: string): boolean {
+  if (!source.includes('(')) return false;
+  const pattern = new RegExpParser().parsePattern(source, 0, source.length, { unicode: true });
+  let needed = false;
+  visitRegExpAST(pattern, {
+    onCapturingGroupEnter(node) {
+      let parent: AST.Node | null = node.parent;
+      while (parent) {
+        if (
+          (parent.type === 'Quantifier' && parent.max > 1) ||
+          (parent.type === 'Assertion' && parent.kind === 'lookbehind')
+        )
+          needed = true;
+        parent = parent.parent;
+      }
+    },
+  });
+  return needed;
+}
+
 export function validateRegexpStructure(source: string): void {
   compileHostRegexp(source, 'u');
   if (!source.includes('(?<') && !/\\(?:[1-9]|k<)/.test(source)) return;

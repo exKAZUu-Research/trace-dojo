@@ -990,6 +990,7 @@ def(
   0,
   (self: RObject, _args, block) => {
     if (!block) throw rubyError(rt().c.LocalJumpError, 'no block given');
+    assertMutableEnumerator(self);
     self.data = { block, held: () => [block] } satisfies GeneratorData;
     return NIL;
   },

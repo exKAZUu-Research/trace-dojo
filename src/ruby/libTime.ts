@@ -1,7 +1,8 @@
-// code-gauge-allow-file fileNcss 675 -- Ruby calendar fields and formatting share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 679 -- Ruby calendar fields and formatting share representation and state; splitting registration by size would scatter that concern.
 // code-gauge-allow-file duplicateLines 15 -- English calendar names mirror the C interpreter because both expose the same fixed calendar vocabulary.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
+  className,
   compareValues,
   comparisonSign,
   inspectValue,
@@ -102,14 +103,13 @@ function offsetFraction(value: Value | undefined, offset: number): { numerator: 
 }
 
 function dataOf(time: RObject): TimeData {
-  if (!(time.data instanceof TimeData)) throw typeError('uninitialized Time');
+  if (!(time.data instanceof TimeData)) throw typeError(`uninitialized ${className(realClassOf(time))}`);
   return time.data as TimeData;
 }
 
 /** The virtual clock: the host's time plus what `sleep` has slept, since sleeping does not wait here. */
 function nowNanoseconds(): bigint {
-  const runtime = rt() as unknown as { slept?: number };
-  return BigInt(Math.round((Date.now() + (runtime.slept ?? 0) * 1000) * 1e6));
+  return BigInt(Date.now()) * 1_000_000n + rt().sleptNanoseconds;
 }
 
 // code-gauge-allow functionCognitiveComplexity 29 -- Time argument forms have different field order and coercion contracts.
@@ -331,8 +331,9 @@ def(
   'initialize',
   [0, 7],
   function* (self: RObject, args, _block, keywords) {
-    if (self.data) throw typeError('already initialized Time');
     const value = yield* initializeTime(realClassOf(self), args, keywords);
+    if (self.frozen) throw frozenError(self, (yield* inspectValue(self)).s);
+    if (self.data) throw typeError(`already initialized ${className(realClassOf(self))}`);
     self.data = value.data;
     return self;
   },
@@ -1038,15 +1039,17 @@ def(
   [0, 1],
   function* (_self, args) {
     if (args.length === 0 || args[0] === NIL) throw new ExecutionLimitError('time');
-    const runtime = rt() as unknown as { slept?: number };
+    const runtime = rt();
     const seconds = yield* toFloat(args[0]);
     if (seconds < 0) throw argumentError('time interval must not be negative');
     if (!Number.isFinite(seconds)) throw rangeError(`${Number.isNaN(seconds) ? 'NaN' : 'Inf'} out of Time range`);
-    const slept = (runtime.slept ?? 0) + seconds;
-    const clock = Date.now() + slept * 1000;
-    if (!Number.isFinite(clock) || Math.abs(clock) > 8_640_000_000_000_000)
+    const duration = seconds * 1_000_000_000;
+    if (!Number.isFinite(duration)) throw new UnsupportedFeatureError('JavaScript の日付範囲外の sleep');
+    const slept = runtime.sleptNanoseconds + BigInt(Math.round(duration));
+    const clock = BigInt(Date.now()) * 1_000_000n + slept;
+    if (clock < -8_640_000_000_000_000_000_000n || clock > 8_640_000_000_000_000_000_000n)
       throw new UnsupportedFeatureError('JavaScript の日付範囲外の sleep');
-    runtime.slept = slept;
+    runtime.sleptNanoseconds = slept;
     return BigInt(Math.round(seconds));
   },
   { visibility: 'private' }

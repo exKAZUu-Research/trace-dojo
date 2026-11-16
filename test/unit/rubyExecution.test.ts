@@ -16767,3 +16767,1272 @@ const numericSumTransitionCases = [
 test.each(numericSumTransitionCases)('sum preserves numeric transitions and callback order: %s', (source, stdout) => {
   expect(run(source)).toMatchObject({ stdout });
 });
+
+const nativeProtocolMutationCases = [
+  [
+    'g=Enumerator::Generator.new{|y|y<<1};begin;g.send(:initialize);rescue=>e;p e.class;end;begin;p g.to_a;rescue=>e;p e.class;end',
+    'LocalJumpError\n[1]\n',
+  ],
+  [
+    'g=Enumerator::Generator.new{|y|y<<1};begin;g.send(:initialize){|y|y<<2};rescue=>e;p e.class;end;begin;p g.to_a;rescue=>e;p e.class;end',
+    '[2]\n',
+  ],
+  [
+    'g=Enumerator::Generator.new{|y|y<<1}.freeze;begin;g.send(:initialize);rescue=>e;p e.class;end;begin;p g.to_a;rescue=>e;p e.class;end',
+    'LocalJumpError\n[1]\n',
+  ],
+  [
+    'g=Enumerator::Generator.new{|y|y<<1}.freeze;begin;g.send(:initialize){|y|y<<2};rescue=>e;p e.class;end;begin;p g.to_a;rescue=>e;p e.class;end',
+    'FrozenError\n[1]\n',
+  ],
+  [
+    'g=Enumerator::Generator.allocate;begin;g.send(:initialize);rescue=>e;p e.class;end;begin;p g.to_a;rescue=>e;p e.class;end',
+    'LocalJumpError\nArgumentError\n',
+  ],
+  [
+    'g=Enumerator::Generator.allocate;begin;g.send(:initialize){|y|y<<2};rescue=>e;p e.class;end;begin;p g.to_a;rescue=>e;p e.class;end',
+    '[2]\n',
+  ],
+  [
+    'g=Enumerator::Generator.allocate.freeze;begin;g.send(:initialize);rescue=>e;p e.class;end;begin;p g.to_a;rescue=>e;p e.class;end',
+    'LocalJumpError\nArgumentError\n',
+  ],
+  [
+    'g=Enumerator::Generator.allocate.freeze;begin;g.send(:initialize){|y|y<<2};rescue=>e;p e.class;end;begin;p g.to_a;rescue=>e;p e.class;end',
+    'FrozenError\nArgumentError\n',
+  ],
+  [
+    't=Time.at(0);begin;t.send(:initialize,2024);puts :ok;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"already initialized Time"\n',
+  ],
+  [
+    't=Time.at(0);begin;t.send(:initialize,Object.new);puts :ok;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Object into Integer"\n',
+  ],
+  [
+    't=Time.at(0);begin;t.send(:initialize,2024,2,3);puts :ok;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"already initialized Time"\n',
+  ],
+  [
+    't=Time.at(0);begin;t.send(:initialize);puts :ok;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"already initialized Time"\n',
+  ],
+  [
+    't=Time.at(0).freeze;begin;t.send(:initialize,2024);puts :ok;rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Time: 1970-01-01 09:00:00 +0900"\n',
+  ],
+  [
+    't=Time.at(0).freeze;begin;t.send(:initialize,Object.new);puts :ok;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Object into Integer"\n',
+  ],
+  [
+    't=Time.at(0).freeze;begin;t.send(:initialize,2024,2,3);puts :ok;rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Time: 1970-01-01 09:00:00 +0900"\n',
+  ],
+  [
+    't=Time.at(0).freeze;begin;t.send(:initialize);puts :ok;rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Time: 1970-01-01 09:00:00 +0900"\n',
+  ],
+  ['t=Time.allocate;begin;t.send(:initialize,2024);puts :ok;rescue=>e;p e.class,e.message;end', 'ok\n'],
+  [
+    't=Time.allocate;begin;t.send(:initialize,Object.new);puts :ok;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Object into Integer"\n',
+  ],
+  ['t=Time.allocate;begin;t.send(:initialize,2024,2,3);puts :ok;rescue=>e;p e.class,e.message;end', 'ok\n'],
+  ['t=Time.allocate;begin;t.send(:initialize);puts :ok;rescue=>e;p e.class,e.message;end', 'ok\n'],
+  [
+    't=Time.allocate.freeze;begin;t.send(:initialize,2024);puts :ok;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"uninitialized Time"\n',
+  ],
+  [
+    't=Time.allocate.freeze;begin;t.send(:initialize,Object.new);puts :ok;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Object into Integer"\n',
+  ],
+  [
+    't=Time.allocate.freeze;begin;t.send(:initialize,2024,2,3);puts :ok;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"uninitialized Time"\n',
+  ],
+  [
+    't=Time.allocate.freeze;begin;t.send(:initialize);puts :ok;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"uninitialized Time"\n',
+  ],
+  [
+    't=Time.utc(2024);begin;t.send(:initialize,2024);puts :ok;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"already initialized Time"\n',
+  ],
+  [
+    't=Time.utc(2024);begin;t.send(:initialize,Object.new);puts :ok;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Object into Integer"\n',
+  ],
+  [
+    't=Time.utc(2024);begin;t.send(:initialize,2024,2,3);puts :ok;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"already initialized Time"\n',
+  ],
+  [
+    't=Time.utc(2024);begin;t.send(:initialize);puts :ok;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"already initialized Time"\n',
+  ],
+  [
+    't=Time.utc(2024).freeze;begin;t.send(:initialize,2024);puts :ok;rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Time: 2024-01-01 00:00:00 UTC"\n',
+  ],
+  [
+    't=Time.utc(2024).freeze;begin;t.send(:initialize,Object.new);puts :ok;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Object into Integer"\n',
+  ],
+  [
+    't=Time.utc(2024).freeze;begin;t.send(:initialize,2024,2,3);puts :ok;rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Time: 2024-01-01 00:00:00 UTC"\n',
+  ],
+  [
+    't=Time.utc(2024).freeze;begin;t.send(:initialize);puts :ok;rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Time: 2024-01-01 00:00:00 UTC"\n',
+  ],
+  ['s="abc";s.send(:initialize,capacity:0);p [s,s.encoding]', '["", #<Encoding:UTF-8>]\n'],
+  ['s="abc";s.send(:initialize,capacity:0,encoding:"UTF-8");p [s,s.encoding]', '["", #<Encoding:UTF-8>]\n'],
+  [
+    's="abc";s.send(:initialize,capacity:0,encoding:"ASCII-8BIT");p [s,s.encoding]',
+    '["", #<Encoding:BINARY (ASCII-8BIT)>]\n',
+  ],
+  ['s="abc";s.send(:initialize,capacity:10);p [s,s.encoding]', '["", #<Encoding:UTF-8>]\n'],
+  ['s="abc";s.send(:initialize,capacity:10,encoding:"UTF-8");p [s,s.encoding]', '["", #<Encoding:UTF-8>]\n'],
+  [
+    's="abc";s.send(:initialize,capacity:10,encoding:"ASCII-8BIT");p [s,s.encoding]',
+    '["", #<Encoding:BINARY (ASCII-8BIT)>]\n',
+  ],
+  ['s="abc";s.send(:initialize,capacity:-1);p [s,s.encoding]', '["", #<Encoding:UTF-8>]\n'],
+  ['s="abc";s.send(:initialize,capacity:-1,encoding:"UTF-8");p [s,s.encoding]', '["", #<Encoding:UTF-8>]\n'],
+  [
+    's="abc";s.send(:initialize,capacity:-1,encoding:"ASCII-8BIT");p [s,s.encoding]',
+    '["", #<Encoding:BINARY (ASCII-8BIT)>]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");s.send(:initialize,capacity:0);p [s,s.encoding]',
+    '["", #<Encoding:BINARY (ASCII-8BIT)>]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");s.send(:initialize,capacity:0,encoding:"UTF-8");p [s,s.encoding]',
+    '["", #<Encoding:UTF-8>]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");s.send(:initialize,capacity:0,encoding:"ASCII-8BIT");p [s,s.encoding]',
+    '["", #<Encoding:BINARY (ASCII-8BIT)>]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");s.send(:initialize,capacity:10);p [s,s.encoding]',
+    '["", #<Encoding:BINARY (ASCII-8BIT)>]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");s.send(:initialize,capacity:10,encoding:"UTF-8");p [s,s.encoding]',
+    '["", #<Encoding:UTF-8>]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");s.send(:initialize,capacity:10,encoding:"ASCII-8BIT");p [s,s.encoding]',
+    '["", #<Encoding:BINARY (ASCII-8BIT)>]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");s.send(:initialize,capacity:-1);p [s,s.encoding]',
+    '["", #<Encoding:BINARY (ASCII-8BIT)>]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");s.send(:initialize,capacity:-1,encoding:"UTF-8");p [s,s.encoding]',
+    '["", #<Encoding:UTF-8>]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");s.send(:initialize,capacity:-1,encoding:"ASCII-8BIT");p [s,s.encoding]',
+    '["", #<Encoding:BINARY (ASCII-8BIT)>]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");s.send(:initialize,capacity:0);p [s,s.encoding]',
+    '["", #<Encoding:US-ASCII>]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");s.send(:initialize,capacity:0,encoding:"UTF-8");p [s,s.encoding]',
+    '["", #<Encoding:UTF-8>]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");s.send(:initialize,capacity:0,encoding:"ASCII-8BIT");p [s,s.encoding]',
+    '["", #<Encoding:BINARY (ASCII-8BIT)>]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");s.send(:initialize,capacity:10);p [s,s.encoding]',
+    '["", #<Encoding:US-ASCII>]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");s.send(:initialize,capacity:10,encoding:"UTF-8");p [s,s.encoding]',
+    '["", #<Encoding:UTF-8>]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");s.send(:initialize,capacity:10,encoding:"ASCII-8BIT");p [s,s.encoding]',
+    '["", #<Encoding:BINARY (ASCII-8BIT)>]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");s.send(:initialize,capacity:-1);p [s,s.encoding]',
+    '["", #<Encoding:US-ASCII>]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");s.send(:initialize,capacity:-1,encoding:"UTF-8");p [s,s.encoding]',
+    '["", #<Encoding:UTF-8>]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");s.send(:initialize,capacity:-1,encoding:"ASCII-8BIT");p [s,s.encoding]',
+    '["", #<Encoding:BINARY (ASCII-8BIT)>]\n',
+  ],
+  ['class S<String;def initialize;self<<"x";super(capacity:10);end;end;p S.new', '""\n'],
+  [
+    's="abc".freeze;begin;s.send(:initialize,capacity:0);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen String: \\"abc\\""\n',
+  ],
+  ['p [$0.equal?($0),$0.equal?($PROGRAM_NAME),$0.frozen?]', '[true, true, true]\n'],
+  ['begin;$0<<"x";rescue=>e;p e.class;end;p $0.equal?($PROGRAM_NAME)', 'FrozenError\ntrue\n'],
+  ['p(Float::INFINITY<=>Rational(10**309))', '1\n'],
+  ['p(Float::INFINITY<=>-Rational(10**309))', '1\n'],
+  ['p(Float::INFINITY<=>1r)', '1\n'],
+  ['p(Float::INFINITY<=>0r)', '1\n'],
+  ['p(-Float::INFINITY<=>Rational(10**309))', '-1\n'],
+  ['p(-Float::INFINITY<=>-Rational(10**309))', '-1\n'],
+  ['p(-Float::INFINITY<=>1r)', '-1\n'],
+  ['p(-Float::INFINITY<=>0r)', '-1\n'],
+  ['p(Float::NAN<=>Rational(10**309))', 'nil\n'],
+  ['p(Float::NAN<=>-Rational(10**309))', 'nil\n'],
+  ['p(Float::NAN<=>1r)', 'nil\n'],
+  ['p(Float::NAN<=>0r)', 'nil\n'],
+  ['p(1.0<=>Rational(10**309))', '-1\n'],
+  ['p(1.0<=>-Rational(10**309))', '1\n'],
+  ['p(1.0<=>1r)', '0\n'],
+  ['p(1.0<=>0r)', '1\n'],
+  ['p(-1.0<=>Rational(10**309))', '-1\n'],
+  ['p(-1.0<=>-Rational(10**309))', '1\n'],
+  ['p(-1.0<=>1r)', '-1\n'],
+  ['p(-1.0<=>0r)', '-1\n'],
+  [
+    'class T<Time;def inspect;puts :inspect;"custom";end;end;t=T.at(0);begin;t.send(:initialize,2024);puts :ok;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"already initialized T"\n',
+  ],
+  [
+    'class T<Time;def inspect;puts :inspect;"custom";end;end;t=T.at(0).freeze;begin;t.send(:initialize,2024);puts :ok;rescue=>e;p e.class,e.message;end',
+    'inspect\nFrozenError\n"can\'t modify frozen T: custom"\n',
+  ],
+  [
+    'class T<Time;def inspect;puts :inspect;"custom";end;end;t=T.allocate;begin;t.send(:initialize,2024);puts :ok;rescue=>e;p e.class,e.message;end',
+    'ok\n',
+  ],
+  [
+    'class T<Time;def inspect;puts :inspect;"custom";end;end;t=T.allocate.freeze;begin;t.send(:initialize,2024);puts :ok;rescue=>e;p e.class,e.message;end',
+    'inspect\nFrozenError\n"can\'t modify frozen T: custom"\n',
+  ],
+] as const;
+
+test.each(nativeProtocolMutationCases)(
+  'native initialization, numeric comparison and program identity: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ stdout });
+  }
+);
+
+const nativeRegexpCaptureCases = [
+  [
+    's="aba";p Regexp.new("(a(b)?)+").match(s)&.to_a',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="b";p Regexp.new("(a(b)?)+").match(s)&.to_a',
+    {
+      stdout: 'nil\n',
+    },
+  ],
+  [
+    's="abc";p Regexp.new("(a(b)?)+").match(s)&.to_a',
+    {
+      stdout: '["ab", "ab", "b"]\n',
+    },
+  ],
+  [
+    's="123x";p Regexp.new("(a(b)?)+").match(s)&.to_a',
+    {
+      stdout: 'nil\n',
+    },
+  ],
+  [
+    's="aba";p Regexp.new("(a|(b))+").match(s)&.to_a',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="b";p Regexp.new("(a|(b))+").match(s)&.to_a',
+    {
+      stdout: '["b", "b", "b"]\n',
+    },
+  ],
+  [
+    's="abc";p Regexp.new("(a|(b))+").match(s)&.to_a',
+    {
+      stdout: '["ab", "b", "b"]\n',
+    },
+  ],
+  [
+    's="123x";p Regexp.new("(a|(b))+").match(s)&.to_a',
+    {
+      stdout: 'nil\n',
+    },
+  ],
+  [
+    's="aba";p Regexp.new("(?:(a)|b)*").match(s)&.to_a',
+    {
+      stdout: '["aba", "a"]\n',
+    },
+  ],
+  [
+    's="b";p Regexp.new("(?:(a)|b)*").match(s)&.to_a',
+    {
+      stdout: '["b", nil]\n',
+    },
+  ],
+  [
+    's="abc";p Regexp.new("(?:(a)|b)*").match(s)&.to_a',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="123x";p Regexp.new("(?:(a)|b)*").match(s)&.to_a',
+    {
+      stdout: '["", nil]\n',
+    },
+  ],
+  [
+    's="aba";p Regexp.new("(a*)*b").match(s)&.to_a',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="b";p Regexp.new("(a*)*b").match(s)&.to_a',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="abc";p Regexp.new("(a*)*b").match(s)&.to_a',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="123x";p Regexp.new("(a*)*b").match(s)&.to_a',
+    {
+      stdout: 'nil\n',
+    },
+  ],
+  [
+    's="aba";p Regexp.new("(a*)*").match(s)&.to_a',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="b";p Regexp.new("(a*)*").match(s)&.to_a',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="abc";p Regexp.new("(a*)*").match(s)&.to_a',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="123x";p Regexp.new("(a*)*").match(s)&.to_a',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`s="aba";p Regexp.new("(\\w*\\s*)*").match(s)&.to_a`,
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`s="b";p Regexp.new("(\\w*\\s*)*").match(s)&.to_a`,
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`s="abc";p Regexp.new("(\\w*\\s*)*").match(s)&.to_a`,
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`s="123x";p Regexp.new("(\\w*\\s*)*").match(s)&.to_a`,
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`s="aba";p Regexp.new("(?:(\\d+)|([a-z]+))+").match(s)&.to_a`,
+    {
+      stdout: '["aba", nil, "aba"]\n',
+    },
+  ],
+  [
+    String.raw`s="b";p Regexp.new("(?:(\\d+)|([a-z]+))+").match(s)&.to_a`,
+    {
+      stdout: '["b", nil, "b"]\n',
+    },
+  ],
+  [
+    String.raw`s="abc";p Regexp.new("(?:(\\d+)|([a-z]+))+").match(s)&.to_a`,
+    {
+      stdout: '["abc", nil, "abc"]\n',
+    },
+  ],
+  [
+    String.raw`s="123x";p Regexp.new("(?:(\\d+)|([a-z]+))+").match(s)&.to_a`,
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="aba";p Regexp.new("(?<=([ab]){2})c").match(s)&.to_a',
+    {
+      stdout: 'nil\n',
+    },
+  ],
+  [
+    's="b";p Regexp.new("(?<=([ab]){2})c").match(s)&.to_a',
+    {
+      stdout: 'nil\n',
+    },
+  ],
+  [
+    's="abc";p Regexp.new("(?<=([ab]){2})c").match(s)&.to_a',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="123x";p Regexp.new("(?<=([ab]){2})c").match(s)&.to_a',
+    {
+      stdout: 'nil\n',
+    },
+  ],
+  [
+    's="aba";p Regexp.new("(?<=([0-9]){3})x").match(s)&.to_a',
+    {
+      stdout: 'nil\n',
+    },
+  ],
+  [
+    's="b";p Regexp.new("(?<=([0-9]){3})x").match(s)&.to_a',
+    {
+      stdout: 'nil\n',
+    },
+  ],
+  [
+    's="abc";p Regexp.new("(?<=([0-9]){3})x").match(s)&.to_a',
+    {
+      stdout: 'nil\n',
+    },
+  ],
+  [
+    's="123x";p Regexp.new("(?<=([0-9]){3})x").match(s)&.to_a',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="aba";p Regexp.new("(a)+").match(s)&.to_a',
+    {
+      stdout: '["a", "a"]\n',
+    },
+  ],
+  [
+    's="b";p Regexp.new("(a)+").match(s)&.to_a',
+    {
+      stdout: 'nil\n',
+    },
+  ],
+  [
+    's="abc";p Regexp.new("(a)+").match(s)&.to_a',
+    {
+      stdout: '["a", "a"]\n',
+    },
+  ],
+  [
+    's="123x";p Regexp.new("(a)+").match(s)&.to_a',
+    {
+      stdout: 'nil\n',
+    },
+  ],
+  [
+    's="aba";p Regexp.new("((a)(b))+").match(s)&.to_a',
+    {
+      stdout: '["ab", "ab", "a", "b"]\n',
+    },
+  ],
+  [
+    's="b";p Regexp.new("((a)(b))+").match(s)&.to_a',
+    {
+      stdout: 'nil\n',
+    },
+  ],
+  [
+    's="abc";p Regexp.new("((a)(b))+").match(s)&.to_a',
+    {
+      stdout: '["ab", "ab", "a", "b"]\n',
+    },
+  ],
+  [
+    's="123x";p Regexp.new("((a)(b))+").match(s)&.to_a',
+    {
+      stdout: 'nil\n',
+    },
+  ],
+  [
+    's="aba";p Regexp.new("(?<x>a)(?<y>b)?").match(s)&.to_a',
+    {
+      stdout: '["ab", "a", "b"]\n',
+    },
+  ],
+  [
+    's="b";p Regexp.new("(?<x>a)(?<y>b)?").match(s)&.to_a',
+    {
+      stdout: 'nil\n',
+    },
+  ],
+  [
+    's="abc";p Regexp.new("(?<x>a)(?<y>b)?").match(s)&.to_a',
+    {
+      stdout: '["ab", "a", "b"]\n',
+    },
+  ],
+  [
+    's="123x";p Regexp.new("(?<x>a)(?<y>b)?").match(s)&.to_a',
+    {
+      stdout: 'nil\n',
+    },
+  ],
+  [
+    's="aba";p Regexp.new("(?<x>a(?<y>b)?)+").match(s)&.to_a',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="b";p Regexp.new("(?<x>a(?<y>b)?)+").match(s)&.to_a',
+    {
+      stdout: 'nil\n',
+    },
+  ],
+  [
+    's="abc";p Regexp.new("(?<x>a(?<y>b)?)+").match(s)&.to_a',
+    {
+      stdout: '["ab", "ab", "b"]\n',
+    },
+  ],
+  [
+    's="123x";p Regexp.new("(?<x>a(?<y>b)?)+").match(s)&.to_a',
+    {
+      stdout: 'nil\n',
+    },
+  ],
+  [
+    'p Regexp.new("ⱥ",Regexp::IGNORECASE).match?("Ⱥ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("ⱥ",Regexp::IGNORECASE).match?("ⱥ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("ⱥ",Regexp::IGNORECASE).match?("Ⱦ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("ⱥ",Regexp::IGNORECASE).match?("ⱦ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("ⱥ",Regexp::IGNORECASE).match?("É")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("ⱥ",Regexp::IGNORECASE).match?("ſ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("ⱥ",Regexp::IGNORECASE).match?("abc")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("Ⱥ",Regexp::IGNORECASE).match?("Ⱥ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("Ⱥ",Regexp::IGNORECASE).match?("ⱥ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("Ⱥ",Regexp::IGNORECASE).match?("Ⱦ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("Ⱥ",Regexp::IGNORECASE).match?("ⱦ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("Ⱥ",Regexp::IGNORECASE).match?("É")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("Ⱥ",Regexp::IGNORECASE).match?("ſ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("Ⱥ",Regexp::IGNORECASE).match?("abc")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("ⱦ",Regexp::IGNORECASE).match?("Ⱥ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("ⱦ",Regexp::IGNORECASE).match?("ⱥ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("ⱦ",Regexp::IGNORECASE).match?("Ⱦ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("ⱦ",Regexp::IGNORECASE).match?("ⱦ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("ⱦ",Regexp::IGNORECASE).match?("É")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("ⱦ",Regexp::IGNORECASE).match?("ſ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("ⱦ",Regexp::IGNORECASE).match?("abc")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("Ⱦ",Regexp::IGNORECASE).match?("Ⱥ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("Ⱦ",Regexp::IGNORECASE).match?("ⱥ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("Ⱦ",Regexp::IGNORECASE).match?("Ⱦ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("Ⱦ",Regexp::IGNORECASE).match?("ⱦ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("Ⱦ",Regexp::IGNORECASE).match?("É")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("Ⱦ",Regexp::IGNORECASE).match?("ſ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("Ⱦ",Regexp::IGNORECASE).match?("abc")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`p Regexp.new("\\u023a",Regexp::IGNORECASE).match?("Ⱥ")`,
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`p Regexp.new("\\u023a",Regexp::IGNORECASE).match?("ⱥ")`,
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`p Regexp.new("\\u023a",Regexp::IGNORECASE).match?("Ⱦ")`,
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`p Regexp.new("\\u023a",Regexp::IGNORECASE).match?("ⱦ")`,
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`p Regexp.new("\\u023a",Regexp::IGNORECASE).match?("É")`,
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`p Regexp.new("\\u023a",Regexp::IGNORECASE).match?("ſ")`,
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`p Regexp.new("\\u023a",Regexp::IGNORECASE).match?("abc")`,
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`p Regexp.new("[\\u2c65]",Regexp::IGNORECASE).match?("Ⱥ")`,
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`p Regexp.new("[\\u2c65]",Regexp::IGNORECASE).match?("ⱥ")`,
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`p Regexp.new("[\\u2c65]",Regexp::IGNORECASE).match?("Ⱦ")`,
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`p Regexp.new("[\\u2c65]",Regexp::IGNORECASE).match?("ⱦ")`,
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`p Regexp.new("[\\u2c65]",Regexp::IGNORECASE).match?("É")`,
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`p Regexp.new("[\\u2c65]",Regexp::IGNORECASE).match?("ſ")`,
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`p Regexp.new("[\\u2c65]",Regexp::IGNORECASE).match?("abc")`,
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("[[:alpha:]]",Regexp::IGNORECASE).match?("Ⱥ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("[[:alpha:]]",Regexp::IGNORECASE).match?("ⱥ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("[[:alpha:]]",Regexp::IGNORECASE).match?("Ⱦ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("[[:alpha:]]",Regexp::IGNORECASE).match?("ⱦ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("[[:alpha:]]",Regexp::IGNORECASE).match?("É")',
+    {
+      stdout: 'true\n',
+    },
+  ],
+  [
+    'p Regexp.new("[[:alpha:]]",Regexp::IGNORECASE).match?("ſ")',
+    {
+      stdout: 'true\n',
+    },
+  ],
+  [
+    'p Regexp.new("[[:alpha:]]",Regexp::IGNORECASE).match?("abc")',
+    {
+      stdout: 'true\n',
+    },
+  ],
+  [
+    'p Regexp.new(".",Regexp::IGNORECASE).match?("Ⱥ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new(".",Regexp::IGNORECASE).match?("ⱥ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new(".",Regexp::IGNORECASE).match?("Ⱦ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new(".",Regexp::IGNORECASE).match?("ⱦ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new(".",Regexp::IGNORECASE).match?("É")',
+    {
+      stdout: 'true\n',
+    },
+  ],
+  [
+    'p Regexp.new(".",Regexp::IGNORECASE).match?("ſ")',
+    {
+      stdout: 'true\n',
+    },
+  ],
+  [
+    'p Regexp.new(".",Regexp::IGNORECASE).match?("abc")',
+    {
+      stdout: 'true\n',
+    },
+  ],
+  [
+    'p Regexp.new("é",Regexp::IGNORECASE).match?("Ⱥ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("é",Regexp::IGNORECASE).match?("ⱥ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("é",Regexp::IGNORECASE).match?("Ⱦ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("é",Regexp::IGNORECASE).match?("ⱦ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("é",Regexp::IGNORECASE).match?("É")',
+    {
+      stdout: 'true\n',
+    },
+  ],
+  [
+    'p Regexp.new("é",Regexp::IGNORECASE).match?("ſ")',
+    {
+      stdout: 'false\n',
+    },
+  ],
+  [
+    'p Regexp.new("é",Regexp::IGNORECASE).match?("abc")',
+    {
+      stdout: 'false\n',
+    },
+  ],
+  [
+    'p Regexp.new("s",Regexp::IGNORECASE).match?("Ⱥ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("s",Regexp::IGNORECASE).match?("ⱥ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("s",Regexp::IGNORECASE).match?("Ⱦ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("s",Regexp::IGNORECASE).match?("ⱦ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("s",Regexp::IGNORECASE).match?("É")',
+    {
+      stdout: 'false\n',
+    },
+  ],
+  [
+    'p Regexp.new("s",Regexp::IGNORECASE).match?("ſ")',
+    {
+      stdout: 'true\n',
+    },
+  ],
+  [
+    'p Regexp.new("s",Regexp::IGNORECASE).match?("abc")',
+    {
+      stdout: 'false\n',
+    },
+  ],
+  [
+    'p Regexp.new("[a-z]",Regexp::IGNORECASE).match?("Ⱥ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("[a-z]",Regexp::IGNORECASE).match?("ⱥ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("[a-z]",Regexp::IGNORECASE).match?("Ⱦ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("[a-z]",Regexp::IGNORECASE).match?("ⱦ")',
+    {
+      uncaughtException: '正規表現の Unicode 17 casefold は、この採点環境では使えません。',
+    },
+  ],
+  [
+    'p Regexp.new("[a-z]",Regexp::IGNORECASE).match?("É")',
+    {
+      stdout: 'false\n',
+    },
+  ],
+  [
+    'p Regexp.new("[a-z]",Regexp::IGNORECASE).match?("ſ")',
+    {
+      stdout: 'true\n',
+    },
+  ],
+  [
+    'p Regexp.new("[a-z]",Regexp::IGNORECASE).match?("abc")',
+    {
+      stdout: 'true\n',
+    },
+  ],
+  [
+    's="aba";r=Regexp.new("(a(b)?)+");p s.scan(r)',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`s="aba";r=Regexp.new("(a(b)?)+");p s.gsub(r,'\\2')`,
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="aba";r=Regexp.new("(a(b)?)+");m=r.match(s);p m&.captures;p [$1,$2]',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="aba";r=Regexp.new("(a(b)?)+");r=Regexp.new("(a(b)?)+");p r.match?(s)',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="abc";r=Regexp.new("(a(b)?)+");p s.scan(r)',
+    {
+      stdout: '[["ab", "b"]]\n',
+    },
+  ],
+  [
+    String.raw`s="abc";r=Regexp.new("(a(b)?)+");p s.gsub(r,'\\2')`,
+    {
+      stdout: '"bc"\n',
+    },
+  ],
+  [
+    's="abc";r=Regexp.new("(a(b)?)+");m=r.match(s);p m&.captures;p [$1,$2]',
+    {
+      stdout: '["ab", "b"]\n["ab", "b"]\n',
+    },
+  ],
+  [
+    's="abc";r=Regexp.new("(a(b)?)+");r=Regexp.new("(a(b)?)+");p r.match?(s)',
+    {
+      stdout: 'true\n',
+    },
+  ],
+  [
+    's="aba";r=Regexp.new("(?<x>a(?<y>b)?)+");p s.scan(r)',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`s="aba";r=Regexp.new("(?<x>a(?<y>b)?)+");p s.gsub(r,'\\2')`,
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="aba";r=Regexp.new("(?<x>a(?<y>b)?)+");m=r.match(s);p m&.captures;p [$1,$2]',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="aba";r=Regexp.new("(?<x>a(?<y>b)?)+");r=Regexp.new("(?<x>a(?<y>b)?)+");p r.match?(s)',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="abc";r=Regexp.new("(?<x>a(?<y>b)?)+");p s.scan(r)',
+    {
+      stdout: '[["ab", "b"]]\n',
+    },
+  ],
+  [
+    String.raw`s="abc";r=Regexp.new("(?<x>a(?<y>b)?)+");p s.gsub(r,'\\2')`,
+    {
+      stdout: '"c"\n',
+    },
+  ],
+  [
+    's="abc";r=Regexp.new("(?<x>a(?<y>b)?)+");m=r.match(s);p m&.captures;p [$1,$2]',
+    {
+      stdout: '["ab", "b"]\n["ab", "b"]\n',
+    },
+  ],
+  [
+    's="abc";r=Regexp.new("(?<x>a(?<y>b)?)+");r=Regexp.new("(?<x>a(?<y>b)?)+");p r.match?(s)',
+    {
+      stdout: 'true\n',
+    },
+  ],
+  [
+    's="aba";r=Regexp.new("(?<=([ab]){2})c");p s.scan(r)',
+    {
+      stdout: '[]\n',
+    },
+  ],
+  [
+    String.raw`s="aba";r=Regexp.new("(?<=([ab]){2})c");p s.gsub(r,'\\2')`,
+    {
+      stdout: '"aba"\n',
+    },
+  ],
+  [
+    's="aba";r=Regexp.new("(?<=([ab]){2})c");m=r.match(s);p m&.captures;p [$1,$2]',
+    {
+      stdout: 'nil\n[nil, nil]\n',
+    },
+  ],
+  [
+    's="aba";r=Regexp.new("(?<=([ab]){2})c");r=Regexp.new("(?<=([ab]){2})c");p r.match?(s)',
+    {
+      stdout: 'false\n',
+    },
+  ],
+  [
+    's="abc";r=Regexp.new("(?<=([ab]){2})c");p s.scan(r)',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    String.raw`s="abc";r=Regexp.new("(?<=([ab]){2})c");p s.gsub(r,'\\2')`,
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="abc";r=Regexp.new("(?<=([ab]){2})c");m=r.match(s);p m&.captures;p [$1,$2]',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="abc";r=Regexp.new("(?<=([ab]){2})c");r=Regexp.new("(?<=([ab]){2})c");p r.match?(s)',
+    {
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    },
+  ],
+  [
+    's="aba";r=Regexp.new("(a)+");p s.scan(r)',
+    {
+      stdout: '[["a"], ["a"]]\n',
+    },
+  ],
+  [
+    String.raw`s="aba";r=Regexp.new("(a)+");p s.gsub(r,'\\2')`,
+    {
+      stdout: '"b"\n',
+    },
+  ],
+  [
+    's="aba";r=Regexp.new("(a)+");m=r.match(s);p m&.captures;p [$1,$2]',
+    {
+      stdout: '["a"]\n["a", nil]\n',
+    },
+  ],
+  [
+    's="aba";r=Regexp.new("(a)+");r=Regexp.new("(a)+");p r.match?(s)',
+    {
+      stdout: 'true\n',
+    },
+  ],
+  [
+    's="abc";r=Regexp.new("(a)+");p s.scan(r)',
+    {
+      stdout: '[["a"]]\n',
+    },
+  ],
+  [
+    String.raw`s="abc";r=Regexp.new("(a)+");p s.gsub(r,'\\2')`,
+    {
+      stdout: '"bc"\n',
+    },
+  ],
+  [
+    's="abc";r=Regexp.new("(a)+");m=r.match(s);p m&.captures;p [$1,$2]',
+    {
+      stdout: '["a"]\n["a", nil]\n',
+    },
+  ],
+  [
+    's="abc";r=Regexp.new("(a)+");r=Regexp.new("(a)+");p r.match?(s)',
+    {
+      stdout: 'true\n',
+    },
+  ],
+] as const;
+
+test.each(nativeRegexpCaptureCases)(
+  'regexp preserves native folds and capture state or refuses: %s',
+  (source, expected) => {
+    expect(run(source)).toMatchObject(expected);
+  }
+);
+
+test.each([1_700_000_000_000, -1, 0])('virtual sleep preserves nanoseconds at epoch %s', (epoch) => {
+  vi.spyOn(Date, 'now').mockReturnValue(epoch);
+  expect(run('a=Time.now;sleep(0.001);p Time.now-a;p(Time.now==a+1r/1000)')).toMatchObject({
+    stdout: '0.001\ntrue\n',
+  });
+  expect(run('a=Time.now;sleep(0.000001);p Time.now-a;p(Time.now==a+1r/1000000)')).toMatchObject({
+    stdout: '1.0e-06\ntrue\n',
+  });
+  expect(run('a=Time.now;100.times{sleep(0.000001)};p Time.now-a;p(Time.now==a+1r/10000)')).toMatchObject({
+    stdout: '0.0001\ntrue\n',
+  });
+});
+
+test.each([
+  'module H;def const_added(n);puts n;end;end;Struct.extend(H);Struct.new("Point",:x);p :after',
+  'module H;def const_added(n);puts n;end;end;class S<Struct;extend H;end;S.new("Point",:x);p :after',
+])('named Struct refuses inherited constant hooks: %s', (source) => {
+  expect(run(source)).toMatchObject({
+    stdout: '',
+    uncaughtException: 'メソッド・定数フック（const_added）は、この採点環境では使えません。',
+  });
+});
+
+test('program globals share frozen literal and source-file identity', () => {
+  expect(
+    run('# frozen_string_literal: true\np [$0.equal?($PROGRAM_NAME), $0.equal?("main.rb"), $0.equal?(__FILE__)]')
+  ).toMatchObject({
+    stdout: '[true, true, true]\n',
+  });
+});

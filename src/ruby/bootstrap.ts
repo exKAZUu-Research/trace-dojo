@@ -6,7 +6,7 @@ import { installMathConstants } from './libNumeric';
 import { defineMainObject } from './libObject';
 import { NIL, RClass, RObject, type Value } from './objects';
 import { type Runtime, stackTooDeepFactory } from './runtime';
-import { singletonClassOf, str } from './values';
+import { internFrozenString, singletonClassOf, str } from './values';
 
 const EXCEPTION_TREE: [string, string][] = [
   ['NoMemoryError', 'Exception'],
@@ -193,6 +193,7 @@ export function bootstrap(runtime: Runtime): void {
   const main = new RObject(object);
   runtime.mainObject = main;
   defineMainObject(main);
+  runtime.programName = internFrozenString(str('main.rb'));
   runtime.globals.set('$stdout', ioObject(runtime, 'stdout'));
   runtime.globals.set('$stderr', ioObject(runtime, 'stderr'));
   object.constants.set('STDOUT', runtime.globals.get('$stdout') as Value);
