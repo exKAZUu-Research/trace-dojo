@@ -325,3 +325,67 @@ test.each(['Data.Set', 'Data.Map', 'Data.Map.Strict'])(
     }
   }
 );
+
+test.each(['Data.Set', 'Data.Map', 'Data.Map.Strict'])('bulk merges force earlier results in %s', (module) => {
+  const type = module === 'Data.Set' ? 'M.Set Int' : 'M.Map Int Int';
+  const operations = module === 'Data.Set' ? ['unions'] : ['unions', 'unionsWith (+)'];
+  for (const operation of operations) {
+    expect(
+      executeProgram(
+        'haskell',
+        `import qualified ${module} as M\nmain=print(M.size(M.${operation} [error "first",error "second"]::${type}))`
+      )
+    ).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: 'first' });
+  }
+});
+
+test.each(['Data.Set', 'Data.Map', 'Data.Map.Strict'])('Foldable uses strict tree folds in %s', (module) => {
+  const singleton = module === 'Data.Set' ? 'M.singleton(1::Int)' : 'M.singleton(1::Int) ()';
+  const type = module === 'Data.Set' ? 'M.Set Int' : 'M.Map Int ()';
+  for (const operation of ["foldr'", "foldl'"]) {
+    expect(
+      executeProgram(
+        'haskell',
+        `import qualified ${module} as M\nimport qualified Data.Foldable as F\nmain=print(F.${operation} (\\_ _->1::Int) undefined (${singleton}))`
+      )
+    ).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: 'Prelude.undefined' });
+    expect(
+      executeProgram(
+        'haskell',
+        `import qualified ${module} as M\nmain=print(M.${operation} (\\_ _->1::Int) (error "seed") (error "tree"::${type}))`
+      )
+    ).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: 'seed' });
+  }
+});
+
+test.each(['Data.Map', 'Data.Map.Strict'])('key-set operations traverse collection trees in %s', (module) => {
+  const imports = `import qualified ${module} as M\nimport qualified Data.Set as S\nimport Data.List(foldl')\n`;
+  for (const [expression, stdout] of [
+    ['sum[M.size(M.restrictKeys m(S.singleton k))|k<-[1..500::Int]]', '500\n'],
+    [String.raw`M.size(foldl' (\tree k->M.withoutKeys tree(S.singleton k)) m [1..500::Int])`, '0\n'],
+  ]) {
+    expect(
+      executeProgram('haskell', `${imports}m=M.fromList[(k,k)|k<-[1..500::Int]]\nmain=print(${expression})`)
+    ).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+  expect(
+    executeProgram(
+      'haskell',
+      `${imports}import qualified Data.Map as L\nm=L.singleton (1::Int)(undefined::Int)\nmain=print(M.size(M.restrictKeys m(S.singleton 1)),M.size(M.withoutKeys m S.empty))`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '(1,1)\n', uncaughtException: undefined });
+});
+
+test.each(['Data.Map', 'Data.Map.Strict'])('key-set traversals preserve comparison order in %s', (module) => {
+  const source = `import qualified ${module} as M\nimport qualified Data.Set as S\ndata K=K Int String deriving(Eq,Show)\ninstance Ord K where\n compare(K x a)(K y b)=case compare x y of\n  EQ->if x==2 then EQ else compare a b\n  ordering->ordering\nm=M.fromList[(K k(show k),())|k<-[1..3]]\ns=S.fromList[K k(error(show k))|k<-[1..3]]\n`;
+  for (const [operation, uncaughtException] of [
+    ['restrictKeys', '1'],
+    ['withoutKeys', '3'],
+  ]) {
+    expect(executeProgram('haskell', `${source}main=print(M.size(M.${operation} m s))`)).toMatchObject({
+      kind: 'executed',
+      stdout: '',
+      uncaughtException,
+    });
+  }
+});

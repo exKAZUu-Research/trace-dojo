@@ -91,7 +91,6 @@ export interface RModule {
   instances: RInstanceDecl[];
   values: RBindGroup;
   exports: ExportTable;
-  /** Whether the module lists its exports, which then must include `main` for a program. */
   hasExportList: boolean;
 }
 

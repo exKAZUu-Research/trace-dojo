@@ -380,3 +380,16 @@ test.each([
     uncaughtException,
   });
 });
+
+test.each([
+  [String.raw`foldl' (\_ _->error "function"::Int) 0 (1:error "tail")`, 'function'],
+  ['sum (error "first":error "tail"::[Int])', 'first'],
+  [String.raw`foldl' (\_ _->1::Int) (error "seed") [2]`, 'seed'],
+  [String.raw`foldl' (\_ _->1::Int) (error "seed") (error "tail"::[Int])`, 'tail'],
+])('strict list folds force updates before subsequent cells: %s', (expression, uncaughtException) => {
+  expect(executeProgram('haskell', `import Data.List\nmain=print(${expression})`)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException,
+  });
+});

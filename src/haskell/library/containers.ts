@@ -154,7 +154,9 @@ foldr' f z s = z ${BT}seq${BT} case s of
   SBin _ x l r -> foldr' f (f x $! foldr' f z r) l
 
 foldl' :: (b -> a -> b) -> b -> Set a -> b
-foldl' f z s = B.foldl' f z (toAscList s)
+foldl' f z s = z ${BT}seq${BT} case s of
+  STip -> z
+  SBin _ x l r -> foldl' f (f (foldl' f z l) x) r
 
 union :: Ord a => Set a -> Set a -> Set a
 union a STip = a
@@ -175,7 +177,7 @@ insertKeeping x t@(SBin _ y l r) = case compare x y of
   EQ -> t
 
 unions :: (Foldable f, Ord a) => f (Set a) -> Set a
-unions = B.foldl union empty
+unions = B.foldl' union empty
 
 intersection :: Ord a => Set a -> Set a -> Set a
 intersection STip _ = STip
@@ -379,6 +381,8 @@ instance Ord a => Monoid (Set a) where
 instance Foldable Set where
   foldr = foldr
   foldl = foldl
+  foldr' = foldr'
+  foldl' = foldl'
   toList = toAscList
   null = null
   length = size
@@ -680,7 +684,9 @@ foldr' f z m = z ${BT}seq${BT} case m of
   Bin _ _ x l r -> foldr' f (f x $! foldr' f z r) l
 
 foldl' :: (b -> a -> b) -> b -> Map k a -> b
-foldl' f z m = B.foldl' f z (elems m)
+foldl' f z m = z ${BT}seq${BT} case m of
+  Tip -> z
+  Bin _ _ x l r -> foldl' f (f (foldl' f z l) x) r
 
 foldrWithKey :: (k -> a -> b -> b) -> b -> Map k a -> b
 foldrWithKey _ z Tip = z
@@ -696,7 +702,9 @@ foldrWithKey' f z m = z ${BT}seq${BT} case m of
   Bin _ k x l r -> foldrWithKey' f (f k x $! foldrWithKey' f z r) l
 
 foldlWithKey' :: (a -> k -> b -> a) -> a -> Map k b -> a
-foldlWithKey' f z m = B.foldl' (\acc (k, x) -> f acc k x) z (toAscList m)
+foldlWithKey' f z m = z ${BT}seq${BT} case m of
+  Tip -> z
+  Bin _ k x l r -> foldlWithKey' f (f (foldlWithKey' f z l) k x) r
 
 foldMapWithKey :: Monoid m => (k -> a -> m) -> Map k a -> m
 foldMapWithKey f = foldrWithKey (\k x acc -> f k x <> acc) mempty
@@ -789,10 +797,10 @@ insertUnion strict keep f k x (Bin count key y l r) = case compare k key of
         in forceValue strict z (Bin count key' z l r)
 
 unions :: (Foldable f, Ord k) => f (Map k a) -> Map k a
-unions = B.foldl union Tip
+unions = B.foldl' union Tip
 
 unionsWith :: (Foldable f, Ord k) => (a -> a -> a) -> f (Map k a) -> Map k a
-unionsWith f = B.foldl (unionWith f) Tip
+unionsWith f = B.foldl' (unionWith f) Tip
 
 intersection :: Ord k => Map k a -> Map k b -> Map k a
 intersection = intersectionWith const
@@ -842,10 +850,23 @@ differenceUsing strict f (Bin _ k x l r) b = case splitLookup k b of
 m1 \\ m2 = difference m1 m2
 
 restrictKeys :: Ord k => Map k a -> S.Set k -> Map k a
-restrictKeys m s = filterWithKey (\k _ -> S.member k s) m
+restrictKeys Tip _ = Tip
+restrictKeys _ S.STip = Tip
+restrictKeys m@(Bin _ k x l r) s = case S.splitMember k s of
+  (sl,found,sr) -> let left = restrictKeys l sl
+                       right = restrictKeys r sr
+                   in left ${BT}seq${BT} right ${BT}seq${BT}
+                      if found then if size left + size right + 1 == size m then m else link k x left right
+                      else link2 left right
 
 withoutKeys :: Ord k => Map k a -> S.Set k -> Map k a
-withoutKeys m s = filterWithKey (\k _ -> S.notMember k s) m
+withoutKeys Tip _ = Tip
+withoutKeys m S.STip = m
+withoutKeys m (S.SBin _ k sl sr) = case splitLookup k m of
+  (l,_,r) -> let left = withoutKeys l sl
+                 right = withoutKeys r sr
+             in right ${BT}seq${BT} left ${BT}seq${BT}
+                if size left + size right == size m then m else link2 left right
 
 isSubmapOf :: (Ord k, Eq a) => Map k a -> Map k a -> Bool
 isSubmapOf a b = all (\(k, x) -> lookup k b == Just x) (toAscList a)
@@ -972,6 +993,8 @@ instance Functor (Map k) where
 instance Foldable (Map k) where
   foldr = foldr
   foldl = foldl
+  foldr' = foldr'
+  foldl' = foldl'
   toList = elems
   null = null
   length = size
