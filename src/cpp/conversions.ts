@@ -27,7 +27,7 @@ export interface ConversionSequence {
   rank: Rank;
   /** Whether a standard conversion adds `const` to the target of a pointer. */
   addsQualification: boolean;
-  /** Whether the sequence converts to `bool`, which is worse than other conversions of the same rank. */
+  /** Whether the sequence converts a pointer to `bool`, which is worse than other conversions of the same rank. */
   isBoolean: boolean;
   /** How many classes up the hierarchy a derived-to-base conversion goes, or 0. */
   baseDistance: number;
@@ -48,6 +48,8 @@ export interface ConversionHost {
   constructFrom(cls: ClassInfo, constructor: FunctionInfo, argument: Expr, row: number): Expr;
   /** An lvalue designating a temporary that holds a prvalue, for binding a const reference to it. */
   materialize(expr: Expr): Expr;
+  /** Stops when a derived-to-base conversion names a base class that is inaccessible here. */
+  checkBaseConversion(from: ClassInfo, to: ClassInfo, row: number): void;
   /** Whether a constructor may convert implicitly: it is not `explicit`. */
   isViableConstructor(constructor: FunctionInfo): boolean;
   /** The conversion of a braced list argument (`f({1, 2})`) to a type, by list-initialization. */
@@ -102,13 +104,18 @@ function referenceBinding(
       return sequence(Rank.Exact, identity, { reference: { toConst } });
     }
     const distance = baseDistance(from, target);
-    if (distance > 0) return sequence(Rank.Conversion, identity, { reference: { toConst }, baseDistance: distance });
+    if (distance > 0) {
+      return sequence(Rank.Conversion, (e) => toBase(host, e, target), {
+        reference: { toConst },
+        baseDistance: distance,
+      });
+    }
   }
   if (!toConst) return undefined;
   if (!expr.isLvalue && from.kind === 'class' && target.kind === 'class') {
     const distance = from.cls === target.cls ? 0 : baseDistance(from, target);
     if (from.cls === target.cls || distance > 0) {
-      return sequence(distance > 0 ? Rank.Conversion : Rank.Exact, (e) => host.materialize(e), {
+      return sequence(distance > 0 ? Rank.Conversion : Rank.Exact, (e) => host.materialize(toBase(host, e, target)), {
         reference: { toConst },
         baseDistance: distance,
       });
@@ -176,7 +183,7 @@ function arithmeticConversion(
   const apply = (e: Expr): Expr => convertArithmetic(host.rvalue(e), target);
   if (from.kind === to.kind && from.name === to.name) return sequence(Rank.Exact, apply);
   if (isPromotion(from, to)) return sequence(Rank.Promotion, apply);
-  return sequence(Rank.Conversion, apply, { isBoolean: to.kind === 'int' && to.name === 'bool' });
+  return sequence(Rank.Conversion, apply);
 }
 
 /** Converts an arithmetic prvalue to another arithmetic type, folding constants. */
@@ -227,8 +234,21 @@ function pointerConversion(
   }
   if (to.to.kind === 'void') return sequence(Rank.Conversion, apply, { addsQualification });
   const distance = baseDistance(fromTarget, to.to);
-  if (distance > 0) return sequence(Rank.Conversion, apply, { baseDistance: distance, addsQualification });
+  if (distance > 0) {
+    return sequence(Rank.Conversion, (e) => apply(toBase(host, e, to.to)), {
+      baseDistance: distance,
+      addsQualification,
+    });
+  }
   return undefined;
+}
+
+/** An expression of a derived class (or a pointer to one) unchanged, once its conversion to `base` is accessible. */
+function toBase(host: ConversionHost, expr: Expr, base: Type): Expr {
+  const { type } = expr;
+  const from = type.kind === 'pointer' ? type.to : type.kind === 'array' ? type.of : type;
+  if (from.kind === 'class' && base.kind === 'class') host.checkBaseConversion(from.cls, base.cls, expr.row);
+  return expr;
 }
 
 function notNull(run: Expr['run']): Expr['run'] {

@@ -257,7 +257,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
     if (this.isClassLike(type) && !value) createsObject = true;
     const { local } = entity;
-    const destroy = this.destroyerOf(type);
+    const destroy = this.destroyerOf(type, declarator.row);
     if (destroy) this.context.scope.destructibles.push({ slot: local.slot, destroy });
     const { slot } = local;
     // A variable must be declared before its initializer runs, which may name it (C++20 [basic.scope.pdecl]).
@@ -520,7 +520,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const expr = this.compileExpression(expressionNode);
     if (expr.functions)
       return this.error(node.row, `関数 ${expr.functions.name} の後に (...) を書いて呼び出してください。`);
-    const destroy = expr.isTemporaryObject ? this.destroyerOf(expr.type) : undefined;
+    const destroy = expr.isTemporaryObject ? this.destroyerOf(expr.type, node.row) : undefined;
     const run = expr.run;
     const exec = this.fullExpression<Completion>((frame) => {
       const value = run(frame);

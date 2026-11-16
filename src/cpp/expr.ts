@@ -38,8 +38,8 @@ export interface FunctionCandidates {
   candidates: FunctionInfo[];
   /** The object of a member function call, evaluated as an lvalue or a prvalue. */
   object?: Expr;
-  /** The class whose members were looked up, which a qualified call (`Base::f()`) names. */
-  qualifier?: ClassInfo;
+  /** The class whose members were looked up, which access checks name (C++20 [class.access.base]). */
+  namingClass?: ClassInfo;
   /** Whether the call must not dispatch virtually, as a qualified call does. */
   isQualified?: boolean;
   /** Explicit template arguments, such as `std::max<int>`. */
