@@ -156,10 +156,10 @@ export function floatRem(a: AnyFloat, b: AnyFloat, bits: FloatBits): AnyFloat {
   const y = asBigFloat(b);
   if (x.kind === 'finite' && y.kind === 'inf') return roundTo(x, bits);
   if (x.kind !== 'finite' || y.kind !== 'finite' || y.isZero) return new BigFloat(false, 'nan', 0n, 0);
-  // a - trunc(a / b) * b, computed exactly.
-  const quotient = truncateToBigInt(floatArithmetic(x, y, '/', 128));
-  const product = floatArithmetic(floatFromBigInt(quotient, 128), y, '*', 128);
-  return roundTo(asBigFloat(floatArithmetic(x, product, '-', 128)), bits);
+  const exponent = Math.min(x.exponent, y.exponent);
+  const dividend = x.mantissa << BigInt(x.exponent - exponent);
+  const divisor = y.mantissa << BigInt(y.exponent - exponent);
+  return roundTo(new BigFloat(x.sign, 'finite', dividend % divisor, exponent), bits);
 }
 
 /** `@mod` of floats as Zig computes it: `fmod(fmod(a, b) + b, b)` for a negative `a`, else `fmod(a, b)`. */

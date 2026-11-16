@@ -41,3 +41,17 @@ export function valueSlots(type: Type): number {
   if (!Number.isSafeInteger(count) || count > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
   return count;
 }
+
+export function allocationSlots(count: number, child: Type): number {
+  if (count === 0) return 0;
+  try {
+    return count * (1 + valueSlots(child));
+  } catch (error) {
+    if (error instanceof ExecutionLimitError) return Infinity;
+    throw error;
+  }
+}
+
+export function checkOutputSize(length: number): void {
+  if (!Number.isSafeInteger(length) || length > LIMITS.maxOutputLength * 4) throw new ExecutionLimitError('output');
+}

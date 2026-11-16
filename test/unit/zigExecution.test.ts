@@ -487,3 +487,180 @@ pub fn main() void {
     uncaughtException: undefined,
   });
 });
+
+test('source-controlled shifts, formatting, writer repetition, and inline expansion stay bounded', () => {
+  const bodies = [
+    ['const a = 1 << 100000000000000000000; _ = a;', 'storage'],
+    ['std.debug.print("{d:>2000000000}", .{1});', 'output'],
+    ['inline for (0..10000000000) |_| {}', 'operations'],
+    [
+      'var buf: [8]u8 = undefined; var w = std.Io.File.stdout().writer(init.io, &buf); try w.interface.splatByteAll(65, 4294967296);',
+      'output',
+    ],
+    [
+      'var buf: [8]u8 = undefined; var w = std.Io.File.stdout().writer(init.io, &buf); try w.interface.splatBytesAll("abc", 4294967296);',
+      'output',
+    ],
+  ];
+  for (const [body, limit] of bodies) {
+    expect(
+      executeProgram(
+        'zig',
+        `const std = @import("std"); pub fn main(init: std.process.Init) !void { _ = &init; ${body} }`
+      )
+    ).toEqual({ kind: 'limitExceeded', limit });
+  }
+});
+
+test('allocator capacity includes nested element storage before construction', () => {
+  const program = `const std = @import("std");
+pub fn main(init: std.process.Init) !void {
+    _ = init.gpa.alloc([600000]u8, 2) catch |err| { std.debug.print("{s}", .{@errorName(err)}); return; };
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: 'OutOfMemory',
+    uncaughtException: undefined,
+  });
+});
+
+test('destructuring, pointer captures, and writable slice lengths retain their result storage', () => {
+  const program = `const std = @import("std");
+var n: usize = 0;
+fn next() usize { const i = n; n += 1; return i; }
+fn pair() [2]?u8 { return .{ null, 2 }; }
+pub fn main() void {
+    var a: ??u8 = null;
+    var b: ??u8 = null;
+    a, b = pair();
+    if (a) |*p| { std.debug.print("{} ", .{p.* == null}); p.* = null; }
+    var data = [_]?u8{ 1, 2 };
+    if (data[next()]) |*p| { p.* += 3; }
+    var slice: []?u8 = &data;
+    slice.len -= 1;
+    std.debug.print("{} {} {} {} {}", .{a == null, b == null, n, slice.len, slice[0].?});
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true false false 1 1 4',
+    uncaughtException: undefined,
+  });
+});
+
+test('loop else and catch results apply coercions and inline loops evaluate their operand once', () => {
+  const program = `const std = @import("std");
+var n: i32 = 0;
+fn get() [2]i32 { n += 1; return .{ n, n }; }
+fn f() !i32 { return 3; }
+pub fn main() void {
+    const x: f64 = while (false) {} else 1;
+    const y = f() catch @as(f64, 1.5);
+    const z: f64 = for ([_]u8{}) |_| {} else 2;
+    std.debug.print("{} {} {}|", .{x, y, z});
+    inline for (get()) |value| { std.debug.print("{} ", .{value}); }
+    std.debug.print("{}", .{n});
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 3 2|1 1 1',
+    uncaughtException: undefined,
+  });
+});
+
+test('function pointer equality and union dispatch use semantic identities', () => {
+  const program = `const std = @import("std");
+const E = enum(u8) { a = 5, b = 10 };
+const U = union(E) { a: i32, b: i32 };
+fn f() void {}
+fn g() void {}
+pub fn main() void {
+    const p: *const fn () void = &f;
+    const q: ?*const fn () void = &g;
+    std.debug.print("{} {}|", .{p == p, q == p});
+    const u: U = .{ .b = 3 };
+    switch (u) { .a => {}, .b => |value| std.debug.print("{}", .{value}) }
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true false|3',
+    uncaughtException: undefined,
+  });
+});
+
+test('extended finite bounds and remainders use exact binary representations', () => {
+  const program = `const std = @import("std");
+pub fn main() void {
+    const x: f128 = 0x1p120;
+    std.debug.print("{} {} {d} {d}", .{
+        std.math.isFinite(std.math.floatMax(f128)), std.math.isFinite(std.math.floatMax(f80)),
+        @rem(x, @as(f128, 3)), @rem(-x, @as(f128, 5)),
+    });
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true true 1 -1',
+    uncaughtException: undefined,
+  });
+});
+
+test('dupe, concat, and list removal preserve independent aggregate storage', () => {
+  const program = `const std = @import("std");
+const P = struct { x: i32 };
+pub fn main(init: std.process.Init) !void {
+    var a = [_]P{ .{ .x = 1 } };
+    const b = try init.gpa.dupe(P, &a);
+    defer init.gpa.free(b);
+    b[0].x = 9;
+    const c = try std.mem.concat(init.gpa, P, &.{ &a, b });
+    defer init.gpa.free(c);
+    c[0].x = 8;
+    var list: std.ArrayList(P) = .empty;
+    defer list.deinit(init.gpa);
+    try list.append(init.gpa, .{ .x = 2 });
+    try list.append(init.gpa, .{ .x = 3 });
+    _ = list.orderedRemove(0);
+    const added = try list.addOne(init.gpa);
+    added.x = 5;
+    std.debug.print("{} {} {} {} {}", .{a[0].x, b[0].x, c[0].x, list.items[0].x, list.items[1].x});
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 9 8 3 5',
+    uncaughtException: undefined,
+  });
+});
+
+test('file writers expose the supplied backing buffer before flush', () => {
+  const program = `const std = @import("std");
+pub fn main(init: std.process.Init) !void {
+    var buf: [32]u8 = undefined;
+    var w = std.Io.File.stdout().writer(init.io, &buf);
+    try w.interface.writeAll("hello");
+    std.debug.print("{s} {s}", .{w.interface.buffered(), buf[0..5]});
+    try w.interface.flush();
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'hello',
+    stderr: 'hello hello',
+    uncaughtException: undefined,
+  });
+});
+
+test('temporary formatting tuples keep later turtles alive through custom format callbacks', () => {
+  const program = `const std = @import("std");
+const P = struct {
+    t: Turtle,
+    pub fn format(self: P, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.print("{} ", .{self.t.canMoveForward()});
+    }
+};
+pub fn main() void {
+    std.debug.print("{f}{f}", .{P{.t = Turtle.init(0, 0)}, P{.t = Turtle.init(0, 1)}});
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: 'false true ',
+    uncaughtException: undefined,
+  });
+});

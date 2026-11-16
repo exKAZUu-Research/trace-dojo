@@ -1,9 +1,11 @@
+// code-gauge-allow-file fileNcss 464 -- Groups the related standard library operations that share this module.
+import { allocationSlots } from '../allocation';
 // code-gauge-allow-file duplicateLines 25 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
 import { floatFromBigInt } from '../floats';
 import type { Frame } from '../runtime';
-import { known, newArray, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
+import { copyForStorage, known, newArray, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
   BOOL,
   CONST_U8_SLICE,
@@ -721,9 +723,11 @@ function allocatingCall(type: Type, args: readonly TExpr[], span: Span, compute:
     (frame) => {
       const values = compute(evaluators.map((evaluate) => evaluate(frame)));
       frame.runtime.spend(1 + Math.floor(values.length / 16));
-      if (!frame.runtime.canAllocate(values.length)) return ERROR_OUT_OF_MEMORY;
-      frame.runtime.allocate(values.length);
-      return newSlice(values);
+      const child = type.kind === 'pointer' ? type.child : type;
+      const slots = allocationSlots(values.length, child);
+      if (!frame.runtime.canAllocate(slots)) return ERROR_OUT_OF_MEMORY;
+      frame.runtime.allocate(slots);
+      return newSlice(values.map(copyForStorage));
     },
     span
   );

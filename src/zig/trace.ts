@@ -6,7 +6,7 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { DisplayNode, TraceItemVariable, TraceScalar } from '../problems/trace';
 import { type CompiledProgram, compileProgram } from './compiler';
 import { runProgram } from './execute';
-import { type AnyFloat, BigFloat, toNumber } from './floats';
+import { type AnyFloat, BigFloat, shortestDecimal, toNumber } from './floats';
 import { stringBytes } from './fmt';
 import { parseZig } from './parse';
 import { type Frame, Runtime } from './runtime';
@@ -115,17 +115,21 @@ function isString(type: Type): boolean {
   return false;
 }
 
-// code-gauge-allow functionNcss 37 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+// code-gauge-allow functionNcss 41 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+// code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
 function scalarOf(value: Value, type: Type): Scalar | typeof NOT_SCALAR {
   if (value === UNASSIGNED) return NOT_SCALAR;
   switch (type.kind) {
     case 'int':
     case 'comptime_int':
-    case 'float':
     case 'comptime_float':
     case 'bool': {
       return basicScalar(value);
+    }
+    case 'float': {
+      if (type.bits > 32 || typeof value !== 'number' || !Number.isFinite(value)) return basicScalar(value);
+      const decimal = shortestDecimal(value, type.bits);
+      return Number(`${decimal.sign ? '-' : ''}${decimal.mantissa}e${decimal.exponent}`);
     }
     case 'enum': {
       const field = type.fields?.find((each) => each.value === value);

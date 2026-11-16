@@ -1,3 +1,4 @@
+import { allocationSlots } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Span } from '../ast';
 import { sizeOf } from '../layout';
@@ -16,7 +17,7 @@ import {
   USIZE,
   VOID,
 } from '../types';
-import { NULL, Pointer, Slice, type Value, ZArray, ZStruct } from '../values';
+import { NULL, Pointer, Slice, storeInto, type Value, ZArray, ZStruct } from '../values';
 import { constSlice, elements } from './common';
 import {
   allocateMemory,
@@ -90,7 +91,7 @@ function growCapacity(minimum: number, child: Type): number {
 
 /** Gives the list exactly `capacity` slots, copying its items to new storage; false when memory runs out. */
 function reallocate(frame: Frame, list: List, capacity: number, child: Type): boolean {
-  if (!frame.runtime.canAllocate(capacity)) return false;
+  if (!frame.runtime.canAllocate(allocationSlots(capacity, child))) return false;
   const values = list.items.values();
   for (let index = values.length; index < capacity; index++) values.push(undefinedValue(child));
   const storage = new ZArray(values, 0, capacity);
@@ -128,6 +129,7 @@ function defineMembers(type: StructType, child: Type): void {
     run: (list: List, args: Value[], frame: Frame) => Value
   ): (() => Member) =>
     fnMember(`ArrayList.${name}`, (sema, call) => {
+      sema.resolveStorage(child, call.span);
       const expected = options.allocator ? [ALLOCATOR, ...options.args] : options.args;
       const args = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
       const list = receiverOf(sema, call.receiver, type, call.span, options.byValue !== true);
@@ -244,17 +246,17 @@ function defineMembers(type: StructType, child: Type): void {
     orderedRemove: method('orderedRemove', { args: [USIZE], result: child }, (list, [index]) => {
       const position = Number(index as bigint);
       if (position >= list.items.length) indexOutOfBounds(position, list.items.length);
-      const values = list.items.values();
+      const values = list.items.values().map(copyForStorage);
       const [removed] = values.splice(position, 1);
-      for (const [at, value] of values.entries()) list.items.set(at, value);
+      for (const [at, value] of values.entries()) storeInto(list.items.target, list.items.start + at, value);
       setLength(list, values.length);
       return removed;
     }),
     swapRemove: method('swapRemove', { args: [USIZE], result: child }, (list, [index]) => {
       const position = Number(index as bigint);
       if (position >= list.items.length) indexOutOfBounds(position, list.items.length);
-      const removed = list.items.get(position);
-      list.items.set(position, list.items.get(list.items.length - 1));
+      const removed = copyForStorage(list.items.get(position));
+      storeInto(list.items.target, list.items.start + position, list.items.get(list.items.length - 1));
       setLength(list, list.items.length - 1);
       return removed;
     }),

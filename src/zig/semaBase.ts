@@ -1,6 +1,7 @@
-// code-gauge-allow-file fileNcss 835 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 842 -- The file holds one layer of the compiler, whose parts share its private state.
 // code-gauge-allow-file duplicateLines 17 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { CompileError } from '../interpreter/diagnostics';
+import { ExecutionBudget } from '../interpreter/limits';
 import { CompilationStorage, valueSlots } from './allocation';
 import { PANIC, panic } from './arith';
 import type { Container, ContainerMember, Expression, FunctionDeclaration, Span } from './ast';
@@ -136,6 +137,7 @@ export interface SemaApi {
   compile(expression: Expression, resultType?: Type): TExpr;
   compileType(expression: Expression): Type;
   reserveStorage(type: Type, span: Span): void;
+  resolveStorage(type: Type, span: Span): void;
   coerce(expression: TExpr, type: Type, span?: Span): TExpr;
   error(span: Span, message: string): never;
   knownValue(expression: TExpr, what: string): Value;
@@ -147,6 +149,7 @@ export interface SemaApi {
     span: Span
   ): { call: (frame: Frame, args: Value[]) => Value; params: readonly Type[]; returnType: Type };
   addressOf(expression: TExpr): TExpr;
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the field layout and default-value checks in one pass.
   structFields(type: StructType, span: Span): StructField[];
   /** The tuple type of fields, the same type for the same field types. */
   tupleType(fields: StructField[]): StructType;
@@ -177,6 +180,7 @@ export function isType(value: Value): value is Type {
 
 export abstract class SemaBase implements SemaApi {
   protected readonly storage = new CompilationStorage();
+  protected readonly compilationBudget = new ExecutionBudget();
   protected scope: Scope;
   /** The namespaces of user containers, by syntax, so that a container expression evaluates to one type. */
   protected readonly containerTypes = new Map<Container, Type>();
@@ -190,8 +194,12 @@ export abstract class SemaBase implements SemaApi {
     this.scope = { namespace: root };
   }
 
-  reserveStorage(type: Type, span: Span): void {
+  resolveStorage(type: Type, span: Span): void {
     this.resolveLayout(type, span, new Set());
+  }
+
+  reserveStorage(type: Type, span: Span): void {
+    this.resolveStorage(type, span);
     this.storage.reserve(type);
   }
 
@@ -378,6 +386,7 @@ export abstract class SemaBase implements SemaApi {
   // Container fields ------------------------------------------------------------------------------------------------
 
   /** The fields of a struct, resolving their types and default values on first use. */
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the field layout and default-value checks in one pass.
   structFields(type: StructType, span: Span): StructField[] {
     if (type.fields) return type.fields;
     const syntax = type.namespace.syntax;

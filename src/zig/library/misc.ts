@@ -1,3 +1,4 @@
+import { allocationSlots } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Span } from '../ast';
 import type { Frame } from '../runtime';
@@ -382,8 +383,8 @@ function priorityQueueType(
     let capacity = Number(queue.slots[1] as bigint);
     if (capacity >= wanted) return true;
     while (capacity < wanted) capacity += Math.floor(capacity / 2) + 8;
-    if (!frame.runtime.canAllocate(capacity)) return false;
-    frame.runtime.allocate(capacity);
+    if (!frame.runtime.canAllocate(allocationSlots(capacity, element))) return false;
+    frame.runtime.allocate(allocationSlots(capacity, element));
     const items = queue.slots[0] as Slice;
     const values = items.values();
     while (values.length < capacity) values.push(undefinedValue(element));
@@ -399,6 +400,7 @@ function priorityQueueType(
     run: (frame: Frame, queue: ZStruct, values: Value[]) => Value
   ): (() => Member) =>
     fnMember(`PriorityQueue.${name}`, (sema, call) => {
+      sema.resolveStorage(element, call.span);
       const expected = allocator ? [ALLOCATOR, ...args] : args;
       const compiled = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
       const queue = queueState(sema, call.receiver, type, call.span);

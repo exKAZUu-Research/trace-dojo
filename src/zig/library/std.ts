@@ -1,3 +1,4 @@
+import { checkOutputSize } from '../allocation';
 import { panic } from '../arith';
 import type { Span } from '../ast';
 import { bytesToText, byteValues, CONST_U8 } from '../builtins';
@@ -170,7 +171,7 @@ interface WriterState extends Record<string, unknown> {
   fd: number | undefined;
   buffered: number[];
   capacity: number;
-  /** The slice that a fixed writer (`std.Io.Writer.fixed`) fills. */
+  /** The backing buffer of a fixed or file writer. */
   fixed?: Slice;
 }
 
@@ -259,10 +260,9 @@ function addWriterMembers(): void {
       return runtime(
         errorUnionOf(WRITE_ERROR, VOID),
         (frame) => {
-          const repeated = Array.from<number>({
-            length: Number(evaluateCount(frame) as bigint),
-          }).fill(Number(evaluateByte(frame) as bigint));
-          return writeTo(frame, writer(frame), repeated);
+          const state = writer(frame);
+          const byte = Number(evaluateByte(frame) as bigint);
+          return writeRepeated(frame, state, [byte], Number(evaluateCount(frame) as bigint));
         },
         call.span
       );
@@ -292,8 +292,7 @@ function addWriterMembers(): void {
         errorUnionOf(WRITE_ERROR, VOID),
         (frame) => {
           const data = byteValues(evaluateBytes(frame)).map(Number);
-          const repeated = Array.from({ length: Number(evaluateCount(frame) as bigint) }, () => data).flat();
-          return writeTo(frame, writer(frame), repeated);
+          return writeRepeated(frame, writer(frame), data, Number(evaluateCount(frame) as bigint));
         },
         call.span
       );
@@ -354,7 +353,7 @@ function addWriterMembers(): void {
         sliceOfU8(),
         (frame) => {
           const state = writer(frame);
-          const slice = state.fixed as Slice;
+          const slice = state.fixed ?? new Slice(new ZArray(state.buffered.map(BigInt)), 0, state.buffered.length);
           return new Slice(slice.target, slice.start, state.buffered.length);
         },
         call.span
@@ -395,8 +394,9 @@ function fileWriter(sema: SemaApi, call: NativeCall): TExpr {
     FILE_WRITER,
     (frame) => {
       const target = evaluateFile(frame) as NativeHandle;
-      const capacity = (evaluateBuffer(frame) as Slice).length;
-      const state: WriterState = { fd: target.state.fd as number, buffered: [], capacity };
+      const buffer = evaluateBuffer(frame) as Slice;
+      const capacity = buffer.length;
+      const state: WriterState = { fd: target.state.fd as number, buffered: [], capacity, fixed: buffer };
       return new ZStruct([handle('writer', state)]);
     },
     call.span
@@ -427,10 +427,10 @@ function writerOf(sema: SemaApi, call: NativeCall): (frame: Parameters<TExpr['ev
 /** Writes bytes through a writer: into its buffer, draining the buffer and the bytes when they do not fit. */
 function writeTo(frame: Parameters<TExpr['eval']>[0], state: WriterState, bytes: number[]): Value {
   frame.runtime.spend();
-  if (state.fixed) {
+  if (state.fixed && state.fd === undefined) {
     if (state.buffered.length + bytes.length > state.capacity) return WRITE_FAILED;
     for (const [index, byte] of bytes.entries()) state.fixed.set(state.buffered.length + index, BigInt(byte));
-    state.buffered.push(...bytes);
+    for (const byte of bytes) state.buffered.push(byte);
     return undefined;
   }
   if (state.buffered.length + bytes.length > state.capacity) {
@@ -438,8 +438,21 @@ function writeTo(frame: Parameters<TExpr['eval']>[0], state: WriterState, bytes:
     state.buffered = [];
     return undefined;
   }
-  state.buffered.push(...bytes);
+  checkOutputSize(state.buffered.length + bytes.length);
+  for (const [index, byte] of bytes.entries()) state.fixed?.set(state.buffered.length + index, BigInt(byte));
+  for (const byte of bytes) state.buffered.push(byte);
   return undefined;
+}
+
+function writeRepeated(frame: Parameters<TExpr['eval']>[0], state: WriterState, data: number[], count: number): Value {
+  const length = data.length * count;
+  if (state.fd === undefined && state.fixed && length > state.capacity - state.buffered.length) return WRITE_FAILED;
+  checkOutputSize(state.buffered.length + length);
+  return writeTo(
+    frame,
+    state,
+    Array.from({ length }, (_, index) => data[index % data.length])
+  );
 }
 
 // std.process ---------------------------------------------------------------------------------------------------------

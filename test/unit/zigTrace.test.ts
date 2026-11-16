@@ -221,3 +221,24 @@ const makeProgram = (callee: string): string => `pub fn main() void {
     const s: S = ${callee}();
     s.t.forward();
 }`;
+
+test('narrow floats show shortest values and string and tag captures record their binding steps', () => {
+  const program = `const std = @import("std");
+const U = union(enum) { a: i32, b: i32 };
+pub fn main() void {
+    var x: f32 = 0.1;
+    x += 0.2;
+    const values = [_]f16{ 0.1, 0.2 };
+    _ = values;
+    for ([_][]const u8{ "a", "a" }) |s| {
+        std.debug.print("{s}", .{s});
+    }
+    const u: U = .{ .a = 4 };
+    switch (u) { inline .a, .b => |v, tag| { const y: i32 = v; _ = y; _ = tag; } }
+}`;
+  const result = traceProgram('zig', program, program);
+  expect(result.finalVars).toMatchObject({ x: 0.3, values: [0.1, 0.2] });
+  expect(result.traceItems.filter((item) => item.line === 8 && item.vars.s === 'a')).toHaveLength(2);
+  expect(result.traceItems.some((item) => item.vars.tag === '.a' && item.vars.v === 4)).toBe(true);
+  expect(result.finalVars).not.toHaveProperty('tag');
+});

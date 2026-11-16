@@ -1,3 +1,4 @@
+import { allocationSlots } from '../allocation';
 // code-gauge-allow-file duplicateLines 19 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { panic } from '../arith';
 import type { Expression, Span } from '../ast';
@@ -119,8 +120,9 @@ function grow(
   kind: KeyKind
 ): boolean {
   const capacity = Math.max(newCapacity, MINIMAL_CAPACITY);
-  if (!frame.runtime.canAllocate(capacity * 2)) return false;
-  frame.runtime.allocate(capacity * 2);
+  if (!frame.runtime.canAllocate(allocationSlots(capacity, keyType) + allocationSlots(capacity, valueType)))
+    return false;
+  frame.runtime.allocate(allocationSlots(capacity, keyType) + allocationSlots(capacity, valueType));
   const old = { ...state, metadata: state.metadata, keys: state.keys, values: state.values };
   state.capacity = capacity;
   state.metadata = Array.from<number>({ length: capacity }).fill(0);
@@ -292,6 +294,8 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
     run: (state: MapState, args: Value[], frame: Frame) => Value
   ): (() => Member) =>
     fnMember(`${map.namespace.name}.${name}`, (sema, call) => {
+      sema.resolveStorage(keyType, call.span);
+      sema.resolveStorage(valueType, call.span);
       const takesAllocator = options.allocates === true && !managed;
       const expected = takesAllocator ? [ALLOCATOR, ...options.args] : options.args;
       const args = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);

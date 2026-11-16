@@ -1,3 +1,4 @@
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 // code-gauge-allow-file fileNcss 1000 -- The file holds one layer of the compiler, whose parts share its private state.
 import {
   checked,
@@ -86,8 +87,10 @@ import {
   NULL,
   Pointer,
   Slice,
+  SliceLength,
   type Slots,
   Some,
+  SomeSlots,
   type Value,
   ZArray,
   ZStruct,
@@ -117,6 +120,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   protected abstract localSlot(): number;
 
   compile(expression: Expression, resultType?: Type): TExpr {
+    this.compilationBudget.spend();
     switch (expression.kind) {
       case 'integer':
       case 'character': {
@@ -298,8 +302,8 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Field access ----------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 38 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionNcss 40 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 27 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected fieldAccess(expression: ExpressionOf<'field'>): TExpr {
     const object = this.compile(expression.object);
     const { name } = expression;
@@ -335,7 +339,12 @@ export abstract class ExpressionCompiler extends SemaBase {
           if (name === 'len') {
             const evaluate = base.eval;
             if (base.known) return known(USIZE, BigInt((base.value as Slice).length), expression);
-            return runtime(USIZE, (frame) => BigInt((evaluate(frame) as Slice).length), expression);
+            const place = base.place;
+            const lengthPlace: Place | undefined = place && {
+              isConst: place.isConst,
+              locate: (frame) => new Pointer(new SliceLength(place.locate(frame)), 0),
+            };
+            return runtime(USIZE, (frame) => BigInt((evaluate(frame) as Slice).length), expression, lengthPlace);
           }
           if (name === 'ptr') this.error(expression, '多要素のポインタ（.ptr）は、この採点環境では使えません。');
         }
@@ -500,6 +509,10 @@ export abstract class ExpressionCompiler extends SemaBase {
       },
     };
     return runtime(child, (frame) => unwrapOptionalValue(evaluate(frame)), expression, unwrapPlace);
+  }
+
+  protected optionalPayloadPointer(pointer: Pointer): Pointer {
+    return pointer.load() instanceof Some ? new Pointer(new SomeSlots(pointer), 0) : pointer;
   }
 
   // Indexing and slicing ----------------------------------------------------------------------------------------------
@@ -844,6 +857,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   // code-gauge-allow functionCognitiveComplexity 27 -- Keeps one operation of the interpreter in one place.
+  // code-gauge-allow functionNcss 39 -- Keeps operand coercion and comparison validation together.
   private comparison(expression: ExpressionOf<'binary'>): TExpr {
     const { operator } = expression;
     let left = this.compile(expression.left);
@@ -924,7 +938,9 @@ export abstract class ExpressionCompiler extends SemaBase {
       }
       case 'pointer': {
         if (ordered || type.size === 'slice') this.error(span, `${typeName(type)} 型の値は、== で比べられません。`);
-        return (a, b) => ((a as Pointer).equals(b as Pointer) ? 0 : 1);
+        return type.child.kind === 'fn'
+          ? (a, b) => ((a as FnValue).fn === (b as FnValue).fn ? 0 : 1)
+          : (a, b) => ((a as Pointer).equals(b as Pointer) ? 0 : 1);
       }
       case 'optional': {
         if (ordered) this.error(span, `${typeName(type)} 型の値は、大小を比べられません。`);
@@ -959,6 +975,13 @@ export abstract class ExpressionCompiler extends SemaBase {
     left = this.coerce(left, type, expression.left);
     right = this.coerce(right, type, expression.right);
     this.checkDivision(operator, type, left, right, expression);
+    if (type.kind === 'comptime_int' && left.known && right.known) {
+      const aBits = (left.value as bigint).toString(2).length;
+      const bBits = (right.value as bigint).toString(2).length;
+      const resultBits = operator === '*' ? aBits + bBits : Math.max(aBits, bBits) + 1;
+      if (resultBits > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+      this.compilationBudget.spend(Math.ceil(resultBits / 64));
+    }
     const operation = this.operation(operator, type, expression);
     // A float of a fixed type divided by zero gives an infinity or NaN, as at run time.
     const dividesByZero =
@@ -1125,6 +1148,12 @@ export abstract class ExpressionCompiler extends SemaBase {
       ) as bigint;
       const value = this.knownValue(left, 'comptime_int の値') as bigint;
       if (amount < 0n) this.error(expression.right, 'シフトの量が負の数です。');
+      if (
+        expression.operator !== '>>' &&
+        value !== 0n &&
+        amount + BigInt(value.toString(2).length) > BigInt(LIMITS.maxSlots)
+      )
+        throw new ExecutionLimitError('storage');
       const result = expression.operator === '>>' ? value >> amount : value << amount;
       return known(type, result, expression);
     }
@@ -1239,7 +1268,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   // Initializers ----------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionNcss 32 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 27 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected structInit(expression: ExpressionOf<'structInit'>, resultType: Type | undefined): TExpr {
     const type = expression.type ? this.compileType(expression.type) : resultType && unwrapResult(resultType);
     if (!type) return this.anonymousStruct(expression);
@@ -1464,22 +1493,6 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   protected noSlot(): number {
     return this.localSlot();
-  }
-}
-
-/** The payload of an optional whose payload is itself optional, as storage that `.?` points into. */
-class SomeSlots implements Slots {
-  constructor(private readonly pointer: Pointer) {}
-
-  get slots(): Value[] {
-    const some = this.pointer.load() as Some;
-    const holder = this.pointer;
-    return new Proxy([some.value], {
-      set: (_, key, value) => {
-        if (key === '0') holder.target.slots[holder.index] = new Some(value as Value);
-        return true;
-      },
-    });
   }
 }
 

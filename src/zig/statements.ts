@@ -31,6 +31,7 @@ import {
   pointerTo,
   type Type,
   typeName,
+  U8,
   USIZE,
   VOID,
 } from './types';
@@ -313,7 +314,7 @@ export abstract class StatementCompiler extends CallCompiler {
     return { exec: this.simple(row, isObjectCreation(valueSyntax), run), noreturn: false };
   }
 
-  // code-gauge-allow functionNcss 44 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionNcss 49 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private destructure(statement: Extract<Statement, { kind: 'destructure' }>): Stmt {
     const sequential = this.sequentialDestructure(statement);
@@ -323,16 +324,19 @@ export abstract class StatementCompiler extends CallCompiler {
     const count = statement.targets.length;
     let elementTypes: Type[];
     if (type.kind === 'struct' && type.isTuple) elementTypes = (type.fields ?? []).map((field) => field.type);
-    else if (type.kind === 'array') elementTypes = Array.from({ length: type.length }, () => type.child);
-    else return this.error(statement, `${typeName(type)} 型の値は、分割して代入できません。`);
+    else if (type.kind === 'array') {
+      if (type.length !== count)
+        this.error(statement, `分割代入の数が合いません（${count} 個ですが、値は ${type.length} 個です）。`);
+      elementTypes = Array.from({ length: count }, () => type.child);
+    } else return this.error(statement, `${typeName(type)} 型の値は、分割して代入できません。`);
     if (elementTypes.length !== count) {
       this.error(statement, `分割代入の数が合いません（${count} 個ですが、値は ${elementTypes.length} 個です）。`);
     }
     const isArray = type.kind === 'array';
-    const element = (aggregate: Value, index: number): Value =>
-      isArray ? (aggregate as ZArray).get(index) : (aggregate as ZStruct).slots[index];
+    const aggregateSlot = this.localSlot();
+    const held = value.known ? value : runtime(type, (frame) => frame.slots[aggregateSlot], statement);
     const stores = statement.targets.map((target, index) => {
-      const elementExpression = this.elementOf(value, index, elementTypes[index], isArray, statement);
+      const elementExpression = this.elementOf(held, index, elementTypes[index], isArray, statement);
       if (target.declaration) {
         const declared = target.declaration.type ? this.compileType(target.declaration.type) : undefined;
         const coerced = declared ? this.coerce(elementExpression, declared, target) : elementExpression;
@@ -344,25 +348,29 @@ export abstract class StatementCompiler extends CallCompiler {
         }
         const binding = this.declareLocal(target.declaration.name, coerced.type, target.declaration.isConst, coerced);
         const convert = coerced;
-        return (frame: Frame, aggregate: Value): void => {
-          frame.slots[binding.slot] = copyForStorage(convert.known ? convert.value : element(aggregate, index));
+        return (frame: Frame): void => {
+          frame.slots[binding.slot] = copyForStorage(convert.eval(frame));
         };
       }
       const destination = target.target as Expression;
       if (destination.kind === 'identifier' && destination.name === '_') return () => {};
       const place = this.assignablePlace(destination);
-      this.coerce(elementExpression, place.type, target);
-      return (frame: Frame, aggregate: Value): void => {
+      const convert = this.coerce(elementExpression, place.type, target);
+      return (frame: Frame): void => {
         const pointer = place.place.locate(frame);
-        storeInto(pointer.target, pointer.index, element(aggregate, index));
+        storeInto(pointer.target, pointer.index, convert.eval(frame));
       };
     });
     const evaluate = value.eval;
     const row = this.stepRow(statement);
     return {
       exec: this.simple(row, false, (frame) => {
-        const aggregate = evaluate(frame);
-        for (const store of stores) store(frame, aggregate);
+        frame.slots[aggregateSlot] = evaluate(frame);
+        try {
+          for (const store of stores) store(frame);
+        } finally {
+          frame.slots[aggregateSlot] = UNASSIGNED;
+        }
       }),
       noreturn: false,
     };
@@ -410,7 +418,15 @@ export abstract class StatementCompiler extends CallCompiler {
     if (value.known) {
       return known(type, isArray ? (value.value as ZArray).get(index) : (value.value as ZStruct).slots[index], span);
     }
-    return runtime(type, () => {}, span);
+    const evaluate = value.eval;
+    return runtime(
+      type,
+      (frame) => {
+        const aggregate = evaluate(frame);
+        return isArray ? (aggregate as ZArray).get(index) : (aggregate as ZStruct).slots[index];
+      },
+      span
+    );
   }
 
   private assignablePlace(target: Expression): {
@@ -1035,9 +1051,10 @@ export abstract class StatementCompiler extends CallCompiler {
         resultType,
         asStatement,
         (frame) => {
-          const value = evaluate(frame);
+          const pointer = binding?.locate?.(frame);
+          const value = pointer ? pointer.load() : evaluate(frame);
           if (value === NULL) return 1;
-          bind?.(frame, value instanceof Some ? value.value : value);
+          bind?.(frame, value instanceof Some ? value.value : value, pointer);
           return 0;
         },
         [binding?.binding]
@@ -1065,12 +1082,13 @@ export abstract class StatementCompiler extends CallCompiler {
       resultType,
       asStatement,
       (frame) => {
-        const value = evaluate(frame);
+        const pointer = binding?.locate?.(frame);
+        const value = pointer ? pointer.load() : evaluate(frame);
         if (value instanceof ErrorValue) {
           bindError?.(frame, value);
           return 1;
         }
-        bind?.(frame, value);
+        bind?.(frame, value, pointer);
         return 0;
       },
       [binding?.binding, errorBinding?.binding]
@@ -1167,7 +1185,13 @@ export abstract class StatementCompiler extends CallCompiler {
     capture: Capture | undefined,
     type: Type,
     operand: TExpr | undefined
-  ): { binding: LocalBinding; bind: (frame: Frame, value: Value) => void } | undefined {
+  ):
+    | {
+        binding: LocalBinding;
+        locate?: (frame: Frame) => Pointer;
+        bind: (frame: Frame, value: Value, pointer?: Pointer) => void;
+      }
+    | undefined {
     if (!capture || capture.name === '_') return undefined;
     if (capture.byPointer) {
       const place = operand?.place;
@@ -1177,8 +1201,10 @@ export abstract class StatementCompiler extends CallCompiler {
       const locate = place.locate;
       return {
         binding,
-        bind: (frame) => {
-          frame.slots[binding.slot] = locate(frame);
+        locate,
+        bind: (frame, _value, pointer) => {
+          const target = pointer as Pointer;
+          frame.slots[binding.slot] = operand?.type.kind === 'optional' ? this.optionalPayloadPointer(target) : target;
         },
       };
     }
@@ -1244,9 +1270,10 @@ export abstract class StatementCompiler extends CallCompiler {
       const evaluate = condition.eval;
       const bind = binding?.bind;
       test = (frame) => {
-        const value = evaluate(frame);
+        const pointer = binding?.locate?.(frame);
+        const value = pointer ? pointer.load() : evaluate(frame);
         if (value === NULL) return false;
-        bind?.(frame, value instanceof Some ? value.value : value);
+        bind?.(frame, value instanceof Some ? value.value : value, pointer);
         return true;
       };
     } else if (condition.type.kind === 'error_union') {
@@ -1258,12 +1285,13 @@ export abstract class StatementCompiler extends CallCompiler {
       const bindError = errorBinding?.bind;
       let lastError: Value;
       test = (frame) => {
-        const value = evaluate(frame);
+        const pointer = binding?.locate?.(frame);
+        const value = pointer ? pointer.load() : evaluate(frame);
         if (value instanceof ErrorValue) {
           lastError = value;
           return false;
         }
-        bind?.(frame, value);
+        bind?.(frame, value, pointer);
         return true;
       };
       failure = (frame) => bindError?.(frame, lastError);
@@ -1299,7 +1327,8 @@ export abstract class StatementCompiler extends CallCompiler {
     const { id } = target;
     const bodyExec = body.exec;
     const otherwiseExec = otherwise?.stmt?.exec;
-    const otherwiseValue = otherwise?.value?.eval;
+    const valueType = asStatement ? VOID : this.loopType(target, otherwise?.value, infinite, expression);
+    const otherwiseValue = otherwise?.value ? this.coerce(otherwise.value, valueType, expression).eval : undefined;
     const hasBinding = binding !== undefined;
     const captureSlots = [binding?.binding.slot, errorBinding?.binding.slot].filter((slot) => slot !== undefined);
     const loop = clearingLocals(captureSlots, (frame: Frame): Jump | { value: Value } | undefined => {
@@ -1329,7 +1358,6 @@ export abstract class StatementCompiler extends CallCompiler {
       if (otherwiseValue) return { value: otherwiseValue(frame) };
       return undefined;
     });
-    const valueType = asStatement ? VOID : this.loopType(target, otherwise?.value, infinite, expression);
     const stmt: Stmt = {
       exec: (frame) => {
         const result = loop(frame);
@@ -1458,7 +1486,8 @@ export abstract class StatementCompiler extends CallCompiler {
     const { id } = target;
     const bodyExec = body.exec;
     const otherwiseExec = otherwise?.stmt?.exec;
-    const otherwiseValue = otherwise?.value?.eval;
+    const valueType = asStatement ? VOID : this.loopType(target, otherwise?.value, false, expression);
+    const otherwiseValue = otherwise?.value ? this.coerce(otherwise.value, valueType, expression).eval : undefined;
     const slots = bindings.map((binding) => binding?.slot);
     const loop = (frame: Frame): Jump | { value: Value } | undefined => {
       const values = operands.map((operand) => operand.evaluate(frame));
@@ -1495,7 +1524,6 @@ export abstract class StatementCompiler extends CallCompiler {
       if (otherwiseValue) return { value: otherwiseValue(frame) };
       return undefined;
     };
-    const valueType = asStatement ? VOID : this.loopType(target, otherwise?.value, false, expression);
     const stmt: Stmt = {
       exec: (frame) => {
         const result = loop(frame);
@@ -1602,6 +1630,8 @@ export abstract class StatementCompiler extends CallCompiler {
     const [capture] = expression.captures;
     const fn = this.currentFn(expression);
     const elements: TExpr[] = [];
+    const operandSlot = this.localSlot();
+    let evaluateOperand: TExpr['eval'] | undefined;
     if (operand.isRange) {
       const start = this.knownValue(
         this.coerce(this.compile(operand.value, USIZE), USIZE, operand.value),
@@ -1612,10 +1642,16 @@ export abstract class StatementCompiler extends CallCompiler {
         this.coerce(this.compile(operand.rangeEnd, USIZE), USIZE, operand.rangeEnd),
         '範囲'
       ) as bigint;
+      this.compilationBudget.spend(Number(end - start));
       for (let value = start; value < end; value++) elements.push(known(USIZE, value, operand));
     } else {
-      const compiled = this.compile(operand.value);
-      const type = compiled.type;
+      const source = this.compile(operand.value);
+      const type = source.type;
+      if (!source.known) evaluateOperand = source.eval;
+      const compiled = source.known ? source : runtime(type, (frame) => frame.slots[operandSlot], operand);
+      this.compilationBudget.spend(
+        type.kind === 'array' ? type.length : type.kind === 'struct' ? (type.fields?.length ?? 0) : 0
+      );
       if (type.kind === 'struct' && type.isTuple) {
         for (const [index, field] of (type.fields ?? []).entries())
           elements.push(this.tupleElement(compiled, index, field, operand));
@@ -1642,6 +1678,7 @@ export abstract class StatementCompiler extends CallCompiler {
     };
     const row = this.stepRow(expression);
     const iterations = elements.map((element) => {
+      this.compilationBudget.spend();
       const locals = new Map<string, LocalBinding>();
       let binding: LocalBinding | undefined;
       if (capture && capture.name !== '_') {
@@ -1665,7 +1702,8 @@ export abstract class StatementCompiler extends CallCompiler {
     const { id } = target;
     return {
       stmt: {
-        exec: (frame) => {
+        exec: clearingLocals([operandSlot], (frame) => {
+          if (evaluateOperand) frame.slots[operandSlot] = evaluateOperand(frame);
           for (const iteration of iterations) {
             frame.runtime.spend();
             if (iteration.slot !== undefined) frame.slots[iteration.slot] = iteration.evaluate(frame);
@@ -1677,7 +1715,7 @@ export abstract class StatementCompiler extends CallCompiler {
             }
           }
           return;
-        },
+        }),
         noreturn: false,
       },
       value: known(VOID, undefined, expression),
@@ -1722,7 +1760,10 @@ export abstract class StatementCompiler extends CallCompiler {
     };
     // The values each prong matches, as keys: bigints for integers and enums, names for errors, and booleans.
     const keyOf = (value: Value): unknown => {
-      if (union) return BigInt((value as ZUnion).tag);
+      if (union) {
+        const field = unionFields?.[(value as ZUnion).tag];
+        return (tagType as EnumType).fields?.find((tag) => tag.name === field?.name)?.value;
+      }
       if (value instanceof ErrorValue) return value.name;
       return value;
     };
@@ -1898,6 +1939,10 @@ export abstract class StatementCompiler extends CallCompiler {
     }
   ): unknown {
     const { operand, operandType, tagType, union, unionFields, resultType, asStatement, keyOf, seen } = context;
+    const fieldForTag = (key: unknown): { name: string; type: Type } | undefined =>
+      unionFields?.find((field) =>
+        (tagType as EnumType).fields?.some((tag) => tag.value === key && tag.name === field.name)
+      );
     const values: unknown[] = [];
     const ranges: [bigint, bigint][] = [];
     const isUnnamed = each.items.some((item) => item.value.kind === 'identifier' && item.value.name === '_');
@@ -1943,7 +1988,7 @@ export abstract class StatementCompiler extends CallCompiler {
     // The capture's type: a union's payload, or the operand's value.
     const captureFor = (keys: unknown[]): Type => {
       if (!union || !unionFields) return operandType;
-      const types = keys.map((key) => unionFields[Number(key as bigint)].type);
+      const types = keys.map((key) => fieldForTag(key)?.type ?? VOID);
       if (types.some((type) => type !== types[0])) {
         this.error(each, 'この枝の値の型がそろわないので受け取れません（inline else を使ってください）。');
       }
@@ -1985,6 +2030,11 @@ export abstract class StatementCompiler extends CallCompiler {
           value: tagValue?.value,
         };
         locals.set(each.tagCapture.name, binding);
+        const bindPayload = bind;
+        bind = (frame, value, pointer) => {
+          bindPayload?.(frame, value, pointer);
+          frame.slots[binding.slot] = tagValue?.value;
+        };
       }
       // Zig does not analyze a prong that a known operand never reaches.
       if (context.skipped) {
@@ -2031,7 +2081,7 @@ export abstract class StatementCompiler extends CallCompiler {
     }
     const keys = each.isElse ? this.remainingKeys(tagType, seen, each, true) : values;
     if (each.isElse && union && each.capture) {
-      const types = keys.map((key) => (unionFields as { type: Type }[])[Number(key as bigint)].type);
+      const types = keys.map((key) => fieldForTag(key)?.type ?? VOID);
       if (types.some((type) => type !== types[0]))
         this.error(each, 'else の枝の値の型がそろわないので受け取れません（inline else を使ってください）。');
     }
@@ -2163,7 +2213,8 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** `x catch handler`; with `discarded`, as in `_ = x catch handler`, the payload and handler need no common type. */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps error-union analysis and handler evaluation together.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps error-union analysis and handler evaluation together.
+  // code-gauge-allow functionNcss 34 -- Keeps the success and error result conversions together.
   protected compileCatch(expression: ExpressionOf<'catch'>, resultType: Type | undefined, discarded = false): TExpr {
     const operand = this.compile(expression.operand);
     const type = operand.type;
@@ -2195,7 +2246,8 @@ export abstract class StatementCompiler extends CallCompiler {
     const handler = this.withCapture(capture, () =>
       this.compile(expression.handler, discarded ? undefined : (resultType ?? type.payload))
     );
-    const payloadValue = runtime(type.payload, () => {}, expression);
+    const payloadSlot = this.localSlot();
+    const payloadValue = runtime(type.payload, (frame) => frame.slots[payloadSlot], expression);
     const resultTypeOf = discarded
       ? VOID
       : handler.type.kind === 'noreturn'
@@ -2204,6 +2256,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const otherwise = discarded ? handler : this.coerce(handler, resultTypeOf, expression.handler);
     const evaluate = operand.eval;
     const evaluateHandler = clearingLocals(capture ? [capture.binding.slot] : [], otherwise.eval);
+    const success = discarded ? payloadValue : this.coerce(payloadValue, resultTypeOf, expression);
     const bind = capture?.bind;
     return runtime(
       resultTypeOf,
@@ -2213,7 +2266,12 @@ export abstract class StatementCompiler extends CallCompiler {
           bind?.(frame, value);
           return evaluateHandler(frame);
         }
-        return value;
+        frame.slots[payloadSlot] = value;
+        try {
+          return success.eval(frame);
+        } finally {
+          frame.slots[payloadSlot] = UNASSIGNED;
+        }
       },
       expression
     );
@@ -2285,15 +2343,13 @@ function storesAnswerValue(type: Type): boolean {
       return storesAnswerValue(type.child);
     }
     case 'pointer': {
-      return type.child === U8_TYPE || (type.child.kind === 'array' && type.child.child === U8_TYPE);
+      return type.child === U8 || (type.child.kind === 'array' && type.child.child === U8);
     }
     default: {
       return false;
     }
   }
 }
-
-const U8_TYPE: Type = { kind: 'int', signed: false, bits: 8, name: 'u8' } as Type;
 
 /** Whether an expression statement only calls functions, whose own steps show what it did. */
 function isCallOnly(expression: Expression): boolean {

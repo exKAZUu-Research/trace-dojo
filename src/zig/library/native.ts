@@ -1,7 +1,16 @@
 import type { Expression, Span } from '../ast';
 import { FunctionInstance } from '../functions';
-import type { Frame } from '../runtime';
-import { known, NATIVE_FN_TYPE, type NativeCall, NativeFn, runtime, type SemaApi, type TExpr } from '../semaBase';
+import { type Frame, withHeldValues } from '../runtime';
+import {
+  evaluateHeld,
+  known,
+  NATIVE_FN_TYPE,
+  type NativeCall,
+  NativeFn,
+  runtime,
+  type SemaApi,
+  type TExpr,
+} from '../semaBase';
 import {
   type Decl,
   type Namespace,
@@ -104,10 +113,8 @@ export function nativeCall(
     type,
     (frame) => {
       frame.runtime.spend();
-      return compute(
-        evaluators.map((evaluate) => evaluate(frame)),
-        frame
-      );
+      const values = evaluateHeld(frame, evaluators);
+      return withHeldValues(frame, values, () => compute(values, frame));
     },
     span
   );

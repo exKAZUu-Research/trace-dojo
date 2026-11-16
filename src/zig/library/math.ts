@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 479 -- Groups the related standard library operations that share this module.
 import { divCeil, divExact, divFloor, divTrunc, floatMod, floatRem, mod, PANIC, panic, rem } from '../arith';
 import type { Expression } from '../ast';
 import { fusedMultiplyAdd, intFittingRange, roundFloat } from '../builtins';
@@ -412,7 +413,12 @@ const MEMBERS: Record<string, () => Member> = {
           ? 3.4028234663852886e38
           : bits === 16
             ? 65_504
-            : roundTo(parseFloatLiteral('1e5000', bits), bits);
+            : new BigFloat(
+                false,
+                'finite',
+                (1n << BigInt(FORMATS[bits].precision)) - 1n,
+                FORMATS[bits].maxExponent - FORMATS[bits].precision + 1
+              );
     return known(type, value, call.span);
   }),
   isNan: predicate('std.math.isNan', (x) => isNaNFloat(x)),
@@ -681,6 +687,7 @@ const MEMBERS: Record<string, () => Member> = {
   sin: builtinAlias('std.math.sin', '@sin'),
   cos: builtinAlias('std.math.cos', '@cos'),
   tan: builtinAlias('std.math.tan', '@tan'),
+  // code-gauge-allow functionCognitiveComplexity 18 -- Resolves the sign result type and value for integer and float arguments.
   sign: fnMember('std.math.sign', (sema, call) => {
     const [arg] = expectArgs(sema, call, 1, 'std.math.sign');
     const value = sema.compile(arg);

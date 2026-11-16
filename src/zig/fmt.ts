@@ -1,4 +1,5 @@
-// code-gauge-allow-file fileNcss 711 -- The file holds one layer of the compiler, whose parts share its private state.
+import { checkOutputSize } from './allocation';
+// code-gauge-allow-file fileNcss 718 -- The file holds one layer of the compiler, whose parts share its private state.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
@@ -709,9 +710,10 @@ function hexDigits(byte: number, upper: boolean): number[] {
 
 export function alignBuffer(out: number[], buffer: readonly number[], options: Options): void {
   const width = options.width ?? buffer.length;
+  checkOutputSize(out.length + Math.max(width, buffer.length));
   const padding = buffer.length < width ? width - buffer.length : 0;
   if (padding === 0) {
-    out.push(...buffer);
+    for (const byte of buffer) out.push(byte);
     return;
   }
   const fill = (count: number): void => {
@@ -719,19 +721,19 @@ export function alignBuffer(out: number[], buffer: readonly number[], options: O
   };
   switch (options.alignment) {
     case 'left': {
-      out.push(...buffer);
+      for (const byte of buffer) out.push(byte);
       fill(padding);
       break;
     }
     case 'center': {
       fill(Math.floor(padding / 2));
-      out.push(...buffer);
+      for (const byte of buffer) out.push(byte);
       fill(Math.floor((padding + 1) / 2));
       break;
     }
     default: {
       fill(padding);
-      out.push(...buffer);
+      for (const byte of buffer) out.push(byte);
     }
   }
 }
@@ -918,9 +920,10 @@ function printFloatHex(out: number[], value: AnyFloat, bits: FloatBits, upper: b
 }
 
 /** The digits and exponent of `Writer.printFloatHex` for a finite nonzero float, rounded to a precision if given. */
-// code-gauge-allow functionNcss 35 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionNcss 36 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function hexFloatDigits(big: BigFloat, bits: FloatBits, upper: boolean, precision: number | undefined): string {
+  checkOutputSize(precision ?? 0);
   const format = FORMATS[bits];
   const fractionalBits = format.precision - 1;
   const digits = Math.ceil(fractionalBits / 4);

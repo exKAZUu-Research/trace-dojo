@@ -1,6 +1,8 @@
-// code-gauge-allow-file duplicateLines 19 -- Library types repeat the same shape of method on purpose, each over its own state.
+import { allocationSlots } from '../allocation';
+// code-gauge-allow-file duplicateLines 21 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { alignOf, sizeOf } from '../layout';
 import {
+  copyForStorage,
   known,
   type NativeCall,
   runtime,
@@ -70,13 +72,14 @@ export function allocatorMembers(): Record<string, () => Member> {
       const allocator = allocatorOf(sema, call);
       const [typeArg, countArg] = expectArgs(sema, call, 2, 'alloc');
       const child = sema.compileType(typeArg);
+      sema.resolveStorage(child, call.span);
       const [count] = compileArgs(sema, [countArg], [USIZE]);
       const evaluate = count.eval;
       return runtime(
         errorUnionOf(ALLOCATOR_ERROR, sliceOf(child, false)),
         (frame) => {
           const n = Number(evaluate(frame) as bigint);
-          if (!frame.runtime.canAllocate(n)) return OUT_OF_MEMORY;
+          if (!frame.runtime.canAllocate(allocationSlots(n, child))) return OUT_OF_MEMORY;
           const array = new ZArray(
             Array.from({ length: n }, () => undefinedValue(child)),
             0,
@@ -92,9 +95,11 @@ export function allocatorMembers(): Record<string, () => Member> {
       const allocator = allocatorOf(sema, call);
       const [typeArg] = expectArgs(sema, call, 1, 'create');
       const child = sema.compileType(typeArg);
+      sema.resolveStorage(child, call.span);
       return runtime(
         errorUnionOf(ALLOCATOR_ERROR, pointerTo(child, false)),
         (frame) => {
+          if (!frame.runtime.canAllocate(allocationSlots(1, child))) return OUT_OF_MEMORY;
           const cell = new Cell(undefinedValue(child));
           if (!allocateMemory(frame, allocator(frame), cell, 1, child)) return OUT_OF_MEMORY;
           return new Pointer(cell, 0);
@@ -106,13 +111,15 @@ export function allocatorMembers(): Record<string, () => Member> {
       const allocator = allocatorOf(sema, call);
       const [typeArg, sliceArg] = expectArgs(sema, call, 2, 'dupe');
       const child = sema.compileType(typeArg);
+      sema.resolveStorage(child, call.span);
       const [source] = compileArgs(sema, [sliceArg], [sliceOf(child, true)]);
       const evaluate = source.eval;
       return runtime(
         errorUnionOf(ALLOCATOR_ERROR, sliceOf(child, false)),
         (frame) => {
           const slice = evaluate(frame) as Slice;
-          const array = new ZArray(slice.values(), 0, slice.length);
+          if (!frame.runtime.canAllocate(allocationSlots(slice.length, child))) return OUT_OF_MEMORY;
+          const array = new ZArray(slice.values().map(copyForStorage), 0, slice.length);
           if (!allocateMemory(frame, allocator(frame), array, slice.length, child)) return OUT_OF_MEMORY;
           return new Slice(array, 0, slice.length);
         },
@@ -152,6 +159,7 @@ export function allocatorMembers(): Record<string, () => Member> {
         return sema.error(memory, 'realloc にはスライスを渡してください。');
       const [count] = compileArgs(sema, [countArg], [USIZE]);
       const child = type.child;
+      sema.resolveStorage(child, call.span);
       return nativeCall(
         errorUnionOf(ALLOCATOR_ERROR, sliceOf(child, false)),
         [compiled, count],
@@ -159,7 +167,7 @@ export function allocatorMembers(): Record<string, () => Member> {
         ([value, size], frame) => {
           const slice = value as Slice;
           const n = Number(size as bigint);
-          if (!frame.runtime.canAllocate(n)) return OUT_OF_MEMORY;
+          if (!frame.runtime.canAllocate(allocationSlots(n, child))) return OUT_OF_MEMORY;
           const values = slice.values().slice(0, n);
           while (values.length < n) values.push(undefinedValue(child));
           const array = new ZArray(values, 0, n);
@@ -215,7 +223,8 @@ export function allocateMemory(
   type: Type,
   previous?: object
 ): boolean {
-  if (!frame.runtime.canAllocate(count)) return false;
+  const slots = allocationSlots(count, type);
+  if (!frame.runtime.canAllocate(slots)) return false;
   const owner = state?.owner?.load();
   if (owner instanceof ZStruct && state?.name === 'fixed') {
     const capacity = owner.slots[0] as bigint;
@@ -235,7 +244,7 @@ export function allocateMemory(
   } else if (owner instanceof ZStruct && state?.name === 'debug' && !previous) {
     owner.slots[0] = (owner.slots[0] as bigint) + 1n;
   }
-  frame.runtime.allocate(count);
+  frame.runtime.allocate(slots);
   return true;
 }
 

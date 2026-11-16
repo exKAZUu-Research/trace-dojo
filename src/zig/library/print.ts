@@ -1,7 +1,8 @@
+import { checkOutputSize } from '../allocation';
 import type { Expression, Span } from '../ast';
 import { byteValues } from '../builtins';
 import { checkFormat, FormatError, type Options, parseFormat, printValue, type Segment, type TypeInfo } from '../fmt';
-import { type Frame, ZigPanic } from '../runtime';
+import { type Frame, withHeldValues, ZigPanic } from '../runtime';
 import type { SemaApi } from '../semaBase';
 import { CONST_U8_SLICE, pointerTo, type StructField, type Type, typeName } from '../types';
 import { Pointer, type Value, type ZStruct } from '../values';
@@ -9,6 +10,8 @@ import { handle } from './native';
 import { WRITER } from './writer';
 
 /** Compiles `print(format, args)`: checks the format against the arguments and returns code giving the bytes. */
+// code-gauge-allow functionCognitiveComplexity 17 -- Checks the complete format against its argument types.
+// code-gauge-allow functionNcss 36 -- Keeps format checking and the resulting formatter together.
 export function compilePrint(
   sema: SemaApi,
   formatArg: Expression,
@@ -51,10 +54,14 @@ export function compilePrint(
     }
   }
   const evaluate = args.eval;
-  return (frame) =>
-    formatBytesOf(segments, fields, evaluate(frame) as ZStruct, info, (arg, value) =>
-      (formatMethods.get(arg) as FormatMethod)(frame, value)
+  return (frame) => {
+    const args = evaluate(frame) as ZStruct;
+    return withHeldValues(frame, [args], () =>
+      formatBytesOf(segments, fields, args, info, (arg, value) =>
+        (formatMethods.get(arg) as FormatMethod)(frame, value)
+      )
     );
+  };
 }
 
 type FormatMethod = (frame: Frame, value: Value) => number[];
@@ -132,6 +139,7 @@ export class PartialOutputPanic extends ZigPanic {
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Expands each parsed segment with its dynamic width and precision.
 function appendSegments(
   out: number[],
   segments: readonly Segment[],
@@ -143,7 +151,8 @@ function appendSegments(
   const argValue = (index: number): Value => fields[index].comptimeValue ?? args.slots[index];
   for (const segment of segments) {
     if (segment.kind === 'literal') {
-      out.push(...segment.bytes);
+      checkOutputSize(out.length + segment.bytes.length);
+      for (const byte of segment.bytes) out.push(byte);
       continue;
     }
     const options: Options = { fill: segment.fill, alignment: segment.alignment };
@@ -151,8 +160,11 @@ function appendSegments(
     else if (segment.width.kind === 'arg') options.width = Number(argValue(segment.width.index) as bigint);
     if (segment.precision.kind === 'number') options.precision = segment.precision.value;
     else if (segment.precision.kind === 'arg') options.precision = Number(argValue(segment.precision.index) as bigint);
-    if (segment.spec === 'f') out.push(...formatWithMethod(segment.arg, argValue(segment.arg)));
-    else printValue(out, segment.spec, options, argValue(segment.arg), fields[segment.arg].type as Type, info);
+    if (segment.spec === 'f') {
+      const bytes = formatWithMethod(segment.arg, argValue(segment.arg));
+      checkOutputSize(out.length + bytes.length);
+      for (const byte of bytes) out.push(byte);
+    } else printValue(out, segment.spec, options, argValue(segment.arg), fields[segment.arg].type as Type, info);
   }
 }
 

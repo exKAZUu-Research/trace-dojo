@@ -230,3 +230,34 @@ export function storeInto(target: Slots, index: number, value: Value): void {
   }
   target.slots[index] = copyValue(value);
 }
+
+export class SliceLength implements Slots {
+  constructor(private readonly pointer: Pointer) {}
+
+  get slots(): Value[] {
+    const slice = this.pointer.load() as Slice;
+    return new Proxy([BigInt(slice.length)], {
+      set: (_, key, value) => {
+        if (key === '0')
+          this.pointer.target.slots[this.pointer.index] = new Slice(slice.target, slice.start, Number(value));
+        return true;
+      },
+    });
+  }
+}
+
+/** The payload of an optional whose payload is itself optional, as storage that `.?` points into. */
+export class SomeSlots implements Slots {
+  constructor(private readonly pointer: Pointer) {}
+
+  get slots(): Value[] {
+    const some = this.pointer.load() as Some;
+    const holder = this.pointer;
+    return new Proxy([some.value], {
+      set: (_, key, value) => {
+        if (key === '0') holder.target.slots[holder.index] = new Some(value as Value);
+        return true;
+      },
+    });
+  }
+}

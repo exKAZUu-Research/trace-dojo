@@ -169,3 +169,13 @@ export class StackOverflow extends Error {
     this.name = 'StackOverflow';
   }
 }
+
+export function withHeldValues<T>(frame: Frame, values: readonly Value[], run: () => T): T {
+  const mark = frame.temporaries.length;
+  for (const value of values) frame.temporaries.push(value);
+  try {
+    return run();
+  } finally {
+    frame.temporaries.length = mark;
+  }
+}

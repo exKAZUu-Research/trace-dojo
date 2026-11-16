@@ -126,6 +126,7 @@ class AstChecker {
   // Containers ------------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionCognitiveComplexity 20 -- Mirrors one AstGen check over the constructs it covers.
+  // code-gauge-allow functionNcss 34 -- Checks declarations and fields in their shared container scope.
   checkContainer(
     members: readonly ContainerMember[],
     fields: readonly ContainerField[],
