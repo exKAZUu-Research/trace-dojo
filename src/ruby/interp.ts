@@ -2212,6 +2212,7 @@ export function nativeProc(
 }
 
 export interface ProcCallOptions {
+  forceBlockProc?: boolean;
   keywords?: RHash;
   block?: RProc;
   /** Whether the caller uses the block's value, which decides whether its last statement is a step. */
@@ -2230,8 +2231,7 @@ export interface ProcCallOptions {
   forbidSingletonDefinition?: boolean;
 }
 
-/** Calls a block or proc with arguments, binding them as a block (or a lambda) does. */
-// code-gauge-allow functionNcss 40 -- Proc calls handle native and Ruby bodies, lambda arity, parameter binding, and control signals.
+// code-gauge-allow functionNcss 41 -- Proc calls keep native/Ruby bodies, effective lambda mode, argument binding and control signals in one invocation lifecycle.
 export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions = {}): Gen {
   const runtime = rt();
   runtime.spend();
@@ -2252,6 +2252,7 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
     return typeof value === 'number' ? boxFloat(value) : value;
   }
   const { def } = body;
+  const isLambda = (proc.isLambda || options.lambdaArgs) && !options.forceBlockProc;
   const outer = proc.outer as unknown as Frame;
   const frame = new Frame(
     'block',
@@ -2269,7 +2270,7 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
       args,
       keywords: options.keywords,
       blockDef: def,
-      isLambda: proc.isLambda || options.lambdaArgs,
+      isLambda,
       block: options.block,
       method: options.method ?? outer.home.extra.method,
       missingReason: options.missingReason,
@@ -2286,17 +2287,11 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
   runtime.pushFrame(frame);
   const savedRow = runtime.currentRow;
   try {
-    if (!def.params && (proc.isLambda || options.lambdaArgs) && (args.length > 0 || options.keywords)) {
+    if (!def.params && isLambda && (args.length > 0 || options.keywords)) {
       throw argumentCountError(args.length + (options.keywords ? 1 : 0), 0, 0);
     }
     if (def.params) {
-      yield* bindParams(
-        def.params,
-        frame,
-        args,
-        options.keywords,
-        proc.isLambda || options.lambdaArgs ? 'lambda' : 'proc'
-      );
+      yield* bindParams(def.params, frame, args, options.keywords, isLambda ? 'lambda' : 'proc');
       if (hasParams(def.params) && !options.method) {
         runtime.currentRow = def.row;
         runtime.steps.stepBinding(def.row, storesAnswers(def.params, frame));
@@ -2305,7 +2300,7 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
     return yield* evalRedoable(def.body, frame);
   } catch (error) {
     if (error instanceof NextSignal) return error.value;
-    if (proc.isLambda || options.lambdaArgs) {
+    if (isLambda) {
       if (error instanceof ReturnSignal && error.target === frame) return error.value;
       if (error instanceof BreakSignal && error.tag === proc.breakTag) return error.value;
     }

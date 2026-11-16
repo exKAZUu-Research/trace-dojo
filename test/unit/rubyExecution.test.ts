@@ -16008,3 +16008,555 @@ test.each(nativeArithmeticEachDisplayCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeEachEntryTupleCases = [
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield();p [:feedback,v]};begin;p e.each_entry.next_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield();p [:feedback,v]};begin;p e.each_entry.peek_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield();p [:feedback,v]};begin;p e.each_entry.each{|*x|p x;break :done};rescue=>x;p x.class,x.message;end',
+    '[]\n[]\n:done\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield();p [:feedback,v]};begin;p e.lazy.each_entry.next_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield();p [:feedback,v]};begin;p e.lazy.each_entry.peek_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield();p [:feedback,v]};begin;p e.lazy.each_entry.each{|*x|p x;break :done};rescue=>x;p x.class,x.message;end',
+    '[]\n[]\n:done\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield();p [:feedback,v]};begin;p e.lazy.each_entry.each_entry.next_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield();p [:feedback,v]};begin;p e.lazy.each_entry.each_entry.peek_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield();p [:feedback,v]};begin;p e.lazy.each_entry.each_entry.each{|*x|p x;break :done};rescue=>x;p x.class,x.message;end',
+    '[]\n[]\n:done\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(nil);p [:feedback,v]};begin;p e.each_entry.next_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[nil]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(nil);p [:feedback,v]};begin;p e.each_entry.peek_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[nil]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(nil);p [:feedback,v]};begin;p e.each_entry.each{|*x|p x;break :done};rescue=>x;p x.class,x.message;end',
+    '[]\n[nil]\n:done\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(nil);p [:feedback,v]};begin;p e.lazy.each_entry.next_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[nil]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(nil);p [:feedback,v]};begin;p e.lazy.each_entry.peek_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[nil]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(nil);p [:feedback,v]};begin;p e.lazy.each_entry.each{|*x|p x;break :done};rescue=>x;p x.class,x.message;end',
+    '[]\n[nil]\n:done\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(nil);p [:feedback,v]};begin;p e.lazy.each_entry.each_entry.next_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[nil]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(nil);p [:feedback,v]};begin;p e.lazy.each_entry.each_entry.peek_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[nil]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(nil);p [:feedback,v]};begin;p e.lazy.each_entry.each_entry.each{|*x|p x;break :done};rescue=>x;p x.class,x.message;end',
+    '[]\n[nil]\n:done\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(1);p [:feedback,v]};begin;p e.each_entry.next_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[1]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(1);p [:feedback,v]};begin;p e.each_entry.peek_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[1]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(1);p [:feedback,v]};begin;p e.each_entry.each{|*x|p x;break :done};rescue=>x;p x.class,x.message;end',
+    '[]\n[1]\n:done\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(1);p [:feedback,v]};begin;p e.lazy.each_entry.next_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[1]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(1);p [:feedback,v]};begin;p e.lazy.each_entry.peek_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[1]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(1);p [:feedback,v]};begin;p e.lazy.each_entry.each{|*x|p x;break :done};rescue=>x;p x.class,x.message;end',
+    '[]\n[1]\n:done\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(1);p [:feedback,v]};begin;p e.lazy.each_entry.each_entry.next_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[1]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(1);p [:feedback,v]};begin;p e.lazy.each_entry.each_entry.peek_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[1]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(1);p [:feedback,v]};begin;p e.lazy.each_entry.each_entry.each{|*x|p x;break :done};rescue=>x;p x.class,x.message;end',
+    '[]\n[1]\n:done\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(1,2);p [:feedback,v]};begin;p e.each_entry.next_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[[1, 2]]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(1,2);p [:feedback,v]};begin;p e.each_entry.peek_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[[1, 2]]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(1,2);p [:feedback,v]};begin;p e.each_entry.each{|*x|p x;break :done};rescue=>x;p x.class,x.message;end',
+    '[]\n[[1, 2]]\n:done\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(1,2);p [:feedback,v]};begin;p e.lazy.each_entry.next_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[[1, 2]]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(1,2);p [:feedback,v]};begin;p e.lazy.each_entry.peek_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[[1, 2]]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(1,2);p [:feedback,v]};begin;p e.lazy.each_entry.each{|*x|p x;break :done};rescue=>x;p x.class,x.message;end',
+    '[]\n[[1, 2]]\n:done\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(1,2);p [:feedback,v]};begin;p e.lazy.each_entry.each_entry.next_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[[1, 2]]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(1,2);p [:feedback,v]};begin;p e.lazy.each_entry.each_entry.peek_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[[1, 2]]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield(1,2);p [:feedback,v]};begin;p e.lazy.each_entry.each_entry.each{|*x|p x;break :done};rescue=>x;p x.class,x.message;end',
+    '[]\n[[1, 2]]\n:done\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield([]);p [:feedback,v]};begin;p e.each_entry.next_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[[]]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield([]);p [:feedback,v]};begin;p e.each_entry.peek_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[[]]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield([]);p [:feedback,v]};begin;p e.each_entry.each{|*x|p x;break :done};rescue=>x;p x.class,x.message;end',
+    '[]\n[[]]\n:done\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield([]);p [:feedback,v]};begin;p e.lazy.each_entry.next_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[[]]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield([]);p [:feedback,v]};begin;p e.lazy.each_entry.peek_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[[]]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield([]);p [:feedback,v]};begin;p e.lazy.each_entry.each{|*x|p x;break :done};rescue=>x;p x.class,x.message;end',
+    '[]\n[[]]\n:done\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield([]);p [:feedback,v]};begin;p e.lazy.each_entry.each_entry.next_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[[]]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield([]);p [:feedback,v]};begin;p e.lazy.each_entry.each_entry.peek_values;rescue=>x;p x.class,x.message;end',
+    '[]\n[[]]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield([]);p [:feedback,v]};begin;p e.lazy.each_entry.each_entry.each{|*x|p x;break :done};rescue=>x;p x.class,x.message;end',
+    '[]\n[[]]\n:done\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield();p [:feedback,v]};begin;p e.lazy.each_entry(7).next_values;rescue=>x;p x.class,x.message;end',
+    '[7]\n[]\n',
+  ],
+  [
+    'e=Enumerator.new{|y,*args|p args;v=y.yield();p [:feedback,v]};begin;p e.lazy.each_entry(7).peek_values;rescue=>x;p x.class,x.message;end',
+    '[7]\n[]\n',
+  ],
+] as const;
+
+test.each(nativeEachEntryTupleCases)(
+  'Each-entry adapters preserve zero, one and packed multiple arguments: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
+
+const nativeEachEntryForcedBlockCases = [
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield()};begin;p e.each_entry(&->(){p :ok}).class;rescue=>x;p x.class,x.message;end',
+    ':ok\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield()}.lazy;begin;p e.each_entry(&->(){p :ok}).class;rescue=>x;p x.class,x.message;end',
+    ':ok\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield()};begin;p e.each_entry(&->(*x){p x}).class;rescue=>x;p x.class,x.message;end',
+    '[]\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield()}.lazy;begin;p e.each_entry(&->(*x){p x}).class;rescue=>x;p x.class,x.message;end',
+    '[]\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield()};begin;p e.each_entry(&->(a){p a}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 0, expected 1)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield()}.lazy;begin;p e.each_entry(&->(a){p a}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 0, expected 1)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield()};begin;p e.each_entry(&->(a,b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 0, expected 2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield()}.lazy;begin;p e.each_entry(&->(a,b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 0, expected 2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield()};begin;p e.each_entry(&->(a,b,c){p a,b,c}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 0, expected 3)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield()}.lazy;begin;p e.each_entry(&->(a,b,c){p a,b,c}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 0, expected 3)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield()};begin;p e.each_entry(&->(a,*b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 0, expected 1+)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield()}.lazy;begin;p e.each_entry(&->(a,*b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 0, expected 1+)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield()};begin;p e.each_entry(&->(a,b=3){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 0, expected 1..2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield()}.lazy;begin;p e.each_entry(&->(a,b=3){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 0, expected 1..2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield()};begin;p e.each_entry(&method(:pair)).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 0, expected 2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield()}.lazy;begin;p e.each_entry(&method(:pair)).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 0, expected 2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(nil)};begin;p e.each_entry(&->(){p :ok}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(nil)}.lazy;begin;p e.each_entry(&->(){p :ok}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(nil)};begin;p e.each_entry(&->(*x){p x}).class;rescue=>x;p x.class,x.message;end',
+    '[nil]\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(nil)}.lazy;begin;p e.each_entry(&->(*x){p x}).class;rescue=>x;p x.class,x.message;end',
+    '[nil]\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(nil)};begin;p e.each_entry(&->(a){p a}).class;rescue=>x;p x.class,x.message;end',
+    'nil\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(nil)}.lazy;begin;p e.each_entry(&->(a){p a}).class;rescue=>x;p x.class,x.message;end',
+    'nil\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(nil)};begin;p e.each_entry(&->(a,b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(nil)}.lazy;begin;p e.each_entry(&->(a,b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(nil)};begin;p e.each_entry(&->(a,b,c){p a,b,c}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 3)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(nil)}.lazy;begin;p e.each_entry(&->(a,b,c){p a,b,c}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 3)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(nil)};begin;p e.each_entry(&->(a,*b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    'nil\n[]\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(nil)}.lazy;begin;p e.each_entry(&->(a,*b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    'nil\n[]\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(nil)};begin;p e.each_entry(&->(a,b=3){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    'nil\n3\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(nil)}.lazy;begin;p e.each_entry(&->(a,b=3){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    'nil\n3\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(nil)};begin;p e.each_entry(&method(:pair)).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(nil)}.lazy;begin;p e.each_entry(&method(:pair)).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1)};begin;p e.each_entry(&->(){p :ok}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1)}.lazy;begin;p e.each_entry(&->(){p :ok}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1)};begin;p e.each_entry(&->(*x){p x}).class;rescue=>x;p x.class,x.message;end',
+    '[1]\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1)}.lazy;begin;p e.each_entry(&->(*x){p x}).class;rescue=>x;p x.class,x.message;end',
+    '[1]\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1)};begin;p e.each_entry(&->(a){p a}).class;rescue=>x;p x.class,x.message;end',
+    '1\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1)}.lazy;begin;p e.each_entry(&->(a){p a}).class;rescue=>x;p x.class,x.message;end',
+    '1\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1)};begin;p e.each_entry(&->(a,b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1)}.lazy;begin;p e.each_entry(&->(a,b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1)};begin;p e.each_entry(&->(a,b,c){p a,b,c}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 3)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1)}.lazy;begin;p e.each_entry(&->(a,b,c){p a,b,c}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 3)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1)};begin;p e.each_entry(&->(a,*b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    '1\n[]\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1)}.lazy;begin;p e.each_entry(&->(a,*b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    '1\n[]\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1)};begin;p e.each_entry(&->(a,b=3){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    '1\n3\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1)}.lazy;begin;p e.each_entry(&->(a,b=3){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    '1\n3\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1)};begin;p e.each_entry(&method(:pair)).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1)}.lazy;begin;p e.each_entry(&method(:pair)).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1,2)};begin;p e.each_entry(&->(){p :ok}).class;rescue=>x;p x.class,x.message;end',
+    ':ok\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1,2)}.lazy;begin;p e.each_entry(&->(){p :ok}).class;rescue=>x;p x.class,x.message;end',
+    ':ok\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1,2)};begin;p e.each_entry(&->(*x){p x}).class;rescue=>x;p x.class,x.message;end',
+    '[[1, 2]]\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1,2)}.lazy;begin;p e.each_entry(&->(*x){p x}).class;rescue=>x;p x.class,x.message;end',
+    '[[1, 2]]\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1,2)};begin;p e.each_entry(&->(a){p a}).class;rescue=>x;p x.class,x.message;end',
+    '[1, 2]\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1,2)}.lazy;begin;p e.each_entry(&->(a){p a}).class;rescue=>x;p x.class,x.message;end',
+    '[1, 2]\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1,2)};begin;p e.each_entry(&->(a,b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    '1\n2\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1,2)}.lazy;begin;p e.each_entry(&->(a,b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    '1\n2\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1,2)};begin;p e.each_entry(&->(a,b,c){p a,b,c}).class;rescue=>x;p x.class,x.message;end',
+    '1\n2\nnil\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1,2)}.lazy;begin;p e.each_entry(&->(a,b,c){p a,b,c}).class;rescue=>x;p x.class,x.message;end',
+    '1\n2\nnil\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1,2)};begin;p e.each_entry(&->(a,*b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    '1\n[2]\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1,2)}.lazy;begin;p e.each_entry(&->(a,*b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    '1\n[2]\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1,2)};begin;p e.each_entry(&->(a,b=3){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    '1\n2\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1,2)}.lazy;begin;p e.each_entry(&->(a,b=3){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    '1\n2\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1,2)};begin;p e.each_entry(&method(:pair)).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield(1,2)}.lazy;begin;p e.each_entry(&method(:pair)).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield([1,2])};begin;p e.each_entry(&->(){p :ok}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield([1,2])}.lazy;begin;p e.each_entry(&->(){p :ok}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 0)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield([1,2])};begin;p e.each_entry(&->(*x){p x}).class;rescue=>x;p x.class,x.message;end',
+    '[[1, 2]]\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield([1,2])}.lazy;begin;p e.each_entry(&->(*x){p x}).class;rescue=>x;p x.class,x.message;end',
+    '[[1, 2]]\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield([1,2])};begin;p e.each_entry(&->(a){p a}).class;rescue=>x;p x.class,x.message;end',
+    '[1, 2]\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield([1,2])}.lazy;begin;p e.each_entry(&->(a){p a}).class;rescue=>x;p x.class,x.message;end',
+    '[1, 2]\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield([1,2])};begin;p e.each_entry(&->(a,b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield([1,2])}.lazy;begin;p e.each_entry(&->(a,b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield([1,2])};begin;p e.each_entry(&->(a,b,c){p a,b,c}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 3)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield([1,2])}.lazy;begin;p e.each_entry(&->(a,b,c){p a,b,c}).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 3)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield([1,2])};begin;p e.each_entry(&->(a,*b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    '[1, 2]\n[]\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield([1,2])}.lazy;begin;p e.each_entry(&->(a,*b){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    '[1, 2]\n[]\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield([1,2])};begin;p e.each_entry(&->(a,b=3){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    '[1, 2]\n3\nEnumerator\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield([1,2])}.lazy;begin;p e.each_entry(&->(a,b=3){p a,b}).class;rescue=>x;p x.class,x.message;end',
+    '[1, 2]\n3\nEnumerator::Lazy\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield([1,2])};begin;p e.each_entry(&method(:pair)).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'def pair(a,b);p a,b;end;e=Enumerator.new{|y|y.yield([1,2])}.lazy;begin;p e.each_entry(&method(:pair)).class;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n',
+  ],
+  [
+    'def f;l=->(a,b){return [a,b]};e=Enumerator.new{|y|p y.yield(1,2)}.lazy;begin;p e.each_entry(&l).equal?(e);rescue=>x;p x.class,x.message;end;p :after;p l.lambda?;begin;l.call([1,2]);rescue=>x;p x.class,x.message;end;end;p [:result,f]',
+    '[:result, [1, 2]]\n',
+  ],
+  [
+    'def f;l=->(a,b){return [a,b]};e=Enumerator.new{|y|p y.yield([1,2])}.lazy;begin;p e.each_entry(&l).equal?(e);rescue=>x;p x.class,x.message;end;p :after;p l.lambda?;begin;l.call([1,2]);rescue=>x;p x.class,x.message;end;end;p [:result,f]',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n:after\ntrue\nArgumentError\n"wrong number of arguments (given 1, expected 2)"\n[:result, [ArgumentError, "wrong number of arguments (given 1, expected 2)"]]\n',
+  ],
+  [
+    'def f;l=->(a,b){break [a,b]};e=Enumerator.new{|y|p y.yield(1,2)}.lazy;begin;p e.each_entry(&l).equal?(e);rescue=>x;p x.class,x.message;end;p :after;p l.lambda?;begin;l.call([1,2]);rescue=>x;p x.class,x.message;end;end;p [:result,f]',
+    'LocalJumpError\n"break from proc-closure"\n:after\ntrue\nArgumentError\n"wrong number of arguments (given 1, expected 2)"\n[:result, [ArgumentError, "wrong number of arguments (given 1, expected 2)"]]\n',
+  ],
+  [
+    'def f;l=->(a,b){break [a,b]};e=Enumerator.new{|y|p y.yield([1,2])}.lazy;begin;p e.each_entry(&l).equal?(e);rescue=>x;p x.class,x.message;end;p :after;p l.lambda?;begin;l.call([1,2]);rescue=>x;p x.class,x.message;end;end;p [:result,f]',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n:after\ntrue\nArgumentError\n"wrong number of arguments (given 1, expected 2)"\n[:result, [ArgumentError, "wrong number of arguments (given 1, expected 2)"]]\n',
+  ],
+  [
+    'def f;l=->(a,b){[a,b]};e=Enumerator.new{|y|p y.yield(1,2)}.lazy;begin;p e.each_entry(&l).equal?(e);rescue=>x;p x.class,x.message;end;p :after;p l.lambda?;begin;l.call([1,2]);rescue=>x;p x.class,x.message;end;end;p [:result,f]',
+    'nil\ntrue\n:after\ntrue\nArgumentError\n"wrong number of arguments (given 1, expected 2)"\n[:result, [ArgumentError, "wrong number of arguments (given 1, expected 2)"]]\n',
+  ],
+  [
+    'def f;l=->(a,b){[a,b]};e=Enumerator.new{|y|p y.yield([1,2])}.lazy;begin;p e.each_entry(&l).equal?(e);rescue=>x;p x.class,x.message;end;p :after;p l.lambda?;begin;l.call([1,2]);rescue=>x;p x.class,x.message;end;end;p [:result,f]',
+    'ArgumentError\n"wrong number of arguments (given 1, expected 2)"\n:after\ntrue\nArgumentError\n"wrong number of arguments (given 1, expected 2)"\n[:result, [ArgumentError, "wrong number of arguments (given 1, expected 2)"]]\n',
+  ],
+] as const;
+
+test.each(nativeEachEntryForcedBlockCases)(
+  'Each-entry forced arrays preserve native block binding and control flow: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);

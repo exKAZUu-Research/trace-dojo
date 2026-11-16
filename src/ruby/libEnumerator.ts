@@ -883,7 +883,7 @@ def('Enumerator', 'rewind', 0, function* (self: RObject) {
   if (receiver !== self) yield* tryImplicitConversion(receiver, 'rewind');
   if (self.cls === rt().c['Enumerator::Lazy']) {
     const data = lazyDataOf(self);
-    if (data.steps.every((step) => step.kind === 'each_entry')) yield* tryImplicitConversion(data.source, 'rewind');
+    if (data.steps.length === 0) yield* tryImplicitConversion(data.source, 'rewind');
   }
   sourceOf(self).cursor = undefined;
   return self;
@@ -1081,7 +1081,6 @@ type LazyStep = (
   | { kind: 'uniq'; block?: RProc }
   | { kind: 'zip'; others: Value[] }
   | { kind: 'each_slice' | 'each_cons'; count: number; exactCount: bigint }
-  | { kind: 'each_entry' }
 ) & { label?: string; args?: Value[] };
 
 interface LazyData {
@@ -1123,7 +1122,7 @@ function* nextLazySize(size: Value, step: LazyStep): Gen<Value> {
       : yield* callMethod(size, '-', [step.exactCount]);
   if (step.kind === 'each_slice' || step.kind === 'each_cons')
     return yield* windowSize(size, step.kind, step.exactCount);
-  return ['map', 'with_index', 'zip', 'each_entry'].includes(step.kind) ? size : NIL;
+  return ['map', 'with_index', 'zip'].includes(step.kind) ? size : NIL;
 }
 
 function lazyPipeline(self: RObject): Pick<LazyData, 'source' | 'steps'> {
@@ -1248,9 +1247,7 @@ for (const kind of ['each_slice', 'each_cons'] as const) {
 }
 def('Enumerator::Lazy', 'each_entry', [0, -1], function* (self: RObject, args, block) {
   if (!block) return makeLazyAdapter(self, 'each_entry', args);
-  const lazy = makeLazy(self, [{ kind: 'each_entry', args }]);
-  yield* runLazy(lazy, (value) => callProc(block, [value], { used: false }), args);
-  return self;
+  return yield* invoke(coreMethod(rt().c.Enumerable, 'each_entry'), self, args, undefined, block, true);
 });
 for (const name of ['each_with_object', 'with_object']) {
   def('Enumerator::Lazy', name, 1, function* (self: RObject, [memo], block) {
@@ -1368,7 +1365,7 @@ function* runLazy(
 }
 
 function lazySourceArgs(data: LazyData, args: Value[]): Value[] {
-  return data.steps.every((step) => step.kind === 'each_entry') ? args : [];
+  return data.steps.length === 0 ? args : [];
 }
 
 interface LazyState {
@@ -1395,7 +1392,7 @@ function* streamLazyStep(
   feedback?: LazyFeedback
 ): Gen<IterationResult> {
   const step = steps[position];
-  const adapter = step && ['each_slice', 'each_cons', 'each_entry'].includes(step.kind);
+  const adapter = step && ['each_slice', 'each_cons'].includes(step.kind);
   const memo = adapter ? undefined : (feedback ?? (step ? { value: item } : undefined));
   const outcome = yield* runLazyStep(steps, states, position, item, visit, yielded, memo);
   return lazySegmentResult(outcome, memo);
@@ -1531,9 +1528,6 @@ function* runLazyStep(
         else state.buffer.shift();
         return yield* next(values);
       }
-      case 'each_entry': {
-        return (yield* next(item)) === STOP ? STOP : NIL;
-      }
     }
   } finally {
     held.splice(rootIndex, 1);
@@ -1585,15 +1579,7 @@ def('Enumerator::Lazy', 'each', [0, -1], function* (self: RObject, args, block) 
   if (args.length > 0 && hasExecutionContext(data.enumerator?.cursor)) throw typeError("can't copy execution context");
   if (!block) {
     if (args.length === 0) return self;
-    const last = data.steps.at(-1);
-    const steps =
-      last?.kind === 'each_entry'
-        ? [...data.steps.slice(0, -1), { ...last, args: [...(last.args ?? []), ...args] }]
-        : data.steps;
-    return makeLazy(
-      lazyIterationSource(data.source, lazySourceArgs(data, args), last?.kind === 'each_entry' ? [] : args),
-      steps
-    );
+    return makeLazy(lazyIterationSource(data.source, lazySourceArgs(data, args), args), data.steps);
   }
   return yield* runLazy(self, (value, yielded) => callProc(block, yielded ?? [value], { used: false }), args);
 });

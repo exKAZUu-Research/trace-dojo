@@ -343,10 +343,14 @@ def('Enumerable', 'each_with_object', 1, function* (self, [memo], block) {
 });
 def('Enumerable', 'each_entry', [0, -1], function* (self, args, block) {
   if (!block) return makeEnumerator(self, 'each_entry', args);
-  yield* iterate(
+  yield* iterateYielded(
     self,
-    function* (value) {
-      yield* callBlock(block, [value], false);
+    function* (yielded) {
+      yield* callProc(block, yielded.length > 1 ? [arr(yielded)] : yielded, {
+        used: false,
+        forceBlockProc: yielded.length > 1,
+      });
+      return NIL;
     },
     args
   );
