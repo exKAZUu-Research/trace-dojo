@@ -70,6 +70,8 @@ export interface RegexpData {
 
 const MATCH_SCRIPT = new vm.Script('regexp.exec(input)');
 
+class RegexpEncodingError extends SyntaxError {}
+
 const POSIX_CLASSES: Record<string, string> = {
   alpha: String.raw`\p{Alphabetic}`,
   digit: String.raw`\p{Nd}`,
@@ -180,21 +182,21 @@ export function translate(
       if (index === source.length - 1) throw new SyntaxError('trailing regexp escape');
       if (inClass === 0) atomStart = out.length;
       const next = source[++index] ?? '\\';
-      if (inClass > 0 && /^[0-7]$/.test(next)) {
-        const octal = /^[0-7]{0,2}/.exec(source.slice(index + 1))?.[0] ?? '';
-        out += `\\x${Number.parseInt(next + octal, 8)
-          .toString(16)
-          .padStart(2, '0')}`;
-        index += octal.length;
+      const byteEscape =
+        next === 'x' ||
+        (inClass > 0 && /^[0-7]$/.test(next)) ||
+        next === '0' ||
+        (/^[1-7]$/.test(next) && /^[0-7]/.test(source.slice(index + 1)))
+          ? regexpByteEscape(source, index - 1)
+          : undefined;
+      if (byteEscape) {
+        const decoded = ascii ? byteEscape : decodeRegexpByteEscape(source, index - 1, byteEscape);
+        out += `\\u{${decoded.value.toString(16)}}`;
+        index += decoded.length - 2;
         continue;
       }
       if (inClass > 0 && /^[89]$/.test(next)) {
         out += next;
-        continue;
-      }
-      if (next === 'x' && /^[0-9a-fA-F]{2}/.test(source.slice(index + 1))) {
-        out += `\\x${source.slice(index + 1, index + 3)}`;
-        index += 2;
         continue;
       }
       if (next === 'u') {
@@ -207,14 +209,6 @@ export function translate(
           index += escape.length;
           continue;
         }
-      }
-      if (next === '0' || (/^[1-7]$/.test(next) && /^[0-7]/.test(source.slice(index + 1)))) {
-        const octal = /^[0-7]{0,2}/.exec(source.slice(index + 1))?.[0] ?? '';
-        out += `\\x${Number.parseInt(next + octal, 8)
-          .toString(16)
-          .padStart(2, '0')}`;
-        index += octal.length;
-        continue;
       }
       if (next === 'c' && /^[A-Za-z]/.test(source[index + 1] ?? '')) {
         out += `\\x${(source[index + 1].toUpperCase().codePointAt(0)! & 31).toString(16).padStart(2, '0')}`;
@@ -534,6 +528,39 @@ function unsupportedSyntax(feature: string): unknown {
   return new UnsupportedFeatureError(`正規表現の${feature}`);
 }
 
+function decodeRegexpByteEscape(
+  source: string,
+  start: number,
+  first: { value: number; length: number }
+): { value: number; length: number } {
+  if (first.value < 0x80) return first;
+  const width = first.value >= 0xc2 && first.value <= 0xdf ? 2 : first.value <= 0xef ? 3 : first.value <= 0xf4 ? 4 : 0;
+  if (first.value < 0xc2 || width === 0) throw new RegexpEncodingError('invalid multibyte escape');
+  const bytes = [first.value];
+  let length = first.length;
+  while (bytes.length < width) {
+    const next = regexpByteEscape(source, start + length);
+    if (!next) throw new RegexpEncodingError('too short escaped multibyte character');
+    if (next.value < 0x80 || next.value > 0xbf) throw new RegexpEncodingError('invalid multibyte escape');
+    bytes.push(next.value);
+    length += next.length;
+  }
+  try {
+    const decoded = new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(bytes));
+    return { value: decoded.codePointAt(0)!, length };
+  } catch {
+    throw new RegexpEncodingError('invalid multibyte escape');
+  }
+}
+
+function regexpByteEscape(source: string, start: number): { value: number; length: number } | undefined {
+  const match = /^\\(?:x([\da-fA-F]{1,2})|([0-7]{1,3}))/.exec(source.slice(start));
+  if (!match) return undefined;
+  const value = Number.parseInt(match[1] ?? match[2], match[1] === undefined ? 8 : 16);
+  if (value > 0xff) throw new RegexpEncodingError('invalid escape code');
+  return { value, length: match[0].length };
+}
+
 function unsupportedClassEscape(escape: string): unknown {
   return unsupportedSyntax(`文字クラス内の${escape}`);
 }
@@ -553,30 +580,22 @@ export function makeRegexp(
   let translated: string;
   let encoding: RegexpData['encoding'];
   try {
-    translated = translate(
-      source,
-      options.extended ?? false,
-      options.multiline ?? false,
-      true,
-      false,
-      options.ignoreCase
-    );
     encoding =
       /[^\u0000-\u007F]/.test(source) || hasNonAsciiRegexpEscape(source, options.extended ?? false)
         ? options.sourceBinary
           ? 'BINARY (ASCII-8BIT)'
           : RUBY_UTF8
         : 'US-ASCII';
-    if (encoding === 'BINARY (ASCII-8BIT)')
-      translated = translate(
-        source,
-        options.extended ?? false,
-        options.multiline ?? false,
-        true,
-        true,
-        options.ignoreCase
-      );
+    translated = translate(
+      source,
+      options.extended ?? false,
+      options.multiline ?? false,
+      true,
+      encoding === 'BINARY (ASCII-8BIT)',
+      options.ignoreCase
+    );
   } catch (error) {
+    if (error instanceof RegexpEncodingError) throw rubyError(rt().c.RegexpError, `${error.message}: /${source}/`);
     if (error instanceof SyntaxError) throw rubyError(rt().c.RegexpError, `invalid pattern: /${source}/`);
     throw error;
   }
@@ -626,8 +645,8 @@ function hasNonAsciiRegexpEscape(source: string, extended: boolean): boolean {
       if (unicode?.points.some((point) => Number.parseInt(point, 16) > 127)) return true;
     }
     if ((escape === 'p' || escape === 'P') && /^\{\^?\w+\}/.test(source.slice(index + 2))) return true;
-    const digits = escape === 'x' ? /^[\da-fA-F]{2}/.exec(source.slice(index + 2)) : undefined;
-    if (digits && Number.parseInt(digits[0], 16) > 127) return true;
+    const byte = regexpByteEscape(source, index);
+    if (byte && byte.value > 127) return true;
     index++;
   }
   return false;

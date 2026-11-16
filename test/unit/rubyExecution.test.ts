@@ -9496,3 +9496,23 @@ p (t+1).class, (t-1).class, t.round.class, t == Time.utc(2000)
     stdout: 'R\n"pattern"\n["a"]\ntrue\nR\nR\nR\nRegexp\n2001\nT\nT\n2002\nT\nT\nT\nT\nT\nT\nTime\nTime\nTime\ntrue\n',
   });
 });
+
+test('Regexp byte escapes decode whole UTF-8 characters and retain binary bytes', () => {
+  expect(
+    run(String.raw`p /\xC3\xA9/.match?("é"), Regexp.new('\\xE3\\x81\\x82').match?("あ")
+p "ééa".scan(/[\xC3\xA9]+/), "éé"[/\xC3\xA9{2}/]
+p /\303\251/.match?("é"), /\xC3\251/.match?("é")
+p /\xF0\x9F\x98\x80/.match?("😀"), /\303\251/.encoding
+r=Regexp.new(String.new('\\xE9', encoding: 'ASCII-8BIT'))
+p r.encoding, r.match?(233.chr)
+['\\xFF', '\\xC3', '\\xC3\\x41', '\\xE0\\x80\\x80', '\\xED\\xA0\\x80'].each do |s|
+  begin; Regexp.new(s); rescue => e; p e.class, e.message; end
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'true\ntrue\n["éé"]\n"éé"\ntrue\ntrue\ntrue\n#<Encoding:UTF-8>\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\nRegexpError\n"invalid multibyte escape: /\\\\xFF/"\nRegexpError\n"too short escaped multibyte character: /\\\\xC3/"\nRegexpError\n"invalid multibyte escape: /\\\\xC3\\\\x41/"\nRegexpError\n"invalid multibyte escape: /\\\\xE0\\\\x80\\\\x80/"\nRegexpError\n"invalid multibyte escape: /\\\\xED\\\\xA0\\\\x80/"\n',
+  });
+  expect(run(String.raw`puts "before"; /\xC3/`)).toMatchObject({ kind: 'compileError' });
+});
