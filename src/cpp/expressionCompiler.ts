@@ -14,7 +14,6 @@ import type { Eval, Frame } from './runtime';
 import type { Entity } from './scopes';
 import { fieldOf, type Syntax, tokenOf } from './syntax';
 import {
-  type Access,
   type ArithmeticType,
   BOOL,
   CHAR,
@@ -25,6 +24,7 @@ import {
   INT,
   isArithmetic,
   isConstType,
+  isCopyConstructor,
   isInteger,
   isWide,
   LONG,
@@ -255,23 +255,24 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       case 'field': {
         if (isQualified && !this.context.cls)
           return this.error(row, `メンバ変数 ${name} を使うには、オブジェクトが要ります。`);
-        return this.fieldAccess(this.implicitThis(row, name), entity.field, row);
+        const { field } = entity;
+        const object = this.implicitThis(row, name);
+        this.checkAccess(field.access, field.owner, this.namingClass(node, field.owner), row, name, this.context.cls);
+        return this.fieldAccess(object, field, row);
       }
       case 'staticField': {
-        this.checkAccess(entity.field.access, entity.field.owner, entity.field.owner, row, name);
-        const global = entity.field.global;
-        if (!global)
-          return this.error(row, `static のメンバ変数 ${entity.field.owner.name}::${name} が定義されていません。`);
-        return this.entityExpr(
-          { kind: 'global', global, isReference: false, constant: entity.field.constant },
-          node,
-          true
-        );
+        const { field } = entity;
+        this.checkAccess(field.access, field.owner, this.namingClass(node, field.owner), row, name);
+        const global = field.global;
+        if (!global) return this.error(row, `static のメンバ変数 ${field.owner.name}::${name} が定義されていません。`);
+        return this.entityExpr({ kind: 'global', global, isReference: false, constant: field.constant }, node, true);
       }
       case 'functions': {
         const members = entity.functions.filter((fn) => fn.owner && !fn.isStatic);
         const object = members.length > 0 && !this.context.isStaticContext ? this.implicitThis(row, name) : undefined;
-        const functions: FunctionCandidates = { name, candidates: entity.functions, object, isQualified };
+        const owner = entity.functions.find((fn) => fn.owner && !fn.native)?.owner;
+        const namingClass = owner && this.namingClass(node, owner);
+        const functions: FunctionCandidates = { name, candidates: entity.functions, object, isQualified, namingClass };
         return {
           type: { kind: 'void' },
           isLvalue: false,
@@ -298,6 +299,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         return this.unsupported(row, entity.feature);
       }
     }
+  }
+
+  /** The class a member's name was looked up in: `C` of `C::name`, else the class of the code compiled now. */
+  private namingClass(node: Syntax, owner: ClassInfo): ClassInfo {
+    const scope = node.type === 'qualified_identifier' ? fieldOf(node, 'scope') : undefined;
+    if (!scope) return this.enclosingClass ?? owner;
+    const resolved = this.resolveScope(scope);
+    return resolved.kind === 'class' ? resolved.cls : owner;
   }
 
   private templateFunction(node: Syntax): Expr {
@@ -367,12 +376,15 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return this.error(node.row, `${node.text} は ${typeName(object.type)} のメンバではありません。`);
     }
     const name = (fieldOf(node, 'name') as Syntax).text;
-    const expr = this.member({ ...object, type: classType(scope.cls, isConstType(object.type)) }, name, node.row);
+    const expr = this.member(object, name, node.row, scope.cls);
     return expr.functions ? { ...expr, functions: { ...expr.functions, isQualified: true } } : expr;
   }
 
-  /** The member `name` of an object: a data member as an lvalue, or member functions to call. */
-  member(object: Expr, name: string, row: number): Expr {
+  /**
+   * The member `name` of an object, looked up in its class or in `naming`, a base of it that a qualified name names: a
+   * data member as an lvalue, or member functions to call.
+   */
+  member(object: Expr, name: string, row: number, naming?: ClassInfo): Expr {
     const type = object.type;
     if (type.kind !== 'class') {
       return this.error(
@@ -380,22 +392,21 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         `${typeName(type)} 型の値にはメンバ ${name} がありません（. の左にはクラスのオブジェクトを書いてください）。`
       );
     }
-    const cls = type.cls;
+    const cls = naming ?? type.cls;
     for (let owner: ClassInfo | undefined = cls; owner; owner = owner.base) {
       const field = owner.ownFields.find((candidate) => candidate.name === name);
       if (field) {
-        this.checkAccess(field.access, owner, cls, row, name);
+        this.checkAccess(field.access, owner, cls, row, name, type.cls);
         return this.fieldAccess(object, field, row);
       }
       const methods = owner.methods.get(name);
       if (methods) {
-        for (const method of methods) this.checkAccessible(method, cls, row);
         return {
           type: { kind: 'void' },
           isLvalue: false,
           row,
           run: () => new FunctionRef(methods),
-          functions: { name, candidates: methods, object, qualifier: owner },
+          functions: { name, candidates: methods, object, namingClass: cls },
         };
       }
       const constant = owner.constants.get(name);
@@ -424,34 +435,6 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       };
     }
     return this.error(row, `${cls.name} に ${name} というメンバはありません。`);
-  }
-
-  /** Stops at a use of a member that the code compiled now cannot access (C++20 [class.access]). */
-  checkAccess(access: Access, owner: ClassInfo, through: ClassInfo, row: number, name: string): void {
-    let effective = access;
-    for (let cls: ClassInfo | undefined = through; cls && cls !== owner; cls = cls.base) {
-      if (cls.baseAccess === 'private' && cls.base?.isDerivedFrom(owner))
-        effective = this.enclosingClass === cls ? effective : 'private';
-      else if (cls.baseAccess === 'protected' && effective === 'public') effective = 'protected';
-    }
-    if (effective === 'public') return;
-    const here = this.enclosingClass;
-    if (effective === 'private' && (here === owner || (here === through && access !== 'private'))) return;
-    if (effective === 'protected' && here && (here.isDerivedFrom(owner) || owner.isDerivedFrom(here))) return;
-    const word = effective === 'private' ? 'private' : 'protected';
-    this.error(row, `${name} は ${owner.name} の ${word} のメンバなので、ここでは使えません。`);
-  }
-
-  private checkAccessible(method: FunctionInfo, through: ClassInfo, row: number): void {
-    if (method.access === 'public' && through === method.owner) return;
-    if (!method.owner) return;
-    try {
-      this.checkAccess(method.access, method.owner, through, row, method.name);
-    } catch (error) {
-      // Overload resolution may still choose an accessible overload; only all-inaccessible sets fail here.
-      const all = method.owner.methods.get(method.name) ?? [];
-      if (all.every((other) => other.access === method.access)) throw error;
-    }
   }
 
   /** The data member of an object, as an lvalue that is const when the object is. */
@@ -948,7 +931,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   private assignObject(target: Expr, source: Expr, row: number): Expr {
     this.checkAssignable(target, row, '=');
     const cls = (target.type as Extract<Type, { kind: 'class' }>).cls;
-    if (cls.isNoncopyable)
+    if (cls.isNoncopyable || cls.isAssignmentDeleted)
       return this.error(row, `${cls.name} のオブジェクトには代入できません（代入演算子が削除されています）。`);
     const value = this.convert(source, { kind: 'reference', to: classType(cls, true) }, row).run;
     const location = target.run;
@@ -1306,8 +1289,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (resolved.fn.owner && !resolved.fn.isStatic && !object) {
       return this.error(row, `メンバ関数 ${resolved.fn.displayName} を呼ぶには、オブジェクトが要ります。`);
     }
-    if (resolved.fn.owner && object?.type.kind === 'class' && candidates.qualifier) {
-      this.checkAccess(resolved.fn.access, resolved.fn.owner, object.type.cls, row, resolved.fn.name);
+    const { owner } = resolved.fn;
+    if (owner && !resolved.fn.native && candidates.namingClass) {
+      const objectClass = !resolved.fn.isStatic && object?.type.kind === 'class' ? object.type.cls : undefined;
+      this.checkAccess(resolved.fn.access, owner, candidates.namingClass, row, resolved.fn.name, objectClass);
     }
     if (resolved.fn.isPure && candidates.isQualified) {
       return this.error(row, `純粋仮想関数 ${resolved.fn.displayName} は、名前を指定して呼び出せません。`);
@@ -1484,7 +1469,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return this.error(node.row, `delete にはポインタを書いてください（${typeName(operand.type)}）。`);
     const pointee = operand.type.to;
     const cls = pointee.kind === 'class' ? pointee.cls : undefined;
-    const destroyStatic = this.destroyerOf(pointee);
+    const destroyStatic = this.destroyerOf(pointee, node.row);
     const hasVirtualDestructor = cls?.destructor?.isVirtual === true;
     const run = operand.run;
     const exec = (frame: Frame): Value => {
@@ -1572,15 +1557,4 @@ function comparePointers(operator: string, a: Ptr, b: Ptr): number {
       return a.index >= b.index ? 1 : 0;
     }
   }
-}
-
-export function isCopyConstructor(fn: FunctionInfo, cls: ClassInfo): boolean {
-  if (fn.params.length === 0) return false;
-  const [first, ...rest] = fn.params;
-  return (
-    first.type.kind === 'reference' &&
-    first.type.to.kind === 'class' &&
-    first.type.to.cls === cls &&
-    rest.every((param) => param.defaultValue !== undefined)
-  );
 }

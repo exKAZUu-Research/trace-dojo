@@ -1,3 +1,4 @@
+import { accessAsMemberOf, isBaseAccessible, isMemberAccessible } from './access';
 import { CompilerBase } from './compilerBase';
 import {
   bestOf,
@@ -14,11 +15,13 @@ import { type Eval, type Frame, holdAll } from './runtime';
 import { FunctionContext } from './scopes';
 import type { Syntax } from './syntax';
 import {
+  type Access,
   type ClassInfo,
   classType,
   type FunctionInfo,
   isArithmetic as isArithmeticType,
   isConstType,
+  isCopyConstructor,
   nonReference,
   pointerTo,
   type Type,
@@ -117,7 +120,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   /** An lvalue designating a temporary holding a prvalue, which lives until the end of the full-expression. */
   materialize(expr: Expr): Expr {
     if (expr.isLvalue) return expr;
-    const destroy = this.destroyerOf(expr.type);
+    const destroy = this.destroyerOf(expr.type, expr.row);
     const { run } = expr;
     return {
       type: expr.type,
@@ -142,6 +145,9 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     if (cls.isNoncopyable) {
       this.error(expr.row, `${cls.name} のオブジェクトはコピーできません（コピーコンストラクタが削除されています）。`);
     }
+    if (expr.type.kind === 'class') this.checkBaseConversion(expr.type.cls, cls, expr.row);
+    const copyConstructor = cls.constructors.find((ctor) => !ctor.native && isCopyConstructor(ctor, cls));
+    if (copyConstructor) this.checkAccess(copyConstructor.access, cls, cls, expr.row, `${cls.name} のコンストラクタ`);
     const source = this.rvalue(expr);
     return {
       type: classType(cls),
@@ -151,6 +157,25 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       onlyCalls: expr.onlyCalls,
       run: (frame) => copyAs(frame, cls, source.run(frame) as Value),
     };
+  }
+
+  /** Stops at a use of a member that the code compiled now cannot access (C++20 [class.access]). */
+  checkAccess(
+    access: Access,
+    owner: ClassInfo,
+    naming: ClassInfo,
+    row: number,
+    name: string,
+    objectClass?: ClassInfo
+  ): void {
+    if (isMemberAccessible(access, owner, naming, this.enclosingClass, objectClass)) return;
+    const word = accessAsMemberOf(access, owner, naming) === 'protected' ? 'protected' : 'private';
+    this.error(row, `${name} は ${owner.name} の ${word} のメンバなので、ここでは使えません。`);
+  }
+
+  checkBaseConversion(from: ClassInfo, to: ClassInfo, row: number): void {
+    if (from === to || !from.isDerivedFrom(to) || isBaseAccessible(from, to, this.enclosingClass)) return;
+    this.error(row, `${to.name} は ${from.name} の public な親クラスではないので、${from.name} から変換できません。`);
   }
 
   constructFrom(cls: ClassInfo, constructor: FunctionInfo, argument: Expr, row: number): Expr {
@@ -394,11 +419,19 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     return { type: classType(cls), isLvalue: false, row, run, onlyCalls: true, isTemporaryObject: true };
   }
 
-  /** Destroys an object of a type at the end of its lifetime, or undefined when that has no effect. */
-  destroyerOf(type: Type): ((frame: Frame, value: Value) => void) | undefined {
-    if (type.kind === 'class') return type.cls.operations?.destroy;
+  /**
+   * Destroys an object of a type at the end of its lifetime, or undefined when that has no effect. With `row`, the code
+   * compiled now destroys the object there, which needs access to its destructor.
+   */
+  destroyerOf(type: Type, row?: number): ((frame: Frame, value: Value) => void) | undefined {
+    if (type.kind === 'class') {
+      const { destructor } = type.cls;
+      if (row !== undefined && destructor && !destructor.native)
+        this.checkAccess(destructor.access, type.cls, type.cls, row, `${type.cls.name} のデストラクタ`);
+      return type.cls.operations?.destroy;
+    }
     if (type.kind === 'array') {
-      const element = this.destroyerOf(type.of);
+      const element = this.destroyerOf(type.of, row);
       if (!element) return undefined;
       return (frame, value) => {
         const { values } = value as ArrayStore;

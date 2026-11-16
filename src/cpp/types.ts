@@ -180,6 +180,10 @@ export class ClassInfo {
   isTurtle = false;
   /** Whether copying is deleted, as for `Turtle`. */
   isNoncopyable = false;
+  /** Whether the implicit copy assignment is deleted, as for a class with a const or reference member. */
+  isAssignmentDeleted = false;
+  /** Whether the implicit default constructor is deleted, as for a class with an uninitialized reference member. */
+  isDefaultConstructorDeleted = false;
   /** Whether the class is `final`, which no class may derive from. */
   isFinal = false;
   /** The constructor a class without user-declared ones has, when it has anything to initialize. */
@@ -206,6 +210,17 @@ export class ClassInfo {
   isDerivedFrom(other: ClassInfo): boolean {
     return this === other || (this.base?.isDerivedFrom(other) ?? false);
   }
+}
+
+export function isCopyConstructor(fn: FunctionInfo, cls: ClassInfo): boolean {
+  if (fn.params.length === 0) return false;
+  const [first, ...rest] = fn.params;
+  return (
+    first.type.kind === 'reference' &&
+    first.type.to.kind === 'class' &&
+    first.type.to.cls === cls &&
+    rest.every((param) => param.defaultValue !== undefined)
+  );
 }
 
 export function pointerTo(type: Type, isConst = false): PointerType {

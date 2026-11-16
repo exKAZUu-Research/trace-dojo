@@ -3,7 +3,6 @@ import { byteAt } from './bytes';
 import { isAuto } from './compilerBase';
 import { CppException, CppRuntimeError } from './errors';
 import type { Expr } from './expr';
-import { isCopyConstructor } from './expressionCompiler';
 import type { Library } from './library/registry';
 import { invoke, newObject, virtualKey, zeroOf } from './objectCompiler';
 import { type CompiledFunction, type Eval, type Exec, type Frame, holdAll, RETURN } from './runtime';
@@ -22,6 +21,7 @@ import {
   intMin,
   isArithmetic,
   isConstType,
+  isCopyConstructor,
   isInteger,
   type ParamInfo,
   sameType,
@@ -544,8 +544,15 @@ export class Compiler extends StatementCompiler {
     cls.isNoncopyable =
       !userCopy &&
       (cls.base?.isNoncopyable === true || cls.ownFields.some((field) => this.isNoncopyableType(field.type)));
+    cls.isAssignmentDeleted =
+      cls.base?.isAssignmentDeleted === true || cls.ownFields.some((field) => isUnassignable(field.type));
     cls.isComplete = true;
-    if (cls.constructors.length === 0) cls.implicitDefault = this.implicitDefaultConstructor(cls);
+    if (cls.constructors.length === 0) {
+      cls.isDefaultConstructorDeleted =
+        cls.base?.isDefaultConstructorDeleted === true ||
+        cls.ownFields.some((field) => !field.initializer && !isDefaultInitializable(field.type));
+      if (!cls.isDefaultConstructorDeleted) cls.implicitDefault = this.implicitDefaultConstructor(cls);
+    }
     cls.operations = this.classOperations(cls, userCopy);
   }
 
@@ -723,6 +730,7 @@ export class Compiler extends StatementCompiler {
     const args = initializer ? this.initializerArguments(initializer) : [];
     if (base.constructors.length === 0) {
       if (args.length > 0) this.error(row, `${base.name} には引数をとるコンストラクタがありません。`);
+      if (base.isDefaultConstructorDeleted) this.error(row, deletedDefaultMessage(base));
       const implicit = base.implicitDefault;
       return (frame) => {
         (frame.self?.read() as CObject).cls = base;
@@ -784,6 +792,8 @@ export class Compiler extends StatementCompiler {
       }
     } else if (type.kind === 'reference') {
       return this.error(field.row, `参照のメンバ ${field.name} は、コンストラクタで初期化してください。`);
+    } else if (isConstType(type) && !this.isClassType(type)) {
+      return this.error(field.row, `const のメンバ ${field.name} は、コンストラクタで初期化してください。`);
     } else if (this.isClassType(type)) {
       value = this.defaultInitializer(type, row);
       isCreation = true;
@@ -1001,6 +1011,12 @@ export class Compiler extends StatementCompiler {
         const type = param.type;
         if (type.kind === 'class' && !type.cls.isComplete)
           this.error(param.row, `クラス ${type.cls.name} はまだ定義されていません。`);
+        if (type.kind === 'class' && type.cls.isAbstract) {
+          this.error(
+            param.row,
+            `${type.cls.name} は抽象クラス（純粋仮想関数があるクラス）なので、引数の型にできません。`
+          );
+        }
         const local = context.declareLocal(param.name ?? `\0param${param.row}`, type, true);
         if (param.name) {
           if (scope.names.has(param.name)) this.error(param.row, `引数 ${param.name} の名前が重複しています。`);
@@ -1220,7 +1236,7 @@ export class Compiler extends StatementCompiler {
       const init = this.staticInitialization(type, value, row);
       if (!init) return;
       const { index } = global;
-      const store = this.staticStore(type);
+      const store = this.staticStore(type, row);
       const exec = this.fullExpression<undefined>((frame) => {
         store(frame, frame.runtime.globals[index] as Box, init.run(frame));
         return;
@@ -1241,7 +1257,10 @@ export class Compiler extends StatementCompiler {
     row: number
   ): { run: Eval<Value>; isConstant: boolean; isCreation: boolean } | undefined {
     if (!value) {
-      if (!this.isClassType(type)) return undefined;
+      if (!this.isClassType(type)) {
+        this.checkConstDefault(type, row);
+        return undefined;
+      }
       return { run: this.defaultInitializer(type, row), isConstant: false, isCreation: true };
     }
     if (value.type === 'initializer_list') {
@@ -1290,7 +1309,7 @@ export class Compiler extends StatementCompiler {
     }
     let isDone = false;
     const run = this.fullExpression(init.run);
-    const store = this.staticStore(type);
+    const store = this.staticStore(type, declarator.row);
     return (frame) => {
       if (isDone) return;
       isDone = true;
@@ -1303,8 +1322,8 @@ export class Compiler extends StatementCompiler {
    * first, so the members its constructor leaves alone are zero; and an object with a destructor is destroyed when
    * the program exits, the last constructed first (C++20 [basic.start.term]).
    */
-  private staticStore(type: Type): (frame: Frame, box: Box, value: Value) => void {
-    const destroy = this.destroyerOf(type);
+  private staticStore(type: Type, row: number): (frame: Frame, box: Box, value: Value) => void {
+    const destroy = this.destroyerOf(type, row);
     return (frame, box, value) => {
       box.value = zeroFilled(value, type);
       if (destroy) frame.runtime.staticObjects.push({ box, destroy });
@@ -1365,6 +1384,7 @@ export class Compiler extends StatementCompiler {
   }
 
   defaultInitializer(type: Type, row: number): Eval<Value> {
+    this.checkConstDefault(type, row);
     if (type.kind === 'class') return this.defaultConstructed(type.cls, row, false).run as Eval<Value>;
     if (type.kind === 'array') {
       const length = type.length ?? 0;
@@ -1377,6 +1397,12 @@ export class Compiler extends StatementCompiler {
     return () => UNINIT;
   }
 
+  /** Stops at the default-initialization of a const object that nothing would give a value (C++20 [dcl.init]p7). */
+  private checkConstDefault(type: Type, row: number): void {
+    if (isConstType(type) && !isConstDefaultConstructible(type))
+      this.error(row, `${typeName(type)} 型の値には初期値を書いてください（const の値は、あとから変えられません）。`);
+  }
+
   defaultConstructed(cls: ClassInfo, row: number, isValueInitialized: boolean): Expr {
     if (!cls.isComplete) return this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
     if (cls.isAbstract)
@@ -1386,6 +1412,7 @@ export class Compiler extends StatementCompiler {
       if (!resolved.fn.native) this.checkAccess(resolved.fn.access, cls, cls, row, `${cls.name} のコンストラクタ`);
       return this.constructWith(cls, resolved, [], row);
     }
+    if (cls.isDefaultConstructorDeleted) return this.error(row, deletedDefaultMessage(cls));
     const implicit = cls.implicitDefault;
     const zeroed = isValueInitialized;
     const zeroFields = cls.fields.map((field) =>
@@ -1589,6 +1616,43 @@ function covariant(base: Type, derived: Type): boolean {
 
 const target = (type: Type): Type | undefined =>
   type.kind === 'pointer' || type.kind === 'reference' ? type.to : undefined;
+
+/** Whether default-initializing a const object of a type gives every scalar in it a value. */
+function isConstDefaultConstructible(type: Type): boolean {
+  if (type.kind === 'array') return isConstDefaultConstructible(type.of);
+  if (type.kind !== 'class') return false;
+  const { cls } = type;
+  return (
+    cls.library !== undefined ||
+    cls.constructors.length > 0 ||
+    cls.fields.every((field) => field.initializer !== undefined || field.type.kind === 'class')
+  );
+}
+
+function deletedDefaultMessage(cls: ClassInfo): string {
+  return `${cls.name} のオブジェクトは初期値なしでは作れません（デフォルトコンストラクタが削除されています）。`;
+}
+
+/** Whether a member of a type deletes its class's implicit copy assignment (C++20 [class.copy.assign]p7). */
+function isUnassignable(type: Type): boolean {
+  if (type.kind === 'reference') return true;
+  if (type.kind === 'array') return isUnassignable(type.of);
+  return isConstType(type) || (type.kind === 'class' && type.cls.isAssignmentDeleted);
+}
+
+/** Whether a member of a type without an initializer leaves its class's implicit default constructor defined. */
+function isDefaultInitializable(type: Type): boolean {
+  if (type.kind === 'reference') return false;
+  if (type.kind === 'array') return isDefaultInitializable(type.of);
+  if (type.kind !== 'class') return !isConstType(type);
+  const { cls } = type;
+  if (cls.isDefaultConstructorDeleted || (isConstType(type) && !isConstDefaultConstructible(type))) return false;
+  return (
+    cls.library !== undefined ||
+    cls.constructors.length === 0 ||
+    cls.constructors.some((ctor) => ctor.params.every((param) => param.defaultValue !== undefined))
+  );
+}
 
 /** The value static storage starts with: zero for scalars, before dynamic initialization. */
 /** Gives the scalars an object never wrote the zero that static storage starts with. */
