@@ -19,7 +19,7 @@ export function deriveInstance(decl: RDataDecl, cls: ClassEntity, support: Suppo
       return [builder.method('==', deriveEq(builder, cons))];
     }
     case 'Ord': {
-      return [builder.method('compare', deriveCompare(builder, cons))];
+      return [builder.method('compare', deriveCompare(builder, cons)), ...deriveComparisons(builder)];
     }
     case 'Show': {
       return [
@@ -164,6 +164,21 @@ function deriveCompare(builder: Builder, cons: ConInfo[]): RClause[] {
   }
   if (cons.length === 0) clauses.push(builder.clause([builder.wild(), builder.wild()], builder.conNamed('EQ')));
   return clauses;
+}
+
+/** GHC derives `<=`, `>`, and `>=` from `<`, so they evaluate their arguments in its order: `x <= y = not (y < x)`. */
+function deriveComparisons(builder: Builder): RBinding[] {
+  const comparison = (name: string, negate: boolean, swap: boolean): RBinding => {
+    const x = builder.newVar('x');
+    const y = builder.newVar('y');
+    const less = swap
+      ? builder.call('<', builder.local(y), builder.local(x))
+      : builder.call('<', builder.local(x), builder.local(y));
+    return builder.method(name, [
+      builder.clause([builder.pvar(x), builder.pvar(y)], negate ? builder.call('not', less) : less),
+    ]);
+  };
+  return [comparison('<=', true, true), comparison('>', false, true), comparison('>=', true, false)];
 }
 
 /**

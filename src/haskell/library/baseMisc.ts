@@ -295,33 +295,29 @@ foldl1' f (x:xs) = listFoldl' f x xs
 foldl1' _ [] = errorEmptyList "foldl1'"
 
 sort :: Ord a => [a] -> [a]
-sort = sortBy compare
+sort = actualSort (>)
 
 sortOn :: Ord b => (a -> b) -> [a] -> [a]
 sortOn f = map snd . sortBy (comparing fst) . map (\x -> let y = f x in y ${BT}seq${BT} (y, x))
 
 sortBy :: (a -> a -> Ordering) -> [a] -> [a]
-sortBy cmp = mergeAll . sequences
+sortBy cmp = actualSort (\x y -> cmp x y == GT)
+
+-- GHC's merge sort, which takes whether one element is greater than another.
+actualSort :: (a -> a -> Bool) -> [a] -> [a]
+actualSort gt = mergeAll . sequences
   where
-    sequences (a:b:xs) = case cmp a b of
-      GT -> descending b [a] xs
-      _ -> ascending b (\ys -> a : ys) xs
+    sequences (a:b:xs) = if a ${BT}gt${BT} b then descending b [a] xs else ascending b (\ys -> a : ys) xs
     sequences xs = [xs]
-    descending a as' (b:bs) = case cmp a b of
-      GT -> descending b (a : as') bs
-      _ -> (a : as') : sequences (b : bs)
+    descending a as' (b:bs) = if a ${BT}gt${BT} b then descending b (a : as') bs else (a : as') : sequences (b : bs)
     descending a as' bs = (a : as') : sequences bs
-    ascending a as' (b:bs) = case cmp a b of
-      GT -> let x = as' [a] in x : sequences (b : bs)
-      _ -> ascending b (\ys -> as' (a : ys)) bs
-    ascending a as' bs = let x = as' [a] in x : sequences bs
+    ascending a as' (b:bs) = if not (a ${BT}gt${BT} b) then ascending b (\ys -> as' (a : ys)) bs else let x = as' [a] in x ${BT}seq${BT} (x : sequences (b : bs))
+    ascending a as' bs = let x = as' [a] in x ${BT}seq${BT} (x : sequences bs)
     mergeAll [x] = x
     mergeAll xs = mergeAll (mergePairs xs)
-    mergePairs (a:b:xs) = let x = merge a b in x : mergePairs xs
+    mergePairs (a:b:xs) = let x = merge a b in x ${BT}seq${BT} (x : mergePairs xs)
     mergePairs xs = xs
-    merge as'@(a:as2) bs'@(b:bs2) = case cmp a b of
-      GT -> b : merge as' bs2
-      _ -> a : merge as2 bs'
+    merge as'@(a:as2) bs'@(b:bs2) = if a ${BT}gt${BT} b then b : merge as' bs2 else a : merge as2 bs'
     merge [] bs' = bs'
     merge as' [] = as'
 

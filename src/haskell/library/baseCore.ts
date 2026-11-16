@@ -178,18 +178,28 @@ instance Eq Bool where
 
 instance Ord Bool where
   compare a b = compare (primConTag a) (primConTag b)
+  x <= y = not (y < x)
+  x > y = y < x
+  x >= y = not (x < y)
 
 instance Eq Ordering where
   a == b = primConTag a == primConTag b
 
 instance Ord Ordering where
   compare a b = compare (primConTag a) (primConTag b)
+  x <= y = not (y < x)
+  x > y = y < x
+  x >= y = not (x < y)
 
 instance Eq () where
   _ == _ = True
 
 instance Ord () where
-  compare _ _ = EQ
+  compare () () = EQ
+  () < () = False
+  x <= y = not (y < x)
+  x > y = y < x
+  x >= y = not (x < y)
 
 instance Eq a => Eq (Maybe a) where
   Nothing == Nothing = True
@@ -201,6 +211,9 @@ instance Ord a => Ord (Maybe a) where
   compare Nothing (Just _) = LT
   compare (Just _) Nothing = GT
   compare (Just x) (Just y) = compare x y
+  x <= y = not (y < x)
+  x > y = y < x
+  x >= y = not (x < y)
 
 instance (Eq a, Eq b) => Eq (Either a b) where
   Left x == Left y = x == y
@@ -212,6 +225,9 @@ instance (Ord a, Ord b) => Ord (Either a b) where
   compare (Left _) (Right _) = LT
   compare (Right _) (Left _) = GT
   compare (Right x) (Right y) = compare x y
+  x <= y = not (y < x)
+  x > y = y < x
+  x >= y = not (x < y)
 
 instance Eq a => Eq [a] where
   [] == [] = True
@@ -225,6 +241,12 @@ instance Ord a => Ord [a] where
   compare (x:xs) (y:ys) = case compare x y of
     EQ -> compare xs ys
     other -> other
+  x <= y = case compare x y of
+    GT -> False
+    _ -> True
+  x < y = not (y <= x)
+  x > y = not (x <= y)
+  x >= y = y <= x
 
 instance Eq Char where
   (==) = primitive "charEq"
@@ -232,8 +254,8 @@ instance Eq Char where
 instance Ord Char where
   (<) = primitive "charLt"
   (<=) = primitive "charLe"
-  x > y = y < x
-  x >= y = y <= x
+  (>) = primitive "charGt"
+  (>=) = primitive "charGe"
   compare x y = if x == y then EQ else if x < y then LT else GT
 
 instance Eq Int where
@@ -242,8 +264,8 @@ instance Eq Int where
 instance Ord Int where
   (<) = primitive "intLt"
   (<=) = primitive "intLe"
-  x > y = y < x
-  x >= y = y <= x
+  (>) = primitive "intGt"
+  (>=) = primitive "intGe"
   compare = primitive "intCompare"
 
 instance Eq Integer where
@@ -252,8 +274,8 @@ instance Eq Integer where
 instance Ord Integer where
   (<) = primitive "integerLt"
   (<=) = primitive "integerLe"
-  x > y = y < x
-  x >= y = y <= x
+  (>) = primitive "integerGt"
+  (>=) = primitive "integerGe"
   compare = primitive "integerCompare"
 
 instance Eq Double where
@@ -262,8 +284,8 @@ instance Eq Double where
 instance Ord Double where
   (<) = primitive "doubleLt"
   (<=) = primitive "doubleLe"
-  x > y = y < x
-  x >= y = y <= x
+  (>) = primitive "doubleGt"
+  (>=) = primitive "doubleGe"
   compare x y = if x < y then LT else if x == y then EQ else GT
 
 instance Eq Float where
@@ -272,8 +294,8 @@ instance Eq Float where
 instance Ord Float where
   (<) = primitive "floatLt"
   (<=) = primitive "floatLe"
-  x > y = y < x
-  x >= y = y <= x
+  (>) = primitive "floatGt"
+  (>=) = primitive "floatGe"
   compare x y = if x < y then LT else if x == y then EQ else GT
 
 -- Numbers
@@ -367,8 +389,11 @@ gcd :: Integral a => a -> a -> a
 gcd x y = gcd' (abs x) (abs y)
   where gcd' a b = if b == fromInteger 0 then a else gcd' b (a ${BT}rem${BT} b)
 
+divZeroError :: a
+divZeroError = primitive "divZeroError"
+
 lcm :: Integral a => a -> a -> a
-lcm x y = if x == fromInteger 0 || y == fromInteger 0 then fromInteger 0 else abs ((x ${BT}quot${BT} (gcd x y)) * y)
+lcm x y = if y == fromInteger 0 || x == fromInteger 0 then fromInteger 0 else abs ((x ${BT}quot${BT} (gcd x y)) * y)
 
 (^) :: (Num a, Integral b) => a -> b -> a
 x0 ^ y0 = if y0 < fromInteger 0 then errorWithoutStackTrace "Negative exponent"
@@ -407,9 +432,9 @@ instance Real Int where
   toRational x = toInteger x :% 1
 
 instance Integral Int where
-  quot = primitive "intQuot"
+  quot x y = if y == 0 then divZeroError else primitive "intQuot" x y
   rem = primitive "intRem"
-  div = primitive "intDiv"
+  div x y = if y == 0 then divZeroError else primitive "intDiv" x y
   mod = primitive "intMod"
   quotRem x y = if y == -1 && x == minBound then (quot x y, 0) else let q = quot x y in q ${BT}seq${BT} (q, rem x y)
   divMod x y = if y == -1 && x == minBound then (div x y, 0) else let q = div x y in q ${BT}seq${BT} (q, mod x y)
@@ -442,8 +467,8 @@ instance Eq Word where
 instance Ord Word where
   (<) = primitive "wordLt"
   (<=) = primitive "wordLe"
-  x > y = y < x
-  x >= y = y <= x
+  (>) = primitive "wordGt"
+  (>=) = primitive "wordGe"
   compare = primitive "wordCompare"
 
 instance Num Word where
@@ -507,7 +532,6 @@ instance Floating Double where
   log = primitive "doubleLog"
   sqrt = primitive "doubleSqrt"
   (**) = primitive "doublePow"
-  logBase = primitive "doubleLogBase"
   sin = primitive "doubleSin"
   cos = primitive "doubleCos"
   tan = primitive "doubleTan"
@@ -522,7 +546,7 @@ instance Floating Double where
   atanh = primitive "doubleAtanh"
 
 instance RealFrac Double where
-  properFraction x = let n = primDoubleTruncate x in (fromInteger n, x - primDoubleFromInteger n)
+  properFraction x = let n = primDoubleTruncate x in n ${BT}seq${BT} (fromInteger n, x - primDoubleFromInteger n)
   truncate x = fromInteger (primDoubleTruncate x)
   round x = fromInteger (roundDouble x)
   ceiling x = fromInteger (ceilingDouble x)
@@ -585,7 +609,6 @@ instance Floating Float where
   log = primitive "floatLog"
   sqrt = primitive "floatSqrt"
   (**) = primitive "floatPow"
-  logBase = primitive "floatLogBase"
   sin = primitive "floatSin"
   cos = primitive "floatCos"
   tan = primitive "floatTan"
@@ -600,7 +623,7 @@ instance Floating Float where
   atanh = primitive "floatAtanh"
 
 instance RealFrac Float where
-  properFraction x = let n = primFloatTruncate x in (fromInteger n, x - primFloatFromInteger n)
+  properFraction x = let n = primFloatTruncate x in n ${BT}seq${BT} (fromInteger n, x - primFloatFromInteger n)
   truncate x = fromInteger (primFloatTruncate x)
   round x = fromInteger (roundFloat x)
   ceiling x = fromInteger (let n = primFloatTruncate x in if x - primFloatFromInteger n > 0.0 then n + 1 else n)
@@ -791,7 +814,7 @@ intUpTo x y = x : (if x == y then [] else intUpTo (x + 1) y)
 
 intFromThenTo :: Int -> Int -> Int -> [Int]
 intFromThenTo x1 x2 y =
-  if x2 >= x1
+  if x1 <= x2
     then (if x1 > y then [] else upFrom x1)
     else (if x1 < y then [] else downFrom x1)
   where

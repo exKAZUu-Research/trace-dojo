@@ -370,7 +370,7 @@ listFoldl f z (x:xs) = listFoldl f (f z x) xs
 
 listFoldl' :: (b -> a -> b) -> b -> [a] -> b
 listFoldl' f z [] = z
-listFoldl' f z (x:xs) = let z' = f z x in z' ${BT}seq${BT} listFoldl' f z' xs
+listFoldl' f z (x:xs) = z ${BT}seq${BT} listFoldl' f (f z x) xs
 
 listFoldr :: (a -> b -> b) -> b -> [a] -> b
 listFoldr k z = go

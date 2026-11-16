@@ -128,7 +128,7 @@ function floorMod(a: bigint, b: bigint): bigint {
 // Int and Integer
 
 // code-gauge-allow functionCognitiveComplexity 23 -- Each branch reproduces one of GHC's error or overflow behaviors for integral division.
-// code-gauge-allow functionNcss 32 -- Each branch reproduces one of GHC's error or overflow behaviors for integral division.
+// code-gauge-allow functionNcss 34 -- Each branch reproduces one of GHC's error or overflow behaviors for integral division.
 function defineIntegral(prefix: 'int' | 'integer' | 'word', wrap: (value: bigint) => bigint): void {
   strict(`${prefix}Add`, 2, ([a, b]) => wrap((a as bigint) + (b as bigint)));
   strict(`${prefix}Sub`, 2, ([a, b]) => wrap((a as bigint) - (b as bigint)));
@@ -166,6 +166,8 @@ function defineIntegral(prefix: 'int' | 'integer' | 'word', wrap: (value: bigint
   strict(`${prefix}Eq`, 2, ([a, b]) => bool(a === b));
   strict(`${prefix}Lt`, 2, ([a, b]) => bool((a as bigint) < (b as bigint)));
   strict(`${prefix}Le`, 2, ([a, b]) => bool((a as bigint) <= (b as bigint)));
+  strict(`${prefix}Gt`, 2, ([a, b]) => bool((a as bigint) > (b as bigint)));
+  strict(`${prefix}Ge`, 2, ([a, b]) => bool((a as bigint) >= (b as bigint)));
   strict(`${prefix}Compare`, 2, ([a, b]) => ordering((a as bigint) < (b as bigint) ? -1 : a === b ? 0 : 1));
   strict(`${prefix}Show`, 1, ([a]) => unpackString((a as bigint).toString(), 0));
   strict(`${prefix}ToDouble`, 1, ([a]) => bigintToDouble(a as bigint));
@@ -251,7 +253,7 @@ strict('integerPopCount', 1, ([a]) => {
 // ---------------------------------------------------------------------------------------------------------------
 // Double and Float
 
-// code-gauge-allow functionNcss 41 -- One definition per floating-point primitive.
+// code-gauge-allow functionNcss 42 -- One definition per floating-point primitive.
 function defineFloating(prefix: 'double' | 'float', round: (value: number) => number): void {
   strict(`${prefix}Add`, 2, ([a, b]) => round((a as number) + (b as number)));
   strict(`${prefix}Sub`, 2, ([a, b]) => round((a as number) - (b as number)));
@@ -268,6 +270,8 @@ function defineFloating(prefix: 'double' | 'float', round: (value: number) => nu
   strict(`${prefix}Eq`, 2, ([a, b]) => bool(a === b));
   strict(`${prefix}Lt`, 2, ([a, b]) => bool((a as number) < (b as number)));
   strict(`${prefix}Le`, 2, ([a, b]) => bool((a as number) <= (b as number)));
+  strict(`${prefix}Gt`, 2, ([a, b]) => bool((a as number) > (b as number)));
+  strict(`${prefix}Ge`, 2, ([a, b]) => bool((a as number) >= (b as number)));
   const unary: Record<string, (value: number) => number> = {
     Exp: Math.exp,
     Log: Math.log,
@@ -287,7 +291,6 @@ function defineFloating(prefix: 'double' | 'float', round: (value: number) => nu
   };
   for (const [name, op] of Object.entries(unary)) strict(`${prefix}${name}`, 1, ([a]) => round(op(a as number)));
   strict(`${prefix}Pow`, 2, ([a, b]) => round((a as number) ** (b as number)));
-  strict(`${prefix}LogBase`, 2, ([a, b]) => round(Math.log(b as number) / Math.log(a as number)));
   strict(`${prefix}Atan2`, 2, ([a, b]) => round(Math.atan2(a as number, b as number)));
   strict(`${prefix}IsNaN`, 1, ([a]) => bool(Number.isNaN(a)));
   strict(`${prefix}IsInfinite`, 1, ([a]) => bool(a === Number.POSITIVE_INFINITY || a === Number.NEGATIVE_INFINITY));
@@ -506,6 +509,12 @@ strict('charLt', 2, ([a, b]) =>
 strict('charLe', 2, ([a, b]) =>
   bool(((a as string).codePointAt(0) as number) <= ((b as string).codePointAt(0) as number))
 );
+strict('charGt', 2, ([a, b]) =>
+  bool(((a as string).codePointAt(0) as number) > ((b as string).codePointAt(0) as number))
+);
+strict('charGe', 2, ([a, b]) =>
+  bool(((a as string).codePointAt(0) as number) >= ((b as string).codePointAt(0) as number))
+);
 strict('ord', 1, ([a]) => BigInt((a as string).codePointAt(0) as number));
 strict('chr', 1, ([a]) => {
   const code = a as bigint;
@@ -721,6 +730,9 @@ define(
       [text]
     )
 );
+define('divZeroError', 0, [], () => {
+  throw divideByZero();
+});
 define('ioUnit', 0, [], () => new IOReturn(unit()));
 define(
   'failIO',
