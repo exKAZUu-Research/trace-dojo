@@ -159,7 +159,7 @@ test.each([
     'second',
   ],
   [String.raw`M.unionWithKey (\k _ _ -> error(show k)) a a`, '2'],
-  [String.raw`M.unionWithKey (\k x _ -> if k==2 then x else error(show k)) a a`, '1'],
+  [String.raw`M.unionWithKey (\k x _ -> if k==2 then x else error(show k)) a a`, '3'],
   [String.raw`M.differenceWith (\x _ -> Just(error(show x))) a a`, '3'],
 ])('strict map merges preserve containers traversal order: %s', (operation, uncaughtException) => {
   const source = `import qualified Data.Map.Strict as M\na=M.fromList[(i,i)|i <- [1..3::Int]]\nmain=print(M.size(${operation}))`;

@@ -61,6 +61,12 @@ f $ x = f x
 seq :: a -> b -> b
 seq = primitive "seq"
 
+strictPair :: a -> b -> (a,b)
+strictPair a b = b ${BT}seq${BT} a ${BT}seq${BT} (a,b)
+
+forceValue :: Bool -> a -> b -> b
+forceValue strict value result = if strict then value ${BT}seq${BT} result else result
+
 ($!) :: (a -> b) -> a -> b
 f $! x = x ${BT}seq${BT} f x
 

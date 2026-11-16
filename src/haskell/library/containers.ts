@@ -139,13 +139,22 @@ foldl' :: (b -> a -> b) -> b -> Set a -> b
 foldl' f z s = B.foldl' f z (toAscList s)
 
 union :: Ord a => Set a -> Set a -> Set a
-union a b = b ${BT}seq${BT} a ${BT}seq${BT} fromDistinctAscList (mergeUnion (toAscList a) (toAscList b))
-  where mergeUnion [] ys = ys
-        mergeUnion xs [] = xs
-        mergeUnion xs@(x:xt) ys@(y:yt) = case compare x y of
-          LT -> x : mergeUnion xt ys
-          GT -> y : mergeUnion xs yt
-          EQ -> x : mergeUnion xt yt
+union a STip = a
+union a (SBin 1 x _ _) = insertKeeping x a
+union (SBin 1 x _ _) b = insert x b
+union STip b = b
+union (SBin _ x l r) b = case split x b of
+  (bl,br) ->
+    let left = union l bl
+        right = union r br
+    in right ${BT}seq${BT} left ${BT}seq${BT} link x left right
+
+insertKeeping :: Ord a => a -> Set a -> Set a
+insertKeeping x STip = singleton x
+insertKeeping x t@(SBin _ y l r) = case compare x y of
+  LT -> balance y (insertKeeping x l) r
+  GT -> balance y l (insertKeeping x r)
+  EQ -> t
 
 unions :: (Foldable f, Ord a) => f (Set a) -> Set a
 unions = B.foldl union empty
@@ -187,7 +196,11 @@ filter :: (a -> Bool) -> Set a -> Set a
 filter p s = fromDistinctAscList (B.filter p (toAscList s))
 
 partition :: (a -> Bool) -> Set a -> (Set a, Set a)
-partition p s = (filter p s, filter (not . p) s)
+partition _ STip = (STip,STip)
+partition p (SBin _ x l r) = case partition p l of
+  (ll,lr) -> case partition p r of
+    (rl,rr) -> if p x then strictPair (link x ll rl) (link2 lr rr)
+              else strictPair (link2 ll rl) (link x lr rr)
 
 lookupMin :: Set a -> Maybe a
 lookupMin STip = Nothing
@@ -226,7 +239,7 @@ maxView STip = Nothing
 maxView s = Just (deleteFindMax s)
 
 elemAt :: Int -> Set a -> a
-elemAt i s = if i < 0 || i >= size s then errorWithoutStackTrace "Set.elemAt: index out of range" else at i s
+elemAt i s = i ${BT}seq${BT} s ${BT}seq${BT} if i < 0 || i >= size s then errorWithoutStackTrace "Set.elemAt: index out of range" else at i s
   where at n (SBin _ x l r) = case compare n (size l) of
           LT -> at n l
           EQ -> x
@@ -252,13 +265,53 @@ drop :: Int -> Set a -> Set a
 drop n s = fromDistinctAscList (B.drop n (toAscList s))
 
 splitAt :: Int -> Set a -> (Set a, Set a)
-splitAt n s = (take n s, drop n s)
+splitAt n s = if n >= size s then (s,STip) else go n s
+  where go i t | i <= 0 = strictPair STip t
+        go _ STip = (STip,STip)
+        go i (SBin _ x l r) = case compare i (size l) of
+          LT -> case go i l of (ll,lr) -> strictPair ll (link x lr r)
+          GT -> case go (i-size l-1) r of (rl,rr) -> strictPair (link x l rl) rr
+          EQ -> strictPair l (insertMin x r)
 
 split :: Ord a => a -> Set a -> (Set a, Set a)
-split x s = (filter (< x) s, filter (> x) s)
+split _ STip = (STip,STip)
+split x (SBin _ y l r) = case compare x y of
+  LT -> case split x l of (lt,gt) -> strictPair lt (link y gt r)
+  GT -> case split x r of (lt,gt) -> strictPair (link y l lt) gt
+  EQ -> (l,r)
 
 splitMember :: Ord a => a -> Set a -> (Set a, Bool, Set a)
-splitMember x s = (filter (< x) s, member x s, filter (> x) s)
+splitMember _ STip = (STip,False,STip)
+splitMember x (SBin _ y l r) = case compare x y of
+  LT -> case splitMember x l of
+    (lt,found,gt) -> let right = link y gt r in right ${BT}seq${BT} (lt,found,right)
+  GT -> case splitMember x r of
+    (lt,found,gt) -> let left = link y l lt in left ${BT}seq${BT} (left,found,gt)
+  EQ -> (l,True,r)
+
+link :: a -> Set a -> Set a -> Set a
+link x STip r = insertMin x r
+link x l STip = insertMax x l
+link x l@(SBin sl kl ll lr) r@(SBin sr kr rl rr) =
+  if 3*sl < sr then balance kr (link x l rl) rr
+  else if 3*sr < sl then balance kl ll (link x lr r)
+  else bin x l r
+
+insertMin :: a -> Set a -> Set a
+insertMin x STip = singleton x
+insertMin x (SBin _ y l r) = balance y (insertMin x l) r
+
+insertMax :: a -> Set a -> Set a
+insertMax x STip = singleton x
+insertMax x (SBin _ y l r) = balance y l (insertMax x r)
+
+link2 :: Set a -> Set a -> Set a
+link2 STip r = r
+link2 l STip = l
+link2 l@(SBin sl kl ll lr) r@(SBin sr kr rl rr) =
+  if 3*sl < sr then balance kr (link2 l rl) rr
+  else if 3*sr < sl then balance kl ll (link2 lr r)
+  else glue l r
 
 lookupLT :: Ord a => a -> Set a -> Maybe a
 lookupLT x tree = x ${BT}seq${BT} (nearest (\y -> y < x) False) tree
@@ -590,10 +643,15 @@ filterWithKey :: (k -> a -> Bool) -> Map k a -> Map k a
 filterWithKey p m = fromDistinctAscList [(k, x) | (k, x) <- toAscList m, p k x]
 
 partition :: (a -> Bool) -> Map k a -> (Map k a, Map k a)
-partition p m = (filter p m, filter (not . p) m)
+partition p = partitionWithKey (\_ x -> p x)
 
 partitionWithKey :: (k -> a -> Bool) -> Map k a -> (Map k a, Map k a)
-partitionWithKey p m = (filterWithKey p m, filterWithKey (\k x -> not (p k x)) m)
+partitionWithKey _ Tip = (Tip,Tip)
+partitionWithKey p (Bin _ k x l r) =
+  let (ll,lr) = partitionWithKey p l
+      (rl,rr) = partitionWithKey p r
+  in if p k x then strictPair (link k x ll rl) (link2 lr rr)
+     else strictPair (link2 ll rl) (link k x lr rr)
 
 mapMaybe :: (a -> Maybe b) -> Map k a -> Map k b
 mapMaybe f = mapMaybeWithKey (\_ x -> f x)
@@ -608,13 +666,29 @@ unionWith :: Ord k => (a -> a -> a) -> Map k a -> Map k a -> Map k a
 unionWith f = unionWithKey (\_ x y -> f x y)
 
 unionWithKey :: Ord k => (k -> a -> a -> a) -> Map k a -> Map k a -> Map k a
-unionWithKey f a b = b ${BT}seq${BT} a ${BT}seq${BT} fromDistinctAscList (go (toAscList a) (toAscList b))
-  where go [] ys = ys
-        go xs [] = xs
-        go xs@((kx, x) : xt) ys@((ky, y) : yt) = case compare kx ky of
-          LT -> (kx, x) : go xt ys
-          GT -> (ky, y) : go xs yt
-          EQ -> (kx, f kx x y) : go xt yt
+unionWithKey = unionWithKeyUsing False
+
+unionWithKeyUsing :: Ord k => Bool -> (k -> a -> a -> a) -> Map k a -> Map k a -> Map k a
+unionWithKeyUsing _ _ a Tip = a
+unionWithKeyUsing strict f a (Bin _ k x Tip Tip) = insertUnion strict True f k x a
+unionWithKeyUsing strict f (Bin _ k x Tip Tip) b = insertUnion strict False f k x b
+unionWithKeyUsing _ _ Tip b = b
+unionWithKeyUsing strict f (Bin _ k x l r) b = case splitLookup k b of
+  (bl,found,br) ->
+    let y = case found of Nothing -> x; Just z -> f k x z
+        left = unionWithKeyUsing strict f l bl
+        right = unionWithKeyUsing strict f r br
+    in if strict then y ${BT}seq${BT} right ${BT}seq${BT} left ${BT}seq${BT} link k y left right
+       else link k y left right
+
+insertUnion :: Ord k => Bool -> Bool -> (k -> a -> a -> a) -> k -> a -> Map k a -> Map k a
+insertUnion strict _ _ k x Tip = k ${BT}seq${BT} forceValue strict x (singleton k x)
+insertUnion strict keep f k x (Bin count key y l r) = case compare k key of
+  LT -> balance key y (insertUnion strict keep f k x l) r
+  GT -> balance key y l (insertUnion strict keep f k x r)
+  EQ -> let key' = if keep then key else k
+            z = if keep then f key y x else f k x y
+        in forceValue strict z (Bin count key' z l r)
 
 unions :: (Foldable f, Ord k) => f (Map k a) -> Map k a
 unions = B.foldl union Tip
@@ -700,7 +774,7 @@ maxView :: Map k a -> Maybe (a, Map k a)
 maxView m = fmap (\((_, x), m') -> (x, m')) (maxViewWithKey m)
 
 elemAt :: Int -> Map k a -> (k, a)
-elemAt i m = if i < 0 || i >= size m then errorWithoutStackTrace "Map.elemAt: index out of range" else at i m
+elemAt i m = i ${BT}seq${BT} m ${BT}seq${BT} if i < 0 || i >= size m then errorWithoutStackTrace "Map.elemAt: index out of range" else at i m
   where at n (Bin _ k x l r) = case compare n (size l) of
           LT -> at n l
           EQ -> (k,x)
@@ -726,7 +800,13 @@ drop :: Int -> Map k a -> Map k a
 drop n m = fromDistinctAscList (B.drop n (toAscList m))
 
 splitAt :: Int -> Map k a -> (Map k a, Map k a)
-splitAt n m = (take n m, drop n m)
+splitAt n m = if n >= size m then (m,Tip) else go n m
+  where go i t | i <= 0 = strictPair Tip t
+        go _ Tip = (Tip,Tip)
+        go i (Bin _ k x l r) = case compare i (size l) of
+          LT -> case go i l of (ll,lr) -> strictPair ll (link k x lr r)
+          GT -> case go (i-size l-1) r of (rl,rr) -> strictPair (link k x l rl) rr
+          EQ -> strictPair l (insertMin k x r)
 
 lookupLT :: Ord k => k -> Map k v -> Maybe (k, v)
 lookupLT k tree = k ${BT}seq${BT} (nearest (\key -> key < k) False) tree
@@ -741,7 +821,7 @@ lookupGE :: Ord k => k -> Map k v -> Maybe (k, v)
 lookupGE k tree = k ${BT}seq${BT} (nearest (\key -> key >= k) True) tree
 
 split :: Ord k => k -> Map k a -> (Map k a, Map k a)
-split k m = (filterWithKey (\k' _ -> k' < k) m, filterWithKey (\k' _ -> k' > k) m)
+split k m = case splitLookup k m of (l,_,r) -> (l,r)
 
 instance (Eq k, Eq a) => Eq (Map k a) where
   t1 == t2 = size t1 == size t2 && toAscList t1 == toAscList t2
@@ -836,14 +916,36 @@ updateWithKey :: Ord k => (k -> a -> Maybe a) -> k -> Map k a -> Map k a
 updateWithKey f k = update (f k) k
 
 insertLookupWithKey :: Ord k => (k -> a -> a -> a) -> k -> a -> Map k a -> (Maybe a,Map k a)
-insertLookupWithKey f k x m = (lookup k m,insertWith (f k) k x m)
+insertLookupWithKey = insertLookupUsing False
+
+insertLookupUsing :: Ord k => Bool -> (k -> a -> a -> a) -> k -> a -> Map k a -> (Maybe a,Map k a)
+insertLookupUsing strict f k x m = k ${BT}seq${BT} case m of
+  Tip -> forceValue strict x (strictPair Nothing (singleton k x))
+  Bin count key y l r -> case compare k key of
+    LT -> case insertLookupUsing strict f k x l of (old,l') -> strictPair old (balance key y l' r)
+    GT -> case insertLookupUsing strict f k x r of (old,r') -> strictPair old (balance key y l r')
+    EQ -> let z = f k x y in forceValue strict z (strictPair (Just y) (Bin count k z l r))
 
 mapEither :: (a -> Either b c) -> Map k a -> (Map k b,Map k c)
 mapEither f = mapEitherWithKey (\_ x -> f x)
 
 mapEitherWithKey :: (k -> a -> Either b c) -> Map k a -> (Map k b,Map k c)
-mapEitherWithKey f m = (fromDistinctAscList [(k,x) | (k,Left x) <- xs],fromDistinctAscList [(k,x) | (k,Right x) <- xs])
-  where xs = [(k,f k x) | (k,x) <- toAscList m]
+mapEitherWithKey = mapEitherUsing False
+
+mapEitherUsing :: Bool -> (k -> a -> Either b c) -> Map k a -> (Map k b,Map k c)
+mapEitherUsing _ _ Tip = (Tip,Tip)
+mapEitherUsing strict f (Bin _ k x l r) =
+  let left = mapEitherUsing strict f l
+      right = mapEitherUsing strict f r
+      build result = case left of
+        (ll,lr) -> case right of
+          (rl,rr) -> case result of
+            Left y -> strictPair (link k y ll rl) (link2 lr rr)
+            Right z -> strictPair (link2 ll rl) (link k z lr rr)
+      classify = case f k x of
+        Left y -> forceValue strict y (build (Left y))
+        Right z -> forceValue strict z (build (Right z))
+  in if strict then classify else left ${BT}seq${BT} right ${BT}seq${BT} classify
 
 alterF :: (Functor f, Ord k) => (Maybe a -> f (Maybe a)) -> k -> Map k a -> f (Map k a)
 alterF f k m = fmap (\result -> alter (const result) k m) (f (lookup k m))
@@ -954,10 +1056,10 @@ fromListWithKey :: Ord k => (k -> a -> a -> a) -> [(k, a)] -> Map k a
 fromListWithKey f = B.foldl' (\t (k, x) -> insertWith (f k) k x t) L.empty
 
 fromAscList :: Eq k => [(k, a)] -> Map k a
-fromAscList xs = forceValues (L.fromAscList xs)
+fromAscList xs = L.fromDistinctAscList (reverse (collapseOrdered xs))
 
 fromDistinctAscList :: [(k, a)] -> Map k a
-fromDistinctAscList xs = forceValues (L.fromDistinctAscList xs)
+fromDistinctAscList xs = forceInputValues xs ${BT}seq${BT} L.fromDistinctAscList xs
 
 fromSet :: (k -> a) -> S.Set k -> Map k a
 fromSet f s = forceValues (L.fromSet f s)
@@ -989,20 +1091,7 @@ unionWith :: Ord k => (a -> a -> a) -> Map k a -> Map k a -> Map k a
 unionWith f = unionWithKey (\_ x y -> f x y)
 
 unionWithKey :: Ord k => (k -> a -> a -> a) -> Map k a -> Map k a -> Map k a
-unionWithKey _ a L.Tip = a
-unionWithKey f a (L.Bin _ k x L.Tip L.Tip) = insertCarried (\key old new -> f key old new) k x a
-unionWithKey f (L.Bin _ k x L.Tip L.Tip) b = insertCarried (\key old new -> f key new old) k x b
-unionWithKey _ L.Tip b = b
-unionWithKey f (L.Bin _ k x l r) b = case L.splitLookup k b of
-  (bl,found,br) -> let y = case found of Nothing -> x; Just z -> f k x z
-                  in y ${BT}seq${BT} L.link k y (unionWithKey f l bl) (unionWithKey f r br)
-
-insertCarried :: Ord k => (k -> a -> a -> a) -> k -> a -> Map k a -> Map k a
-insertCarried _ k x L.Tip = k ${BT}seq${BT} x ${BT}seq${BT} L.singleton k x
-insertCarried f k x (L.Bin size key y l r) = case compare k key of
-  LT -> L.balance key y (insertCarried f k x l) r
-  GT -> L.balance key y l (insertCarried f k x r)
-  EQ -> let z = f key y x in z ${BT}seq${BT} L.Bin size key z l r
+unionWithKey = L.unionWithKeyUsing True
 
 unionsWith :: (Foldable f, Ord k) => (a -> a -> a) -> f (Map k a) -> Map k a
 unionsWith f = B.foldl' (unionWith f) L.empty
@@ -1039,21 +1128,30 @@ updateWithKey :: Ord k => (k -> a -> Maybe a) -> k -> Map k a -> Map k a
 updateWithKey f k = update (f k) k
 
 insertLookupWithKey :: Ord k => (k -> a -> a -> a) -> k -> a -> Map k a -> (Maybe a,Map k a)
-insertLookupWithKey f k x m = (L.lookup k m,insertWith (f k) k x m)
+insertLookupWithKey = L.insertLookupUsing True
 
 mapEither :: (a -> Either b c) -> Map k a -> (Map k b,Map k c)
 mapEither f = mapEitherWithKey (\_ x -> f x)
 
 mapEitherWithKey :: (k -> a -> Either b c) -> Map k a -> (Map k b,Map k c)
-mapEitherWithKey f m = let (l,r) = L.mapEitherWithKey f m in (forceValues l,forceValues r)
+mapEitherWithKey = L.mapEitherUsing True
 
 alterF :: (Functor f, Ord k) => (Maybe a -> f (Maybe a)) -> k -> Map k a -> f (Map k a)
 alterF f k m = fmap (\result -> alter (const result) k m) (f (L.lookup k m))
 
 fromDescList :: Eq k => [(k,a)] -> Map k a
-fromDescList xs = forceValues (L.fromDescList xs)
+fromDescList xs = L.fromDistinctAscList (collapseOrdered xs)
+
+collapseOrdered :: Eq k => [(k,a)] -> [(k,a)]
+collapseOrdered = B.foldl' step []
+  where step [] (k,x) = k ${BT}seq${BT} x ${BT}seq${BT} [(k,x)]
+        step acc@((previous,_):rest) (k,x) = k ${BT}seq${BT}
+          if k == previous then x ${BT}seq${BT} (k,x):rest else x ${BT}seq${BT} (k,x):acc
 
 fromDistinctDescList :: [(k,a)] -> Map k a
-fromDistinctDescList xs = forceValues (L.fromDistinctDescList xs)
+fromDistinctDescList xs = forceInputValues xs ${BT}seq${BT} L.fromDistinctDescList xs
+
+forceInputValues :: [(k,a)] -> ()
+forceInputValues = B.foldl' (\_ (k,x) -> k ${BT}seq${BT} x ${BT}seq${BT} ()) ()
 
 `;

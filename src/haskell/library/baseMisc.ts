@@ -463,7 +463,9 @@ genericDrop _ [] = []
 genericDrop n (_:xs) = genericDrop (n - fromInteger 1) xs
 
 genericSplitAt :: Integral i => i -> [a] -> ([a], [a])
-genericSplitAt n xs = (genericTake n xs, genericDrop n xs)
+genericSplitAt n xs | n <= 0 = ([],xs)
+genericSplitAt _ [] = ([],[])
+genericSplitAt n (x:xs) = let (a,b) = genericSplitAt (n-1) xs in (x:a,b)
 
 genericIndex :: Integral i => [a] -> i -> a
 genericIndex (x:_) n | n == fromInteger 0 = x
