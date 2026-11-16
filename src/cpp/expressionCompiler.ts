@@ -9,7 +9,7 @@ import { type ConversionSequence, convertArithmetic, implicitConversion, Rank, s
 import { CppRuntimeError } from './errors';
 import { constantExpr, type Expr, type FunctionCandidates } from './expr';
 import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
-import { ObjectCompiler, zeroOf } from './objectCompiler';
+import { makeEach, ObjectCompiler, zeroOf } from './objectCompiler';
 import type { Eval, Frame } from './runtime';
 import type { Entity } from './scopes';
 import { fieldOf, type Syntax, tokenOf } from './syntax';
@@ -463,6 +463,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
           return new Ptr(target as CObject, index);
         },
         description: field.name,
+        temporaryMember: object.temporaryMember && {
+          object: object.temporaryMember.object,
+          path: [...object.temporaryMember.path, index],
+        },
       };
     }
     // A member of a prvalue is an xvalue, which the interpreter treats as a temporary's member.
@@ -472,6 +476,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       isLvalue: true,
       row,
       run: (frame) => new Ptr((materialized(frame) as Ptr).read() as CObject, index),
+      temporaryMember: { object, path: [index] },
     };
   }
 
@@ -1447,6 +1452,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         ? (this.valueInitialized(elementType, row).run as Eval<Value>)
         : this.defaultInitializer(elementType, row)
       : undefined;
+    const destroy = this.destroyerOf(elementType);
     return {
       type: pointerTo(elementType),
       isLvalue: false,
@@ -1455,18 +1461,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         const count = Number(length(frame));
         if (count < 0 || count < initial.length) throw new CppRuntimeError('badLength');
         frame.runtime.reserve(count);
-        const values: Value[] = [];
-        // The elements made so far stay reachable while the rest are made.
-        const store = new ArrayStore(values);
-        frame.pending.push(store);
-        try {
-          for (let index = 0; index < count; index++) {
-            if (index < initial.length) values.push(initial[index](frame));
-            else values.push((rest as Eval<Value>)(frame));
-          }
-        } finally {
-          frame.pending.pop();
-        }
+        const make = (index: number): Value =>
+          index < initial.length ? initial[index](frame) : (rest as Eval<Value>)(frame);
+        const store = new ArrayStore(makeEach(frame, count, make, () => destroy));
         store.allocation = 'newArray';
         return new Ptr(store, 0);
       },

@@ -4,8 +4,8 @@ import { isAuto } from './compilerBase';
 import { CppException, CppRuntimeError } from './errors';
 import type { Expr } from './expr';
 import type { Library } from './library/registry';
-import { invoke, newObject, virtualKey, zeroOf } from './objectCompiler';
-import { type CompiledFunction, type Eval, type Exec, type Frame, holdAll, RETURN } from './runtime';
+import { invoke, makeEach, newObject, virtualKey, zeroOf } from './objectCompiler';
+import { type CompiledFunction, type Eval, type Exec, type Frame, RETURN } from './runtime';
 import { type Entity, FunctionContext, type Scope } from './scopes';
 import { bindsDirectly, endScope, StatementCompiler } from './statementCompiler';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
@@ -673,27 +673,27 @@ export class Compiler extends StatementCompiler {
       }
     }
     if (!hasWork && !list && fn.params.length === 0) return undefined;
+    return initializeInOrder(parts, base !== undefined, this.undoConstruction(cls));
+  }
+
+  /**
+   * Destroys the members and the base a constructor has initialized, the last first, when an exception leaves the
+   * constructor before the object is complete (C++20 [except.ctor]).
+   */
+  private undoConstruction(cls: ClassInfo): (frame: Frame, isBaseComplete: boolean) => void {
     const destroyers = cls.ownFields.map((field) => ({ field, destroy: this.destroyerOf(field.type) }));
-    const baseDestroy = base?.operations?.destroy;
-    return (frame) => {
-      try {
-        for (const part of parts) part(frame);
-      } catch (error) {
-        // An exception from a member's initialization destroys the members and the base already initialized.
-        if (error instanceof CppException) {
-          const object = frame.self?.read() as CObject;
-          for (let index = destroyers.length - 1; index >= 0; index--) {
-            const { field, destroy } = destroyers[index];
-            if (destroy && object.values[field.index] !== UNINIT) destroy(frame, object.values[field.index]);
-          }
-          if (baseDestroy && base) {
-            object.cls = base;
-            baseDestroy(frame, object);
-          }
-        }
-        throw error;
+    const base = cls.base;
+    return (frame, isBaseComplete) => {
+      const object = frame.self?.read() as CObject;
+      for (let index = destroyers.length - 1; index >= 0; index--) {
+        const { field, destroy } = destroyers[index];
+        if (destroy && object.values[field.index] !== UNINIT) destroy(frame, object.values[field.index]);
       }
-      return;
+      const baseDestroy = base?.operations?.destroy;
+      if (baseDestroy && base && isBaseComplete) {
+        object.cls = base;
+        baseDestroy(frame, object);
+      }
     };
   }
 
@@ -714,11 +714,11 @@ export class Compiler extends StatementCompiler {
     const resolved = this.resolve(`${cls.name} のコンストラクタ`, cls.constructors, args, undefined, initializer.row);
     const runs = this.callArguments(resolved, args, initializer.row);
     const { row } = initializer;
-    return (frame) => {
+    return this.fullExpression<undefined>((frame) => {
       const values = runs.map((run) => run(frame));
-      invoke(frame, resolved.fn, values, frame.self, row);
+      invoke(frame, resolved.fn, values, frame.self, row, true);
       return;
-    };
+    });
   }
 
   private initializerArguments(initializer: Syntax): Expr[] {
@@ -748,7 +748,7 @@ export class Compiler extends StatementCompiler {
     return this.fullExpression<undefined>((frame) => {
       const values = runs.map((run) => run(frame));
       (frame.self?.read() as CObject).cls = base;
-      invoke(frame, resolved.fn, values, frame.self, row);
+      invoke(frame, resolved.fn, values, frame.self, row, true);
       return;
     });
   }
@@ -1025,8 +1025,6 @@ export class Compiler extends StatementCompiler {
           if (scope.names.has(param.name)) this.error(param.row, `引数 ${param.name} の名前が重複しています。`);
           scope.names.set(param.name, { kind: 'local', local, isReference: type.kind === 'reference' });
         }
-        const destroy = type.kind === 'reference' ? undefined : this.destroyerOf(type);
-        if (destroy) scope.destructibles.push({ slot: local.slot, destroy });
       }
       const body = fieldOf(node, 'body');
       if (!body) {
@@ -1035,42 +1033,31 @@ export class Compiler extends StatementCompiler {
         return this.error(node.row, `${fn.displayName} の本体を書いてください。`);
       }
       if (body.type === 'try_statement') return this.unsupported(node.row, '関数の try ブロック');
-      context.namedReturn = this.namedReturnCandidate(body, fn);
-      const memberInit =
-        fn.isConstructor && cls
-          ? this.memberInitialization(
-              cls,
-              fn,
-              node.children.find((child) => child.type === 'field_initializer_list')
-            )
-          : undefined;
-      if (!fn.isConstructor && node.children.some((child) => child.type === 'field_initializer_list')) {
+      const initializerList = node.children.find((child) => child.type === 'field_initializer_list');
+      const memberInit = fn.isConstructor && cls ? this.memberInitialization(cls, fn, initializerList) : undefined;
+      if (!fn.isConstructor && initializerList) {
         this.error(node.row, 'メンバの初期化子の並び（: x(...)）は、コンストラクタにしか書けません。');
       }
       const statements = this.compileStatements(body.children);
-      fn.compiled = this.functionBody(fn, context, memberInit, statements, body.endRow);
+      context.endBody();
+      const undo = fn.isConstructor && cls ? this.constructorBodyFailure(cls, initializerList) : undefined;
+      fn.compiled = this.functionBody(fn, context, memberInit, statements, body.endRow, undo);
     } finally {
       this.context = saved;
     }
   }
 
-  /** The local a function returns by name in all its `return` statements, which the result shares (NRVO). */
-  private namedReturnCandidate(body: Syntax, fn: FunctionInfo): FunctionContext['namedReturn'] {
-    if (fn.ret.kind !== 'class') return undefined;
-    const names = new Set<string>();
-    let others = false;
-    const visit = (node: Syntax): void => {
-      if (node.type === 'return_statement') {
-        const value = node.children[0];
-        if (value?.type === 'identifier') names.add(value.text);
-        else others = true;
-      }
-      for (const child of node.children) visit(child);
-    };
-    visit(body);
-    if (others || names.size !== 1) return undefined;
-    const [name] = names;
-    return { name, slot: -1, type: fn.ret, isParameter: false };
+  /**
+   * What an exception from a constructor's body destroys: the object a delegated constructor completed, or else the
+   * members and the base.
+   */
+  private constructorBodyFailure(cls: ClassInfo, initializerList: Syntax | undefined): (frame: Frame) => void {
+    const isDelegating = initializerList?.children.some(
+      (initializer) => initializer.type === 'field_initializer' && initializer.children[0].text === cls.name
+    );
+    if (isDelegating) return (frame) => cls.operations?.destroy?.(frame, frame.self?.read() as Value);
+    const undo = this.undoConstruction(cls);
+    return (frame) => undo(frame, true);
   }
 
   private functionBody(
@@ -1078,7 +1065,8 @@ export class Compiler extends StatementCompiler {
     context: FunctionContext,
     memberInit: Exec | undefined,
     statements: Exec,
-    endRow: number
+    endRow: number,
+    undoConstruction: ((frame: Frame) => void) | undefined
   ): CompiledFunction {
     const scope = context.scope;
     const { slots, destructibles } = scope;
@@ -1087,12 +1075,17 @@ export class Compiler extends StatementCompiler {
     void endRow;
     const body = (frame: Frame): void => {
       let completion;
+      let isInitialized = false;
       try {
         if (memberInit) memberInit(frame);
+        isInitialized = true;
         completion = statements(frame);
         if (isMain) frame.runtime.onMainEnd?.(frame);
       } catch (error) {
-        if (error instanceof CppException) endScope(frame, slots, destructibles);
+        if (error instanceof CppException) {
+          endScope(frame, slots, destructibles);
+          if (isInitialized) undoConstruction?.(frame);
+        }
         throw error;
       }
       endScope(frame, slots, destructibles);
@@ -1388,9 +1381,17 @@ export class Compiler extends StatementCompiler {
     if (type.kind === 'array') {
       const length = type.length ?? 0;
       const element = this.defaultInitializer(type.of, row);
+      const destroy = this.destroyerOf(type.of);
       return (frame) => {
         frame.runtime.reserve(length);
-        return new ArrayStore(Array.from({ length }, () => element(frame)));
+        return new ArrayStore(
+          makeEach(
+            frame,
+            length,
+            () => element(frame),
+            () => destroy
+          )
+        );
       };
     }
     return () => UNINIT;
@@ -1564,14 +1565,11 @@ export class Compiler extends StatementCompiler {
           : elementType.kind === 'array'
             ? this.arrayInitializer(elementType, [], row)
             : (this.valueInitialized(elementType, row).run as Eval<Value>);
+      const destroy = this.destroyerOf(elementType);
       return (frame) => {
         frame.runtime.reserve(length);
-        const values: Value[] = [];
-        return holdAll(frame, inits, (initial) => {
-          for (let index = 0; index < length; index++)
-            values.push(index < initial.length ? (initial[index] as Value) : (rest as Eval<Value>)(frame));
-          return new ArrayStore(values);
-        });
+        const make = (index: number): Value => (index < inits.length ? inits[index] : (rest as Eval<Value>))(frame);
+        return new ArrayStore(makeEach(frame, length, make, () => destroy));
       };
     };
   }
@@ -1595,12 +1593,17 @@ export class Compiler extends StatementCompiler {
           return this.error(row, `参照のメンバ ${field.name} に初期値がありません。`);
         return this.valueInitialized(field.type, row).run as Eval<Value>;
       });
+      const destroyers = fields.map((field) => this.destroyerOf(field.type));
       return (frame) => {
         const object = newObject(cls);
-        return holdAll(frame, inits, (values) => {
-          for (const [index, value] of values.entries()) object.values[fields[index].index] = value as Value;
-          return object;
-        });
+        const values = makeEach(
+          frame,
+          inits.length,
+          (index) => inits[index](frame),
+          (index) => destroyers[index]
+        );
+        for (const [index, value] of values.entries()) object.values[fields[index].index] = value;
+        return object;
       };
     };
   }
@@ -1813,6 +1816,30 @@ function isNarrowing(
     return !(intMinOf(to) <= intMinOf(from) && intMaxOf(to) >= intMaxOf(from));
   }
   return false;
+}
+
+/**
+ * Runs the parts of a constructor's initialization of the base (the first part, when `hasBase`) and the members. An
+ * exception from one undoes the parts done before it.
+ */
+function initializeInOrder(
+  parts: readonly Exec[],
+  hasBase: boolean,
+  undo: (frame: Frame, isBaseComplete: boolean) => void
+): Exec {
+  return (frame) => {
+    let done = 0;
+    try {
+      for (const part of parts) {
+        part(frame);
+        done++;
+      }
+    } catch (error) {
+      if (error instanceof CppException) undo(frame, hasBase && done > 0);
+      throw error;
+    }
+    return;
+  };
 }
 
 function intMinOf(type: Extract<Type, { kind: 'int' }>): bigint {

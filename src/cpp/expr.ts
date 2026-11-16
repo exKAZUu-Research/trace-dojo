@@ -30,6 +30,11 @@ export interface Expr {
   braced?: Syntax;
   /** The member an expression names, for messages such as "assigning to a const member". */
   description?: string;
+  /**
+   * For a member of a temporary (`T(1).id`): the temporary's prvalue, and the indices of the members leading to the
+   * member, so that a reference bound to the member can extend the temporary's lifetime (C++20 [class.temporary]).
+   */
+  temporaryMember?: { object: Expr; path: number[] };
 }
 
 /** A name that denotes functions: free functions, or the member functions of an object. */

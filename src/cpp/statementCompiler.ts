@@ -3,7 +3,7 @@ import { CppException, ProgramAbort } from './errors';
 import type { Expr } from './expr';
 import { ExpressionCompiler } from './expressionCompiler';
 import { destroyTemporaries } from './objectCompiler';
-import { BREAK, type Completion, CONTINUE, type Eval, type Exec, type Frame, RETURN } from './runtime';
+import { BREAK, type Completion, CONTINUE, type Eval, type Exec, type Frame, type LocalInfo, RETURN } from './runtime';
 import { type Entity, Scope } from './scopes';
 import { isObjectCreation, onlyCalls } from './stepRules';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
@@ -21,7 +21,7 @@ import {
   unqualified,
   withConst,
 } from './types';
-import { Box, Liveness, Ptr, type Store, UNINIT, type Value } from './values';
+import { Box, type CObject, Liveness, Ptr, type Store, UNINIT, type Value } from './values';
 
 /** Compiles statements to closures that run them and tell how they completed. */
 export abstract class StatementCompiler extends ExpressionCompiler {
@@ -53,7 +53,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     try {
       exec = compile();
     } finally {
-      this.context.scopes.pop();
+      this.context.popScope();
     }
     return this.withScopeExit(exec, scope);
   }
@@ -432,26 +432,40 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const local = this.context.declareLocal(name, type, false);
     this.context.scope.names.set(name, { kind: 'local', local, isReference: true });
     const { slot } = local;
-    if (extends_) {
-      const destroy = this.destroyerOf(heldType);
-      const holder = this.context.declareLocal(`\0${name}`, heldType, false);
-      if (destroy) this.context.scope.destructibles.push({ slot: holder.slot, destroy });
-      const make = bound.run;
-      return {
-        exec: this.fullExpression<undefined>((frame) => {
-          const box = new Box(make(frame) as Value);
-          frame.slots[holder.slot] = box;
-          frame.slots[slot] = new Ptr(box, 0);
-          return;
-        }),
-        hasInitializer: true,
-        createsObject: false,
-      };
-    }
+    // A reference bound to a member of a temporary extends the whole temporary's lifetime.
+    const member = isDirect ? target.temporaryMember : undefined;
+    if (member) return this.extendedReference(slot, name, member.object.type, member.object.run, memberAt(member.path));
+    if (extends_) return this.extendedReference(slot, name, heldType, bound.run, (box) => new Ptr(box, 0));
     const locate = bound.run;
     return {
       exec: this.fullExpression<undefined>((frame) => {
         frame.slots[slot] = locate(frame) as Ptr;
+        return;
+      }),
+      hasInitializer: true,
+      createsObject: false,
+    };
+  }
+
+  /**
+   * A reference bound to (a part of) a temporary of type `heldType`, which a hidden variable holds as long as the
+   * reference lives.
+   */
+  private extendedReference(
+    slot: number,
+    name: string,
+    heldType: Type,
+    make: Eval<Value | Ptr>,
+    locate: (box: Box) => Ptr
+  ): { exec: Exec; hasInitializer: boolean; createsObject: boolean } {
+    const destroy = this.destroyerOf(heldType);
+    const holder = this.context.declareLocal(`\0${name}`, heldType, false);
+    if (destroy) this.context.scope.destructibles.push({ slot: holder.slot, destroy });
+    return {
+      exec: this.fullExpression<undefined>((frame) => {
+        const box = new Box(make(frame) as Value);
+        frame.slots[holder.slot] = box;
+        frame.slots[slot] = locate(box);
         return;
       }),
       hasInitializer: true,
@@ -482,6 +496,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return;
       };
       this.context.scope.slots.splice(this.context.scope.slots.indexOf(slot), 1);
+      this.context.scope.returnSlots.delete(local);
       this.context.scope.statics.push(slot);
       return exec;
     }
@@ -629,7 +644,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return;
       };
     } finally {
-      this.context.scopes.pop();
+      this.context.popScope();
     }
     return this.withScopeExit(loop, scope);
   }
@@ -655,7 +670,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     try {
       loop = this.rangeForLoop(node);
     } finally {
-      this.context.scopes.pop();
+      this.context.popScope();
     }
     return this.withScopeExit(loop, scope);
   }
@@ -670,22 +685,26 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const rangeType = range.type;
     const rangeLocal = this.context.declareLocal('\0range', rangeType, false);
     const rangeSlot = rangeLocal.slot;
+    // A temporary range lives in the slot until the loop ends, as binding it to the reference extends its lifetime.
     const keepRange: Eval<void> = range.isLvalue
       ? (frame) => {
           frame.slots[rangeSlot] = range.run(frame) as Ptr;
         }
       : (frame) => {
-          frame.slots[rangeSlot] = new Ptr(new Box(range.run(frame) as Value), 0);
+          frame.slots[rangeSlot] = new Box(range.run(frame) as Value);
         };
     if (!range.isLvalue) {
       const destroy = this.destroyerOf(rangeType);
-      if (destroy)
-        this.context.scope.destructibles.push({
-          slot: rangeSlot,
-          destroy: (frame, value) => destroy(frame, ((value as Ptr).store as Box).value),
-        });
+      if (destroy) this.context.scope.destructibles.push({ slot: rangeSlot, destroy });
     }
-    const rangeRef: Expr = { type: rangeType, isLvalue: true, row, run: (frame) => frame.slots[rangeSlot] as Ptr };
+    const rangeRef: Expr = {
+      type: rangeType,
+      isLvalue: true,
+      row,
+      run: range.isLvalue
+        ? (frame) => frame.slots[rangeSlot] as Ptr
+        : (frame) => new Ptr(frame.slots[rangeSlot] as Box, 0),
+    };
     let begin: Expr;
     let end: Expr;
     if (rangeType.kind === 'array') {
@@ -739,7 +758,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         this.context.loopDepth--;
       }
     } finally {
-      this.context.scopes.pop();
+      this.context.popScope();
     }
     const iteration = this.withScopeExit((frame) => {
       bind(frame);
@@ -868,7 +887,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       }
     } finally {
       this.context.switchDepth--;
-      this.context.scopes.pop();
+      this.context.popScope();
     }
     const exec: Exec = (frame) => {
       const key = String(value(frame));
@@ -921,29 +940,36 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   private returnValue(node: Syntax, returnType: Type, row: number): Eval<Value | Ptr> {
     if (node.type === 'initializer_list') {
       if (returnType.kind === 'reference') return this.error(row, '参照を返す関数は {...} を返せません。');
+      this.context.noteReturn(undefined);
       return this.listInitializer(returnType, node, row);
     }
     const expr = this.compileExpression(node);
     if (returnType.kind === 'reference') {
       return this.convert(expr, returnType, row).run;
     }
-    const named = this.context.namedReturn;
-    const entity =
-      named && node.type === 'identifier' && node.text === named.name
-        ? this.context.lookupLocal(named.name)
-        : undefined;
-    if (entity?.kind === 'local' && !entity.isReference && !entity.local.isParameter && returnType.kind === 'class') {
-      const { slot } = entity.local;
-      const target = returnType.cls;
-      if (expr.type.kind === 'class' && expr.type.cls === target) {
-        return (frame) => {
-          const store = frame.slots[slot] as Box;
-          frame.nrvoSlot = slot;
-          return store.value;
-        };
-      }
-    }
-    return this.copyInitializer(returnType, expr, row, false);
+    const local = this.returnedLocal(node, expr, returnType);
+    this.context.noteReturn(local);
+    if (!local) return this.copyInitializer(returnType, expr, row, false);
+    const { slot } = local;
+    const share: Eval<Value> = (frame) => {
+      frame.nrvoSlot = slot;
+      return (frame.slots[slot] as Box).value;
+    };
+    // An object that cannot be copied leaves the function as it is, as moving it would.
+    if (returnType.kind === 'class' && returnType.cls.isNoncopyable) return share;
+    const copy = this.copyInitializer(returnType, expr, row, false);
+    const { namedReturns } = this.context;
+    return (frame) => (namedReturns.has(local) ? share(frame) : copy(frame));
+  }
+
+  /** The local variable of the returned class type that a `return` names, which it may return without copying. */
+  private returnedLocal(node: Syntax, expr: Expr, returnType: Type): LocalInfo | undefined {
+    let name = node;
+    while (name.type === 'parenthesized_expression' && name.children.length === 1) name = name.children[0];
+    if (name.type !== 'identifier' || returnType.kind !== 'class') return undefined;
+    if (expr.type.kind !== 'class' || expr.type.cls !== returnType.cls) return undefined;
+    const entity = this.context.lookupLocal(name.text);
+    return entity?.kind === 'local' && !entity.isReference ? entity.local : undefined;
   }
 
   private tryStatement(node: Syntax): Exec {
@@ -964,18 +990,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         if (!(error instanceof CppException)) throw error;
         tryBlocks.pop();
         isActive = false;
-        for (const handler of handlers) {
-          if (!handler.matches(error)) continue;
-          frame.runtime.handling.push(error);
-          frame.pending.push(error.value);
-          try {
-            return handler.run(frame, error);
-          } finally {
-            frame.pending.pop();
-            frame.runtime.handling.pop();
-          }
-        }
-        throw error;
+        const handler = handlers.find((candidate) => candidate.matches(error));
+        if (!handler) throw error;
+        return runHandler(frame, handler.run, error);
       } finally {
         if (isActive) tryBlocks.pop();
       }
@@ -1017,6 +1034,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         } else {
           const local = this.context.declareLocal(name, handlerType, false);
           scope.names.set(name, { kind: 'local', local, isReference: false });
+          // A handler's variable is no candidate for returning without a copy (C++20 [class.copy.elision]).
+          scope.returnSlots.delete(local);
           const copy = caught.kind === 'class' ? caught.cls : undefined;
           bind = (frame, error) => {
             const value = copy ? copy.operations?.copy(frame, error.value) : error.value;
@@ -1028,7 +1047,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       }
       body = this.compileStatements(bodyNode.children);
     } finally {
-      this.context.scopes.pop();
+      this.context.popScope();
     }
     const run = this.withScopeExit((frame) => {
       bind(frame, frame.runtime.handling.at(-1) as CppException);
@@ -1075,6 +1094,41 @@ function exceptionMatches(handler: Type, thrown: Type): boolean {
   }
   if (handler.kind === 'pointer' && thrown.kind === 'nullptr') return true;
   return sameType(unqualified(handler), unqualified(thrown), false);
+}
+
+/** Runs a handler for an exception, which ends the exception unless the handler rethrows it. */
+function runHandler(
+  frame: Frame,
+  run: (frame: Frame, exception: CppException) => Completion,
+  exception: CppException
+): Completion {
+  frame.runtime.handling.push(exception);
+  frame.pending.push(exception.value);
+  exception.handlerCount++;
+  let completion: Completion;
+  try {
+    completion = run(frame, exception);
+  } catch (error) {
+    exception.handlerCount--;
+    if (error !== exception && error instanceof CppException) endException(frame, exception);
+    throw error;
+  } finally {
+    frame.pending.pop();
+    frame.runtime.handling.pop();
+  }
+  exception.handlerCount--;
+  endException(frame, exception);
+  return completion;
+}
+
+/**
+ * Destroys an exception object when the last handler running for it exits other than by rethrowing it
+ * (C++20 [except.throw]).
+ */
+function endException(frame: Frame, exception: CppException): void {
+  if (exception.handlerCount > 0 || exception.isDestroyed) return;
+  exception.isDestroyed = true;
+  if (exception.type.kind === 'class') exception.type.cls.operations?.destroy?.(frame, exception.value);
 }
 
 /** Ends a scope: destroys its objects, the last first, and makes its variables' storage unusable. */
@@ -1141,6 +1195,15 @@ function asZeroAssignment(node: Syntax): Syntax | undefined {
     all: [call, equals, zero],
   };
   return { ...node, type: 'expression_statement', children: [assignment], all: [assignment] };
+}
+
+/** Locates the member that the indices `path` lead to in the object a box holds. */
+function memberAt(path: readonly number[]): (box: Box) => Ptr {
+  return (box) => {
+    let object = box.value as CObject;
+    for (const index of path.slice(0, -1)) object = object.values[index] as CObject;
+    return new Ptr(object, path.at(-1) as number);
+  };
 }
 
 /** Whether a reference to `target` binds to an lvalue of `source` itself, rather than to a converted temporary. */

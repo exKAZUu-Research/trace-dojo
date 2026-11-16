@@ -1,0 +1,15 @@
+C1 cp11 caught 11 ~E11 ~E1 
+C2 caught 2 ~E2 
+C3 inner cp13 outer 13 ~E13 ~E3 
+C4 cp14 inner cp24 ~E14 ~E4 outer 24 ~E24 
+C5 cp15 ~E5 any ~E15 
+C6 cp16 nested ~E16 after ~E6 
+loop C7 continue ~E7 
+std::exception
+std::exception
+mine
+mine
+range
+std::exception
+b
+std::exception
