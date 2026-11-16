@@ -728,13 +728,12 @@ export class Converter {
     )
       this.fail(node, '名前付きキャプチャと番号付き後方参照は一緒に使えません。');
     try {
-      new RegExp(translate(source, flags.includes('x'), flags.includes('m')), 'u');
+      translate(source, flags.includes('x'), flags.includes('m'));
     } catch (error) {
-      if (!(error instanceof UnsupportedFeatureError)) {
-        const names = regexpCaptureNames(source, flags.includes('x'));
-        if (new Set(names).size !== names.length) this.unsupported(node, '重複する名前付きキャプチャ');
-        this.fail(node, '正規表現の書き方に誤りがあります。');
-      }
+      if (error instanceof UnsupportedFeatureError) {
+        if (error.message.startsWith('重複する名前付きキャプチャ'))
+          this.unsupported(node, '重複する名前付きキャプチャ');
+      } else this.fail(node, '正規表現の書き方に誤りがあります。');
     }
   }
 

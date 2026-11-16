@@ -8,6 +8,7 @@ import {
 import { type Token, tokenize } from 'oniguruma-parser/tokenizer';
 
 import { ExecutionLimitError } from '../interpreter/limits';
+import { hostRegexpCaptureNames } from './regexpCaptureNames';
 import { decodeRegexpByteEscape, regexpByteEscape, RegexpEncodingError } from './regexpEscapes';
 import { regexpLexicalSource } from './regexpLexicalSource';
 import { regexpPropertyNames } from './regexpProperties';
@@ -184,14 +185,8 @@ function byteViewNode(node: SourceNode, inClass: boolean): boolean {
 }
 
 export function validateRegexpStructure(source: string): void {
+  compileHostRegexp(source, 'u');
   if (!source.includes('(?<') && !/\\(?:[1-9]|k<)/.test(source)) return;
-  try {
-    new RegExp(source, 'u');
-  } catch (error) {
-    if (error instanceof SyntaxError) return;
-    if (error instanceof RangeError) throw new ExecutionLimitError('operations');
-    throw error;
-  }
   try {
     const pattern = new RegExpParser().parsePattern(source, 0, source.length, { unicode: true });
     visitRegExpAST(pattern, {
@@ -204,6 +199,18 @@ export function validateRegexpStructure(source: string): void {
     if (error instanceof RangeError) throw new ExecutionLimitError('operations');
     if (error instanceof RegExpSyntaxError) throw new UnsupportedFeatureError('正規表現の構文の検証');
     throw error;
+  }
+}
+
+export function compileHostRegexp(source: string, flags: string): RegExp {
+  try {
+    return new RegExp(source, flags);
+  } catch (error) {
+    if (error instanceof RangeError) throw new ExecutionLimitError('operations');
+    if (!(error instanceof SyntaxError)) throw error;
+    const names = hostRegexpCaptureNames(source);
+    if (new Set(names).size !== names.length) throw new UnsupportedFeatureError('重複する名前付きキャプチャ');
+    throw new UnsupportedFeatureError('この正規表現');
   }
 }
 

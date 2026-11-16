@@ -11978,3 +11978,54 @@ test('Dynamic nesting references fail explicitly after validation', () => {
     uncaughtException: '正規表現のネストレベル付き後方参照は、この採点環境では使えません。',
   });
 });
+
+test('Undefined core constructors agree across lookup, defined probes and reflected calls', () => {
+  expect(
+    run(String.raw`p defined?(Integer.new),defined?(Float.new),defined?(NilClass.new),defined?(TrueClass.new),defined?(FalseClass.new)
+p defined?(Symbol.new),defined?(Encoding.new),defined?(Rational.new),defined?(Class.new),defined?(Module.new),defined?(Numeric.new)
+[Integer,Float,NilClass,TrueClass,FalseClass,Symbol,Encoding,Rational].each do |type|
+ p type.respond_to?(:new)
+ begin;type.public_send(:new);rescue NoMethodError=>e;p e.class,e.name,e.receiver==type;end
+ begin;type.method(:new);rescue NameError=>e;p e.class,e.name;end
+end
+class I<Integer;end
+p defined?(I.new),I.respond_to?(:new)
+def Integer.new(x:);x+1;end
+p defined?(Integer.new),Integer.respond_to?(:new),Integer.new(x:2),Integer.method(:new).call(x:3)
+def I.new;:child;end
+p defined?(I.new),I.new
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'nil\nnil\nnil\nnil\nnil\nnil\nnil\nnil\n"method"\n"method"\n"method"\nfalse\nNoMethodError\n:new\ntrue\nNameError\n:new\nfalse\nNoMethodError\n:new\ntrue\nNameError\n:new\nfalse\nNoMethodError\n:new\ntrue\nNameError\n:new\nfalse\nNoMethodError\n:new\ntrue\nNameError\n:new\nfalse\nNoMethodError\n:new\ntrue\nNameError\n:new\nfalse\nNoMethodError\n:new\ntrue\nNameError\n:new\nfalse\nNoMethodError\n:new\ntrue\nNameError\n:new\nfalse\nNoMethodError\n:new\ntrue\nNameError\n:new\nnil\nfalse\n"method"\ntrue\n3\n4\n"method"\n:child\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'a**',
+  'a?*',
+  'a+*',
+  'a*{2}',
+  'a??+',
+  'a{2}?*',
+  String.raw`\\*+`,
+  String.raw`\\*{2}+`,
+  String.raw`\**+`,
+  String.raw`\*{2}*+`,
+])('Ruby-valid host-incompatible repeats fail explicitly: %s', (pattern) => {
+  expect(run(`puts :before;p /${pattern}/.match?('aaaa')`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'before\n',
+    uncaughtException: 'この正規表現は、この採点環境では使えません。',
+  });
+});
+
+test('Dynamic redundant repeat compilation fails explicitly', () => {
+  expect(run(String.raw`puts :before;p Regexp.new('a**').match('abaa')`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'before\n',
+    uncaughtException: 'この正規表現は、この採点環境では使えません。',
+  });
+});

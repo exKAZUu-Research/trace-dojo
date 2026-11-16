@@ -128,9 +128,9 @@ export function extend(owner: string, names: string[], wrap: (previous: NativeFn
   });
 }
 
-let singletonOf: ((cls: RClass) => RClass) | undefined;
+let singletonOf: ((cls: RClass, exposed?: boolean) => RClass) | undefined;
 
-export function setSingletonFactory(factory: (cls: RClass) => RClass): void {
+export function setSingletonFactory(factory: (cls: RClass, exposed?: boolean) => RClass): void {
   singletonOf = factory;
 }
 
@@ -166,6 +166,7 @@ export function installNatives(runtime: Runtime): void {
       });
     }
   }
+  installConstructorBarriers(runtime);
   const kernel = runtime.c.Kernel;
   const singleton = (singletonOf as (cls: RClass) => RClass)(kernel);
   for (const [name, method] of kernel.methods) {
@@ -177,4 +178,13 @@ export function installNatives(runtime: Runtime): void {
       owner,
       new Map([...owner.methods].map(([name, method]) => [name, { ...method, body: { ...method.body } }]))
     );
+}
+
+function installConstructorBarriers(runtime: Runtime): void {
+  for (const owner of Object.values(runtime.c)) {
+    if (owner.instanceKind !== 'none') continue;
+    const target = (singletonOf as (cls: RClass, exposed?: boolean) => RClass)(owner, false);
+    if (!target.methods.has('new'))
+      target.methods.set('new', { name: 'new', owner: target, visibility: 'public', body: { kind: 'undefined' } });
+  }
 }

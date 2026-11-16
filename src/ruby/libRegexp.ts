@@ -53,6 +53,7 @@ import { regexpLexicalSource } from './regexpLexicalSource';
 import { regexpOuterOptions } from './regexpOuterOptions';
 import { charIndex, regexpByteIndex, unitIndex } from './regexpPositions';
 import {
+  compileHostRegexp,
   hasRegexpProperty,
   regexpSyntaxReason,
   supportsRegexpByteView,
@@ -352,9 +353,6 @@ export function translate(
       out += `\\${char}`;
       continue;
     }
-    if (inClass === 0 && char === '+' && /[*+?]/.test(source[index - 1] ?? '') && source[index - 2] !== '\\') {
-      throw unsupportedSyntax('強欲な量指定子（*+ など）');
-    }
     if (inClass === 0 && char === '.') {
       atomStart = out.length;
       out += dotall ? String.raw`[\s\S]` : String.raw`[^\n]`;
@@ -565,14 +563,7 @@ export function makeRegexp(source: string, options: RegexpOptions): RObject {
       );
     throw error;
   }
-  let js: RegExp;
-  try {
-    js = new RegExp(translated, `dgmu${options.ignoreCase ? 'i' : ''}${options.multiline ? 's' : ''}`);
-  } catch {
-    const names = regexpCaptureNames(source, options.extended);
-    if (new Set(names).size !== names.length) throw new UnsupportedFeatureError('重複する名前付きキャプチャ');
-    throw rubyError(rt().c.RegexpError, `${regexpSyntaxReason(source, options.extended)}: ${display}`);
-  }
+  const js = compileHostRegexp(translated, `dgmu${options.ignoreCase ? 'i' : ''}${options.multiline ? 's' : ''}`);
   const data: RegexpData = {
     source,
     encoding,
@@ -762,15 +753,15 @@ function execWithinBudget(
 function regexpForMatch(data: RegexpData, source?: RString, anchored = false): RegExp {
   const binary = source?.binary && data.encoding === 'US-ASCII';
   const base = binary
-    ? (data.binaryJs ??= new RegExp(
+    ? (data.binaryJs ??= compileHostRegexp(
         translate(data.source, data.extended, data.multiline, true, true, data.ignoreCase),
         data.js.flags
       ))
     : data.js;
   if (!anchored) return base;
   return binary
-    ? (data.binaryReverseSticky ??= new RegExp(base.source, base.flags.replace('g', 'y')))
-    : (data.reverseSticky ??= new RegExp(base.source, base.flags.replace('g', 'y')));
+    ? (data.binaryReverseSticky ??= compileHostRegexp(base.source, base.flags.replace('g', 'y')))
+    : (data.reverseSticky ??= compileHostRegexp(base.source, base.flags.replace('g', 'y')));
 }
 
 export function validateRegexpByteView(regexp: RObject): void {
