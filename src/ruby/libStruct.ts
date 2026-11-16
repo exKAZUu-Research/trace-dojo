@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 479 -- Record layout and initialization share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 481 -- Record layout and initialization share representation and state; splitting registration by size would scatter that concern.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   addressOf,
@@ -598,17 +598,18 @@ def(
   'Data',
   'initialize',
   [0, 0],
+  // code-gauge-allow functionCognitiveComplexity 20 -- Name conversion, binding and missing-before-unknown diagnostics share the ordered initialization lifecycle.
   function* (self: RObject, _args, _block, keywords) {
     if (self.frozen) throw frozenError(self, yield* inspect(self));
     const { memberSymbols } = layoutOf(self.cls);
     const values = valuesOf(self);
     const given = new Set<RSymbol>();
-    const unknown: string[] = [];
+    const unknown: Value[] = [];
     for (const entry of keywords?.map.values() ?? []) {
       const key = yield* symbolNameOf(entry.key);
       const index = memberSymbols.indexOf(key);
-      const name = entry.key instanceof RString ? yield* inspect(entry.key) : symInspect(key);
-      if (index === -1) unknown.push(name);
+      if (index === -1)
+        unknown.push(entry.key instanceof RSymbol || entry.key instanceof RString ? entry.key : symbolString(key));
       else {
         values[index] = entry.value;
         given.add(memberSymbols[index]);
@@ -617,8 +618,11 @@ def(
     const missing = memberSymbols.filter((member) => !given.has(member)).map((member) => symInspect(member));
     if (missing.length > 0)
       throw argumentError(`missing keyword${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`);
-    if (unknown.length > 0)
-      throw argumentError(`unknown keyword${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}`);
+    if (unknown.length > 0) {
+      const names: string[] = [];
+      for (const key of unknown) names.push(key instanceof RSymbol ? symInspect(key) : yield* inspect(key));
+      throw argumentError(`unknown keyword${unknown.length > 1 ? 's' : ''}: ${names.join(', ')}`);
+    }
     self.frozen = true;
     return NIL;
   },

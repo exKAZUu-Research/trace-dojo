@@ -12804,3 +12804,15 @@ test('Completed iterator duplication 1', () => {
     uncaughtException: undefined,
   });
 });
+
+test('Data converts keyword names before reporting missing and unknown members', () => {
+  expect(
+    run(
+      'class K;def to_str;"m";end;def inspect;puts :unexpected;"custom";end;end;p Data.define(:m).new(K.new=>2).to_h;k="z";def k.inspect;puts :inspected;"custom";end;k.freeze;D=Data.define(:m);begin;D.new(**{k=>1});rescue=>e;p e.message;end;begin;D.new(m:1,**{k=>1});rescue=>e;p e.message;end'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '{m: 2}\n"missing keyword: :m"\ninspected\n"unknown keyword: custom"\n',
+    uncaughtException: undefined,
+  });
+});
