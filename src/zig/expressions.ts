@@ -314,6 +314,10 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Field access ----------------------------------------------------------------------------------------------------
 
+  private typeOnlyOperand(value: TExpr): TExpr {
+    return value.place ? this.addressOf(value) : value;
+  }
+
   // code-gauge-allow functionNcss 41 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected fieldAccess(expression: ExpressionOf<'field'>): TExpr {
@@ -335,7 +339,12 @@ export abstract class ExpressionCompiler extends SemaBase {
     switch (type.kind) {
       case 'struct': {
         if (type.isTuple && name === 'len') {
-          return this.fixedResult(base, COMPTIME_INT, BigInt(this.structFields(type, expression).length), expression);
+          return this.fixedResult(
+            this.typeOnlyOperand(base),
+            COMPTIME_INT,
+            BigInt(this.structFields(type, expression).length),
+            expression
+          );
         }
         return this.structField(base, type, name, expression);
       }
@@ -343,7 +352,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         return this.unionField(base, type, name, expression);
       }
       case 'array': {
-        if (name === 'len') return this.fixedResult(base, USIZE, BigInt(type.length), expression);
+        if (name === 'len') return this.fixedResult(this.typeOnlyOperand(base), USIZE, BigInt(type.length), expression);
         break;
       }
       case 'pointer': {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 907 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 909 -- The file holds one layer of the compiler, whose parts share its private state.
 // code-gauge-allow-file duplicateLines 18 -- Undefined and zero initializers share aggregate shapes but differ in scalar and optional values.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
@@ -6,6 +6,7 @@ import { CompilationStorage, valueSlots } from './allocation';
 import { PANIC, panic } from './arith';
 import { isDiscardName } from './ast';
 import type { Container, ContainerMember, Expression, FunctionDeclaration, SourceFile, Span } from './ast';
+import { markRuntimeStorage } from './comptimeMemory';
 import {
   type AnyFloat,
   asBigFloat,
@@ -393,6 +394,7 @@ export abstract class SemaBase implements SemaApi {
           markConstantStorage(decl.cell);
         } else {
           decl.cell = { slots: [copyForStorage(compiled.value)] };
+          markRuntimeStorage(decl.cell, compiled.type);
           const owner = decl.namespace.name.replace(/^main\.?/, '');
           this.globalVariables.push({
             name: owner ? `${owner}.${syntax.name}` : syntax.name,

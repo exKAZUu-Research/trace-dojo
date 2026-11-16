@@ -1,13 +1,13 @@
 import { checkOutputSize } from '../allocation';
 import type { Frame } from '../runtime';
 import type { StructType } from '../types';
-import { ErrorValue, Slice, type Value, ZArray, ZStruct } from '../values';
+import { ErrorValue, type NativeHandle, Slice, type Value, ZArray, ZStruct } from '../values';
 import { nativeStruct } from './native';
 
 export const WRITER: StructType = nativeStruct('Io.Writer', {}, [], {
   kind: 'writer',
   args: [],
-  storageSlots: 4,
+  storageSlots: 5,
   byteSize: 32,
 });
 
@@ -16,16 +16,17 @@ export interface WriterState extends Record<string, unknown> {
   buffer: Slice;
   end: number;
   capacity: number;
+  growth?: NativeHandle;
 }
 
 export function writerValue(state: WriterState): ZStruct {
-  return new ZStruct([state.fd, state.buffer, state.end, state.capacity]);
+  return new ZStruct([state.fd, state.buffer, state.end, state.capacity, state.growth]);
 }
 
 export function writerState(value: Value): WriterState {
   const header = value as ZStruct;
   const state = {} as WriterState;
-  for (const [index, name] of ['fd', 'buffer', 'end', 'capacity'].entries()) {
+  for (const [index, name] of ['fd', 'buffer', 'end', 'capacity', 'growth'].entries()) {
     Object.defineProperty(state, name, {
       enumerable: true,
       get: () => header.slots[index],
@@ -48,6 +49,10 @@ export function bufferingWriter(): WriterState {
 export function writeTo(frame: Frame, state: WriterState, bytes: readonly number[]): Value {
   frame.runtime.spend();
   const end = state.end + bytes.length;
+  if (end > state.capacity && state.growth) {
+    const grow = state.growth.state.grow as (frame: Frame, writer: WriterState, end: number) => boolean;
+    if (!grow(frame, state, end)) return ErrorValue.of('WriteFailed');
+  }
   if (end > state.capacity) {
     if (state.fd === undefined) {
       const available = Math.max(0, state.capacity - state.end);

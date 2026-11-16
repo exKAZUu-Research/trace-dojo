@@ -3,6 +3,7 @@ import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
+import { rejectRuntimeEffect } from './comptimeMemory';
 import type { FunctionInstance } from './functions';
 import { createUtf8Decoder } from './utf8';
 import {
@@ -100,6 +101,7 @@ export class Runtime {
   }
 
   writeOutput(fd: number, bytes: readonly number[]): void {
+    rejectRuntimeEffect();
     const index = fd === 2 ? 1 : 0;
     const text = this.outputDecoders[index].decode(new Uint8Array(bytes), { stream: true });
     (index === 1 ? this.io.stderr : this.io.stdout).write(text);

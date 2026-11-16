@@ -30,7 +30,7 @@ import {
   typeName,
   VOID,
 } from './types';
-import { type FnValue, Pointer, type Value } from './values';
+import { type FnValue, Pointer, scalarValueKey, type Value } from './values';
 
 /** What a function body's compilation needs to know about the function. */
 export interface FunctionCompilation {
@@ -38,6 +38,7 @@ export interface FunctionCompilation {
   syntax: FunctionDeclaration;
   namespace: Namespace;
   paramTypes: readonly Type[];
+  comptimeArgs: readonly (TExpr | undefined)[];
   returnType: Type;
   inferredErrors?: ErrorSetType;
   isMethod: boolean;
@@ -141,7 +142,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps one operation of the interpreter in one place.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps one operation of the interpreter in one place.
   private callDeclaration(
     ref: FnRef,
     receiver: TExpr | undefined,
@@ -165,7 +166,8 @@ export abstract class CallCompiler extends BuiltinCompiler {
       const declared = this.parameterType(
         ref.decl,
         index,
-        args.map((each) => each.type)
+        args.map((each) => each.type),
+        args.map((arg) => (isComptimeOnly(arg.type) ? arg : undefined))
       );
       declaredTypes.push(declared);
       const compiled = isTExpr(arg) ? arg : this.compile(arg, declared);
@@ -174,10 +176,10 @@ export abstract class CallCompiler extends BuiltinCompiler {
       else args.push(compiled);
     }
     const argTypes = args.map((arg) => arg.type);
-    const instance = this.instantiate(ref, argTypes, expression);
+    const instance = this.instantiate(ref, argTypes, expression, args);
     void resultType;
     for (const [index, arg] of args.entries()) {
-      if (declaredTypes[index] === undefined && isComptimeOnly(arg.type)) {
+      if (declaredTypes[index] === undefined && isComptimeOnly(arg.type) && (arg.type.kind === 'type' || !arg.known)) {
         this.error(
           params[index],
           'anytype の引数に、コンパイルのときだけの値（型や comptime_int など）を渡すことは、この採点環境では使えません。'
@@ -186,11 +188,14 @@ export abstract class CallCompiler extends BuiltinCompiler {
     }
     const evaluators = args.map((arg) => (frame: Frame) => copyForFrame(frame, arg.eval(frame), arg.type));
     const row = expression.row;
-    return runtime(
+    const call = runtime(
       instance.returnType,
       (frame) => this.invoke(instance, evaluateHeld(frame, evaluators), row, frame, true),
       expression
     );
+    return isComptimeOnly(instance.returnType)
+      ? known(instance.returnType, this.evaluateAtCompileTime(call), expression)
+      : call;
   }
 
   /** Passes a method's receiver, taking its address or dereferencing it to match the first parameter. */
@@ -217,21 +222,36 @@ export abstract class CallCompiler extends BuiltinCompiler {
   private parameterType(
     decl: Extract<Decl, { kind: 'fn' }>,
     index: number,
-    previous: readonly Type[]
+    previous: readonly Type[],
+    values: readonly (TExpr | undefined)[] = []
   ): Type | undefined {
     const param = decl.syntax.params[index];
     if (!param?.type) return undefined;
     const typeExpression = param.type;
-    return this.inParameterScope(decl, previous, () => this.compileType(typeExpression));
+    return this.inParameterScope(decl, previous, () => this.compileType(typeExpression), values);
   }
 
   /** Runs code in a function's declaration scope with its first parameters bound, for types that refer to them. */
-  private inParameterScope<T>(decl: Extract<Decl, { kind: 'fn' }>, types: readonly Type[], run: () => T): T {
+  private inParameterScope<T>(
+    decl: Extract<Decl, { kind: 'fn' }>,
+    types: readonly Type[],
+    run: () => T,
+    values: readonly (TExpr | undefined)[] = []
+  ): T {
     const locals = new Map<string, LocalBinding>();
     for (const [index, type] of types.entries()) {
       const param = decl.syntax.params[index];
       if (param && param.name !== '_') {
-        locals.set(param.name, { kind: 'local', name: param.name, slot: -1, type, isConst: true, known: false });
+        const argument = values[index];
+        locals.set(param.name, {
+          kind: 'local',
+          name: param.name,
+          slot: -1,
+          type,
+          isConst: true,
+          known: argument?.known ?? false,
+          value: argument?.value,
+        });
       }
     }
     const namespace = decl.namespace;
@@ -240,33 +260,47 @@ export abstract class CallCompiler extends BuiltinCompiler {
   }
 
   /** The instance of a function for argument types, compiling its body the first time. */
-  instantiate(ref: FnRef, argTypes: readonly Type[], span: Span): FunctionInstance {
+  // code-gauge-allow functionCognitiveComplexity 19 -- Resolves parameter and return types in the same specialization scope.
+  // code-gauge-allow functionNcss 33 -- Keeps specialization identity and its compilation inputs together.
+  instantiate(ref: FnRef, argTypes: readonly Type[], span: Span, args: readonly TExpr[] = []): FunctionInstance {
     const { decl } = ref;
     const syntax = decl.syntax;
     const paramTypes: Type[] = [];
+    const comptimeArgs = args.map((arg) => (isComptimeOnly(arg.type) && arg.known ? arg : undefined));
     for (const [index, param] of syntax.params.entries()) {
-      const type = param.type ? this.parameterType(decl, index, paramTypes) : argTypes[index];
+      const type = param.type ? this.parameterType(decl, index, paramTypes, comptimeArgs) : argTypes[index];
       if (!type)
         this.error(span, `関数「${syntax.name}」は anytype の引数を持つので、呼び出さずに値としては使えません。`);
       paramTypes.push(type);
     }
-    const key = `${this.idOf(decl)}(${paramTypes.map((type) => this.idOf(type as object)).join(',')})`;
+    const key = JSON.stringify([
+      this.idOf(decl),
+      paramTypes.map((type, index) => [
+        this.idOf(type as object),
+        comptimeArgs[index] ? scalarValueKey(comptimeArgs[index].value) : undefined,
+      ]),
+    ]);
     const existing = this.instances.get(key);
     if (existing) {
       if (existing.state === 'pending' && this.resolvingFields === 0) this.compilePendingBodies();
       return existing;
     }
-    const { returnType, inferredErrors } = this.inParameterScope(decl, paramTypes, () => {
-      const payload = this.compileType(syntax.returnType);
-      if (!syntax.inferredErrorSet) return { returnType: payload, inferredErrors: undefined };
-      const errors: ErrorSetType = {
-        kind: 'error_set',
-        names: new Set(),
-        inferredFrom: syntax.name,
-        resolved: false,
-      };
-      return { returnType: errorUnionOf(errors, payload), inferredErrors: errors };
-    });
+    const { returnType, inferredErrors } = this.inParameterScope(
+      decl,
+      paramTypes,
+      () => {
+        const payload = this.compileType(syntax.returnType);
+        if (!syntax.inferredErrorSet) return { returnType: payload, inferredErrors: undefined };
+        const errors: ErrorSetType = {
+          kind: 'error_set',
+          names: new Set(),
+          inferredFrom: syntax.name,
+          resolved: false,
+        };
+        return { returnType: errorUnionOf(errors, payload), inferredErrors: errors };
+      },
+      comptimeArgs
+    );
     const instance = new FunctionInstance(syntax.name, paramTypes, returnType);
     instance.internal = decl.namespace.internal ?? false;
     instance.isAtomic = !instance.internal && this.atomicRow(syntax);
@@ -278,6 +312,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
         syntax,
         namespace: decl.namespace,
         paramTypes,
+        comptimeArgs,
         returnType,
         inferredErrors,
         isMethod,

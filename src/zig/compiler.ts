@@ -1,8 +1,10 @@
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
+import { panic } from './arith';
 import type { FunctionDeclaration, SourceFile, Span } from './ast';
 import { checkSource } from './astCheck';
+import { duringComptime } from './comptimeMemory';
 import type { FunctionInstance } from './functions';
 import { parseZig } from './parse';
 import './library/registry';
@@ -155,8 +157,15 @@ class Compiler extends StatementCompiler {
       undefined,
       0
     );
+    frame.slots = new Proxy(frame.slots, {
+      get: (target, key, receiver) => {
+        if (typeof key === 'string' && /^\d+$/.test(key)) panic('unable to resolve comptime value');
+        return Reflect.get(target, key, receiver);
+      },
+      set: () => panic('unable to resolve comptime value'),
+    });
     try {
-      return expression.eval(frame);
+      return duringComptime(() => expression.eval(frame));
     } catch (error) {
       if (error instanceof ZigPanic)
         return this.error(expression.span, `コンパイルのときの計算が失敗しました: ${error.text}`);

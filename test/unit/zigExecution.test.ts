@@ -1414,7 +1414,7 @@ test('replacement size queries and allocating transforms check expansion before 
   ]) {
     const source =
       prefix +
-      `const parts:[1000][]const u8=@splat(&replacement);_= &parts;_= &input;const value=${expression} catch|err|{std.debug.print("{s}",.{@errorName(err)});return;};std.debug.print("{}",.{value.len});}`;
+      `const parts:[1000][]const u8=@splat(&replacement);_= &parts;_= &input;const value=${expression} catch |err|{std.debug.print("{s}",.{@errorName(err)});return;};std.debug.print("{}",.{value.len});}`;
     expect(executeProgram('zig', source)).toMatchObject({
       kind: 'executed',
       stderr: 'OutOfMemory',
@@ -2638,7 +2638,7 @@ test('known optional captures retain compile-time payloads and skip unselected s
 });
 
 test('known error unions select handlers with their own payload type and known captures', () => {
-  const source = `const std=@import("std");pub fn main()void{const ok:error{Bad}!u8=1;if(ok)|x|{std.debug.print("{} ",.{x});}else|err|{const bad:u8=300;_=bad;_=err;}const e:error{Bad}!u8=error.Bad;const a=e catch 1000;const b=e catch|err| @errorName(err);std.debug.print("{} {s}",.{a,b});}`;
+  const source = `const std=@import("std");pub fn main()void{const ok:error{Bad}!u8=1;if(ok)|x|{std.debug.print("{} ",.{x});}else|err|{const bad:u8=300;_=bad;_=err;}const e:error{Bad}!u8=error.Bad;const a=e catch 1000;const b=e catch |err| @errorName(err);std.debug.print("{} {s}",.{a,b});}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
     stderr: '1 1000 Bad',
@@ -2647,7 +2647,7 @@ test('known error unions select handlers with their own payload type and known c
 });
 
 test('resolved empty error sets skip catch and if handlers while retaining calls', () => {
-  const source = `const std=@import("std");fn inferred()!void{std.debug.print("a",.{});}fn explicit()error{}!u8{std.debug.print("b",.{});return 4;}pub fn main()void{inferred() catch|err|{_=err;};if(explicit())|x|{std.debug.print("{}",.{x});}else|err|{_=err;}}`;
+  const source = `const std=@import("std");fn inferred()!void{std.debug.print("a",.{});}fn explicit()error{}!u8{std.debug.print("b",.{});return 4;}pub fn main()void{inferred() catch |err|{_=err;};if(explicit())|x|{std.debug.print("{}",.{x});}else|err|{_=err;}}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
     stderr: 'ab4',
@@ -2656,10 +2656,94 @@ test('resolved empty error sets skip catch and if handlers while retaining calls
 });
 
 test('recursive inferred error sets retain reachable handlers', () => {
-  const source = `const std=@import("std");fn recurse(n:u8)!void{if(n==0)return error.Bad;try recurse(n-1);}pub fn main()void{recurse(2) catch|err|{std.debug.print("{s}",.{@errorName(err)});};}`;
+  const source = `const std=@import("std");fn recurse(n:u8)!void{if(n==0)return error.Bad;try recurse(n-1);}pub fn main()void{recurse(2) catch |err|{std.debug.print("{s}",.{@errorName(err)});};}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
     stderr: 'Bad',
+    uncaughtException: undefined,
+  });
+});
+
+test('anytype specializes numeric literals by value and keeps void helpers at runtime', () => {
+  const source = `const std=@import("std");fn tw(v:anytype)@TypeOf(v){return v+v;}fn show(v:anytype)void{std.debug.print("{d}",.{v});}fn make(n:anytype)[n]u8{return @splat(7);}pub fn main()void{std.debug.print("{d} {d} {d} {any}|",.{tw(3),tw(5),tw(1.5),make(2)});show(5);show(7);}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '6 10 3 { 7, 7 }|57',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'var t:u32=100;const c:u32=t;',
+  'const c:u32=t;var t:u32=100;',
+  'var t:u32=100;var c:u32=t+1;',
+  'var t:u32=100;const p=&t;const c:u32=p.*;',
+  'var a:[2]u8=.{1,2};const c:u8=a[0];',
+  'const S=struct{x:u8};var s:S=.{.x=3};const c:u8=s.x;',
+  'var t:u32=100;fn read()u32{return t;}const c:u32=read();',
+])('container initializers reject runtime memory reads: %s', (declarations) => {
+  expect(
+    executeProgram('zig', `const std=@import("std");${declarations}pub fn main()void{std.debug.print("{any}",.{c});}`)
+      .kind
+  ).toBe('compileError');
+});
+
+test('container initializers allow pure calls, constant storage, addresses and array type lengths', () => {
+  const source = `const std=@import("std");fn pure(x:u32)u32{return x+1;}var t:u32=pure(4);var a:[2]u8=.{1,2};const p=&a;const n=a.len;const m=p.len;const same=&t==&t;const s:[]const u8="abc";var count:usize=s.len;pub fn main()void{std.debug.print("{} {} {} {} {}",.{t,n,m,same,count});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '5 2 2 true 3',
+    uncaughtException: undefined,
+  });
+});
+
+test('comptime-only return values reject runtime argument reads and output effects', () => {
+  for (const body of [
+    'fn f(v:u8)comptime_int{_=v;return 3;}pub fn main()void{var v:u8=2;_=&v;std.debug.print("{}",.{f(v)});}',
+    'fn f(v:anytype)@TypeOf(v){std.debug.print("x",.{});return v;}pub fn main()void{std.debug.print("{}",.{f(3)});}',
+  ])
+    expect(executeProgram('zig', `const std=@import("std");${body}`).kind).toBe('compileError');
+});
+
+test.each(['void', 'struct{}'])('zero-sized ArrayList %s capacity is virtual across growth and shrinking', (type) => {
+  const value = type === 'void' ? '{}' : '.{}';
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var l:std.ArrayList(${type})=.empty;try l.append(init.gpa,${value});try l.resize(init.gpa,3);std.debug.print("{} {}|",.{l.capacity,l.items.len});try l.ensureTotalCapacityPrecise(init.gpa,0);l.shrinkAndFree(init.gpa,1);const c=try l.clone(init.gpa);std.debug.print("{} {} {}",.{l.capacity,c.capacity,c.items.len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '18446744073709551615 3|18446744073709551615 18446744073709551615 1',
+    uncaughtException: undefined,
+  });
+});
+
+test('zero-sized ArrayList initialization needs no allocator bytes and materialization stays bounded', () => {
+  const source = `const std=@import("std");pub fn main()!void{var b:[0]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&b);const g=f.allocator();var l=try std.ArrayList(void).initCapacity(g,0);try l.appendNTimes(g,{},4);l.appendAssumeCapacity({});std.debug.print("{} {} {}",.{l.capacity,l.items.len,f.end_index});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '18446744073709551615 5 0',
+    uncaughtException: undefined,
+  });
+  expect(
+    executeProgram(
+      'zig',
+      `const std=@import("std");pub fn main(init:std.process.Init)!void{var l:std.ArrayList(void)=.empty;try l.appendNTimes(init.gpa,{},1000000000);}`
+    ).kind
+  ).toBe('limitExceeded');
+});
+
+test('ArrayList print reserves before custom formatting while arguments are evaluated first', () => {
+  const source = `const std=@import("std");const S=struct{pub fn format(_:S,w:*std.Io.Writer)std.Io.Writer.Error!void{std.debug.print("format",.{});try w.writeAll("");}};fn argument()S{std.debug.print("arg|",.{});return .{};}pub fn main()void{var b:[1]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&b);var l:std.ArrayList(u8)=.empty;l.print(f.allocator(),"{f}",.{argument()}) catch |e|{std.debug.print("{s}",.{@errorName(e)});};}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'arg|OutOfMemory',
+    uncaughtException: undefined,
+  });
+});
+
+test('ArrayList allocating writer retains partial output when later growth fails', () => {
+  const source = `const std=@import("std");const S=struct{pub fn format(_:S,w:*std.Io.Writer)std.Io.Writer.Error!void{try w.writeAll("abc");try w.writeAll("${'x'.repeat(180)}");}};pub fn main()void{var b:[150]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&b);var l:std.ArrayList(u8)=.empty;l.print(f.allocator(),"{f}",.{S{}}) catch |e|{std.debug.print("{s}|{s}|{}",.{@errorName(e),l.items,l.capacity});};}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'OutOfMemory|abc|132',
     uncaughtException: undefined,
   });
 });

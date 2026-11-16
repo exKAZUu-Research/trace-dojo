@@ -7,10 +7,19 @@ import { CONST_U8_SLICE, pointerTo, type StructField, type Type, typeName } from
 import { compileTimeReadable, ErrorValue, Pointer, type Value, type ZStruct } from '../values';
 import { bufferedBytes, bufferingWriter, WRITER, type WriterState, writerState, writerValue, writeTo } from './writer';
 
-export type CompiledPrint = (frame: Frame, destination?: WriterState) => number[];
+export interface PreparedPrint {
+  args: ZStruct;
+  write: (destination?: WriterState) => number[];
+}
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Checks the complete format against its argument types.
-// code-gauge-allow functionNcss 39 -- Keeps format checking and the resulting formatter together.
+export interface CompiledPrint {
+  (frame: Frame, destination?: WriterState): number[];
+  prepare: (frame: Frame) => PreparedPrint;
+  formatLength: number;
+}
+
+// code-gauge-allow functionCognitiveComplexity 22 -- Checks the complete format against its argument types.
+// code-gauge-allow functionNcss 41 -- Keeps format checking and the resulting formatter together.
 export function compilePrint(sema: SemaApi, formatArg: Expression, argsArg: Expression, span: Span): CompiledPrint {
   const format = sema.compile(formatArg, CONST_U8_SLICE);
   if (!format.known || !compileTimeReadable(format.value))
@@ -48,16 +57,25 @@ export function compilePrint(sema: SemaApi, formatArg: Expression, argsArg: Expr
     }
   }
   const evaluate = args.eval;
-  return (frame, suppliedDestination) => {
-    const destination = suppliedDestination ?? bufferingWriter();
+  const prepare = (frame: Frame): PreparedPrint => {
     const args = copyForFrame(frame, evaluate(frame), type) as ZStruct;
-    return withHeldValues(frame, [args], () => {
-      appendSegments(frame, destination, segments, fields, args, info, (arg, value) =>
-        (formatMethods.get(arg) as FormatMethod)(frame, value, destination)
-      );
-      return suppliedDestination ? [] : bufferedBytes(destination);
-    });
+    return {
+      args,
+      write: (suppliedDestination) => {
+        const destination = suppliedDestination ?? bufferingWriter();
+        return withHeldValues(frame, [args], () => {
+          appendSegments(frame, destination, segments, fields, args, info, (arg, value) =>
+            (formatMethods.get(arg) as FormatMethod)(frame, value, destination)
+          );
+          return suppliedDestination ? [] : bufferedBytes(destination);
+        });
+      },
+    };
   };
+  return Object.assign((frame: Frame, destination?: WriterState) => prepare(frame).write(destination), {
+    prepare,
+    formatLength: formatBytes.length,
+  });
 }
 
 export function printInto(frame: Frame, destination: WriterState, print: CompiledPrint): Value {

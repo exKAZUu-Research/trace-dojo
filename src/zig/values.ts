@@ -36,6 +36,12 @@ export interface Slots {
 const scalarIdentities = new WeakMap<object, number>();
 let nextScalarIdentity = 1;
 
+const storageAliases = new WeakMap<object, Value[]>();
+
+export function aliasStorage(proxy: Value[], original: Value[]): void {
+  storageAliases.set(proxy, original);
+}
+
 const storageLocations = new WeakMap<object, (index: number) => { storage: object; index: number }>();
 
 export function registerStorageLocation(
@@ -61,7 +67,8 @@ export function storageOverlaps(
 }
 
 export function storageLocation(storage: object, index: number): { storage: object; index: number } {
-  return storageLocations.get(storage)?.(index) ?? { storage, index };
+  const original = storageAliases.get(storage) ?? storage;
+  return storageLocations.get(original)?.(index) ?? { storage: original, index };
 }
 
 const immutableStorage = new WeakSet<object>();
@@ -197,7 +204,8 @@ export class Pointer {
   }
 
   storageLocation(): { storage: object; index: number } {
-    const value = this.load();
+    const slots = this.target.slots;
+    const value = (storageAliases.get(slots) ?? slots)[this.index];
     if (value instanceof ZArray) return storageLocation(value.slots, value.offset);
     return storageLocation(
       this.target instanceof SomeSlots || this.target instanceof SliceLength ? this.target : this.target.slots,

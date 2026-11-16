@@ -1,7 +1,8 @@
+import { allocationSlots } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Span } from '../ast';
 import { sizeOf } from '../layout';
-import type { Frame } from '../runtime';
+import { type Frame, withHeldValues } from '../runtime';
 import { copyForFrame, copyForStorage, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
   errorUnionOf,
@@ -16,7 +17,7 @@ import {
   USIZE,
   VOID,
 } from '../types';
-import { NULL, optionalSome, Pointer, Slice, storeInto, type Value, ZArray, ZStruct } from '../values';
+import { NativeHandle, NULL, optionalSome, Pointer, Slice, storeInto, type Value, ZArray, ZStruct } from '../values';
 import { constSlice, elements } from './common';
 import {
   ALLOCATOR,
@@ -30,6 +31,7 @@ import {
 } from './heap';
 import { addMembers, compileArgs, expectArgs, fnMember, type Member, nativeStateCall, nativeStruct } from './native';
 import { compilePrint, PrintWriteError } from './print';
+import type { WriterState } from './writer';
 
 const SAFETY_STATE = nativeEnum('debug.SafetyLock.State', ['unlocked', 'locked']);
 const SAFETY_LOCK = nativeStruct('debug.SafetyLock', {}, [
@@ -38,6 +40,9 @@ const SAFETY_LOCK = nativeStruct('debug.SafetyLock', {}, [
 
 /** The cache line of the reference toolchain's CPU (aarch64), which sets the first capacity. */
 const CACHE_LINE = 128;
+
+const MAX_CAPACITY = (1n << 64n) - 1n;
+const zeroExtents = new WeakMap<object, number>();
 
 const listTypes = new WeakMap<Type, StructType>();
 
@@ -91,6 +96,12 @@ function growCapacity(minimum: number, child: Type): number {
 
 /** Gives the list exactly `capacity` slots, copying its items to new storage; false when memory runs out. */
 function reallocate(frame: Frame, list: List, capacity: number, child: Type): boolean {
+  if (sizeOf(child) === 0) {
+    list.struct.slots[1] = MAX_CAPACITY;
+    list.capacity = Number(MAX_CAPACITY);
+    if (!zeroExtents.has(list.items.target)) zeroExtents.set(list.items.target, list.items.target.slots.length);
+    return true;
+  }
   const previous = list.capacity > 0 ? list.items.target : undefined;
   const complete = reserveNativeAllocation(frame, list.allocator, capacity, child, previous);
   if (!complete) return false;
@@ -116,7 +127,19 @@ function ensureTotalCapacity(frame: Frame, list: List, capacity: number, child: 
   return reallocate(frame, list, growCapacity(capacity, child), child);
 }
 
-function setLength(list: List, length: number): void {
+function materializeLength(frame: Frame, list: List, length: number): void {
+  if (sizeOf(list.child) !== 0) return;
+  const target = list.items.target;
+  const previous = zeroExtents.get(target) ?? target.slots.length;
+  const needed = list.items.start + length;
+  if (needed <= previous) return;
+  frame.runtime.reserveStorage(allocationSlots(needed - previous, list.child));
+  zeroExtents.set(target, needed);
+  for (let index = target.slots.length; index < needed; index++) target.slots.push(undefinedValue(list.child));
+}
+
+function setLength(list: List, length: number, frame: Frame): void {
+  materializeLength(frame, list, length);
   for (let index = length; index < list.items.length; index++)
     list.items.target.slots[list.items.start + index] = undefinedValue(list.child);
   list.struct.slots[0] = new Slice(list.items.target, list.items.start, length);
@@ -152,12 +175,13 @@ function defineMembers(type: StructType, child: Type): void {
     if (!ensureTotalCapacity(frame, list, list.items.length + values.length, child)) return ERROR_OUT_OF_MEMORY;
     // `addManyAt` slices `items[index..]` after growing the list.
     if (index > list.items.length) panic(`start index ${index} is larger than end index ${list.items.length}`);
+    materializeLength(frame, list, list.items.length + values.length);
     const current = list.items.values().map(copyForStorage);
     const inserted = values.map(copyForStorage);
     const combined = [...current.slice(0, index), ...inserted, ...current.slice(index)];
     for (const [position, value] of combined.entries())
       storeInto(list.items.target, list.items.start + position, value);
-    setLength(list, combined.length);
+    setLength(list, combined.length, frame);
     return undefined;
   };
   const members: Record<string, () => Member> = {
@@ -206,14 +230,16 @@ function defineMembers(type: StructType, child: Type): void {
     }),
     append: method('append', { args: [child], result: allocating(VOID), allocator: true }, (list, [item], frame) => {
       if (!ensureTotalCapacity(frame, list, list.items.length + 1, child)) return ERROR_OUT_OF_MEMORY;
+      materializeLength(frame, list, list.items.length + 1);
       storeInto(list.items.target, list.items.start + list.items.length, item);
-      setLength(list, list.items.length + 1);
+      setLength(list, list.items.length + 1, frame);
       return;
     }),
-    appendAssumeCapacity: method('appendAssumeCapacity', { args: [child], result: VOID }, (list, [item]) => {
+    appendAssumeCapacity: method('appendAssumeCapacity', { args: [child], result: VOID }, (list, [item], frame) => {
       if (list.items.length >= list.capacity) panic(PANIC.unreachable);
+      materializeLength(frame, list, list.items.length + 1);
       storeInto(list.items.target, list.items.start + list.items.length, item);
-      setLength(list, list.items.length + 1);
+      setLength(list, list.items.length + 1, frame);
       return;
     }),
     appendSlice: method(
@@ -227,9 +253,10 @@ function defineMembers(type: StructType, child: Type): void {
       (list, [value, count], frame) => {
         const length = list.items.length + Number(count as bigint);
         if (!ensureTotalCapacity(frame, list, length, child)) return ERROR_OUT_OF_MEMORY;
+        materializeLength(frame, list, length);
         for (let index = list.items.length; index < length; index++)
           storeInto(list.items.target, list.items.start + index, value);
-        setLength(list, length);
+        setLength(list, length, frame);
         return;
       }
     ),
@@ -243,27 +270,27 @@ function defineMembers(type: StructType, child: Type): void {
       { args: [USIZE, constItems], result: allocating(VOID), allocator: true },
       (list, [index, slice], frame) => insertValues(frame, list, Number(index as bigint), elements(slice))
     ),
-    orderedRemove: method('orderedRemove', { args: [USIZE], result: child }, (list, [index]) => {
+    orderedRemove: method('orderedRemove', { args: [USIZE], result: child }, (list, [index], frame) => {
       const position = Number(index as bigint);
       if (position >= list.items.length) indexOutOfBounds(position, list.items.length);
       const values = list.items.values().map(copyForStorage);
       const [removed] = values.splice(position, 1);
       for (const [at, value] of values.entries()) storeInto(list.items.target, list.items.start + at, value);
-      setLength(list, values.length);
+      setLength(list, values.length, frame);
       return removed;
     }),
-    swapRemove: method('swapRemove', { args: [USIZE], result: child }, (list, [index]) => {
+    swapRemove: method('swapRemove', { args: [USIZE], result: child }, (list, [index], frame) => {
       const position = Number(index as bigint);
       if (position >= list.items.length) indexOutOfBounds(position, list.items.length);
       const removed = copyForStorage(list.items.get(position));
       storeInto(list.items.target, list.items.start + position, list.items.get(list.items.length - 1));
-      setLength(list, list.items.length - 1);
+      setLength(list, list.items.length - 1, frame);
       return removed;
     }),
-    pop: method('pop', { args: [], result: optionalOf(child) }, (list) => {
+    pop: method('pop', { args: [], result: optionalOf(child) }, (list, _, frame) => {
       if (list.items.length === 0) return NULL;
       const value = copyForStorage(list.items.get(list.items.length - 1));
-      setLength(list, list.items.length - 1);
+      setLength(list, list.items.length - 1, frame);
       return optionalSome(value, child);
     }),
     getLast: method('getLast', { args: [], result: child, byValue: true }, (list) => {
@@ -276,23 +303,27 @@ function defineMembers(type: StructType, child: Type): void {
     last: method('last', { args: [], result: optionalOf(child), byValue: true }, (list) =>
       list.items.length === 0 ? NULL : optionalSome(list.items.get(list.items.length - 1), child)
     ),
-    clearRetainingCapacity: method('clearRetainingCapacity', { args: [], result: VOID }, (list) => {
-      setLength(list, 0);
+    clearRetainingCapacity: method('clearRetainingCapacity', { args: [], result: VOID }, (list, _, frame) => {
+      setLength(list, 0, frame);
       return;
     }),
     clearAndFree: method('clearAndFree', { args: [], result: VOID, allocator: true }, (list) => {
       freeList(list);
       return;
     }),
-    shrinkRetainingCapacity: method('shrinkRetainingCapacity', { args: [USIZE], result: VOID }, (list, [length]) => {
-      if (Number(length as bigint) > list.items.length) panic(PANIC.unreachable);
-      setLength(list, Number(length as bigint));
-      return;
-    }),
+    shrinkRetainingCapacity: method(
+      'shrinkRetainingCapacity',
+      { args: [USIZE], result: VOID },
+      (list, [length], frame) => {
+        if (Number(length as bigint) > list.items.length) panic(PANIC.unreachable);
+        setLength(list, Number(length as bigint), frame);
+        return;
+      }
+    ),
     orderedRemoveMany: method(
       'orderedRemoveMany',
       { args: [sliceOf(USIZE, true)], result: VOID },
-      (list, [indexes]) => {
+      (list, [indexes], frame) => {
         const sorted = elements(indexes).map((index) => Number(index as bigint));
         const values = list.items.values().map(copyForStorage);
         for (const [position, index] of sorted.entries()) {
@@ -303,7 +334,7 @@ function defineMembers(type: StructType, child: Type): void {
         const kept = values.filter((_, index) => !removed.has(index));
         for (const [position, value] of kept.entries())
           storeInto(list.items.target, list.items.start + position, value);
-        setLength(list, kept.length);
+        setLength(list, kept.length, frame);
         return;
       }
     ),
@@ -313,9 +344,9 @@ function defineMembers(type: StructType, child: Type): void {
       (list, [length], frame) => {
         const size = Number(length as bigint);
         if (size > list.items.length) panic(PANIC.unreachable);
-        setLength(list, size);
+        setLength(list, size, frame);
         // The memory shrinks to the items, in place where the allocator can.
-        reallocate(frame, list, size, child);
+        if (sizeOf(child) !== 0) reallocate(frame, list, size, child);
         return;
       }
     ),
@@ -326,25 +357,25 @@ function defineMembers(type: StructType, child: Type): void {
         const previous = list.items.length;
         const size = previous + Number(count as bigint);
         if (!ensureTotalCapacity(frame, list, size, child)) return ERROR_OUT_OF_MEMORY;
-        setLength(list, size);
+        setLength(list, size, frame);
         return new Slice(list.items.target, list.items.start + previous, size - previous);
       }
     ),
-    unusedCapacitySlice: method(
-      'unusedCapacitySlice',
-      { args: [], result: items, byValue: true },
-      (list) => new Slice(list.items.target, list.items.start + list.items.length, list.capacity - list.items.length)
-    ),
-    appendBounded: method('appendBounded', { args: [child], result: allocating(VOID) }, (list, [item]) => {
+    unusedCapacitySlice: method('unusedCapacitySlice', { args: [], result: items, byValue: true }, (list, _, frame) => {
+      materializeLength(frame, list, list.capacity);
+      return new Slice(list.items.target, list.items.start + list.items.length, list.capacity - list.items.length);
+    }),
+    appendBounded: method('appendBounded', { args: [child], result: allocating(VOID) }, (list, [item], frame) => {
       if (list.items.length >= list.capacity) return ERROR_OUT_OF_MEMORY;
+      materializeLength(frame, list, list.items.length + 1);
       storeInto(list.items.target, list.items.start + list.items.length, item);
-      setLength(list, list.items.length + 1);
+      setLength(list, list.items.length + 1, frame);
       return;
     }),
     resize: method('resize', { args: [USIZE], result: allocating(VOID), allocator: true }, (list, [length], frame) => {
       const size = Number(length as bigint);
       if (!ensureTotalCapacity(frame, list, size, child)) return ERROR_OUT_OF_MEMORY;
-      setLength(list, size);
+      setLength(list, size, frame);
       return;
     }),
     ensureTotalCapacity: method(
@@ -358,7 +389,7 @@ function defineMembers(type: StructType, child: Type): void {
       { args: [USIZE], result: allocating(VOID), allocator: true },
       (list, [capacity], frame) => {
         const size = Number(capacity as bigint);
-        if (list.capacity >= size) return;
+        if (sizeOf(child) !== 0 && list.capacity >= size) return;
         return reallocate(frame, list, size, child) ? undefined : ERROR_OUT_OF_MEMORY;
       }
     ),
@@ -375,7 +406,7 @@ function defineMembers(type: StructType, child: Type): void {
       { args: [], result: allocating(pointerTo(child, false)), allocator: true },
       (list, _, frame) => {
         if (!ensureTotalCapacity(frame, list, list.items.length + 1, child)) return ERROR_OUT_OF_MEMORY;
-        setLength(list, list.items.length + 1);
+        setLength(list, list.items.length + 1, frame);
         return new Pointer(list.items.target, list.items.start + list.items.length - 1);
       }
     ),
@@ -394,18 +425,18 @@ function defineMembers(type: StructType, child: Type): void {
       const copy = listOf(emptyList(), child);
       copy.allocator = list.allocator;
       if (!reallocate(frame, copy, list.capacity, child)) return ERROR_OUT_OF_MEMORY;
+      materializeLength(frame, copy, list.items.length);
       for (let index = 0; index < list.items.length; index++)
         storeInto(copy.items.target, copy.items.start + index, list.items.get(index));
-      setLength(copy, list.items.length);
+      setLength(copy, list.items.length, frame);
       return copy.struct;
     }),
-    allocatedSlice: method(
-      'allocatedSlice',
-      { args: [], result: items, byValue: true },
-      (list) => new Slice(list.items.target, list.items.start, list.capacity)
-    ),
-    expandToCapacity: method('expandToCapacity', { args: [], result: VOID }, (list) => {
-      setLength(list, list.capacity);
+    allocatedSlice: method('allocatedSlice', { args: [], result: items, byValue: true }, (list, _, frame) => {
+      materializeLength(frame, list, list.capacity);
+      return new Slice(list.items.target, list.items.start, list.capacity);
+    }),
+    expandToCapacity: method('expandToCapacity', { args: [], result: VOID }, (list, _, frame) => {
+      setLength(list, list.capacity, frame);
       return;
     }),
     replaceRange: method(
@@ -426,7 +457,7 @@ function defineMembers(type: StructType, child: Type): void {
         const combined = [...values.slice(0, from), ...replacement, ...values.slice(from + count)];
         for (const [position, value] of combined.entries())
           storeInto(list.items.target, list.items.start + position, value);
-        setLength(list, combined.length);
+        setLength(list, combined.length, frame);
         return;
       }
     ),
@@ -443,16 +474,51 @@ function defineMembers(type: StructType, child: Type): void {
         call.span,
         (frame) => ({ receiver: list(frame) }),
         (state, [allocator], frame) => {
-          let bytes: bigint[];
-          try {
-            bytes = print(frame).map(BigInt);
-          } catch (error) {
-            if (error instanceof PrintWriteError) return ERROR_OUT_OF_MEMORY;
-            throw error;
-          }
-          const received = listOf(state.receiver, child);
-          received.allocator = allocatorState(allocator);
-          return insertValues(frame, received, received.items.length, bytes);
+          const prepared = print.prepare(frame);
+          return withHeldValues(frame, [prepared.args], () => {
+            const received = listOf(state.receiver, child);
+            received.allocator = allocatorState(allocator);
+            if (!ensureTotalCapacity(frame, received, received.items.length + print.formatLength, child))
+              return ERROR_OUT_OF_MEMORY;
+            const owner = received.struct;
+            received.struct = new ZStruct(owner.slots.map(copyForStorage));
+            storeInto(owner, 0, new Slice(new ZArray([]), 0, 0));
+            owner.slots[1] = 0n;
+            const destination: WriterState = {
+              fd: undefined,
+              buffer: new Slice(received.items.target, received.items.start, received.capacity),
+              end: received.items.length,
+              capacity: received.capacity,
+              growth: new NativeHandle('writerGrowth', {
+                grow: (frame: Frame, writer: WriterState, end: number) => {
+                  setLength(received, writer.end, frame);
+                  if (!ensureTotalCapacity(frame, received, end + 1, child)) return false;
+                  writer.buffer = new Slice(received.items.target, received.items.start, received.capacity);
+                  writer.capacity = received.capacity;
+                  return true;
+                },
+              }),
+            };
+            return withHeldValues(frame, [received.struct], () => {
+              let completed = false;
+              try {
+                prepared.write(destination);
+                completed = true;
+                return;
+              } catch (error) {
+                if (error instanceof PrintWriteError) {
+                  completed = true;
+                  return ERROR_OUT_OF_MEMORY;
+                }
+                throw error;
+              } finally {
+                if (completed) {
+                  setLength(received, destination.end, frame);
+                  for (const [index, value] of received.struct.slots.entries()) storeInto(owner, index, value);
+                }
+              }
+            });
+          });
         }
       );
     });

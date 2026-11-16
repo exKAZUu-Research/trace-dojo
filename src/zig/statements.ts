@@ -108,8 +108,8 @@ export abstract class StatementCompiler extends CallCompiler {
 
   // Functions -------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 35 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionNcss 37 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected compileFunctionBody(compilation: FunctionCompilation): void {
     const { instance, syntax, namespace } = compilation;
     instance.state = 'compiling';
@@ -141,7 +141,8 @@ export abstract class StatementCompiler extends CallCompiler {
               slot,
               type,
               isConst: true,
-              known: false,
+              known: compilation.comptimeArgs[index]?.known ?? false,
+              value: compilation.comptimeArgs[index]?.value,
             };
             locals.set(param.name, binding);
             const isReceiver = compilation.isMethod && index === 0 && isSelfType(type, namespace);
@@ -1120,6 +1121,7 @@ export abstract class StatementCompiler extends CallCompiler {
     );
   }
 
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps known capture facts and their lexical runtime initialization together.
   private selectedBranch(
     expression: Expression | undefined,
     capture: ReturnType<StatementCompiler['captureBinding']>,
@@ -2290,8 +2292,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** `x catch handler`; with `discarded`, as in `_ = x catch handler`, the payload and handler need no common type. */
-  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps error-union analysis and handler evaluation together.
-  // code-gauge-allow functionNcss 42 -- Keeps the success and error result conversions together.
+  // code-gauge-allow functionNcss 53 -- Keeps the success and error result conversions together.
   protected compileCatch(expression: ExpressionOf<'catch'>, resultType: Type | undefined, discarded = false): TExpr {
     const operand = this.compile(expression.operand);
     const type = operand.type;
