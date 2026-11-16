@@ -354,7 +354,9 @@ lexFracExp ('.':c:cs) | isDigit c = [('.' : ds ++ e, u) | (ds, t) <- lexDigits (
 lexFracExp s = lexExp s
 
 lexExp :: ReadS String
-lexExp (e:s) | e ${BT}elem${BT} "eE" = [(e : c : ds, u) | (c:t) <- [s], c ${BT}elem${BT} "+-", (ds, u) <- lexDigits t] ++ [(e : ds, t) | (ds, t) <- lexDigits s]
+lexExp input@(e:s) | e ${BT}elem${BT} "eE" =
+  let results = [(e : c : ds, u) | (c:t) <- [s], c ${BT}elem${BT} "+-", (ds, u) <- lexDigits t] ++ [(e : ds, t) | (ds, t) <- lexDigits s]
+  in if null results then [("", input)] else results
 lexExp s = [("", s)]
 
 lexDigits :: ReadS String

@@ -181,14 +181,14 @@ test('handle output actions remain lazy until executed', () => {
   });
 });
 
-test('encodeFloat handles extreme scaling and rounds directly to Float', () => {
+test('encodeFloat handles extreme scaling and GHC Float conversion', () => {
   const source = `main = do
   print (encodeFloat 1 9223372036854775807 :: Double, encodeFloat 1 (-9223372036854775807) :: Double, encodeFloat (-1) (-9223372036854775807) :: Double)
   print (encodeFloat 0 9223372036854775807 :: Float, encodeFloat 18014399583223809 0 :: Float, encodeFloat 1 (-149) :: Float)`;
   expect(executeProgram('haskell', source)).toMatchObject({
     kind: 'executed',
     uncaughtException: undefined,
-    stdout: '(Infinity,0.0,-0.0)\n(0.0,1.80144e16,1.0e-45)\n',
+    stdout: '(Infinity,0.0,-0.0)\n(0.0,1.8014399e16,1.0e-45)\n',
   });
 });
 

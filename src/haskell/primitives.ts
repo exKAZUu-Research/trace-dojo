@@ -3,6 +3,7 @@ import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { CONS_CON, tupleCon, UNIT_CON } from './builtinTypes';
 import type { ConInfo } from './entities';
 import { cons, NIL, nullary, type PrimResult, unpackString } from './machine';
+import { platformPower } from './platformMath';
 import type { Runtime } from './runtime';
 import {
   ConValue,
@@ -215,31 +216,6 @@ strict('wordShiftR', 2, ([a, b]) => (shiftCount(b) >= 64n ? 0n : (a as bigint) >
 strict('wordPopCount', 1, ([a]) => BigInt(countOnes(a as bigint)));
 strict('integerToInt', 1, ([a]) => wrapInt(a as bigint));
 strict('intToInteger', 1, ([a]) => a);
-strict('integerPow', 2, ([a, b], runtime) => {
-  const exponent = b as bigint;
-  const base = a as bigint;
-  const bits = (base < 0n ? -base : base).toString(2).length;
-  runtime.spend(Math.ceil((bits * Number(exponent)) / 4096) + 1);
-  return base ** exponent;
-});
-strict('intPow', 2, ([a, b]) => {
-  let result = 1n;
-  let base = a as bigint;
-  let exponent = b as bigint;
-  while (exponent > 0n) {
-    if (exponent & 1n) result = wrapInt(result * base);
-    base = wrapInt(base * base);
-    exponent >>= 1n;
-  }
-  return result;
-});
-strict('integerGcd', 2, ([a, b]) => {
-  let x = (a as bigint) < 0n ? -(a as bigint) : (a as bigint);
-  let y = (b as bigint) < 0n ? -(b as bigint) : (b as bigint);
-  while (y !== 0n) [x, y] = [y, x % y];
-  return x;
-});
-
 // Bits
 strict('intRotate', 2, ([a, b]) => wrapInt(rotate64(a as bigint, b as bigint)));
 strict('wordRotate', 2, ([a, b]) => rotate64(a as bigint, b as bigint));
@@ -317,8 +293,7 @@ function defineFloating(prefix: 'double' | 'float', round: (value: number) => nu
     Atanh: Math.atanh,
   };
   for (const [name, op] of Object.entries(unary)) strict(`${prefix}${name}`, 1, ([a]) => round(op(a as number)));
-  strict(`${prefix}Pow`, 2, ([a, b]) => round((a as number) ** (b as number)));
-  strict(`${prefix}Atan2`, 2, ([a, b]) => round(Math.atan2(a as number, b as number)));
+  strict(`${prefix}Pow`, 2, ([a, b]) => platformPower(a as number, b as number, prefix === 'float'));
   strict(`${prefix}IsNaN`, 1, ([a]) => bool(Number.isNaN(a)));
   strict(`${prefix}IsInfinite`, 1, ([a]) => bool(a === Number.POSITIVE_INFINITY || a === Number.NEGATIVE_INFINITY));
   strict(`${prefix}IsNegativeZero`, 1, ([a]) => bool(Object.is(a, -0)));
@@ -371,16 +346,6 @@ strict('floatToDouble', 1, ([a]) => a);
 export function decodeFloat(value: number, isFloat: boolean): { mantissa: bigint; exponent: number } {
   const bits = isFloat ? 24 : 53;
   if (value === 0) return { mantissa: 0n, exponent: 0 };
-  if (!Number.isFinite(value)) {
-    // GHC decodes the IEEE bit pattern: infinity as 2^(bits-1) * 2^(max exponent), NaN with its payload.
-    const sign = value < 0 ? -1n : 1n;
-    if (Number.isNaN(value)) {
-      return isFloat ? { mantissa: -12_582_912n, exponent: 105 } : { mantissa: -6_755_399_441_055_744n, exponent: 972 };
-    }
-    return isFloat
-      ? { mantissa: sign * 8_388_608n, exponent: 105 }
-      : { mantissa: sign * 4_503_599_627_370_496n, exponent: 972 };
-  }
   const view = new DataView(new ArrayBuffer(8));
   if (isFloat) {
     view.setFloat32(0, value);
@@ -432,7 +397,7 @@ function encodeFloat(mantissa: bigint, exponent: number, isFloat: boolean, runti
   runtime.spend(Math.ceil((bits + Math.abs(exponent)) / 64));
   const numerator = exponent >= 0 ? mantissa << BigInt(exponent) : mantissa;
   const denominator = exponent >= 0 ? 1n : 1n << BigInt(-exponent);
-  return isFloat ? rationalToFloat(numerator, denominator) : rationalToDouble(numerator, denominator);
+  return isFloat ? Math.fround(rationalToDouble(numerator, denominator)) : rationalToDouble(numerator, denominator);
 }
 
 /** The double nearest to n/d, rounding half to even. */
@@ -765,6 +730,46 @@ define(
         return unit();
       },
       [handle, text]
+    )
+);
+define(
+  'hFlush',
+  1,
+  [],
+  ([handle], runtime) =>
+    new IOPrim(
+      'hFlush',
+      () => {
+        runtime.machine.force(handle);
+        return unit();
+      },
+      [handle]
+    )
+);
+define(
+  'hSetBuffering',
+  2,
+  [],
+  ([handle, mode], runtime) =>
+    new IOPrim(
+      'hSetBuffering',
+      () => {
+        runtime.machine.force(handle);
+        const buffering = runtime.machine.force(mode) as ConValue;
+        if (buffering.con.name === 'BlockBuffering') {
+          const size = runtime.machine.force(buffering.fields[0]) as ConValue;
+          if (size.con.name === 'Just') {
+            const count = runtime.machine.force(size.fields[0]) as bigint;
+            if (count <= 0n)
+              throw new HaskellException(
+                `hSetBuffering: invalid argument (illegal buffer size (${count}))`,
+                'IOException'
+              );
+          }
+        }
+        return unit();
+      },
+      [handle, mode]
     )
 );
 define('divZeroError', 0, [], () => {

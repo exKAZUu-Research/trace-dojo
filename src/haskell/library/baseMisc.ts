@@ -92,10 +92,10 @@ hPrint :: Show a => Handle -> a -> IO ()
 hPrint h x = hPutStrLn h (show x)
 
 hFlush :: Handle -> IO ()
-hFlush _ = return ()
+hFlush = primitive "hFlush"
 
 hSetBuffering :: Handle -> BufferMode -> IO ()
-hSetBuffering _ _ = return ()
+hSetBuffering = primitive "hSetBuffering"
 
 -- Turtles
 
@@ -477,17 +477,35 @@ unfoldr f b0 = case f b0 of
   Just (a, b) -> a : unfoldr f b
   Nothing -> []
 
-mapAccumL :: (s -> a -> (s, b)) -> s -> [a] -> (s, [b])
-mapAccumL _ s [] = (s, [])
-mapAccumL f s (x:xs) = let (s', y) = f s x
-                           (s'', ys) = mapAccumL f s' xs
-                       in (s'', y : ys)
+data Accum s a = Accum (s -> (s,a))
 
-mapAccumR :: (s -> a -> (s, b)) -> s -> [a] -> (s, [b])
-mapAccumR _ s [] = (s, [])
-mapAccumR f s (x:xs) = let (s', ys) = mapAccumR f s xs
-                           (s'', y) = f s' x
-                       in (s'', y : ys)
+runAccum :: Accum s a -> s -> (s,a)
+runAccum (Accum f) = f
+
+instance Functor (Accum s) where
+  fmap f (Accum g) = Accum (\s -> let (next,x) = g s in (next,f x))
+
+instance Applicative (Accum s) where
+  pure x = Accum (\s -> (s,x))
+  Accum f <*> Accum g = Accum (\s -> let (s1,h) = f s; (s2,x) = g s1 in (s2,h x))
+
+data AccumR s a = AccumR (s -> (s,a))
+
+runAccumR :: AccumR s a -> s -> (s,a)
+runAccumR (AccumR f) = f
+
+instance Functor (AccumR s) where
+  fmap f (AccumR g) = AccumR (\s -> let (next,x) = g s in (next,f x))
+
+instance Applicative (AccumR s) where
+  pure x = AccumR (\s -> (s,x))
+  AccumR f <*> AccumR g = AccumR (\s -> let (s1,x) = g s; (s2,h) = f s1 in (s2,h x))
+
+mapAccumL :: Traversable t => (s -> a -> (s,b)) -> s -> t a -> (s,t b)
+mapAccumL f s xs = runAccum (traverse (\x -> Accum (\acc -> f acc x)) xs) s
+
+mapAccumR :: Traversable t => (s -> a -> (s,b)) -> s -> t a -> (s,t b)
+mapAccumR f s xs = runAccumR (traverse (\x -> AccumR (\acc -> f acc x)) xs) s
 
 zip4 :: [a] -> [b] -> [c] -> [d] -> [(a, b, c, d)]
 zip4 = zipWith4 (\a b c d -> (a, b, c, d))
@@ -662,6 +680,100 @@ instance Ord a => Ord (Down a) where
 
 instance Show a => Show (Down a) where
   showsPrec d (Down x) = showParen (d >= 11) (showString "Down " . showsPrec 11 x)
+
+instance Read a => Read (Down a) where
+  readsPrec d = readParen (d > 10) (\r -> [(Down x,t) | ("Down",s) <- lex r, (x,t) <- readsPrec 11 s])
+
+instance Bounded a => Bounded (Down a) where
+  minBound = Down maxBound
+  maxBound = Down minBound
+
+instance (Enum a, Bounded a, Eq a) => Enum (Down a) where
+  succ (Down x) = Down (pred x)
+  pred (Down x) = Down (succ x)
+  fromEnum (Down x) = complement (fromEnum x)
+  toEnum n = Down (toEnum (complement n))
+  enumFrom (Down x) = if x == minBound then [Down x] else map Down (enumFromThen x (pred x))
+  enumFromThen (Down x) (Down y) = map Down (enumFromThen x y)
+
+instance Functor Down where
+  fmap f (Down x) = Down (f x)
+
+instance Applicative Down where
+  pure = Down
+  Down f <*> Down x = Down (f x)
+
+instance Monad Down where
+  Down x >>= f = f x
+
+instance Foldable Down where
+  foldMap f (Down x) = f x
+
+instance Traversable Down where
+  traverse f (Down x) = Down <$> f x
+
+instance Semigroup a => Semigroup (Down a) where
+  Down x <> Down y = Down (x <> y)
+
+instance Monoid a => Monoid (Down a) where
+  mempty = Down mempty
+
+instance Num a => Num (Down a) where
+  Down x + Down y = Down (x + y)
+  Down x - Down y = Down (x - y)
+  Down x * Down y = Down (x * y)
+  negate (Down x) = Down (negate x)
+  abs (Down x) = Down (abs x)
+  signum (Down x) = Down (signum x)
+  fromInteger x = Down (fromInteger x)
+
+instance Real a => Real (Down a) where
+  toRational (Down x) = toRational x
+
+instance Fractional a => Fractional (Down a) where
+  Down x / Down y = Down (x / y)
+  recip (Down x) = Down (recip x)
+  fromRational x = Down (fromRational x)
+
+instance RealFrac a => RealFrac (Down a) where
+  properFraction (Down x) = let (i,f) = properFraction x in (i,Down f)
+
+instance Floating a => Floating (Down a) where
+  pi = Down pi
+  Down x ** Down y = Down (x ** y)
+  logBase (Down x) (Down y) = Down (logBase x y)
+  exp (Down x) = Down (exp x)
+  log (Down x) = Down (log x)
+  sqrt (Down x) = Down (sqrt x)
+  sin (Down x) = Down (sin x)
+  cos (Down x) = Down (cos x)
+  tan (Down x) = Down (tan x)
+  asin (Down x) = Down (asin x)
+  acos (Down x) = Down (acos x)
+  atan (Down x) = Down (atan x)
+  sinh (Down x) = Down (sinh x)
+  cosh (Down x) = Down (cosh x)
+  tanh (Down x) = Down (tanh x)
+  asinh (Down x) = Down (asinh x)
+  acosh (Down x) = Down (acosh x)
+  atanh (Down x) = Down (atanh x)
+
+instance RealFloat a => RealFloat (Down a) where
+  floatRadix (Down x) = floatRadix x
+  floatDigits (Down x) = floatDigits x
+  floatRange (Down x) = floatRange x
+  decodeFloat (Down x) = decodeFloat x
+  encodeFloat m e = Down (encodeFloat m e)
+  exponent (Down x) = exponent x
+  significand (Down x) = Down (significand x)
+  scaleFloat n (Down x) = Down (scaleFloat n x)
+  atan2 (Down y) (Down x) = Down (atan2 y x)
+  isNaN (Down x) = isNaN x
+  isInfinite (Down x) = isInfinite x
+  isDenormalized (Down x) = isDenormalized x
+  isNegativeZero (Down x) = isNegativeZero x
+  isIEEE (Down x) = isIEEE x
+
 `;
 
 /** Standard input and files, which this environment rejects before running, as Java's Scanner and files are. */

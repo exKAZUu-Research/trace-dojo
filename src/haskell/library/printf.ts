@@ -151,7 +151,7 @@ formatOne spec@(Spec minus plus space zero alt width prec c) u = case u of
     digitsMin ds = case prec of
       Just p -> if p == 0 && ds == "0" then "" else replicate (p - length ds) '0' ++ ds
       Nothing -> ds
-    unsigned n bound = if n < 0 && bound > 0 then bound + n else n
+    unsigned n bound = if n < 0 then (if bound > 0 then bound + n else perror "bad argument") else n
     prefixAlt p ds = if alt && not (null ds) && ds /= "0" && not (p == "0" && head ds == '0') then p ++ ds else ds
     signed n ds = if n < 0 then '-' : ds else if plus then '+' : ds else if space then ' ' : ds else ds
     signedDouble d ds = if d < 0 || isNegativeZero d then '-' : ds else if plus then '+' : ds else if space then ' ' : ds else ds
@@ -171,8 +171,9 @@ formatOne spec@(Spec minus plus space zero alt width prec c) u = case u of
       Just w -> let n = w - length s in
         if n <= 0 then s
         else if minus then s ++ replicate n ' '
-        else if zero && numeric && zeroPadding then (case s of
-          (sign:rest) -> if sign ${BT}elem${BT} "+- " then sign : replicate n '0' ++ rest else replicate n '0' ++ s
-          [] -> replicate n '0')
+        else if zero && numeric && zeroPadding then zeroPad n s
         else replicate n ' ' ++ s
+    zeroPad n (sign:rest) | sign ${BT}elem${BT} "+- " = sign : zeroPad n rest
+    zeroPad n ('0':base:rest) | base ${BT}elem${BT} "xXbB" = '0' : base : replicate n '0' ++ rest
+    zeroPad n s = replicate n '0' ++ s
 `;

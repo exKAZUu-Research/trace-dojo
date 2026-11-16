@@ -42,12 +42,6 @@ optional v = (Just <$> v) <|> pure Nothing
 (<**>) = liftA2 (flip ($))
 infixl 4 <**>
 
-fold :: (Foldable t, Monoid m) => t m -> m
-fold = foldMap id
-
-foldMap' :: (Foldable t, Monoid m) => (a -> m) -> t a -> m
-foldMap' f = foldl' (\acc x -> acc <> f x) mempty
-
 fmapDefault :: Traversable t => (a -> b) -> t a -> t b
 fmapDefault = fmap
 

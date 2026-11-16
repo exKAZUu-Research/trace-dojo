@@ -147,7 +147,7 @@ union a b = b ${BT}seq${BT} a ${BT}seq${BT} fromDistinctAscList (mergeUnion (toA
           GT -> y : mergeUnion xs yt
           EQ -> x : mergeUnion xt yt
 
-unions :: Ord a => [Set a] -> Set a
+unions :: (Foldable f, Ord a) => f (Set a) -> Set a
 unions = B.foldl union empty
 
 intersection :: Ord a => Set a -> Set a -> Set a
@@ -226,7 +226,11 @@ maxView STip = Nothing
 maxView s = Just (deleteFindMax s)
 
 elemAt :: Int -> Set a -> a
-elemAt i s = if i < 0 || i >= size s then errorWithoutStackTrace "Set.elemAt: index out of range" else toAscList s !! i
+elemAt i s = if i < 0 || i >= size s then errorWithoutStackTrace "Set.elemAt: index out of range" else at i s
+  where at n (SBin _ x l r) = case compare n (size l) of
+          LT -> at n l
+          EQ -> x
+          GT -> at (n - size l - 1) r
 
 findIndex :: Ord a => a -> Set a -> Int
 findIndex x s = case lookupIndex x s of
@@ -234,7 +238,12 @@ findIndex x s = case lookupIndex x s of
   Nothing -> errorWithoutStackTrace "Set.findIndex: element is not in the set"
 
 lookupIndex :: Ord a => a -> Set a -> Maybe Int
-lookupIndex x s = B.lookup x (zip (toAscList s) [0..])
+lookupIndex x = go 0
+  where go _ STip = Nothing
+        go offset (SBin _ y l r) = case compare x y of
+          LT -> go offset l
+          EQ -> Just (offset + size l)
+          GT -> go (offset + size l + 1) r
 
 take :: Int -> Set a -> Set a
 take n s = fromDistinctAscList (B.take n (toAscList s))
@@ -252,16 +261,16 @@ splitMember :: Ord a => a -> Set a -> (Set a, Bool, Set a)
 splitMember x s = (filter (< x) s, member x s, filter (> x) s)
 
 lookupLT :: Ord a => a -> Set a -> Maybe a
-lookupLT x s = lookupMax (filter (< x) s)
+lookupLT x = nearest (\y -> y < x) False
 
 lookupGT :: Ord a => a -> Set a -> Maybe a
-lookupGT x s = lookupMin (filter (> x) s)
+lookupGT x = nearest (\y -> y > x) True
 
 lookupLE :: Ord a => a -> Set a -> Maybe a
-lookupLE x s = lookupMax (filter (<= x) s)
+lookupLE x = nearest (\y -> y <= x) False
 
 lookupGE :: Ord a => a -> Set a -> Maybe a
-lookupGE x s = lookupMin (filter (>= x) s)
+lookupGE x = nearest (\y -> y >= x) True
 
 instance Eq a => Eq (Set a) where
   a == b = size a == size b && toAscList a == toAscList b
@@ -292,6 +301,17 @@ instance Foldable Set where
   maximum = findMax
   sum s = B.sum (toAscList s)
   product s = B.product (toAscList s)
+
+nearest :: (a -> Bool) -> Bool -> Set a -> Maybe a
+nearest _ _ STip = Nothing
+nearest matches lower (SBin _ x l r) =
+  let preferred = if lower then l else r
+      other = if lower then r else l
+  in if matches x then case nearest matches lower preferred of
+       Just found -> Just found
+       Nothing -> Just x
+     else nearest matches lower other
+
 powerSet :: Set a -> Set (Set a)
 powerSet s = fromDistinctAscList (B.map fromDistinctAscList (subsets (toAscList s)))
   where subsets [] = [[]]
@@ -596,10 +616,10 @@ unionWithKey f a b = b ${BT}seq${BT} a ${BT}seq${BT} fromDistinctAscList (go (to
           GT -> (ky, y) : go xs yt
           EQ -> (kx, f kx x y) : go xt yt
 
-unions :: Ord k => [Map k a] -> Map k a
+unions :: (Foldable f, Ord k) => f (Map k a) -> Map k a
 unions = B.foldl union Tip
 
-unionsWith :: Ord k => (a -> a -> a) -> [Map k a] -> Map k a
+unionsWith :: (Foldable f, Ord k) => (a -> a -> a) -> f (Map k a) -> Map k a
 unionsWith f = B.foldl (unionWith f) Tip
 
 intersection :: Ord k => Map k a -> Map k b -> Map k a
@@ -680,10 +700,19 @@ maxView :: Map k a -> Maybe (a, Map k a)
 maxView m = fmap (\((_, x), m') -> (x, m')) (maxViewWithKey m)
 
 elemAt :: Int -> Map k a -> (k, a)
-elemAt i m = if i < 0 || i >= size m then errorWithoutStackTrace "Map.elemAt: index out of range" else toAscList m !! i
+elemAt i m = if i < 0 || i >= size m then errorWithoutStackTrace "Map.elemAt: index out of range" else at i m
+  where at n (Bin _ k x l r) = case compare n (size l) of
+          LT -> at n l
+          EQ -> (k,x)
+          GT -> at (n - size l - 1) r
 
 lookupIndex :: Ord k => k -> Map k a -> Maybe Int
-lookupIndex k m = B.lookup k (zip (keys m) [0..])
+lookupIndex k = go 0
+  where go _ Tip = Nothing
+        go offset (Bin _ key _ l r) = case compare k key of
+          LT -> go offset l
+          EQ -> Just (offset + size l)
+          GT -> go (offset + size l + 1) r
 
 findIndex :: Ord k => k -> Map k a -> Int
 findIndex k m = case lookupIndex k m of
@@ -700,16 +729,16 @@ splitAt :: Int -> Map k a -> (Map k a, Map k a)
 splitAt n m = (take n m, drop n m)
 
 lookupLT :: Ord k => k -> Map k v -> Maybe (k, v)
-lookupLT k m = lookupMax (filterWithKey (\k' _ -> k' < k) m)
+lookupLT k = nearest (\key -> key < k) False
 
 lookupGT :: Ord k => k -> Map k v -> Maybe (k, v)
-lookupGT k m = lookupMin (filterWithKey (\k' _ -> k' > k) m)
+lookupGT k = nearest (\key -> key > k) True
 
 lookupLE :: Ord k => k -> Map k v -> Maybe (k, v)
-lookupLE k m = lookupMax (filterWithKey (\k' _ -> k' <= k) m)
+lookupLE k = nearest (\key -> key <= k) False
 
 lookupGE :: Ord k => k -> Map k v -> Maybe (k, v)
-lookupGE k m = lookupMin (filterWithKey (\k' _ -> k' >= k) m)
+lookupGE k = nearest (\key -> key >= k) True
 
 split :: Ord k => k -> Map k a -> (Map k a, Map k a)
 split k m = (filterWithKey (\k' _ -> k' < k) m, filterWithKey (\k' _ -> k' > k) m)
@@ -747,6 +776,17 @@ instance Ord k => Semigroup (Map k v) where
 
 instance Ord k => Monoid (Map k v) where
   mempty = Tip
+
+nearest :: (k -> Bool) -> Bool -> Map k a -> Maybe (k,a)
+nearest _ _ Tip = Nothing
+nearest matches lower (Bin _ k x l r) =
+  let preferred = if lower then l else r
+      other = if lower then r else l
+  in if matches k then case nearest matches lower preferred of
+       Just found -> Just found
+       Nothing -> Just (k,x)
+     else nearest matches lower other
+
 mapAccum :: (a -> b -> (a,c)) -> a -> Map k b -> (a,Map k c)
 mapAccum f = mapAccumWithKey (\a _ x -> f a x)
 
@@ -843,7 +883,7 @@ singleton :: k -> a -> Map k a
 singleton k x = x ${BT}seq${BT} L.singleton k x
 
 insert :: Ord k => k -> a -> Map k a -> Map k a
-insert k x m = x ${BT}seq${BT} L.insert k x m
+insert k x m = k ${BT}seq${BT} x ${BT}seq${BT} L.insert k x m
 
 insertWith :: Ord k => (a -> a -> a) -> k -> a -> Map k a -> Map k a
 insertWith f k x m = case L.lookup k m of
@@ -923,7 +963,7 @@ unionWithKey f a b = b ${BT}seq${BT} a ${BT}seq${BT} L.fromDistinctAscList (go (
           GT -> (ky, y) : go xs yt
           EQ -> let z = f kx x y in z ${BT}seq${BT} (kx, z) : go xt yt
 
-unionsWith :: Ord k => (a -> a -> a) -> [Map k a] -> Map k a
+unionsWith :: (Foldable f, Ord k) => (a -> a -> a) -> f (Map k a) -> Map k a
 unionsWith f = B.foldl' (unionWith f) L.empty
 
 intersectionWith :: Ord k => (a -> b -> c) -> Map k a -> Map k b -> Map k c

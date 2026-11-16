@@ -672,6 +672,11 @@ class Renamer {
       const name = binding.names[0];
       const method = cls.methods.find((candidate) => candidate.name === name.name);
       if (!method) throw compileError(name.span, `${name.name} は、クラス ${cls.name} のメソッドではありません。`);
+      const visible =
+        this.scope.values.get(method.name).includes(method) ||
+        [...this.scope.qualifiedValues.values()].some((values) => values.get(method.name).includes(method));
+      if (!visible)
+        throw compileError(name.span, `${name.name} は、クラス ${cls.name} の見えるメソッドではありません。`);
       bindings.push(this.renameFunBinding(binding, { kind: 'global', entity: method }, new LocalScope()));
     }
     this.instances.push({ cls, type, context, bindings, span: decl.span });

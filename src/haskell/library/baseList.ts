@@ -535,7 +535,20 @@ unwords (w:ws) = w ++ ' ' : unwords ws
 
 -- Foldable and Traversable
 
+data FoldEndo a = FoldEndo (a -> a)
+
+runFoldEndo :: FoldEndo a -> a -> a
+runFoldEndo (FoldEndo f) = f
+
+instance Semigroup (FoldEndo a) where
+  FoldEndo f <> FoldEndo g = FoldEndo (f . g)
+
+instance Monoid (FoldEndo a) where
+  mempty = FoldEndo id
+
 class Foldable t where
+  fold :: Monoid m => t m -> m
+  foldMap' :: Monoid m => (a -> m) -> t a -> m
   foldMap :: Monoid m => (a -> m) -> t a -> m
   foldr :: (a -> b -> b) -> b -> t a -> b
   foldl :: (b -> a -> b) -> b -> t a -> b
@@ -551,10 +564,12 @@ class Foldable t where
   minimum :: Ord a => t a -> a
   sum :: Num a => t a -> a
   product :: Num a => t a -> a
+  fold = foldMap id
+  foldMap' f = foldl' (\acc x -> acc <> f x) mempty
   foldMap f = foldr (\x acc -> f x <> acc) mempty
-  foldr f z t = listFoldr f z (toList t)
+  foldr f z t = runFoldEndo (foldMap (\x -> FoldEndo (f x)) t) z
   foldl f z t = listFoldl f z (toList t)
-  foldr' f z t = listFoldr f z (toList t)
+  foldr' f z t = foldl (\k x acc -> k $! f x acc) id t z
   foldl' f z t = listFoldl' f z (toList t)
   foldr1 f t = case toList t of
     [] -> errorWithoutStackTrace "foldr1: empty structure"

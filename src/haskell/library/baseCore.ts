@@ -18,6 +18,14 @@ infixr 0 $, $!
 infixr 6 <>
 infixl 9 !!
 infixl 3 <|>
+infix 4 ${BT}elem${BT}, ${BT}notElem${BT}
+infixr 0 ${BT}seq${BT}
+infixl 0 ${BT}on${BT}
+infix 5 \\
+infixl 7 .&.
+infixl 5 .|.
+infixl 6 ${BT}xor${BT}
+infixl 8 ${BT}shift${BT}, ${BT}shiftL${BT}, ${BT}shiftR${BT}, ${BT}rotate${BT}, ${BT}rotateL${BT}, ${BT}rotateR${BT}
 
 primitive :: [Char] -> a
 primitive name = primitive name
@@ -371,6 +379,14 @@ class (RealFrac a, Floating a) => RealFloat a where
   scaleFloat :: Int -> a -> a
   isNaN, isInfinite, isDenormalized, isNegativeZero, isIEEE :: a -> Bool
   atan2 :: a -> a -> a
+  atan2 y x
+    | x > 0 = atan (y / x)
+    | x == 0 && y > 0 = pi / 2
+    | x < 0 && y > 0 = pi + atan (y / x)
+    | (x <= 0 && y < 0) || (x < 0 && isNegativeZero y) || (isNegativeZero x && isNegativeZero y) = negate (atan2 (negate y) x)
+    | y == 0 && (x < 0 || isNegativeZero x) = pi
+    | x == 0 && y == 0 = y
+    | otherwise = x + y
   exponent x = if m == 0 then 0 else n + floatDigits x
     where (m, n) = decodeFloat x
   significand x = encodeFloat m (negate (floatDigits x))
@@ -500,7 +516,7 @@ instance Enum Word where
   succ x = if x == maxBound then errorWithoutStackTrace "Enum.succ{Word}: tried to take ${BT}succ' of last tag in enumeration" else x + 1
   pred x = if x == minBound then errorWithoutStackTrace "Enum.pred{Word}: tried to take ${BT}pred' of first tag in enumeration" else x - 1
   toEnum n = if n < 0 then errorWithoutStackTrace ("Enum.toEnum{Word}: tag (" ++ show n ++ ") is outside of enumeration's range (0,18446744073709551615)") else fromInteger (toInteger n)
-  fromEnum x = fromInteger (toInteger x)
+  fromEnum x = if x > 9223372036854775807 then errorWithoutStackTrace ("Enum.fromEnum{Word}: value (" ++ show x ++ ") is outside of Int's bounds (-9223372036854775808,9223372036854775807)") else fromInteger (toInteger x)
   enumFrom x = map fromInteger (enumFromTo (toInteger x) 18446744073709551615)
   enumFromTo x y = map fromInteger (enumFromTo (toInteger x) (toInteger y))
   enumFromThen x y = map fromInteger (enumFromThenTo (toInteger x) (toInteger y) (if y >= x then 18446744073709551615 else 0))
@@ -546,7 +562,7 @@ instance Floating Double where
   atanh = primitive "doubleAtanh"
 
 instance RealFrac Double where
-  properFraction x = let n = primDoubleTruncate x in n ${BT}seq${BT} (fromInteger n, x - primDoubleFromInteger n)
+  properFraction x = let n = primDoubleTruncate x in n ${BT}seq${BT} (fromInteger n, if x == 0 || isInfinite x || isNaN x then 0 else x - primDoubleFromInteger n)
   truncate x = fromInteger (primDoubleTruncate x)
   round x = fromInteger (roundDouble x)
   ceiling x = fromInteger (ceilingDouble x)
@@ -581,7 +597,6 @@ instance RealFloat Double where
   isDenormalized x = x /= 0.0 && abs x < 2.2250738585072014e-308
   isNegativeZero = primitive "doubleIsNegativeZero"
   isIEEE _ = True
-  atan2 = primitive "doubleAtan2"
 
 instance Num Float where
   (+) = primitive "floatAdd"
@@ -623,7 +638,7 @@ instance Floating Float where
   atanh = primitive "floatAtanh"
 
 instance RealFrac Float where
-  properFraction x = let n = primFloatTruncate x in n ${BT}seq${BT} (fromInteger n, x - primFloatFromInteger n)
+  properFraction x = let n = primFloatTruncate x in n ${BT}seq${BT} (fromInteger n, if x == 0 || isInfinite x || isNaN x then 0 else x - primFloatFromInteger n)
   truncate x = fromInteger (primFloatTruncate x)
   round x = fromInteger (roundFloat x)
   ceiling x = fromInteger (let n = primFloatTruncate x in if x - primFloatFromInteger n > 0.0 then n + 1 else n)
@@ -652,7 +667,6 @@ instance RealFloat Float where
   isDenormalized x = x /= 0.0 && abs x < 1.17549435e-38
   isNegativeZero = primitive "floatIsNegativeZero"
   isIEEE _ = True
-  atan2 = primitive "floatAtan2"
 
 floatToRational :: RealFloat a => a -> Rational
 floatToRational x = let (m, e) = decodeFloat x
