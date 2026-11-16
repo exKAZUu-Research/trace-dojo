@@ -175,6 +175,10 @@ export function numericLimitsClass(library: Library, type: Type): ClassInfo {
     staticFunction('epsilon', limits.epsilon as number);
     staticFunction('infinity', Number.POSITIVE_INFINITY);
     staticFunction('quiet_NaN', Number.NaN);
+  } else {
+    // The integer types have these members too, which give 0.
+    const zero = typeof limits.max === 'bigint' ? 0n : 0;
+    for (const name of ['epsilon', 'infinity', 'quiet_NaN']) staticFunction(name, zero);
   }
   const int: Type = { kind: 'int', name: 'int' };
   cls.constants.set('digits', constant(limits.digits, int));

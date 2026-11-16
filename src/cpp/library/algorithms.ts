@@ -26,26 +26,33 @@ import { CObject, Ptr, type Store, type Value } from '../values';
 import { pairClass } from './associative';
 import type { SequenceValue } from './containerValues';
 import { comparatorOf, elementOperations, equalTo, lessThan, moveValue, truthy } from './elements';
+import type { IteratorCategory } from './libraryClass';
 import type { EngineValue } from './random';
 import { uniformInteger } from './random';
 import type { Library } from './registry';
 import { StringValue } from './string';
 import { constRef, generic, native } from './support';
 
-/** What an argument's type tells of an iterator: the element it designates, and whether it goes backward. */
+/** What an argument's type tells of an iterator: the element it designates, its category, and whether it goes backward. */
 interface IteratorInfo {
   element: Type;
+  category: IteratorCategory;
   isReverse: boolean;
   isOutput?: boolean;
 }
 
 function iteratorInfo(type: Type): IteratorInfo | undefined {
-  if (type.kind === 'pointer' && type.to.kind !== 'void') return { element: type.to, isReverse: false };
+  if (type.kind === 'pointer' && type.to.kind !== 'void')
+    return { element: type.to, category: 'randomAccess', isReverse: false };
   if (type.kind === 'class' && type.cls.library?.kind === 'iterator') {
-    return { element: type.cls.library.args[0], isReverse: type.cls.library.isReverse === true };
+    return {
+      element: type.cls.library.args[0],
+      category: type.cls.library.iteratorCategory ?? 'randomAccess',
+      isReverse: type.cls.library.isReverse === true,
+    };
   }
   if (type.kind === 'class' && type.cls.library?.kind === 'back_insert_iterator') {
-    return { element: type.cls.library.args[0], isReverse: false, isOutput: true };
+    return { element: type.cls.library.args[0], category: 'forward', isReverse: false, isOutput: true };
   }
   return undefined;
 }
@@ -174,11 +181,23 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     return undefined;
   };
 
+  /** Stops when an algorithm gets iterators of a weaker category than it needs, as libc++ rejects them. */
+  const checkCategory = (name: string, info: IteratorInfo, needed: IteratorCategory, row: number): void => {
+    if (needed === 'randomAccess' && info.category !== 'randomAccess')
+      compiler().error(
+        row,
+        `std::${name} には、ランダムアクセスイテレータ（vector や配列などのもの）を渡してください。`
+      );
+    if (info.category === 'forward')
+      compiler().error(row, `std::${name} には、双方向イテレータ（-- で戻れるもの）を渡してください。`);
+  };
+
   // Sorting -------------------------------------------------------------------------------------------------------
   for (const name of ['sort', 'stable_sort']) {
     define(name, (args) => {
       const info = rangeAt(args, 0);
       if (!info || args.length > 3 || isConstType(info.element)) return;
+      checkCategory(name, info, 'randomAccess', args[0].row);
       const less = lessOf(args, 2, info.element);
       if (!less)
         return compiler().error(
@@ -197,6 +216,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('reverse', (args) => {
     const info = rangeAt(args, 0);
     if (!info || args.length !== 2) return;
+    checkCategory('reverse', info, 'bidirectional', args[0].row);
     return native('reverse', params(args), VOID, ([first, last]) => {
       const values = range(first, last, info);
       for (let i = 0, j = values.length - 1; i < j; i++, j--) values.swap(i, j);
@@ -207,6 +227,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     define(name, (args) => {
       const info = rangeAt(args, 0);
       if (!info || args.length > 3) return;
+      checkCategory(name, info, 'bidirectional', args[0].row);
       const less = lessOf(args, 2, info.element);
       if (!less) return;
       return native(name, params(args), BOOL, ([first, last], { frame }) => {
@@ -221,6 +242,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const info = rangeAt(args, 0);
     if (!info || args.length !== 3 || args[2].type.kind !== 'class' || args[2].type.cls.library?.kind !== 'engine')
       return;
+    checkCategory('shuffle', info, 'randomAccess', args[0].row);
     return native(
       'shuffle',
       [...params(args).slice(0, 2), referenceTo(args[2].type)],
@@ -823,6 +845,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     define(name, (args) => {
       const info = args[0] ? iteratorInfo(unqualified(args[0].type)) : undefined;
       if (!info || args.length > 2 || (args[1] && !isInteger(unqualified(args[1].type)))) return;
+      if (name === 'prev') checkCategory(name, info, 'bidirectional', args[0].row);
       const type = unqualified(args[0].type);
       return native(
         name,

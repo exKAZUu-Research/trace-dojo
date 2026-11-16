@@ -5,14 +5,17 @@ import type { ExpressionCompiler } from '../expressionCompiler';
 import { type Eval, type Frame, holdAll } from '../runtime';
 import type { Syntax } from '../syntax';
 import {
+  alignOf,
   BOOL,
   ClassInfo,
   classType,
   type FunctionInfo,
   isConstType,
+  isInteger,
   pointerTo,
   referenceTo,
   SIZE_T,
+  sizeOf,
   type Type,
   typeName,
   unqualified,
@@ -39,6 +42,7 @@ import { typeKey } from './templates';
 export type SequenceKind = 'vector' | 'deque' | 'array' | 'list';
 
 const MAX_ELEMENTS = 1_000_000;
+const PTRDIFF_MAX = 2n ** 63n - 1n;
 
 /** The type of a library parameter that takes a braced list or a callable as the call wrote it. */
 const AS_WRITTEN: Type = { kind: 'function', ret: VOID, params: [] };
@@ -67,10 +71,11 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
     return elementOps;
   };
   const container = name;
-  const iterator = randomAccessIterator(library.iterators, container, element, false, false);
-  const constIterator = randomAccessIterator(library.iterators, container, element, true, false);
-  const reverseIterator = randomAccessIterator(library.iterators, container, element, false, true);
-  const constReverseIterator = randomAccessIterator(library.iterators, container, element, true, true);
+  const category = kind === 'list' ? 'bidirectional' : 'randomAccess';
+  const iterator = randomAccessIterator(library.iterators, container, element, false, false, category);
+  const constIterator = randomAccessIterator(library.iterators, container, element, true, false, category);
+  const reverseIterator = randomAccessIterator(library.iterators, container, element, false, true, category);
+  const constReverseIterator = randomAccessIterator(library.iterators, container, element, true, true, category);
   cls.memberTypes.set('value_type', element);
   cls.memberTypes.set('size_type', SIZE_T);
   cls.memberTypes.set('iterator', classType(iterator));
@@ -95,8 +100,10 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
       sequenceOperator(compiler, cls, element, kind, operator, operands, row, editor, ops),
     listInitializer: (compiler, elements, row) =>
       sequenceList(compiler, element, elements, row, make, fixedLength, ops),
-    memberCall: (compiler, object, member, args, row) =>
-      emplacement(compiler, library, object, member, args, row, element, editor),
+    memberCall: (compiler, object, member, args, row) => {
+      checkElementRequirement(compiler, { kind, element, ops }, member, args, row);
+      return emplacement(compiler, library, object, member, args, row, element, editor);
+    },
     constructingMembers:
       kind === 'array'
         ? []
@@ -137,19 +144,35 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
       ),
     ];
   } else {
+    const countConstructor = nativeConstructor(
+      cls,
+      [SIZE_T],
+      ([count], { frame }) => {
+        checkVectorLength(frame, library, kind, element, count);
+        const n = asNumber(count);
+        reserve(frame, n);
+        return make(Array.from({ length: n }, () => ops().make(frame)));
+      },
+      { isExplicit: true }
+    );
     cls.constructors = [
       nativeConstructor(cls, [], () => make([])),
-      nativeConstructor(
-        cls,
-        [SIZE_T],
-        ([count], { frame }) => {
-          const n = asNumber(count);
-          reserve(frame, n);
-          return make(Array.from({ length: n }, () => ops().make(frame)));
+      {
+        ...countConstructor,
+        // A template only to stop at a call for elements without a default constructor, as libc++ does.
+        instantiate: ([count, ...rest]) => {
+          if (count && rest.length === 0 && isInteger(unqualified(count.type)) && !ops().isDefaultConstructible) {
+            library.compiler.error(
+              count.row,
+              `${typeName(element)} のオブジェクトは引数なしでは作れないので、${name}(n) には要素の値も渡してください。`
+            );
+          }
+          return countConstructor;
         },
-        { isExplicit: true }
-      ),
+        isTemplate: true,
+      },
       nativeConstructor(cls, [SIZE_T, constRef(element)], ([count, value], { frame }) => {
+        checkVectorLength(frame, library, kind, element, count);
         const n = asNumber(count);
         reserve(frame, n);
         const source = (value as Ptr).read();
@@ -178,6 +201,23 @@ const reserve = (frame: Frame, count: number): void => {
   if (count > MAX_ELEMENTS) throw new CppRuntimeError('custom', 'コンテナの要素が多すぎます。');
   frame.runtime.reserve(count);
 };
+
+/**
+ * `max_size()` of libc++ on arm64: as many elements, or nodes of a list, as the allocator can allocate, and at most
+ * PTRDIFF_MAX.
+ */
+function maxSizeOf(kind: SequenceKind, element: Type): bigint {
+  const nodeAlign = Math.max(8, alignOf(element));
+  const size = kind === 'list' ? Math.ceil((16 + sizeOf(element)) / nodeAlign) * nodeAlign : sizeOf(element);
+  const count = (2n ** 64n - 1n) / BigInt(size);
+  return count < PTRDIFF_MAX ? count : PTRDIFF_MAX;
+}
+
+/** Throws the `std::length_error` that libc++ throws for a vector of more than `max_size()` elements. */
+function checkVectorLength(frame: Frame, library: Library, kind: SequenceKind, element: Type, count: unknown): void {
+  if (kind === 'vector' && BigInt(count as bigint) > maxSizeOf(kind, element))
+    throwLibrary(frame, library.exception('length_error'), 'vector');
+}
 
 /** The iterators of a range, with what `read` needs to take the elements between two of them. */
 interface IteratorRange {
@@ -302,13 +342,9 @@ function sequenceMethods(
   ): FunctionInfo =>
     native(name, params, ret, (args, { self, frame }) => run(self as SequenceValue, args, frame), { owner: cls });
   method('size', [], SIZE_T, (self) => BigInt(self.items.length), { isConst: true });
-  method(
-    'max_size',
-    [],
-    SIZE_T,
-    () => (kind === 'array' ? BigInt(fixedLength ?? 0) : 0x7_ff_ff_ff_ff_ff_ff_ffn / BigInt(Math.max(1, 4))),
-    { isConst: true }
-  );
+  method('max_size', [], SIZE_T, () => (kind === 'array' ? BigInt(fixedLength ?? 0) : maxSizeOf(kind, element)), {
+    isConst: true,
+  });
   method('empty', [], BOOL, (self) => (self.items.length === 0 ? 1 : 0), { isConst: true });
   for (const isConst of [false, true]) {
     const ref = referenceTo(isConst ? withConst(element) : element);
@@ -402,9 +438,8 @@ function sequenceMethods(
   if (kind === 'vector') {
     method('capacity', [], SIZE_T, (self) => BigInt(self.capacity), { isConst: true });
     method('reserve', [SIZE_T], VOID, (self, [count], frame) => {
+      checkVectorLength(frame, library, kind, element, count);
       const n = asNumber(count);
-      if (BigInt(count as bigint) > 0x3f_ff_ff_ff_ff_ff_ff_ffn)
-        throwLibrary(frame, library.exception('length_error'), 'vector');
       if (n > self.capacity) {
         self.capacity = n;
         const { hasEffects, copy, destroy } = ops();
@@ -431,6 +466,7 @@ function sequenceMethods(
     types.iterator,
     (self, [at, count, value], frame) => {
       const index = positionOf(self, at);
+      checkVectorLength(frame, library, kind, element, BigInt(self.items.length) + BigInt(count as bigint));
       const n = asNumber(count);
       reserve(frame, n);
       editor.insertCopies(frame, self, index, n, value as Ptr);
@@ -478,16 +514,19 @@ function sequenceMethods(
     return new Ptr(self, from);
   });
   method('resize', [SIZE_T], VOID, (self, [count], frame) => {
+    checkVectorLength(frame, library, kind, element, count);
     const n = asNumber(count);
     reserve(frame, Math.max(0, n - self.items.length));
     editor.resize(frame, self, n, () => ops().make(frame));
   });
   method('resize', [SIZE_T, constRef(element)], VOID, (self, [count, value], frame) => {
+    checkVectorLength(frame, library, kind, element, count);
     const n = asNumber(count);
     reserve(frame, Math.max(0, n - self.items.length));
     editor.resize(frame, self, n, () => ops().copy(frame, (value as Ptr).read()));
   });
   method('assign', [SIZE_T, constRef(element)], VOID, (self, [count, value], frame) => {
+    checkVectorLength(frame, library, kind, element, count);
     const n = asNumber(count);
     reserve(frame, n);
     editor.assignCopies(frame, self, n, value as Ptr);
@@ -568,6 +607,7 @@ function listMethods(
 ): void {
   const less = lessThan(element);
   const equal = equalTo(element);
+  // `checkElementRequirement` stops a call of these members for elements without == or <.
   method('remove', [constRef(element)], SIZE_T, (self, [value], frame) => {
     if (!equal) throw new CppRuntimeError('custom', `${typeName(element)} の値は == で比べられません。`);
     const target = (value as Ptr).read();
@@ -641,6 +681,30 @@ function listMethods(
       { owner: cls }
     );
   });
+}
+
+/**
+ * Stops at a call of a member function that needs of the elements what they lack, as instantiating it does in libc++:
+ * `resize(n)` a default constructor, and the list's `remove(value)`, `unique()`, and `sort()` `==` or `<`.
+ */
+function checkElementRequirement(
+  compiler: ExpressionCompiler,
+  { kind, element, ops }: { kind: SequenceKind; element: Type; ops: () => ElementOperations },
+  member: string,
+  args: Expr[],
+  row: number
+): void {
+  if (member === 'resize' && args.length === 1 && !ops().isDefaultConstructible) {
+    compiler.error(
+      row,
+      `${typeName(element)} のオブジェクトは引数なしでは作れないので、resize には要素の値も渡してください。`
+    );
+  }
+  if (kind !== 'list') return;
+  const isEqualityCall = (member === 'remove' && args.length === 1) || (member === 'unique' && args.length === 0);
+  if (isEqualityCall && !equalTo(element)) compiler.error(row, `${typeName(element)} の値は == で比べられません。`);
+  if (member === 'sort' && args.length === 0 && !lessThan(element))
+    compiler.error(row, `${typeName(element)} の値は < で比べられません。比べ方を表す関数を渡してください。`);
 }
 
 /** The parameter of a member function taking a comparator or a predicate, as a function's name or an object. */

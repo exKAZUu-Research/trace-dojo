@@ -47,12 +47,38 @@ import {
 } from './support';
 import { typeKey } from './templates';
 
+/** The capacity of libc++'s short string, which keeps its characters in the object. */
+const SHORT_CAPACITY = 22;
+
 /** The value of a `std::string`: its bytes, as a string of character codes below 256. */
 export class StringValue extends Store {
+  /** The capacity libc++ gives the string, which a new string fits exactly and an edit grows as libc++ grows it. */
+  capacity: number;
+  private stored: string;
   private cStringCache?: { bytes: string; store: ArrayStore };
 
-  constructor(public bytes: string) {
+  constructor(bytes: string) {
     super();
+    this.stored = bytes;
+    this.capacity = fittingCapacity(bytes.length);
+  }
+
+  get bytes(): string {
+    return this.stored;
+  }
+
+  /** Replaces the bytes, growing the capacity to at least twice the old one when they do not fit, as libc++ does. */
+  set bytes(bytes: string) {
+    if (bytes.length > this.capacity) this.capacity = fittingCapacity(Math.max(bytes.length, 2 * this.capacity));
+    this.stored = bytes;
+  }
+
+  /** Takes the bytes and the buffer of another string, as the move constructor and assignment do. */
+  moveFrom(source: StringValue): void {
+    this.stored = source.stored;
+    this.capacity = source.capacity;
+    source.stored = '';
+    source.capacity = SHORT_CAPACITY;
   }
 
   /** The null-terminated copy that `c_str()` and `data()` return, one array while the bytes stay the same. */
@@ -91,7 +117,9 @@ export function decodeUtf8(bytes: string): string {
 }
 
 const NPOS = 0xff_ff_ff_ff_ff_ff_ff_ffn;
-const MAX_SIZE = 0x7f_ff_ff_ff_ff_ff_ff_f7n;
+const MAX_SIZE = 0x7f_ff_ff_ff_ff_ff_ff_f6n;
+/** The longest string that the interpreter makes, which is far shorter than `max_size()`. */
+const MAX_LENGTH = 1_000_000;
 
 /** Reads the bytes of an argument that is a `std::string` (by reference) or a `const char*`. */
 function textOf(value: unknown): string {
@@ -159,10 +187,18 @@ export function stringClass(library: Library): ClassInfo {
     if (begin > BigInt(bytes.length)) return outOfRange(frame);
     return bytes.slice(Number(begin), Number(begin) + clampedLength(count, bytes.length - Number(begin)));
   };
-  const repeated = (frame: Frame, count: unknown, char: unknown): string => {
-    if (BigInt(count as bigint) > MAX_SIZE) return lengthError(frame);
-    return checkLength(frame, charOf(char).repeat(asNumber(count)));
+  /**
+   * A count of characters a call asks for, besides `kept` characters it keeps, which throws `std::length_error` when
+   * the string would exceed `max_size()`, as libc++ does.
+   */
+  const requestedLength = (frame: Frame, count: unknown, kept = 0): number => {
+    const length = BigInt(count as bigint);
+    if (length > MAX_SIZE - BigInt(kept)) return lengthError(frame);
+    if (length > MAX_LENGTH) throw new CppRuntimeError('custom', '文字列が長すぎます。');
+    return Number(length);
   };
+  const repeated = (frame: Frame, count: unknown, char: unknown, kept = 0): string =>
+    checkLength(frame, charOf(char).repeat(requestedLength(frame, count, kept)));
   cls.constructors = [
     nativeConstructor(cls, [], () => make('')),
     nativeConstructor(cls, [CONST_CHAR_PTR], ([pointer]) => {
@@ -240,9 +276,14 @@ export function stringClass(library: Library): ClassInfo {
   };
   for (const name of ['size', 'length']) method(name, [], SIZE_T, (s) => BigInt(s.bytes.length), { isConst: true });
   method('max_size', [], SIZE_T, () => MAX_SIZE, { isConst: true });
-  method('capacity', [], SIZE_T, (s) => BigInt(capacityOf(s.bytes.length)), { isConst: true });
-  method('reserve', [SIZE_T], VOID, () => {}, { optional: 1 });
-  method('shrink_to_fit', [], VOID, () => {});
+  method('capacity', [], SIZE_T, (s) => BigInt(s.capacity), { isConst: true });
+  method('reserve', [SIZE_T], VOID, (s, [count], frame) => {
+    const length = requestedLength(frame, count);
+    if (length > s.capacity) s.capacity = fittingCapacity(length);
+  });
+  method('shrink_to_fit', [], VOID, (s) => {
+    s.capacity = fittingCapacity(s.bytes.length);
+  });
   method('empty', [], BOOL, (s) => (s.bytes.length === 0 ? 1 : 0), { isConst: true });
   method('clear', [], VOID, (s) => {
     s.bytes = '';
@@ -401,11 +442,15 @@ export function stringClass(library: Library): ClassInfo {
     return self(s);
   };
   /** The forms of the characters `append`, `assign`, `insert`, and `replace` put in: `(str)`, `(s, n)`, `(n, c)`, ... */
-  const sources: { params: Type[]; optional?: number; bytes: (args: unknown[], frame: Frame) => string }[] = [
+  const sources: {
+    params: Type[];
+    optional?: number;
+    bytes: (args: unknown[], frame: Frame, kept: number) => string;
+  }[] = [
     { params: [ref], bytes: ([text]) => textOf(text) },
     { params: [CONST_CHAR_PTR], bytes: ([text]) => textOf(text) },
     { params: [CONST_CHAR_PTR, SIZE_T], bytes: ([pointer, count]) => pointerBytes(pointer as Ptr, count) },
-    { params: [SIZE_T, CHAR], bytes: ([count, char], frame) => repeated(frame, count, char) },
+    { params: [SIZE_T, CHAR], bytes: ([count, char], frame, kept) => repeated(frame, count, char, kept) },
   ];
   const substringSource = {
     params: [ref, SIZE_T, SIZE_T],
@@ -437,7 +482,8 @@ export function stringClass(library: Library): ClassInfo {
         refType,
         (s, args, frame) => {
           const [start, count] = target.span(s, args);
-          return edit(s, start, count, source.bytes(args.slice(at), frame), frame);
+          const kept = s.bytes.length - clampedLength(count, Math.max(0, s.bytes.length - Number(position(start, 0n))));
+          return edit(s, start, count, source.bytes(args.slice(at), frame, kept), frame);
         },
         { optional: source.optional }
       );
@@ -451,7 +497,7 @@ export function stringClass(library: Library): ClassInfo {
     insertAt(s, at, charOf(char), frame)
   );
   method('insert', [constIteratorType, SIZE_T, CHAR], iteratorType, (s, [at, count, char], frame) =>
-    insertAt(s, at, repeated(frame, count, char), frame)
+    insertAt(s, at, repeated(frame, count, char, s.bytes.length), frame)
   );
   rangeMethod('insert', [constIteratorType], iteratorType, (s, [at], bytes, frame) => insertAt(s, at, bytes, frame));
   method('erase', [SIZE_T, SIZE_T], refType, (s, [start, count], frame) => edit(s, start ?? 0n, count, '', frame), {
@@ -475,7 +521,7 @@ export function stringClass(library: Library): ClassInfo {
     [SIZE_T, CHAR],
     VOID,
     (s, [count, char], frame) => {
-      const length = asNumber(count);
+      const length = requestedLength(frame, count);
       const fill = char === undefined ? '\0' : charOf(char);
       s.bytes = checkLength(
         frame,
@@ -486,7 +532,10 @@ export function stringClass(library: Library): ClassInfo {
   );
   method('swap', [{ kind: 'reference', to: type }], VOID, (s, [other]) => {
     const target = (other as Ptr).read() as StringValue;
-    [s.bytes, target.bytes] = [target.bytes, s.bytes];
+    const moved = new StringValue('');
+    moved.moveFrom(s);
+    s.moveFrom(target);
+    target.moveFrom(moved);
   });
   for (const name of ['c_str', 'data']) {
     method(name, [], CONST_CHAR_PTR, (s) => new Ptr(s.cString(), 0), { isConst: true });
@@ -512,7 +561,7 @@ const make = (bytes: string): StringValue => new StringValue(bytes);
 
 const checkLength = (frame: Frame, bytes: string): string => {
   frame.runtime.reserve(Math.ceil(bytes.length / 8));
-  if (bytes.length > 1_000_000) throw new CppRuntimeError('custom', '文字列が長すぎます。');
+  if (bytes.length > MAX_LENGTH) throw new CppRuntimeError('custom', '文字列が長すぎます。');
   return bytes;
 };
 
@@ -573,10 +622,15 @@ class SelfBox extends Store {
   }
 }
 
-/** The capacity libc++'s string has for a length: 22 in its short form, then rounded up to a multiple of 16, less 1. */
-function capacityOf(length: number): number {
-  if (length <= 22) return 22;
-  return Math.ceil((length + 1) / 16) * 16 - 1;
+/**
+ * The capacity libc++'s string allocates for a length: the short form's, or room for the length and the terminating
+ * null character rounded up to a multiple of 8, less the null character; a room of 24 becomes 25, which tells it from
+ * the short form's.
+ */
+function fittingCapacity(length: number): number {
+  if (length <= SHORT_CAPACITY) return SHORT_CAPACITY;
+  const room = Math.ceil((length + 1) / 8) * 8;
+  return (room === SHORT_CAPACITY + 2 ? room + 1 : room) - 1;
 }
 
 function pointerBytes(pointer: Ptr, count: unknown): string {
@@ -646,6 +700,44 @@ function narrowsToChar(value: Expr): boolean {
   return type.name !== 'char' && type.name !== 'schar' && type.name !== 'bool';
 }
 
+/** The result of `+` from the evaluated operands, which takes the buffer of the operand at `reused`, if any. */
+function concatenation(
+  a: Eval<string | StringValue>,
+  b: Eval<string | StringValue>,
+  reused: number
+): Eval<StringValue> {
+  const bytesOf = (value: string | StringValue): string => (value instanceof StringValue ? value.bytes : value);
+  return (frame) => {
+    const operands = [a(frame), b(frame)];
+    const bytes = bytesOf(operands[0]) + bytesOf(operands[1]);
+    frame.runtime.reserve(Math.ceil(bytes.length / 8));
+    const source = operands.at(reused);
+    if (reused < 0 || !(source instanceof StringValue)) return new StringValue(bytes);
+    const result = new StringValue('');
+    result.moveFrom(source);
+    result.bytes = bytes;
+    return result;
+  };
+}
+
+/** `s = t` of a temporary string `t`, which moves it, taking its buffer. */
+function moveAssignment(compiler: ExpressionCompiler, left: Expr, right: Expr, row: number): Expr {
+  const location = left.run;
+  const moved = compiler.rvalue(right).run;
+  return {
+    type: left.type,
+    isLvalue: true,
+    row,
+    run: (frame) => {
+      const source = moved(frame) as StringValue;
+      const place = location(frame) as Ptr;
+      const target = place.read() as StringValue;
+      if (target !== source) target.moveFrom(source);
+      return place;
+    },
+  };
+}
+
 /** The operators of `std::string`: `+`, `+=`, `=`, comparisons, and `[]`. */
 // code-gauge-allow functionCognitiveComplexity 30 -- One case per operator, each with its operand forms.
 function stringOperator(
@@ -683,29 +775,27 @@ function stringOperator(
   switch (operator) {
     case '+': {
       if (!right) return undefined;
-      const a = textRun(left) ?? (isString(right) ? charRun(left, isPlainChar) : undefined);
-      const b = textRun(right) ?? (isString(left) ? charRun(right, isPlainChar) : undefined);
-      if (!a || !b || (!isString(left) && !isString(right))) return undefined;
-      return {
-        type,
-        isLvalue: false,
-        row,
-        isTemporaryObject: true,
-        run: (frame) => {
-          const bytes = a(frame) + b(frame);
-          frame.runtime.reserve(Math.ceil(bytes.length / 8));
-          return new StringValue(bytes);
-        },
-      };
+      if (!isString(left) && !isString(right)) return undefined;
+      const operandRun = (expr: Expr): Eval<string | StringValue> | undefined =>
+        isString(expr)
+          ? (compiler.rvalue(expr).run as Eval<StringValue>)
+          : (textRun(expr) ?? charRun(expr, isPlainChar));
+      const a = operandRun(left);
+      const b = operandRun(right);
+      if (!a || !b) return undefined;
+      // A temporary string operand gives its buffer to the result, as libc++ appends to it or inserts into it.
+      const reused = operands.findIndex((operand) => isString(operand) && !operand.isLvalue);
+      return { type, isLvalue: false, row, isTemporaryObject: true, run: concatenation(a, b, reused) };
     }
     case '+=':
     case '=': {
       if (!isString(left)) return undefined;
       compiler.checkAssignable(left, row, operator);
+      const append = operator === '+=';
+      if (!append && isString(right) && !right.isLvalue) return moveAssignment(compiler, left, right, row);
+      const location = left.run;
       const source = textRun(right) ?? charRun(right, isArithmetic);
       if (!source) return undefined;
-      const location = left.run;
-      const append = operator === '+=';
       return {
         type: left.type,
         isLvalue: true,

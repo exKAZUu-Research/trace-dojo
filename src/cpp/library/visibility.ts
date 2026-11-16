@@ -1,3 +1,6 @@
+import { BINARY, UNARY } from '../../c/library/mathFunctions';
+import { MATH_CONSTANTS } from './constants';
+
 /**
  * The groups of library names each header makes visible in libc++ (Apple clang 21), directly or through the headers it
  * includes, as compiling a probe of each group after including the header showed. A group is named after the header
@@ -436,8 +439,11 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
   'stddef.h': [],
 };
 
-/** The group of each library name whose visibility depends on the headers a program includes. */
-const NAME_GROUPS: Record<string, string> = {};
+/**
+ * The groups of each library name whose visibility depends on the headers a program includes, any of which makes it
+ * visible, as `<cstdlib>` and `<cmath>` both declare `std::abs`.
+ */
+const NAME_GROUPS: Record<string, string[]> = {};
 for (const [group, names] of Object.entries({
   iostream: ['cout', 'cerr', 'clog', 'endl', 'flush', 'ends'],
   iomanip: ['setw', 'setprecision', 'setfill', 'setbase', 'setiosflags', 'resetiosflags'],
@@ -521,7 +527,33 @@ for (const [group, names] of Object.entries({
   exception: ['exception'],
   limits: ['numeric_limits'],
   random: ['mt19937', 'mt19937_64', 'random_device', 'uniform_int_distribution', 'uniform_real_distribution'],
-  cstdlib: ['rand', 'srand', 'exit', 'labs', 'llabs', 'atoi', 'atol', 'RAND_MAX', 'EXIT_SUCCESS', 'EXIT_FAILURE'],
+  cstdlib: [
+    'rand',
+    'srand',
+    'exit',
+    'abs',
+    'labs',
+    'llabs',
+    'atoi',
+    'atol',
+    'RAND_MAX',
+    'EXIT_SUCCESS',
+    'EXIT_FAILURE',
+  ],
+  cmath: [
+    ...Object.keys(UNARY).flatMap((name) => [name, `${name}f`, `${name}l`]),
+    ...Object.keys(BINARY),
+    'fma',
+    'abs',
+    'isnan',
+    'isinf',
+    'isfinite',
+    'signbit',
+    ...Object.keys(MATH_CONSTANTS),
+    'INFINITY',
+    'NAN',
+    'HUGE_VAL',
+  ],
   cctype: [
     'isalnum',
     'isalpha',
@@ -575,24 +607,21 @@ for (const [group, names] of Object.entries({
     'ULLONG_MAX',
   ],
 })) {
-  for (const name of names) NAME_GROUPS[name] = group;
+  for (const name of names) (NAME_GROUPS[name] ??= []).push(group);
 }
 
-/**
- * Whether a library name is visible to a program that includes `headers`. Names of no group, such as the functions of
- * <cmath> that every header here brings, stay visible.
- */
+/** Whether a library name is visible to a program that includes `headers`. Names of no group stay visible. */
 export function isVisible(name: string, headers: ReadonlySet<string>): boolean {
-  const group = NAME_GROUPS[name];
-  if (!group) return true;
+  const nameGroups = NAME_GROUPS[name];
+  if (!nameGroups) return true;
   for (const header of headers) {
     const groups = VISIBLE_GROUPS[header];
-    if (!groups || header === group || groups.includes(group)) return true;
+    if (!groups || nameGroups.some((group) => header === group || groups.includes(group))) return true;
   }
   return false;
 }
 
 /** The header that declares a library name, for the message that asks to include it. */
 export function headerOf(name: string): string | undefined {
-  return NAME_GROUPS[name];
+  return NAME_GROUPS[name]?.[0];
 }

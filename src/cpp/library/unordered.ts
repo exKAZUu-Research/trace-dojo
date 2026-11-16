@@ -17,7 +17,7 @@ import {
   withConst,
 } from '../types';
 import { CObject, Ptr, type Value } from '../values';
-import { keyText, pairClass } from './associative';
+import { keyText, mappedNotDefaultConstructible, pairClass } from './associative';
 import { MapValue } from './containerValues';
 import { type ElementOperations, elementOperations, equalTo } from './elements';
 import { addRangeMembers, emplacementCall, type EntryTable, insertCopy } from './emplacement';
@@ -453,8 +453,8 @@ export function unorderedClass(
   const isMap = valueType !== undefined;
   const entryType: Type = isMap ? classType(pairClass(library, withConst(keyType), valueType)) : keyType;
   const elementType: Type = isMap ? entryType : withConst(keyType);
-  const iterator = classType(randomAccessIterator(library.iterators, name, elementType, false, false, true));
-  const constIterator = classType(randomAccessIterator(library.iterators, name, elementType, true, false, true));
+  const iterator = classType(randomAccessIterator(library.iterators, name, elementType, false, false, 'forward'));
+  const constIterator = classType(randomAccessIterator(library.iterators, name, elementType, true, false, 'forward'));
   cls.memberTypes.set('iterator', iterator);
   cls.memberTypes.set('const_iterator', constIterator);
   cls.memberTypes.set('key_type', keyType);
@@ -515,6 +515,7 @@ export function unorderedClass(
       const object = left.isLvalue ? left.run : compiler_.materialize(left).run;
       const keyOps = elementOperations(compiler, unqualified(keyType), row);
       const mappedOps = elementOperations(compiler, valueType as Type, row);
+      if (!mappedOps.isDefaultConstructible) return mappedNotDefaultConstructible(compiler_, valueType as Type, row);
       return {
         type: valueType as Type,
         isLvalue: true,
