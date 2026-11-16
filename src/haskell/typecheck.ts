@@ -1,5 +1,5 @@
 import { FUNCTION_TYPE } from './builtinTypes';
-import { type ClassEnv, superclassPaths } from './classEnv';
+import type { ClassEnv } from './classEnv';
 import { DERIVABLE_CLASSES, deriveInstance } from './deriving';
 import {
   type ClassEntity,
@@ -232,13 +232,26 @@ function defineClassMethods(checker: Checker, decl: RClassDecl): void {
   void checker;
   decl.entity.supers = decl.supers.map((sup) => sup.cls);
   for (const [index, sup] of decl.supers.entries()) {
-    if (superclassPaths(sup.cls).some((entry) => entry.cls === decl.entity) || sup.cls === decl.entity) {
+    if (reachesSuperclass(sup.cls, decl.entity)) {
       throw compileError(decl.span, `クラス ${decl.entity.name} のスーパークラスが循環しています。`);
     }
     if (decl.supers.findIndex((other) => other.cls === sup.cls) !== index) {
       throw compileError(sup.span, `スーパークラス ${sup.cls.name} が重複しています。`);
     }
   }
+}
+
+function reachesSuperclass(cls: ClassEntity, target: ClassEntity): boolean {
+  const pending = [cls];
+  const visited = new Set<ClassEntity>();
+  while (pending.length > 0) {
+    const current = pending.pop() as ClassEntity;
+    if (current === target) return true;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    pending.push(...current.supers);
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------------------------------------------

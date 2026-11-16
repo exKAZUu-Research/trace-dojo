@@ -146,3 +146,44 @@ test('an endless loop stops at the operation limit', () => {
     limit: 'operations',
   });
 });
+
+test('Integer shifts charge the execution budget before allocating', () => {
+  expect(
+    executeProgram('haskell', 'import Data.Bits\nmain = print (shiftL (1 :: Integer) 9223372036854775807)')
+  ).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+  expect(
+    executeProgram(
+      'haskell',
+      'import Data.Bits\nmain = print (shiftL (0 :: Integer) 9223372036854775807, shiftR (-3 :: Integer) 9223372036854775807, shiftL (-3 :: Integer) 4, shift (32 :: Integer) (-3))'
+    )
+  ).toMatchObject({ kind: 'executed', uncaughtException: undefined, stdout: '(0,-1,-48,4)\n' });
+});
+
+test.each(['Int', 'Word', 'Integer'])('negative %s shifts report Haskell overflow', (type) => {
+  for (const operation of ['shiftL', 'shiftR']) {
+    expect(
+      executeProgram('haskell', `import Data.Bits\nmain = print (${operation} (1 :: ${type}) (-9223372036854775807))`)
+    ).toMatchObject({ kind: 'executed', uncaughtException: 'arithmetic overflow', stdout: '' });
+  }
+});
+
+test.each([
+  'class A a => A a where a :: a -> Int',
+  'class B a => A a where a :: a -> Int\nclass A a => B a where b :: a -> Int',
+  'class B a => A a where a :: a -> Int\nclass C a => B a where b :: a -> Int\nclass A a => C a where c :: a -> Int',
+])('cyclic superclasses produce compile diagnostics: %s', (declarations) => {
+  expect(executeProgram('haskell', `${declarations}\nmain = print 1`).kind).toBe('compileError');
+});
+
+test('integer-to-Float conversion rounds once at Float precision', () => {
+  const program = `main = do
+  print (map (\\n -> fromInteger n :: Float) [18014399583223807,18014399583223808,18014399583223809,-18014399583223809,18014401730707455,18014401730707456,18014401730707457,0,1,340282356779733661637539395458142568448])
+  print (18014399583223809 :: Float, -18014399583223809 :: Float)
+`;
+  expect(executeProgram('haskell', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      '[1.8014399e16,1.8014399e16,1.80144e16,-1.80144e16,1.80144e16,1.8014403e16,1.8014403e16,0.0,1.0,Infinity]\n(1.80144e16,-1.80144e16)\n',
+  });
+});

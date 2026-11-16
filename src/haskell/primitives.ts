@@ -171,7 +171,7 @@ function defineIntegral(prefix: 'int' | 'integer' | 'word', wrap: (value: bigint
   strict(`${prefix}Compare`, 2, ([a, b]) => ordering((a as bigint) < (b as bigint) ? -1 : a === b ? 0 : 1));
   strict(`${prefix}Show`, 1, ([a]) => unpackString((a as bigint).toString(), 0));
   strict(`${prefix}ToDouble`, 1, ([a]) => bigintToDouble(a as bigint));
-  strict(`${prefix}ToFloat`, 1, ([a]) => Math.fround(bigintToDouble(a as bigint)));
+  strict(`${prefix}ToFloat`, 1, ([a]) => rationalToFloat(a as bigint, 1n));
 }
 
 function countOnes(value: bigint): number {
@@ -187,6 +187,12 @@ function bigCost(a: bigint, b: bigint): number {
   return size > 64 ? Math.ceil(size / 64) : 1;
 }
 
+function shiftCount(value: Value): bigint {
+  const count = value as bigint;
+  if (count < 0n) throw new HaskellException('arithmetic overflow', 'ArithException');
+  return count;
+}
+
 /** Converts an integer to the nearest double, rounding half to even as GHC's `fromInteger` does. */
 export const bigintToDouble = Number;
 
@@ -198,8 +204,8 @@ strict('wordAnd', 2, ([a, b]) => (a as bigint) & (b as bigint));
 strict('wordOr', 2, ([a, b]) => (a as bigint) | (b as bigint));
 strict('wordXor', 2, ([a, b]) => (a as bigint) ^ (b as bigint));
 strict('wordComplement', 1, ([a]) => BigInt.asUintN(64, ~(a as bigint)));
-strict('wordShiftL', 2, ([a, b]) => ((b as bigint) >= 64n ? 0n : BigInt.asUintN(64, (a as bigint) << (b as bigint))));
-strict('wordShiftR', 2, ([a, b]) => ((b as bigint) >= 64n ? 0n : (a as bigint) >> (b as bigint)));
+strict('wordShiftL', 2, ([a, b]) => (shiftCount(b) >= 64n ? 0n : BigInt.asUintN(64, (a as bigint) << (b as bigint))));
+strict('wordShiftR', 2, ([a, b]) => (shiftCount(b) >= 64n ? 0n : (a as bigint) >> (b as bigint)));
 strict('wordPopCount', 1, ([a]) => BigInt(countOnes(a as bigint)));
 strict('integerToInt', 1, ([a]) => wrapInt(a as bigint));
 strict('intToInteger', 1, ([a]) => a);
@@ -233,17 +239,22 @@ strict('intAnd', 2, ([a, b]) => wrapInt((a as bigint) & (b as bigint)));
 strict('intOr', 2, ([a, b]) => wrapInt((a as bigint) | (b as bigint)));
 strict('intXor', 2, ([a, b]) => wrapInt((a as bigint) ^ (b as bigint)));
 strict('intComplement', 1, ([a]) => wrapInt(~(a as bigint)));
-strict('intShiftL', 2, ([a, b]) => ((b as bigint) >= 64n ? 0n : wrapInt((a as bigint) << (b as bigint))));
+strict('intShiftL', 2, ([a, b]) => (shiftCount(b) >= 64n ? 0n : wrapInt((a as bigint) << (b as bigint))));
 strict('intShiftR', 2, ([a, b]) =>
-  (b as bigint) >= 64n ? ((a as bigint) < 0n ? -1n : 0n) : (a as bigint) >> (b as bigint)
+  shiftCount(b) >= 64n ? ((a as bigint) < 0n ? -1n : 0n) : (a as bigint) >> (b as bigint)
 );
 strict('intPopCount', 1, ([a]) => BigInt(countOnes(BigInt.asUintN(64, a as bigint))));
 strict('integerAnd', 2, ([a, b]) => (a as bigint) & (b as bigint));
 strict('integerOr', 2, ([a, b]) => (a as bigint) | (b as bigint));
 strict('integerXor', 2, ([a, b]) => (a as bigint) ^ (b as bigint));
 strict('integerComplement', 1, ([a]) => ~(a as bigint));
-strict('integerShiftL', 2, ([a, b]) => (a as bigint) << (b as bigint));
-strict('integerShiftR', 2, ([a, b]) => (a as bigint) >> (b as bigint));
+strict('integerShiftL', 2, ([a, b], runtime) => {
+  const count = shiftCount(b);
+  if (a === 0n) return 0n;
+  runtime.spend(Math.ceil((hexDigits(a as bigint) * 4 + Number(count)) / 64));
+  return (a as bigint) << count;
+});
+strict('integerShiftR', 2, ([a, b]) => (a as bigint) >> shiftCount(b));
 strict('integerPopCount', 1, ([a]) => {
   const value = a as bigint;
   const count = countOnes(value < 0n ? ~value : value);
@@ -301,7 +312,9 @@ function defineFloating(prefix: 'double' | 'float', round: (value: number) => nu
     return BigInt(Math.trunc(value));
   });
   strict(`${prefix}Rint`, 1, ([a]) => roundHalfEven(a as number));
-  strict(`${prefix}FromInteger`, 1, ([a]) => round(bigintToDouble(a as bigint)));
+  strict(`${prefix}FromInteger`, 1, ([a]) =>
+    prefix === 'float' ? rationalToFloat(a as bigint, 1n) : bigintToDouble(a as bigint)
+  );
   strict(`${prefix}Digits`, 1, ([a]) => {
     const { digits, exponent } = floatToDigits(a as number, prefix === 'float');
     return tuple(listOf(digits.map(BigInt)), BigInt(exponent));
@@ -404,7 +417,7 @@ export function rationalToDouble(numerator: bigint, denominator: bigint): number
   return rationalToBinary(numerator, denominator, 53, -1074, 1023);
 }
 
-function rationalToFloat(numerator: bigint, denominator: bigint): number {
+export function rationalToFloat(numerator: bigint, denominator: bigint): number {
   return Math.fround(rationalToBinary(numerator, denominator, 24, -149, 127));
 }
 

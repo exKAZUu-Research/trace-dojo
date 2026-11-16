@@ -25,7 +25,7 @@ import {
   type ValueEntity,
 } from './entities';
 import { TailCall } from './machine';
-import { primitiveNamed } from './primitives';
+import { primitiveNamed, rationalToFloat } from './primitives';
 import type { LocalVar, RAlt, RBindGroup, RBinding, RClause, RExpr, RGuard, RPat, RRhs, RStmt } from './rast';
 import { type DictBuilders, dictBuilders, type Runtime } from './runtime';
 import type { Span } from './syntax';
@@ -1154,7 +1154,7 @@ export class Codegen {
       if (typeEntity === INT_TYPE) return { k: 'lit', value: BigInt.asIntN(64, value) };
       if (typeEntity === WORD_TYPE) return { k: 'lit', value: BigInt.asUintN(64, value) };
       if (typeEntity === DOUBLE_TYPE) return { k: 'lit', value: Number(value) };
-      if (typeEntity === FLOAT_TYPE) return { k: 'lit', value: Math.fround(Number(value)) };
+      if (typeEntity === FLOAT_TYPE) return { k: 'lit', value: rationalToFloat(value, 1n) };
       const support = this.options.support;
       return {
         k: 'app',
@@ -1164,8 +1164,8 @@ export class Codegen {
     }
     const value = negative ? -lit.value : lit.value;
     if (typeEntity === DOUBLE_TYPE) return { k: 'lit', value };
-    if (typeEntity === FLOAT_TYPE) return { k: 'lit', value: Math.fround(value) };
     const { numerator, denominator } = exactRatio(lit.text, negative);
+    if (typeEntity === FLOAT_TYPE) return { k: 'lit', value: rationalToFloat(numerator, denominator) };
     const ratio: Core = {
       k: 'con',
       con: this.options.support.ratioCon(),
