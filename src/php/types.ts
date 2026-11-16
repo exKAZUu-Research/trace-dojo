@@ -20,7 +20,12 @@ export function typeToString(type: TypeDecl): string {
   if (type.k === 'inter') return type.types.map((part) => typeToString(part)).join('&');
   // A union of one type and null reads as a nullable type.
   const others = type.types.filter((part) => !(part.k === 'named' && part.name === 'null'));
-  if (others.length === 1 && others.length < type.types.length && others[0].k === 'named' && others[0].name !== 'mixed') {
+  if (
+    others.length === 1 &&
+    others.length < type.types.length &&
+    others[0].k === 'named' &&
+    others[0].name !== 'mixed'
+  ) {
     return `?${typeToString(others[0])}`;
   }
   const parts = type.types.map((part) => (part.k === 'inter' ? `(${typeToString(part)})` : typeToString(part)));
@@ -264,4 +269,3 @@ function resolveSelf(type: TypeDecl, scope: PhpClass | undefined): TypeDecl {
 export function givenType(value: Value): string {
   return debugType(value);
 }
-

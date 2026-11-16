@@ -3,8 +3,8 @@ import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
 import { lower } from './bytes';
 import { throwError } from './errors';
-import { share } from './places';
 import { collectGarbage } from './garbage';
+import { share } from './places';
 import { FatalError, Frame, rt, SCRIPT_PATH, setCallCapture } from './runtime';
 import { coerce, describeType, givenType, NO_MATCH, typeToString } from './types';
 import {
@@ -215,13 +215,7 @@ function bindNative(
   return { values, refs, named };
 }
 
-function coerceArg(
-  param: Param,
-  index: number,
-  value: Value,
-  strict: boolean,
-  name: string
-): Value {
+function coerceArg(param: Param, index: number, value: Value, strict: boolean, name: string): Value {
   if (!param.type) return value;
   const coerced = coerce(value, param.type, {
     strict,
@@ -568,8 +562,6 @@ export function parseTypeText(text: string): TypeDecl {
   ];
   return { k: 'named', name: builtin.includes(lower(text)) ? lower(text) : text };
 }
-
-
 
 export function closureFunction(decl: FunctionDecl): UserFunction {
   const runtime = rt();

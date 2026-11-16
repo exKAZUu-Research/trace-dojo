@@ -104,6 +104,7 @@ const UNSUPPORTED_FUNCTIONS: [string, string[]][] = [
   ],
   ['セッション', ['session_start', 'session_destroy', 'session_id']],
   ['環境変数', ['getenv', 'putenv']],
+  ['フォームの入力の検査', ['filter_var', 'filter_input', 'filter_var_array', 'filter_input_array', 'filter_has_var']],
   [
     '実行環境の情報と設定',
     [

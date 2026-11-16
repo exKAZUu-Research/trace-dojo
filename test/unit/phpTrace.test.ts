@@ -20,7 +20,10 @@ const asJava = (items: TraceItem[]): unknown[] =>
     callDepth: callLines.length,
     vars: Object.fromEntries(
       Object.entries(vars).map(([name, value]) => [
-        name.replace(/^\$this->/, 'this.').replace(/^\$/, '').replace('::$', '.'),
+        name
+          .replace(/^\$this->/, 'this.')
+          .replace(/^\$/, '')
+          .replace('::$', '.'),
         value,
       ])
     ),
@@ -164,5 +167,6 @@ $p->show();`;
   const items = phpTrace(program);
   const inShow = items.find((item) => item.callLines.length > 0 && item.vars.$z === 2);
   expect(inShow?.vars).toEqual({ $z: 2, '$this->x': 5, 'P::$count': 3 });
+  // oxlint-disable-next-line unicorn/no-null -- The trace format shows null as null.
   expect(inShow?.referenceVars.$y).toEqual({ kind: 'value', value: null });
 });

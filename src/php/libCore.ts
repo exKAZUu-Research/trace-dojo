@@ -3,8 +3,8 @@
 import { lower } from './bytes';
 import { callStack, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
-import * as conversionsModule from './conversions';
 import { findClass, lookupMethod, visibleProps } from './classes';
+import * as conversionsModule from './conversions';
 import { debugType, getType, isNumericString, normalizeKeyString } from './conversions';
 import {
   E_ALL,
@@ -491,8 +491,9 @@ defineFunction('class_parents(object|string $object_or_class, bool $autoload = t
   return array;
 });
 defineFunction('spl_object_id(object $object): int', ({ args }) => BigInt((args[0] as PhpObject).id));
-defineFunction('spl_object_hash(object $object): string', ({ args }) =>
-  `${(args[0] as PhpObject).id.toString(16).padStart(16, '0')}${'0'.repeat(16)}`
+defineFunction(
+  'spl_object_hash(object $object): string',
+  ({ args }) => `${(args[0] as PhpObject).id.toString(16).padStart(16, '0')}${'0'.repeat(16)}`
 );
 defineFunction('iterator_to_array(Traversable|array $iterator, bool $preserve_keys = true): array', ({ args }) => {
   const [iterable, preserveKeys = true] = args;
@@ -602,7 +603,6 @@ defineFunction('debug_print_backtrace(int $options = 0, int $limit = 0): void', 
   );
   return null;
 });
-
 
 // Standard streams ---------------------------------------------------------------------------------------------------
 

@@ -193,4 +193,3 @@ export function readElement(array: PhpArray, key: Key, quiet: boolean): Value {
   }
   return value;
 }
-

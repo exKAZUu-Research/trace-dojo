@@ -452,5 +452,3 @@ export function toKey(value: Value): Key {
   if (value instanceof PhpArray) throwError('TypeError', 'Illegal offset type');
   throwError('TypeError', `Cannot access offset of type ${debugType(value)} on array`);
 }
-
-

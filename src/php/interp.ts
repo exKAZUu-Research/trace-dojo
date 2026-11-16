@@ -67,8 +67,8 @@ import {
   writableContainer,
 } from './places';
 import { ExitSignal, FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
-import { UnsupportedFeatureError } from './unsupported';
 import { incrementString } from './strings';
+import { UnsupportedFeatureError } from './unsupported';
 import {
   type Callable,
   type ClosureData,

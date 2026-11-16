@@ -70,7 +70,6 @@ export function floatToInt(value: number): bigint {
   return BigInt(Math.trunc(value));
 }
 
-
 /** The result of an integer operation, or the float PHP produces when it overflows. */
 export function intOrFloat(value: bigint): bigint | number {
   if (value > INT_MAX || value < INT_MIN) return Number(value);
@@ -194,7 +193,6 @@ export function debugType(value: Value): string {
   return object.cls.isAnonymous ? anonymousDebugName(object) : object.cls.name;
 }
 
-
 function anonymousDebugName(object: PhpObject): string {
   const parent = object.cls.parent;
   if (parent) return `${parent.name}@anonymous`;
@@ -207,7 +205,6 @@ export function compareBytes(a: string, b: string): number {
   if (a === b) return 0;
   return a < b ? -1 : 1;
 }
-
 
 export function sign(value: number | bigint): number {
   if (typeof value === 'bigint') return value < 0n ? -1 : value > 0n ? 1 : 0;

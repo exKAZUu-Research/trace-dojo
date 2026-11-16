@@ -16,7 +16,9 @@ function debugEntries(object: PhpObject): [string | bigint, Slot, string][] {
   if (isClosure(object)) return closureDebug(object);
   const internal = object.internal as { debugEntries?: () => [string | bigint, Value][] } | undefined;
   if (internal?.debugEntries) {
-    return internal.debugEntries().map(([key, value]) => [typeof key === 'string' ? propNameOf(key) : key, value, debugLabel(key)]);
+    return internal
+      .debugEntries()
+      .map(([key, value]) => [typeof key === 'string' ? propNameOf(key) : key, value, debugLabel(key)]);
   }
   const entries: [string | bigint, Slot, string][] = [];
   for (const [key, slot] of object.props) {

@@ -36,7 +36,11 @@ defineClass({
 defineClass({
   name: 'Serializable',
   kind: 'interface',
-  methods: ['serialize()', 'unserialize(string $data)'].map((signature) => ({ signature, impl: () => null, isAbstract: true })),
+  methods: ['serialize()', 'unserialize(string $data)'].map((signature) => ({
+    signature,
+    impl: () => null,
+    isAbstract: true,
+  })),
 });
 defineClass({
   name: 'IteratorAggregate',
@@ -204,7 +208,6 @@ function defineTurtleMethods(): NativeMethod[] {
 }
 
 defineClass({ name: 'Turtle', methods: defineTurtleMethods() });
-
 
 export function typeName(value: Value): string {
   return debugType(value);

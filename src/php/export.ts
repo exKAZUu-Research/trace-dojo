@@ -116,7 +116,9 @@ export function exportExpr(e: Expr, priority = 0): string {
 }
 
 function exportArgs(args: Arg[]): string {
-  return args.map((arg) => `${arg.name ? `${arg.name}: ` : ''}${arg.spread ? '...' : ''}${exportExpr(arg.e)}`).join(', ');
+  return args
+    .map((arg) => `${arg.name ? `${arg.name}: ` : ''}${arg.spread ? '...' : ''}${exportExpr(arg.e)}`)
+    .join(', ');
 }
 
 function exportClass(cls: ClassRef): string {

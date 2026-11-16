@@ -95,7 +95,10 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
   }
   const declared = [...decl.interfaces];
   // A class that declares __toString implements Stringable, as if it had named it last.
-  if (decl.methods.some((method) => lower(method.fn.name) === '__tostring') && !declared.some((name) => lower(name) === 'stringable')) {
+  if (
+    decl.methods.some((method) => lower(method.fn.name) === '__tostring') &&
+    !declared.some((name) => lower(name) === 'stringable')
+  ) {
     declared.push('Stringable');
   }
   for (const name of declared) {
@@ -943,8 +946,6 @@ export function classConstant(cls: PhpClass, name: string, scope: PhpClass | und
   }
   return share(constant.value as Value);
 }
-
-
 
 export function objectToArray(object: PhpObject): PhpArray {
   const array = new PhpArray();

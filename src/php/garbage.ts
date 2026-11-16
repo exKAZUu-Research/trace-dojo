@@ -283,4 +283,3 @@ export function holderCounts(runtime: Runtime): Map<PhpObject, number> {
   }
   return counts;
 }
-

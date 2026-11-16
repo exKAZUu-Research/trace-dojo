@@ -165,4 +165,3 @@ function keyLabel(key: Key, isList: boolean): string {
   if (isList || typeof key === 'bigint') return String(key);
   return dec(key);
 }
-

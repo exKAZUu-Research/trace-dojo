@@ -188,7 +188,6 @@ export class Converter {
     return { k: 'expr', e: this.expr(node) };
   }
 
-
   // Statements --------------------------------------------------------------------------------------------------------
 
   private echoTagStatement(node: Node): Stmt[] {

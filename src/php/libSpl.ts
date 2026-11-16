@@ -701,7 +701,9 @@ const objectStorageOf = (object: PhpObject): ObjectStorage => object.internal as
 
 /** Reports a method PHP 8.5 deprecates in favor of its ArrayAccess counterpart. */
 function deprecatedMethod(name: string, replacement: string): void {
-  deprecated(`Method SplObjectStorage::${name}() is deprecated since 8.5, use method SplObjectStorage::${replacement}() instead`);
+  deprecated(
+    `Method SplObjectStorage::${name}() is deprecated since 8.5, use method SplObjectStorage::${replacement}() instead`
+  );
 }
 
 function storageKey(value: Value): PhpObject {
@@ -723,7 +725,8 @@ defineClass({
       impl: ({ thisObj, args }) => {
         const storage = objectStorageOf(thisObj);
         const offset = Number(args[0]);
-        if (offset < 0 || offset >= storage.entries.size) throwError('OutOfBoundsException', `Seek position ${offset} is out of range`);
+        if (offset < 0 || offset >= storage.entries.size)
+          throwError('OutOfBoundsException', `Seek position ${offset} is out of range`);
         storage.position = offset;
         return null;
       },

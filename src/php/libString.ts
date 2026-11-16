@@ -5,9 +5,10 @@ import { createHash } from 'node:crypto';
 
 import { eastAsianWidth } from 'get-east-asian-width';
 
-import { codePointBytes, dec, enc, lower, upper, utf8Chars } from './bytes';
+import { codePointBytes, dec, enc, lower, upper, utf8Chars, utf8Length } from './bytes';
 import { compareBytes } from './conversions';
 import { deprecated, throwError, warn } from './errors';
+import { HTML401_ENTITIES } from './htmlEntities';
 import { defineAlias, defineConstant, defineFunction } from './native';
 import { toStr } from './operators';
 import { rt } from './runtime';
@@ -635,6 +636,112 @@ defineFunction(
     return text.replaceAll('&amp;', '&');
   }
 );
+const ENTITY_BY_CODE = new Map(HTML401_ENTITIES.map(([code, name]) => [code, name]));
+const CODE_BY_ENTITY = new Map(HTML401_ENTITIES.map(([code, name]) => [name, code]));
+
+defineFunction(
+  'htmlentities(string $string, int $flags = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401, ?string $encoding = null, bool $double_encode = true): string',
+  ({ args }) => {
+    const flags = args[1] === undefined ? 11n : (args[1] as bigint);
+    const doubleEncode = args[3] !== false;
+    const text = s(args[0]);
+    let result = '';
+    for (let index = 0; index < text.length;) {
+      const length = utf8Length(text, index);
+      const char = text.slice(index, index + length);
+      index += length;
+      const code = length === 1 ? char.charCodeAt(0) : (dec(char).codePointAt(0) as number);
+      if (length === 1 && code >= 0x80) {
+        if ((flags & 8n) === 0n) return '';
+        result += 'ï¿½';
+        continue;
+      }
+      if (
+        char === '&' &&
+        !doubleEncode &&
+        /^&(?:[A-Za-z][A-Za-z\d]*|#\d+|#[xX][\dA-Fa-f]+);/.test(text.slice(index - 1))
+      ) {
+        result += char;
+        continue;
+      }
+      if (char === '"') result += flags & 2n ? '&quot;' : char;
+      else if (char === "'") result += (flags & 3n) === 3n ? ((flags & 48n) === 0n ? '&#039;' : '&apos;') : char;
+      else {
+        const name = ENTITY_BY_CODE.get(code);
+        result += name ? `&${name};` : char;
+      }
+    }
+    return result;
+  }
+);
+defineFunction(
+  'html_entity_decode(string $string, int $flags = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401, ?string $encoding = null): string',
+  ({ args }) => {
+    const flags = args[1] === undefined ? 11n : (args[1] as bigint);
+    return s(args[0]).replaceAll(/&(#[xX][\dA-Fa-f]+|#\d+|[A-Za-z][A-Za-z\d]*);/g, (match, body: string) => {
+      if (body.startsWith('#')) {
+        const code = /^#[xX]/.test(body) ? Number.parseInt(body.slice(2), 16) : Number.parseInt(body.slice(1), 10);
+        if (code === 0x27 && (flags & 3n) !== 3n) return match;
+        if (code === 0x22 && (flags & 2n) === 0n) return match;
+        if (code > 0x10_ff_ff || (code >= 0xd8_00 && code <= 0xdf_ff)) return match;
+        return codePointBytes(code);
+      }
+      if (body === 'quot' && (flags & 2n) === 0n) return match;
+      const code = CODE_BY_ENTITY.get(body);
+      return code === undefined ? match : codePointBytes(code);
+    });
+  }
+);
+defineFunction('strip_tags(string $string, array|string|null $allowed_tags = null): string', ({ args }) =>
+  stripTags(s(args[0]), allowedTags(args[1] ?? null))
+);
+
+function allowedTags(value: Value): Set<string> {
+  if (value === null) return new Set();
+  const names =
+    value instanceof PhpArray
+      ? value.values().map((item) => toStr(item))
+      : [...toStr(value).matchAll(/<([A-Za-z\d]+)>/g)].map((match) => match[1]);
+  return new Set(names.map((name) => lower(name)));
+}
+
+/** Removes HTML and PHP tags as PHP's strip_tags does, keeping the allowed tags. */
+// code-gauge-allow functionCognitiveComplexity 30 -- Transcribes the states of PHP's php_strip_tags_ex.
+function stripTags(text: string, allowed: Set<string>): string {
+  let result = '';
+  let index = 0;
+  while (index < text.length) {
+    const char = text[index];
+    if (char !== '<' || index + 1 >= text.length || /\s/.test(text[index + 1])) {
+      result += char;
+      index++;
+      continue;
+    }
+    if (text.startsWith('<!--', index)) {
+      const end = text.indexOf('-->', index + 4);
+      index = end === -1 ? text.length : end + 3;
+      continue;
+    }
+    let end = index + 1;
+    let quote = '';
+    let depth = 1;
+    while (end < text.length) {
+      const current = text[end];
+      if (quote) {
+        if (current === quote) quote = '';
+      } else if (current === '"' || current === "'") quote = current;
+      else if (current === '<') depth++;
+      else if (current === '>' && --depth === 0) break;
+      end++;
+    }
+    const tag = text.slice(index, Math.min(end + 1, text.length));
+    const name = /^<\/?\s*([A-Za-z\d]+)/.exec(tag)?.[1];
+    if (name && allowed.has(lower(name))) result += tag;
+    index = end + 1;
+  }
+  return result;
+}
+
 defineFunction('addslashes(string $string): string', ({ args }) =>
   s(args[0]).replaceAll(/["'\\\0]/g, (match) => (match === '\0' ? String.raw`\0` : `\\${match}`))
 );

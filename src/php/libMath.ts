@@ -248,4 +248,3 @@ defineFunction('lcg_value(): float', () => {
   deprecated(String.raw`Function lcg_value() is deprecated since 8.4, use \Random\Randomizer::getFloat() instead`);
   return Math.random();
 });
-

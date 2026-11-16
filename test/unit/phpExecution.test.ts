@@ -70,14 +70,20 @@ test('an uncaught exception prints its fatal error and reports it', () => {
     stdout:
       '\nFatal error: Uncaught RuntimeException: boom in /main.php:2\nStack trace:\n#0 /main.php(3): f()\n#1 {main}\n  thrown in /main.php on line 2\n',
   });
-  expect(execution.kind === 'executed' && execution.uncaughtException).toMatch(/^Fatal error: Uncaught RuntimeException: boom/);
+  expect(execution.kind === 'executed' && execution.uncaughtException).toMatch(
+    /^Fatal error: Uncaught RuntimeException: boom/
+  );
 });
 
 test('text outside the PHP tags is printed as it is', () => {
-  expect(run('Title\n<?php echo 1 + 1 ?>\nmiddle <?= "x" ?>\nend\n')).toMatchObject({ stdout: 'Title\n2middle xend\n' });
+  expect(run('Title\n<?php echo 1 + 1 ?>\nmiddle <?= "x" ?>\nend\n')).toMatchObject({
+    stdout: 'Title\n2middle xend\n',
+  });
 });
 
 test('turtle methods take their Japanese and English names', () => {
-  const execution = run('<?php\n$t = new Turtle();\n$t->前に進む();\n$t->forward();\n$t->右を向く();\n$t->turnRight();');
+  const execution = run(
+    '<?php\n$t = new Turtle();\n$t->前に進む();\n$t->forward();\n$t->右を向く();\n$t->turnRight();'
+  );
   expect(execution.kind === 'executed' && execution.finalTurtles).toEqual([{ x: 0, y: 2, color: '#', dir: 'S' }]);
 });

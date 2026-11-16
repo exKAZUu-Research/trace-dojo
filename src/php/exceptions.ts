@@ -282,4 +282,3 @@ const subclasses: [string, string][] = [
   ['JsonException', 'Exception'],
 ];
 for (const [name, parent] of subclasses) defineClass({ name, parent });
-
