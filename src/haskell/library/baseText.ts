@@ -323,6 +323,8 @@ lex "" = [("", "")]
 lex (c:s) | isSpace c = lex (dropWhile isSpace s)
 lex ('\'':s) = [('\'' : ch ++ "'", t) | (ch, '\'':t) <- lexLitChar s, ch /= "'"]
 lex ('"':s) = [('"' : str, t) | (str, t) <- lexString s]
+lex ('0':b:s) | baseOf b /= 0 && not (null ds) = [('0' : b : ds, t)]
+  where (ds, t) = span (isDigitOfBase (baseOf b)) s
 lex (c:s) | isSingle c = [([c], s)]
           | isSym c = [(c : sym, t) | (sym, t) <- [span isSym s]]
           | isAlpha c || c == '_' = [(c : nam, t) | (nam, t) <- [span isIdChar s]]
@@ -409,39 +411,61 @@ readDecimal = primitive "readDecimal"
 readFloatText :: String -> (Integer, Integer)
 readFloatText = primitive "readFloatText"
 
-readSignedNumber :: Int -> (String -> Maybe a) -> (a -> a) -> ReadS a
-readSignedNumber p conv neg r = direct p r ++ paren r
-  where direct q s = [(x, t) | (tok, t) <- lex s, Just x <- [conv tok]]
-                     ++ (if q > 6 then [] else [(neg x, u) | ("-", t) <- lex s, (tok, u) <- lex t, Just x <- [conv tok]])
-        paren s = [(x, u) | ("(", t) <- lex s, (x, t') <- direct 0 t ++ paren t, (")", u) <- lex t']
+readSignedNumber :: (String -> Maybe a) -> (a -> a) -> ReadS a
+readSignedNumber conv neg r = direct r ++ paren r
+  where direct s = [(x, t) | (tok, t) <- lex s, Just x <- [conv tok]]
+                     ++ [(neg x, u) | ("-", t) <- lex s, (tok, u) <- lex t, Just x <- [conv tok]]
+        paren s = [(x, u) | ("(", t) <- lex s, (x, t') <- direct t ++ paren t, (")", u) <- lex t']
 
 convInteger :: String -> Maybe Integer
-convInteger tok = if not (null tok) && all isDigit tok then Just (readDecimal tok) else Nothing
+convInteger tok = case convBased tok of
+  Just n -> Just n
+  Nothing -> if not (null tok) && all isDigit tok then Just (readDecimal tok) else Nothing
+
+-- A hexadecimal, octal, or binary token such as 0x1F, which GHC's Read accepts for every number type.
+convBased :: String -> Maybe Integer
+convBased tok = case tok of
+  ('0':b:ds) | baseOf b /= 0 && not (null ds) && all (isDigitOfBase (baseOf b)) ds ->
+    Just (foldl (\n d -> n * toInteger (baseOf b) + toInteger (digitToInt d)) 0 ds)
+  _ -> Nothing
+
+-- The base a letter after 0 selects, or 0 for none.
+baseOf :: Char -> Int
+baseOf b = if b ${BT}elem${BT} "xX" then 16 else if b ${BT}elem${BT} "oO" then 8 else if b ${BT}elem${BT} "bB" then 2 else 0
+
+isDigitOfBase :: Int -> Char -> Bool
+isDigitOfBase base c = case base of
+  16 -> isHexDigit c
+  8 -> isOctDigit c
+  _ -> c == '0' || c == '1'
 
 convFractional :: Fractional a => String -> Maybe a
 convFractional tok = case tok of
   "NaN" -> Just (fromInteger 0 / fromInteger 0)
   "Infinity" -> Just (fromInteger 1 / fromInteger 0)
-  (c:_) -> if isDigit c then (let (n, d) = readFloatText tok in Just (fromRational (n :% d))) else Nothing
-  _ -> Nothing
+  _ -> case convBased tok of
+    Just n -> Just (fromInteger n)
+    Nothing -> case tok of
+      (c:_) -> if isDigit c then (let (n, d) = readFloatText tok in Just (fromRational (n :% d))) else Nothing
+      _ -> Nothing
 
 instance Read Int where
-  readsPrec p = readSignedNumber p (fmap fromInteger . convInteger) negate
+  readsPrec _ = readSignedNumber (fmap fromInteger . convInteger) negate
 
 instance Read Integer where
-  readsPrec p = readSignedNumber p convInteger negate
+  readsPrec _ = readSignedNumber convInteger negate
 
 instance Read Word where
-  readsPrec p = readSignedNumber p (fmap fromInteger . convInteger) negate
+  readsPrec _ = readSignedNumber (fmap fromInteger . convInteger) negate
 
 instance (Integral a, Read a) => Read (Ratio a) where
   readsPrec p = readParen (p > 7) (\r -> [(x % y, u) | (x, s) <- readsPrec 8 r, ("%", t) <- lex s, (y, u) <- readsPrec 8 t])
 
 instance Read Double where
-  readsPrec p = readSignedNumber p convFractional negate
+  readsPrec _ = readSignedNumber convFractional negate
 
 instance Read Float where
-  readsPrec p = readSignedNumber p convFractional negate
+  readsPrec _ = readSignedNumber convFractional negate
 
 instance Read Char where
   readsPrec _ = readParen False (\r -> [(c, t) | ('\'':lexeme, t) <- lex r, Just c <- [decodeLitChar (init lexeme)]])
