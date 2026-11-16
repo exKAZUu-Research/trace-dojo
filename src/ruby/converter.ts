@@ -773,14 +773,10 @@ export class Converter {
         if (
           interpolates &&
           child.namedChildren.some(
-            (part, index, children) =>
-              part?.type === 'escape_sequence' &&
-              /^\\(?:c|C-|M-)/.test(part.text) &&
-              part.text.includes('\n') &&
-              children[index + 1]?.type === 'heredoc_body'
+            (part) => part?.type === 'escape_sequence' && /^\\(?:c|C-|M-)/.test(part.text) && part.text.includes('\n')
           )
         )
-          this.unsupported(child, 'heredoc と制御文字の改行エスケープの組み合わせ');
+          this.unsupported(child, '単語配列の制御文字の改行エスケープ');
         const parts: StrPart[] = interpolates
           ? this.stringParts(child)
           : [

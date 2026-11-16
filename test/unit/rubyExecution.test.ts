@@ -14793,3 +14793,17 @@ test('A difficult speculative suffix cannot replace a completed native match', (
     uncaughtException: undefined,
   });
 });
+
+test('Percent words reject physical control-newline operands', () => {
+  for (const kind of ['W', 'I'])
+    for (const eol of ['\n', '\r\n'])
+      for (const prefix of [String.raw`\c`, String.raw`\C-`, String.raw`\M-`, String.raw`\M-\c`, String.raw`\c\M-`]) {
+        const source = `p %${kind}[foo ${prefix}${eol}bar baz]`;
+        expect(run(source), source).toMatchObject({
+          kind: 'compileError',
+          diagnostics: [
+            expect.objectContaining({ message: '単語配列の制御文字の改行エスケープは、この採点環境では使えません。' }),
+          ],
+        });
+      }
+});
