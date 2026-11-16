@@ -1,6 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 
 function fail(node: Node, message: string): never {
   throw new CompileError([{ row: node.startPosition.row, message }]);
@@ -23,9 +24,16 @@ export function decodeString(node: Node): number[] {
 function decodeQuoted(node: Node): number[] {
   const bytes: number[] = [];
   for (const part of node.namedChildren) {
-    if (part.type === 'string_content') bytes.push(...new TextEncoder().encode(part.text));
-    else if (part.type === 'escape_sequence') bytes.push(...escapeBytes(part.text, part, true));
-    else if (part.type === 'string') return decodeQuoted(part);
+    if (part.type === 'string') return decodeQuoted(part);
+    if (part.text.length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+    const decoded =
+      part.type === 'string_content'
+        ? new TextEncoder().encode(part.text)
+        : part.type === 'escape_sequence'
+          ? escapeBytes(part.text, part, true)
+          : [];
+    if (bytes.length + decoded.length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+    for (const byte of decoded) bytes.push(byte);
   }
   return bytes;
 }

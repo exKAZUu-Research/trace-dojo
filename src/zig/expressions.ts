@@ -27,10 +27,11 @@ import {
   parseFloatLiteral,
 } from './floats';
 import { asFloat, comparisonTest, isArithmeticType, isIntegerType, isZero, sign } from './operands';
-import { type Frame, Jump } from './runtime';
+import { type Frame, Jump, withHeldValues } from './runtime';
 import {
   addDecls,
   copyForStorage,
+  evaluateHeld,
   FnRef,
   isAnonymous,
   isType,
@@ -300,7 +301,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   // Field access ----------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionNcss 40 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 27 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected fieldAccess(expression: ExpressionOf<'field'>): TExpr {
     const object = this.compile(expression.object);
     const { name } = expression;
@@ -537,19 +538,24 @@ export abstract class ExpressionCompiler extends SemaBase {
       const elements = elementSlots(object.value, type);
       return known(child, elements.slots[elements.start + Number(index.value)], expression);
     }
-    const access = this.elementAccess(object, type);
-    const evaluateIndex = index.eval;
+    const evaluateObject =
+      type.kind === 'array' && object.place ? (frame: Frame) => object.place!.locate(frame).load() : object.eval;
+    const access = this.elementAccess(type);
+    const locate = (frame: Frame): { slots: Slots; position: number } => {
+      const value = evaluateObject(frame);
+      return withHeldValues(frame, [value], () => access(value, index.eval(frame) as bigint));
+    };
     const place: Place = {
       isConst,
       locate: (frame) => {
-        const { slots, position } = access(frame, evaluateIndex(frame) as bigint);
+        const { slots, position } = locate(frame);
         return new Pointer(slots, position);
       },
     };
     return runtime(
       child,
       (frame) => {
-        const { slots, position } = access(frame, evaluateIndex(frame) as bigint);
+        const { slots, position } = locate(frame);
         return slots.slots[position];
       },
       expression,
@@ -559,17 +565,12 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   /** Locates the element at an index of an array, a pointer to one, or a slice, checking the bounds. */
   // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  private elementAccess(
-    object: TExpr,
-    type: Type
-  ): (frame: Frame, index: bigint) => { slots: Slots; position: number } {
-    const evaluate = object.eval;
+  private elementAccess(type: Type): (value: Value, index: bigint) => { slots: Slots; position: number } {
     if (type.kind === 'array') {
-      const place = object.place;
       const limit = type.length + (type.sentinel === undefined ? 0 : 1);
       const length = type.length;
-      return (frame, index) => {
-        const array = (place ? place.locate(frame).load() : evaluate(frame)) as ZArray;
+      return (value, index) => {
+        const array = value as ZArray;
         if (index >= BigInt(limit)) indexOutOfBounds(index, length);
         return { slots: array, position: array.offset + Number(index) };
       };
@@ -577,15 +578,15 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array') {
       const array = type.child;
       const limit = array.length + (array.sentinel === undefined ? 0 : 1);
-      return (frame, index) => {
-        const target = (evaluate(frame) as Pointer).load() as ZArray;
+      return (value, index) => {
+        const target = (value as Pointer).load() as ZArray;
         if (index >= BigInt(limit)) indexOutOfBounds(index, array.length);
         return { slots: target, position: target.offset + Number(index) };
       };
     }
     const sentinel = type.kind === 'pointer' ? type.sentinel : undefined;
-    return (frame, index) => {
-      const slice = evaluate(frame) as Slice;
+    return (value, index) => {
+      const slice = value as Slice;
       const limit = slice.length + (sentinel === undefined ? 0 : 1);
       if (index >= BigInt(limit)) indexOutOfBounds(index, slice.length);
       return { slots: slice.target, position: slice.start + Number(index) };
@@ -853,7 +854,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 27 -- Keeps one operation of the interpreter in one place.
+  // code-gauge-allow functionCognitiveComplexity 30 -- Keeps one operation of the interpreter in one place.
   // code-gauge-allow functionNcss 39 -- Keeps operand coercion and comparison validation together.
   private comparison(expression: ExpressionOf<'binary'>): TExpr {
     const { operator } = expression;
@@ -882,9 +883,14 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (errorUnion && error && !ordered) {
       // An error union equals an error when it holds that error.
       const isEqual = operator === '==';
-      const evaluateUnion = errorUnion.eval;
-      const evaluateError = error.eval;
-      return runtime(BOOL, (frame) => (evaluateUnion(frame) === evaluateError(frame)) === isEqual, expression);
+      return runtime(
+        BOOL,
+        (frame) => {
+          const values = evaluateHeld(frame, [left.eval, right.eval]);
+          return (values[0] === values[1]) === isEqual;
+        },
+        expression
+      );
     }
     // Integers of any types compare by their values, without a common type.
     const type =
@@ -1266,8 +1272,8 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Initializers ----------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 32 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 27 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionNcss 38 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected structInit(expression: ExpressionOf<'structInit'>, resultType: Type | undefined): TExpr {
     const type = expression.type ? this.compileType(expression.type) : resultType && unwrapResult(resultType);
     if (!type) return this.anonymousStruct(expression);
@@ -1295,7 +1301,12 @@ export abstract class ExpressionCompiler extends SemaBase {
         this.error(init, `フィールド「${init.name}」を2回初期化しています。`);
       }
     }
-    const elements = fields.map((field) => {
+    const order = [
+      ...expression.fields.map((init) => fields.findIndex((field) => field.name === init.name)),
+      ...fields.flatMap((field, index) => (expression.fields.some((init) => init.name === field.name) ? [] : [index])),
+    ];
+    const elements = order.map((position) => {
+      const field = fields[position];
       const init = expression.fields.find((each) => each.name === field.name);
       if (!init) {
         if (!field.hasDefault) this.error(expression, `フィールド「${field.name}」の値がありません。`);
@@ -1303,7 +1314,11 @@ export abstract class ExpressionCompiler extends SemaBase {
       }
       return this.coerce(this.compile(init.value, field.type), field.type, init.value);
     });
-    return this.aggregate(type, elements, expression, (values) => new ZStruct(values));
+    return this.aggregate(type, elements, expression, (values) => {
+      const slots: Value[] = [];
+      for (const [index, position] of order.entries()) slots[position] = values[index];
+      return new ZStruct(slots);
+    });
   }
 
   private unionInit(expression: ExpressionOf<'structInit'>, type: Extract<Type, { kind: 'union' }>): TExpr {

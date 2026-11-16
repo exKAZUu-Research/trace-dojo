@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 842 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 850 -- The file holds one layer of the compiler, whose parts share its private state.
 // code-gauge-allow-file duplicateLines 17 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
@@ -78,6 +78,7 @@ export interface TExpr {
   readonly type: Type;
   /** Whether the value is known at compile time, in `value`. */
   readonly known: boolean;
+  readonly staticResult?: { value: Value };
   readonly value: Value;
   readonly eval: Eval;
   readonly place?: Place;
@@ -559,6 +560,22 @@ export abstract class SemaBase implements SemaApi {
   }
 
   protected tryCoerce(expression: TExpr, to: Type, span: Span): TExpr | undefined {
+    if (!expression.known && expression.staticResult) {
+      const converted = this.tryCoerce(known(expression.type, expression.staticResult.value, span), to, span);
+      if (!converted) return undefined;
+      return {
+        ...runtime(
+          to,
+          (frame) => {
+            expression.eval(frame);
+            return converted.eval(frame);
+          },
+          span
+        ),
+        staticResult: { value: converted.value },
+      };
+    }
+
     const from = expression.type;
     if (from === to) return expression;
     if (from.kind === 'noreturn') return { ...expression, type: to };

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 616 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 620 -- The file holds one layer of the compiler, whose parts share its private state.
 import {
   divCeil,
   divExact,
@@ -34,7 +34,7 @@ import {
 } from './floats';
 import { importStd } from './library/std';
 import { ZigPanic } from './runtime';
-import { copyForStorage, known, newArray, runtime, type TExpr } from './semaBase';
+import { copyForStorage, evaluateHeld, inMemoryCoercible, known, newArray, runtime, type TExpr } from './semaBase';
 import {
   BOOL,
   COMPTIME_INT,
@@ -843,16 +843,22 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     if (!target || target.isConst)
       return this.error(expression.args[0], `${name} の書き込み先には、変更できる配列やスライスを指定してください。`);
     if (!from) return this.error(expression.args[1], `${name} の読み込み元には、配列やスライスを指定してください。`);
+    if (!inMemoryCoercible(from.child, target.child)) this.error(expression, `${name} の要素の型が一致しません。`);
     const evaluateDestination = destination.eval;
     const evaluateSource = source.eval;
     return runtime(
       VOID,
       (frame) => {
-        const out = target.view(evaluateDestination(frame));
-        const input = from.view(evaluateSource(frame));
+        const valuesOf = evaluateHeld(frame, [evaluateDestination, evaluateSource]);
+        const out = target.view(valuesOf[0]);
+        const input = from.view(valuesOf[1]);
         if (out.length !== input.length) panic(PANIC.memcpyLengths);
         const values = input.slots.slots.slice(input.start, input.start + input.length).map(copyForStorage);
-        if (name === '@memcpy' && out.slots === input.slots && Math.abs(out.start - input.start) < out.length)
+        if (
+          name === '@memcpy' &&
+          out.slots.slots === input.slots.slots &&
+          Math.abs(out.start - input.start) < out.length
+        )
           panic(PANIC.memcpyAlias);
         for (const [index, value] of values.entries()) storeInto(out.slots, out.start + index, value);
         return;

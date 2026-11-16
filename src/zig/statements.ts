@@ -3,10 +3,11 @@ import { PANIC, panic } from './arith';
 import type { Capture, Expression, ExpressionOf, Label, Span, Statement, SwitchCase } from './ast';
 import { CallCompiler, type FunctionCompilation } from './calls';
 import type { FunctionInstance } from './functions';
-import { type Frame, Jump } from './runtime';
+import { type Frame, Jump, withHeldValues } from './runtime';
 import {
   copyForStorage,
   errorSetIncludes,
+  evaluateHeld,
   known,
   type LocalBinding,
   mergeErrorSets,
@@ -38,7 +39,6 @@ import {
 import {
   copyValue,
   ErrorValue,
-  isAggregate,
   NULL,
   Pointer,
   type Slice,
@@ -262,8 +262,8 @@ export abstract class StatementCompiler extends CallCompiler {
       slot,
       type,
       isConst,
-      known: Boolean(isConst && value?.known),
-      value: isConst && value?.known ? value.value : undefined,
+      known: Boolean(isConst && (value?.known || value?.staticResult)),
+      value: isConst ? (value?.known ? value.value : value?.staticResult?.value) : undefined,
     };
     if (name !== '_') {
       this.scope.locals?.set(name, binding);
@@ -366,7 +366,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const row = this.stepRow(statement);
     return {
       exec: this.simple(row, false, (frame) => {
-        frame.slots[aggregateSlot] = evaluate(frame);
+        frame.slots[aggregateSlot] = copyValue(evaluate(frame));
         try {
           for (const store of stores) store(frame);
         } finally {
@@ -402,9 +402,8 @@ export abstract class StatementCompiler extends CallCompiler {
       const evaluate = this.coerce(this.compile(element, place.type), place.type, element).eval;
       const locate = place.place.locate;
       return (frame: Frame): void => {
-        const result = evaluate(frame);
         const pointer = locate(frame);
-        storeInto(pointer.target, pointer.index, result);
+        withHeldValues(frame, [pointer], () => storeInto(pointer.target, pointer.index, evaluate(frame)));
       };
     });
     return {
@@ -568,9 +567,8 @@ export abstract class StatementCompiler extends CallCompiler {
       const onlyCalls = isObjectCreation(expression.value);
       return {
         exec: this.simple(row, onlyCalls, (frame) => {
-          const result = evaluate(frame);
           const pointer = place.locate(frame);
-          storeInto(pointer.target, pointer.index, result);
+          withHeldValues(frame, [pointer], () => storeInto(pointer.target, pointer.index, evaluate(frame)));
         }),
         noreturn: value.type.kind === 'noreturn',
       };
@@ -660,7 +658,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const locate = place.locate;
     return (frame) => {
       const pointer = locate(frame);
-      store(frame, pointer.target, pointer.index);
+      withHeldValues(frame, [pointer], () => store(frame, pointer.target, pointer.index));
     };
   }
 
@@ -718,16 +716,21 @@ export abstract class StatementCompiler extends CallCompiler {
       if (!fields.some((field) => field.name === init.name))
         this.error(init, `${typeName(type)} 型には、フィールド「${init.name}」がありません。`);
     }
-    const stores = fields.map((field) => {
-      const init = value.fields.find((each) => each.name === field.name);
-      if (init) return this.slotStore(init.value, field.type);
-      if (!field.hasDefault) return this.error(value, `フィールド「${field.name}」の値がありません。`);
-      const defaultValue = field.defaultValue;
-      return (_frame: Frame, holder: Slots, index: number) => storeInto(holder, index, defaultValue);
+    const seen = new Set<string>();
+    const stores = value.fields.map((init) => {
+      if (seen.has(init.name)) this.error(init, `フィールド「${init.name}」を2回初期化しています。`);
+      seen.add(init.name);
+      const position = fields.findIndex((field) => field.name === init.name);
+      return { position, store: this.slotStore(init.value, fields[position].type) };
     });
+    for (const [position, field] of fields.entries()) {
+      if (seen.has(field.name)) continue;
+      if (!field.hasDefault) this.error(value, `フィールド「${field.name}」の値がありません。`);
+      stores.push({ position, store: (_frame, holder, index) => storeInto(holder, index, field.defaultValue) });
+    }
     return (frame, holder, index) => {
       const struct = holder.slots[index] as ZStruct;
-      for (const [position, store] of stores.entries()) store(frame, struct, position);
+      for (const { position, store } of stores) store(frame, struct, position);
     };
   }
 
@@ -822,7 +825,7 @@ export abstract class StatementCompiler extends CallCompiler {
     }
     let value = this.compile(expression.value, returnType);
     this.recordErrors(value.type, value);
-    value = this.coerceReturn(value, returnType, expression.value);
+    value = this.coerce(value, returnType, expression.value);
     const evaluate = copiedIfStored(value);
     return (frame) => new Jump('return', target, evaluate(frame));
   }
@@ -846,19 +849,6 @@ export abstract class StatementCompiler extends CallCompiler {
       return;
     }
     for (const name of set.names) inferred.names.add(name);
-  }
-
-  private coerceReturn(value: TExpr, returnType: Type, span: Span): TExpr {
-    if (returnType.kind === 'error_union' && this.fn?.inferredErrors === returnType.errorSet) {
-      // Errors join the inferred set, which coercion would otherwise check against.
-      if (value.type.kind === 'error_set') return { ...value, type: returnType };
-      if (value.type.kind === 'error_union') {
-        const payload = this.coerce(runtime(value.type.payload, value.eval, span), returnType.payload, span);
-        void payload;
-        return { ...value, type: returnType };
-      }
-    }
-    return this.coerce(value, returnType, span);
   }
 
   // Control flow as expressions ---------------------------------------------------------------------------------------
@@ -1492,8 +1482,11 @@ export abstract class StatementCompiler extends CallCompiler {
     const otherwiseValue = otherwise?.value ? this.coerce(otherwise.value, valueType, expression).eval : undefined;
     const slots = bindings.map((binding) => binding?.slot);
     const loop = (frame: Frame): Jump | { value: Value } | undefined => {
-      const values = operands.map((operand) => operand.evaluate(frame));
-      frame.temporaries.push(...values);
+      const values = evaluateHeld(
+        frame,
+        operands.map((operand) => operand.evaluate)
+      );
+      for (const value of values) frame.temporaries.push(value);
       try {
         let count: number | undefined;
         for (const [index, operand] of operands.entries()) {
@@ -1649,7 +1642,7 @@ export abstract class StatementCompiler extends CallCompiler {
     } else {
       const source = this.compile(operand.value);
       const type = source.type;
-      if (!source.known) evaluateOperand = source.eval;
+      if (!source.known) evaluateOperand = (frame) => copyValue(source.eval(frame));
       const compiled = source.known ? source : runtime(type, (frame) => frame.slots[operandSlot], operand);
       this.compilationBudget.spend(
         type.kind === 'array' ? type.length : type.kind === 'struct' ? (type.fields?.length ?? 0) : 0
@@ -2057,7 +2050,12 @@ export abstract class StatementCompiler extends CallCompiler {
     };
     if (each.isInline) {
       // One copy of the body per value the prong matches, each knowing the value.
-      const keys = each.isElse ? this.remainingKeys(tagType, seen, each) : values;
+      const keys = each.isElse ? this.remainingKeys(tagType, seen, each) : [...values];
+      if (!each.isElse)
+        for (const [first, last] of ranges) {
+          this.compilationBudget.spend(Number(last - first + 1n));
+          for (let key = first; key <= last; key++) keys.push(key);
+        }
       const inline = new Map<
         unknown,
         {
@@ -2179,7 +2177,7 @@ export abstract class StatementCompiler extends CallCompiler {
       resultType ? errorUnionOf({ kind: 'error_set', names: undefined }, resultType) : undefined
     );
     const type = operand.type;
-    if (type.kind !== 'error_union' && type.kind !== 'error_set') {
+    if (type.kind !== 'error_union') {
       return this.error(expression, `try はエラー共用体の値にだけ使えます（${typeName(type)} 型です）。`);
     }
     const errorSet = type.kind === 'error_union' ? type.errorSet : type;
@@ -2215,11 +2213,23 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** `x catch handler`; with `discarded`, as in `_ = x catch handler`, the payload and handler need no common type. */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps error-union analysis and handler evaluation together.
-  // code-gauge-allow functionNcss 34 -- Keeps the success and error result conversions together.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps error-union analysis and handler evaluation together.
+  // code-gauge-allow functionNcss 40 -- Keeps the success and error result conversions together.
   protected compileCatch(expression: ExpressionOf<'catch'>, resultType: Type | undefined, discarded = false): TExpr {
     const operand = this.compile(expression.operand);
     const type = operand.type;
+    if (type.kind === 'error_set' && !expression.capture) {
+      const handler = this.compile(expression.handler, resultType);
+      const result = runtime(
+        handler.type,
+        (frame) => {
+          operand.eval(frame);
+          return handler.eval(frame);
+        },
+        expression
+      );
+      return handler.known ? { ...result, staticResult: { value: handler.value } } : result;
+    }
     if (type.kind !== 'error_union') {
       return this.error(expression, `catch はエラー共用体の値にだけ使えます（${typeName(type)} 型です）。`);
     }
@@ -2423,7 +2433,7 @@ function copiedIfStored(value: TExpr): (frame: Frame) => Value {
 
 /** A value captured or returned by value: an aggregate is copied, so that later writes to its source do not show. */
 function copyAggregate(value: Value): Value {
-  return isAggregate(value) ? copyValue(value) : value;
+  return copyValue(value);
 }
 
 /** Writes a value into `holder.slots[index]`. */

@@ -333,9 +333,10 @@ addMembers(RANDOM, {
     return runtime(
       VOID,
       (frame) => {
+        const generator = state(frame);
         const slice = evaluate(frame) as Slice;
         frame.runtime.spend(1 + Math.floor(slice.length / 8));
-        for (const [index, byte] of fill(state(frame), slice.length).entries()) slice.set(index, BigInt(byte));
+        for (const [index, byte] of fill(generator, slice.length).entries()) slice.set(index, BigInt(byte));
         return;
       },
       call.span
@@ -368,11 +369,12 @@ addMembers(RANDOM, {
     return runtime(
       USIZE,
       (frame) => {
+        const generator = state(frame);
         const values = (evaluate(frame) as Slice).values();
         frame.runtime.spend(1 + values.length);
         return type.kind === 'int'
-          ? weightedIntIndex(state(frame), type, values as bigint[])
-          : weightedFloatIndex(state(frame), type.bits as 32 | 64, values as number[]);
+          ? weightedIntIndex(generator, type, values as bigint[])
+          : weightedFloatIndex(generator, type.bits as 32 | 64, values as number[]);
       },
       call.span
     );
@@ -386,8 +388,8 @@ addMembers(RANDOM, {
     return runtime(
       VOID,
       (frame) => {
-        const slice = evaluate(frame) as Slice;
         const generator = state(frame);
+        const slice = evaluate(frame) as Slice;
         const usize = intType(false, 64, 'usize');
         for (let index = 0; index + 1 < slice.length; index++) {
           frame.runtime.spend();
@@ -412,8 +414,9 @@ addMembers(RANDOM, {
     return runtime(
       type,
       (frame) => {
+        const generator = state(frame);
         if (fields.length === 1) return fields[0].value;
-        return fields[Number(uintLessThan(state(frame), usize, BigInt(fields.length)))].value;
+        return fields[Number(uintLessThan(generator, usize, BigInt(fields.length)))].value;
       },
       call.span
     );

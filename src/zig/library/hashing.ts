@@ -1,7 +1,7 @@
 /** Zig's Wyhash (`std.hash.Wyhash`) and `std.hash.autoHash`, which decide a hash map's iteration order. */
 import { sizeOf } from '../layout';
 import type { Type } from '../types';
-import { NULL, Some, type Value, type ZArray, type ZStruct } from '../values';
+import { NULL, Some, type Value, type ZArray, type ZStruct, type ZUnion } from '../values';
 
 const MASK = (1n << 64n) - 1n;
 const SECRET = [
@@ -107,6 +107,13 @@ export function autoHashBytes(value: Value, type: Type): number[] {
     }
     case 'struct': {
       return (type.fields ?? []).flatMap((field, index) => autoHashBytes((value as ZStruct).slots[index], field.type));
+    }
+    case 'union': {
+      const union = value as ZUnion;
+      const field = type.fields![union.tag];
+      const tag = type.tagType!;
+      const tagValue = tag.fields!.find((entry) => entry.name === field.name)!.value;
+      return [...autoHashBytes(tagValue, tag), ...autoHashBytes(union.slots[0], field.type)];
     }
     case 'optional': {
       if (value === NULL) return [];

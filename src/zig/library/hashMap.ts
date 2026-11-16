@@ -41,8 +41,9 @@ interface MapState extends Record<string, unknown> {
 const MINIMAL_CAPACITY = 8;
 const MAX_LOAD = 80;
 
-function hashOf(key: Value, keyType: Type, kind: KeyKind): bigint {
+function hashOf(frame: Frame, key: Value, keyType: Type, kind: KeyKind): bigint {
   const bytes = kind === 'string' ? elements(key).map((byte) => Number(byte as bigint)) : autoHashBytes(key, keyType);
+  frame.runtime.spend(1 + bytes.length);
   return wyhash(0n, bytes);
 }
 
@@ -87,14 +88,15 @@ function fingerprint(hash: bigint): number {
   return Number(hash >> 57n);
 }
 
-function getIndex(state: MapState, key: Value, keyType: Type, kind: KeyKind): number {
+function getIndex(frame: Frame, state: MapState, key: Value, keyType: Type, kind: KeyKind): number {
   if (state.size === 0) return -1;
-  const hash = hashOf(key, keyType, kind);
+  const hash = hashOf(frame, key, keyType, kind);
   const mask = state.capacity - 1;
   const print = fingerprint(hash);
   let limit = state.capacity;
   let index = Number(hash & BigInt(mask));
   while (state.metadata[index] !== 0 && limit !== 0) {
+    frame.runtime.spend();
     if (state.metadata[index] === (0x80 | print) && keysEqual(key, state.keys.slots[index], kind)) return index;
     limit--;
     index = (index + 1) & mask;
@@ -102,11 +104,14 @@ function getIndex(state: MapState, key: Value, keyType: Type, kind: KeyKind): nu
   return -1;
 }
 
-function putNoClobber(state: MapState, key: Value, value: Value, keyType: Type, kind: KeyKind): void {
-  const hash = hashOf(key, keyType, kind);
+function putNoClobber(frame: Frame, state: MapState, key: Value, value: Value, keyType: Type, kind: KeyKind): void {
+  const hash = hashOf(frame, key, keyType, kind);
   const mask = state.capacity - 1;
   let index = Number(hash & BigInt(mask));
-  while ((state.metadata[index] & 0x80) !== 0) index = (index + 1) & mask;
+  while ((state.metadata[index] & 0x80) !== 0) {
+    frame.runtime.spend();
+    index = (index + 1) & mask;
+  }
   state.available--;
   state.metadata[index] = 0x80 | fingerprint(hash);
   state.keys.slots[index] = key;
@@ -137,7 +142,7 @@ function grow(
   state.size = 0;
   for (let index = 0; index < old.capacity && state.size < size; index++) {
     if ((old.metadata[index] & 0x80) === 0) continue;
-    putNoClobber(state, old.keys.slots[index], old.values.slots[index], keyType, kind);
+    putNoClobber(frame, state, old.keys.slots[index], old.values.slots[index], keyType, kind);
   }
   return true;
 }
@@ -169,16 +174,17 @@ function getOrPut(
   kind: KeyKind
 ): { index: number; found: boolean } | undefined {
   if (!growIfNeeded(frame, state, 1, keyType, valueType, kind)) {
-    const index = getIndex(state, key, keyType, kind);
+    const index = getIndex(frame, state, key, keyType, kind);
     return index === -1 ? undefined : { index, found: true };
   }
-  const hash = hashOf(key, keyType, kind);
+  const hash = hashOf(frame, key, keyType, kind);
   const mask = state.capacity - 1;
   const print = fingerprint(hash);
   let limit = state.capacity;
   let index = Number(hash & BigInt(mask));
   let firstTombstone = state.capacity;
   while (state.metadata[index] !== 0 && limit !== 0) {
+    frame.runtime.spend();
     if (state.metadata[index] === (0x80 | print)) {
       if (keysEqual(key, state.keys.slots[index], kind)) return { index, found: true };
     } else if (firstTombstone === state.capacity && state.metadata[index] === 1) {
@@ -392,44 +398,56 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
         return new ZStruct([new Pointer(state.keys, slot.index), new Pointer(state.values, slot.index)]);
       }
     ),
-    get: method('get', { args: [keyType], result: optionalOf(valueType), mutable: false }, (state, [key]) => {
-      const index = getIndex(state, key, keyType, kind);
+    get: method('get', { args: [keyType], result: optionalOf(valueType), mutable: false }, (state, [key], frame) => {
+      const index = getIndex(frame, state, key, keyType, kind);
       return index === -1 ? NULL : state.values.slots[index];
     }),
     getPtr: method(
       'getPtr',
       { args: [keyType], result: optionalOf(pointerTo(valueType, false)), mutable: false },
-      (state, [key]) => {
-        const index = getIndex(state, key, keyType, kind);
+      (state, [key], frame) => {
+        const index = getIndex(frame, state, key, keyType, kind);
         return index === -1 ? NULL : new Pointer(state.values, index);
       }
     ),
-    getKey: method('getKey', { args: [keyType], result: optionalOf(keyType), mutable: false }, (state, [key]) => {
-      const index = getIndex(state, key, keyType, kind);
-      return index === -1 ? NULL : state.keys.slots[index];
-    }),
-    getEntry: method('getEntry', { args: [keyType], result: optionalOf(entry), mutable: false }, (state, [key]) => {
-      const index = getIndex(state, key, keyType, kind);
-      return index === -1 ? NULL : new ZStruct([new Pointer(state.keys, index), new Pointer(state.values, index)]);
-    }),
+    getKey: method(
+      'getKey',
+      { args: [keyType], result: optionalOf(keyType), mutable: false },
+      (state, [key], frame) => {
+        const index = getIndex(frame, state, key, keyType, kind);
+        return index === -1 ? NULL : state.keys.slots[index];
+      }
+    ),
+    getEntry: method(
+      'getEntry',
+      { args: [keyType], result: optionalOf(entry), mutable: false },
+      (state, [key], frame) => {
+        const index = getIndex(frame, state, key, keyType, kind);
+        return index === -1 ? NULL : new ZStruct([new Pointer(state.keys, index), new Pointer(state.values, index)]);
+      }
+    ),
     contains: method(
       'contains',
       { args: [keyType], result: BOOL, mutable: false },
-      (state, [key]) => getIndex(state, key, keyType, kind) !== -1
+      (state, [key], frame) => getIndex(frame, state, key, keyType, kind) !== -1
     ),
-    remove: method('remove', { args: [keyType], result: BOOL, mutable: true }, (state, [key]) => {
-      const index = getIndex(state, key, keyType, kind);
+    remove: method('remove', { args: [keyType], result: BOOL, mutable: true }, (state, [key], frame) => {
+      const index = getIndex(frame, state, key, keyType, kind);
       if (index === -1) return false;
       removeAt(state, index, keyType, valueType);
       return true;
     }),
-    fetchRemove: method('fetchRemove', { args: [keyType], result: optionalOf(kv), mutable: true }, (state, [key]) => {
-      const index = getIndex(state, key, keyType, kind);
-      if (index === -1) return NULL;
-      const removed = new ZStruct([state.keys.slots[index], state.values.slots[index]]);
-      removeAt(state, index, keyType, valueType);
-      return removed;
-    }),
+    fetchRemove: method(
+      'fetchRemove',
+      { args: [keyType], result: optionalOf(kv), mutable: true },
+      (state, [key], frame) => {
+        const index = getIndex(frame, state, key, keyType, kind);
+        if (index === -1) return NULL;
+        const removed = new ZStruct([state.keys.slots[index], state.values.slots[index]]);
+        removeAt(state, index, keyType, valueType);
+        return removed;
+      }
+    ),
     count: method('count', { args: [], result: U32, mutable: false }, (state) => BigInt(state.size)),
     capacity: method('capacity', { args: [], result: U32, mutable: false }, (state) => BigInt(state.capacity)),
     clearRetainingCapacity: method('clearRetainingCapacity', { args: [], result: VOID, mutable: true }, (state) => {

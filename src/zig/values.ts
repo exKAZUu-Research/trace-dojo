@@ -121,7 +121,7 @@ export class ErrorValue {
 
 /** A single-item pointer, to a slot of some storage. */
 export class Pointer {
-  private static readonly projections = new WeakMap<Slots, Map<string, Slots>>();
+  private static readonly projections = new WeakMap<object, Map<string, Slots>>();
   constructor(
     readonly target: Slots,
     readonly index: number
@@ -132,10 +132,10 @@ export class Pointer {
   }
 
   project(kind: 'length' | 'optional'): Pointer {
-    let projections = Pointer.projections.get(this.target);
+    let projections = Pointer.projections.get(this.storageIdentity());
     if (!projections) {
       projections = new Map();
-      Pointer.projections.set(this.target, projections);
+      Pointer.projections.set(this.storageIdentity(), projections);
     }
     const key = `${this.index} ${kind}`;
     let storage = projections.get(key);
@@ -146,8 +146,12 @@ export class Pointer {
     return new Pointer(storage, 0);
   }
 
+  private storageIdentity(): object {
+    return this.target instanceof SomeSlots || this.target instanceof SliceLength ? this.target : this.target.slots;
+  }
+
   equals(other: Pointer): boolean {
-    return this.target === other.target && this.index === other.index;
+    return this.storageIdentity() === other.storageIdentity() && this.index === other.index;
   }
 }
 

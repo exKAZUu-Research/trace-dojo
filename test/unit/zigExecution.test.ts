@@ -923,3 +923,168 @@ pub fn main(init: std.process.Init) !void {
     uncaughtException: undefined,
   });
 });
+
+test('evaluates receivers, indices, comparisons, fields, and assignment locations in source order', () => {
+  expect(
+    executeProgram(
+      'zig',
+      `const std = @import("std");var n:u8=0;fn rand(p:*std.Random.DefaultPrng)std.Random{n=n*10+1;return p.random();}fn buf(b:[]u8)[]u8{n=n*10+2;return b;}pub fn main()void{var p=std.Random.DefaultPrng.init(0);var b:[2]u8=undefined;rand(&p).bytes(buf(&b));std.debug.print("{}",.{n});}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: '12', uncaughtException: undefined });
+  expect(
+    executeProgram(
+      'zig',
+      `const std = @import("std");var n:u8=0;fn base(a:*[2]u8)*[2]u8{n=n*10+1;return a;}fn idx()usize{n=n*10+2;return 0;}pub fn main()void{var a=[_]u8{3,4};const x=base(&a)[idx()];std.debug.print("{} {}",.{x,n});}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: '3 12', uncaughtException: undefined });
+  expect(
+    executeProgram(
+      'zig',
+      `const std = @import("std");var n:u8=0;fn err()anyerror{n=n*10+1;return error.Bad;}fn result()anyerror!u8{n=n*10+2;return error.Bad;}pub fn main()void{const equal=err()==result();std.debug.print("{} {}",.{equal,n});}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: 'true 12', uncaughtException: undefined });
+  expect(
+    executeProgram(
+      'zig',
+      `const std = @import("std");var n:u8=0;fn mark(x:u8)u8{n=n*10+x;return n;}const P=struct{a:u8,b:u8};pub fn main()void{const p=P{.b=mark(2),.a=mark(1)};std.debug.print("{} {} {}",.{n,p.a,p.b});}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: '21 21 2', uncaughtException: undefined });
+  expect(
+    executeProgram(
+      'zig',
+      `const std = @import("std");var n:u8=0;fn idx()usize{n=n*10+1;return 0;}fn val()u8{n=n*10+2;return 8;}pub fn main()void{var a=[_]u8{0};a[idx()]=val();std.debug.print("{} {}",.{n,a[0]});}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: '12 8', uncaughtException: undefined });
+});
+
+test('copies destructured arrays, inline loop values, and optional return payloads', () => {
+  expect(
+    executeProgram(
+      'zig',
+      `const std = @import("std");pub fn main()void{var a=[_]u8{1,2};a[1],a[0]=a;std.debug.print("{} {}",.{a[0],a[1]});}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: '2 1', uncaughtException: undefined });
+  expect(
+    executeProgram(
+      'zig',
+      `const std = @import("std");pub fn main()void{var a=[_]u8{1,2};inline for(a)|x|{std.debug.print("{} ",.{x});a[1]=9;}}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: '1 2 ', uncaughtException: undefined });
+  expect(
+    executeProgram(
+      'zig',
+      `const std = @import("std");const P=struct{x:u8};fn f()??P{var o:??P=P{.x=1};defer o.?.?.x=2;return o;}pub fn main()void{const r=f();std.debug.print("{}",.{r.?.?.x});}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: '1', uncaughtException: undefined });
+});
+
+test('preserves pointer identity through array views and specializes inline switch ranges', () => {
+  expect(
+    executeProgram(
+      'zig',
+      `const std = @import("std");pub fn main()void{var a=[_]u8{1,2,3};const p=&a[1];const q=&a[0..2][1];std.debug.print("{} {} {}",.{p==q,p.*,q.*});}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: 'true 2 2', uncaughtException: undefined });
+  expect(
+    executeProgram(
+      'zig',
+      `const std = @import("std");pub fn main()void{var n:u8=2;_= &n;switch(n){inline 1...3=>|x|std.debug.print("{}",.{x}),else=>{}}}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: '2', uncaughtException: undefined });
+});
+
+test('rejects invalid error propagation, duplicate result fields, and incompatible memory copies', () => {
+  expect(
+    executeProgram(
+      'zig',
+      `const std = @import("std");const E=error{A};fn fail()E{return E.A;}pub fn main()E!void{try fail();}`
+    ).kind
+  ).toBe('compileError');
+  expect(
+    executeProgram(
+      'zig',
+      `const std = @import("std");const P=struct{x:u8};pub fn main()void{var p=P{.x=0};p=.{.x=1,.x=2};std.debug.print("{}",.{p.x});}`
+    ).kind
+  ).toBe('compileError');
+  expect(
+    executeProgram(
+      'zig',
+      `const std = @import("std");fn small()error{A}!u8{return 3;}fn wide()!f128{return small();}pub fn main()!void{const x=try wide();std.debug.print("{d}",.{x+0.5});}`
+    ).kind
+  ).toBe('compileError');
+  expect(
+    executeProgram(
+      'zig',
+      `const std = @import("std");pub fn main()void{var a=[_]u8{0};const b=[_]u16{300};@memcpy(&a,&b);std.debug.print("{}",.{a[0]});}`
+    ).kind
+  ).toBe('compileError');
+  expect(
+    executeProgram(
+      'zig',
+      `const std = @import("std");pub fn main()void{var a=[_]u16{0};const b=[_]u8{1};@memcpy(&a,&b);std.debug.print("{}",.{a[0]});}`
+    ).kind
+  ).toBe('compileError');
+});
+
+test('bare error-set catch executes effects while its constant result remains available', () => {
+  const program = `const std = @import("std");
+var n: u8 = 0;
+fn fail() error{A} { n += 1; return error.A; }
+pub fn main() void {
+    const r = fail() catch 5;
+    const x: u8 = r;
+    var a: [r]u8 = undefined;
+    _ = &a;
+    const y: u8 = fail() catch 7;
+    std.debug.print("{} {} {} {}", .{x, a.len, y, n});
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: '5 5 7 2',
+    uncaughtException: undefined,
+  });
+});
+
+test('retains earlier for operands while later operands call user code', () => {
+  const program = `const std = @import("std");
+fn other() [1]u8 {
+    const t = Turtle.init(0, 0);
+    std.debug.print("{}", .{t.canMoveForward()});
+    return .{0};
+}
+pub fn main() void {
+    for ([_]Turtle{Turtle.init(0, 1)}, other()) |t, x| { _ = t; _ = x; }
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: 'false',
+    uncaughtException: undefined,
+  });
+});
+
+test('large string literals respect storage limits without overflowing the host call stack', () => {
+  expect(executeProgram('zig', `pub fn main() void { const s = "${'a'.repeat(900_000)}"; _ = s; }`)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('zig', `pub fn main() void { const s = "${'a'.repeat(1_000_001)}"; _ = s; }`)).toMatchObject({
+    kind: 'limitExceeded',
+    limit: 'storage',
+  });
+});
+
+test('hashes union tags and payloads with Zig hash-map iteration order', () => {
+  expect(
+    executeProgram(
+      'zig',
+      `const std=@import("std");
+const K=union(enum){a:u8,b:u8,c:void};
+pub fn main(init:std.process.Init)!void{
+ var map:std.AutoHashMap(K,u8)=.init(init.gpa);defer map.deinit();
+ try map.put(.{.a=1},1);try map.put(.{.b=1},2);try map.put(.{.a=2},3);try map.put(.{.c={}},4);
+ var i=map.iterator();while(i.next())|e|std.debug.print("{} ",.{e.value_ptr.*});
+}
+`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: '4 1 3 2 ', uncaughtException: undefined });
+});
