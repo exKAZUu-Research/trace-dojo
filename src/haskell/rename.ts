@@ -200,6 +200,7 @@ export function renameModule(module: Module, options: RenameOptions): RModule {
 class Renamer {
   private readonly scope = new GlobalScope();
   private readonly ownValues = new Map<string, ValueEntity>();
+  private readonly importOrigins = new Map<object, Set<string>>();
   private readonly ownTypes = new Map<string, TypeLike>();
   private readonly ownTypeChildren = new Map<TypeLike, ValueEntity[]>();
   private readonly dataDecls: RDataDecl[] = [];
@@ -276,21 +277,33 @@ class Renamer {
       }
     }
     const qualifier = imp.alias ?? imp.module;
-    this.importTable(table, qualifier, !imp.qualified);
+    this.importTable(table, qualifier, !imp.qualified, imp.module);
   }
 
-  private importTable(table: ExportTable, qualifier: string | undefined, unqualified: boolean): void {
+  private importTable(table: ExportTable, qualifier: string | undefined, unqualified: boolean, source?: string): void {
     for (const [name, entity] of table.values) {
+      if (source) this.addImportOrigin(entity, source);
       if (unqualified) this.scope.addValue(undefined, name, entity);
       if (qualifier !== undefined) this.scope.addValue(qualifier, name, entity);
     }
     for (const [name, entry] of table.types) {
+      if (source) this.addImportOrigin(entry.entity.entity, source);
       if (unqualified) this.scope.addType(undefined, name, entry.entity);
       if (qualifier !== undefined) this.scope.addType(qualifier, name, entry.entity);
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch is one form of an import item.
+  private addImportOrigin(entity: object, source: string): void {
+    let origins = this.importOrigins.get(entity);
+    if (!origins) {
+      origins = new Set();
+      this.importOrigins.set(entity, origins);
+    }
+    origins.add(source);
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 22 -- Each branch is one form of an import item.
+  // code-gauge-allow functionNcss 32 -- Import selection distinguishes names, children, hiding and unsupported APIs.
   private selectImportItem(exports: ExportTable, item: ImportItem, imp: Import, into: ExportTable): void {
     const { name } = item.name;
     if (item.kind === 'value') {
@@ -306,12 +319,16 @@ class Renamer {
     if (!entry) {
       // `hiding (C)` may name a data constructor.
       const constructor = exports.values.get(name);
+      if (!imp.hiding && constructor?.unsupported) throw unsupportedError(item.name.span, constructor.unsupported);
       if (imp.hiding && constructor) {
         into.values.set(name, constructor);
         return;
       }
       if (imp.hiding) return;
       throw compileError(item.name.span, `モジュール ${imp.module} は ${name} を export していません。`);
+    }
+    if (!imp.hiding && entry.entity.kind === 'type' && entry.entity.entity.unsupported) {
+      throw unsupportedError(item.name.span, entry.entity.entity.unsupported);
     }
     into.types.set(name, { entity: entry.entity, children: [] });
     const children =
@@ -369,9 +386,14 @@ class Renamer {
   private childrenOf(entry: TypeLike): ValueEntity[] {
     const own = this.ownTypeChildren.get(entry);
     if (own) return own;
-    if (entry.kind === 'class') return entry.entity.methods;
-    const type = entry.entity;
-    return [...type.cons.map((con) => con.entity), ...[...type.fields.values()].map((field) => field.entity)];
+    const children =
+      entry.kind === 'class'
+        ? entry.entity.methods
+        : [
+            ...entry.entity.cons.map((con) => con.entity),
+            ...[...entry.entity.fields.values()].map((field) => field.entity),
+          ];
+    return children.filter((child) => this.scope.values.get(child.name).includes(child));
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -669,12 +691,7 @@ class Renamer {
         return renamed;
       }
       const renamed = this.renamePatBinding(binding, scope, (name) => this.ownValues.get(name.name) as ValueEntity);
-      renamed.patSigs = new Map(
-        renamed.binders.flatMap((local) => {
-          const sig = sigs.get(local.name);
-          return sig ? [[local, sig] as const] : [];
-        })
-      );
+      renamed.patSigs = patternSignatures(renamed, sigs);
       return renamed;
     });
     return { bindings };
@@ -753,6 +770,7 @@ class Renamer {
       for (const op of decl.ops) {
         const local = scope.vars.get(op.name);
         if (!local) throw compileError(op.span, `結合性を宣言した ${op.name} の定義がありません。`);
+        if (local.fixity) throw compileError(op.span, `${op.name} の結合性が重複して宣言されています。`);
         local.fixity = { assoc: decl.assoc, prec: decl.prec };
       }
     }
@@ -768,13 +786,7 @@ class Renamer {
       // The pattern's variables are the ones the group declared.
       renamed.binders = renamed.binders.map((local) => scope.vars.get(local.name) as LocalVar);
       replacePatLocals(renamed.pat, scope);
-      if (renamed.binders.some((local) => sigs.has(local.name))) {
-        renamed.patSigs = new Map();
-        for (const local of renamed.binders) {
-          const sig = sigs.get(local.name);
-          if (sig) renamed.patSigs.set(local, sig);
-        }
-      }
+      renamed.patSigs = patternSignatures(renamed, sigs);
       return renamed;
     });
     return { group: { bindings }, scope };
@@ -1012,9 +1024,13 @@ class Renamer {
   // -------------------------------------------------------------------------------------------------------------
   // Patterns
 
+  renamePat(pat: Pat, binders: Map<string, LocalVar>): RPat {
+    return { ...this.renamePatCore(pat, binders), surface: pat };
+  }
+
   // code-gauge-allow functionCognitiveComplexity 16 -- One short case per pattern kind.
   // code-gauge-allow functionNcss 44 -- One short case per pattern kind.
-  renamePat(pat: Pat, binders: Map<string, LocalVar>): RPat {
+  private renamePatCore(pat: Pat, binders: Map<string, LocalVar>): RPat {
     const { span } = pat;
     switch (pat.kind) {
       case 'pvar': {
@@ -1183,10 +1199,15 @@ class Renamer {
       const role = what === 'type' ? '型・クラスの名前' : isOperatorName(name.name) ? '演算子' : '名前';
       throw compileError(name.span, `${role} ${text} がスコープにありません。`);
     }
-    const sources = found.map((entity) => `${entity.module}.${entity.name}`).join(' と ');
+    const sources = found
+      .flatMap((entity) =>
+        [...(this.importOrigins.get(entity) ?? [entity.module])].map((source) => `${source}.${entity.name}`)
+      )
+      .join(' と ');
     throw compileError(name.span, `${text} が、${sources} のどれを指すか決まりません。`);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Constructor lookup covers special syntax, qualification and unsupported library exports.
   private lookupCon(name: QName): ConInfo {
     if (!name.qualifier) {
       if (name.name === '()') return UNIT_CON;
@@ -1205,6 +1226,8 @@ class Renamer {
     } else {
       candidates = this.scope.values.get(name.name);
     }
+    const unsupported = candidates.find((entity) => entity.unsupported);
+    if (unsupported?.unsupported) throw unsupportedError(name.span, unsupported.unsupported);
     candidates = candidates.filter((entity) => entity.sort === 'con');
     if (candidates.length === 0) throw compileError(name.span, `構成子 ${describeName(name)} がスコープにありません。`);
     return this.pickOne(candidates, name, 'value').con as ConInfo;
@@ -1242,6 +1265,9 @@ class Renamer {
       name,
       'type'
     );
+    if (picked.candidate.kind === 'type' && picked.candidate.entity.unsupported) {
+      throw unsupportedError(name.span, picked.candidate.entity.unsupported);
+    }
     return picked.candidate;
   }
 
@@ -1263,6 +1289,18 @@ class Renamer {
     if (found.kind !== 'class') throw compileError(name.span, `${describeName(name)} は型で、クラスではありません。`);
     return found.entity;
   }
+}
+
+function patternSignatures(
+  binding: Extract<RBinding, { k: 'pat' }>,
+  sigs: ReadonlyMap<string, RSigType>
+): Map<LocalVar, RSigType> {
+  return new Map(
+    binding.binders.flatMap((local) => {
+      const sig = sigs.get(local.name);
+      return sig ? [[local, sig] as const] : [];
+    })
+  );
 }
 
 const STAR_TYPE = { tag: 'tgen', index: 0 } as const;

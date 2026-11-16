@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 486 -- The primitive table lists every built-in operation the Haskell library calls.
+// code-gauge-allow-file fileNcss 498 -- The primitive table lists every built-in operation the Haskell library calls.
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { CONS_CON, tupleCon, UNIT_CON } from './builtinTypes';
 import type { ConInfo } from './entities';
@@ -187,6 +187,12 @@ function bigCost(a: bigint, b: bigint): number {
   return size > 64 ? Math.ceil(size / 64) : 1;
 }
 
+function rotate64(value: bigint, count: bigint): bigint {
+  const bits = BigInt.asUintN(64, value);
+  const offset = BigInt.asUintN(6, count);
+  return BigInt.asUintN(64, (bits << offset) | (bits >> (64n - offset)));
+}
+
 function shiftCount(value: Value): bigint {
   const count = value as bigint;
   if (count < 0n) throw new HaskellException('arithmetic overflow', 'ArithException');
@@ -235,6 +241,16 @@ strict('integerGcd', 2, ([a, b]) => {
 });
 
 // Bits
+strict('intRotate', 2, ([a, b]) => wrapInt(rotate64(a as bigint, b as bigint)));
+strict('wordRotate', 2, ([a, b]) => rotate64(a as bigint, b as bigint));
+strict('leadingZeros64', 1, ([a]) => {
+  const value = BigInt.asUintN(64, a as bigint);
+  return value === 0n ? 64n : 64n - BigInt(value.toString(2).length);
+});
+strict('trailingZeros64', 1, ([a]) => {
+  const value = BigInt.asUintN(64, a as bigint);
+  return value === 0n ? 64n : BigInt((value & -value).toString(2).length - 1);
+});
 strict('intAnd', 2, ([a, b]) => wrapInt((a as bigint) & (b as bigint)));
 strict('intOr', 2, ([a, b]) => wrapInt((a as bigint) | (b as bigint)));
 strict('intXor', 2, ([a, b]) => wrapInt((a as bigint) ^ (b as bigint)));
@@ -257,7 +273,7 @@ strict('integerShiftL', 2, ([a, b], runtime) => {
 strict('integerShiftR', 2, ([a, b]) => (a as bigint) >> shiftCount(b));
 strict('integerPopCount', 1, ([a]) => {
   const value = a as bigint;
-  const count = countOnes(value < 0n ? ~value : value);
+  const count = countOnes(value < 0n ? -value : value);
   return BigInt(value < 0n ? -count : count);
 });
 

@@ -99,7 +99,7 @@ fromList :: Ord a => [a] -> Set a
 fromList = B.foldl (\t x -> insert x t) STip
 
 fromAscList :: Eq a => [a] -> Set a
-fromAscList xs = fromDistinctAscList (B.map B.head (group xs))
+fromAscList xs = fromDistinctAscList (B.map B.last (group xs))
 
 fromDistinctAscList :: [a] -> Set a
 fromDistinctAscList xs = B.foldr seq () xs ${BT}seq${BT} fst (build (length xs) xs)
@@ -292,6 +292,29 @@ instance Foldable Set where
   maximum = findMax
   sum s = B.sum (toAscList s)
   product s = B.product (toAscList s)
+powerSet :: Set a -> Set (Set a)
+powerSet s = fromDistinctAscList (B.map fromDistinctAscList (subsets (toAscList s)))
+  where subsets [] = [[]]
+        subsets (x:xs) = let rest = subsets xs in [] : (B.map (x:) rest ++ B.tail rest)
+
+cartesianProduct :: Set a -> Set b -> Set (a,b)
+cartesianProduct a b = fromDistinctAscList [(x,y) | x <- toAscList a, y <- toAscList b]
+
+mapMonotonic :: (a -> b) -> Set a -> Set b
+mapMonotonic f s = fromDistinctAscList (B.map f (toAscList s))
+
+symmetricDifference :: Ord a => Set a -> Set a -> Set a
+symmetricDifference a b = union (difference a b) (difference b a)
+
+fold :: (a -> b -> b) -> b -> Set a -> b
+fold = foldr
+
+fromDescList :: Eq a => [a] -> Set a
+fromDescList xs = fromDistinctAscList (reverse (B.map B.last (group xs)))
+
+fromDistinctDescList :: [a] -> Set a
+fromDistinctDescList = fromDistinctAscList . reverse
+
 `;
 
 /** `Data.Map` as a size-balanced binary tree, as the `containers` package implements it. */
@@ -724,6 +747,45 @@ instance Ord k => Semigroup (Map k v) where
 
 instance Ord k => Monoid (Map k v) where
   mempty = Tip
+mapAccum :: (a -> b -> (a,c)) -> a -> Map k b -> (a,Map k c)
+mapAccum f = mapAccumWithKey (\a _ x -> f a x)
+
+mapAccumWithKey :: (a -> k -> b -> (a,c)) -> a -> Map k b -> (a,Map k c)
+mapAccumWithKey f a m = let (b, xs) = B.mapAccumL (\acc (k,x) -> let (next,y) = f acc k x in (next,(k,y))) a (toAscList m)
+                      in (b,fromDistinctAscList xs)
+
+mapAccumRWithKey :: (a -> k -> b -> (a,c)) -> a -> Map k b -> (a,Map k c)
+mapAccumRWithKey f a m = let (b, xs) = B.mapAccumR (\acc (k,x) -> let (next,y) = f acc k x in (next,(k,y))) a (toAscList m)
+                       in (b,fromDistinctAscList xs)
+
+splitLookup :: Ord k => k -> Map k a -> (Map k a,Maybe a,Map k a)
+splitLookup k m = let (l,r) = split k m in (l,lookup k m,r)
+
+updateWithKey :: Ord k => (k -> a -> Maybe a) -> k -> Map k a -> Map k a
+updateWithKey f k = update (f k) k
+
+insertLookupWithKey :: Ord k => (k -> a -> a -> a) -> k -> a -> Map k a -> (Maybe a,Map k a)
+insertLookupWithKey f k x m = (lookup k m,insertWith (f k) k x m)
+
+mapEither :: (a -> Either b c) -> Map k a -> (Map k b,Map k c)
+mapEither f = mapEitherWithKey (\_ x -> f x)
+
+mapEitherWithKey :: (k -> a -> Either b c) -> Map k a -> (Map k b,Map k c)
+mapEitherWithKey f m = (fromDistinctAscList [(k,x) | (k,Left x) <- xs],fromDistinctAscList [(k,x) | (k,Right x) <- xs])
+  where xs = [(k,f k x) | (k,x) <- toAscList m]
+
+alterF :: (Functor f, Ord k) => (Maybe a -> f (Maybe a)) -> k -> Map k a -> f (Map k a)
+alterF f k m = fmap (\result -> alter (const result) k m) (f (lookup k m))
+
+mapKeysMonotonic :: (k1 -> k2) -> Map k1 a -> Map k2 a
+mapKeysMonotonic f m = fromDistinctAscList [(f k,x) | (k,x) <- toAscList m]
+
+fromDescList :: Eq k => [(k,a)] -> Map k a
+fromDescList xs = fromDistinctAscList (reverse (B.map B.last (groupBy (\(k,_) (l,_) -> k == l) xs)))
+
+fromDistinctDescList :: [(k,a)] -> Map k a
+fromDistinctDescList = fromDistinctAscList . reverse
+
 `;
 
 /** The functions of Data.Map.Strict that differ from Data.Map: each evaluates the values it stores. */
@@ -746,6 +808,16 @@ export const STRICT_MAP_VALUES = [
   'mapWithKey',
   'traverseWithKey',
   'mapKeysWith',
+  'mapAccum',
+  'mapAccumWithKey',
+  'mapAccumRWithKey',
+  'updateWithKey',
+  'insertLookupWithKey',
+  'mapEither',
+  'mapEitherWithKey',
+  'alterF',
+  'fromDescList',
+  'fromDistinctDescList',
   'mapMaybe',
   'mapMaybeWithKey',
   'unionWith',
@@ -820,10 +892,12 @@ fromSet :: (k -> a) -> S.Set k -> Map k a
 fromSet f s = forceValues (L.fromSet f s)
 
 map :: (a -> b) -> Map k a -> Map k b
-map f m = forceValues (L.map f m)
+map f = mapWithKey (\_ x -> f x)
 
 mapWithKey :: (k -> a -> b) -> Map k a -> Map k b
-mapWithKey f m = forceValues (L.mapWithKey f m)
+mapWithKey _ L.Tip = L.Tip
+mapWithKey f (L.Bin size k x l r) =
+  let y = f k x in y ${BT}seq${BT} L.Bin size k y (mapWithKey f l) (mapWithKey f r)
 
 traverseWithKey :: Applicative t => (k -> a -> t b) -> Map k a -> t (Map k b)
 traverseWithKey f m = fmap forceValues (L.traverseWithKey f m)
@@ -864,4 +938,34 @@ differenceWith f a b = L.fromDistinctAscList [(k, z) | (k, x) <- L.toAscList a, 
   Just y -> case f x y of
     Nothing -> Nothing
     Just z -> z ${BT}seq${BT} Just z]]
+mapAccum :: (a -> b -> (a,c)) -> a -> Map k b -> (a,Map k c)
+mapAccum f = mapAccumWithKey (\a _ x -> f a x)
+
+mapAccumWithKey :: (a -> k -> b -> (a,c)) -> a -> Map k b -> (a,Map k c)
+mapAccumWithKey f a m = let (b,n) = L.mapAccumWithKey f a m in (b,forceValues n)
+
+mapAccumRWithKey :: (a -> k -> b -> (a,c)) -> a -> Map k b -> (a,Map k c)
+mapAccumRWithKey f a m = let (b,n) = L.mapAccumRWithKey f a m in (b,forceValues n)
+
+updateWithKey :: Ord k => (k -> a -> Maybe a) -> k -> Map k a -> Map k a
+updateWithKey f k = update (f k) k
+
+insertLookupWithKey :: Ord k => (k -> a -> a -> a) -> k -> a -> Map k a -> (Maybe a,Map k a)
+insertLookupWithKey f k x m = (L.lookup k m,insertWith (f k) k x m)
+
+mapEither :: (a -> Either b c) -> Map k a -> (Map k b,Map k c)
+mapEither f = mapEitherWithKey (\_ x -> f x)
+
+mapEitherWithKey :: (k -> a -> Either b c) -> Map k a -> (Map k b,Map k c)
+mapEitherWithKey f m = let (l,r) = L.mapEitherWithKey f m in (forceValues l,forceValues r)
+
+alterF :: (Functor f, Ord k) => (Maybe a -> f (Maybe a)) -> k -> Map k a -> f (Map k a)
+alterF f k m = fmap (\result -> alter (const result) k m) (f (L.lookup k m))
+
+fromDescList :: Eq k => [(k,a)] -> Map k a
+fromDescList xs = forceValues (L.fromDescList xs)
+
+fromDistinctDescList :: [(k,a)] -> Map k a
+fromDistinctDescList xs = forceValues (L.fromDistinctDescList xs)
+
 `;

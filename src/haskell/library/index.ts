@@ -3,12 +3,16 @@ import { BASE_LIST } from './baseList';
 import { BASE_MISC, BASE_UNSUPPORTED } from './baseMisc';
 import { BASE_TEXT } from './baseText';
 import { MAP_SOURCE, SET_SOURCE, STRICT_MAP_SOURCE, STRICT_MAP_VALUES } from './containers';
+import { BASE_EXTRA } from './extra';
 import { PRINTF_SOURCE } from './printf';
 import { BASE_TUPLES } from './tuples';
 
 /** The library's own modules in dependency order, which public modules re-export. */
 export const LIBRARY_SOURCES: { name: string; source: string }[] = [
-  { name: 'Base', source: [BASE_CORE, BASE_LIST, BASE_TEXT, BASE_MISC, BASE_UNSUPPORTED, BASE_TUPLES].join('\n') },
+  {
+    name: 'Base',
+    source: [BASE_CORE, BASE_LIST, BASE_TEXT, BASE_MISC, BASE_UNSUPPORTED, BASE_TUPLES, BASE_EXTRA].join('\n'),
+  },
   { name: 'Data.Set.Internal', source: SET_SOURCE },
   { name: 'Data.Map.Internal', source: MAP_SOURCE },
   { name: 'Data.Map.Strict.Internal', source: STRICT_MAP_SOURCE },
@@ -198,6 +202,10 @@ const PRELUDE: PublicModule = {
 };
 
 const DATA_LIST_VALUES = [
+  'compareLength',
+  'deleteFirstsBy',
+  'inits1',
+  'tails1',
   ...PRELUDE_LIST,
   'foldl',
   "foldl'",
@@ -324,6 +332,18 @@ const MAP_VALUES = [
   'traverseWithKey',
   'mapKeys',
   'mapKeysWith',
+  'mapAccum',
+  'mapAccumWithKey',
+  'mapAccumRWithKey',
+  'splitLookup',
+  'updateWithKey',
+  'insertLookupWithKey',
+  'mapEither',
+  'mapEitherWithKey',
+  'alterF',
+  'mapKeysMonotonic',
+  'fromDescList',
+  'fromDistinctDescList',
   'filter',
   'filterWithKey',
   'partition',
@@ -370,6 +390,13 @@ const MAP_VALUES = [
 ];
 
 const SET_VALUES = [
+  'powerSet',
+  'cartesianProduct',
+  'mapMonotonic',
+  'symmetricDifference',
+  'fold',
+  'fromDescList',
+  'fromDistinctDescList',
   'empty',
   'singleton',
   'size',
@@ -491,7 +518,11 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
     types: [['Either', 'all']],
     values: ['either', 'lefts', 'rights', 'partitionEithers', 'isLeft', 'isRight', 'fromLeft', 'fromRight'],
   },
-  'Data.Function': { from: 'Base', types: [], values: ['id', 'const', '.', 'flip', '$', '&', 'on', 'fix'] },
+  'Data.Function': {
+    from: 'Base',
+    types: [],
+    values: ['id', 'const', '.', 'flip', '$', '&', 'on', 'fix', 'applyWhen'],
+  },
   'Data.Ord': {
     from: 'Base',
     types: [
@@ -526,13 +557,15 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
       'maximumBy',
       'minimumBy',
       'notElem',
+      'fold',
+      "foldMap'",
       'find',
     ],
   },
   'Data.Traversable': {
     from: 'Base',
     types: [['Traversable', 'all']],
-    values: ['for', 'forM', 'mapAccumL', 'mapAccumR'],
+    values: ['for', 'forM', 'mapAccumL', 'mapAccumR', 'fmapDefault'],
   },
   'Data.Functor': { from: 'Base', types: [['Functor', 'all']], values: ['<$>', '<&>', '$>', 'void'] },
   'Control.Monad': {
@@ -570,6 +603,11 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
       'unless',
       'liftM',
       'liftM2',
+      'liftM3',
+      'liftM4',
+      'liftM5',
+      'mfilter',
+      '<$!>',
       'ap',
       '<$>',
     ],
@@ -580,7 +618,7 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
       ['Applicative', 'all'],
       ['Alternative', 'all'],
     ],
-    values: ['<$>', '<$', 'liftA', 'liftA3', 'asum'],
+    values: ['<$>', '<$', 'liftA', 'liftA3', 'asum', 'optional', '<**>'],
   },
   Numeric: {
     from: 'Base',
@@ -601,9 +639,40 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
       'readHex',
       'readOct',
       'readDec',
+      'readBin',
+      'readInt',
+      'readSigned',
+      'readFloat',
+      'fromRat',
+      'lexDigits',
+      'exp',
+      'log',
+      'sqrt',
+      'sin',
+      'cos',
+      'tan',
+      'asin',
+      'acos',
+      'atan',
+      'sinh',
+      'cosh',
+      'tanh',
+      'asinh',
+      'acosh',
+      'atanh',
+      'pi',
+      '**',
+      'logBase',
     ],
   },
-  'Data.Bits': { from: 'Base', types: [['Bits', 'all']], values: [] },
+  'Data.Bits': {
+    from: 'Base',
+    types: [
+      ['Bits', 'all'],
+      ['FiniteBits', 'all'],
+    ],
+    values: [],
+  },
   'Data.Ratio': {
     from: 'Base',
     types: [
@@ -682,7 +751,6 @@ export const UNSUPPORTED_VALUES: Record<string, string> = {
   getChar: '標準入力（getChar）',
   interact: '標準入力（interact）',
   readLn: '標準入力（readLn）',
-  readIO: '標準入力（readIO）',
   stdin: '標準入力（stdin）',
   hGetLine: '標準入力（hGetLine）',
   hGetContents: '標準入力（hGetContents）',

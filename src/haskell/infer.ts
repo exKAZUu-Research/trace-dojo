@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 705 -- The type checker keeps its inference rules beside the substitution state they share.
+// code-gauge-allow-file fileNcss 729 -- The type checker keeps its inference rules beside the substitution state they share.
 import { LIMITS } from '../interpreter/limits';
 import { CHAR_TYPE, FUNCTION_TYPE, LIST_TYPE, tupleCon } from './builtinTypes';
 import { type ClassEnv, entailByGivens, hasConstructorHead, isSubclassOf, predsEqual } from './classEnv';
@@ -148,6 +148,10 @@ export class Checker {
     return undefined;
   }
 
+  tryUnify(a: Type, b: Type): boolean {
+    return this.unifyTypes(a, b) === undefined;
+  }
+
   freshVar(kind: Kind = STAR, name?: string): TVar {
     return freshTypeVar(kind, this.level, name);
   }
@@ -169,13 +173,13 @@ export class Checker {
     return { kind: 'hole', hole };
   }
 
-  /**
-   * Reduces the wanted constraints by instances until each has a type variable at its head, then splits them into
-   * those about the binding being generalized (retained) and those about enclosing ones (deferred).
-   */
-  // code-gauge-allow functionCognitiveComplexity 26 -- Context reduction follows the steps of the Haskell report in one loop.
-  // code-gauge-allow functionNcss 34 -- Reduction and its depth/work guards operate on the same constraint queue.
-  simplify(holes: EvidenceHole[], outerLevel: number): { retained: EvidenceHole[]; deferred: EvidenceHole[] } {
+  // code-gauge-allow functionCognitiveComplexity 28 -- Context reduction follows the steps of the Haskell report in one loop.
+  // code-gauge-allow functionNcss 38 -- Reduction and its depth/work guards operate on the same constraint queue.
+  simplify(
+    holes: EvidenceHole[],
+    outerLevel: number,
+    givens: { pred: Pred; evidence: Evidence }[] = []
+  ): { retained: EvidenceHole[]; deferred: EvidenceHole[] } {
     const retained: EvidenceHole[] = [];
     const deferred: EvidenceHole[] = [];
     const work = [...holes];
@@ -189,6 +193,11 @@ export class Checker {
       if (hole.solution) continue;
       const pred = { cls: hole.pred.cls, type: zonk(hole.pred.type) };
       hole.pred = pred;
+      const given = entailByGivens(givens, pred);
+      if (given) {
+        hole.solution = given;
+        continue;
+      }
       if (hasConstructorHead(pred.type)) {
         const found = this.env.findInstance(pred);
         if (found === 'none') this.noInstance(hole);
@@ -313,7 +322,9 @@ export class Checker {
       cls: constraint.cls,
       type: this.convertType(constraint.type, vars, varKinds, constraint.cls.tyvarKind),
     }));
-    return { kinds: kinds.map(defaultKind), names, preds, type };
+    const scheme = { kinds: kinds.map(defaultKind), names, preds, type };
+    checkSchemeAmbiguity(scheme, sig.span);
+    return scheme;
   }
 
   /** Converts a written type, checking its kinds and expanding synonyms. */
@@ -379,12 +390,11 @@ export class Checker {
         entity.synonym as Type,
         synonymArgs.map((arg) => arg.type)
       );
-      return this.applyTypeArgs(
-        { type: expanded, kind: kindOfType(expanded) },
-        args.slice(entity.arity),
-        vars,
-        varKinds
-      );
+      let resultKind = entity.kind;
+      for (let index = 0; index < entity.arity; index++) {
+        resultKind = (pruneKind(resultKind) as { tag: 'arrow'; to: Kind }).to;
+      }
+      return this.applyTypeArgs({ type: expanded, kind: resultKind }, args.slice(entity.arity), vars, varKinds);
     }
     const converted =
       head.k === 'con'
@@ -451,7 +461,7 @@ export class Checker {
     this.unify(actual, expected, expr.span, context);
   }
 
-  // code-gauge-allow functionNcss 54 -- One short case per expression kind, each delegating to a helper.
+  // code-gauge-allow functionNcss 56 -- One short case per expression kind, each delegating to a helper.
   private inferExprInner(expr: RExpr): Type {
     switch (expr.k) {
       case 'var': {
@@ -508,8 +518,10 @@ export class Checker {
       }
       case 'typed': {
         const scheme = this.sigToScheme(expr.sig);
-        this.checkAgainstScheme(scheme, expr.span, (type) => this.checkExpr(expr.expr, type));
-        return this.instantiate(scheme, expr.span, '型の注釈').type;
+        expr.dictParams = this.checkAgainstScheme(scheme, expr.span, (type) => this.checkExpr(expr.expr, type));
+        const instantiated = this.instantiate(scheme, expr.span, '型の注釈');
+        expr.evidence = instantiated.evidence;
+        return instantiated.type;
       }
       case 'recordCon': {
         const { type, fieldTypes } = this.instantiateCon(expr.con, expr.span);
@@ -641,7 +653,6 @@ export class Checker {
     const monad = this.freshVar(kindArrow(STAR, STAR), 'm');
     if (needsMonad) {
       expr.monad = this.want({ cls: this.builtins.monad, type: monad }, expr.span, 'do');
-      expr.monadType = monad;
     }
     let result: Type = this.freshVar();
     for (const [index, stmt] of expr.stmts.entries()) {
@@ -671,6 +682,7 @@ export class Checker {
         }
       }
     }
+    expr.type = result;
     return result;
   }
 
@@ -962,7 +974,7 @@ export class Checker {
     this.level = outer;
     const inner = this.wanted;
     this.wanted = saved;
-    const { retained, deferred } = this.simplify(inner, outer);
+    const { retained, deferred } = this.simplify(inner, outer, givens);
     for (const hole of retained) {
       const evidence = entailByGivens(givens, hole.pred);
       if (evidence) {
@@ -1064,4 +1076,17 @@ export function typeVarNames(types: readonly RType[]): string[] {
   };
   for (const type of types) collect(type);
   return names;
+}
+
+export function checkSchemeAmbiguity(scheme: Scheme, span: Span): void {
+  const indices = (type: Type): number[] => {
+    const current = prune(type);
+    if (current.tag === 'tgen') return [current.index];
+    if (current.tag === 'tap') return [...indices(current.fn), ...indices(current.arg)];
+    return [];
+  };
+  const visible = new Set(indices(scheme.type));
+  if (scheme.preds.some((pred) => indices(pred.type).some((index) => !visible.has(index)))) {
+    throw compileError(span, '型シグネチャの制約に、結果の型から決まらない型変数があります。');
+  }
 }

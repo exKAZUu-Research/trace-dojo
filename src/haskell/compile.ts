@@ -4,16 +4,17 @@ import { PRIMITIVE_TYPES, TURTLE_TYPE, UNIT_TYPE } from './builtinTypes';
 import { ClassEnv } from './classEnv';
 import { Codegen, type CodegenSupport, globalOf } from './codegen';
 import type { GlobalDef } from './core';
-import type { ClassEntity, ConInfo, TypeEntity, ValueEntity } from './entities';
+import { type ClassEntity, type ConInfo, nextId, type TypeEntity, type ValueEntity } from './entities';
 import { compileError } from './errors';
 import type { Builtins } from './infer';
 import { LIBRARY_SOURCES, PUBLIC_MODULES, UNSUPPORTED_MODULES, UNSUPPORTED_VALUES } from './library';
+import { KNOWN_LIBRARY_TYPES, KNOWN_LIBRARY_VALUES } from './library/knownValues';
 import { type CompiledModuleInfo, emptyExports, type ExportTable, type TypeLike } from './modules';
 import { misplacedHaskellAtomicMessage, parseHaskell } from './parse';
 import { setPrimitiveTypes } from './primitives';
 import { renameModule, type RModule } from './rename';
 import { typecheckModule } from './typecheck';
-import { tcon } from './types';
+import { STAR, tcon } from './types';
 
 /** The library compiled once per process: its modules, instances, and the entities the compiler refers to. */
 interface Library {
@@ -170,6 +171,38 @@ class LibraryCompiler {
       this.exportValues(exports, spec.from, spec.values, name);
       if (spec.overrides) this.exportValues(exports, spec.overrides.from, spec.overrides.values, name);
       for (const [typeName, children] of spec.types) exportType(exports, source, typeName, children, name);
+      for (const value of KNOWN_LIBRARY_VALUES[name] ?? []) {
+        if (!exports.values.has(value)) {
+          exports.values.set(value, {
+            id: nextId(),
+            name: value,
+            module: name,
+            sort: 'var',
+            unsupported: `ライブラリ関数（${name}.${value}）`,
+          });
+        }
+      }
+      for (const type of KNOWN_LIBRARY_TYPES[name] ?? []) {
+        if (!exports.types.has(type)) {
+          exports.types.set(type, {
+            entity: {
+              kind: 'type',
+              entity: {
+                id: nextId(),
+                name: type,
+                module: name,
+                sort: 'prim',
+                kind: STAR,
+                arity: 0,
+                cons: [],
+                fields: new Map(),
+                unsupported: `ライブラリの型（${name}.${type}）`,
+              },
+            },
+            children: [],
+          });
+        }
+      }
       modules.set(name, { name, exports, instances: [] });
     }
     return modules;

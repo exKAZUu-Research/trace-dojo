@@ -283,6 +283,7 @@ function dataNodeOf(runtime: Runtime, value: ConValue, type: Type, depth: number
   const { con } = value;
   const entries: Record<string, DisplayNode> = {};
   const isTuple = con.type.special === 'tuple';
+  if (!isTuple && con.type.cons.length > 1) entries['<constructor>'] = { kind: 'value', value: con.name };
   for (const [index, field] of value.fields.entries()) {
     const forced = forceForDisplay(runtime, field);
     if (forced === undefined) continue;

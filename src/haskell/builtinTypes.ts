@@ -1,4 +1,5 @@
 import { type ConInfo, nextId, type TypeEntity, type ValueEntity } from './entities';
+import { compileError } from './errors';
 import { simpleKind, type Type } from './types';
 
 /** The module that owns the primitive types and the special syntax types (lists, tuples, unit, functions). */
@@ -51,11 +52,11 @@ CONS_CON.entity.fixity = { assoc: 'infixr', prec: 5 };
 export const UNIT_TYPE: TypeEntity = { ...primType('()', 0, 'unit'), sort: 'data' };
 export const UNIT_CON = addConstructor(UNIT_TYPE, '()', []);
 
-/** GHC defines tuples up to 64 elements; instances exist up to 15. */
 export const MAX_TUPLE_SIZE = 64;
 const tupleTypes = new Map<number, TypeEntity>();
 
 export function tupleType(size: number): TypeEntity {
+  if (size > MAX_TUPLE_SIZE) throw compileError(0, `タプルの要素は ${MAX_TUPLE_SIZE} 個までです。`);
   let type = tupleTypes.get(size);
   if (!type) {
     const name = `(${','.repeat(size - 1)})`;

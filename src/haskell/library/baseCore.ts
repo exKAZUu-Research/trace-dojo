@@ -192,7 +192,7 @@ instance Ord Ordering where
   x >= y = not (x < y)
 
 instance Eq () where
-  _ == _ = True
+  () == () = True
 
 instance Ord () where
   compare () () = EQ

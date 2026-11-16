@@ -3,7 +3,7 @@
  * constructor applications. The type checker annotates it with types and class evidence.
  */
 import type { ClassEntity, ConInfo, DictParam, Evidence, FieldInfo, Fixity, TypeEntity, ValueEntity } from './entities';
-import type { Literal, Span } from './syntax';
+import type { Literal, Pat, Span } from './syntax';
 import type { Scheme, Type } from './types';
 
 export interface LocalVar {
@@ -43,15 +43,14 @@ export type RExpr =
       span: Span;
       /** The `Monad` dictionary of the block's monad. */
       monad?: Evidence;
-      /** The block's monad type, which tells an `IO` block from others. */
-      monadType?: Type;
+      type?: Type;
     }
   | { k: 'tuple'; elems: RExpr[]; span: Span }
   | { k: 'list'; elems: RExpr[]; span: Span }
   | { k: 'arith'; from: RExpr; next?: RExpr; to?: RExpr; span: Span; evidence?: Evidence }
   | { k: 'comp'; expr: RExpr; quals: RStmt[]; span: Span }
   | { k: 'rsection'; op: RExpr; right: RExpr; span: Span }
-  | { k: 'typed'; expr: RExpr; sig: RSigType; span: Span }
+  | { k: 'typed'; expr: RExpr; sig: RSigType; span: Span; dictParams?: DictParam[]; evidence?: Evidence[] }
   | { k: 'recordCon'; con: ConInfo; fields: RFieldBind[]; span: Span }
   | { k: 'recordUpdate'; expr: RExpr; fields: RFieldBind[]; span: Span; cons?: ConInfo[] };
 
@@ -61,7 +60,7 @@ export interface RFieldBind {
   span: Span;
 }
 
-export type RPat =
+export type RPat = (
   | { k: 'var'; local: LocalVar; span: Span }
   | { k: 'wild'; span: Span }
   | {
@@ -75,7 +74,8 @@ export type RPat =
       type?: Type;
     }
   | { k: 'con'; con: ConInfo; args: RPat[]; span: Span }
-  | { k: 'as'; local: LocalVar; pat: RPat; span: Span };
+  | { k: 'as'; local: LocalVar; pat: RPat; span: Span }
+) & { surface?: Pat };
 
 export type RType =
   | { k: 'var'; name: string; span: Span }

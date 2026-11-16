@@ -13,6 +13,7 @@ export interface TypeEntity {
   name: string;
   module: string;
   sort: 'data' | 'synonym' | 'prim';
+  unsupported?: string;
   kind: Kind;
   /** The number of type parameters a data type or synonym declares. */
   arity: number;
@@ -21,7 +22,6 @@ export interface TypeEntity {
   fields: Map<string, FieldInfo>;
   /** What a synonym stands for, with its parameters as `TGen` indices. */
   synonym?: Type;
-  /** The classes the declaration derives, with the derived instances once they are made. */
   span?: Span;
   /** How the type prints when it is special syntax: lists, tuples, unit, and functions. */
   special?: 'list' | 'tuple' | 'unit' | 'function';

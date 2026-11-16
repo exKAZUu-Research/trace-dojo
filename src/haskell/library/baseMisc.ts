@@ -541,9 +541,22 @@ class Eq a => Bits a where
   popCount :: a -> Int
   bit :: Int -> a
   zeroBits :: a
+  rotate, rotateL, rotateR :: a -> Int -> a
+  bitSize :: a -> Int
+  bitSizeMaybe :: a -> Maybe Int
+  isSigned :: a -> Bool
+  unsafeShiftL, unsafeShiftR :: a -> Int -> a
+  rotateL = rotate
+  rotateR x n = rotate x (negate n)
+  unsafeShiftL = shiftL
+  unsafeShiftR = shiftR
   shift x n = if n >= 0 then shiftL x n else shiftR x (negate n)
 
 instance Bits Int where
+  rotate = primitive "intRotate"
+  bitSize _ = 64
+  bitSizeMaybe _ = Just 64
+  isSigned _ = True
   (.&.) = primitive "intAnd"
   (.|.) = primitive "intOr"
   xor = primitive "intXor"
@@ -559,6 +572,10 @@ instance Bits Int where
   zeroBits = 0
 
 instance Bits Integer where
+  rotate = shift
+  bitSize _ = errorWithoutStackTrace "Data.Bits.bitSize(Integer)"
+  bitSizeMaybe _ = Nothing
+  isSigned _ = True
   (.&.) = primitive "integerAnd"
   (.|.) = primitive "integerOr"
   xor = primitive "integerXor"
@@ -574,6 +591,10 @@ instance Bits Integer where
   zeroBits = 0
 
 instance Bits Word where
+  rotate = primitive "wordRotate"
+  bitSize _ = 64
+  bitSizeMaybe _ = Just 64
+  isSigned _ = False
   (.&.) = primitive "wordAnd"
   (.|.) = primitive "wordOr"
   xor = primitive "wordXor"
@@ -589,6 +610,10 @@ instance Bits Word where
   zeroBits = 0
 
 instance Bits Bool where
+  rotate x _ = x
+  bitSize _ = 1
+  bitSizeMaybe _ = Just 1
+  isSigned _ = False
   (.&.) = (&&)
   (.|.) = (||)
   xor a b = a /= b
@@ -602,6 +627,25 @@ instance Bits Bool where
   popCount x = if x then 1 else 0
   bit i = i == 0
   zeroBits = False
+
+class Bits a => FiniteBits a where
+  finiteBitSize :: a -> Int
+  countLeadingZeros, countTrailingZeros :: a -> Int
+
+instance FiniteBits Int where
+  finiteBitSize _ = 64
+  countLeadingZeros = primitive "leadingZeros64"
+  countTrailingZeros = primitive "trailingZeros64"
+
+instance FiniteBits Word where
+  finiteBitSize _ = 64
+  countLeadingZeros x = primitive "leadingZeros64" (toInteger x)
+  countTrailingZeros x = primitive "trailingZeros64" (toInteger x)
+
+instance FiniteBits Bool where
+  finiteBitSize _ = 1
+  countLeadingZeros x = if x then 0 else 1
+  countTrailingZeros x = if x then 0 else 1
 
 -- Data.Ord
 
@@ -650,7 +694,10 @@ readLn :: Read a => IO a
 readLn = unsupportedIO
 
 readIO :: Read a => String -> IO a
-readIO _ = unsupportedIO
+readIO s = case [x | (x, t) <- reads s, ("", "") <- lex t] of
+  [x] -> return x
+  [] -> fail "Prelude.readIO: no parse"
+  _ -> fail "Prelude.readIO: ambiguous parse"
 
 stdin :: Handle
 stdin = errorWithoutStackTrace "stdin"

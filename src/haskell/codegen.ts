@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 853 -- The Core generator covers every construct of the language in one pass over shared state.
+// code-gauge-allow-file fileNcss 864 -- The Core generator covers every construct of the language in one pass over shared state.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   CHAR_TYPE,
@@ -26,6 +26,7 @@ import {
   type ValueEntity,
 } from './entities';
 import { TailCall } from './machine';
+import { surfacePatternText } from './patternText';
 import { primitiveNamed, rationalToFloat } from './primitives';
 import type { LocalVar, RAlt, RBindGroup, RBinding, RClause, RExpr, RGuard, RPat, RRhs, RStmt } from './rast';
 import { type DictBuilders, dictBuilders, type Runtime } from './runtime';
@@ -650,7 +651,7 @@ export class Codegen {
         return { k: 'let', binds: [{ index: slot, expr: right }], body: lambda };
       }
       case 'typed': {
-        return this.compileExpr(expr.expr);
+        return this.compileTyped(expr);
       }
       case 'recordCon': {
         const args: Core[] = Array.from({ length: expr.con.arity }, (_, position) => {
@@ -848,12 +849,24 @@ export class Codegen {
   // -------------------------------------------------------------------------------------------------------------
   // do blocks
 
+  private compileTyped(expr: Extract<RExpr, { k: 'typed' }>): Core {
+    const params = expr.dictParams ?? [];
+    if (params.length === 0) return this.compileExpr(expr.expr);
+    const frame = new FrameScope(this.frame);
+    const fn = this.withFrame(frame, (): Core => {
+      for (const param of params) frame.slots.set(param, frame.alloc());
+      const body = this.compileExpr(expr.expr);
+      return { k: 'lam', arity: params.length, size: frame.size, body };
+    });
+    return { k: 'app', fn, args: (expr.evidence ?? []).map((evidence) => this.compileEvidence(evidence)) };
+  }
+
   private compileDo(expr: Extract<RExpr, { k: 'do' }>): Core {
+    if (this.options.isProgram && expr.type && isIOType(expr.type)) return this.compileIODo(expr);
     if (!expr.monad) {
       // A block of `let` statements and one expression needs no monad: it is a `let` expression.
       return this.compileLetChain(expr.stmts, 0);
     }
-    if (this.options.isProgram && expr.monadType && isIOConstructor(expr.monadType)) return this.compileIODo(expr);
     return this.compileMonadic(expr.stmts, 0, expr.monad);
   }
 
@@ -1212,11 +1225,6 @@ function isIOType(type: Type): boolean {
   return head.tag === 'tcon' && head.entity === IO_TYPE && args.length === 1;
 }
 
-function isIOConstructor(type: Type): boolean {
-  const pruned = prune(type);
-  return pruned.tag === 'tcon' && pruned.entity === IO_TYPE;
-}
-
 function stripParens(expr: RExpr): RExpr {
   return expr.k === 'typed' ? stripParens(expr.expr) : expr;
 }
@@ -1340,6 +1348,7 @@ export function isScalarType(type: Type): boolean {
 }
 
 function patternText(pat: RPat): string {
+  if (pat.surface) return surfacePatternText(pat.surface);
   switch (pat.k) {
     case 'var': {
       return pat.local.name;

@@ -10,7 +10,15 @@ import {
   type ValueEntity,
 } from './entities';
 import { compileError, unsupportedError } from './errors';
-import { type Builtins, Checker, newDictParam, typeError, typeParamKinds, typeVarNames } from './infer';
+import {
+  type Builtins,
+  Checker,
+  checkSchemeAmbiguity,
+  newDictParam,
+  typeError,
+  typeParamKinds,
+  typeVarNames,
+} from './infer';
 import { TypePrinter } from './prettyType';
 import type { RBinding, RType } from './rast';
 import type { RClassDecl, RDataDecl, RInstanceDecl, RModule, RSynonymDecl } from './rename';
@@ -193,15 +201,14 @@ function methodScheme(checker: Checker, decl: RClassDecl, sig: RClassDecl['metho
   const type = checker.convertType(sig.type, vars, varKinds, STAR);
   const preds: Pred[] = [{ cls: decl.entity, type: { tag: 'tgen', index: 0 } }];
   for (const constraint of sig.context) {
-    if (constraint.type.k === 'var' && constraint.type.name === decl.param) {
-      throw compileError(constraint.span, 'クラスのメソッドの文脈に、クラスの型変数の制約は書けません。');
-    }
     preds.push({
       cls: constraint.cls,
       type: checker.convertType(constraint.type, vars, varKinds, constraint.cls.tyvarKind),
     });
   }
-  return { kinds, names, preds, type };
+  const scheme = { kinds, names, preds, type };
+  checkSchemeAmbiguity(scheme, sig.span);
+  return scheme;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -326,7 +333,7 @@ export function makeInstance(
 
 function registerInstance(checker: Checker, info: InstanceInfo, span: Span): void {
   for (const existing of checker.env.instancesOf(info.cls)) {
-    if (headsOverlap(existing.head, info.head)) {
+    if (headsOverlap(checker, existing, info)) {
       const printer = new TypePrinter();
       throw compileError(
         span,
@@ -344,27 +351,17 @@ function registerInstance(checker: Checker, info: InstanceInfo, span: Span): voi
 }
 
 /** Whether two instance heads could describe the same type, which Haskell forbids without overlap pragmas. */
-function headsOverlap(a: Type, b: Type): boolean {
-  const left = new Map<number, Type>();
-  const right = new Map<number, Type>();
-  const unify = (x: Type, y: Type): boolean => {
-    const p = prune(x);
-    const q = prune(y);
-    if (p.tag === 'tgen') {
-      const bound = left.get(p.index);
-      if (bound) return true;
-      left.set(p.index, q);
-      return true;
-    }
-    if (q.tag === 'tgen') {
-      right.set(q.index, p);
-      return true;
-    }
-    if (p.tag === 'tcon' && q.tag === 'tcon') return p.entity === q.entity;
-    if (p.tag === 'tap' && q.tag === 'tap') return unify(p.fn, q.fn) && unify(p.arg, q.arg);
-    return false;
-  };
-  return unify(a, b);
+function headsOverlap(checker: Checker, a: InstanceInfo, b: InstanceInfo): boolean {
+  return checker.tryUnify(
+    instantiateType(
+      a.head,
+      a.kinds.map((kind) => checker.freshVar(kind))
+    ),
+    instantiateType(
+      b.head,
+      b.kinds.map((kind) => checker.freshVar(kind))
+    )
+  );
 }
 
 /** Finds each superclass's evidence at the instance's type, from the instance's context and other instances. */
@@ -608,17 +605,24 @@ function sameContext(a: Pred[], b: Pred[]): boolean {
 
 function checkMain(checker: Checker, module: RModule, builtins: Builtins): void {
   const main = module.exports.values.get('main');
-  const binding = module.values.bindings.find(
-    (candidate) =>
-      candidate.k === 'fun' && candidate.binder.kind === 'global' && candidate.binder.entity.name === 'main'
+  const binding = module.values.bindings.find((candidate) =>
+    candidate.k === 'pat'
+      ? candidate.globals?.some((entity) => entity.name === 'main')
+      : candidate.binder.kind === 'global' && candidate.binder.entity.name === 'main'
   );
-  if (!binding || binding.k !== 'fun' || binding.binder.kind !== 'global') {
+  const entity =
+    binding?.k === 'pat'
+      ? binding.globals?.find((global) => global.name === 'main')
+      : binding?.binder.kind === 'global'
+        ? binding.binder.entity
+        : undefined;
+  if (!binding || !entity) {
     throw compileError(0, 'main が定義されていません。');
   }
   if (!main && module.hasExportList) {
     throw compileError(binding.span, 'main が export されていません。');
   }
-  const scheme = binding.binder.entity.scheme as Scheme;
+  const scheme = entity.scheme as Scheme;
   const instantiated = checker.instantiate(scheme, binding.span, 'main');
   checker.unify(
     instantiated.type,
