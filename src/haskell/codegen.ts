@@ -179,7 +179,8 @@ export class Codegen {
               ? runtime.global(def)
               : new Thunk(undefined, undefined, () => new TailCall(runtime.machine.force(runtime.global(def)), args));
         }
-        const missing = `${info.span ? sourceSpanText(info.span) : PROGRAM_FILE}: No instance nor default method for class operation ${method.name}`;
+        // GHC writes the quotes around the name as the low bytes of ‘ and ’.
+        const missing = `${info.span ? sourceSpanText(info.span) : PROGRAM_FILE}: No instance nor default method for class operation \u0018${method.name}\u0019`;
         return (runtime: Runtime, dict: Dict) => {
           const fallback = info.cls.defaults[index];
           if (!fallback) {

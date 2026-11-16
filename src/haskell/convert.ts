@@ -716,7 +716,12 @@ function convertInstance(node: Node): Decl {
     cls: qualifiedName(nameNode).name,
     type: convertType(types[0]),
     decls,
-    span: spanOf(node),
+    // GHC reports an instance at its head, from the context to the type.
+    span: {
+      ...spanOf(contextNode?.firstChild ?? nameNode),
+      endRow: spanOf(types[0]).endRow,
+      endCol: spanOf(types[0]).endCol,
+    },
   };
 }
 
