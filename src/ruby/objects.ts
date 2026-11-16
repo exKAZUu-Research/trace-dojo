@@ -1,5 +1,6 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { BlockDef, MethodDef } from './ast';
+import type { NativeSignature } from './nativeSignatures';
 import { rt } from './runtime';
 
 /**
@@ -270,6 +271,7 @@ export interface RMethod {
   row?: number;
   reflectionOwner?: RClass;
   nativeIdentityOwner?: RClass;
+  nativeSignature?: NativeSignature;
   missing?: boolean;
   superName?: string;
   owner: RClass;

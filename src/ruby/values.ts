@@ -225,7 +225,7 @@ export function classOf(value: Value): RClass {
   }
   if (value === NIL) return c.NilClass;
   if (value instanceof RSymbol) return c.Symbol;
-  if (value instanceof RClass) return singletonClassOf(value);
+  if (value instanceof RClass) return singletonClassOf(value, false);
   return (value as RBasic).singleton ?? (value as RBasic).cls;
 }
 
@@ -240,21 +240,21 @@ export function realClassOf(value: Value): RClass {
 export function singletonDefinitionClass(value: Value): RClass | undefined {
   if (value === NIL || typeof value === 'boolean') return realClassOf(value);
   if (!(value instanceof RBasic) || value instanceof RFloat) return undefined;
-  value.singletonExposed = true;
   return singletonClassOf(value);
 }
 
 /** The singleton class of an object, created on first use; a class's chains to its superclass's. */
-export function singletonClassOf(value: Value): RClass {
+export function singletonClassOf(value: Value, exposed = true): RClass {
   const { c } = rt();
   if (!(value instanceof RBasic) || value instanceof RFloat) {
     throw new TypeError('A singleton class of an immediate value');
   }
+  if (exposed) value.singletonExposed = true;
   if (value.singleton) return value.singleton;
   let superclass: RClass;
   if (value instanceof RClass) {
     if (value.isModule) superclass = c.Module;
-    else superclass = value.superclass ? singletonClassOf(value.superclass) : c.Class;
+    else superclass = value.superclass ? singletonClassOf(value.superclass, false) : c.Class;
   } else {
     superclass = value.cls;
   }

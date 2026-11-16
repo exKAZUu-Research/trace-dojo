@@ -695,6 +695,7 @@ export function ivarSet(self: Value, name: string, value: Value): void {
     throw frozenError(self, runToEnd(inspect(self)));
   }
   if (self.frozen) throw frozenError(self, inspectForFrozen(self));
+  if (self instanceof RClass && self.isModule) singletonClassOf(self);
   self.ivars ??= new Map();
   if (!self.ivars.has(name)) rt().chargeSlots(1);
   self.ivars.set(name, value);
@@ -797,6 +798,7 @@ export function setClassVariable(holder: RClass, name: string, value: Value): vo
     }
   }
   assertMutableClass(holder);
+  if (holder.isModule) singletonClassOf(holder);
   holder.classVariables.set(name, value);
 }
 

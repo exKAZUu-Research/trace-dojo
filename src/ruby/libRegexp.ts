@@ -15,6 +15,7 @@ import {
 } from './conversions';
 import { coreMethod, def, extend, sdef, sundef } from './define';
 import { argumentError, frozenError, indexError, rubyError, typeError } from './errors';
+import { validateKeywords } from './exceptionOption';
 import { digest, hashDefault, hashGet, hashSet, stringKeyEquals, stringKeyHash } from './hashes';
 import { callBlock, callMethod, type Gen, invoke } from './interp';
 import { tryAry } from './libArray';
@@ -48,8 +49,10 @@ import {
   regexpLineCommentEnd,
 } from './regexpCaptureNames';
 import { RegexpCursor } from './regexpCursor';
+import { decodeRegexpByteEscape, regexpByteEscape, RegexpEncodingError } from './regexpEscapes';
 import { charIndex, regexpByteIndex, unitIndex } from './regexpPositions';
 import {
+  hasRegexpProperty,
   regexpSyntaxReason,
   supportsRegexpByteView,
   validateRegexpStructure,
@@ -78,11 +81,11 @@ export interface RegexpData {
   binaryReverseSticky?: RegExp;
   context?: vm.Context;
   binaryContext?: vm.Context;
+  reverseContext?: vm.Context;
+  binaryReverseContext?: vm.Context;
 }
 
 const MATCH_SCRIPT = new vm.Script('regexp.exec(input)');
-
-class RegexpEncodingError extends SyntaxError {}
 
 const POSIX_CLASSES: Record<string, string> = {
   alpha: String.raw`\p{Alphabetic}`,
@@ -138,6 +141,7 @@ interface RegexpOptions {
   multiline?: boolean;
   extended?: boolean;
   sourceBinary?: boolean;
+  fixedEncoding?: boolean;
 }
 
 const SYNTAX = String.raw`^$\.*+?()[]{}|/-`;
@@ -552,39 +556,6 @@ function unsupportedSyntax(feature: string): unknown {
   return new UnsupportedFeatureError(`正規表現の${feature}`);
 }
 
-function decodeRegexpByteEscape(
-  source: string,
-  start: number,
-  first: { value: number; length: number }
-): { value: number; length: number } {
-  if (first.value < 0x80) return first;
-  if (first.value < 0xc2 || first.value > 0xf4) throw new RegexpEncodingError('invalid multibyte escape');
-  const width = first.value < 0xe0 ? 2 : first.value < 0xf0 ? 3 : 4;
-  const bytes = [first.value];
-  let length = first.length;
-  while (bytes.length < width) {
-    const next = regexpByteEscape(source, start + length);
-    if (!next) throw new RegexpEncodingError('too short escaped multibyte character');
-    if (next.value < 0x80 || next.value > 0xbf) throw new RegexpEncodingError('invalid multibyte escape');
-    bytes.push(next.value);
-    length += next.length;
-  }
-  try {
-    const decoded = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(Uint8Array.from(bytes));
-    return { value: decoded.codePointAt(0)!, length };
-  } catch {
-    throw new RegexpEncodingError('invalid multibyte escape');
-  }
-}
-
-function regexpByteEscape(source: string, start: number): { value: number; length: number } | undefined {
-  const match = /^\\(?:x([\da-fA-F]{1,2})|([0-7]{1,3}))/.exec(source.slice(start));
-  if (!match) return undefined;
-  const value = Number.parseInt(match[1] ?? match[2], match[1] === undefined ? 8 : 16);
-  if (value > 0xff) throw new RegexpEncodingError('invalid escape code');
-  return { value, length: match[0].length };
-}
-
 function unsupportedClassEscape(escape: string): unknown {
   return unsupportedSyntax(`文字クラス内の${escape}`);
 }
@@ -602,7 +573,10 @@ export function makeRegexp(source: string, options: RegexpOptions): RObject {
   let encoding: RegexpData['encoding'];
   try {
     encoding =
-      /[^\u0000-\u007F]/.test(source) || hasNonAsciiRegexpEscape(source, options.extended ?? false)
+      options.fixedEncoding ||
+      /[^\u0000-\u007F]/.test(source) ||
+      hasNonAsciiRegexpEscape(source, options.extended ?? false) ||
+      hasRegexpProperty(source, options.extended ?? false)
         ? options.sourceBinary
           ? 'BINARY (ASCII-8BIT)'
           : RUBY_UTF8
@@ -757,7 +731,8 @@ export function execAt(
   start: number,
   source?: RString,
   snapshot?: RString,
-  validated = false
+  validated = false,
+  anchored = false
 ): MatchState | undefined {
   if (start < 0 || start > charIndex(text, text.length)) return undefined;
   const data = dataOf(regexp);
@@ -768,15 +743,19 @@ export function execAt(
     if (data.foldCheck.unsupported) throw new UnsupportedFeatureError('Unicode の複数文字 casefold');
   }
   const binaryMatch = source?.binary === true && data.encoding === 'US-ASCII';
-  const js = regexpForMatch(data, source);
+  const js = regexpForMatch(data, source, anchored);
   rt().spend();
   const startUnit = unitIndex(text, start);
   js.lastIndex = startUnit;
   const result =
     data.safeNative || (text.length <= 8 && data.source.length <= 16)
       ? js.exec(text)
-      : execWithinBudget(data, js, text, binaryMatch);
-  rt().spend(Math.ceil(((result?.index ?? text.length) - startUnit) / 64));
+      : execWithinBudget(data, js, text, binaryMatch, anchored);
+  const work =
+    anchored && data.safeNative
+      ? Math.max(1, result ? (result.indices?.[0]?.[1] ?? startUnit) - startUnit : 1)
+      : (result?.index ?? text.length) - startUnit;
+  rt().spend(Math.ceil(work / 64));
   if (!result?.indices) return undefined;
   const names: string[] = [];
   const namedGroups: Record<string, number> = Object.create(null) as Record<string, number>;
@@ -795,12 +774,22 @@ export function execAt(
   };
 }
 
-function execWithinBudget(data: RegexpData, js: RegExp, text: string, binaryMatch: boolean): RegExpExecArray | null {
+function execWithinBudget(
+  data: RegexpData,
+  js: RegExp,
+  text: string,
+  binaryMatch: boolean,
+  anchored: boolean
+): RegExpExecArray | null {
   const remaining = rt().budget.remainingMilliseconds;
   if (remaining === 0) throw new ExecutionLimitError('time');
-  const context = binaryMatch
-    ? (data.binaryContext ??= vm.createContext({ regexp: js, input: text }))
-    : (data.context ??= vm.createContext({ regexp: js, input: text }));
+  const context = anchored
+    ? binaryMatch
+      ? (data.binaryReverseContext ??= vm.createContext({ regexp: js, input: text }))
+      : (data.reverseContext ??= vm.createContext({ regexp: js, input: text }))
+    : binaryMatch
+      ? (data.binaryContext ??= vm.createContext({ regexp: js, input: text }))
+      : (data.context ??= vm.createContext({ regexp: js, input: text }));
   context.input = text;
   try {
     return MATCH_SCRIPT.runInContext(context, { timeout: remaining }) as RegExpExecArray | null;
@@ -811,12 +800,18 @@ function execWithinBudget(data: RegexpData, js: RegExp, text: string, binaryMatc
   }
 }
 
-function regexpForMatch(data: RegexpData, source?: RString): RegExp {
-  if (!source?.binary || data.encoding !== 'US-ASCII') return data.js;
-  return (data.binaryJs ??= new RegExp(
-    translate(data.source, data.extended, data.multiline, true, true, data.ignoreCase),
-    data.js.flags
-  ));
+function regexpForMatch(data: RegexpData, source?: RString, anchored = false): RegExp {
+  const binary = source?.binary && data.encoding === 'US-ASCII';
+  const base = binary
+    ? (data.binaryJs ??= new RegExp(
+        translate(data.source, data.extended, data.multiline, true, true, data.ignoreCase),
+        data.js.flags
+      ))
+    : data.js;
+  if (!anchored) return base;
+  return binary
+    ? (data.binaryReverseSticky ??= new RegExp(base.source, base.flags.replace('g', 'y')))
+    : (data.reverseSticky ??= new RegExp(base.source, base.flags.replace('g', 'y')));
 }
 
 export function validateRegexpByteView(regexp: RObject): void {
@@ -993,11 +988,17 @@ function allMatches(regexp: RObject, source: RString): MatchState[] {
 
 // Regexp ---------------------------------------------------------------------------------------------------------------
 
-function* optionsOf(value: Value | undefined): Gen<{ ignoreCase: boolean; multiline: boolean; extended: boolean }> {
+function* optionsOf(value: Value | undefined): Gen<RegexpOptions> {
   if (value === undefined || value === NIL || value === false)
     return { ignoreCase: false, multiline: false, extended: false };
   if (typeof value === 'bigint') {
-    return { ignoreCase: (value & 1n) !== 0n, extended: (value & 2n) !== 0n, multiline: (value & 4n) !== 0n };
+    if ((value & 32n) !== 0n) throw new UnsupportedFeatureError('正規表現の no encoding モード');
+    return {
+      fixedEncoding: (value & 16n) !== 0n,
+      ignoreCase: (value & 1n) !== 0n,
+      extended: (value & 2n) !== 0n,
+      multiline: (value & 4n) !== 0n,
+    };
   }
   if (value instanceof RString) {
     if (/[^imx]/.test(value.s)) throw argumentError(`unknown regexp option: ${value.s}`);
@@ -1103,7 +1104,11 @@ def(
     if (self.data) throw typeError('already initialized regexp');
     if (isRegexp(source)) {
       const data = dataOf(source);
-      self.data = makeRegexp(data.source, { ...data, sourceBinary: data.encoding === 'BINARY (ASCII-8BIT)' }).data;
+      self.data = makeRegexp(data.source, {
+        ...data,
+        sourceBinary: data.encoding === 'BINARY (ASCII-8BIT)',
+        fixedEncoding: data.encoding !== 'US-ASCII',
+      }).data;
     } else {
       const parsedOptions = yield* optionsOf(options);
       const pattern = yield* toStrValue(source);
@@ -1115,9 +1120,7 @@ def(
 );
 function* checkRegexpKeywords(keywords: RHash | undefined): Gen<void> {
   if (keywords) {
-    for (const entry of keywords.map.values())
-      if (!(entry.key instanceof RSymbol) || entry.key.name !== 'timeout')
-        throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
+    yield* validateKeywords(keywords, ['timeout']);
     const timeout = (yield* hashGet(keywords, sym('timeout')))?.value;
     if (timeout !== undefined && timeout !== NIL) throw new UnsupportedFeatureError('Regexp のタイムアウト');
   }
@@ -1133,6 +1136,7 @@ sdef('Regexp', 'union', [0, -1], function* (_self, args) {
   const parts: string[] = [];
   let binary = false;
   let ascii = true;
+  let lockedBinary: boolean | undefined;
   let length = 0;
   for (const item of items) {
     const part = isRegexp(item)
@@ -1140,13 +1144,25 @@ sdef('Regexp', 'union', [0, -1], function* (_self, args) {
       : escapeRegexpPattern(yield* toStrValue(item));
     binary = regexpPatternEncoding(binary, ascii, part, 'union');
     const bytes = stringBytes(part);
-    ascii &&= bytes.every((byte) => byte < 0x80);
+    const partAscii = bytes.every((byte) => byte < 0x80);
+    const fixed = isRegexp(item) ? dataOf(item).encoding !== 'US-ASCII' : !partAscii;
+    if (fixed) {
+      if (lockedBinary !== undefined && lockedBinary !== part.binary)
+        throw argumentError(
+          `incompatible encodings: ${lockedBinary ? 'ASCII-8BIT' : RUBY_UTF8} and ${part.binary ? 'ASCII-8BIT' : RUBY_UTF8}`
+        );
+      lockedBinary = part.binary;
+    }
+    ascii &&= partAscii;
     length += bytes.length + (parts.length > 0 ? 1 : 0);
     rt().checkStringLength(length);
     parts.push(part.s);
   }
   return regexpFromString(
-    regexpText(parts.length === 0 ? '(?!)' : parts.join('|'), binary ? 'BINARY (ASCII-8BIT)' : RUBY_UTF8)
+    regexpText(
+      parts.length === 0 ? '(?!)' : parts.join('|'),
+      (lockedBinary ?? binary) ? 'BINARY (ASCII-8BIT)' : RUBY_UTF8
+    )
   );
 });
 
@@ -1267,7 +1283,12 @@ def('Regexp', 'inspect', 0, (self: RObject) => regexpText(regexpInspect(self), d
 def('Regexp', 'to_s', 0, (self: RObject) => regexpText(regexpToS(self), dataOf(self).encoding));
 def('Regexp', 'options', 0, (self: RObject) => {
   const data = dataOf(self);
-  return BigInt((data.ignoreCase ? 1 : 0) | (data.extended ? 2 : 0) | (data.multiline ? 4 : 0));
+  return BigInt(
+    (data.ignoreCase ? 1 : 0) |
+      (data.extended ? 2 : 0) |
+      (data.multiline ? 4 : 0) |
+      (data.encoding !== 'US-ASCII' ? 16 : 0)
+  );
 });
 def(
   'Regexp',
@@ -1453,12 +1474,9 @@ def(
   'named_captures',
   0,
   function* (self: RObject, _args, _block, keywords) {
+    yield* validateKeywords(keywords, ['symbolize_names']);
     let symbolize = false;
-    for (const entry of keywords?.map.values() ?? []) {
-      if (!(entry.key instanceof RSymbol) || entry.key.name !== 'symbolize_names')
-        throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
-      symbolize = truthy(entry.value);
-    }
+    for (const entry of keywords?.map.values() ?? []) symbolize = truthy(entry.value);
     const hash = newHash();
     const state = stateOf(self);
     for (const name of state.names)
@@ -1894,15 +1912,9 @@ for (const name of ['index', 'rindex'] as const) {
       setLastMatch(state);
       return state ? BigInt(charIndex(self.s, (state.groups[0] as readonly [number, number])[0])) : NIL;
     }
-    for (let position = start; position >= 0; position--) {
-      const state = execAt(regexp, self.s, position, self);
-      if (state && charIndex(self.s, (state.groups[0] as readonly [number, number])[0]) === position) {
-        setLastMatch(state);
-        return BigInt(position);
-      }
-    }
-    setLastMatch(undefined);
-    return NIL;
+    const state = reverseRegexpSearch(regexp, self, start);
+    setLastMatch(state);
+    return state ? BigInt(charIndex(self.s, state.groups[0]![0])) : NIL;
   });
 }
 wrapFirst(['[]', 'slice'], function* (self, args) {
@@ -1992,36 +2004,9 @@ for (const [name, last] of [
 ] as const) {
   wrapFirst(name, function* (self, args) {
     const regexp = args[0] as RObject;
-    let state = execAt(regexp, self.s, 0, self);
-    if (last && state) {
-      const literal = literalRegexpText(regexp);
-      if (literal !== undefined) {
-        const index = self.s.lastIndexOf(literal);
-        state = index === -1 ? undefined : execAt(regexp, self.s, charIndex(self.s, index), self);
-      } else if (dataOf(regexp).safeNative && !/^(?:\^|\\A)/.test(dataOf(regexp).source)) {
-        const data = dataOf(regexp);
-        const matchRegexp = regexpForMatch(data, self);
-        const sticky =
-          matchRegexp === data.js
-            ? (data.reverseSticky ??= new RegExp(matchRegexp.source, matchRegexp.flags.replace('g', 'y')))
-            : (data.binaryReverseSticky ??= new RegExp(matchRegexp.source, matchRegexp.flags.replace('g', 'y')));
-        for (let position = charIndex(self.s, self.s.length); position >= 0; position--) {
-          if (position % 64 === 0) rt().spend();
-          sticky.lastIndex = unitIndex(self.s, position);
-          if (sticky.test(self.s)) {
-            state = execAt(regexp, self.s, position, self);
-            break;
-          }
-        }
-      } else {
-        for (;;) {
-          const from = (state.groups[0] as readonly [number, number])[0];
-          const next = execAt(regexp, self.s, charIndex(self.s, from) + 1, self);
-          if (!next) break;
-          state = next;
-        }
-      }
-    }
+    const state = last
+      ? reverseRegexpSearch(regexp, self, charIndex(self.s, self.s.length))
+      : execAt(regexp, self.s, 0, self);
     setLastMatch(state);
     if (!state)
       return last
@@ -2035,6 +2020,37 @@ for (const [name, last] of [
       sliceStringEncoding(self, to),
     ]);
   });
+}
+
+function reverseRegexpSearch(regexp: RObject, source: RString, start: number): MatchState | undefined {
+  const snapshot = matchSnapshot(source);
+  validateRegexpSubject(regexp, source);
+  const literal = literalRegexpText(regexp);
+  if (literal !== undefined) {
+    rt().spend(Math.ceil(source.s.length / 64));
+    const position = source.s.lastIndexOf(literal, unitIndex(source.s, start));
+    return position === -1
+      ? undefined
+      : execAt(regexp, source.s, charIndex(source.s, position), source, snapshot, true);
+  }
+  if (dataOf(regexp).safeNative) {
+    for (let position = start; position >= 0; position--) {
+      const state = execAt(regexp, source.s, position, source, snapshot, true, true);
+      if (state) return state;
+    }
+    return undefined;
+  }
+  let last: MatchState | undefined;
+  let position = 0;
+  while (position <= start) {
+    const state = execAt(regexp, source.s, position, source, snapshot, true);
+    if (!state) break;
+    const from = charIndex(source.s, state.groups[0]![0]);
+    if (from > start) break;
+    last = state;
+    position = from + 1;
+  }
+  return last;
 }
 
 function* asGen(value: Gen | Value): Gen {

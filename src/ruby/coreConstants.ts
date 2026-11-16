@@ -2,7 +2,8 @@
 export const coreConstants: Readonly<Record<string, readonly string[]>> = {
   Encoding: [
     'ANSI_X3_4_1968',
-    'ascii',
+    // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Preserve the case-sensitive Ruby constant.
+    'ASCII',
     'ASCII_8BIT',
     'BIG5',
     'BIG5_HKSCS',

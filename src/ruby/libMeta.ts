@@ -2,6 +2,7 @@ import type { Params } from './ast';
 import { addressOf, className, inspect, stringEncodingName, tryImplicitConversion } from './conversions';
 import { def, findCoreMethod, isCoreMethod, sdef, sundef } from './define';
 import { argumentError, frozenError, nameError, rubyError, typeError, undefinedMethodError } from './errors';
+import { validateKeywords } from './exceptionOption';
 import { digest, hashGet } from './hashes';
 import {
   addMethod,
@@ -313,15 +314,7 @@ function* methodDescription(self: RObject): Gen<RString> {
         : undefined;
   const params = definition?.params;
   const signature = params
-    ? [
-        ...params.required.map((param) => (typeof param === 'string' ? param : '*')),
-        ...params.optional.map((param) => `${param.name}=...`),
-        ...(params.rest === undefined ? [] : [`*${params.rest}`]),
-        ...params.post.map((param) => (typeof param === 'string' ? param : '*')),
-        ...params.keywords.map((param) => `${param.name}:${param.value ? ' ...' : ''}`),
-        ...(params.keywordRest === undefined ? [] : [`**${params.keywordRest}`]),
-        ...(params.block === undefined ? [] : [`&${params.block}`]),
-      ].join(', ')
+    ? methodParameterSignature(params)
     : methodArity(method) < 0
       ? '*'
       : Array.from({ length: methodArity(method) }, () => '_').join(', ');
@@ -333,6 +326,28 @@ function* methodDescription(self: RObject): Gen<RString> {
     ...(name === method.name ? [] : [str('('), symbolString(sym(method.name)), str(')')]),
     str(`(${signature})${row === undefined ? '' : ` main.rb:${row + 1}`}>`),
   ]);
+}
+
+function methodParameterSignature(params: Params): string {
+  if (
+    params.rest === '*' &&
+    params.keywordRest === '**' &&
+    params.block === '&' &&
+    params.required.length + params.optional.length + params.post.length + params.keywords.length === 0
+  )
+    return '...';
+  return [
+    ...params.required.map((param) => (typeof param === 'string' ? param : '_')),
+    ...params.optional.map((param) => `${param.name}=...`),
+    ...(params.rest === undefined ? [] : [params.rest === '*' ? '*' : `*${params.rest}`]),
+    ...params.post.map((param) => (typeof param === 'string' ? param : '_')),
+    ...params.keywords.map((param) => `${param.name}:${param.value ? ' ...' : ''}`),
+    ...(params.keywordRest === undefined || (params.keywordRest === '**' && params.rest !== undefined)
+      ? []
+      : [params.keywordRest === '**' ? '**' : `**${params.keywordRest}`]),
+    ...(params.noKeywords ? ['**nil'] : []),
+    ...(params.block === undefined ? [] : [params.block === '&' ? '...' : `&${params.block}`]),
+  ].join(', ');
 }
 
 function joinMethodDescription(parts: RString[]): RString {
@@ -409,10 +424,7 @@ def(
   'parameters',
   0,
   function* (self: RProc, _args, _block, keywords) {
-    if (keywords)
-      for (const entry of keywords.map.values())
-        if (!(entry.key instanceof RSymbol && entry.key.name === 'lambda'))
-          throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
+    yield* validateKeywords(keywords, ['lambda']);
     const asLambda = keywords ? (yield* hashGet(keywords, sym('lambda')))?.value : undefined;
     const isLambda = asLambda === undefined || asLambda === NIL ? self.isLambda : truthy(asLambda);
     if (self.reflectedMethod) return methodParameterList(self.reflectedMethod, isLambda);
@@ -443,8 +455,9 @@ for (const owner of ['Method', 'UnboundMethod']) {
     return (
       left.recv === right.recv &&
       left.moduleBound === right.moduleBound &&
-      (left.method.body.kind !== 'native' ||
-        (left.method.nativeIdentityOwner ?? left.owner) === (right.method.nativeIdentityOwner ?? right.owner)) &&
+      (left.method.body.kind === 'native'
+        ? (left.method.nativeIdentityOwner ?? left.owner) === (right.method.nativeIdentityOwner ?? right.owner)
+        : left.method.owner === right.method.owner) &&
       methodBodyIdentity(left.method, left.owner) === methodBodyIdentity(right.method, right.owner)
     );
   });
@@ -503,7 +516,7 @@ export function methodArity(method: RMethod): number {
 function nativeSignature(method: RMethod): NativeSignature | undefined {
   const owner = method.owner;
   const name = owner.isSingleton && owner.attached instanceof RClass ? `${owner.attached.name}.` : `${owner.name}#`;
-  return nativeSignatures[name + method.name];
+  return method.nativeSignature ?? nativeSignatures[name + method.name];
 }
 
 function methodParamsArity(params: Params | undefined): number {
@@ -605,7 +618,14 @@ function* defineMethodFrom(owner: RClass, args: Value[], block: RProc | undefine
   } else if (body instanceof RObject && (body.cls === rt().c.Method || body.cls === rt().c.UnboundMethod)) {
     const source = (body.data as MethodData).method;
     assertMethodOwner(source.owner, owner, true);
-    method = { ...source, name, superName: source.superName ?? source.name, owner, visibility };
+    method = {
+      ...source,
+      name,
+      superName: source.superName ?? source.name,
+      owner,
+      visibility,
+      nativeSignature: source.body.kind === 'native' ? nativeSignature(source) : undefined,
+    };
   } else {
     throw typeError(`wrong argument type ${realClassOf(body).name} (expected Proc/Method/UnboundMethod)`);
   }
@@ -619,7 +639,7 @@ def('Module', 'define_method', [1, 2], function* (self: RClass, args, block) {
   const result = yield* defineMethodFrom(self, args, block, visibility);
   if (frame.definitionOwner === self && frame.moduleFunction && result instanceof RSymbol) {
     const method = self.methods.get(result.key) as RMethod;
-    self.singletonExposed = true;
+
     const owner = singletonClassOf(self);
     addMethod(owner, { ...method, owner, visibility: 'public' });
     method.visibility = 'private';

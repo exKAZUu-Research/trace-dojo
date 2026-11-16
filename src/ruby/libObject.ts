@@ -729,7 +729,6 @@ def(
     if (!(target instanceof RBasic) || target instanceof RFloat) throw typeError("can't define singleton");
     if (target.frozen)
       throw frozenError(target, target instanceof RClass ? (target.name ?? '') : yield* inspect(target));
-    target.singletonExposed = true;
     const singleton = singletonClassOf(target);
     if (!singleton.includes.includes(self)) singleton.includes.unshift(self);
     invalidateMethodCaches();
@@ -874,7 +873,6 @@ def(
     for (const name of yield* symbolNames(args)) {
       const method = self.findMethod(name);
       if (!method) throw nameError(`undefined method '${name}' for module '${self.name}'`, self, name);
-      self.singletonExposed = true;
       addMethod(singletonClassOf(self), { ...method, owner: singletonClassOf(self), visibility: 'public' });
       addMethod(self, { ...method, visibility: 'private' });
     }

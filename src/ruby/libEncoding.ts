@@ -27,6 +27,13 @@ export function installEncodings(runtime: Runtime): void {
     encodingNames.set(object, nameString);
     encoding.constants.set(constant, object);
   }
+  for (const [alias, constant] of [
+    // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- This is a case-sensitive Ruby constant.
+    ['ASCII', 'US_ASCII'],
+    ['ANSI_X3_4_1968', 'US_ASCII'],
+    ['CP65001', 'UTF_8'],
+  ])
+    encoding.constants.set(alias, encoding.constants.get(constant) as Value);
 }
 
 def('Encoding', ['to_s', 'name'], 0, (self: RObject) => encodingNames.get(self) as RString);

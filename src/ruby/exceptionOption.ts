@@ -13,6 +13,17 @@ export function* exceptionOption(keywords: RHash | undefined): Gen<boolean> {
       selected = entry.value;
     } else unknown.push(yield* inspect(entry.key));
   }
-  if (unknown.length > 0) throw argumentError(`unknown keyword${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}`);
+  if (unknown.length > 0) throw argumentError(unknownKeywordMessage(unknown));
   return selected;
+}
+
+export function* validateKeywords(keywords: RHash | undefined, allowed: readonly string[]): Gen<void> {
+  const unknown: string[] = [];
+  for (const entry of keywords?.map.values() ?? [])
+    if (!(entry.key instanceof RSymbol) || !allowed.includes(entry.key.name)) unknown.push(yield* inspect(entry.key));
+  if (unknown.length > 0) throw argumentError(unknownKeywordMessage(unknown));
+}
+
+function unknownKeywordMessage(names: string[]): string {
+  return `unknown keyword${names.length > 1 ? 's' : ''}: ${names.join(', ')}`;
 }

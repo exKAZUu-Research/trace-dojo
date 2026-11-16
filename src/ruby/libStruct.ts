@@ -17,6 +17,7 @@ import {
 } from './conversions';
 import { coreMethod, def, sdef, sundef } from './define';
 import { argumentError, frozenError, indexError, nameError, rubyError, typeError } from './errors';
+import { validateKeywords } from './exceptionOption';
 import { digest, hashKeyOf, hashSet } from './hashes';
 import { addMethod, assertMutableClass, callBlock, callMethod, callProc, type Gen, invoke } from './interp';
 import { tryAry } from './libArray';
@@ -238,11 +239,11 @@ sdef(
     const classNameValue =
       first === undefined || first === NIL || first instanceof RSymbol ? undefined : yield* toStrValue(first);
     let keywordInit: boolean | undefined;
+    yield* validateKeywords(keywords, ['keyword_init']);
     if (keywords) {
       for (const entry of keywords.map.values()) {
         if (entry.key instanceof RSymbol && entry.key.name === 'keyword_init')
           keywordInit = entry.value === NIL ? undefined : truthy(entry.value);
-        else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
       }
     }
     const names = classNameValue || first === NIL ? args.slice(1) : args;

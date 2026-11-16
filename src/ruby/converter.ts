@@ -25,6 +25,7 @@ import type {
 import { decodeDoubleQuoted, decodeSingleQuoted } from './escapes';
 import { translate } from './libRegexp';
 import { regexpCaptureNames, regexpHasNumberedBackref } from './regexpCaptureNames';
+import { validateRegexpSourceSyntax } from './regexpStructure';
 import { UnsupportedFeatureError } from './runtime';
 
 /** The local variables of one scope; a block's scope sees its parents' variables. */
@@ -715,6 +716,12 @@ export class Converter {
         regexpHasNumberedBackref(source, flags.includes('x'))
       )
         this.fail(node, '名前付きキャプチャと番号付き後方参照は一緒に使えません。');
+      try {
+        validateRegexpSourceSyntax(source, flags.includes('x'));
+      } catch (error) {
+        if (error instanceof UnsupportedFeatureError) this.unsupported(node, '正規表現の構文の検証');
+        this.fail(node, '正規表現の書き方に誤りがあります。');
+      }
       try {
         new RegExp(translate(source, flags.includes('x'), flags.includes('m')), 'u');
       } catch (error) {

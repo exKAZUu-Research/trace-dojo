@@ -10547,3 +10547,122 @@ test.each([String.raw`/\b/`, String.raw`/\p{L}/`])(
     });
   }
 );
+
+test('Enumerator initialization, module mutation and encoded dispatch preserve protocols', () => {
+  expect(
+    run(String.raw`class E < Enumerator
+ def initialize(value:, &block)
+  puts :init
+  super(2){|y|y << value; y << block.call(value)}
+ end
+end
+e=E.new(value:7){|x|x+1};p e.class,e.size,e.next,e.next
+reset=Enumerator.new{|y|y << :old};reset.send(:initialize,1){|y|y << :reset};p reset.size,reset.next
+class Blank < Enumerator
+ def initialize; @x=1;end
+end
+begin;Blank.new.next;rescue=>e;p e.class,e.message;end
+module Plain;end
+p Plain.method(:name).to_s
+module Written;@x=1;end
+p Written.method(:name).to_s
+module Functions;module_function;def f;7;end;end
+p Functions.f,Functions.method(:name).to_s
+module WrittenLater;end
+WrittenLater.instance_variable_set(:@x,1);p WrittenLater.method(:name).to_s
+n=("x"+255.chr).to_sym
+c=Class.new{define_method(n){42}}
+p n.to_proc.call(c.new),[c.new].map(&n)
+s=String.new('abc',encoding:Encoding::ASCII.name)
+p s.encoding==Encoding::ANSI_X3_4_1968, String.new('é',encoding:Encoding::CP65001.name).length
+p defined?(DATA)
+begin;DATA;rescue NameError=>e;p e.class,e.message;end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'init\nE\n2\n7\n8\n1\n:reset\nArgumentError\n"uninitialized enumerator"\n"#<Method: Module#name()>"\n"#<Method: #<Class:Written>(Module)#name()>"\n7\n"#<Method: #<Class:Functions>(Module)#name()>"\n"#<Method: #<Class:WrittenLater>(Module)#name()>"\n42\n[42]\ntrue\n1\nnil\nNameError\n"uninitialized constant DATA"\n',
+  });
+});
+
+test('Copied methods preserve definition identity and native reflection contracts', () => {
+  expect(
+    run(String.raw`class A
+ def f;1;end
+ alias_method :alias_f,:f
+end
+class B<A
+ define_method(:g,A.instance_method(:f))
+ define_method(:h,A.instance_method(:f))
+end
+b=B.new
+p b.method(:f)==b.method(:g),b.method(:g)==b.method(:h),b.method(:f)==b.method(:alias_f)
+class C
+ define_method(:convert,Kernel.instance_method(:Integer))
+end
+m=C.new.method(:convert);p m.call('12'),m.arity,m.parameters,m.to_proc.arity,C.instance_method(:convert).parameters
+class Signatures
+ def a(*);end
+ def b(**nil);end
+ def c(*,**,&);end
+ def d(x,*,y,**,&);end
+ def e(**,&);end
+ def f((a,b));end
+end
+[:a,:b,:c,:d,:e,:f].each{|n|p Signatures.instance_method(n).to_s.sub(/ (main\.rb|-e):\d+>/,'>')}
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'false\ntrue\ntrue\n12\n-2\n[[:req, :arg], [:opt, :base], [:key, :exception]]\n-2\n[[:req, :arg], [:opt, :base], [:key, :exception]]\n"#<UnboundMethod: Signatures#a(*)>"\n"#<UnboundMethod: Signatures#b(**nil)>"\n"#<UnboundMethod: Signatures#c(...)>"\n"#<UnboundMethod: Signatures#d(x, *, y, ...)>"\n"#<UnboundMethod: Signatures#e(**, ...)>"\n"#<UnboundMethod: Signatures#f(_)>"\n',
+  });
+});
+
+test('Regexp flags, keyword validation and bounded reverse searches preserve Ruby behavior', () => {
+  expect(
+    run(String.raw`[Regexp.new('a',16),Regexp.new(String.new('a',encoding:'ASCII-8BIT'),16),/é/,/\p{L}/].each do |r|
+ p r.options,r.encoding,r.match?('a')
+ begin;p r.match?(233.chr);rescue=>e;p e.class;end
+ p Regexp.new(r).options
+end
+begin;Regexp.union(Regexp.new('a',16),Regexp.new(String.new('b',encoding:'ASCII-8BIT'),16));rescue=>e;p e.class;end
+p Regexp.union(Regexp.new('a',16),/c/).options
+[proc{Regexp.new('a',foo:1,bar:2)},proc{Regexp.compile(/a/,foo:1,bar:2)},proc{Struct.new(:x,foo:1,bar:2)},proc{proc{}.parameters(foo:1,bar:2)},proc{/a/.match('a').named_captures(foo:1,bar:2)}].each do |call|
+ begin;call.call;rescue=>e;p e.class,e.message;end
+end
+p ('b'*20000).rindex(/a/),('b'*20000).rindex(/[ac]/),('b'*20000).rpartition(/[ac]/).map(&:length)
+p 'ababa'.rindex(/aba/,2),'ababa'.rpartition(/aba/),'ababa'.rindex(/a.*a/,2)
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '16\n#<Encoding:UTF-8>\ntrue\nEncoding::CompatibilityError\n16\n16\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\nfalse\n16\n16\n#<Encoding:UTF-8>\nfalse\nEncoding::CompatibilityError\n16\n16\n#<Encoding:UTF-8>\ntrue\nEncoding::CompatibilityError\n16\nArgumentError\n0\nArgumentError\n"unknown keywords: :foo, :bar"\nArgumentError\n"unknown keywords: :foo, :bar"\nArgumentError\n"unknown keywords: :foo, :bar"\nArgumentError\n"unknown keywords: :foo, :bar"\nArgumentError\n"unknown keywords: :foo, :bar"\nnil\nnil\n[0, 0, 20000]\n2\n["ab", "aba", ""]\n2\n',
+  });
+});
+
+test('Regexp literal validation sees the full source and Onigmo lookbehind widths', () => {
+  for (const source of [
+    String.raw`/\X(/`,
+    String.raw`/\G[/`,
+    String.raw`/\X\1/`,
+    String.raw`/(?<=\R{0})x/`,
+    String.raw`/(?<=(?i:a|bc))X/`,
+  ]) {
+    expect(run(`puts :before; p ${source}`)).toMatchObject({ kind: 'compileError' });
+  }
+  expect(
+    run(String.raw`p /(?<=(?:a|bc){1})X/.match?('bcX'), /\303\251/.match?('é'), /\xC3\251/.match?('é')`)
+  ).toMatchObject({ stdout: 'true\ntrue\ntrue\n' });
+});
+
+test('Time float conversion preserves nanosecond arithmetic across epoch scales', () => {
+  expect(
+    run(`[0, 1, -1, 1709960707, -1709960707].each do |sec|
+  [Rational(1,4), Rational(3,5), Rational(1,1000000000)].each {|part| p (Time.at(sec)+part).to_f}
+end`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '0.25\n0.6\n1.0e-09\n1.25\n1.6\n1.000000001\n-0.75\n-0.4\n-0.999999999\n1709960707.2499998\n1709960707.6\n1709960707.0\n-1709960706.7500002\n-1709960706.4\n-1709960707.0\n',
+  });
+});

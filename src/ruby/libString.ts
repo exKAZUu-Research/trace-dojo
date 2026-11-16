@@ -1896,7 +1896,7 @@ def('Symbol', 'start_with?', [0, -1], (self: RSymbol, args) =>
 def('Symbol', 'end_with?', [0, -1], (self: RSymbol, args) =>
   invoke(coreMethod(rt().c.String, 'end_with?'), symbolString(self), args, undefined, undefined, false)
 );
-def('Symbol', 'to_proc', 0, (self: RSymbol) => symbolProc(self.name));
+def('Symbol', 'to_proc', 0, (self: RSymbol) => symbolProc(self.key));
 
 /** The lambda `&:name` passes: it calls the method `name` on its first argument. */
 export function symbolProc(name: string): Value {

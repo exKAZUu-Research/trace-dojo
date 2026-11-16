@@ -154,6 +154,8 @@ export function bootstrap(runtime: Runtime): void {
   regexp.constants.set('IGNORECASE', 1n);
   regexp.constants.set('EXTENDED', 2n);
   regexp.constants.set('MULTILINE', 4n);
+  regexp.constants.set('FIXEDENCODING', 16n);
+  regexp.constants.set('NOENCODING', 32n);
   defineClass('MatchData', object);
   defineClass('Time', object).includes.push(c.Comparable);
   defineClass('Rational', numeric).instanceKind = 'none';

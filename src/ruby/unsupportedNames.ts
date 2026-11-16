@@ -4,7 +4,6 @@ export const UNSUPPORTED_CONSTANTS: Record<string, string> = {
   ARGF: '標準入力（ARGF）',
   ARGV: 'コマンドライン引数（ARGV）',
   ENV: '環境変数（ENV）',
-  DATA: '__END__ の後のデータ（DATA）',
   File: 'ファイルの読み書き（File）',
   Dir: 'ディレクトリの操作（Dir）',
   FileUtils: 'ファイルの操作（FileUtils）',

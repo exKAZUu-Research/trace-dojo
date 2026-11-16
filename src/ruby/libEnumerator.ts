@@ -39,7 +39,6 @@ import {
   isRubyNumber,
   NIL,
   RArray,
-  type RClass,
   RHash,
   RObject,
   RProc,
@@ -74,7 +73,7 @@ export function makeEnumerator(
   method: string,
   args: Value[],
   keywords?: RHash,
-  explicit?: { sizeBlock?: RProc }
+  explicit?: { sizeBlock?: RProc; target?: RObject }
 ): RObject {
   const sizeBlock = explicit?.sizeBlock;
   const spec = method === 'step' || method === '%' ? arithmeticSpec(recv, args, keywords) : undefined;
@@ -83,7 +82,8 @@ export function makeEnumerator(
     (spec.end === NIL || isRubyNumber(spec.end)) &&
     isRubyNumber(spec.step) &&
     (isRubyNumber(recv) || (recv instanceof RRange && isRubyNumber(recv.begin)));
-  const enumerator = new RObject(arithmetic ? rt().c['Enumerator::ArithmeticSequence'] : rt().c.Enumerator);
+  const enumerator =
+    explicit?.target ?? new RObject(arithmetic ? rt().c['Enumerator::ArithmeticSequence'] : rt().c.Enumerator);
   const source: EnumeratorSource = {
     recv,
     method,
@@ -849,38 +849,43 @@ interface GeneratorData {
   held(): Value[];
 }
 
-sdef('Enumerator', 'new', [0, 1], function* (self: RClass, args, block) {
-  const runtime = rt();
-  const generator = new RObject(runtime.c['Enumerator::Generator']);
-  const data: GeneratorData = {
-    block: requireBlock(block),
-    held() {
-      return [this.block];
-    },
-  };
-  generator.data = data;
-  const enumerator = makeEnumerator(generator, 'each', []);
-  enumerator.cls = self;
-  const [size] = args;
-  if (size !== undefined) {
-    const source = enumerator.data as EnumeratorSource;
-    if (size instanceof RProc || (yield* advertisesPublicMethod(size, 'call'))) {
-      source.size = function* () {
-        return size instanceof RProc || (yield* advertisesPublicMethod(size, 'call'))
-          ? yield* callMethod(size, 'call', [])
-          : size;
-      };
-      const previousHeld = source.held;
-      source.held = function () {
-        return [...previousHeld.call(this), size];
-      };
-    } else {
-      const normalized = size === NIL || (isRubyFloat(size) && Number(size) === Infinity) ? size : yield* toInt(size);
-      source.size = () => normalized;
+def(
+  'Enumerator',
+  'initialize',
+  [0, 1],
+  function* (self: RObject, args, block) {
+    const runtime = rt();
+    const generator = new RObject(runtime.c['Enumerator::Generator']);
+    const data: GeneratorData = {
+      block: requireBlock(block),
+      held() {
+        return [this.block];
+      },
+    };
+    generator.data = data;
+    const enumerator = makeEnumerator(generator, 'each', [], undefined, { target: self });
+    const [size] = args;
+    if (size !== undefined) {
+      const source = enumerator.data as EnumeratorSource;
+      if (size instanceof RProc || (yield* advertisesPublicMethod(size, 'call'))) {
+        source.size = function* () {
+          return size instanceof RProc || (yield* advertisesPublicMethod(size, 'call'))
+            ? yield* callMethod(size, 'call', [])
+            : size;
+        };
+        const previousHeld = source.held;
+        source.held = function () {
+          return [...previousHeld.call(this), size];
+        };
+      } else {
+        const normalized = size === NIL || (isRubyFloat(size) && Number(size) === Infinity) ? size : yield* toInt(size);
+        source.size = () => normalized;
+      }
     }
-  }
-  return enumerator;
-});
+    return enumerator;
+  },
+  { visibility: 'private' }
+);
 sdef('Enumerator::Lazy', 'new', [0, -1], () => {
   throw new UnsupportedFeatureError('Enumerator::Lazy.new');
 });
