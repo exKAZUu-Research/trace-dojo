@@ -31,6 +31,7 @@ import {
   type NativeFn,
   NIL,
   RArray,
+  type RClass,
   RHash,
   RObject,
   type RProc,
@@ -539,7 +540,8 @@ function unsupportedClassEscape(escape: string): unknown {
 
 export function makeRegexp(
   source: string,
-  options: { ignoreCase?: boolean; multiline?: boolean; extended?: boolean; sourceBinary?: boolean }
+  options: { ignoreCase?: boolean; multiline?: boolean; extended?: boolean; sourceBinary?: boolean },
+  cls = rt().c.Regexp
 ): RObject {
   rt().spend(Math.ceil(source.length / 64));
   if (((/\\+$/.exec(source)?.[0].length ?? 0) & 1) === 1)
@@ -547,7 +549,7 @@ export function makeRegexp(
   if (hasVariableLengthLookbehind(source)) throw rubyError(rt().c.RegexpError, `invalid pattern: /${source}/`);
   if (regexpCaptureNames(source, options.extended).length > 0 && regexpHasNumberedBackref(source, options.extended))
     throw rubyError(rt().c.RegexpError, `numbered backref/call is not allowed. (use name): /${source}/`);
-  const regexp = new RObject(rt().c.Regexp);
+  const regexp = new RObject(cls);
   let translated: string;
   let encoding: RegexpData['encoding'];
   try {
@@ -707,7 +709,7 @@ function triviallyLinearRegexp(source: string): boolean {
 }
 
 export function isRegexp(value: Value): value is RObject {
-  return value instanceof RObject && value.cls === rt().c.Regexp;
+  return value instanceof RObject && value.cls.isSubclassOf(rt().c.Regexp);
 }
 
 function dataOf(regexp: RObject): RegexpData {
@@ -1027,15 +1029,15 @@ function invalidPatternMessage(pattern: RString): RString {
   return stringFromBytes(result.subarray(0, length), false, pattern.usAscii);
 }
 
-sdef('Regexp', ['new', 'compile'], [1, 2], function* (_self, [source, options]) {
+sdef('Regexp', ['new', 'compile'], [1, 2], function* (self: RClass, [source, options]) {
   if (isRegexp(source)) {
     const data = dataOf(source);
-    return makeRegexp(data.source, { ...data, sourceBinary: data.encoding === 'BINARY (ASCII-8BIT)' });
+    return makeRegexp(data.source, { ...data, sourceBinary: data.encoding === 'BINARY (ASCII-8BIT)' }, self);
   }
   const parsedOptions = yield* optionsOf(options);
   const pattern = yield* toStrValue(source);
   if (!validStringEncoding(pattern)) throw rubyError(rt().c.RegexpError, invalidPatternMessage(pattern));
-  return makeRegexp(pattern.s, { ...parsedOptions, sourceBinary: pattern.binary });
+  return makeRegexp(pattern.s, { ...parsedOptions, sourceBinary: pattern.binary }, self);
 });
 sdef('Regexp', ['escape', 'quote'], 1, function* (_self, [value]) {
   const text = value instanceof RSymbol ? value.name : yield* toStr(value);
@@ -1111,7 +1113,7 @@ function literalRegexpText(regexp: RObject): string | undefined {
 }
 
 export function regexpValueDisplayOf(value: RObject): string | undefined {
-  if (value.cls === rt().c.Regexp) return regexpInspect(value);
+  if (value.cls.isSubclassOf(rt().c.Regexp)) return regexpInspect(value);
   if (value.cls === rt().c.MatchData) return matchDataInspect(value);
   return undefined;
 }

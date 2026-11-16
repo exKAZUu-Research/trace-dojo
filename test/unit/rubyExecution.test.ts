@@ -9473,3 +9473,26 @@ test('String initialization does not mutate on option conversion error', () => {
     stdout: '"old"\n',
   });
 });
+
+test('Regexp and Time subclasses retain constructors and native operations', () => {
+  expect(
+    run(`class R < Regexp
+  def label; "pattern"; end
+end
+r = R.new("a")
+p r.class, r.label, "cat".scan(r), r == /a/, r.match("a").regexp.class
+p R.compile("b").class, R.new(r).class, R.union("a").class
+class T < Time
+  def label; year; end
+end
+t = T.utc(2000)
+p T.new(2001).label, T.new.class, T.now.class, T.local(2002).label
+p T.at(0).class, T.at(t).class, T.at(Rational(1,3)).class
+p t.getutc.class, t.getlocal("+01:00").class, t.getlocal.class
+p (t+1).class, (t-1).class, t.round.class, t == Time.utc(2000)
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'R\n"pattern"\n["a"]\ntrue\nR\nR\nR\nRegexp\n2001\nT\nT\n2002\nT\nT\nT\nT\nT\nT\nTime\nTime\nTime\ntrue\n',
+  });
+});

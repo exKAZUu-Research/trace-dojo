@@ -13,7 +13,7 @@ import { argumentError, floatDomainError, frozenError, rangeError, rubyError, ty
 import { bigintRatio } from './floatMath';
 import { callMethod, type Gen } from './interp';
 import { floatToRational, isRational } from './libRational';
-import { isRubyFloat, NIL, RObject, RString, type Value } from './objects';
+import { isRubyFloat, NIL, type RClass, RObject, RString, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { arr, isA, realClassOf, str, stringBytes, stringFromBytes } from './values';
 
@@ -57,7 +57,9 @@ function floorDivide(a: bigint, b: bigint): bigint {
   return a % b !== 0n && a < 0n !== b < 0n ? quotient - 1n : quotient;
 }
 
+// code-gauge-allow functionParameterCount 7 -- A Time carries its class, instant, zone and exact fractional remainder.
 function makeTime(
+  cls: RClass,
   nanoseconds: bigint,
   offset = LOCAL_OFFSET,
   zone: TimeData['zone'] = 'local',
@@ -65,12 +67,13 @@ function makeTime(
   remainderNumerator = 0n,
   remainderDenominator = 1n
 ): RObject {
-  const time = new RObject(rt().c.Time);
+  const time = new RObject(cls);
   time.data = new TimeData(nanoseconds, offset, zone, exactOffset, remainderNumerator, remainderDenominator);
   return time;
 }
 
 function makeExactTime(
+  cls: RClass,
   numerator: bigint,
   denominator: bigint,
   offset = LOCAL_OFFSET,
@@ -79,12 +82,12 @@ function makeExactTime(
 ): RObject {
   const nanoseconds = floorDivide(numerator, denominator);
   let remainder = numerator - nanoseconds * denominator;
-  if (remainder === 0n) return makeTime(nanoseconds, offset, zone, exactOffset);
+  if (remainder === 0n) return makeTime(cls, nanoseconds, offset, zone, exactOffset);
   let a = remainder;
   let b = denominator;
   while (b !== 0n) [a, b] = [b, a % b];
   remainder /= a;
-  return makeTime(nanoseconds, offset, zone, exactOffset, remainder, denominator / a);
+  return makeTime(cls, nanoseconds, offset, zone, exactOffset, remainder, denominator / a);
 }
 
 function offsetFraction(value: Value | undefined, offset: number): { numerator: bigint; denominator: bigint } {
@@ -237,7 +240,14 @@ function calendarArgs(args: Value[]): Value[] {
   return args.length === 10 ? [args[5], args[4], args[3], args[2], args[1], args[0]] : args.slice(0, 6);
 }
 
-function* buildTime(args: Value[], offset: number, zone: TimeData['zone'], microseconds?: Value, exact?: Value): Gen {
+function* buildTime(
+  cls: RClass,
+  args: Value[],
+  offset: number,
+  zone: TimeData['zone'],
+  microseconds?: Value,
+  exact?: Value
+): Gen {
   const { fields, seconds } = yield* fieldArgs(args);
   const [year, month, day, hour, minute] = fields;
   const whole = Math.floor(seconds);
@@ -275,6 +285,7 @@ function* buildTime(args: Value[], offset: number, zone: TimeData['zone'], micro
   const localDenominator = exactSeconds.denominator * micros.denominator;
   const fractionOffset = offsetFraction(exact, offset);
   return makeExactTime(
+    cls,
     localNumerator * fractionOffset.denominator - fractionOffset.numerator * 1_000_000_000n * localDenominator,
     localDenominator * fractionOffset.denominator,
     offset,
@@ -287,9 +298,9 @@ sdef(
   'Time',
   'now',
   0,
-  (_self, _args, _block, keywords) => {
+  (self: RClass, _args, _block, keywords) => {
     if (keywords) throw new UnsupportedFeatureError('Time.now の in: 指定');
-    return makeTime(nowNanoseconds());
+    return makeTime(self, nowNanoseconds());
   },
   { keywords: true }
 );
@@ -297,39 +308,41 @@ sdef(
   'Time',
   'new',
   [0, 7],
-  function* (_self, args, _block, keywords) {
+  function* (self: RClass, args, _block, keywords) {
     if (keywords) throw new UnsupportedFeatureError('Time.new の in: 指定');
-    if (args.length === 0) return makeTime(nowNanoseconds());
+    if (args.length === 0) return makeTime(self, nowNanoseconds());
     if (args.length === 1 && args[0] instanceof RString && /^\d{4}-\d{2}-\d{2}(?:[ T].*)?$/.test(args[0].s))
       throw new UnsupportedFeatureError('Time.new の文字列形式');
     if (args.length === 7 && args[6] !== NIL)
       return yield* buildTime(
+        self,
         args.slice(0, 6),
         yield* parseOffset(args[6]),
         zoneFromOffset(args[6]),
         undefined,
         exactOffset(args[6])
       );
-    return yield* buildTime(args, LOCAL_OFFSET, 'local');
+    return yield* buildTime(self, args, LOCAL_OFFSET, 'local');
   },
   { keywords: true }
 );
-sdef('Time', ['local', 'mktime'], [1, 10], (_self, args) =>
-  buildTime(calendarArgs(args), LOCAL_OFFSET, 'local', args.length === 7 ? args[6] : undefined)
-);
-sdef('Time', ['utc', 'gm'], [1, 10], (_self, args) =>
-  buildTime(calendarArgs(args), 0, 'utc', args.length === 7 ? args[6] : undefined)
-);
+sdef('Time', ['local', 'mktime'], [1, 10], function* (self: RClass, args) {
+  return yield* buildTime(self, calendarArgs(args), LOCAL_OFFSET, 'local', args.length === 7 ? args[6] : undefined);
+});
+sdef('Time', ['utc', 'gm'], [1, 10], function* (self: RClass, args) {
+  return yield* buildTime(self, calendarArgs(args), 0, 'utc', args.length === 7 ? args[6] : undefined);
+});
 sdef(
   'Time',
   'at',
   [1, 3],
-  function* (_self, args, _block, keywords) {
+  function* (self: RClass, args, _block, keywords) {
     if (keywords || args.length > 2) throw new UnsupportedFeatureError('Time.at の unit/in: 指定');
     const [seconds, microseconds] = args;
     if (seconds instanceof RObject && seconds.data instanceof TimeData) {
       if (microseconds !== undefined) throw typeError("can't convert Time into an exact number");
       return makeTime(
+        self,
         seconds.data.nanoseconds,
         seconds.data.offset,
         seconds.data.zone,
@@ -354,6 +367,7 @@ sdef(
             0
           );
     return makeExactTime(
+      self,
       first.numerator * second.denominator * 1_000_000_000n + second.numerator * first.denominator * 1000n,
       first.denominator * second.denominator
     );
@@ -740,13 +754,22 @@ def('Time', 'to_f', 0, (self: RObject) => {
 });
 def('Time', ['getutc', 'getgm'], 0, (self: RObject) => {
   const data = dataOf(self);
-  return makeTime(data.nanoseconds, 0, 'utc', undefined, data.remainderNumerator, data.remainderDenominator);
+  return makeTime(
+    realClassOf(self),
+    data.nanoseconds,
+    0,
+    'utc',
+    undefined,
+    data.remainderNumerator,
+    data.remainderDenominator
+  );
 });
 def('Time', ['utc', 'gmtime'], 0, (self: RObject) => changeZone(self, 0, 'utc'));
 def('Time', 'getlocal', [0, 1], function* (self: RObject, args) {
   const data = dataOf(self);
   return args.length > 0 && args[0] !== NIL
     ? makeTime(
+        realClassOf(self),
         data.nanoseconds,
         yield* parseOffset(args[0]),
         zoneFromOffset(args[0]),
@@ -754,7 +777,15 @@ def('Time', 'getlocal', [0, 1], function* (self: RObject, args) {
         data.remainderNumerator,
         data.remainderDenominator
       )
-    : makeTime(data.nanoseconds, LOCAL_OFFSET, 'local', undefined, data.remainderNumerator, data.remainderDenominator);
+    : makeTime(
+        realClassOf(self),
+        data.nanoseconds,
+        LOCAL_OFFSET,
+        'local',
+        undefined,
+        data.remainderNumerator,
+        data.remainderDenominator
+      );
 });
 def('Time', 'localtime', [0, 1], function* (self: RObject, args) {
   if (args.length === 0 || args[0] === NIL) return changeZone(self, LOCAL_OFFSET, 'local');
@@ -801,13 +832,13 @@ def('Time', 'round', [0, 1], function* (self: RObject, args) {
       2n * data.exactNumerator() * scale + data.remainderDenominator,
       2n * data.remainderDenominator
     );
-    return makeExactTime(rounded, scale, data.offset, data.zone, data.exactOffset);
+    return makeExactTime(rt().c.Time, rounded, scale, data.offset, data.zone, data.exactOffset);
   }
   const unit = 10n ** BigInt(9 - digits);
   const rounded =
     floorDivide(2n * data.exactNumerator() + unit * data.remainderDenominator, 2n * unit * data.remainderDenominator) *
     unit;
-  return makeTime(rounded, data.offset, data.zone, data.exactOffset);
+  return makeTime(rt().c.Time, rounded, data.offset, data.zone, data.exactOffset);
 });
 def('Time', '+', 1, function* (self: RObject, [seconds]) {
   if (seconds instanceof RObject && seconds.data instanceof TimeData) throw typeError('time + time?');
@@ -819,6 +850,7 @@ def('Time', '+', 1, function* (self: RObject, [seconds]) {
     0
   );
   return makeExactTime(
+    rt().c.Time,
     data.exactNumerator() * delta.denominator + delta.numerator * data.remainderDenominator * 1_000_000_000n,
     data.remainderDenominator * delta.denominator,
     data.offset,
@@ -839,6 +871,7 @@ def('Time', '-', 1, function* (self: RObject, [other]) {
     0
   );
   return makeExactTime(
+    rt().c.Time,
     data.exactNumerator() * delta.denominator - delta.numerator * data.remainderDenominator * 1_000_000_000n,
     data.remainderDenominator * delta.denominator,
     data.offset,
