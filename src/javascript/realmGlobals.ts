@@ -3,7 +3,7 @@ import { formatLogArguments } from './consoleFormat';
 import { formatTable } from './consoleTable';
 import { inspect, inspectValue } from './inspect';
 import type { ErrorName, RealmBuilder } from './realm';
-import { dateValueOf } from './realmDate';
+import { dateValueOf, hostLocales, hostOptions } from './realmDate';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import { defineHidden, type Runtime } from './runtime';
 import {
@@ -14,6 +14,7 @@ import {
   JsFunction,
   JsObject,
   type NativeCall,
+  throwingHostErrors,
   toBoolean,
   unboxed,
   type Value,
@@ -59,6 +60,10 @@ function defineObject(builder: RealmBuilder): void {
     return `[object ${typeof tag === 'string' ? tag : tagOf(thisValue)}]`;
   });
   builder.method(objectPrototype, 'valueOf', 0, ({ runtime, thisValue }) => runtime.toObject(thisValue));
+  // toLocaleString calls the value's own toString, as the specification's Invoke does.
+  builder.method(objectPrototype, 'toLocaleString', 0, ({ runtime, thisValue }) =>
+    runtime.call(runtime.get(thisValue, 'toString'), thisValue, [])
+  );
 }
 
 function tagOf(value: Value): string {
@@ -327,6 +332,14 @@ function defineNumberFormats(builder: RealmBuilder): void {
     if (!(precision >= 1 && precision <= 100))
       runtime.throwError('RangeError', 'toPrecision() argument must be between 1 and 100');
     return value.toPrecision(precision);
+  });
+  // Node.js formats for its default locale, en-US, when no locale is given.
+  builder.method(numberPrototype, 'toLocaleString', 0, ({ runtime, thisValue, args }) => {
+    const value = thisNumber(runtime, thisValue);
+    const locales = (args[0] === undefined ? 'en-US' : hostLocales(runtime, args[0])) as Intl.LocalesArgument;
+    return throwingHostErrors(runtime, () =>
+      value.toLocaleString(locales, hostOptions(runtime, args[1]) as Intl.NumberFormatOptions)
+    );
   });
   builder.method(numberPrototype, 'toExponential', 1, ({ runtime, thisValue, args }) => {
     const value = thisNumber(runtime, thisValue);

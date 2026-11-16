@@ -7,7 +7,7 @@ import { PARAMETER_PROPERTY_ASSIGNMENT } from './jsView';
 export class TypeScriptProgramConverter extends ProgramConverter {
   constructor(source: string, trace: TraceOptions | undefined) {
     super(source, trace);
-    // `this.name = name` for a parameter property, which records no step: learners wrote no statement for it.
+    // `this.name = name` for a parameter property, which steps on the parameter's row as the assignment it stands for.
     this.statementConverters[PARAMETER_PROPERTY_ASSIGNMENT] = (node: Node) => {
       const row = node.startPosition.row;
       const name = node.text;
@@ -26,6 +26,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
           value: { kind: 'identifier', name, row },
           row,
         },
+        stepRow: this.stepRowOf(node),
         row,
       };
     };

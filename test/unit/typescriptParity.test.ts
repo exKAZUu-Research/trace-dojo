@@ -1,0 +1,46 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+
+import { executeProgram } from '../../src/interpreter/program';
+
+const PARITY_DIR = path.join(import.meta.dirname, '..', 'fixtures', 'typescriptParity');
+const TYPE_ERROR_DIR = path.join(import.meta.dirname, '..', 'fixtures', 'typescriptTypeErrors');
+
+const programsIn = (directory: string): string[] => fs.readdirSync(directory).filter((name) => name.endsWith('.ts'));
+const read = (directory: string, name: string): string => fs.readFileSync(path.join(directory, name), 'utf8');
+
+// The interpreter's clock stands still in these tests, so that the program, not the load of the host, decides each one.
+beforeEach(() => {
+  vi.spyOn(performance, 'now').mockReturnValue(0);
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+// Each `.out` file holds what Node.js 26.13.0 printed for its program, which TypeScript 7.0.2 (`tsc --strict`)
+// accepted, followed by the first line of the exception that ended it, if one did.
+test.each(programsIn(PARITY_DIR))('%s prints what Node.js prints', (name) => {
+  const expected = read(PARITY_DIR, name.replace(/\.ts$/, '.out'));
+  const execution = executeProgram('typescript', read(PARITY_DIR, name));
+  if (execution.kind !== 'executed') throw new Error(`${name} did not run: ${JSON.stringify(execution)}`);
+  const uncaught = execution.uncaughtException ? `[uncaught] ${execution.uncaughtException.split('\n')[0]}\n` : '';
+  expect(execution.stdout + uncaught).toBe(expected);
+});
+
+// Each `.out` file holds the errors TypeScript 7.0.2 (`tsc --strict`) reported for its program, one per line as
+// `(row,column): error TSxxxx: message`; the interpreter must reject the program on the same rows.
+test.each(programsIn(TYPE_ERROR_DIR))('%s is rejected on the rows tsc reports', (name) => {
+  const expectedRows = [
+    ...new Set(
+      read(TYPE_ERROR_DIR, name.replace(/\.ts$/, '.out'))
+        .split('\n')
+        .filter((line) => line.startsWith('('))
+        .map((line) => Number(/^\((\d+),/.exec(line)?.[1]))
+    ),
+  ];
+  const execution = executeProgram('typescript', read(TYPE_ERROR_DIR, name));
+  if (execution.kind !== 'compileError') throw new Error(`${name} was not rejected: ${JSON.stringify(execution)}`);
+  expect([...new Set(execution.diagnostics.map((diagnostic) => diagnostic.row + 1))]).toEqual(expectedRows);
+});

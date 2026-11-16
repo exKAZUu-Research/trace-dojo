@@ -14,6 +14,9 @@ export class Sym {
   typeKind?: TypeKind;
   valueDeclarations: TreeNode[] = [];
   typeDeclarations: TreeNode[] = [];
+  /** Each value declaration's kind and the name it declares, which duplicate declarations are reported at. */
+  readonly valueEntries: { kind: ValueKind; name: TreeNode }[] = [];
+  readonly typeEntries: { kind: TypeKind; name: TreeNode }[] = [];
   /** The type of the value, once resolved. */
   valueType?: Type;
   /** The type the name stands for, once resolved. */
@@ -62,7 +65,7 @@ export class Scope {
     return (this.kind === 'block' || this.kind === 'class') && this.parent ? this.parent.functionScope : this;
   }
 
-  declareValue(name: string, kind: ValueKind, declaration: TreeNode): Sym {
+  declareValue(name: string, kind: ValueKind, declaration: TreeNode, nameNode: TreeNode = declaration): Sym {
     let symbol = this.values.get(name);
     if (!symbol) {
       symbol = new Sym(name, this);
@@ -70,10 +73,11 @@ export class Scope {
     }
     symbol.valueKind ??= kind;
     symbol.valueDeclarations.push(declaration);
+    symbol.valueEntries.push({ kind, name: nameNode });
     return symbol;
   }
 
-  declareType(name: string, kind: TypeKind, declaration: TreeNode): Sym {
+  declareType(name: string, kind: TypeKind, declaration: TreeNode, nameNode: TreeNode = declaration): Sym {
     let symbol = this.types.get(name);
     if (!symbol) {
       // A class is a value and a type of the same name.
@@ -82,6 +86,7 @@ export class Scope {
     }
     symbol.typeKind ??= kind;
     symbol.typeDeclarations.push(declaration);
+    symbol.typeEntries.push({ kind, name: nameNode });
     return symbol;
   }
 }

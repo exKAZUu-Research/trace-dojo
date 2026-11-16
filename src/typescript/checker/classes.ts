@@ -1,6 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
+import { checkDuplicateMembers } from './declarations';
 import { FlowState, type State } from './flow';
 import type { Sym } from './scopes';
 import { hasToken, named, propertyNameText } from './syntax';
@@ -737,6 +738,7 @@ export class ClassChecker {
     }
     const body = node.childForFieldName('body');
     const members = body ? named(body) : [];
+    if (body) checkDuplicateMembers(this.c, body);
     // Types written in the class report the names they cannot find.
     this.c.typeParametersOf(node);
     const instance = info.instanceType.resolve();

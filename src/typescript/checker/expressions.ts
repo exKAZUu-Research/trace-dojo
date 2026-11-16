@@ -279,8 +279,14 @@ export class ExpressionChecker {
     const entry = this.c.flow.entry(key);
     if (this.isOuterVariable(node, symbol)) return this.outerVariableType(symbol, declared);
     if (entry) {
-      if (!entry.assigned && this.needsDefiniteAssignment(symbol, declared) && !this.isAssignmentTarget(node)) {
+      const unassignedAuto = !entry.assigned && this.isAutoTyped(symbol) && isIntrinsic(entry.type, 'undefined');
+      if (
+        !entry.assigned &&
+        (unassignedAuto || this.needsDefiniteAssignment(symbol, declared)) &&
+        !this.isAssignmentTarget(node)
+      ) {
         this.c.error(node, `変数 ${name} は値を代入する前に使われています。`);
+        if (unassignedAuto) return errorType;
       }
       if (entry.evolving && !this.isEvolvingUse(node)) return this.finishEvolving(entry.type);
       return entry.type;
@@ -781,6 +787,12 @@ export class ExpressionChecker {
         isLiteral: true,
       }
     );
+    const seenKeys = new Set<string>();
+    const checkDuplicate = (keyNode: TreeNode, name: string): void => {
+      if (seenKeys.has(name))
+        this.c.error(keyNode, `オブジェクトリテラルには、同じ名前のプロパティを2つ以上書けません。`);
+      seenKeys.add(name);
+    };
     for (const member of named(node)) {
       switch (member.type) {
         case 'pair': {
@@ -801,6 +813,7 @@ export class ExpressionChecker {
             }
             break;
           }
+          checkDuplicate(key, name);
           const context = contextFor(name);
           const checked = this.check(value, context);
           const valueType = isConstContext ? checked : this.widenForMutableLocation(checked, context);
@@ -808,6 +821,7 @@ export class ExpressionChecker {
           break;
         }
         case 'shorthand_property_identifier': {
+          checkDuplicate(member, member.text);
           const valueType = isConstContext
             ? this.identifier(member)
             : this.widenForMutableLocation(this.identifier(member), contextFor(member.text));
@@ -819,6 +833,7 @@ export class ExpressionChecker {
           const name = propertyNameText(nameNode) ?? '';
           const isGetter = hasToken(member, 'get');
           const isSetter = hasToken(member, 'set');
+          checkDuplicate(nameNode, isGetter ? `get ${name}` : isSetter ? `set ${name}` : name);
           const methodType = this.c.classes.withObjectThis(object, () =>
             this.functionExpression(member, contextFor(name))
           );
@@ -1348,7 +1363,8 @@ export class ExpressionChecker {
         ? `'${node.text}' は ${what} の可能性があります。`
         : `オブジェクトは ${what} の可能性があります。`
     );
-    return rest;
+    // Nothing is left to use when the value can only be `null` or `undefined`.
+    return isIntrinsic(rest, 'never') ? errorType : rest;
   }
 
   private isEntityName(node: TreeNode): boolean {
@@ -1391,16 +1407,30 @@ export class ExpressionChecker {
       return errorType;
     }
     this.c.classes.checkPropertyAccessibility(node, propertyNode, objectNode, objectType, property);
-    const unsupported = this.unsupportedMember(objectType, name);
+    const unsupported = this.unsupportedMember(objectType, name) ?? this.unsupportedLibraryMember(property);
     if (unsupported) this.c.error(propertyNode, unsupportedMessage(unsupported));
     const type = property.type();
     return property.optional ? unionOf([type, undefinedType]) : type;
+  }
+
+  /** A library member of every error or regular expression that this interpreter does not provide. */
+  private unsupportedLibraryMember(property: Property): string | undefined {
+    const declaration = property.declaration;
+    if (!declaration || !this.c.isLibrary(declaration)) return undefined;
+    const owner = declaration.parent?.parent?.childForFieldName('name')?.text;
+    // A stack trace names the files and lines of the host, which differ from the program's.
+    if (owner === 'Error' && property.name === 'stack') return 'Error の stack';
+    if (owner === 'RegExp' && property.name === 'compile') return 'RegExp の compile';
+    return undefined;
   }
 
   private unsupportedMember(objectType: Type, name: string): string | undefined {
     if (objectType.kind !== 'object') return undefined;
     // The interpreter leaves out Math.random so that a program always draws the same board.
     if (objectType.name === 'Math' && name === 'random') return 'Math.random';
+    // The well-known symbols replace the protocols of the language, which this interpreter does not support yet.
+    if (objectType.name === 'SymbolConstructor' && wellKnownSymbols.has(name))
+      return `Symbol.${name} などの well-known シンボル`;
     // Timers print how long they took, which differs on every run.
     if (objectType.name === 'Console' && ['time', 'timeEnd', 'timeLog', 'timeStamp'].includes(name))
       return `console.${name}`;
@@ -1415,6 +1445,20 @@ export class ExpressionChecker {
   }
 
   private reportMissingProperty(node: TreeNode, name: string, type: Type): void {
+    const apparent = this.c.apparentType(type);
+    const classInfo = apparent.kind === 'object' ? (apparent.classInfo ?? apparent.target?.classInfo) : undefined;
+    if (
+      classInfo &&
+      apparent.kind === 'object' &&
+      !apparent.isClassStatic &&
+      classInfo.staticType.resolve().properties.has(name)
+    ) {
+      this.c.error(
+        node,
+        `プロパティ '${name}' は型 '${this.c.print(type)}' にありません。静的メンバー '${classInfo.name}.${name}' のことですか？`
+      );
+      return;
+    }
     const suggestion = this.suggestProperty(type, name);
     this.c.error(
       node,
@@ -2570,6 +2614,22 @@ export class ExpressionChecker {
     return anonymousObject(() => structure, { isLiteral: true });
   }
 }
+
+const wellKnownSymbols = new Set([
+  'iterator',
+  'asyncIterator',
+  'hasInstance',
+  'isConcatSpreadable',
+  'match',
+  'matchAll',
+  'replace',
+  'search',
+  'species',
+  'split',
+  'toPrimitive',
+  'toStringTag',
+  'unscopables',
+]);
 
 /** Functions and blocks whose bodies run when called, after the declarations that precede the call. */
 const laterRunningTypes = new Set([

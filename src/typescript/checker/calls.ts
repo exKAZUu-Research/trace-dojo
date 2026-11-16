@@ -100,7 +100,13 @@ export class Calls {
       return errorType;
     }
     const typeArguments = this.explicitTypeArguments(node);
-    const resolution = this.resolve(node, callee, signatures, args, typeArguments, contextual);
+    const receiver =
+      callee.type === 'member_expression' && callee.childForFieldName('object')?.type !== 'super'
+        ? this.c.silently(() =>
+            this.c.relations.removeNullish(this.c.expressions.check(callee.childForFieldName('object') as TreeNode))
+          )
+        : undefined;
+    const resolution = this.resolve(node, callee, signatures, args, typeArguments, contextual, receiver);
     if (!resolution) return errorType;
     this.resolved.set(node.id, resolution.signature);
     const result = resolution.returnType;
@@ -222,7 +228,8 @@ export class Calls {
     signatures: Signature[],
     args: TreeNode[],
     typeArguments: Type[] | undefined,
-    contextual: Type | undefined
+    contextual: Type | undefined,
+    receiver?: Type
   ): Resolution | undefined {
     const candidates = typeArguments
       ? signatures.filter(
@@ -237,14 +244,13 @@ export class Calls {
       this.c.error(node, `型引数は ${counts.join(' か ')} 個必要ですが、${typeArguments.length} 個渡されています。`);
       return undefined;
     }
-    const argumentTypes = new Map<number, Type>();
     for (const candidate of candidates) {
       if (!this.arityMatches(candidate, args)) continue;
       const instantiated = this.c.silently(() =>
-        this.instantiateFor(candidate, args, typeArguments, contextual, argumentTypes)
+        this.instantiateFor(candidate, args, typeArguments, contextual, receiver)
       );
       if (this.c.silently(() => this.argumentsMatch(instantiated, args))) {
-        const final = this.instantiateFor(candidate, args, typeArguments, contextual, argumentTypes);
+        const final = this.instantiateFor(candidate, args, typeArguments, contextual, receiver);
         this.checkArguments(final, args, true);
         if (typeArguments)
           this.c.checkTypeArgumentConstraints(
@@ -264,11 +270,11 @@ export class Calls {
         return {
           signature: candidate,
           returnType: this.c
-            .silently(() => this.instantiateFor(candidate, args, typeArguments, contextual, argumentTypes))
+            .silently(() => this.instantiateFor(candidate, args, typeArguments, contextual, receiver))
             .returnType(),
         };
       }
-      const instantiated = this.instantiateFor(candidate, args, typeArguments, contextual, argumentTypes);
+      const instantiated = this.instantiateFor(candidate, args, typeArguments, contextual, receiver);
       this.checkArguments(instantiated, args, true);
       return { signature: instantiated, returnType: instantiated.returnType() };
     }
@@ -294,7 +300,7 @@ export class Calls {
     return {
       signature: last,
       returnType: this.c
-        .silently(() => this.instantiateFor(last, args, typeArguments, contextual, argumentTypes))
+        .silently(() => this.instantiateFor(last, args, typeArguments, contextual, receiver))
         .returnType(),
     };
   }
@@ -377,7 +383,9 @@ export class Calls {
     const { parameters } = signature;
     if (index < parameters.length) {
       const parameter = parameters[index];
-      return parameter.rest ? this.c.restElementType(parameter.type) : parameter.type;
+      if (parameter.rest) return this.c.restElementType(parameter.type);
+      // An optional parameter also takes `undefined`.
+      return parameter.optional ? unionOf([parameter.type, undefinedType]) : parameter.type;
     }
     const last = parameters.at(-1);
     return last?.rest ? this.c.restElementType(last.type) : undefined;
@@ -445,9 +453,8 @@ export class Calls {
     args: TreeNode[],
     typeArguments: Type[] | undefined,
     contextual: Type | undefined,
-    cache: Map<number, Type>
+    receiver: Type | undefined
   ): Signature {
-    void cache;
     if (signature.typeParameters.length === 0) return signature;
     if (typeArguments) {
       const filled = this.fillTypeArguments(signature, typeArguments);
@@ -458,6 +465,8 @@ export class Calls {
     const inferences = new Map<number, Inference>(
       parameters.map((parameter) => [parameter.id, { candidates: [], contravariant: [], topLevel: false }])
     );
+    // A `this` parameter infers from the object the method is called on.
+    if (receiver && signature.thisType) this.inferTypes(inferences, parameters, receiver, signature.thisType, true);
     // Context-insensitive arguments infer first; functions without parameter annotations then see what they inferred.
     const sensitive = args.map((arg) => this.isContextSensitive(arg));
     const inferFromArgument = (arg: TreeNode, index: number, mapper: Mapper | undefined): void => {

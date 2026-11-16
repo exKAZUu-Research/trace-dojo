@@ -3,6 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { SourceDiagnostic } from '../../interpreter/diagnostics';
 import { Binder } from './binder';
 import { ClassChecker } from './classes';
+import { checkDuplicateDeclarations } from './declarations';
 import { ExpressionChecker } from './expressions';
 import { Flow } from './flow';
 import { libraryScope, libraryTree, markUnsupported } from './library';
@@ -107,6 +108,7 @@ export class Checker {
   }
 
   check(): SourceDiagnostic[] {
+    checkDuplicateDeclarations(this, this.binder.allScopes);
     this.statements.checkProgram(this.root);
     const seen = new Set<string>();
     return this.diagnostics
@@ -1207,8 +1209,9 @@ export class Checker {
       node.childForFieldName('return_type') ??
       (['construct_signature', 'constructor_type'].includes(node.type) ? node.childForFieldName('type') : undefined);
     let predicate: Signature['predicate'];
-    if (returnNode?.type === 'type_predicate_annotation') {
-      const predicateNode = named(returnNode)[0];
+    // A function type spells its predicate without the annotation's colon.
+    if (returnNode?.type === 'type_predicate_annotation' || returnNode?.type === 'type_predicate') {
+      const predicateNode = returnNode.type === 'type_predicate' ? returnNode : named(returnNode)[0];
       const name = predicateNode?.childForFieldName('name')?.text;
       const typeNode = predicateNode?.childForFieldName('type');
       if (name && typeNode) {
@@ -1515,43 +1518,56 @@ export class Checker {
     return this.resolveConditional(type, mapper);
   }
 
-  private resolveConditional(type: ConditionalType, mapper: Mapper): Type {
-    const checkType = this.instantiate(type.checkType, mapper);
+  private resolveConditional(type: ConditionalType, outer: Mapper): Type {
+    const checkType = this.instantiate(type.checkType, outer);
     if (type.distributive && checkType.kind === 'union') {
       return unionOf(
-        checkType.types.map((member) => {
-          const memberMapper: Mapper = new Map([...mapper, [(type.checkType as TypeParameter).id, member]]);
-          return this.resolveConditional(type, memberMapper);
-        })
+        checkType.types.map((member) =>
+          this.resolveConditional(type, new Map([...outer, [(type.checkType as TypeParameter).id, member]]))
+        )
       );
     }
     if (type.distributive && isIntrinsic(checkType, 'never')) return neverType;
+    // The `infer` type parameters belong to this conditional type, so each instantiation gets its own.
+    const mapper: Mapper = new Map(outer);
+    const inferTypeParameters = type.inferTypeParameters.map((parameter): TypeParameter => ({
+      ...parameter,
+      id: newTypeId(),
+    }));
+    for (const [index, parameter] of type.inferTypeParameters.entries())
+      mapper.set(parameter.id, inferTypeParameters[index]);
     const extendsType = this.instantiate(type.extendsType, mapper);
-    if (this.relations.isGeneric(checkType) || this.relations.isGeneric(extendsType, type.inferTypeParameters)) {
-      if (mapper.size === 0) return type;
+    if (this.relations.isGeneric(checkType) || this.relations.isGeneric(extendsType, inferTypeParameters)) {
+      if (outer.size === 0) return type;
       return {
         ...type,
         id: newTypeId(),
         checkType,
         extendsType,
         trueType: this.instantiate(type.trueType, mapper),
-        falseType: this.instantiate(type.falseType, mapper),
+        falseType: this.instantiate(type.falseType, outer),
+        inferTypeParameters,
         distributive: type.distributive && checkType.kind === 'typeParameter',
       };
     }
     const inferred = new Map(mapper);
-    if (type.inferTypeParameters.length > 0) {
-      const inferences = this.expressions.calls.inferFromTypes(type.inferTypeParameters, checkType, extendsType);
-      for (const parameter of type.inferTypeParameters) {
+    if (inferTypeParameters.length > 0) {
+      const inferences = this.expressions.calls.inferFromTypes(inferTypeParameters, checkType, extendsType);
+      for (const parameter of inferTypeParameters) {
         inferred.set(parameter.id, inferences.get(parameter.id) ?? parameter.constraint?.() ?? unknownType);
       }
     }
-    const extendsInstantiated = this.instantiate(type.extendsType, inferred);
+    const extendsInstantiated = this.instantiate(extendsType, inferred);
     if (isAnyLike(checkType)) {
-      return unionOf([this.instantiate(type.trueType, inferred), this.instantiate(type.falseType, mapper)]);
+      return unionOf([
+        this.instantiate(this.instantiate(type.trueType, mapper), inferred),
+        this.instantiate(type.falseType, outer),
+      ]);
     }
-    if (this.relations.isAssignable(checkType, extendsInstantiated)) return this.instantiate(type.trueType, inferred);
-    return this.instantiate(type.falseType, mapper);
+    if (this.relations.isAssignable(checkType, extendsInstantiated)) {
+      return this.instantiate(this.instantiate(type.trueType, mapper), inferred);
+    }
+    return this.instantiate(type.falseType, outer);
   }
 
   templateLiteral(texts: string[], types: Type[]): Type {

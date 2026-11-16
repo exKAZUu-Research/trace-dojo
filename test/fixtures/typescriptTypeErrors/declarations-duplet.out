@@ -1,0 +1,2 @@
+(1,5): error TS2451: Cannot redeclare block-scoped variable 'a'.
+(2,5): error TS2451: Cannot redeclare block-scoped variable 'a'.

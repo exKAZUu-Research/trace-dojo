@@ -1,0 +1,6 @@
+12-345 12 4 false (\d+)-(\d+) 
+a<1>b<2>c<3> bbb [ 'x', 'y', 'z' ]
+1 2 2 3
+[ '1', '2' ] true [ 'bbb', index: 1, input: 'abbb', groups: undefined ]
+05/01/2024 2024
+/a/ /\//g /x/m

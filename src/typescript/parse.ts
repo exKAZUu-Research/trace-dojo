@@ -1,4 +1,4 @@
-import { CompileError } from '../interpreter/diagnostics';
+import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from '../javascript/ast';
@@ -18,9 +18,21 @@ const parser = await loadParser('@willbooster/tree-sitter-typescript/tree-sitter
 export function parseTypeScript(source: string, trace?: TraceOptions): Program {
   return parseSource(parser, source, { identifier: '名前', type_identifier: '型の名前' }, (root) => {
     rejectUnsupportedSyntax(root);
-    const program = new TypeScriptProgramConverter(source, trace).convert(javaScriptViewOf(root));
+    let program: Program | undefined;
+    let converterErrors: SourceDiagnostic[] = [];
+    try {
+      program = new TypeScriptProgramConverter(source, trace).convert(javaScriptViewOf(root));
+    } catch (error) {
+      if (!(error instanceof CompileError)) throw error;
+      converterErrors = error.diagnostics;
+    }
+    // tsc reports its grammar errors and type errors together; the type checker words a row's error first.
     const diagnostics = checkTypeScript(root);
-    if (diagnostics.length > 0) throw new CompileError(diagnostics);
+    const rows = new Set(diagnostics.map((diagnostic) => diagnostic.row));
+    const all = [...diagnostics, ...converterErrors.filter((diagnostic) => !rows.has(diagnostic.row))].toSorted(
+      (a, b) => a.row - b.row
+    );
+    if (all.length > 0 || !program) throw new CompileError(all);
     return program;
   });
 }

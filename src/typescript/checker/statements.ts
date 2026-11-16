@@ -224,7 +224,7 @@ export class StatementChecker {
           if (!annotation) {
             // `let x;` follows the types assigned to it, starting as `undefined`.
             this.c.expressions.setVariableType(symbol, anyType);
-            this.c.flow.set(key, { type: undefinedType, assigned: true });
+            this.c.flow.set(key, { type: undefinedType, assigned: kind === 'var' });
             continue;
           }
           this.c.expressions.setVariableType(symbol, annotation);
@@ -669,6 +669,7 @@ export class StatementChecker {
   checkFunctionLike(node: TreeNode, signature: Signature, contextualReturn: Type | undefined): void {
     if (this.c.silent > 0) return;
     const parameters = node.childForFieldName('parameters');
+    this.checkParameterOrder(parameters ? named(parameters) : []);
     for (const parameter of parameters ? named(parameters) : []) {
       const value = parameter.childForFieldName('value');
       const annotation = this.c.annotationType(parameter.childForFieldName('type'));
@@ -683,6 +684,18 @@ export class StatementChecker {
     }
     if (!node.childForFieldName('body')) return;
     this.c.expressions.checkFunctionBody(node, signature, contextualReturn, false);
+  }
+
+  /** Reports a required parameter after one marked `?`, which callers could not omit. */
+  private checkParameterOrder(parameters: TreeNode[]): void {
+    let optional = false;
+    for (const parameter of parameters) {
+      const isRest = parameter.childForFieldName('pattern')?.type === 'rest_pattern';
+      if (parameter.type === 'optional_parameter') optional = true;
+      else if (optional && !isRest && !parameter.childForFieldName('value')) {
+        this.c.error(parameter, '省略できる引数の後に、省略できない引数は書けません。');
+      }
+    }
   }
 
   /** Reports a function that may end without returning a value its declared return type requires. */

@@ -1,7 +1,16 @@
 import type { RealmBuilder } from './realm';
+import { hostLocales } from './realmDate';
 import { asRegExp, replaceWithRegExp, splitWithRegExp } from './realmRegExp';
 import type { Runtime } from './runtime';
-import { isCallable, JsObject, type NativeCall, type NativeFunction, unboxed, type Value } from './values';
+import {
+  isCallable,
+  JsObject,
+  type NativeCall,
+  type NativeFunction,
+  throwingHostErrors,
+  unboxed,
+  type Value,
+} from './values';
 
 /** One fixed locale, so that sorting with localeCompare gives the same order on every server. */
 const collator = new Intl.Collator('en');
@@ -52,7 +61,62 @@ export function defineStringBuiltins(builder: RealmBuilder): void {
   defineSearches(method);
   defineExtractions(method);
   defineBuilders(method);
+  defineLocaleAndLegacy(method);
+  // trimLeft and trimRight are the same functions as trimStart and trimEnd.
+  for (const [alias, name] of [
+    ['trimLeft', 'trimStart'],
+    ['trimRight', 'trimEnd'],
+  ] as const) {
+    const property = stringPrototype.properties.get(name);
+    if (property) stringPrototype.properties.set(alias, { ...property });
+  }
 }
+
+/** The locale-aware case conversions, the well-formedness checks, and the legacy `substr` and HTML methods. */
+function defineLocaleAndLegacy(method: StringMethod): void {
+  // Node.js formats for its default locale, en-US, when no locale is given.
+  method('toLocaleUpperCase', 0, ({ runtime, args }, text) =>
+    throwingHostErrors(runtime, () =>
+      text.toLocaleUpperCase((args[0] === undefined ? 'en-US' : hostLocales(runtime, args[0])) as string)
+    )
+  );
+  method('toLocaleLowerCase', 0, ({ runtime, args }, text) =>
+    throwingHostErrors(runtime, () =>
+      text.toLocaleLowerCase((args[0] === undefined ? 'en-US' : hostLocales(runtime, args[0])) as string)
+    )
+  );
+  method('isWellFormed', 0, (_, text) => text.isWellFormed());
+  method('toWellFormed', 0, (_, text) => text.toWellFormed());
+  method('substr', 2, ({ runtime, args }, text) => {
+    const relative = integerArgument(runtime, args[0], 0);
+    const start = relative < 0 ? Math.max(text.length + relative, 0) : Math.min(relative, text.length);
+    const length = args[1] === undefined ? text.length - start : integerArgument(runtime, args[1], 0);
+    return text.slice(start, start + Math.max(0, Math.min(length, text.length - start)));
+  });
+  for (const [name, tag, attribute] of htmlMethods) {
+    method(name, attribute ? 1 : 0, ({ runtime, args }, text) => {
+      const value = attribute ? ` ${attribute}="${runtime.toString(args[0]).replaceAll('"', '&quot;')}"` : '';
+      return `<${tag}${value}>${text}</${tag}>`;
+    });
+  }
+}
+
+/** The legacy HTML methods, by name: the element each wraps the string in, and the attribute its argument sets. */
+const htmlMethods: [string, string, string | undefined][] = [
+  ['anchor', 'a', 'name'],
+  ['big', 'big', undefined],
+  ['blink', 'blink', undefined],
+  ['bold', 'b', undefined],
+  ['fixed', 'tt', undefined],
+  ['fontcolor', 'font', 'color'],
+  ['fontsize', 'font', 'size'],
+  ['italics', 'i', undefined],
+  ['link', 'a', 'href'],
+  ['small', 'small', undefined],
+  ['strike', 'strike', undefined],
+  ['sub', 'sub', undefined],
+  ['sup', 'sup', undefined],
+];
 
 type StringMethod = (name: string, length: number, run: (call: NativeCall, text: string) => Value) => void;
 

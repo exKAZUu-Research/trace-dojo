@@ -1,0 +1,6 @@
+(8,5): error TS2322: Type '{ length: number; }' is not assignable to type 'Type'.
+(14,33): error TS2322: Type 'string' is not assignable to type 'number'.
+(18,23): error TS2345: Argument of type 'number' is not assignable to parameter of type '{ length: number; }'.
+(24,5): error TS2769: No overload matches this call.
+(27,26): error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.
+(35,1): error TS18046: 'obj' is of type 'unknown'.

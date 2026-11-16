@@ -294,6 +294,22 @@ export function flattenInto(runtime: Runtime, target: ArrayOps, source: ArrayOps
 function defineSearches(builder: RealmBuilder): void {
   arrayMethod(builder, 'join', 1, ({ runtime, args }, ops) => joinArray(runtime, ops, args[0], new Set()));
   arrayMethod(builder, 'toString', 0, ({ runtime }, ops) => joinArray(runtime, ops, undefined, new Set()));
+  // Each element formats with its own toLocaleString, given the locales and options the array was given.
+  arrayMethod(builder, 'toLocaleString', 0, ({ runtime, args }, ops) => {
+    const { length } = ops;
+    runtime.scan(length);
+    let text = '';
+    for (let index = 0; index < length; index++) {
+      const element = ops.get(index);
+      const part =
+        element === undefined || element === null
+          ? ''
+          : runtime.toString(runtime.call(runtime.get(element, 'toLocaleString'), element, args));
+      runtime.extendString(text.length + part.length + 1, part.length + 1);
+      text += (index > 0 ? ',' : '') + part;
+    }
+    return text;
+  });
   arrayMethod(builder, 'at', 1, ({ runtime, args }, ops) => {
     const { length } = ops;
     const relative = toInteger(runtime, args[0]);

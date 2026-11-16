@@ -66,6 +66,13 @@ export class Binder {
     return scope;
   }
 
+  /** Every scope of the program, the module's first. */
+  get allScopes(): Scope[] {
+    return [this.moduleScope, ...this.scopes.values()].filter(
+      (scope, index, scopes) => scopes.indexOf(scope) === index
+    );
+  }
+
   // code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of declaration, as the binder must see each.
   private bind(node: TreeNode, scope: Scope): void {
     switch (node.type) {
@@ -78,7 +85,8 @@ export class Binder {
           if (declarator.type !== 'variable_declarator') continue;
           const name = declarator.childForFieldName('name');
           if (name)
-            for (const identifier of patternIdentifiers(name)) target.declareValue(identifier.text, kind, declarator);
+            for (const identifier of patternIdentifiers(name))
+              target.declareValue(identifier.text, kind, declarator, identifier);
           this.bindChildren(declarator, scope);
         }
         return;
@@ -86,7 +94,7 @@ export class Binder {
       case 'function_declaration':
       case 'function_signature': {
         const name = node.childForFieldName('name');
-        if (name) scope.declareValue(name.text, 'function', node);
+        if (name) scope.declareValue(name.text, 'function', node, name);
         this.bindFunction(node, scope);
         return;
       }
@@ -94,8 +102,8 @@ export class Binder {
       case 'abstract_class_declaration': {
         const name = node.childForFieldName('name');
         if (name) {
-          scope.declareValue(name.text, 'class', node);
-          scope.declareType(name.text, 'class', node);
+          scope.declareValue(name.text, 'class', node, name);
+          scope.declareType(name.text, 'class', node, name);
         }
         this.bindClass(node, scope);
         return;
@@ -106,13 +114,13 @@ export class Binder {
       }
       case 'interface_declaration': {
         const name = node.childForFieldName('name');
-        if (name) scope.declareType(name.text, 'interface', node);
+        if (name) scope.declareType(name.text, 'interface', node, name);
         this.bindTypeParameterOwner(node, scope);
         return;
       }
       case 'type_alias_declaration': {
         const name = node.childForFieldName('name');
-        if (name) scope.declareType(name.text, 'alias', node);
+        if (name) scope.declareType(name.text, 'alias', node, name);
         this.bindTypeParameterOwner(node, scope);
         return;
       }
@@ -148,7 +156,7 @@ export class Binder {
       const kind = header.childForFieldName('kind')?.text as 'let' | 'const' | 'var' | undefined;
       if (left && kind) {
         const target = kind === 'var' ? scope.functionScope : blockScope;
-        for (const identifier of patternIdentifiers(left)) target.declareValue(identifier.text, kind, node);
+        for (const identifier of patternIdentifiers(left)) target.declareValue(identifier.text, kind, node, identifier);
       } else if (left) {
         this.noteAssigned(left);
       }
@@ -159,7 +167,8 @@ export class Binder {
       const blockScope = this.newScope(node, 'block', scope);
       const parameter = node.childForFieldName('parameter');
       if (parameter)
-        for (const identifier of patternIdentifiers(parameter)) blockScope.declareValue(identifier.text, 'catch', node);
+        for (const identifier of patternIdentifiers(parameter))
+          blockScope.declareValue(identifier.text, 'catch', node, identifier);
       this.bindChildren(node, blockScope);
       return;
     }
@@ -202,7 +211,7 @@ export class Binder {
     // A named function expression sees its own name.
     if (node.type === 'function_expression') {
       const name = node.childForFieldName('name');
-      if (name) functionScope.declareValue(name.text, 'function', node);
+      if (name) functionScope.declareValue(name.text, 'function', node, name);
     }
     const parameters = node.childForFieldName('parameters');
     if (parameters) {
@@ -210,11 +219,11 @@ export class Binder {
         const pattern = parameter.childForFieldName('pattern') ?? parameter;
         if (pattern.type === 'this') continue;
         for (const identifier of patternIdentifiers(pattern))
-          functionScope.declareValue(identifier.text, 'parameter', parameter);
+          functionScope.declareValue(identifier.text, 'parameter', parameter, identifier);
       }
     }
     const single = node.childForFieldName('parameter');
-    if (single) functionScope.declareValue(single.text, 'parameter', single);
+    if (single) functionScope.declareValue(single.text, 'parameter', single, single);
     for (const child of named(node)) {
       if (child.type === 'statement_block') this.bindChildren(child, functionScope);
       else this.bind(child, functionScope);
@@ -228,8 +237,8 @@ export class Binder {
     if (node.type === 'class') {
       const name = node.childForFieldName('name');
       if (name) {
-        classScope.declareValue(name.text, 'class', node);
-        classScope.declareType(name.text, 'class', node);
+        classScope.declareValue(name.text, 'class', node, name);
+        classScope.declareType(name.text, 'class', node, name);
       }
     }
     this.bindChildren(node, classScope);
@@ -248,13 +257,13 @@ export class Binder {
         case 'lexical_declaration': {
           for (const declarator of named(child)) {
             const name = declarator.childForFieldName('name');
-            if (name) scope.declareValue(name.text, 'declared', declarator);
+            if (name) scope.declareValue(name.text, 'declared', declarator, name);
           }
           break;
         }
         case 'function_signature': {
           const name = child.childForFieldName('name');
-          if (name) scope.declareValue(name.text, 'function', child);
+          if (name) scope.declareValue(name.text, 'function', child, name);
           this.bindFunction(child, scope);
           break;
         }
@@ -270,7 +279,7 @@ export class Binder {
     if (!parameters) return;
     for (const parameter of named(parameters)) {
       const name = parameter.childForFieldName('name');
-      if (name) scope.declareType(name.text, 'typeParameter', parameter);
+      if (name) scope.declareType(name.text, 'typeParameter', parameter, name);
     }
   }
 }

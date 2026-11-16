@@ -1,6 +1,10 @@
 import type { Checker } from './checker';
 import { booleanType, falseType, type ObjectType, type Signature, trueType, type Type } from './types';
 
+function isNullish(member: Type): boolean {
+  return member.kind === 'intrinsic' && (member.name === 'null' || member.name === 'undefined');
+}
+
 /** Prints types as TypeScript writes them in its messages. */
 export class Printer {
   private depth = 0;
@@ -30,7 +34,8 @@ export class Printer {
       }
       case 'union': {
         if (type === booleanType) return 'boolean';
-        const members = type.types;
+        // TypeScript lists `null` and `undefined` last, as in `string | undefined`.
+        const members = [...type.types.filter((member) => !isNullish(member)), ...type.types.filter(isNullish)];
         const hasBoolean = members.includes(trueType) && members.includes(falseType);
         const printed: string[] = [];
         for (const member of members) {
@@ -46,7 +51,9 @@ export class Printer {
         return type.types.map((member) => this.wrap(member)).join(' & ');
       }
       case 'typeParameter': {
-        return type.name;
+        // A class's polymorphic `this` prints as the class.
+        const constraint = type.isThisType ? type.constraint?.() : undefined;
+        return constraint ? this.print(constraint) : type.name;
       }
       case 'indexedAccess': {
         return `${this.wrap(type.objectType)}[${this.print(type.indexType)}]`;

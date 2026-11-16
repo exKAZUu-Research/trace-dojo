@@ -1,0 +1,13 @@
+x coordinate at 0 0 s
+x coordinate at 100 0 s
+prop has the value 'p'.
+{ resident: { name: 'r', age: 2 } }
+b { length: 1, name: 'n', other: 2 } x
+{ color: 'red', area: 10000 } { color: 'red', area: 10000 }
+Color was blue 42
+The first value is z [ 'z' ]
+hello 42 hello 42
+Provided coordinates had 2 dimensions 1 2 undefined
+x 1 [ true ]
+5 [ 'a' ] [ 'hello', 1 ] [ 'beautiful', 2, true ] { contents: 'world' }
+{ street: 's', unit: 'u' } { color: 'c', radius: 1 }
