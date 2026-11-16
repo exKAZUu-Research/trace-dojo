@@ -2184,9 +2184,10 @@ export function makeBlock(def: BlockDef, frame: Frame): RProc {
 export function nativeProc(
   arity: number,
   call: (args: Value[], block: RProc | undefined, used: boolean, keywords?: RHash) => Value | Gen,
-  lambda = false
+  lambda = false,
+  takesKeywords = false
 ): RProc {
-  const proc = new RProc(rt().c.Proc, { kind: 'native', arity, lambda, call }, NIL, undefined);
+  const proc = new RProc(rt().c.Proc, { kind: 'native', arity, lambda, takesKeywords, call }, NIL, undefined);
   proc.isLambda = lambda;
   proc.breakTag = {};
   return proc;
@@ -2223,7 +2224,13 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
     if (body.lambda && body.arity >= 0 && count !== body.arity && !proc.reflectedMethod) {
       throw argumentCountError(count, body.arity, body.arity);
     }
-    const result = body.call(args, options.block, options.used ?? true, options.keywords);
+    const actual = !body.takesKeywords && options.keywords ? [...args, options.keywords] : args;
+    const result = body.call(
+      actual,
+      options.block,
+      options.used ?? true,
+      body.takesKeywords ? options.keywords : undefined
+    );
     const value = isGenerator(result) ? yield* result : result;
     return typeof value === 'number' ? boxFloat(value) : value;
   }

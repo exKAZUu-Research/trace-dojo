@@ -11752,3 +11752,55 @@ test('Pretty printing dispatches native inspect aliases at the object boundary',
     uncaughtException: undefined,
   });
 });
+
+test('Bound native Method objects retain receiver-compatible implementations', () => {
+  expect(
+    run(
+      'p DATA.inspect==DATA.method(:inspect).call\np DATA.inspect==DATA.method(:inspect).to_proc.call\np DATA.inspect==DATA.method(:inspect).unbind.bind(DATA).call\np DATA.inspect==DATA.method(:inspect).unbind.bind_call(DATA)\np DATA.method(:read).call\np DATA.method(:rewind).call\np DATA.method(:read).to_proc.call\n__END__\nhello\n'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'true\ntrue\ntrue\ntrue\n"hello\\n"\n0\n"p DATA.inspect==DATA.method(:inspect).call\\np DATA.inspect==DATA.method(:inspect).to_proc.call\\np DATA.inspect==DATA.method(:inspect).unbind.bind(DATA).call\\np DATA.inspect==DATA.method(:inspect).unbind.bind_call(DATA)\\np DATA.method(:read).call\\np DATA.method(:rewind).call\\np DATA.method(:read).to_proc.call\\n__END__\\nhello\\n"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native Enumerator consumers retain keyword yield tuples', () => {
+  expect(
+    run(
+      '[false,true].each do |adapter|\n e=Enumerator.new do |y|\n  if adapter;y.to_proc.call(a:1);y.to_proc.call(1,a:2)\n  else;y.yield(a:1);y.yield(1,a:2);end\n end\n p e.next,e.next;e.rewind;p e.next_values,e.next_values\n e.rewind;p e.to_a\n e.rewind;p e.with_index.to_a\n e.rewind;p e.with_object(:memo).to_a\n e.rewind;p e.lazy.map{|x|x}.force\n e.rewind;p e.lazy.with_index.force\nend\nclass K\n def self.echo(a:);a;end\nend\np K.method(:echo).to_proc.call(a:7)\np :echo.to_proc.call(K,a:8)\ny=Enumerator::Yielder.new{|a:|p a};y.yield(a:9);y.to_proc.call(a:10)\n'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '{a: 1}\n[1, {a: 2}]\n[{a: 1}]\n[1, {a: 2}]\n[{a: 1}, [1, {a: 2}]]\n[[{a: 1}, 0], [[1, {a: 2}], 1]]\n[[{a: 1}, :memo], [[1, {a: 2}], :memo]]\n[{a: 1}, 1]\n[[{a: 1}, 0], [[1, {a: 2}], 1]]\n{a: 1}\n[1, {a: 2}]\n[{a: 1}]\n[1, {a: 2}]\n[{a: 1}, [1, {a: 2}]]\n[[{a: 1}, 0], [[1, {a: 2}], 1]]\n[[{a: 1}, :memo], [[1, {a: 2}], :memo]]\n[{a: 1}, 1]\n[[{a: 1}, 0], [[1, {a: 2}], 1]]\n7\n8\n9\n10\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Find patterns fix candidate count while retaining live element reads', () => {
+  expect(
+    run(
+      'module M\n def self.===(v)\n  $calls+=1\n  case $op\n  when :pop;$a.pop\n  when :shift;$a.shift\n  when :push;$a.push(9)\n  when :unshift;$a.unshift(0)\n  end\n  true\n end\nend\n[:pop,:shift,:push,:unshift].each do |op|\n $op=op;$calls=0;$a=[1,2,3]\n p(($a in [*,M,nil,*r]));p r,$a,$calls\n $calls=0;$a=[1,2,3]\n p(($a in [*r,M,nil,*z]));p r,z,$a,$calls\nend\n'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'true\nnil\n[1]\n2\ntrue\n[1]\nnil\n[1]\n2\ntrue\nnil\n[3]\n2\ntrue\n[3]\nnil\n[3]\n2\nfalse\nnil\n[1, 2, 3, 9, 9]\n2\nfalse\nnil\nnil\n[1, 2, 3, 9, 9]\n2\nfalse\nnil\n[0, 0, 1, 2, 3]\n2\nfalse\nnil\nnil\n[0, 0, 1, 2, 3]\n2\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'p "ss".match?(/ẞ/i)',
+  'p "ẞ".match?(/ss/i)',
+  'p "ẞ".match?(/s{2}/i)',
+  'p "ss".match?(/[ẞ]/i)',
+  String.raw`p "SS".match?(/\u1e9e/i)`,
+])('Capital casefold expansions fail explicitly: %s', (source) => {
+  expect(run(source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'Unicode の複数文字 casefold は、この採点環境では使えません。',
+  });
+});

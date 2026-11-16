@@ -236,7 +236,7 @@ export interface ProcOuter {
 
 export type ProcBody =
   | { kind: 'block'; def: BlockDef }
-  | { kind: 'native'; arity: number; lambda: boolean; call: NativeProc };
+  | { kind: 'native'; arity: number; lambda: boolean; takesKeywords: boolean; call: NativeProc };
 
 export type NativeProc = (
   args: Value[],

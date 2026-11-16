@@ -159,7 +159,8 @@ function* matchFind(
   const array = yield* deconstruct(value, cache);
   if (!array) return false;
   const width = pattern.middle.length;
-  for (let start = 0; start + width <= array.items.length; start++) {
+  const length = array.items.length;
+  for (let start = 0; start + width <= length; start++) {
     let matched = true;
     for (const [index, item] of pattern.middle.entries()) {
       if (!(yield* matchPattern(item, array.items.at(start + index) ?? NIL, frame))) {

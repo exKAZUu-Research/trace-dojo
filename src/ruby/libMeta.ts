@@ -227,8 +227,8 @@ function methodBodyIdentity(method: RMethod, owner: RClass): object {
   return fn.nativeIdentity ?? fn;
 }
 
-function reflectedCallable(method: RMethod, owner: RClass): RMethod {
-  if (method.body.kind !== 'native' || method.missing) return method;
+function reflectedCallable(method: RMethod, owner: RClass, recv: Value): RMethod {
+  if (method.body.kind !== 'native' || method.missing || isA(recv, method.owner)) return method;
   const canonical = findCoreMethod(method.nativeIdentityOwner ?? owner, method.name);
   return canonical?.body.kind === 'native' && !('unavailable' in canonical.body.fn)
     ? { ...method, body: canonical.body }
@@ -276,7 +276,7 @@ def(
   [0, -1],
   function* (self: RObject, args, block, keywords, used) {
     const { recv, method, owner } = self.data as MethodData;
-    return yield* invoke(reflectedCallable(method, owner), recv, args, keywords, block, used);
+    return yield* invoke(reflectedCallable(method, owner, recv), recv, args, keywords, block, used);
   },
   { keywords: true }
 );
@@ -284,7 +284,8 @@ def('Method', 'to_proc', 0, (self: RObject) => {
   const { recv, method, owner } = self.data as MethodData;
   const proc = nativeProc(
     methodArity(method),
-    (args, block, used, keywords) => invoke(reflectedCallable(method, owner), recv, args, keywords, block, used),
+    (args, block, used, keywords) => invoke(reflectedCallable(method, owner, recv), recv, args, keywords, block, used),
+    true,
     true
   );
   proc.captured = [recv, method.owner, ...(method.body.kind === 'proc' ? [method.body.proc] : [])];
@@ -734,7 +735,14 @@ def(
   [1, -1],
   function* (self: RObject, [recv, ...args], block, keywords, used) {
     const { owner } = self.data as MethodData;
-    return yield* invoke(reflectedCallable(validBoundMethod(self, recv), owner), recv, args, keywords, block, used);
+    return yield* invoke(
+      reflectedCallable(validBoundMethod(self, recv), owner, recv),
+      recv,
+      args,
+      keywords,
+      block,
+      used
+    );
   },
   { keywords: true }
 );

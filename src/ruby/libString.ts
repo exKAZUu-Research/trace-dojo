@@ -1916,10 +1916,11 @@ def('Symbol', 'to_proc', 0, (self: RSymbol) => symbolProc(self.key));
 export function symbolProc(name: string): Value {
   const proc = nativeProc(
     -2,
-    (args, block) => {
+    (args, block, _used, keywords) => {
       if (args.length === 0) throw argumentError('no receiver given');
-      return callMethod(args[0], name, args.slice(1), undefined, block);
+      return callMethod(args[0], name, args.slice(1), keywords, block);
     },
+    true,
     true
   );
   proc.nativeRequired = 1;

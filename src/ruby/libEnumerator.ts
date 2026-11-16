@@ -970,7 +970,12 @@ def(
   { keywords: true }
 );
 def('Enumerator::Yielder', 'to_proc', 0, (self: RObject) => {
-  const proc = nativeProc(-1, (args, _block, _used, keywords) => callProc(consumerOf(self), args, { keywords }));
+  const proc = nativeProc(
+    -1,
+    (args, _block, _used, keywords) => callProc(consumerOf(self), args, { keywords }),
+    false,
+    true
+  );
   proc.captured = [self];
   return proc;
 });
