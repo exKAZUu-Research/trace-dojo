@@ -302,7 +302,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
     case 'yield': {
       return yield* atCallRow(e.row, function* () {
         const { args, keywords } = yield* evalArgs(e.args, frame);
-        const block = frame.home.extra.block;
+        const block = frame.lexicalBlock;
         if (!block) throw rubyError(rt().c.LocalJumpError, 'no block given (yield)');
         const used = e.used === 1 || (e.used === 2 && frame.resultUsed);
         rt().currentRow = e.row;
@@ -320,7 +320,8 @@ export function* ev(e: Expr, frame: Frame): Gen {
     case 'not': {
       const value = yield* ev(e.e, frame);
       const method = classOf(value).findMethod('!');
-      if (method && method.body.kind !== 'native') return yield* invoke(method, value, [], undefined, undefined, true);
+      if (!method) return yield* callMethod(value, '!', []);
+      if (!isCoreMethod(method, method.owner, '!')) return yield* invoke(method, value, [], undefined, undefined, true);
       return !truthy(value);
     }
     case 'if': {
@@ -677,7 +678,7 @@ export function* makeRange(from: Value, to: Value, exclusive: boolean): Gen {
       to instanceof RString &&
       from.cls === rt().c.String &&
       to.cls === rt().c.String &&
-      classOf(from).findMethod('<=>')?.body.kind === 'native';
+      isCoreMethod(classOf(from).findMethod('<=>'), rt().c.String, '<=>');
     if (!comparable && !nativeStrings) {
       const order = respondsTo(from, '<=>') ? yield* callMethod(from, '<=>', [to]) : NIL;
       if (order === NIL) throw argumentError('bad value for range');
@@ -1298,7 +1299,7 @@ function* definedText(e: Expr, frame: Frame): Gen {
       return text(e.block ? 'expression' : 'method');
     }
     case 'yield': {
-      return text(frame.home.extra.block ? 'yield' : undefined);
+      return text(frame.lexicalBlock ? 'yield' : undefined);
     }
     case 'super': {
       if (e.block) return text('expression');
@@ -1373,7 +1374,11 @@ function* definedText(e: Expr, frame: Frame): Gen {
 }
 
 function* undefinedReceiver(e: Expr, frame: Frame): Gen<boolean> {
-  if (e.k === 'call' && e.recv) return yield* undefinedReceiver(e.recv, frame);
+  if (e.k === 'call') {
+    if (e.block) return false;
+    for (const argument of e.args) if ((yield* definedText(argument, frame)) === NIL) return true;
+    return e.recv ? yield* undefinedReceiver(e.recv, frame) : false;
+  }
   return (
     (e.k === 'ivar' || e.k === 'gvar' || e.k === 'cvar' || e.k === 'array' || e.k === 'hash') &&
     (yield* definedText(e, frame)) === NIL
@@ -2234,13 +2239,14 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
     options.used ?? true,
     {
       home: options.method ? undefined : outer.home,
+      lexicalBlockHome: options.method ? (outer.home.extra.lexicalBlockHome ?? outer.home) : undefined,
       outer,
       proc,
       args,
       keywords: options.keywords,
       blockDef: def,
       isLambda: proc.isLambda || options.lambdaArgs,
-      block: options.method ? options.block : (options.block ?? outer.home.extra.block),
+      block: options.block,
       method: options.method ?? outer.home.extra.method,
       missingReason: options.missingReason,
       def: outer.home.extra.def,
@@ -2253,7 +2259,6 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
     }
   );
   if (!options.definee && !options.definitionTarget) frame.shareDefinitionMode(outer);
-  if (options.block) frame.extra.block = options.block;
   runtime.pushFrame(frame);
   const savedRow = runtime.currentRow;
   try {

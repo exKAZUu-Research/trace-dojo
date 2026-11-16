@@ -45,11 +45,12 @@ import {
   RSymbol,
   type Value,
 } from './objects';
-import { regexpCaptureNames, regexpHasNumberedBackref } from './regexpCaptureNames';
+import { hostRegexpCaptureNames, regexpCaptureNames, regexpHasNumberedBackref } from './regexpCaptureNames';
 import { regexpHasExpandingCasefold } from './regexpCasefold';
 import { RegexpCursor } from './regexpCursor';
 import { decodeRegexpByteEscape, regexpByteEscape, RegexpEncodingError } from './regexpEscapes';
 import { regexpLexicalSource } from './regexpLexicalSource';
+import { regexpOuterOptions } from './regexpOuterOptions';
 import { charIndex, regexpByteIndex, unitIndex } from './regexpPositions';
 import {
   hasRegexpProperty,
@@ -178,9 +179,8 @@ export function translate(
   source = regexpLexicalSource(source, extended);
   validateRegexpSourceSyntax(source, false, ascii);
   const classes = ascii ? ASCII_POSIX_CLASSES : POSIX_CLASSES;
-  for (const name of captureNamesForValidation(source))
-    if ((/^[\p{ID_Start}_]/u.test(name) || /^\\u(?:[\dA-Fa-f]{4}|\{[\dA-Fa-f]+\})/.test(name)) && /[-\\]/.test(name))
-      throw unsupportedSyntax('特殊なキャプチャ名');
+  for (const name of regexpCaptureNames(source))
+    if (!/^[\p{ID_Start}_][\p{ID_Continue}_]*$/u.test(name)) throw unsupportedSyntax('特殊なキャプチャ名');
   let out = '';
   let inClass = 0;
   let classStart = 0;
@@ -382,28 +382,6 @@ export function translate(
   return out;
 }
 
-function* captureNamesForValidation(source: string): Generator<string> {
-  let start = -1;
-  let inClass = false;
-  for (let index = 0; index < source.length; index++) {
-    if (start >= 0) {
-      if (source[index] === '>') {
-        if (index > start) yield source.slice(start, index);
-        start = -1;
-      }
-      continue;
-    }
-    if (source[index] === '\\') {
-      index++;
-      continue;
-    }
-
-    if (source[index] === '[') inClass = true;
-    else if (source[index] === ']') inClass = false;
-    else if (!inClass && source.startsWith('(?<', index)) start = index + 3;
-  }
-}
-
 function translateEscape(
   next: string,
   source: string,
@@ -467,7 +445,9 @@ function translateEscape(
       return `(?:(?<=${word})(?=${word})|(?<!${word})(?!${word}))`;
     }
     case 'R': {
-      return String.raw`(?:\r\n|\r(?!\n)|[\n\v\f\u0085  ])`;
+      return classes === ASCII_POSIX_CLASSES
+        ? String.raw`(?:\r\n|\r(?!\n)|[\n\v\f])`
+        : String.raw`(?:\r\n|\r(?!\n)|[\n\v\f\u0085  ])`;
     }
     case 'e': {
       return String.raw`\x1B`;
@@ -519,6 +499,7 @@ function translateEscape(
           throw unsupportedSyntax(`Unicode プロパティ ${rawName}`);
         }
       }
+      if (negated && !inClass) return `(?:(?!\\p{${name}})[\\s\\S])`;
       return `\\${negated ? 'P' : 'p'}{${name}}`;
     }
     case 'k': {
@@ -736,7 +717,7 @@ export function execAt(
   if (!result?.indices) return undefined;
   const names: string[] = [];
   const namedGroups: Record<string, number> = Object.create(null) as Record<string, number>;
-  const nameOrder = (data.captureNames ??= regexpCaptureNames(js.source));
+  const nameOrder = (data.captureNames ??= hostRegexpCaptureNames(js.source));
   for (const [position, name] of nameOrder.entries()) {
     if (!(name in namedGroups)) names.push(name);
     if (!(name in namedGroups) || result.indices[position + 1] !== undefined) namedGroups[name] = position + 1;
@@ -1061,7 +1042,8 @@ def(
   'Regexp',
   'initialize',
   [1, 2],
-  function* (self: RObject, [source, options], _block, keywords) {
+  function* (self: RObject, args, _block, keywords) {
+    const [source, options] = args;
     yield* checkRegexpKeywords(keywords);
     if (self.frozen)
       throw frozenError(
@@ -1070,6 +1052,8 @@ def(
       );
     if (self.data) throw typeError('already initialized regexp');
     if (isRegexp(source)) {
+      if (args.length > 1 && options !== NIL)
+        rt().io.stderr.write(`main.rb:${rt().currentRow + 1}: warning: flags ignored\n`);
       const data = dataOf(source);
       self.data = makeRegexp(data.source, {
         ...data,
@@ -1206,7 +1190,8 @@ sdef('Regexp', 'last_match', [0, 1], function* (_self, args) {
 });
 
 function regexpToS(regexp: RObject): string {
-  const data = dataOf(regexp);
+  const original = dataOf(regexp);
+  const data = regexpOuterOptions(original.source, original);
   const on = `${data.multiline ? 'm' : ''}${data.ignoreCase ? 'i' : ''}${data.extended ? 'x' : ''}`;
   const off = `${data.multiline ? '' : 'm'}${data.ignoreCase ? '' : 'i'}${data.extended ? '' : 'x'}`;
   return `(?${on}${off ? `-${off}` : ''}:${escapedRegexpSource(data.source)})`;
@@ -1289,7 +1274,7 @@ def('Regexp', 'hash', 0, (self: RObject) =>
   )
 );
 def('Regexp', 'names', 0, (self: RObject) =>
-  arr([...new Set(regexpCaptureNames(dataOf(self).js.source))].map((name) => captureNameString(self, name)))
+  arr([...new Set(hostRegexpCaptureNames(dataOf(self).js.source))].map((name) => captureNameString(self, name)))
 );
 
 function captureNameString(regexp: RObject, name: string): RString {

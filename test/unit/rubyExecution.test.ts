@@ -11464,3 +11464,291 @@ test.each([String.raw`p "ss".match?(/\A[a-ÿ]\z/i)`, String.raw`p "ss".match?(/\
     });
   }
 );
+
+test('Ruby regexp token boundaries distinguish ignored text, escapes and literal braces', () => {
+  expect(
+    run(String.raw`['(?x:\x 61)','(?x:\u 0061)',"(?x:\\x# comment\n61)","(?x:\\u# comment\n0061)"].each do |source|
+ begin;Regexp.new(source);rescue RegexpError=>e;puts e.message;end
+end
+p /(?x:a{ 2 })/.match?('a{2}'),/(?x:a{ 2 })/.match?('aa')
+p /(?x:a{ 2,3 })/.match?('a{2,3}'),/(?x:a{ 2,3 })/.match?('aa')
+r=Regexp.new("(?x:a # comment"+"\\"+"\n b\n c)")
+p r.match?('abc'),r.match?('ac')
+r=/(?x:a # comment\
+ b
+ c)/
+p r.match?('ac'),r.match?('abc')
+source="(?x:a # "+'\p{Invalid}\u{bogus}\x'+"\n b)"
+p Regexp.new(source).match?('ab')
+p /(?x:a{2})/.match?('aa'),/(?x:a\{ 2 \})/.match?('a{2}')
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'invalid hex escape: /(?x:\\x 61)/\ninvalid Unicode escape: /(?x:\\u 0061)/\ninvalid hex escape: /(?x:\\x# comment\n61)/\ninvalid Unicode escape: /(?x:\\u# comment\n0061)/\ntrue\nfalse\ntrue\nfalse\ntrue\nfalse\ntrue\nfalse\ntrue\ntrue\ntrue\n',
+    stderr: '',
+    uncaughtException: undefined,
+  });
+});
+
+test('Native aliases control unary negation and primitive formatting', () => {
+  expect(
+    run(String.raw`class C;alias ! frozen?;end
+o=C.new.freeze;p !o
+class D;alias ! to_s;end
+p((!D.new).class)
+class Integer;alias to_s chr;end
+puts 65
+class Integer;alias inspect chr;end
+p 66
+`)
+  ).toMatchObject({ kind: 'executed', stdout: 'true\nString\nA\nB\n', stderr: '', uncaughtException: undefined });
+});
+
+test('Native iterator aliases retain Enumerable traversal and tie order', () => {
+  expect(
+    run(String.raw`class Array;alias each reverse_each;end
+p [1,2,3].entries,[1,2,3].sort_by{|x|x%2}
+`)
+  ).toMatchObject({ kind: 'executed', stdout: '[3, 2, 1]\n[2, 3, 1]\n', stderr: '', uncaughtException: undefined });
+});
+
+test('Native comparator aliases use normal sort_by comparison', () => {
+  expect(
+    run(String.raw`class Integer;alias <=> +;end
+p [3,1,2].sort_by{|x|x}
+`)
+  ).toMatchObject({ kind: 'executed', stdout: '[2, 1, 3]\n', stderr: '', uncaughtException: undefined });
+});
+
+test('Pattern key errors accept keyword metadata and preserve it on message replacement', () => {
+  expect(
+    run(String.raw`e=NoMatchingPatternKeyError.new('missing',key: :a,matchee:{a:1})
+p e.message,e.key,e.matchee
+e.send(:initialize,'changed')
+p e.message,e.key,e.matchee
+n=NoMatchingPatternKeyError.new(key:nil,matchee:nil)
+p n.message,n.key,n.matchee
+begin;NoMatchingPatternKeyError.new(unknown:1);rescue=>e;p e.class,e.message;end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '"missing"\n:a\n{a: 1}\n"changed"\n:a\n{a: 1}\n"NoMatchingPatternKeyError"\nnil\nnil\nArgumentError\n"unknown keyword: :unknown"\n',
+    stderr: '',
+    uncaughtException: undefined,
+  });
+});
+
+test('Defined receiver probes inspect call arguments while retaining block-call semantics', () => {
+  expect(
+    run(String.raw`a=[]
+p defined?(a.push($missing).size),a
+p defined?(a.push([[$missing]]).size),a
+p defined?(a.push({k:$missing}).size),a
+p defined?(a.push(2).size),a
+class C
+ attr_reader :arr
+ def initialize;@arr=[];end
+end
+o=C.new
+p defined?(o.instance_variable_set(:@arr,[$missing])[0]),o.arr
+p defined?(a.push($missing){}.size),a
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'nil\n[]\nnil\n[]\nnil\n[]\n"method"\n[2]\nnil\n[]\n"method"\n[2, nil]\n',
+    stderr: '',
+    uncaughtException: undefined,
+  });
+});
+
+test('Proc-defined methods retain lexical yield and invocation block parameters separately', () => {
+  expect(
+    run(String.raw`class C;end
+def install(klass)
+ klass.define_method(:f){|&block|[yield(7),block_given?,block.call]}
+end
+install(C){|n|n*2}
+p C.new.f{99}
+class D
+ define_method(:f){|&block|[block_given?,block.call]}
+end
+p D.new.f{42}
+class E;end
+def install_empty(klass)
+ klass.define_method(:f){|&block|[defined?(yield),block_given?,block.call]}
+end
+install_empty(E)
+p E.new.f{8}
+def proc_blocks
+ callable=proc{|&callback|[block_given?,yield(3),callback ? callback.call : :none]}
+ [callable.call,callable.call{9}]
+end
+p proc_blocks{|n|n*2}
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '[14, true, 99]\n[false, 42]\n[nil, false, 8]\n[[true, 6, :none], [true, 6, 9]]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Standalone negated Unicode properties preserve their distinct fold order', () => {
+  expect(
+    run(String.raw`['a','A','!'].each do |s|
+ p [s,/\P{Lower}/i.match?(s),/[\P{Lower}]/i.match?(s),/\p{^Upper}/i.match?(s),/[\p{^Upper}]/i.match?(s)]
+end
+p /(?i:\P{Ll})/.match?('a')
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '["a", false, true, false, true]\n["A", false, true, false, true]\n["!", true, true, true, true]\nfalse\n',
+    stderr: '',
+    uncaughtException: undefined,
+  });
+});
+
+test('Rational remainders follow Numeric operation order with finite and nonfinite divisors', () => {
+  expect(
+    run(String.raw`[Rational(2,3),Rational(-2,3)].each do |r|
+ [0.1,-0.1,1,0.0,-0.0,Float::INFINITY,-Float::INFINITY,Float::NAN].each do |divisor|
+  [:%,:modulo,:remainder,:div,:divmod,:fdiv].each do |op|
+   begin;p [r,divisor,op,r.send(op,divisor)];rescue=>e;p [r,divisor,op,e.class,e.message];end
+  end
+ end
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[(2/3), 0.1, :%, 0.06666666666666654]\n[(2/3), 0.1, :modulo, 0.06666666666666654]\n[(2/3), 0.1, :remainder, 0.06666666666666654]\n[(2/3), 0.1, :div, 6]\n[(2/3), 0.1, :divmod, [6, 0.06666666666666654]]\n[(2/3), 0.1, :fdiv, 6.666666666666666]\n[(2/3), -0.1, :%, -0.03333333333333344]\n[(2/3), -0.1, :modulo, -0.03333333333333344]\n[(2/3), -0.1, :remainder, 0.06666666666666657]\n[(2/3), -0.1, :div, -7]\n[(2/3), -0.1, :divmod, [-7, -0.03333333333333344]]\n[(2/3), -0.1, :fdiv, -6.666666666666666]\n[(2/3), 1, :%, (2/3)]\n[(2/3), 1, :modulo, (2/3)]\n[(2/3), 1, :remainder, (2/3)]\n[(2/3), 1, :div, 0]\n[(2/3), 1, :divmod, [0, (2/3)]]\n[(2/3), 1, :fdiv, 0.6666666666666666]\n[(2/3), 0.0, :%, ZeroDivisionError, "divided by 0"]\n[(2/3), 0.0, :modulo, ZeroDivisionError, "divided by 0"]\n[(2/3), 0.0, :remainder, ZeroDivisionError, "divided by 0"]\n[(2/3), 0.0, :div, ZeroDivisionError, "divided by 0"]\n[(2/3), 0.0, :divmod, ZeroDivisionError, "divided by 0"]\n[(2/3), 0.0, :fdiv, Infinity]\n[(2/3), -0.0, :%, ZeroDivisionError, "divided by 0"]\n[(2/3), -0.0, :modulo, ZeroDivisionError, "divided by 0"]\n[(2/3), -0.0, :remainder, ZeroDivisionError, "divided by 0"]\n[(2/3), -0.0, :div, ZeroDivisionError, "divided by 0"]\n[(2/3), -0.0, :divmod, ZeroDivisionError, "divided by 0"]\n[(2/3), -0.0, :fdiv, Infinity]\n[(2/3), Infinity, :%, NaN]\n[(2/3), Infinity, :modulo, NaN]\n[(2/3), Infinity, :remainder, NaN]\n[(2/3), Infinity, :div, 0]\n[(2/3), Infinity, :divmod, [0, NaN]]\n[(2/3), Infinity, :fdiv, 0.0]\n[(2/3), -Infinity, :%, NaN]\n[(2/3), -Infinity, :modulo, NaN]\n[(2/3), -Infinity, :remainder, (2/3)]\n[(2/3), -Infinity, :div, 0]\n[(2/3), -Infinity, :divmod, [0, NaN]]\n[(2/3), -Infinity, :fdiv, -0.0]\n[(2/3), NaN, :%, FloatDomainError, "NaN"]\n[(2/3), NaN, :modulo, FloatDomainError, "NaN"]\n[(2/3), NaN, :remainder, FloatDomainError, "NaN"]\n[(2/3), NaN, :div, FloatDomainError, "NaN"]\n[(2/3), NaN, :divmod, FloatDomainError, "NaN"]\n[(2/3), NaN, :fdiv, NaN]\n[(-2/3), 0.1, :%, 0.03333333333333344]\n[(-2/3), 0.1, :modulo, 0.03333333333333344]\n[(-2/3), 0.1, :remainder, -0.06666666666666657]\n[(-2/3), 0.1, :div, -7]\n[(-2/3), 0.1, :divmod, [-7, 0.03333333333333344]]\n[(-2/3), 0.1, :fdiv, -6.666666666666666]\n[(-2/3), -0.1, :%, -0.06666666666666654]\n[(-2/3), -0.1, :modulo, -0.06666666666666654]\n[(-2/3), -0.1, :remainder, -0.06666666666666654]\n[(-2/3), -0.1, :div, 6]\n[(-2/3), -0.1, :divmod, [6, -0.06666666666666654]]\n[(-2/3), -0.1, :fdiv, 6.666666666666666]\n[(-2/3), 1, :%, (1/3)]\n[(-2/3), 1, :modulo, (1/3)]\n[(-2/3), 1, :remainder, (-2/3)]\n[(-2/3), 1, :div, -1]\n[(-2/3), 1, :divmod, [-1, (1/3)]]\n[(-2/3), 1, :fdiv, -0.6666666666666666]\n[(-2/3), 0.0, :%, ZeroDivisionError, "divided by 0"]\n[(-2/3), 0.0, :modulo, ZeroDivisionError, "divided by 0"]\n[(-2/3), 0.0, :remainder, ZeroDivisionError, "divided by 0"]\n[(-2/3), 0.0, :div, ZeroDivisionError, "divided by 0"]\n[(-2/3), 0.0, :divmod, ZeroDivisionError, "divided by 0"]\n[(-2/3), 0.0, :fdiv, -Infinity]\n[(-2/3), -0.0, :%, ZeroDivisionError, "divided by 0"]\n[(-2/3), -0.0, :modulo, ZeroDivisionError, "divided by 0"]\n[(-2/3), -0.0, :remainder, ZeroDivisionError, "divided by 0"]\n[(-2/3), -0.0, :div, ZeroDivisionError, "divided by 0"]\n[(-2/3), -0.0, :divmod, ZeroDivisionError, "divided by 0"]\n[(-2/3), -0.0, :fdiv, -Infinity]\n[(-2/3), Infinity, :%, NaN]\n[(-2/3), Infinity, :modulo, NaN]\n[(-2/3), Infinity, :remainder, (-2/3)]\n[(-2/3), Infinity, :div, 0]\n[(-2/3), Infinity, :divmod, [0, NaN]]\n[(-2/3), Infinity, :fdiv, -0.0]\n[(-2/3), -Infinity, :%, NaN]\n[(-2/3), -Infinity, :modulo, NaN]\n[(-2/3), -Infinity, :remainder, NaN]\n[(-2/3), -Infinity, :div, 0]\n[(-2/3), -Infinity, :divmod, [0, NaN]]\n[(-2/3), -Infinity, :fdiv, 0.0]\n[(-2/3), NaN, :%, FloatDomainError, "NaN"]\n[(-2/3), NaN, :modulo, FloatDomainError, "NaN"]\n[(-2/3), NaN, :remainder, FloatDomainError, "NaN"]\n[(-2/3), NaN, :div, FloatDomainError, "NaN"]\n[(-2/3), NaN, :divmod, FloatDomainError, "NaN"]\n[(-2/3), NaN, :fdiv, NaN]\n',
+    stderr: '',
+    uncaughtException: undefined,
+  });
+});
+
+test('Time String dispatch validates year tokens independently of calendar argument coercion', () => {
+  expect(
+    run(String.raw`['24','99','+24','-1','','abcd',' 2024','2024 '].each do |s|
+ begin;p Time.new(s).year;rescue ArgumentError=>e;puts e.message;end
+end
+['0001','2024','+024','-024','12345'].each{|s|p Time.new(s).year}
+p Time.new('24',1).year,Time.local('24').year
+class Year
+ def to_str;'2024';end
+end
+p Time.new(Year.new).year
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'year must be 4 or more digits: 24\nyear must be 4 or more digits: 99\nyear must be 4 or more digits: +24\nyear must be 4 or more digits: -1\ncan\'t parse: ""\ncan\'t parse: "abcd"\ncan\'t parse: " 2024"\ncan\'t parse: "2024 "\n1\n2024\n24\n-24\n12345\n24\n24\n2024\n',
+    stderr: '',
+    uncaughtException: undefined,
+  });
+});
+
+test('Binary newline matching retains byte-oriented R semantics', () => {
+  expect(
+    run(String.raw`s=String.new(encoding:'ASCII-8BIT');s<<133
+p /\R/.match?(s),s.gsub(/\R/,'-').bytes
+p /\R/.match?("\u0085"),/\R/.match?("\u2028")
+p String.new("\r\n",encoding:'ASCII-8BIT').gsub(/\R/,'-').bytes
+p Regexp.new(String.new('\\R',encoding:'ASCII-8BIT')).match?(s)
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'false\n[133]\ntrue\ntrue\n[45]\nfalse\n',
+    stderr: '',
+    uncaughtException: undefined,
+  });
+});
+
+test('Regexp text merges only a single complete root option group', () => {
+  expect(
+    run(String.raw`[/a/,/(?:a)/,/(?x:a b)/,/(?i:(?-m:a))/,/(?i:a)|b/,/(?i:a)(b)/,/(?x:a b) /x,/(?x:a b) /,/(?i:a)(?#tail)/,/(?i:a(?#inner))/].each{|r|p r.to_s}
+p Regexp.union(/(?x:a b)/,/c/).source
+[/(?x)a b/,/(?x)(?-x)a b/,/(?x)(?x:a b)/,/(?i-i:a)/,/(?ii-ii:a)/,/(?x-x:a b)/].each{|r|p r.to_s}
+p /(?i-i:a)/.match?('A'),/(?ii-ii:a)/.match?('A'),/(?x-x:a b)/.match?('a b')
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '"(?-mix:a)"\n"(?-mix:a)"\n"(?x-mi:a b)"\n"(?i-mx:(?-m:a))"\n"(?-mix:(?i:a)|b)"\n"(?-mix:(?i:a)(b))"\n"(?x-mi:(?x:a b) )"\n"(?-mix:(?x:a b) )"\n"(?-mix:(?i:a)(?#tail))"\n"(?i-mx:a(?#inner))"\n"(?x-mi:a b)|(?-mix:c)"\n"(?x-mi:a b)"\n"(?-mix:a b)"\n"(?x-mi:a b)"\n"(?-mix:a)"\n"(?-mix:a)"\n"(?-mix:a b)"\nfalse\nfalse\ntrue\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Regexp copies warn at the call site without coercing ignored options', () => {
+  expect(
+    run(String.raw`p Regexp.new(/a/i,nil)
+p Regexp.new(/b/,false)
+p Regexp.compile(/c/,0)
+class Options
+ def to_int;raise 'must not coerce';end
+end
+p Regexp.new(/d/,Options.new)
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '/a/i\n/b/\n/c/\n/d/\n',
+    stderr: 'main.rb:2: warning: flags ignored\nmain.rb:3: warning: flags ignored\nmain.rb:7: warning: flags ignored\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['foo!', 'a b', ':x', 'a.b', 'a:b', '+a', ' a'])(
+  'Ruby capture names outside host identifiers fail explicitly: %s',
+  (name) => {
+    expect(run(`puts :before;p /(?<${name}>a)/`)).toMatchObject({
+      kind: 'executed',
+      stdout: 'before\n',
+      uncaughtException: '正規表現の特殊なキャプチャ名は、この採点環境では使えません。',
+    });
+    expect(run(`puts :before;Regexp.new(${JSON.stringify(`(?<${name}>a)`)})`)).toMatchObject({
+      kind: 'executed',
+      stdout: 'before\n',
+      uncaughtException: '正規表現の特殊なキャプチャ名は、この採点環境では使えません。',
+    });
+  }
+);
+
+test.each([String.raw`(?<a b>a)(?<=x*)`, String.raw`(?<a b>a)\1`])(
+  'capture capability checks follow all syntax validation: %s',
+  (source) => {
+    expect(run(`puts :before;p /${source}/`)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test.each([
+  String.raw`p /(?x:a # \x
+ b)/`,
+  String.raw`p /(?x:a # \u{bogus}
+ b)/`,
+])('source regexp escapes are checked before engine comment handling: %s', (source) => {
+  expect(run(`puts :before;${source}`)).toMatchObject({ kind: 'compileError' });
+});
+
+test.each(['2024-01-01 00:00:00', '2024-01-01 00:00:00+09:00'])(
+  'unsupported Time String forms do not become calendar years: %s',
+  (source) => {
+    expect(run(`Time.new(${JSON.stringify(source)})`)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: 'Time.new の文字列形式は、この採点環境では使えません。',
+    });
+  }
+);
+
+test('Pretty printing dispatches native inspect aliases at the object boundary', () => {
+  const result = run('class C;alias inspect to_s;def initialize;@x=1;end;end;pp C.new;pp [C.new]');
+  if (result.kind !== 'executed') throw new Error(JSON.stringify(result));
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.stdout).not.toContain('@x');
+  expect(result.stdout).toMatch(/^#<C:0x[\da-f]+>\n\[#<C:0x[\da-f]+>\]\n$/);
+  expect(run('class E;undef inspect;def initialize;@x=1;end;end;pp E.new')).toMatchObject({
+    kind: 'executed',
+    stdout: expect.stringContaining('@x=1'),
+    uncaughtException: undefined,
+  });
+});

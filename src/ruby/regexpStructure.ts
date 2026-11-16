@@ -54,7 +54,7 @@ function parseSourceRegexp(source: string, extended: boolean, binary = false): S
   const normalized = normalizeRubyRegexpEscapes(source, extended, binary);
   const tokens = tokenize(normalized, { flags: extended ? 'x' : '' }).tokens;
   validateSourceTokens(tokens);
-  const root = parseOniguruma(quantifiableAssertionSource(tokens), {
+  const root = parseOniguruma(quantifiableAssertionSource(aliasedCaptureTokens(tokens)), {
     flags: extended ? 'x' : '',
     skipLookbehindValidation: true,
     skipBackrefValidation: true,
@@ -70,6 +70,27 @@ function validateSourceTokens(tokens: Token[]): void {
       if (bounds && Number(bounds[1]) > Number(bounds[2])) throw new SyntaxError('invalid reversed quantifier range');
     }
   }
+}
+
+function aliasedCaptureTokens(tokens: Token[]): Token[] {
+  const aliases = new Map<string, string>();
+  for (const token of tokens) {
+    if (token.type !== 'GroupOpen' || token.kind !== 'capturing' || token.name === undefined) continue;
+    if (token.name.length === 0) throw new RegexpEncodingError('group name is empty');
+    if (/^[\d-]/.test(token.name)) throw new RegexpEncodingError(`invalid group name <${token.name}>`);
+    if (!aliases.has(token.name)) aliases.set(token.name, `RubyCapture${aliases.size}`);
+  }
+  return tokens.map((token) => {
+    if (token.type === 'GroupOpen' && token.kind === 'capturing' && token.name !== undefined)
+      return { ...token, raw: `(?<${aliases.get(token.name)}>` };
+    if (token.type === 'Backreference' || token.type === 'Subroutine') {
+      const match = /^\\([gk])(?:<([^>]+)>|'([^']+)')$/.exec(token.raw);
+      const name = match?.[2] ?? match?.[3];
+      if (match && name !== undefined && aliases.has(name))
+        return { ...token, raw: `\\${match[1]}<${aliases.get(name)}>` };
+    }
+    return token;
+  });
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- Source assertions are wrapped for AST parsing while group balance remains checked before recursive parsing.

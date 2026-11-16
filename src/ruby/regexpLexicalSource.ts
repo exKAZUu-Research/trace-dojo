@@ -1,92 +1,73 @@
-interface LexicalState {
-  extended: boolean;
-  scopes: boolean[];
-  classes: number[];
-}
+import { type Token, tokenize } from 'oniguruma-parser/tokenizer';
+
+import { ExecutionLimitError } from '../interpreter/limits';
+import { RegexpEncodingError } from './regexpEscapes';
+import { UnsupportedFeatureError } from './runtime';
 
 export function regexpLexicalSource(source: string, extended: boolean): string {
-  if (!extended && !/\(\?[imx-]*x/.test(source) && !source.includes('(?#')) return source;
-  const parts: string[] = [];
-  const state: LexicalState = { extended, scopes: [], classes: [] };
-  for (let index = 0; index < source.length; index++) {
-    const char = source[index];
-    if (char === '\\') {
-      const atom = /^\\(?:[pPu]\{[^}]*\}|[gk](?:<[^>]*>|'[^']*')|[\s\S])/.exec(source.slice(index))?.[0] ?? char;
-      parts.push(atom);
-      index += atom.length - 1;
-      continue;
-    }
-    if (classCharacter(source, index, state)) {
-      parts.push(char);
-      continue;
-    }
-    if (source.startsWith('(?#', index) || (state.extended && char === '#')) {
-      const end = char === '#' ? regexpLineCommentEnd(source, index) : regexpCommentEnd(source, index + 3);
-      if (end < 0) return parts.join('') + source.slice(index);
-      index = end;
-      continue;
-    }
-    const group = groupOptions(source, index, state);
-    if (group) {
-      parts.push(group.text);
-      index += group.length - 1;
-    } else if (/[ \t\n\r\f]/.test(char)) {
-      if (!state.extended) parts.push(`\\u{${char.codePointAt(0)!.toString(16)}}`);
-    } else parts.push(char === '#' ? String.raw`\#` : char);
-  }
-  return parts.join('');
+  return regexpSourceTokens(source, extended)
+    .map((token) => sourceToken(token, source))
+    .join('');
 }
 
-function classCharacter(source: string, index: number, state: LexicalState): boolean {
-  if (source[index] === '[') {
-    state.classes.push(index + (source[index + 1] === '^' ? 2 : 1));
-    return true;
+export function regexpSourceTokens(source: string, extended: boolean): Token[] {
+  try {
+    return tokenize(source, { flags: extended ? 'x' : '', rules: { rubySyntax: true } }).tokens;
+  } catch (error) {
+    if (error instanceof SyntaxError || error instanceof UnsupportedFeatureError) throw error;
+    if (error instanceof RangeError) throw new ExecutionLimitError('operations');
+    if (error instanceof Error && error.message === 'Quantifier value unsupported in Oniguruma')
+      throw new RegexpEncodingError('too big number for repeat range');
+    if (
+      error instanceof Error &&
+      /unsupported/i.test(error.message) &&
+      !error.message.startsWith('Invalid or unsupported group option')
+    )
+      throw new UnsupportedFeatureError('正規表現の構文の検証');
+    throw new SyntaxError(error instanceof Error ? error.message : 'invalid regexp source');
   }
-  if (state.classes.length === 0) return false;
-  if (source[index] === ']' && index !== state.classes.at(-1)) state.classes.pop();
-  return true;
 }
 
-function groupOptions(
-  source: string,
-  index: number,
-  state: LexicalState
-): { text: string; length: number } | undefined {
-  if (source[index] === ')') state.extended = state.scopes.pop() ?? state.extended;
-  if (source[index] !== '(') return undefined;
-  const options = /^\(\?([imx]*)(?:-([imx]*))?([:)])/.exec(source.slice(index));
-  if (!options) {
-    state.scopes.push(state.extended);
-    return undefined;
-  }
-  if (options[3] === ':') state.scopes.push(state.extended);
-  if (options[1].includes('x')) state.extended = true;
-  if (options[2]?.includes('x')) state.extended = false;
-  const on = options[1].replaceAll('x', '');
-  const off = (options[2] ?? '').replaceAll('x', '');
-  const text = on || off || options[3] === ':' ? `(?${on}${off ? `-${off}` : ''}${options[3]}` : '';
-  return { text, length: options[0].length };
-}
-
-export function regexpCommentEnd(source: string, start: number): number {
-  for (let index = start; index < source.length; index++) {
-    if (source[index] === '\\') index++;
-    else if (source[index] === ')') return index;
-  }
-  return -1;
-}
-
-export function regexpLineCommentEnd(source: string, start: number): number {
-  for (let index = start; index < source.length; index++) {
-    if (source[index] === '\\' && source[index + 1] === '\\') {
-      index++;
-      continue;
+function sourceToken(token: Token, source: string): string {
+  if (token.type === 'Character') {
+    if (token.raw.startsWith('\\')) {
+      validateEscape(token.raw, token.rawStart, source.length);
+      return token.raw;
     }
-    if (source[index] === '\\' && source[index + 1] === '\n') {
-      index++;
-      continue;
-    }
-    if (source[index] === '\n') return index;
+    return token.raw === ']' ? token.raw : `\\u{${token.value.toString(16)}}`;
   }
-  return source.length;
+  if (
+    (token.type === 'GroupOpen' && token.kind === 'group') ||
+    (token.type === 'Directive' && token.kind === 'flags')
+  ) {
+    const options = /^\(\?([imx]*)(?:-([imx]*))?([:)])$/.exec(token.raw);
+    if (options) {
+      const disabled = new Set(options[2]);
+      const on = [...new Set(options[1])].filter((flag) => flag !== 'x' && !disabled.has(flag)).join('');
+      const off = [...disabled].filter((flag) => flag !== 'x').join('');
+      return on || off || options[3] === ':' ? `(?${on}${off ? `-${off}` : ''}${options[3]}` : '';
+    }
+  }
+  return token.raw;
+}
+
+function validateEscape(raw: string, start: number | undefined, sourceLength: number): void {
+  if (raw === '\\') throw new RegexpEncodingError('too short escape sequence');
+  if (raw.startsWith(String.raw`\x`) && !/^(?:\\x[\da-f]{1,2})+$/i.test(raw))
+    throw new RegexpEncodingError('invalid hex escape');
+  if (raw.startsWith(String.raw`\u`)) {
+    if (raw.startsWith(String.raw`\u{`)) {
+      if (!/^\\u\{[ \t\r\n\f\v]*[\da-f]+(?:[ \t\r\n\f\v]+[\da-f]+)*[ \t\r\n\f\v]*\}$/i.test(raw))
+        throw new RegexpEncodingError('invalid Unicode list');
+    } else if (!/^\\u[\da-f]{4}$/i.test(raw))
+      throw new RegexpEncodingError(
+        raw === String.raw`\u` && start !== undefined && start + raw.length === sourceLength
+          ? 'too short escape sequence'
+          : 'invalid Unicode escape'
+      );
+  }
+  if (/^\\[pP]\{/.test(raw) && !raw.endsWith('}')) {
+    const name = raw.slice(3).replace(/^\^/, '').slice(0, -1);
+    throw new RegexpEncodingError(`invalid character property name {${name}}`);
+  }
 }

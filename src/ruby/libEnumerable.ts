@@ -123,7 +123,7 @@ export const rangeHelpers: { iterateRange: (range: RRange, visit: Visit) => Gen<
 
 function isOverridden(collection: RArray | RHash | RRange): boolean {
   const method = (collection.singleton ?? collection.cls).findMethod('each');
-  return method !== undefined && method.body.kind !== 'native';
+  return method === undefined || !isCoreMethod(method, method.owner, 'each');
 }
 
 export function* toArray(collection: Value, args: Value[] = []): Gen<Value[]> {

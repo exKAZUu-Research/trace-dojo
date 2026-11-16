@@ -152,9 +152,6 @@ def('Kernel', 'to_s', 0, (self) => str(anyToS(self)));
 def('Kernel', 'inspect', 0, function* (self) {
   if (self instanceof RObject && self.exception) return str(yield* inspectException(self));
   if (self instanceof RBasic && !(self instanceof RClass)) {
-    if (classOf(self).findMethod('to_s')?.body.kind === 'user' && !self.ivars?.size) {
-      return str(anyToS(self));
-    }
     return str(yield* inspectObject(self));
   }
   return str(anyToS(self));
@@ -338,7 +335,7 @@ def('Kernel', ['to_enum', 'enum_for'], [0, -1], function* (self, args, block) {
 
 const PRIVATE = { visibility: 'private' as Visibility };
 
-def('Kernel', 'block_given?', 0, () => rt().frame.home.extra.block !== undefined, PRIVATE);
+def('Kernel', 'block_given?', 0, () => rt().frame.lexicalBlock !== undefined, PRIVATE);
 def(
   'Kernel',
   'loop',
@@ -1094,19 +1091,23 @@ def(
   },
   { ...PRIVATE, keywords: true }
 );
-def(
-  'KeyError',
-  'initialize',
-  [0, 1],
-  function* (self: RObject, args, _block, keywords) {
-    const options = exceptionKeywords(keywords, ['receiver', 'key']);
-    yield* setExceptionMessage(self, args[0] ?? NIL);
-    self.internal ??= new Map();
-    for (const [name, value] of options) self.internal.set(`${name}`, value);
-    return NIL;
-  },
-  { ...PRIVATE, keywords: true }
-);
+for (const [owner, allowed] of [
+  ['KeyError', ['receiver', 'key']],
+  ['NoMatchingPatternKeyError', ['matchee', 'key']],
+] as const)
+  def(
+    owner,
+    'initialize',
+    [0, 1],
+    function* (self: RObject, args, _block, keywords) {
+      const options = exceptionKeywords(keywords, allowed);
+      yield* setExceptionMessage(self, args[0] ?? NIL);
+      self.internal ??= new Map();
+      for (const [name, value] of options) self.internal.set(name, value);
+      return NIL;
+    },
+    { ...PRIVATE, keywords: true }
+  );
 
 function* initializeNameError(self: RObject, args: Value[], keywords: RHash | undefined): Gen<void> {
   const options = exceptionKeywords(keywords, ['receiver']);
@@ -1119,7 +1120,7 @@ function* initializeNameError(self: RObject, args: Value[], keywords: RHash | un
   if (options.has('receiver')) self.internal.set('receiver', options.get('receiver') ?? NIL);
 }
 
-function exceptionKeywords(keywords: RHash | undefined, allowed: string[]): Map<string, Value> {
+function exceptionKeywords(keywords: RHash | undefined, allowed: readonly string[]): Map<string, Value> {
   const options = new Map<string, Value>();
   for (const entry of keywords?.map.values() ?? []) {
     const name = entry.key instanceof RSymbol ? entry.key.name : '';

@@ -704,15 +704,20 @@ export class Converter {
     for (const child of namedChildren(node)) {
       if (child.type === 'string_content' || child.type === 'escape_sequence') literal += child.text;
       else if (child.type === 'interpolation') {
-        if (literal) parts.push(literal.replaceAll('\r\n', '\n'));
+        if (literal) parts.push(this.regexpLiteralPart(node, literal));
         literal = '';
         const statements = this.body(namedChildren(child), 1);
         parts.push(statements.length === 1 ? statements[0].e : { k: 'seq', body: statements });
       }
     }
-    if (literal) parts.push(literal.replaceAll('\r\n', '\n'));
+    if (literal) parts.push(this.regexpLiteralPart(node, literal));
     if (parts.every((part) => typeof part === 'string')) this.validateLiteralRegexp(node, parts.join(''), flags);
     return { k: 'regex', parts, flags, slashDelimited: node.text.startsWith('/') };
+  }
+
+  private regexpLiteralPart(node: Node, source: string): string {
+    if (decodeDoubleQuoted(source) === undefined) this.fail(node, '正規表現の書き方に誤りがあります。');
+    return source.replaceAll('\r\n', '\n').replaceAll(/\\[\s\S]/g, (escape) => (escape === '\\\n' ? '' : escape));
   }
 
   private validateLiteralRegexp(node: Node, source: string, flags: string): void {

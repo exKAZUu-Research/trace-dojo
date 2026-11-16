@@ -332,8 +332,14 @@ def(
 function* initializeTime(cls: RClass, args: Value[], keywords: RHash | undefined): Gen<RObject> {
   if (keywords) throw new UnsupportedFeatureError('Time.new の in: 指定');
   if (args.length === 0) return makeTime(cls, nowNanoseconds());
-  if (args.length === 1 && args[0] instanceof RString && /^\d{4}-\d{2}-\d{2}(?:[ T].*)?$/.test(args[0].s))
-    throw new UnsupportedFeatureError('Time.new の文字列形式');
+  if (args.length === 1) {
+    const input = args[0] instanceof RString ? args[0] : yield* tryImplicitConversion(args[0], 'to_str');
+    if (input instanceof RString) return yield* initializeStringTime(cls, input);
+    if (input !== undefined && input !== NIL)
+      throw typeError(
+        `can't convert ${realClassOf(args[0]).name} to String (${realClassOf(args[0]).name}#to_str gives ${realClassOf(input).name})`
+      );
+  }
   if (args.length === 7 && args[6] !== NIL)
     return yield* buildTime(
       cls,
@@ -344,6 +350,16 @@ function* initializeTime(cls: RClass, args: Value[], keywords: RHash | undefined
       exactOffset(args[6])
     );
   return yield* buildTime(cls, args, LOCAL_OFFSET, 'local');
+}
+
+function* initializeStringTime(cls: RClass, input: RString): Gen<RObject> {
+  const source = input.s;
+  const year = /^[+-]?\d+/.exec(source)?.[0];
+  if (!year || /^[ \t\n\r\f\v]|[ \t\n\r\f\v]$/.test(source))
+    throw argumentError(`can't parse: ${(yield* inspectValue(input)).s}`);
+  if (year.length < 4) throw argumentError(`year must be 4 or more digits: ${year}`);
+  if (year !== source) throw new UnsupportedFeatureError('Time.new の文字列形式');
+  return yield* buildTime(cls, [input], LOCAL_OFFSET, 'local');
 }
 
 sdef('Time', ['local', 'mktime'], [1, 10], function* (self: RClass, args) {

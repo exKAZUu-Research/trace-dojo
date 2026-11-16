@@ -280,7 +280,7 @@ def('Array', 'values_at', [0, -1], function* (self: RArray, args) {
 });
 def('Array', ['length', 'size'], 0, (self: RArray) => BigInt(self.items.length));
 def('Array', 'empty?', 0, (self: RArray) => self.items.length === 0);
-def('Array', ['to_a', 'entries'], 0, (self: RArray) => (self.cls === rt().c.Array ? self : arr([...self.items])));
+def('Array', 'to_a', 0, (self: RArray) => (self.cls === rt().c.Array ? self : arr([...self.items])));
 def('Array', 'to_ary', 0, (self) => self);
 def('Array', ['inspect', 'to_s'], 0, function* (self: RArray) {
   return yield* inspectArray(self);

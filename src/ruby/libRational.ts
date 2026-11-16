@@ -1,5 +1,5 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { formatFloat, toFloat, toInt, toStr, tryImplicitConversion } from './conversions';
+import { formatFloat, rEquals, toFloat, toInt, toStr, tryImplicitConversion } from './conversions';
 import { def } from './define';
 import { argumentError, floatDomainError, typeError, zeroDivisionError } from './errors';
 import { exceptionOption } from './exceptionOption';
@@ -10,7 +10,7 @@ import { chargeIntegerResult, integerBits } from './integerBudget';
 import { callMethod, type Gen } from './interp';
 import { isRubyFloat, NIL, RArray, RObject, RString, RSymbol, type Value } from './objects';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
-import { arr, realClassOf, str } from './values';
+import { arr, isA, realClassOf, str, truthy } from './values';
 
 /** A Rational's value in lowest terms, with a positive denominator. */
 interface Fraction {
@@ -151,29 +151,41 @@ function* rationalDivision(
   other: Value,
   op: '%' | 'modulo' | 'remainder' | 'div' | 'divmod' | 'fdiv'
 ): Gen {
-  const left = fractionOf(self);
-  if (isRubyFloat(other)) return yield* callMethod(toNumber(left), op, [other]);
-  const right = asFraction(other);
-  if (!right) {
-    const [left, converted] = yield* coercePair(self, other);
-    return yield* callMethod(left, op, [converted]);
-  }
   if (op === 'fdiv') {
-    if (right.numerator === 0n) return toNumber(left) / 0;
-    const quotient = makeRational(left.numerator * right.denominator, left.denominator * right.numerator);
-    return toNumber(fractionOf(quotient));
+    const divisor = (yield* rEquals(other, 0n)) ? 0 : other;
+    const divided = yield* arithmetic(self, divisor, '/');
+    return isRational(divided) ? toNumber(fractionOf(divided)) : yield* toFloat(divided);
   }
-  if (right.numerator === 0n) throw zeroDivisionError();
-  const numerator = left.numerator * right.denominator;
-  const denominator = left.denominator * right.numerator;
-  const quotient = op === 'remainder' ? numerator / denominator : floorDivide(numerator, denominator);
-  if (op === 'div') return quotient;
-  const remainder = makeRational(
-    left.numerator * right.denominator - quotient * right.numerator * left.denominator,
-    left.denominator * right.denominator
-  );
-  return op === 'divmod' ? arr([quotient, remainder]) : remainder;
+  if (op === 'div') return yield* numericDiv(self, other);
+  if (op === 'divmod') return arr([yield* numericDiv(self, other), yield* numericModulo(self, other)]);
+  if (op === 'remainder') return yield* numericRemainder(self, other);
+  return yield* numericModulo(self, other);
 }
+
+function* numericDiv(left: Value, right: Value): Gen {
+  if (yield* rEquals(0n, right)) throw zeroDivisionError();
+  const quotient = yield* callMethod(left, '/', [right]);
+  return yield* callMethod(quotient, 'floor', []);
+}
+
+function* numericModulo(left: Value, right: Value): Gen {
+  const quotient = yield* callMethod(left, 'div', [right]);
+  const product = yield* callMethod(right, '*', [quotient]);
+  return yield* callMethod(left, '-', [product]);
+}
+
+function* numericRemainder(self: RObject, other: Value): Gen {
+  const [left, right] = isA(other, rt().c.Numeric) ? [self, other] : yield* coercePair(self, other);
+  const remainder = yield* callMethod(left, '%', [right]);
+  if (yield* rEquals(remainder, 0n)) return remainder;
+  const opposite =
+    (truthy(yield* callMethod(left, '<', [0n])) && truthy(yield* callMethod(right, '>', [0n]))) ||
+    (truthy(yield* callMethod(left, '>', [0n])) && truthy(yield* callMethod(right, '<', [0n])));
+  if (!opposite) return remainder;
+  if (isRubyFloat(right) && Math.abs(Number(right)) === Infinity) return left;
+  return yield* callMethod(remainder, '-', [right]);
+}
+
 def('Rational', '**', 1, function* (self: RObject, [exponent]) {
   const { numerator, denominator } = fractionOf(self);
   if (isRational(exponent) && fractionOf(exponent).denominator === 1n) exponent = fractionOf(exponent).numerator;

@@ -99,6 +99,10 @@ export class Frame implements TracedFrame {
   get home(): Frame {
     return this.extra.home ?? this;
   }
+  get lexicalBlock(): RProc | undefined {
+    const home = this.home;
+    return (home.extra.lexicalBlockHome ?? home).extra.block;
+  }
 }
 
 export function rootValues(frame: Frame, values: readonly Value[]): void {
@@ -113,8 +117,8 @@ export interface FrameExtra {
   method?: RMethod;
   missingReason?: 'vcall' | 'private' | 'protected';
   def?: MethodDef;
-  /** The block the method received, which `yield` calls. */
   block?: RProc;
+  lexicalBlockHome?: Frame;
   /** The arguments the method received, which `super` without arguments passes on. */
   args?: Value[];
   keywords?: Value;

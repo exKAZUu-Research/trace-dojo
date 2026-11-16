@@ -1055,3 +1055,11 @@ test.each(['+', '*'])('proc-defined operators record the same class initializer 
   expect(expected.length).toBeGreaterThan(0);
   expect(rubyTrace(program(`define_method(:${operator}) do |x|`))).toEqual(expected);
 });
+
+test.each(['private', 'include'])('proc-defined declaration names retain atomic call sites: %s', (name) => {
+  const program = (declaration: string): string =>
+    `class A\n def hidden # atomic\n  $x=1\n end\n ${declaration}\n def go\n  ${name}\n end\nend\nA.new.go`;
+  const expected = rubyTrace(program(`alias ${name} hidden`));
+  expect(expected.length).toBeGreaterThan(0);
+  expect(rubyTrace(program(`define_method(:${name},new.method(:hidden).to_proc)`))).toEqual(expected);
+});

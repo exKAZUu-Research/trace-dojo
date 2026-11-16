@@ -299,7 +299,7 @@ function fastToS(value: Value): string | undefined {
 /** Whether the program redefined a library method for a value, which then must run instead of the fast path. */
 function isOverridden(value: Value, name: string): boolean {
   const method = classOf(value).findMethod(name);
-  return method !== undefined && method.body.kind !== 'native';
+  return method === undefined || !isCoreMethod(method, method.owner, name);
 }
 
 /** The default text of an object: `#<Foo:0x...>`, with a fake address that stays the same for the object. */

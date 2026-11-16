@@ -1,5 +1,6 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { addressOf, anonymousClassName, inspect, quotedSymbolName, symInspect } from './conversions';
+import { isCoreMethod } from './define';
 import type { Gen } from './interp';
 import { structEntriesOf } from './libStruct';
 import { type HashEntry, RArray, RBasic, RClass, RHash, RObject, RString, RSymbol, type Value } from './objects';
@@ -244,9 +245,8 @@ function group(
 }
 
 function showsItself(value: Value): boolean {
-  if (value instanceof RObject && structEntriesOf(value)) return false;
   const method = classOf(value).findMethod('inspect');
-  return method !== undefined && method.body.kind !== 'native';
+  return method !== undefined && !isCoreMethod(method, method.owner, 'inspect');
 }
 
 function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = false): Gen<Doc> {
@@ -325,7 +325,7 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = fa
     !value.exception &&
     value.data === undefined &&
     !showsItself(value) &&
-    classOf(value).findMethod('to_s')?.body.kind === 'native' &&
+    isCoreMethod(classOf(value).findMethod('to_s'), rt().c.Kernel, 'to_s') &&
     value.ivars &&
     value.ivars.size > 0
   ) {

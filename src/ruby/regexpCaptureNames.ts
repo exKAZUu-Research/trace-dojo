@@ -1,7 +1,16 @@
-import { regexpLexicalSource } from './regexpLexicalSource';
+import { regexpSourceTokens } from './regexpLexicalSource';
 
 export function regexpCaptureNames(source: string, extended = false): string[] {
-  source = regexpLexicalSource(source, extended);
+  try {
+    return regexpSourceTokens(source, extended).flatMap((token) =>
+      token.type === 'GroupOpen' && token.kind === 'capturing' && token.name !== undefined ? [token.name] : []
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function hostRegexpCaptureNames(source: string): string[] {
   const names: string[] = [];
   let inClass = false;
   for (let index = 0; index < source.length; index++) {
@@ -21,19 +30,18 @@ export function regexpCaptureNames(source: string, extended = false): string[] {
 }
 
 export function regexpHasNumberedBackref(source: string, extended = false): boolean {
-  source = regexpLexicalSource(source, extended);
-  let inClass = false;
-  for (let index = 0; index < source.length; index++) {
-    const char = source[index];
-    if (char === '\\') {
-      const next = source[index + 1] ?? '';
-      if (!inClass && /[1-9]/.test(next) && !(/[1-7]/.test(next) && /[0-7]/.test(source[index + 2] ?? ''))) return true;
-      if (!inClass && next === 'k' && /^<\d+>/.test(source.slice(index + 2))) return true;
-      index++;
-      continue;
+  try {
+    let depth = 0;
+    for (const token of regexpSourceTokens(source, extended)) {
+      if (token.type === 'CharacterClassOpen') depth++;
+      else if (token.type === 'CharacterClassClose') depth--;
+      else if (depth === 0 && token.type === 'Character') {
+        if (/^\\[1-9]/.test(token.raw) && !/^\\[1-7][0-7]/.test(token.raw)) return true;
+        if (/^\\k<\d+>/.test(token.raw)) return true;
+      }
     }
-    if (char === '[') inClass = true;
-    else if (char === ']') inClass = false;
+    return false;
+  } catch {
+    return false;
   }
-  return false;
 }
