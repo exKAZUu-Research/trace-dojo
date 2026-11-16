@@ -3,7 +3,7 @@ import { PANIC, panic } from '../arith';
 /** `std.Random` with `DefaultPrng` (Xoshiro256), transcribed so that seeded sequences match Zig's. */
 import type { Span } from '../ast';
 import type { Frame } from '../runtime';
-import { known, runtime, type SemaApi, type TExpr } from '../semaBase';
+import { copyForStorage, known, runtime, type SemaApi, type TExpr } from '../semaBase';
 import {
   arrayOf,
   BOOL,
@@ -23,6 +23,7 @@ import {
   wrapInt,
 } from '../types';
 import { NativeHandle, type Pointer, type Slice, type Value, ZArray, ZStruct } from '../values';
+import { storeSliceValue } from './common';
 import { addMembers, compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
 
 const MASK = (1n << 64n) - 1n;
@@ -391,9 +392,10 @@ addMembers(RANDOM, {
         for (let index = 0; index + 1 < slice.length; index++) {
           frame.runtime.spend();
           const other = Number(intRange(generator, usize, BigInt(index), BigInt(slice.length), false));
-          const value = slice.get(index);
-          slice.set(index, slice.get(other));
-          slice.set(other, value);
+          const value = copyForStorage(slice.get(index));
+          const swapped = copyForStorage(slice.get(other));
+          storeSliceValue(slice, index, swapped);
+          storeSliceValue(slice, other, value);
         }
         return;
       },

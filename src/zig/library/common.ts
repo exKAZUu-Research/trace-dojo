@@ -59,6 +59,11 @@ export function storeSliceValue(slice: Slice, index: number, value: Value): void
   storeInto(slice.target, slice.start + index, value);
 }
 
+export function storeSliceValues(slice: Slice, values: readonly Value[]): void {
+  const copied = values.map(copyForStorage);
+  for (const [index, value] of copied.entries()) storeSliceValue(slice, index, value);
+}
+
 /** Part of a slice, sharing its elements. */
 export function subSlice(slice: Slice, start: number, length: number): Slice {
   return new Slice(slice.target, slice.start + start, length);

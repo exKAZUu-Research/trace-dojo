@@ -4,7 +4,7 @@ import type { Frame } from '../runtime';
 import { known, type SemaApi } from '../semaBase';
 import { BOOL, fnType, optionalOf, type StructType, type Type, typeName, USIZE, VOID } from '../types';
 import { FnValue, NULL, type Slice, type Value, ZStruct } from '../values';
-import { compareScalars, constSlice, generic, mutableSlice, ORDER, tupleOf } from './common';
+import { compareScalars, constSlice, generic, mutableSlice, ORDER, storeSliceValues, tupleOf } from './common';
 import { type Member, nativeCall, nativeFunction, nativeStruct } from './native';
 import { type SortAlgorithm, sortValues } from './sorting';
 
@@ -43,7 +43,7 @@ function sorter(name: string, algorithm: SortAlgorithm): () => Member {
         algorithm,
         frame
       );
-      for (const [index, value] of sorted.entries()) slice.set(index, value);
+      storeSliceValues(slice, sorted);
       return;
     });
   });

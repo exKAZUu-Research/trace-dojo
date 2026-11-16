@@ -784,3 +784,142 @@ test('turtle collection traverses large aggregate roots without host argument li
     uncaughtException: undefined,
   });
 });
+
+test('virtual slice-length and optional payload addresses identify the same live storage', () => {
+  const program = `const std = @import("std");
+pub fn main() void {
+    var data = [_]u8{ 1, 2, 3 };
+    var slice: []u8 = &data;
+    const p = &slice.len;
+    const q = &slice.len;
+    p.* = 2;
+    var optional: ??u8 = @as(?u8, null);
+    const a = &optional.?;
+    const b = &optional.?;
+    a.* = 7;
+    std.debug.print("{} {} {} {}", .{p == q, q.*, a == b, b.*.?});
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 2 true 7',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['std.mem.reverse(P, &values)', 2],
+  ['std.mem.rotate(P, &values, 1)', 1],
+  ['std.mem.sort(P, &values, {}, less)', 1],
+  ['std.sort.heap(P, &values, {}, less)', 1],
+])('aggregate permutations preserve element field addresses (%s)', (operation, expected) => {
+  const program = `const std = @import("std");
+const P = struct { x: i32 };
+fn less(_: void, a: P, b: P) bool { return a.x < b.x; }
+pub fn main() void {
+    var values = [_]P{ .{ .x = 3 }, .{ .x = 1 }, .{ .x = 2 } };
+    const p = &values[0].x;
+    ${operation};
+    std.debug.print("{} {}", .{values[0].x, p.*});
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: `${expected} ${expected}`,
+    uncaughtException: undefined,
+  });
+});
+
+test('swap, shuffle, and queue removal keep interior pointers attached to their locations', () => {
+  const program = `const std = @import("std");
+const P = struct { x: i32 };
+fn order(_: void, a: P, b: P) std.math.Order { return std.math.order(a.x, b.x); }
+pub fn main(init: std.process.Init) !void {
+    var a = P{ .x = 1 };
+    var b = P{ .x = 2 };
+    const p = &a.x;
+    std.mem.swap(P, &a, &b);
+    var values = [_]P{ .{ .x = 1 }, .{ .x = 2 }, .{ .x = 3 } };
+    const q = &values[0].x;
+    var prng = std.Random.DefaultPrng.init(42);
+    prng.random().shuffle(P, &values);
+    var queue: std.PriorityQueue(P, void, order) = .empty;
+    defer queue.deinit(init.gpa);
+    try queue.push(init.gpa, .{ .x = 3 });
+    try queue.push(init.gpa, .{ .x = 1 });
+    try queue.push(init.gpa, .{ .x = 2 });
+    const first = &queue.items[0].x;
+    _ = queue.pop();
+    std.debug.print("{} {} {} {}", .{a.x, p.*, values[0].x == q.*, first.*});
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: '2 2 true 2',
+    uncaughtException: undefined,
+  });
+});
+
+test('writer views and drains read the same authoritative backing storage', () => {
+  const program = `const std = @import("std");
+const P = struct {
+    pub fn format(_: @This(), out: *std.Io.Writer) std.Io.Writer.Error!void {
+        try out.writeAll("abc");
+        const view = out.buffered();
+        view[0] = 88;
+    }
+};
+pub fn main(init: std.process.Init) !void {
+    var buffer: [8]u8 = undefined;
+    var w = std.Io.File.stdout().writer(init.io, &buffer);
+    try w.interface.writeAll("abc");
+    buffer[0] = 88;
+    std.debug.print("{s}|", .{w.interface.buffered()});
+    try w.interface.flush();
+    try w.interface.writeAll("def");
+    buffer[0] = 89;
+    try w.interface.writeAll("0123456789");
+    var fixedBuffer: [8]u8 = undefined;
+    var fixed = std.Io.Writer.fixed(&fixedBuffer);
+    try fixed.writeAll("abc");
+    const view = fixed.buffered();
+    view[1] = 90;
+    std.debug.print("{s}|{f}", .{fixed.buffered(), P{}});
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'XbcYef0123456789',
+    stderr: 'Xbc|XZc|abc',
+    uncaughtException: undefined,
+  });
+});
+
+test('custom formatters share pending bytes with file, fixed, and allocation writers', () => {
+  const program = `const std = @import("std");
+const P = struct {
+    pub fn format(_: @This(), out: *std.Io.Writer) std.Io.Writer.Error!void {
+        try out.writeAll("abc");
+        const bytes = out.buffered();
+        bytes[0] = 88;
+    }
+};
+pub fn main(init: std.process.Init) !void {
+    var buffer: [32]u8 = undefined;
+    var file = std.Io.File.stdout().writer(init.io, &buffer);
+    try file.interface.writeAll("start");
+    try file.interface.print("{f}", .{P{}});
+    try file.interface.flush();
+    var fixedBuffer: [8]u8 = undefined;
+    var fixed = std.Io.Writer.fixed(&fixedBuffer);
+    try fixed.writeAll("a");
+    try fixed.print("{f}", .{P{}});
+    var fmtBuffer: [8]u8 = undefined;
+    const formatted = try std.fmt.bufPrint(&fmtBuffer, "a{f}", .{P{}});
+    const allocated = try std.fmt.allocPrint(init.gpa, "a{f}", .{P{}});
+    defer init.gpa.free(allocated);
+    std.debug.print("{s}|{s}|{s}", .{fixed.buffered(), formatted, allocated});
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Xtartabc',
+    stderr: 'Xabc|Xabc|Xabc',
+    uncaughtException: undefined,
+  });
+});

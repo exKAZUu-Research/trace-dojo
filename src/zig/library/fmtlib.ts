@@ -1,3 +1,4 @@
+import { PANIC, panic } from '../arith';
 import { BigFloat, parseFloatLiteral, toNumber } from '../floats';
 import { runtime } from '../semaBase';
 import {
@@ -18,7 +19,8 @@ import { ErrorValue, Slice, type Value } from '../values';
 import { allocating, allocatorArg, computed, constSlice, elements, generic, mutableSlice, newSlice } from './common';
 import { allocateMemory, allocatorState, ERROR_OUT_OF_MEMORY } from './heap';
 import { compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
-import { compilePrint } from './print';
+import { compilePrint, PrintWriteError } from './print';
+import type { WriterState } from './writer';
 
 const PARSE_INT_ERRORS = errorSetOf(['Overflow', 'InvalidCharacter']);
 const INVALID_CHARACTER = ErrorValue.of('InvalidCharacter');
@@ -160,11 +162,14 @@ const MEMBERS: Record<string, () => Member> = {
       errorUnionOf(errorSetOf(['NoSpaceLeft']), sliceOf(U8, false)),
       (frame) => {
         const target = evaluate(frame) as Slice;
-        const bytes = print(frame);
-        frame.runtime.spend();
-        if (bytes.length > target.length) return ErrorValue.of('NoSpaceLeft');
-        for (const [index, byte] of bytes.entries()) target.set(index, BigInt(byte));
-        return new Slice(target.target, target.start, bytes.length);
+        const state: WriterState = { fd: undefined, buffer: target, end: 0, capacity: target.length };
+        try {
+          print(frame, state);
+        } catch (error) {
+          if (error instanceof PrintWriteError) return ErrorValue.of('NoSpaceLeft');
+          throw error;
+        }
+        return new Slice(target.target, target.start, state.end);
       },
       call.span
     );
@@ -177,7 +182,13 @@ const MEMBERS: Record<string, () => Member> = {
       allocating(sliceOf(U8, false)),
       (frame) => {
         const allocator = allocatorState(evaluateAllocator(frame));
-        const bytes = print(frame);
+        let bytes: number[];
+        try {
+          bytes = print(frame);
+        } catch (error) {
+          if (error instanceof PrintWriteError) return ERROR_OUT_OF_MEMORY;
+          throw error;
+        }
         frame.runtime.spend();
         const slice = newSlice(bytes.map(BigInt));
         if (!allocateMemory(frame, allocator, slice.target, bytes.length, U8)) return ERROR_OUT_OF_MEMORY;
@@ -189,7 +200,18 @@ const MEMBERS: Record<string, () => Member> = {
   count: fnMember('std.fmt.count', (sema, call) => {
     const [format, args] = expectArgs(sema, call, 2, 'std.fmt.count');
     const print = compilePrint(sema, format, args, call.span);
-    return runtime(U64, (frame) => BigInt(print(frame).length), call.span);
+    return runtime(
+      U64,
+      (frame) => {
+        try {
+          return BigInt(print(frame).length);
+        } catch (error) {
+          if (error instanceof PrintWriteError) panic(PANIC.unreachable);
+          throw error;
+        }
+      },
+      call.span
+    );
   }),
   digitToChar: fnMember('std.fmt.digitToChar', (sema, call) => {
     const [digitArg, caseArg] = expectArgs(sema, call, 2, 'std.fmt.digitToChar');

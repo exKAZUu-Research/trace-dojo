@@ -32,7 +32,7 @@ import {
 } from '../types';
 import { ErrorValue, FnValue, NULL, type Pointer, Slice, Some, type Value, ZArray, ZStruct, ZUnion } from '../values';
 import { WeakValueMap } from '../weakValueMap';
-import { computed, constSlice, elements, equalValues, mutableSlice, newSlice } from './common';
+import { computed, constSlice, elements, equalValues, mutableSlice, newSlice, storeSliceValue } from './common';
 import { ALLOCATOR, ALLOCATOR_ERROR, ERROR_OUT_OF_MEMORY } from './heap';
 import { addMembers, compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
 
@@ -362,20 +362,20 @@ function priorityQueueType(
     compare.call(frame, [queue.slots[2], a, b]) as bigint;
   const siftUp = (frame: Frame, queue: ZStruct, start: number): void => {
     const items = queue.slots[0] as Slice;
-    const child = items.get(start);
+    const child = copyForStorage(items.get(start));
     let index = start;
     while (index > 0) {
       const parentIndex = (index - 1) >> 1;
       const parent = items.get(parentIndex);
       if (order(frame, queue, child, parent) !== 0n) break;
-      items.set(index, parent);
+      storeSliceValue(items, index, parent);
       index = parentIndex;
     }
-    items.set(index, child);
+    storeSliceValue(items, index, child);
   };
   const siftDown = (frame: Frame, queue: ZStruct, target: number): void => {
     const items = queue.slots[0] as Slice;
-    const element = items.get(target);
+    const element = copyForStorage(items.get(target));
     let index = target;
     for (;;) {
       let lesser = index * 2 + 1;
@@ -383,10 +383,10 @@ function priorityQueueType(
       const next = lesser + 1;
       if (next < items.length && order(frame, queue, items.get(next), items.get(lesser)) === 0n) lesser = next;
       if (order(frame, queue, element, items.get(lesser)) === 0n) break;
-      items.set(index, items.get(lesser));
+      storeSliceValue(items, index, items.get(lesser));
       index = lesser;
     }
-    items.set(index, element);
+    storeSliceValue(items, index, element);
   };
   const reserve = (frame: Frame, queue: ZStruct, wanted: number): boolean => {
     let capacity = Number(queue.slots[1] as bigint);
@@ -440,9 +440,9 @@ function priorityQueueType(
   const popIndex = (frame: Frame, queue: ZStruct, index: number): Value => {
     const items = queue.slots[0] as Slice;
     if (index >= items.length) indexOutOfBounds(index, items.length);
-    const last = items.get(items.length - 1);
-    const item = items.get(index);
-    items.set(index, last);
+    const last = copyForStorage(items.get(items.length - 1));
+    const item = copyForStorage(items.get(index));
+    storeSliceValue(items, index, last);
     const shrunk = new Slice(items.target, items.start, items.length - 1);
     queue.slots[0] = shrunk;
     if (index === shrunk.length) return item;

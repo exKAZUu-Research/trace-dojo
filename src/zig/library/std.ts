@@ -30,8 +30,8 @@ import {
   typeMember,
   unavailableMember,
 } from './native';
-import { compilePrint, decodeOutput, PartialOutputPanic } from './print';
-import { WRITER } from './writer';
+import { compilePrint, decodeOutput, printInto, PrintWriteError } from './print';
+import { bufferedBytes, flushWriter, WRITER, type WriterState, writeTo } from './writer';
 
 let std: StructType | undefined;
 
@@ -118,6 +118,7 @@ function lazyMember(name: string): () => Member {
 // std.debug -----------------------------------------------------------------------------------------------------------
 
 const DEBUG = nativeStruct('std.debug', {
+  // code-gauge-allow duplicateLines 15 -- Debug print and panic share formatting setup but have different buffers and failure handling.
   print: fnMember('std.debug.print', (sema, call) => {
     const [format, args] = expectArgs(sema, call, 2, 'std.debug.print');
     const print = compilePrint(sema, format, args, call.span);
@@ -125,14 +126,19 @@ const DEBUG = nativeStruct('std.debug', {
       VOID,
       (frame) => {
         frame.runtime.spend();
-        let bytes: number[];
+        const state: WriterState = {
+          fd: 2,
+          buffer: new Slice(new ZArray(Array.from({ length: 64 }, () => 0n)), 0, 64),
+          end: 0,
+          capacity: 64,
+        };
         try {
-          bytes = print(frame);
+          print(frame, state);
         } catch (error) {
-          if (error instanceof PartialOutputPanic) frame.runtime.writeOutput(2, error.partial);
-          throw error;
+          if (!(error instanceof PrintWriteError)) throw error;
+        } finally {
+          flushWriter(frame, state);
         }
-        frame.runtime.writeOutput(2, bytes);
         return;
       },
       call.span
@@ -146,10 +152,31 @@ const DEBUG = nativeStruct('std.debug', {
       return;
     });
   }),
+  // code-gauge-allow duplicateLines 15 -- Debug print and panic share formatting setup but have different buffers and failure handling.
   panic: fnMember('std.debug.panic', (sema, call) => {
     const [format, args] = expectArgs(sema, call, 2, 'std.debug.panic');
     const print = compilePrint(sema, format, args, call.span);
-    return runtime({ kind: 'noreturn' }, (frame) => panic(decodeOutput(print(frame))), call.span);
+    return runtime(
+      { kind: 'noreturn' },
+      (frame) => {
+        const buffer = new ZArray(Array.from({ length: 0x10_00 }, () => 0xaan));
+        const state: WriterState = {
+          fd: undefined,
+          buffer: new Slice(buffer, 0, buffer.length),
+          end: 0,
+          capacity: buffer.length,
+        };
+        try {
+          print(frame, state);
+        } catch (error) {
+          if (error instanceof PrintWriteError)
+            return panic(decodeOutput(buffer.values().map(Number)) + '(msg truncated)');
+          throw error;
+        }
+        return panic(decodeOutput(bufferedBytes(state)));
+      },
+      call.span
+    );
   }),
 });
 
@@ -165,15 +192,6 @@ const FILE: StructType = nativeStruct('Io.File', {});
 const FILE_WRITER: StructType = nativeStruct('Io.File.Writer', {}, [
   { name: 'interface', type: WRITER, hasDefault: false },
 ]);
-
-interface WriterState extends Record<string, unknown> {
-  /** 1 for standard output, 2 for standard error, or undefined for a fixed buffer. */
-  fd: number | undefined;
-  buffered: number[];
-  capacity: number;
-  /** The backing buffer of a fixed or file writer. */
-  fixed?: Slice;
-}
 
 const WRITE_FAILED = ErrorValue.of('WriteFailed');
 const WRITE_ERROR = errorSetOf(['WriteFailed']);
@@ -232,11 +250,7 @@ function addWriterMembers(): void {
       const [format, args] = expectArgs(sema, call, 2, 'print');
       const writer = writerOf(sema, call);
       const print = compilePrint(sema, format, args, call.span);
-      return runtime(
-        errorUnionOf(WRITE_ERROR, VOID),
-        (frame) => writeTo(frame, writer(frame), print(frame)),
-        call.span
-      );
+      return runtime(errorUnionOf(WRITE_ERROR, VOID), (frame) => printInto(frame, writer(frame), print), call.span);
     }),
     writeAll: fnMember('Writer.writeAll', (sema, call) => {
       const writer = writerOf(sema, call);
@@ -327,10 +341,7 @@ function addWriterMembers(): void {
         errorUnionOf(WRITE_ERROR, VOID),
         (frame) => {
           const state = writer(frame);
-          if (state.fd !== undefined) {
-            frame.runtime.writeOutput(state.fd, state.buffered);
-            state.buffered = [];
-          }
+          flushWriter(frame, state);
           return;
         },
         call.span
@@ -345,9 +356,9 @@ function addWriterMembers(): void {
           const slice = evaluate(frame) as Slice;
           return handle('writer', {
             fd: undefined,
-            buffered: [],
+            buffer: slice,
+            end: 0,
             capacity: slice.length,
-            fixed: slice,
           } satisfies WriterState);
         },
         call.span
@@ -359,8 +370,7 @@ function addWriterMembers(): void {
         sliceOfU8(),
         (frame) => {
           const state = writer(frame);
-          const slice = state.fixed ?? new Slice(new ZArray(state.buffered.map(BigInt)), 0, state.buffered.length);
-          return new Slice(slice.target, slice.start, state.buffered.length);
+          return new Slice(state.buffer.target, state.buffer.start, state.end);
         },
         call.span
       );
@@ -402,7 +412,7 @@ function fileWriter(sema: SemaApi, call: NativeCall): TExpr {
       io.eval(frame);
       const buffer = evaluateBuffer(frame) as Slice;
       const capacity = buffer.length;
-      const state: WriterState = { fd: target.state.fd as number, buffered: [], capacity, fixed: buffer };
+      const state: WriterState = { fd: target.state.fd as number, buffer, end: 0, capacity };
       return new ZStruct([handle('writer', state)]);
     },
     call.span
@@ -431,29 +441,11 @@ function writerOf(sema: SemaApi, call: NativeCall): (frame: Parameters<TExpr['ev
 }
 
 /** Writes bytes through a writer: into its buffer, draining the buffer and the bytes when they do not fit. */
-function writeTo(frame: Parameters<TExpr['eval']>[0], state: WriterState, bytes: number[]): Value {
-  frame.runtime.spend();
-  if (state.fixed && state.fd === undefined) {
-    if (state.buffered.length + bytes.length > state.capacity) return WRITE_FAILED;
-    for (const [index, byte] of bytes.entries()) state.fixed.set(state.buffered.length + index, BigInt(byte));
-    for (const byte of bytes) state.buffered.push(byte);
-    return undefined;
-  }
-  if (state.buffered.length + bytes.length > state.capacity) {
-    frame.runtime.writeOutput(state.fd as number, [...state.buffered, ...bytes]);
-    state.buffered = [];
-    return undefined;
-  }
-  checkOutputSize(state.buffered.length + bytes.length);
-  for (const [index, byte] of bytes.entries()) state.fixed?.set(state.buffered.length + index, BigInt(byte));
-  for (const byte of bytes) state.buffered.push(byte);
-  return undefined;
-}
-
 function writeRepeated(frame: Parameters<TExpr['eval']>[0], state: WriterState, data: number[], count: number): Value {
   const length = data.length * count;
-  if (state.fd === undefined && state.fixed && length > state.capacity - state.buffered.length) return WRITE_FAILED;
-  checkOutputSize(state.buffered.length + length);
+  const end = state.end + length;
+  if (state.fd === undefined && end > state.capacity) return WRITE_FAILED;
+  if (end > state.capacity || !Number.isFinite(state.capacity)) checkOutputSize(end);
   return writeTo(
     frame,
     state,

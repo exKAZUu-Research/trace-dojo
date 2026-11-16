@@ -5,7 +5,16 @@ import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
 import { floatFromBigInt } from '../floats';
 import type { Frame } from '../runtime';
-import { evaluateHeld, known, newArray, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
+import {
+  copyForStorage,
+  evaluateHeld,
+  known,
+  newArray,
+  runtime,
+  type SemaApi,
+  type TExpr,
+  undefinedValue,
+} from '../semaBase';
 import {
   BOOL,
   CONST_U8_SLICE,
@@ -22,7 +31,7 @@ import {
   USIZE,
   VOID,
 } from '../types';
-import { NULL, type Pointer, Slice, type Value, ZStruct } from '../values';
+import { NULL, type Pointer, Slice, storeInto, type Value, ZStruct } from '../values';
 import { WeakValueMap } from '../weakValueMap';
 import {
   allocating,
@@ -40,6 +49,7 @@ import {
   ORDER,
   orderValue,
   storeSliceValue,
+  storeSliceValues,
   subSlice,
   tupleOf,
 } from './common';
@@ -502,8 +512,7 @@ const MEMBERS: Record<string, () => Member> = {
         if (shift > slice.length) panic(`end index ${shift} out of bounds for slice of length ${slice.length}`);
         const values = slice.values();
         frame.runtime.spend(values.length);
-        for (const [index, value] of [...values.slice(shift), ...values.slice(0, shift)].entries())
-          slice.set(index, value);
+        storeSliceValues(slice, [...values.slice(shift), ...values.slice(0, shift)]);
         return;
       },
       call.span
@@ -518,7 +527,7 @@ const MEMBERS: Record<string, () => Member> = {
         const slice = evaluate(frame) as Slice;
         const values = slice.values().toReversed();
         frame.runtime.spend(values.length);
-        for (const [index, value] of values.entries()) slice.set(index, value);
+        storeSliceValues(slice, values);
         return;
       },
       call.span
@@ -533,9 +542,10 @@ const MEMBERS: Record<string, () => Member> = {
       (frame) => {
         const x = evaluateA(frame) as Pointer;
         const y = evaluateB(frame) as Pointer;
-        const temporary = x.load();
-        x.target.slots[x.index] = y.load();
-        y.target.slots[y.index] = temporary;
+        const temporary = copyForStorage(x.load());
+        const other = copyForStorage(y.load());
+        storeInto(x.target, x.index, other);
+        storeInto(y.target, y.index, temporary);
         return;
       },
       call.span
@@ -752,7 +762,7 @@ function sorter(name: string, algorithm: SortAlgorithm): () => Member {
         algorithm,
         frame
       );
-      for (const [index, value] of sorted.entries()) slice.set(index, value);
+      storeSliceValues(slice, sorted);
       return;
     });
   });

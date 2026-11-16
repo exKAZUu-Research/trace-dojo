@@ -121,6 +121,7 @@ export class ErrorValue {
 
 /** A single-item pointer, to a slot of some storage. */
 export class Pointer {
+  private static readonly projections = new WeakMap<Slots, Map<string, Slots>>();
   constructor(
     readonly target: Slots,
     readonly index: number
@@ -128,6 +129,21 @@ export class Pointer {
 
   load(): Value {
     return this.target.slots[this.index];
+  }
+
+  project(kind: 'length' | 'optional'): Pointer {
+    let projections = Pointer.projections.get(this.target);
+    if (!projections) {
+      projections = new Map();
+      Pointer.projections.set(this.target, projections);
+    }
+    const key = `${this.index} ${kind}`;
+    let storage = projections.get(key);
+    if (!storage) {
+      storage = kind === 'length' ? new SliceLength(this) : new SomeSlots(this);
+      projections.set(key, storage);
+    }
+    return new Pointer(storage, 0);
   }
 
   equals(other: Pointer): boolean {
@@ -237,7 +253,7 @@ export function storeInto(target: Slots, index: number, value: Value): void {
   target.slots[index] = copyValue(value);
 }
 
-export class SliceLength implements Slots {
+class SliceLength implements Slots {
   constructor(private readonly pointer: Pointer) {}
 
   get slots(): Value[] {
@@ -253,7 +269,7 @@ export class SliceLength implements Slots {
 }
 
 /** The payload of an optional whose payload is itself optional, as storage that `.?` points into. */
-export class SomeSlots implements Slots {
+class SomeSlots implements Slots {
   constructor(private readonly pointer: Pointer) {}
 
   get slots(): Value[] {

@@ -86,10 +86,8 @@ import {
   NULL,
   Pointer,
   Slice,
-  SliceLength,
   type Slots,
   Some,
-  SomeSlots,
   type Value,
   ZArray,
   ZStruct,
@@ -341,7 +339,7 @@ export abstract class ExpressionCompiler extends SemaBase {
             const place = base.place;
             const lengthPlace: Place | undefined = place && {
               isConst: place.isConst,
-              locate: (frame) => new Pointer(new SliceLength(place.locate(frame)), 0),
+              locate: (frame) => place.locate(frame).project('length'),
             };
             return runtime(USIZE, (frame) => BigInt((evaluate(frame) as Slice).length), expression, lengthPlace);
           }
@@ -504,14 +502,14 @@ export abstract class ExpressionCompiler extends SemaBase {
         const pointer = place.locate(frame);
         const value = pointer.load();
         if (value === NULL) nullUnwrapPanic();
-        return value instanceof Some ? new Pointer(new SomeSlots(pointer), 0) : pointer;
+        return value instanceof Some ? pointer.project('optional') : pointer;
       },
     };
     return runtime(child, (frame) => unwrapOptionalValue(evaluate(frame)), expression, unwrapPlace);
   }
 
   protected optionalPayloadPointer(pointer: Pointer): Pointer {
-    return pointer.load() instanceof Some ? new Pointer(new SomeSlots(pointer), 0) : pointer;
+    return pointer.load() instanceof Some ? pointer.project('optional') : pointer;
   }
 
   // Indexing and slicing ----------------------------------------------------------------------------------------------

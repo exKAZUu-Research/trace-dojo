@@ -30,7 +30,7 @@ import {
   nativeEnum,
 } from './heap';
 import { compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
-import { compilePrint } from './print';
+import { compilePrint, PrintWriteError } from './print';
 
 const SAFETY_STATE = nativeEnum('debug.SafetyLock.State', ['unlocked', 'locked']);
 const SAFETY_LOCK = nativeStruct('debug.SafetyLock', {}, [
@@ -442,7 +442,13 @@ function defineMembers(type: StructType, child: Type): void {
       return runtime(
         allocating(VOID),
         (frame) => {
-          const bytes = print(frame).map(BigInt);
+          let bytes: bigint[];
+          try {
+            bytes = print(frame).map(BigInt);
+          } catch (error) {
+            if (error instanceof PrintWriteError) return ERROR_OUT_OF_MEMORY;
+            throw error;
+          }
           const received = listOf(list(frame));
           received.allocator = allocatorState(evaluateAllocator(frame));
           return insertValues(frame, received, received.items.length, bytes);
