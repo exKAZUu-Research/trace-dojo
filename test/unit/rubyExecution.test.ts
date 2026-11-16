@@ -11723,9 +11723,9 @@ test.each([String.raw`(?<a b>a)(?<=x*)`, String.raw`(?<a b>a)\1`])(
 test.each([
   String.raw`p /(?x:a # \x
  b)/`,
-  String.raw`p /(?x:a # \u{bogus}
- b)/`,
-])('source regexp escapes are checked before engine comment handling: %s', (source) => {
+  String.raw`p /\u{bogus}/`,
+  String.raw`p /\uZZZZ/`,
+])('malformed literal hex and active Unicode escapes fail before execution: %s', (source) => {
   expect(run(`puts :before;${source}`)).toMatchObject({ kind: 'compileError' });
 });
 
@@ -20068,3 +20068,93 @@ test.each([
     uncaughtException: '既定ハンドラがない method_missing のフォールバックは、この採点環境では使えません。',
   });
 });
+
+const chainConstructionCases = [
+  [
+    'p Enumerator::Chain.new.to_a',
+    {
+      uncaughtException: 'Enumerator::Chain#initialize は、この採点環境では使えません。',
+      stdout: '',
+    },
+  ],
+  [
+    'p Enumerator::Chain.new([1],[2]).to_a',
+    {
+      uncaughtException: 'Enumerator::Chain#initialize は、この採点環境では使えません。',
+      stdout: '',
+    },
+  ],
+  [
+    'p Enumerator::Chain.new([1]){|x|puts :unexpected}.to_a',
+    {
+      uncaughtException: 'Enumerator::Chain#initialize は、この採点環境では使えません。',
+      stdout: '',
+    },
+  ],
+  [
+    'class C<Enumerator::Chain;end;p C.new([1],[2]).to_a',
+    {
+      uncaughtException: 'Enumerator::Chain#initialize は、この採点環境では使えません。',
+      stdout: '',
+    },
+  ],
+  [
+    'p Enumerator::Chain.method(:new).call([1],[2]).to_a',
+    {
+      uncaughtException: 'Enumerator::Chain#initialize は、この採点環境では使えません。',
+      stdout: '',
+    },
+  ],
+  [
+    'c=Enumerator::Chain.allocate;c.send(:initialize,[1],[2]);p c.to_a',
+    {
+      uncaughtException: 'Enumerator::Chain#initialize は、この採点環境では使えません。',
+      stdout: '',
+    },
+  ],
+  [
+    'c=[1].chain;c.send(:initialize,[2]);p c.to_a',
+    {
+      uncaughtException: 'Enumerator::Chain#initialize は、この採点環境では使えません。',
+      stdout: '',
+    },
+  ],
+  [
+    'class C<Enumerator::Chain;alias setup initialize;def self.build;allocate.tap{|c|c.send(:setup,[1],[2])};end;end;p C.build.to_a',
+    {
+      uncaughtException: 'Enumerator::Chain#initialize は、この採点環境では使えません。',
+      stdout: '',
+    },
+  ],
+  [
+    'c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c){|y|y<<1};rescue=>e;p e.class,e.message;end',
+    {
+      stdout: 'TypeError\n"wrong argument type chain (expected enumerator)"\n',
+    },
+  ],
+  [
+    'c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c){|y|y<<1};rescue=>e;p e.class,e.message;end',
+    {
+      stdout: 'TypeError\n"wrong argument type chain (expected enumerator)"\n',
+    },
+  ],
+  [
+    'e=Enumerator.new{|y|y<<1};p e.to_a',
+    {
+      stdout: '[1]\n',
+    },
+  ],
+  [
+    'class C<Enumerator;end;p C.new{|y|y<<2}.to_a',
+    {
+      stdout: '[2]\n',
+    },
+  ],
+] as const;
+
+test.each(chainConstructionCases)(
+  'Chain initialization retains its capability and receiver boundaries: %s',
+  (source, expected) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', uncaughtException: undefined, ...expected });
+  }
+);

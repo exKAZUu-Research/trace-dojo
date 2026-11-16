@@ -924,8 +924,11 @@ def(
   'Enumerator',
   'initialize',
   [0, 1],
-  // code-gauge-allow functionCognitiveComplexity 20 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Receiver types, size conversion, frozen state and producer replacement retain native validation order.
+  // code-gauge-allow functionNcss 31 -- Initializer validation and rooted producer installation share the converted size and receiver.
   function* (self: RObject, args, block) {
+    if (self.cls.isSubclassOf(rt().c['Enumerator::Chain']))
+      throw typeError('wrong argument type chain (expected enumerator)');
     if (self.cls.isSubclassOf(rt().c['Enumerator::Lazy']))
       throw new UnsupportedFeatureError('Enumerator::Lazy#initialize');
     if (!block) throw argumentError('tried to create Proc object without a block');
@@ -967,6 +970,9 @@ function assertMutableEnumerator(self: RObject): void {
   if (self.frozen) throw frozenError(self, runToEnd(inspect(self)));
 }
 
+def('Enumerator::Chain', 'initialize', [0, -1], unavailableMethod('Enumerator::Chain#initialize'), {
+  visibility: 'private',
+});
 def('Enumerator::Lazy', 'initialize', [0, -1], unavailableMethod('Enumerator::Lazy#initialize'), {
   visibility: 'private',
 });
