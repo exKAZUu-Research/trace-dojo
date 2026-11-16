@@ -97,6 +97,30 @@ fn walk(t: Turtle, n: i32) void {
     turtles[0].?.forward();
 }`,
   },
+  {
+    name: 'a turtle in a literal stays while the literal calls a function that records steps',
+    java: javaMain(
+      `
+    Turtle[] pair = { new Turtle(0, 0), make(2, 0) };
+    pair[1].forward();`,
+      `
+  static Turtle make(int x, int y) {
+    Turtle t = new Turtle(x, y);
+    t.forward();
+    return t;
+  }`
+    ),
+    zig: `pub fn main() void {
+    const pair = [_]Turtle{ Turtle.init(0, 0), make(2, 0) };
+    pair[1].forward();
+}
+
+fn make(x: i32, y: i32) Turtle {
+    const t = Turtle.init(x, y);
+    t.forward();
+    return t;
+}`,
+  },
 ])('$name', ({ java, zig }) => {
   const javaTrace = traceProgram('java', java, java);
   const zigTrace = traceProgram('zig', zig, zig);
