@@ -21,9 +21,9 @@ import {
 import { CObject, Ptr, type Value } from '../values';
 import { MapValue } from './containerValues';
 import { type ElementOperations, elementOperations, equalTo, lessThan } from './elements';
+import { addRangeMembers, emplacementCall, type EntryTable, insertCopy } from './emplacement';
 import { randomAccessIterator } from './iterators';
 import type { Library } from './registry';
-import { constructElement } from './sequences';
 import { StringValue } from './string';
 import { addMethod, constRef, generic, native, nativeConstructor, throwLibrary } from './support';
 import { typeKey } from './templates';
@@ -106,11 +106,12 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
         }
         const [u1, u2] = source.type.cls.fields;
         const compiler = library.compiler;
+        // The members construct from the source's members, which a class member's copy constructor copies.
         const slot = (type: Type): Expr => ({
           type,
-          isLvalue: false,
+          isLvalue: true,
           row: source.row,
-          run: (frame) => frame.pending.at(-1) as Value,
+          run: (frame) => frame.pending.at(-1) as Ptr,
         });
         let convertFirst: Eval;
         let convertSecond: Eval;
@@ -121,11 +122,11 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
           return;
         }
         return nativeConstructor(cls, [constRef(source.type)], ([pair], { frame }) => {
-          const [a, b] = ((pair as Ptr).read() as CObject).values;
-          frame.pending.push(a);
+          const object = (pair as Ptr).read() as CObject;
+          frame.pending.push(new Ptr(object, 0));
           const x = convertFirst(frame);
           frame.pending.pop();
-          frame.pending.push(b);
+          frame.pending.push(new Ptr(object, 1));
           const y = convertSecond(frame);
           frame.pending.pop();
           return make(x as Value, y as Value);
@@ -362,7 +363,17 @@ export function orderedClass(
     const destroy = ops().destroy;
     if (destroy) for (const entry of entries) destroy(frame, entry);
   };
+  const table: EntryTable<OrderedValue> = {
+    keyOf,
+    lookup: (self, key) => (isMulti ? -1 : find(self, key)),
+    insert,
+    ops,
+  };
   const insertResult = pairClass(library, types.iterator, BOOL);
+  const insertionResult = (self: OrderedValue, at: number, inserted: boolean): Value => {
+    const position = new Ptr(self, at);
+    return isMulti ? position : new CObject(insertResult, [position, inserted ? 1 : 0]);
+  };
   cls.library = {
     kind,
     args,
@@ -442,35 +453,14 @@ export function orderedClass(
       }
       return;
     },
-    memberCall: (compiler_, object, member, callArgs, row) => {
-      if (member !== 'emplace' && member !== 'try_emplace') return;
-      if (member === 'try_emplace' && !isMap) return;
-      const self = compiler_.objectOf(object);
-      let makeEntry: Eval<Value>;
-      if (member === 'try_emplace' || (isMap && callArgs.length === 2)) {
-        const keyValue = constructElement(compiler_, unqualified(keyType), [callArgs[0]], row);
-        const mappedValue = constructElement(compiler_, valueType as Type, callArgs.slice(1), row);
-        makeEntry = (frame) =>
-          new CObject((entryType as Extract<Type, { kind: 'class' }>).cls, [keyValue(frame), mappedValue(frame)]);
-      } else {
-        makeEntry = constructElement(compiler_, unqualified(entryType), callArgs, row);
-      }
-      const resultType = isMulti ? types.iterator : classType(insertResult);
-      return {
-        type: resultType,
-        isLvalue: false,
-        row,
+    memberCall: (compiler_, object, member, callArgs, row) =>
+      emplacementCall(compiler_, object, member, callArgs, row, {
+        types: { keyType, entryType, valueType },
+        table,
+        resultType: isMulti ? types.iterator : classType(insertResult),
         isTemporaryObject: !isMulti,
-        run: (frame) => {
-          const target = (self(frame) as Ptr).read() as OrderedValue;
-          const entry = makeEntry(frame);
-          const [at, inserted] = insert(frame, target, entry);
-          if (!inserted) ops().destroy?.(frame, entry);
-          const position = new Ptr(target, at);
-          return isMulti ? position : new CObject(insertResult, [position, inserted ? 1 : 0]);
-        },
-      };
-    },
+        result: insertionResult,
+      }),
     constructingMembers: isMap ? ['emplace', 'try_emplace'] : ['emplace'],
   };
   cls.operations = {
@@ -485,32 +475,8 @@ export function orderedClass(
     },
     destroy: (frame, value) => destroyAll(frame, (value as OrderedValue).entries),
   };
-  cls.constructors = [
-    nativeConstructor(cls, [], () => make([])),
-    nativeConstructor(cls, [types.constIterator, types.constIterator], () => make([])),
-  ];
-  // The range constructor accepts any iterator pair whose elements convert to entries.
-  cls.constructors[1] = {
-    ...nativeConstructor(cls, [], () => {}),
-    instantiate: (callArgs) => {
-      if (
-        callArgs.length !== 2 ||
-        callArgs[0].type.kind !== 'class' ||
-        callArgs[0].type.cls.library?.kind !== 'iterator'
-      )
-        return;
-      const iteratorType = callArgs[0].type;
-      return nativeConstructor(cls, [iteratorType, iteratorType], ([first, last], { frame }) => {
-        const from = first as Ptr;
-        const to = last as Ptr;
-        const self = make([]);
-        for (let index = from.index; index < to.index; index++)
-          insert(frame, self, ops().copy(frame, from.store?.get(index)));
-        return self;
-      });
-    },
-    isTemplate: true,
-  };
+  cls.constructors = [nativeConstructor(cls, [], () => make([]))];
+  addRangeMembers(compiler, cls, entryType, table, () => make([]));
   const method = (
     memberName: string,
     params: Type[],
@@ -584,26 +550,17 @@ export function orderedClass(
     { isConst: true }
   );
   method('contains', [constRef(keyType)], BOOL, (self, [k]) => (find(self, keyArg(k)) >= 0 ? 1 : 0), { isConst: true });
-  const insertMethod = (entryParam: Type): void => {
-    method('insert', [entryParam], isMulti ? types.iterator : classType(insertResult), (self, [entry], frame) => {
-      const value = ops().copy(frame, (entry as Ptr).read());
-      const [at, inserted] = insert(frame, self, value);
-      if (!inserted) ops().destroy?.(frame, value);
-      const position = new Ptr(self, at);
-      return isMulti ? position : new CObject(insertResult, [position, inserted ? 1 : 0]);
-    });
-  };
-  insertMethod(constRef(unqualified(entryType)));
+  method(
+    'insert',
+    [constRef(unqualified(entryType))],
+    isMulti ? types.iterator : classType(insertResult),
+    (self, [entry], frame) => insertionResult(self, ...insertCopy(table, frame, self, (entry as Ptr).read()))
+  );
   method(
     'insert',
     [types.constIterator, constRef(unqualified(entryType))],
     types.iterator,
-    (self, [, entry], frame) => {
-      const value = ops().copy(frame, (entry as Ptr).read());
-      const [at, inserted] = insert(frame, self, value);
-      if (!inserted) ops().destroy?.(frame, value);
-      return new Ptr(self, at);
-    }
+    (self, [, entry], frame) => new Ptr(self, insertCopy(table, frame, self, (entry as Ptr).read())[0])
   );
   method('erase', [constRef(keyType)], SIZE_T, (self, [k], frame) => {
     const keyValue = keyArg(k);

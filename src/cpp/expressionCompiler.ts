@@ -84,7 +84,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         return this.identifier(node);
       }
       case 'qualified_identifier': {
-        return this.entityExpr(this.lookupQualified(node), node, true);
+        const expr = this.entityExpr(this.lookupQualified(node), node, true);
+        // `std::min<long long>` names a function template with its template arguments.
+        const name = fieldOf(node, 'name') as Syntax;
+        if (name.type !== 'template_function' || !expr.functions) return expr;
+        const templateArgs = this.templateArguments(fieldOf(name, 'arguments') as Syntax);
+        return { ...expr, functions: { ...expr.functions, templateArgs } };
       }
       case 'template_function': {
         return this.templateFunction(node);

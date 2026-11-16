@@ -3,7 +3,7 @@ import type { ExpressionCompiler } from '../expressionCompiler';
 import { invoke, zeroOf } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import { type ClassInfo, type FunctionInfo, isArithmetic, type Type, typeName } from '../types';
-import { Box, CObject, FunctionRef, Ptr, Store, UNINIT, type Value } from '../values';
+import { type ArrayStore, Box, CObject, FunctionRef, Ptr, Store, UNINIT, type Value } from '../values';
 import { SequenceValue } from './containerValues';
 import { StringValue } from './string';
 
@@ -52,6 +52,49 @@ export function elementOperations(compiler: ExpressionCompiler, type: Type, row:
     assign: (_frame, _target, source) => source,
     hasEffects: false,
   };
+}
+
+/**
+ * Move-assigns `source` to `target` as `*out = std::move(*in)` does, giving the target's new value. A moved-from
+ * `std::string`, vector, deque, or list is left empty, as libc++ leaves it, and a class without a copy constructor or
+ * destructor the program declared moves its members; any other value is copied.
+ */
+export function moveValue(frame: Frame, type: Type, target: Value, source: Value): Value {
+  if (target === source || target === UNINIT || source === UNINIT) return source;
+  if (type.kind === 'array') {
+    const to = target as ArrayStore;
+    for (const [index, item] of (source as ArrayStore).values.entries())
+      to.values[index] = moveValue(frame, type.of, to.values[index], item);
+    return to;
+  }
+  if (type.kind !== 'class') return source;
+  const { cls } = type;
+  const kind = cls.library?.kind;
+  if (target instanceof StringValue && source instanceof StringValue) {
+    target.bytes = source.bytes;
+    source.bytes = '';
+  } else if ((kind === 'vector' || kind === 'deque' || kind === 'list') && target instanceof SequenceValue) {
+    const from = source as SequenceValue;
+    cls.operations?.destroy?.(frame, target);
+    target.items = from.items;
+    target.capacity = from.capacity;
+    from.items = [];
+    from.capacity = 0;
+  } else if (!cls.library && !declaresCopyOrDestructor(cls)) {
+    const to = target as CObject;
+    const from = source as CObject;
+    for (const field of cls.fields)
+      to.values[field.index] = moveValue(frame, field.type, to.values[field.index], from.values[field.index]);
+  } else cls.operations?.assign(frame, target, source);
+  return target;
+}
+
+/** Whether a class or a base declares a copy constructor or a destructor, which leaves it without an implicit move. */
+function declaresCopyOrDestructor(cls: ClassInfo): boolean {
+  for (let current: ClassInfo | undefined = cls; current; current = current.base) {
+    if (current.destructor || current.constructors.some((ctor) => isUserCopy(ctor, current as ClassInfo))) return true;
+  }
+  return false;
 }
 
 function isUserCopy(ctor: FunctionInfo, cls: ClassInfo): boolean {
@@ -156,18 +199,20 @@ export function locationOf(value: Value): Ptr {
 
 /**
  * A comparator argument of an algorithm or a container: a function's name, or a function object such as
- * `std::greater<int>()`, compiled for two elements of a type. Gives undefined when the argument is neither.
+ * `std::greater<int>()`, compiled for two elements of a type, or for arguments of the types `elementType` lists.
+ * Gives undefined when the argument is neither.
  */
 export function comparatorOf(
   compiler: ExpressionCompiler,
   argumentType: Type,
   functions: FunctionInfo[] | undefined,
-  elementType: Type,
+  elementType: Type | Type[],
   row: number,
   arity = 2
 ): ((frame: Frame, callee: Value, ...args: Value[]) => Value) | undefined {
+  const types = Array.isArray(elementType) ? elementType : Array.from({ length: arity }, () => elementType);
   if (functions) {
-    const args = Array.from({ length: arity }, () => ({ type: elementType, isLvalue: true, row, run: () => UNINIT }));
+    const args = types.map((type) => ({ type, isLvalue: true, row, run: () => UNINIT }));
     const resolved = compiler.resolve('比較の関数', functions, args, undefined, row);
     const fn = resolved.fn;
     if (fn.owner && !fn.isStatic) return compiler.error(row, `メンバ関数 ${fn.displayName} は、関数として渡せません。`);
@@ -181,9 +226,9 @@ export function comparatorOf(
       ) as Value;
   }
   if (argumentType.kind === 'class' && argumentType.cls.library?.kind === 'functor') {
-    const operation = argumentType.cls.library.apply?.(elementType);
+    const operation = argumentType.cls.library.apply?.(types[0]);
     if (!operation) {
-      return compiler.error(row, `${argumentType.cls.name} では ${typeName(elementType)} を比べられません。`);
+      return compiler.error(row, `${argumentType.cls.name} では ${typeName(types[0])} を比べられません。`);
     }
     return (_frame, _callee, a, b) => operation(a, b);
   }

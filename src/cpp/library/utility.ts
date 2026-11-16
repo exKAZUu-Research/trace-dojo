@@ -5,6 +5,7 @@ import { BOOL, ClassInfo, classType, isArithmetic, type Type, typeName, unqualif
 import { CObject, type Value } from '../values';
 import { equalTo, lessThan } from './elements';
 import type { Library } from './registry';
+import { StringValue } from './string';
 import { nativeConstructor } from './support';
 import { typeKey } from './templates';
 
@@ -52,6 +53,9 @@ export function functorClass(library: Library, name: string, argument: Type | un
           operator === '<' ? order < 0 : operator === '>' ? order > 0 : operator === '<=' ? order <= 0 : order >= 0;
         return result ? 1 : 0;
       };
+    }
+    if (operator === '+' && operand.kind === 'class' && operand.cls.library?.kind === 'string') {
+      return (a, b) => new StringValue((a as StringValue).bytes + (b as StringValue).bytes);
     }
     if (!isArithmetic(operand)) return undefined;
     const run = binaryOperation(operator as never, operand as never);
