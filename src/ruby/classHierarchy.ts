@@ -81,14 +81,20 @@ export function copyHierarchy(source: RClass, copy: RClass): Map<HierarchyEntry,
       table: tables.get(current.table) ?? current.table,
     });
   }
-  const sharedOrigins = new Set(
-    [...entries.keys()].flatMap((entry) => (entry !== sourceHead && entry.origin ? [entry.origin] : []))
-  );
+  const origins: { entry: HierarchyEntry; source: HierarchyEntry }[] = [];
   for (const [original, entry] of entries) {
     entry.next = (original.next && entries.get(original.next)) ?? stop;
-    entry.origin = original.origin && entries.get(original.origin);
-    if (entry.kind === 'include' && entry.value !== copy && !sharedOrigins.has(original))
-      hierarchyOf(entry.value).occurrences.add(entry);
+    if (original === sourceHead) {
+      entry.origin = original.origin && entries.get(original.origin);
+      continue;
+    }
+    let register = true;
+    if (original.origin) origins.push({ entry, source: original.origin });
+    else if (origins.at(-1)?.source === original) {
+      origins.pop()!.entry.origin = entry;
+      register = false;
+    }
+    if (entry.kind === 'include' && entry.value !== copy && register) hierarchyOf(entry.value).occurrences.add(entry);
   }
   hierarchyOf(copy).head = entries.get(sourceHead)!;
   return entries;

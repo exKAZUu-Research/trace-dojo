@@ -23359,3 +23359,1556 @@ test.each(nativeExactValueProtocolCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeMatchOffsetCases = [
+  [
+    's="";r=/$/;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="";r=/$/;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="";r=/$/;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[0, true, 0, true]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    's="";r=/$/;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    's="";r=/$/;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    's="";r=/$/;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    's="";r=/$/;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    's="";r=/$/;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    String.raw`s="";r=/\z/;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="";r=/\z/;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="";r=/\z/;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[0, true, 0, true]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    String.raw`s="";r=/\z/;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    String.raw`s="";r=/\z/;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    String.raw`s="";r=/\z/;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    String.raw`s="";r=/\z/;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    String.raw`s="";r=/\z/;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    's="";r=//;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="";r=//;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="";r=//;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[0, true, 0, true]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    's="";r=//;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    's="";r=//;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    's="";r=//;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    's="";r=//;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    's="";r=//;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    's="";r=/a/;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="";r=/a/;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="";r=/a/;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="";r=/a/;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="";r=/a/;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="";r=/a/;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="";r=/a/;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="";r=/a/;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="";r=/\A/;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="";r=/\A/;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="";r=/\A/;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[0, true, 0, true]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    String.raw`s="";r=/\A/;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    String.raw`s="";r=/\A/;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    String.raw`s="";r=/\A/;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    String.raw`s="";r=/\A/;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    String.raw`s="";r=/\A/;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[0, false, 0, false]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    's="abc";r=/$/;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="abc";r=/$/;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[3, true, 3, true]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    's="abc";r=/$/;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[3, true, 3, true]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    's="abc";r=/$/;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[3, true, 3, true]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    's="abc";r=/$/;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[3, true, 3, true]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    's="abc";r=/$/;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[3, false, 3, false]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    's="abc";r=/$/;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[3, false, 3, false]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    's="abc";r=/$/;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[3, false, 3, false]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="abc";r=/\z/;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="abc";r=/\z/;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, true, 3, true]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="abc";r=/\z/;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, true, 3, true]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="abc";r=/\z/;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, true, 3, true]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="abc";r=/\z/;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, true, 3, true]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="abc";r=/\z/;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, false, 3, false]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="abc";r=/\z/;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, false, 3, false]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="abc";r=/\z/;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, false, 3, false]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    's="abc";r=//;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="abc";r=//;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[2, true, 2, true]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    's="abc";r=//;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[0, true, 0, true]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    's="abc";r=//;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[1, true, 1, true]\n[1, true, ""]\n[1, ""]\n',
+  ],
+  [
+    's="abc";r=//;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[3, true, 3, true]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    's="abc";r=//;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[3, false, 3, false]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    's="abc";r=//;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[3, false, 3, false]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    's="abc";r=//;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[3, false, 3, false]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    's="abc";r=/a/;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="abc";r=/a/;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="abc";r=/a/;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[0, true, 0, true]\n[0, true, "a"]\n[0, "a"]\n',
+  ],
+  [
+    's="abc";r=/a/;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="abc";r=/a/;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="abc";r=/a/;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="abc";r=/a/;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="abc";r=/a/;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="abc";r=/\A/;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="abc";r=/\A/;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="abc";r=/\A/;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[0, true, 0, true]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    String.raw`s="abc";r=/\A/;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="abc";r=/\A/;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="abc";r=/\A/;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="abc";r=/\A/;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="abc";r=/\A/;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="é𝟎";r=/$/;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="é𝟎";r=/$/;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[2, true, 2, true]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    's="é𝟎";r=/$/;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[2, true, 2, true]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    's="é𝟎";r=/$/;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[2, true, 2, true]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    's="é𝟎";r=/$/;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[2, false, 2, false]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    's="é𝟎";r=/$/;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[2, false, 2, false]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    's="é𝟎";r=/$/;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[2, false, 2, false]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    's="é𝟎";r=/$/;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[2, false, 2, false]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    String.raw`s="é𝟎";r=/\z/;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="é𝟎";r=/\z/;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[2, true, 2, true]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    String.raw`s="é𝟎";r=/\z/;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[2, true, 2, true]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    String.raw`s="é𝟎";r=/\z/;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[2, true, 2, true]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    String.raw`s="é𝟎";r=/\z/;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[2, false, 2, false]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    String.raw`s="é𝟎";r=/\z/;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[2, false, 2, false]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    String.raw`s="é𝟎";r=/\z/;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[2, false, 2, false]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    String.raw`s="é𝟎";r=/\z/;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[2, false, 2, false]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    's="é𝟎";r=//;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="é𝟎";r=//;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[1, true, 1, true]\n[1, true, ""]\n[1, ""]\n',
+  ],
+  [
+    's="é𝟎";r=//;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[0, true, 0, true]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    's="é𝟎";r=//;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[1, true, 1, true]\n[1, true, ""]\n[1, ""]\n',
+  ],
+  [
+    's="é𝟎";r=//;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[2, false, 2, false]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    's="é𝟎";r=//;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[2, false, 2, false]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    's="é𝟎";r=//;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[2, false, 2, false]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    's="é𝟎";r=//;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[2, false, 2, false]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    's="é𝟎";r=/a/;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="é𝟎";r=/a/;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="é𝟎";r=/a/;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="é𝟎";r=/a/;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="é𝟎";r=/a/;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="é𝟎";r=/a/;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="é𝟎";r=/a/;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    's="é𝟎";r=/a/;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]',
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="é𝟎";r=/\A/;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="é𝟎";r=/\A/;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="é𝟎";r=/\A/;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[0, true, 0, true]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    String.raw`s="é𝟎";r=/\A/;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="é𝟎";r=/\A/;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="é𝟎";r=/\A/;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="é𝟎";r=/\A/;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="é𝟎";r=/\A/;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/$/;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/$/;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, true, 3, true]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/$/;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[1, true, 1, true]\n[1, true, ""]\n[1, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/$/;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[1, true, 1, true]\n[1, true, ""]\n[1, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/$/;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, true, 3, true]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/$/;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, false, 3, false]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/$/;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, false, 3, false]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/$/;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, false, 3, false]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/\z/;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/\z/;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, true, 3, true]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/\z/;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, true, 3, true]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/\z/;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, true, 3, true]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/\z/;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, true, 3, true]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/\z/;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, false, 3, false]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/\z/;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, false, 3, false]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/\z/;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, false, 3, false]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=//;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=//;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[2, true, 2, true]\n[2, true, ""]\n[2, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=//;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[0, true, 0, true]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=//;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[1, true, 1, true]\n[1, true, ""]\n[1, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=//;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, true, 3, true]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=//;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, false, 3, false]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=//;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, false, 3, false]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=//;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[3, false, 3, false]\n[3, true, ""]\n[3, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/a/;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/a/;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/a/;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[0, true, 0, true]\n[0, true, "a"]\n[0, "a"]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/a/;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/a/;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/a/;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/a/;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/a/;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/\A/;p [r.match(s,-9)&.begin(0),r.match?(s,-9),s.match(r,-9)&.begin(0),s.match?(r,-9)];p r.match(s,-9){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/\A/;p [r.match(s,-1)&.begin(0),r.match?(s,-1),s.match(r,-1)&.begin(0),s.match?(r,-1)];p r.match(s,-1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/\A/;p [r.match(s,0)&.begin(0),r.match?(s,0),s.match(r,0)&.begin(0),s.match?(r,0)];p r.match(s,0){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[0, true, 0, true]\n[0, true, ""]\n[0, ""]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/\A/;p [r.match(s,1)&.begin(0),r.match?(s,1),s.match(r,1)&.begin(0),s.match?(r,1)];p r.match(s,1){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/\A/;p [r.match(s,3)&.begin(0),r.match?(s,3),s.match(r,3)&.begin(0),s.match?(r,3)];p r.match(s,3){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/\A/;p [r.match(s,4)&.begin(0),r.match?(s,4),s.match(r,4)&.begin(0),s.match?(r,4)];p r.match(s,4){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/\A/;p [r.match(s,8)&.begin(0),r.match?(s,8),s.match(r,8)&.begin(0),s.match?(r,8)];p r.match(s,8){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+  [
+    String.raw`s="a\nb";r=/\A/;p [r.match(s,9223372036854775807)&.begin(0),r.match?(s,9223372036854775807),s.match(r,9223372036854775807)&.begin(0),s.match?(r,9223372036854775807)];p r.match(s,9223372036854775807){|m|[m.begin(0),$~==m,$&]};p [$~&.begin(0),$&]`,
+    '[nil, false, nil, false]\nnil\n[nil, nil]\n',
+  ],
+] as const;
+
+test.each(nativeMatchOffsetCases)('match offsets clamp independently of predicate offsets: %s', (source, stdout) => {
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+const nativeCopiedOriginStackCases = [
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "D", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :c, :p]\n[:a, :b, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;B.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "A", "D", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "A", "B", "A", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "A", "B", "A", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :a, :d, :c, :p]\n[:a, :a, :b, :a, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;D.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "D", "A", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :c, :p]\n[:a, :b, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;B.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["E", "A", "B", "E", "D", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "E", "A", "B", "E", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "E", "A", "B", "E", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :b, :e, :d, :c, :p]\n[:e, :a, :b, :e, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;D.prepend B;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["B", "A", "B", "D", "A", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :b, :c, :p]\n[:a, :b, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;C.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["E", "A", "B", "D", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :b, :d, :c, :p]\n[:a, :b, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;P.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "D", "C", "A", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "A", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "A", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :c, :a, :p]\n[:a, :b, :d, :c, :a, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;L=K.clone;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "D", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "L", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :c, :p]\n[:a, :b, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;L=K.clone;B.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "A", "D", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "A", "B", "A", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "A", "B", "A", "D", "L", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :a, :d, :c, :p]\n[:a, :a, :b, :a, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;L=K.clone;D.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "D", "A", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "L", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :c, :p]\n[:a, :b, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;L=K.clone;B.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["E", "A", "B", "E", "D", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "E", "A", "B", "E", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "E", "A", "B", "E", "D", "L", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :b, :e, :d, :c, :p]\n[:e, :a, :b, :e, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;L=K.clone;D.prepend B;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["B", "A", "B", "D", "A", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "B", "A", "B", "D", "L", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :b, :c, :p]\n[:a, :b, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;L=K.clone;C.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["E", "A", "B", "D", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "L", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :b, :d, :c, :p]\n[:a, :b, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;L=K.clone;P.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "D", "C", "A", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "A", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "L", "A", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :c, :a, :p]\n[:a, :b, :d, :c, :a, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "D", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :c, :p]\n[:a, :b, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;B.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "A", "D", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "A", "B", "A", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "A", "B", "A", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :a, :d, :c, :p]\n[:a, :a, :b, :a, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;D.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "D", "A", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :c, :p]\n[:a, :b, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;B.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["E", "A", "B", "E", "D", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "E", "A", "B", "E", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "E", "A", "B", "E", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :b, :e, :d, :c, :p]\n[:e, :a, :b, :e, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;D.prepend B;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["B", "A", "B", "D", "A", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :b, :c, :p]\n[:a, :b, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;C.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["E", "A", "B", "D", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :b, :d, :c, :p]\n[:a, :b, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;P.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "D", "C", "A", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "A", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "A", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :c, :a, :p]\n[:a, :b, :d, :c, :a, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;L=K.dup;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "D", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "L", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :c, :p]\n[:a, :b, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;L=K.dup;B.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "A", "D", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "A", "B", "A", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "A", "B", "A", "D", "L", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :a, :d, :c, :p]\n[:a, :a, :b, :a, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;L=K.dup;D.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "D", "A", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "L", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :c, :p]\n[:a, :b, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;L=K.dup;B.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["E", "A", "B", "E", "D", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "E", "A", "B", "E", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "E", "A", "B", "E", "D", "L", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :b, :e, :d, :c, :p]\n[:e, :a, :b, :e, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;L=K.dup;D.prepend B;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["B", "A", "B", "D", "A", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "B", "A", "B", "D", "L", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :b, :c, :p]\n[:a, :b, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;L=K.dup;C.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["E", "A", "B", "D", "C", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "L", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :b, :d, :c, :p]\n[:a, :b, :d, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;L=K.dup;P.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "D", "C", "A", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "A", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "L", "A", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :c, :a, :p]\n[:a, :b, :d, :c, :a, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "D", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :c, :e, :p]\n[:a, :b, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;B.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "A", "D", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "A", "B", "A", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "A", "B", "A", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :a, :d, :c, :e, :p]\n[:a, :a, :b, :a, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;D.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "D", "A", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :c, :e, :p]\n[:a, :b, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;B.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["E", "A", "B", "E", "D", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "E", "A", "B", "E", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "E", "A", "B", "E", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :b, :e, :d, :c, :e, :p]\n[:e, :a, :b, :e, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;D.prepend B;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["B", "A", "B", "D", "A", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :b, :c, :e, :p]\n[:a, :b, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;C.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["E", "A", "B", "D", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :b, :d, :c, :e, :p]\n[:a, :b, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;P.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "D", "C", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :c, :a, :e, :p]\n[:a, :b, :d, :c, :a, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;L=K.clone;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "D", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :c, :e, :p]\n[:a, :b, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;L=K.clone;B.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "A", "D", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "A", "B", "A", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "A", "B", "A", "D", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :a, :d, :c, :e, :p]\n[:a, :a, :b, :a, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;L=K.clone;D.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "D", "A", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :c, :e, :p]\n[:a, :b, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;L=K.clone;B.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["E", "A", "B", "E", "D", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "E", "A", "B", "E", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "E", "A", "B", "E", "D", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :b, :e, :d, :c, :e, :p]\n[:e, :a, :b, :e, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;L=K.clone;D.prepend B;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["B", "A", "B", "D", "A", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "B", "A", "B", "D", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :b, :c, :e, :p]\n[:a, :b, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;L=K.clone;C.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["E", "A", "B", "D", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :b, :d, :c, :e, :p]\n[:a, :b, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.clone;L=K.clone;P.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "D", "C", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "L", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :c, :a, :e, :p]\n[:a, :b, :d, :c, :a, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "D", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :c, :e, :p]\n[:a, :b, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;B.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "A", "D", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "A", "B", "A", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "A", "B", "A", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :a, :d, :c, :e, :p]\n[:a, :a, :b, :a, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;D.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "D", "A", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :c, :e, :p]\n[:a, :b, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;B.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["E", "A", "B", "E", "D", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "E", "A", "B", "E", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "E", "A", "B", "E", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :b, :e, :d, :c, :e, :p]\n[:e, :a, :b, :e, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;D.prepend B;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["B", "A", "B", "D", "A", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :b, :c, :e, :p]\n[:a, :b, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;C.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["E", "A", "B", "D", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :b, :d, :c, :e, :p]\n[:a, :b, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;P.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "D", "C", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :c, :a, :e, :p]\n[:a, :b, :d, :c, :a, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;L=K.dup;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "D", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :c, :e, :p]\n[:a, :b, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;L=K.dup;B.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "A", "D", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "A", "B", "A", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "A", "B", "A", "D", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :a, :d, :c, :e, :p]\n[:a, :a, :b, :a, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;L=K.dup;D.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "D", "A", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :c, :e, :p]\n[:a, :b, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;L=K.dup;B.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["E", "A", "B", "E", "D", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "E", "A", "B", "E", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "E", "A", "B", "E", "D", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :b, :e, :d, :c, :e, :p]\n[:e, :a, :b, :e, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;L=K.dup;D.prepend B;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["B", "A", "B", "D", "A", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "B", "A", "B", "D", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :b, :c, :e, :p]\n[:a, :b, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;L=K.dup;C.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["E", "A", "B", "D", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :b, :d, :c, :e, :p]\n[:a, :b, :d, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend D;prepend B;end;K=C.dup;L=K.dup;P.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "D", "C", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "K", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n["B", "A", "B", "D", "L", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :c, :a, :e, :p]\n[:a, :b, :d, :c, :a, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "D", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :c, :p]\n[:a, :d, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;B.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "D", "B", "A", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :a, :c, :p]\n[:a, :d, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;D.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "D", "A", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "A", "D", "A", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "A", "D", "A", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :a, :b, :c, :p]\n[:a, :a, :d, :a, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;B.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["E", "A", "D", "B", "E", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "E", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "E", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :d, :b, :e, :c, :p]\n[:e, :a, :d, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;D.prepend B;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "D", "B", "A", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "B", "A", "D", "B", "A", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "B", "A", "D", "B", "A", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :b, :c, :p]\n[:a, :d, :a, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;C.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["E", "A", "D", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :d, :b, :c, :p]\n[:a, :d, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;P.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "D", "B", "C", "A", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "A", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "A", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :c, :a, :p]\n[:a, :d, :b, :c, :a, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;L=K.clone;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "D", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "L", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :c, :p]\n[:a, :d, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;L=K.clone;B.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "D", "B", "A", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "L", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :a, :c, :p]\n[:a, :d, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;L=K.clone;D.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "D", "A", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "A", "D", "A", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "A", "D", "A", "B", "L", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :a, :b, :c, :p]\n[:a, :a, :d, :a, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;L=K.clone;B.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["E", "A", "D", "B", "E", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "E", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "E", "A", "D", "B", "L", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :d, :b, :e, :c, :p]\n[:e, :a, :d, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;L=K.clone;D.prepend B;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "D", "B", "A", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "B", "A", "D", "B", "A", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "B", "A", "D", "B", "A", "B", "L", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :b, :c, :p]\n[:a, :d, :a, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;L=K.clone;C.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["E", "A", "D", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "L", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :d, :b, :c, :p]\n[:a, :d, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;L=K.clone;P.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "D", "B", "C", "A", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "A", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "L", "A", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :c, :a, :p]\n[:a, :d, :b, :c, :a, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "D", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :c, :p]\n[:a, :d, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;B.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "D", "B", "A", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :a, :c, :p]\n[:a, :d, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;D.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "D", "A", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "A", "D", "A", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "A", "D", "A", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :a, :b, :c, :p]\n[:a, :a, :d, :a, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;B.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["E", "A", "D", "B", "E", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "E", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "E", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :d, :b, :e, :c, :p]\n[:e, :a, :d, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;D.prepend B;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "D", "B", "A", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "B", "A", "D", "B", "A", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "B", "A", "D", "B", "A", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :b, :c, :p]\n[:a, :d, :a, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;C.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["E", "A", "D", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :d, :b, :c, :p]\n[:a, :d, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;P.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "D", "B", "C", "A", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "A", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "A", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :c, :a, :p]\n[:a, :d, :b, :c, :a, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;L=K.dup;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "D", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "L", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :c, :p]\n[:a, :d, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;L=K.dup;B.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "D", "B", "A", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "L", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :a, :c, :p]\n[:a, :d, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;L=K.dup;D.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "D", "A", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "A", "D", "A", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "A", "D", "A", "B", "L", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :a, :b, :c, :p]\n[:a, :a, :d, :a, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;L=K.dup;B.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["E", "A", "D", "B", "E", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "E", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "E", "A", "D", "B", "L", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :d, :b, :e, :c, :p]\n[:e, :a, :d, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;L=K.dup;D.prepend B;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "D", "B", "A", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "B", "A", "D", "B", "A", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "B", "A", "D", "B", "A", "B", "L", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :b, :c, :p]\n[:a, :d, :a, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;L=K.dup;C.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["E", "A", "D", "B", "C", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "L", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :d, :b, :c, :p]\n[:a, :d, :b, :c, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;L=K.dup;P.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "D", "B", "C", "A", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "A", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "L", "A", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :c, :a, :p]\n[:a, :d, :b, :c, :a, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "D", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :c, :e, :p]\n[:a, :d, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;B.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "D", "B", "A", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :a, :c, :e, :p]\n[:a, :d, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;D.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "D", "A", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "A", "D", "A", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "A", "D", "A", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :a, :b, :c, :e, :p]\n[:a, :a, :d, :a, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;B.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["E", "A", "D", "B", "E", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "E", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "E", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :d, :b, :e, :c, :e, :p]\n[:e, :a, :d, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;D.prepend B;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "D", "B", "A", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "B", "A", "D", "B", "A", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "B", "A", "D", "B", "A", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :b, :c, :e, :p]\n[:a, :d, :a, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;C.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["E", "A", "D", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :d, :b, :c, :e, :p]\n[:a, :d, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;P.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "D", "B", "C", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :c, :a, :e, :p]\n[:a, :d, :b, :c, :a, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;L=K.clone;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "D", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :c, :e, :p]\n[:a, :d, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;L=K.clone;B.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "D", "B", "A", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :a, :c, :e, :p]\n[:a, :d, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;L=K.clone;D.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "D", "A", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "A", "D", "A", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "A", "D", "A", "B", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :a, :b, :c, :e, :p]\n[:a, :a, :d, :a, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;L=K.clone;B.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["E", "A", "D", "B", "E", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "E", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "E", "A", "D", "B", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :d, :b, :e, :c, :e, :p]\n[:e, :a, :d, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;L=K.clone;D.prepend B;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "D", "B", "A", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "B", "A", "D", "B", "A", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "B", "A", "D", "B", "A", "B", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :b, :c, :e, :p]\n[:a, :d, :a, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;L=K.clone;C.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["E", "A", "D", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :d, :b, :c, :e, :p]\n[:a, :d, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.clone;L=K.clone;P.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "D", "B", "C", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "L", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :c, :a, :e, :p]\n[:a, :d, :b, :c, :a, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "D", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :c, :e, :p]\n[:a, :d, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;B.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "D", "B", "A", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :a, :c, :e, :p]\n[:a, :d, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;D.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "D", "A", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "A", "D", "A", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "A", "D", "A", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :a, :b, :c, :e, :p]\n[:a, :a, :d, :a, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;B.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["E", "A", "D", "B", "E", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "E", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "E", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :d, :b, :e, :c, :e, :p]\n[:e, :a, :d, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;D.prepend B;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "B", "D", "B", "A", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "B", "A", "D", "B", "A", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "B", "A", "D", "B", "A", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :b, :c, :e, :p]\n[:a, :d, :a, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;C.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["E", "A", "D", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :d, :b, :c, :e, :p]\n[:a, :d, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;P.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,K.new.x',
+    '["A", "D", "B", "C", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :c, :a, :e, :p]\n[:a, :d, :b, :c, :a, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;L=K.dup;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "D", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :c, :e, :p]\n[:a, :d, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;L=K.dup;B.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "D", "B", "A", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :a, :c, :e, :p]\n[:a, :d, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;L=K.dup;D.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "D", "A", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "A", "D", "A", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "A", "D", "A", "B", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :a, :b, :c, :e, :p]\n[:a, :a, :d, :a, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;L=K.dup;B.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["E", "A", "D", "B", "E", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "E", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "E", "A", "D", "B", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :d, :b, :e, :c, :e, :p]\n[:e, :a, :d, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;L=K.dup;D.prepend B;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "B", "D", "B", "A", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "B", "A", "D", "B", "A", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "B", "A", "D", "B", "A", "B", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :b, :d, :a, :b, :c, :e, :p]\n[:a, :d, :a, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;L=K.dup;C.prepend E;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["E", "A", "D", "B", "C", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "L", "E", "P", "Object", "Kernel", "BasicObject"]\n[:e, :a, :d, :b, :c, :e, :p]\n[:a, :d, :b, :c, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;class C<P;def x;[:c]+super;end;prepend B;prepend D;end;K=C.dup;L=K.dup;P.prepend A;p C.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,L.new.x',
+    '["A", "D", "B", "C", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "K", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n["D", "A", "D", "B", "L", "A", "E", "P", "Object", "Kernel", "BasicObject"]\n[:a, :d, :b, :c, :a, :e, :p]\n[:a, :d, :b, :c, :a, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "K"]\n[:a, :b, :d, :m, :p]\n[:a, :b, :d, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;B.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "A", "D", "M"]\n["B", "A", "A", "B", "A", "D", "K"]\n["B", "A", "A", "B", "A", "D", "K"]\n[:a, :a, :b, :a, :d, :m, :p]\n[:a, :a, :b, :a, :d, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;D.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "A", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "K"]\n[:a, :b, :d, :a, :m, :p]\n[:a, :b, :d, :a, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;B.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "B", "E", "D", "M"]\n["B", "E", "A", "B", "E", "D", "K"]\n["B", "E", "A", "B", "E", "D", "K"]\n[:e, :a, :b, :e, :d, :m, :p]\n[:e, :a, :b, :e, :d, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;D.prepend B;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["B", "A", "B", "D", "A", "B", "M"]\n["B", "B", "A", "B", "D", "K"]\n["B", "B", "A", "B", "D", "K"]\n[:a, :b, :d, :a, :b, :m, :p]\n[:a, :b, :d, :a, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;M.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "K"]\n[:e, :a, :b, :d, :m, :e, :p]\n[:a, :b, :d, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;P.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "K"]\n[:a, :b, :d, :m, :a, :p]\n[:a, :b, :d, :m, :a, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "L"]\n[:a, :b, :d, :m, :p]\n[:a, :b, :d, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;B.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "A", "D", "M"]\n["B", "A", "A", "B", "A", "D", "K"]\n["B", "A", "A", "B", "A", "D", "L"]\n[:a, :a, :b, :a, :d, :m, :p]\n[:a, :a, :b, :a, :d, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;D.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "A", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "L"]\n[:a, :b, :d, :a, :m, :p]\n[:a, :b, :d, :a, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;B.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "B", "E", "D", "M"]\n["B", "E", "A", "B", "E", "D", "K"]\n["B", "E", "A", "B", "E", "D", "L"]\n[:e, :a, :b, :e, :d, :m, :p]\n[:e, :a, :b, :e, :d, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;D.prepend B;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["B", "A", "B", "D", "A", "B", "M"]\n["B", "B", "A", "B", "D", "K"]\n["B", "B", "A", "B", "D", "L"]\n[:a, :b, :d, :a, :b, :m, :p]\n[:a, :b, :d, :a, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;M.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "L"]\n[:e, :a, :b, :d, :m, :e, :p]\n[:a, :b, :d, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;P.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "L"]\n[:a, :b, :d, :m, :a, :p]\n[:a, :b, :d, :m, :a, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "K"]\n[:a, :b, :d, :m, :p]\n[:a, :b, :d, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;B.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "A", "D", "M"]\n["B", "A", "A", "B", "A", "D", "K"]\n["B", "A", "A", "B", "A", "D", "K"]\n[:a, :a, :b, :a, :d, :m, :p]\n[:a, :a, :b, :a, :d, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;D.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "A", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "K"]\n[:a, :b, :d, :a, :m, :p]\n[:a, :b, :d, :a, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;B.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "B", "E", "D", "M"]\n["B", "E", "A", "B", "E", "D", "K"]\n["B", "E", "A", "B", "E", "D", "K"]\n[:e, :a, :b, :e, :d, :m, :p]\n[:e, :a, :b, :e, :d, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;D.prepend B;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["B", "A", "B", "D", "A", "B", "M"]\n["B", "B", "A", "B", "D", "K"]\n["B", "B", "A", "B", "D", "K"]\n[:a, :b, :d, :a, :b, :m, :p]\n[:a, :b, :d, :a, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;M.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "K"]\n[:e, :a, :b, :d, :m, :e, :p]\n[:a, :b, :d, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;P.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "K"]\n[:a, :b, :d, :m, :a, :p]\n[:a, :b, :d, :m, :a, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "L"]\n[:a, :b, :d, :m, :p]\n[:a, :b, :d, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;B.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "A", "D", "M"]\n["B", "A", "A", "B", "A", "D", "K"]\n["B", "A", "A", "B", "A", "D", "L"]\n[:a, :a, :b, :a, :d, :m, :p]\n[:a, :a, :b, :a, :d, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;D.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "A", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "L"]\n[:a, :b, :d, :a, :m, :p]\n[:a, :b, :d, :a, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;B.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "B", "E", "D", "M"]\n["B", "E", "A", "B", "E", "D", "K"]\n["B", "E", "A", "B", "E", "D", "L"]\n[:e, :a, :b, :e, :d, :m, :p]\n[:e, :a, :b, :e, :d, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;D.prepend B;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["B", "A", "B", "D", "A", "B", "M"]\n["B", "B", "A", "B", "D", "K"]\n["B", "B", "A", "B", "D", "L"]\n[:a, :b, :d, :a, :b, :m, :p]\n[:a, :b, :d, :a, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;M.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "L"]\n[:e, :a, :b, :d, :m, :e, :p]\n[:a, :b, :d, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;P.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "L"]\n[:a, :b, :d, :m, :a, :p]\n[:a, :b, :d, :m, :a, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "K"]\n[:a, :b, :d, :m, :e, :p]\n[:a, :b, :d, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;B.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "A", "D", "M"]\n["B", "A", "A", "B", "A", "D", "K"]\n["B", "A", "A", "B", "A", "D", "K"]\n[:a, :a, :b, :a, :d, :m, :e, :p]\n[:a, :a, :b, :a, :d, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;D.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "A", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "K"]\n[:a, :b, :d, :a, :m, :e, :p]\n[:a, :b, :d, :a, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;B.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "B", "E", "D", "M"]\n["B", "E", "A", "B", "E", "D", "K"]\n["B", "E", "A", "B", "E", "D", "K"]\n[:e, :a, :b, :e, :d, :m, :e, :p]\n[:e, :a, :b, :e, :d, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;D.prepend B;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["B", "A", "B", "D", "A", "B", "M"]\n["B", "B", "A", "B", "D", "K"]\n["B", "B", "A", "B", "D", "K"]\n[:a, :b, :d, :a, :b, :m, :e, :p]\n[:a, :b, :d, :a, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;M.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "K"]\n[:e, :a, :b, :d, :m, :e, :e, :p]\n[:a, :b, :d, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;P.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "K"]\n[:a, :b, :d, :m, :a, :e, :p]\n[:a, :b, :d, :m, :a, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "L"]\n[:a, :b, :d, :m, :e, :p]\n[:a, :b, :d, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;B.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "A", "D", "M"]\n["B", "A", "A", "B", "A", "D", "K"]\n["B", "A", "A", "B", "A", "D", "L"]\n[:a, :a, :b, :a, :d, :m, :e, :p]\n[:a, :a, :b, :a, :d, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;D.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "A", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "L"]\n[:a, :b, :d, :a, :m, :e, :p]\n[:a, :b, :d, :a, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;B.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "B", "E", "D", "M"]\n["B", "E", "A", "B", "E", "D", "K"]\n["B", "E", "A", "B", "E", "D", "L"]\n[:e, :a, :b, :e, :d, :m, :e, :p]\n[:e, :a, :b, :e, :d, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;D.prepend B;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["B", "A", "B", "D", "A", "B", "M"]\n["B", "B", "A", "B", "D", "K"]\n["B", "B", "A", "B", "D", "L"]\n[:a, :b, :d, :a, :b, :m, :e, :p]\n[:a, :b, :d, :a, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;M.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "L"]\n[:e, :a, :b, :d, :m, :e, :e, :p]\n[:a, :b, :d, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;P.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "L"]\n[:a, :b, :d, :m, :a, :e, :p]\n[:a, :b, :d, :m, :a, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "K"]\n[:a, :b, :d, :m, :e, :p]\n[:a, :b, :d, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;B.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "A", "D", "M"]\n["B", "A", "A", "B", "A", "D", "K"]\n["B", "A", "A", "B", "A", "D", "K"]\n[:a, :a, :b, :a, :d, :m, :e, :p]\n[:a, :a, :b, :a, :d, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;D.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "A", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "K"]\n[:a, :b, :d, :a, :m, :e, :p]\n[:a, :b, :d, :a, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;B.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "B", "E", "D", "M"]\n["B", "E", "A", "B", "E", "D", "K"]\n["B", "E", "A", "B", "E", "D", "K"]\n[:e, :a, :b, :e, :d, :m, :e, :p]\n[:e, :a, :b, :e, :d, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;D.prepend B;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["B", "A", "B", "D", "A", "B", "M"]\n["B", "B", "A", "B", "D", "K"]\n["B", "B", "A", "B", "D", "K"]\n[:a, :b, :d, :a, :b, :m, :e, :p]\n[:a, :b, :d, :a, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;M.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "K"]\n[:e, :a, :b, :d, :m, :e, :e, :p]\n[:a, :b, :d, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;P.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "K"]\n[:a, :b, :d, :m, :a, :e, :p]\n[:a, :b, :d, :m, :a, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "L"]\n[:a, :b, :d, :m, :e, :p]\n[:a, :b, :d, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;B.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "A", "D", "M"]\n["B", "A", "A", "B", "A", "D", "K"]\n["B", "A", "A", "B", "A", "D", "L"]\n[:a, :a, :b, :a, :d, :m, :e, :p]\n[:a, :a, :b, :a, :d, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;D.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "A", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "L"]\n[:a, :b, :d, :a, :m, :e, :p]\n[:a, :b, :d, :a, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;B.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "B", "E", "D", "M"]\n["B", "E", "A", "B", "E", "D", "K"]\n["B", "E", "A", "B", "E", "D", "L"]\n[:e, :a, :b, :e, :d, :m, :e, :p]\n[:e, :a, :b, :e, :d, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;D.prepend B;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["B", "A", "B", "D", "A", "B", "M"]\n["B", "B", "A", "B", "D", "K"]\n["B", "B", "A", "B", "D", "L"]\n[:a, :b, :d, :a, :b, :m, :e, :p]\n[:a, :b, :d, :a, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;M.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "L"]\n[:e, :a, :b, :d, :m, :e, :e, :p]\n[:a, :b, :d, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend D;prepend B;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;P.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "M"]\n["B", "A", "B", "D", "K"]\n["B", "A", "B", "D", "L"]\n[:a, :b, :d, :m, :a, :e, :p]\n[:a, :b, :d, :m, :a, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "K"]\n[:a, :d, :b, :m, :p]\n[:a, :d, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;B.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "A", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "K"]\n[:a, :d, :b, :a, :m, :p]\n[:a, :d, :b, :a, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;D.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "A", "B", "M"]\n["D", "A", "A", "D", "A", "B", "K"]\n["D", "A", "A", "D", "A", "B", "K"]\n[:a, :a, :d, :a, :b, :m, :p]\n[:a, :a, :d, :a, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;B.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "D", "B", "E", "M"]\n["D", "E", "A", "D", "B", "K"]\n["D", "E", "A", "D", "B", "K"]\n[:e, :a, :d, :b, :e, :m, :p]\n[:e, :a, :d, :b, :e, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;D.prepend B;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "B", "A", "B", "M"]\n["D", "B", "A", "D", "B", "A", "B", "K"]\n["D", "B", "A", "D", "B", "A", "B", "K"]\n[:a, :d, :a, :b, :m, :p]\n[:a, :d, :a, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;M.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "K"]\n[:e, :a, :d, :b, :m, :e, :p]\n[:a, :d, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;P.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "K"]\n[:a, :d, :b, :m, :a, :p]\n[:a, :d, :b, :m, :a, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "L"]\n[:a, :d, :b, :m, :p]\n[:a, :d, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;B.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "A", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "L"]\n[:a, :d, :b, :a, :m, :p]\n[:a, :d, :b, :a, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;D.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "A", "B", "M"]\n["D", "A", "A", "D", "A", "B", "K"]\n["D", "A", "A", "D", "A", "B", "L"]\n[:a, :a, :d, :a, :b, :m, :p]\n[:a, :a, :d, :a, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;B.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "D", "B", "E", "M"]\n["D", "E", "A", "D", "B", "K"]\n["D", "E", "A", "D", "B", "L"]\n[:e, :a, :d, :b, :e, :m, :p]\n[:e, :a, :d, :b, :e, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;D.prepend B;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "B", "A", "B", "M"]\n["D", "B", "A", "D", "B", "A", "B", "K"]\n["D", "B", "A", "D", "B", "A", "B", "L"]\n[:a, :d, :a, :b, :m, :p]\n[:a, :d, :a, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;M.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "L"]\n[:e, :a, :d, :b, :m, :e, :p]\n[:a, :d, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;P.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "L"]\n[:a, :d, :b, :m, :a, :p]\n[:a, :d, :b, :m, :a, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "K"]\n[:a, :d, :b, :m, :p]\n[:a, :d, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;B.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "A", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "K"]\n[:a, :d, :b, :a, :m, :p]\n[:a, :d, :b, :a, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;D.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "A", "B", "M"]\n["D", "A", "A", "D", "A", "B", "K"]\n["D", "A", "A", "D", "A", "B", "K"]\n[:a, :a, :d, :a, :b, :m, :p]\n[:a, :a, :d, :a, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;B.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "D", "B", "E", "M"]\n["D", "E", "A", "D", "B", "K"]\n["D", "E", "A", "D", "B", "K"]\n[:e, :a, :d, :b, :e, :m, :p]\n[:e, :a, :d, :b, :e, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;D.prepend B;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "B", "A", "B", "M"]\n["D", "B", "A", "D", "B", "A", "B", "K"]\n["D", "B", "A", "D", "B", "A", "B", "K"]\n[:a, :d, :a, :b, :m, :p]\n[:a, :d, :a, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;M.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "K"]\n[:e, :a, :d, :b, :m, :e, :p]\n[:a, :d, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;P.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "K"]\n[:a, :d, :b, :m, :a, :p]\n[:a, :d, :b, :m, :a, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "L"]\n[:a, :d, :b, :m, :p]\n[:a, :d, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;B.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "A", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "L"]\n[:a, :d, :b, :a, :m, :p]\n[:a, :d, :b, :a, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;D.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "A", "B", "M"]\n["D", "A", "A", "D", "A", "B", "K"]\n["D", "A", "A", "D", "A", "B", "L"]\n[:a, :a, :d, :a, :b, :m, :p]\n[:a, :a, :d, :a, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;B.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "D", "B", "E", "M"]\n["D", "E", "A", "D", "B", "K"]\n["D", "E", "A", "D", "B", "L"]\n[:e, :a, :d, :b, :e, :m, :p]\n[:e, :a, :d, :b, :e, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;D.prepend B;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "B", "A", "B", "M"]\n["D", "B", "A", "D", "B", "A", "B", "K"]\n["D", "B", "A", "D", "B", "A", "B", "L"]\n[:a, :d, :a, :b, :m, :p]\n[:a, :d, :a, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;M.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "L"]\n[:e, :a, :d, :b, :m, :e, :p]\n[:a, :d, :b, :m, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;P.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "L"]\n[:a, :d, :b, :m, :a, :p]\n[:a, :d, :b, :m, :a, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "K"]\n[:a, :d, :b, :m, :e, :p]\n[:a, :d, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;B.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "A", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "K"]\n[:a, :d, :b, :a, :m, :e, :p]\n[:a, :d, :b, :a, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;D.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "A", "B", "M"]\n["D", "A", "A", "D", "A", "B", "K"]\n["D", "A", "A", "D", "A", "B", "K"]\n[:a, :a, :d, :a, :b, :m, :e, :p]\n[:a, :a, :d, :a, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;B.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "D", "B", "E", "M"]\n["D", "E", "A", "D", "B", "K"]\n["D", "E", "A", "D", "B", "K"]\n[:e, :a, :d, :b, :e, :m, :e, :p]\n[:e, :a, :d, :b, :e, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;D.prepend B;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "B", "A", "B", "M"]\n["D", "B", "A", "D", "B", "A", "B", "K"]\n["D", "B", "A", "D", "B", "A", "B", "K"]\n[:a, :d, :a, :b, :m, :e, :p]\n[:a, :d, :a, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;M.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "K"]\n[:e, :a, :d, :b, :m, :e, :e, :p]\n[:a, :d, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;class C<P;include M;end;class T<P;include K;end;P.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "K"]\n[:a, :d, :b, :m, :a, :e, :p]\n[:a, :d, :b, :m, :a, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "L"]\n[:a, :d, :b, :m, :e, :p]\n[:a, :d, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;B.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "A", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "L"]\n[:a, :d, :b, :a, :m, :e, :p]\n[:a, :d, :b, :a, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;D.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "A", "B", "M"]\n["D", "A", "A", "D", "A", "B", "K"]\n["D", "A", "A", "D", "A", "B", "L"]\n[:a, :a, :d, :a, :b, :m, :e, :p]\n[:a, :a, :d, :a, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;B.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "D", "B", "E", "M"]\n["D", "E", "A", "D", "B", "K"]\n["D", "E", "A", "D", "B", "L"]\n[:e, :a, :d, :b, :e, :m, :e, :p]\n[:e, :a, :d, :b, :e, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;D.prepend B;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "B", "A", "B", "M"]\n["D", "B", "A", "D", "B", "A", "B", "K"]\n["D", "B", "A", "D", "B", "A", "B", "L"]\n[:a, :d, :a, :b, :m, :e, :p]\n[:a, :d, :a, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;M.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "L"]\n[:e, :a, :d, :b, :m, :e, :e, :p]\n[:a, :d, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.clone;L=K.clone;class C<P;include M;end;class T<P;include L;end;P.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "L"]\n[:a, :d, :b, :m, :a, :e, :p]\n[:a, :d, :b, :m, :a, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "K"]\n[:a, :d, :b, :m, :e, :p]\n[:a, :d, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;B.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "A", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "K"]\n[:a, :d, :b, :a, :m, :e, :p]\n[:a, :d, :b, :a, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;D.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "A", "B", "M"]\n["D", "A", "A", "D", "A", "B", "K"]\n["D", "A", "A", "D", "A", "B", "K"]\n[:a, :a, :d, :a, :b, :m, :e, :p]\n[:a, :a, :d, :a, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;B.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "D", "B", "E", "M"]\n["D", "E", "A", "D", "B", "K"]\n["D", "E", "A", "D", "B", "K"]\n[:e, :a, :d, :b, :e, :m, :e, :p]\n[:e, :a, :d, :b, :e, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;D.prepend B;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "B", "A", "B", "M"]\n["D", "B", "A", "D", "B", "A", "B", "K"]\n["D", "B", "A", "D", "B", "A", "B", "K"]\n[:a, :d, :a, :b, :m, :e, :p]\n[:a, :d, :a, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;M.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "K"]\n[:e, :a, :d, :b, :m, :e, :e, :p]\n[:a, :d, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;class C<P;include M;end;class T<P;include K;end;P.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),K.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "K"]\n[:a, :d, :b, :m, :a, :e, :p]\n[:a, :d, :b, :m, :a, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "L"]\n[:a, :d, :b, :m, :e, :p]\n[:a, :d, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;B.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "A", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "L"]\n[:a, :d, :b, :a, :m, :e, :p]\n[:a, :d, :b, :a, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;D.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "A", "B", "M"]\n["D", "A", "A", "D", "A", "B", "K"]\n["D", "A", "A", "D", "A", "B", "L"]\n[:a, :a, :d, :a, :b, :m, :e, :p]\n[:a, :a, :d, :a, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;B.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "D", "B", "E", "M"]\n["D", "E", "A", "D", "B", "K"]\n["D", "E", "A", "D", "B", "L"]\n[:e, :a, :d, :b, :e, :m, :e, :p]\n[:e, :a, :d, :b, :e, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;D.prepend B;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "B", "D", "B", "A", "B", "M"]\n["D", "B", "A", "D", "B", "A", "B", "K"]\n["D", "B", "A", "D", "B", "A", "B", "L"]\n[:a, :d, :a, :b, :m, :e, :p]\n[:a, :d, :a, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;M.prepend E;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["E", "A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "L"]\n[:e, :a, :d, :b, :m, :e, :e, :p]\n[:a, :d, :b, :m, :e, :p]\n',
+  ],
+  [
+    'module A;def x;[:a]+super;end;end;module B;def x;[:b]+super;end;end;module D;def x;[:d]+super;end;end;module E;def x;[:e]+super;end;end;B.prepend A;D.prepend A;class P;def x;[:p];end;end;P.prepend E;module M;def x;[:m]+super;end;prepend B;prepend D;end;K=M.dup;L=K.dup;class C<P;include M;end;class T<P;include L;end;P.prepend A;p M.ancestors.map(&:name),K.ancestors.map(&:name),L.ancestors.map(&:name);p C.new.x,T.new.x',
+    '["A", "D", "B", "M"]\n["D", "A", "D", "B", "K"]\n["D", "A", "D", "B", "L"]\n[:a, :d, :b, :m, :a, :e, :p]\n[:a, :d, :b, :m, :a, :e, :p]\n',
+  ],
+] as const;
+
+test.each(nativeCopiedOriginStackCases)(
+  'copied prepend origins retain native nesting and propagation: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);

@@ -71,6 +71,7 @@ const RUBY_UTF8 = 'UTF-8';
 
 export interface RegexpData {
   source: string;
+  translatedSource: string;
   encoding: 'US-ASCII' | typeof RUBY_UTF8 | 'BINARY (ASCII-8BIT)';
   ignoreCase: boolean;
   multiline: boolean;
@@ -450,11 +451,9 @@ function translateEscape(
         throw unsupportedClassEscape(String.raw`\B`);
       }
       const word = `[${classes === ASCII_POSIX_CLASSES ? classes.word : UNICODE_BOUNDARY_WORD}]`;
-      const boundary =
-        next === 'b'
-          ? `(?:(?<=${word})(?!${word})|(?<!${word})(?=${word}))`
-          : `(?:(?<=${word})(?=${word})|(?<!${word})(?!${word}))`;
-      return String.raw`(?=[\s\S]|$)` + boundary;
+      return next === 'b'
+        ? `(?:(?<=${word})(?!${word})|(?<!${word})(?=${word}))`
+        : `(?:(?<=${word})(?=${word})|(?<!${word})(?!${word}))`;
     }
     case 'R': {
       return classes === ASCII_POSIX_CLASSES
@@ -576,9 +575,10 @@ export function makeRegexp(source: string, options: RegexpOptions): RObject {
       );
     throw error;
   }
-  const js = compileHostRegexp(translated, `dgmu${options.ignoreCase ? 'i' : ''}${options.multiline ? 's' : ''}`);
+  const js = compileMatchingRegexp(translated, `dgmu${options.ignoreCase ? 'i' : ''}${options.multiline ? 's' : ''}`);
   const data: RegexpData = {
     source,
+    translatedSource: translated,
     encoding,
     ignoreCase: options.ignoreCase ?? false,
     multiline: options.multiline ?? false,
@@ -588,6 +588,10 @@ export function makeRegexp(source: string, options: RegexpOptions): RObject {
   };
   regexp.data = data;
   return regexp;
+}
+
+function compileMatchingRegexp(source: string, flags: string): RegExp {
+  return compileHostRegexp(String.raw`(?=[\s\S]|$)(?:${source})`, flags);
 }
 
 function hasNonAsciiRegexpEscape(source: string, extended: boolean): boolean {
@@ -719,7 +723,7 @@ export function execAt(
   rt().chargeSlots(result.indices.length * 3);
   const names: string[] = [];
   const namedGroups: Record<string, number> = Object.create(null) as Record<string, number>;
-  const nameOrder = (data.captureNames ??= hostRegexpCaptureNames(js.source));
+  const nameOrder = (data.captureNames ??= hostRegexpCaptureNames(data.translatedSource));
   for (const [position, name] of nameOrder.entries()) {
     if (!(name in namedGroups)) names.push(name);
     if (!(name in namedGroups) || result.indices[position + 1] !== undefined) namedGroups[name] = position + 1;
@@ -741,9 +745,13 @@ function assertHostMatchParity(
   result: RegExpExecArray | null,
   options: { binary: boolean; anchored: boolean }
 ): void {
-  if (!options.binary && (data.ignoreCase || /\(\?[ims]*i/.test(data.js.source)) && data.foldCheck?.text !== text)
-    data.foldCheck = { text, needed: regexpNeedsCasefoldParity(data.js.source, text) };
-  const captureParity = (data.captureParity ??= requiresNativeCaptureParity(data.js.source));
+  if (
+    !options.binary &&
+    (data.ignoreCase || /\(\?[ims]*i/.test(data.translatedSource)) &&
+    data.foldCheck?.text !== text
+  )
+    data.foldCheck = { text, needed: regexpNeedsCasefoldParity(data.translatedSource, text) };
+  const captureParity = (data.captureParity ??= requiresNativeCaptureParity(data.translatedSource));
   const feature = captureParity ? '正規表現の繰り返し・後読みキャプチャ' : undefined;
   if (captureParity && options.binary && /\P{ASCII}/u.test(text))
     throw new UnsupportedFeatureError('正規表現の繰り返し・後読みキャプチャ');
@@ -780,7 +788,7 @@ function execWithinBudget(
 function regexpForMatch(data: RegexpData, source?: RString, anchored = false): RegExp {
   const binary = source?.binary && data.encoding === 'US-ASCII';
   const base = binary
-    ? (data.binaryJs ??= compileHostRegexp(
+    ? (data.binaryJs ??= compileMatchingRegexp(
         translate(data.source, data.extended, data.multiline, true, true, data.ignoreCase),
         data.js.flags
       ))
@@ -1341,7 +1349,8 @@ function* subjectText(value: Value): Gen<RString | undefined> {
 
 function matchAt(regexp: RObject, subject: RString, offset: number): MatchState | undefined {
   const text = subject.s;
-  const start = offset < 0 ? offset + charIndex(text, text.length) : offset;
+  const length = charIndex(text, text.length);
+  const start = offset < 0 ? offset + length : Math.min(offset, length);
   if (start < 0) return undefined;
   validateRegexpSubject(regexp, subject);
   return execAt(regexp, text, start, subject, undefined, true);

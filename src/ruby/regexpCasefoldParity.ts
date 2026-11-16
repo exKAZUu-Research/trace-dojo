@@ -264,7 +264,9 @@ function sameCaptureRanges(
 // The bundled 4.0.0 compiler lacks the 4.0.9 overflow guards, so bound syntax and repeat counts before calling it.
 function assertBoundedPattern(data: RegexpData): void {
   if (data.source.length > LIMITS.maxCallDepth) throw new UnsupportedFeatureError('Unicode の複数文字 casefold');
-  const ast = new RegExpParser().parsePattern(data.js.source, 0, data.js.source.length, { unicode: true });
+  const ast = new RegExpParser().parsePattern(data.translatedSource, 0, data.translatedSource.length, {
+    unicode: true,
+  });
   visitRegExpAST(ast, {
     onQuantifierEnter(node) {
       if (node.min > LIMITS.maxCallDepth || (Number.isFinite(node.max) && node.max > LIMITS.maxCallDepth))
