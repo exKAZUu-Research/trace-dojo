@@ -295,6 +295,7 @@ export class RClass extends RBasic {
   /** The modules this module includes directly, the last included first. */
   readonly includes: RClass[] = [];
   readonly prepends: RClass[] = [];
+  sharedSingletonOrigin?: RClass;
   /** The object a singleton class belongs to. */
   attached?: Value;
   /** The module whose constant first named this one, for names such as `Outer::Inner`. */

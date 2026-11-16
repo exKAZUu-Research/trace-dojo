@@ -1063,3 +1063,9 @@ test.each(['private', 'include'])('proc-defined declaration names retain atomic 
   expect(expected.length).toBeGreaterThan(0);
   expect(rubyTrace(program(`define_method(:${name},new.method(:hidden).to_proc)`))).toEqual(expected);
 });
+
+test('Singleton copies retain captured turtles through the shared origin', () => {
+  const program =
+    'module M;def go;super;end;end;def make;t=Turtle.new;o=Object.new;o.define_singleton_method(:go){t.forward};o.singleton_class.prepend M;o.clone;end;b=make;x=1;b.go';
+  expect(traceProgram('ruby', program, program).finalTurtles).toMatchObject([{ x: 0, y: 1 }]);
+});

@@ -15060,3 +15060,93 @@ test.each(rationalPowerIdentityCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeCopyBoundaryCases = [
+  [
+    'module N;def m;[:N]+super;end;end\nmodule M;def m;[:M]+super;end;end\nclass S;def m;[:S];end;end\nclass C<S;include M;prepend M;def m;[:C]+super;end;end\nK=C.dup;$n=0;M.include N;p K.new.m;p K.ancestors',
+    '[:M, :N, :C, :M, :N, :S]\n[M, N, K, M, N, S, Object, Kernel, BasicObject]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end\nmodule M;def m;$n+=1;M.include N if $n==1;[:M]+super;end;end\nclass S;def m;[:S];end;end\nclass C<S;include M;prepend M;def m;[:C]+super;end;end\nK=C.dup;$n=0;p K.new.m;p K.ancestors',
+    '[:M, :N, :C, :M, :N, :S]\n[M, N, K, M, N, S, Object, Kernel, BasicObject]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end\nmodule M;def m;[:M]+super;end;end\nclass S;def m;[:S];end;end\nclass C<S;include M;prepend M;def m;[:C]+super;end;end\nK=C.clone;$n=0;M.include N;p K.new.m;p K.ancestors',
+    '[:M, :N, :C, :M, :N, :S]\n[M, N, K, M, N, S, Object, Kernel, BasicObject]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end\nmodule M;def m;$n+=1;M.include N if $n==1;[:M]+super;end;end\nclass S;def m;[:S];end;end\nclass C<S;include M;prepend M;def m;[:C]+super;end;end\nK=C.clone;$n=0;p K.new.m;p K.ancestors',
+    '[:M, :N, :C, :M, :N, :S]\n[M, N, K, M, N, S, Object, Kernel, BasicObject]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end\nmodule M;def m;[:M]+super;end;end\nclass C;def m;[:C];end;end\na=C.new;a.extend M;a.singleton_class.prepend M\nb=a.clone;$target=b.singleton_class;$n=0;$target.include N;p b.m;p b.singleton_class.ancestors.reject{|x|x==b.singleton_class||x==a.singleton_class};p b.m;p a.m',
+    '[:N, :M, :M, :C]\n[N, M, M, C, Object, Kernel, BasicObject]\n[:N, :M, :M, :C]\n[:M, :M, :C]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end\nmodule M;def m;$n+=1;$target.include N if $n==1;[:M]+super;end;end\nclass C;def m;[:C];end;end\na=C.new;a.extend M;a.singleton_class.prepend M\nb=a.clone;$target=b.singleton_class;$n=0;p b.m;p b.singleton_class.ancestors.reject{|x|x==b.singleton_class||x==a.singleton_class};p b.m;p a.m',
+    '[:M, :M, :C]\n[N, M, M, C, Object, Kernel, BasicObject]\n[:N, :M, :M, :C]\n[:M, :M, :C]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end;module M;def m;$n+=1;M.include N if $n==1;[:M,defined?(super)]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;alias other m;end;K=C.dup;o=K.new;saved=o.method(:m);bound=M.instance_method(:m).bind(o);$n=0;p o.m;p K.ancestors',
+    '[:M, "super", :N, :C, :M, "super", :N, :S]\n[M, N, K, M, N, S, Object, Kernel, BasicObject]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end;module M;def m;$n+=1;M.include N if $n==1;[:M,defined?(super)]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;alias other m;end;K=C.dup;o=K.new;saved=o.method(:m);bound=M.instance_method(:m).bind(o);$n=0;p saved.call;p K.ancestors',
+    '[:M, "super", :N, :C, :M, "super", :N, :S]\n[M, N, K, M, N, S, Object, Kernel, BasicObject]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end;module M;def m;$n+=1;M.include N if $n==1;[:M,defined?(super)]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;alias other m;end;K=C.dup;o=K.new;saved=o.method(:m);bound=M.instance_method(:m).bind(o);$n=0;p bound.call;p K.ancestors',
+    '[:M, "super", :N, :C, :M, "super", :N, :S]\n[M, N, K, M, N, S, Object, Kernel, BasicObject]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end;module M;def m;$n+=1;M.include N if $n==1;[:M,defined?(super)]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;alias other m;end;K=C.dup;o=K.new;saved=o.method(:m);bound=M.instance_method(:m).bind(o);$n=0;p o.other;p K.ancestors',
+    '[:M, "super", :N, :C, :M, "super", :N, :S]\n[M, N, K, M, N, S, Object, Kernel, BasicObject]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end;module M;def m;$n+=1;M.include N if $n==1;[:M,defined?(super)]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;alias other m;end;K=C.clone;o=K.new;saved=o.method(:m);bound=M.instance_method(:m).bind(o);$n=0;p o.m;p K.ancestors',
+    '[:M, "super", :N, :C, :M, "super", :N, :S]\n[M, N, K, M, N, S, Object, Kernel, BasicObject]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end;module M;def m;$n+=1;M.include N if $n==1;[:M,defined?(super)]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;alias other m;end;K=C.clone;o=K.new;saved=o.method(:m);bound=M.instance_method(:m).bind(o);$n=0;p saved.call;p K.ancestors',
+    '[:M, "super", :N, :C, :M, "super", :N, :S]\n[M, N, K, M, N, S, Object, Kernel, BasicObject]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end;module M;def m;$n+=1;M.include N if $n==1;[:M,defined?(super)]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;alias other m;end;K=C.clone;o=K.new;saved=o.method(:m);bound=M.instance_method(:m).bind(o);$n=0;p bound.call;p K.ancestors',
+    '[:M, "super", :N, :C, :M, "super", :N, :S]\n[M, N, K, M, N, S, Object, Kernel, BasicObject]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end;module M;def m;$n+=1;M.include N if $n==1;[:M,defined?(super)]+super;end;end;class S;def m;[:S];end;end;class C<S;include M;prepend M;def m;[:C]+super;end;alias other m;end;K=C.clone;o=K.new;saved=o.method(:m);bound=M.instance_method(:m).bind(o);$n=0;p o.other;p K.ancestors',
+    '[:M, "super", :N, :C, :M, "super", :N, :S]\n[M, N, K, M, N, S, Object, Kernel, BasicObject]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end;module M;def m;$n+=1;$target.include N if $n==1;[:M,defined?(super)]+super;end;end;class C;def m;[:C];end;end;a=C.new;a.extend M;a.singleton_class.prepend M;a.singleton_class.alias_method :other,:m;b=a.clone;$target=b.singleton_class;saved=b.method(:m);$n=0;p b.m;p b.m;p a.m',
+    '[:M, "super", :M, "super", :C]\n[:N, :M, "super", :M, "super", :C]\n[:M, "super", :M, "super", :C]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end;module M;def m;$n+=1;$target.include N if $n==1;[:M,defined?(super)]+super;end;end;class C;def m;[:C];end;end;a=C.new;a.extend M;a.singleton_class.prepend M;a.singleton_class.alias_method :other,:m;b=a.clone;$target=b.singleton_class;saved=b.method(:m);$n=0;p saved.call;p b.m;p a.m',
+    '[:M, "super", :M, "super", :C]\n[:N, :M, "super", :M, "super", :C]\n[:M, "super", :M, "super", :C]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end;module M;def m;$n+=1;$target.include N if $n==1;[:M,defined?(super)]+super;end;end;class C;def m;[:C];end;end;a=C.new;a.extend M;a.singleton_class.prepend M;a.singleton_class.alias_method :other,:m;b=a.clone;$target=b.singleton_class;saved=b.method(:m);$n=0;p b.other;p b.m;p a.m',
+    '[:M, "super", :M, "super", :C]\n[:N, :M, "super", :M, "super", :C]\n[:M, "super", :M, "super", :C]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end;module M;def m;$n+=1;$target.include N if $n==1;[:M,defined?(super)]+super;end;end;class C;def m;[:C];end;end;a=C.new;a.extend M;a.singleton_class.prepend M;a.singleton_class.alias_method :other,:m;b=a.clone.clone;$target=b.singleton_class;saved=b.method(:m);$n=0;p b.m;p b.m;p a.m',
+    '[:M, "super", :M, "super", :C]\n[:N, :M, "super", :M, "super", :C]\n[:M, "super", :M, "super", :C]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end;module M;def m;$n+=1;$target.include N if $n==1;[:M,defined?(super)]+super;end;end;class C;def m;[:C];end;end;a=C.new;a.extend M;a.singleton_class.prepend M;a.singleton_class.alias_method :other,:m;b=a.clone.clone;$target=b.singleton_class;saved=b.method(:m);$n=0;p saved.call;p b.m;p a.m',
+    '[:M, "super", :M, "super", :C]\n[:N, :M, "super", :M, "super", :C]\n[:M, "super", :M, "super", :C]\n',
+  ],
+  [
+    'module N;def m;[:N]+super;end;end;module M;def m;$n+=1;$target.include N if $n==1;[:M,defined?(super)]+super;end;end;class C;def m;[:C];end;end;a=C.new;a.extend M;a.singleton_class.prepend M;a.singleton_class.alias_method :other,:m;b=a.clone.clone;$target=b.singleton_class;saved=b.method(:m);$n=0;p b.other;p b.m;p a.m',
+    '[:M, "super", :M, "super", :C]\n[:N, :M, "super", :M, "super", :C]\n[:M, "super", :M, "super", :C]\n',
+  ],
+] as const;
+
+test.each(nativeCopyBoundaryCases)(
+  'Native copy boundaries retain shared tails and active continuations: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);

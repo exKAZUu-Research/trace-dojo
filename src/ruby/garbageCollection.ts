@@ -70,6 +70,8 @@ function pushClassReferences(value: RClass, pending: Value[]): void {
   for (const item of value.constants.values()) pending.push(item);
   for (const item of value.classVariables.values()) pending.push(item);
   for (const method of value.methods.values()) if (method.body.kind === 'proc') pending.push(method.body.proc);
+  if (value.sharedSingletonOrigin) pending.push(value.sharedSingletonOrigin);
+  if (value.attached !== undefined) pending.push(value.attached);
   for (const item of value.includes) pending.push(item);
   for (const item of value.prepends) pending.push(item);
   if (value.superclass) pending.push(value.superclass);

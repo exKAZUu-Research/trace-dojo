@@ -66,7 +66,7 @@ export function prependHierarchy(target: RClass, module: RClass): void {
 
 export function copyHierarchy(source: RClass, copy: RClass): Map<HierarchyEntry, HierarchyEntry> {
   const sourceHead = hierarchyOf(source).head;
-  const stop = source.superclass && hierarchyOf(source.superclass).head;
+  const stop = originOf(sourceHead).next;
   const entries = new Map<HierarchyEntry, HierarchyEntry>();
   const tables = new Map<Map<string, RMethod>, Map<string, RMethod>>([
     [sourceHead.table, new Map()],
@@ -80,13 +80,31 @@ export function copyHierarchy(source: RClass, copy: RClass): Map<HierarchyEntry,
       table: tables.get(current.table) ?? current.table,
     });
   }
+  const sharedOrigins = new Set(
+    [...entries.keys()].flatMap((entry) => (entry !== sourceHead && entry.origin ? [entry.origin] : []))
+  );
   for (const [original, entry] of entries) {
     entry.next = (original.next && entries.get(original.next)) ?? stop;
     entry.origin = original.origin && entries.get(original.origin);
-    if (entry.kind === 'include' && entry.value !== copy) hierarchyOf(entry.value).occurrences.add(entry);
+    if (entry.kind === 'include' && entry.value !== copy && !sharedOrigins.has(original))
+      hierarchyOf(entry.value).occurrences.add(entry);
   }
   hierarchyOf(copy).head = entries.get(sourceHead)!;
   return entries;
+}
+
+export function copySingletonHierarchy(
+  source: RClass,
+  copy: RClass
+): {
+  methods: Map<string, RMethod>;
+  occurrences: Map<HierarchyEntry, HierarchyEntry>;
+} {
+  const sourceHead = hierarchyOf(source).head;
+  const head = hierarchyOf(copy).head;
+  head.next = sourceHead.next;
+  copy.sharedSingletonOrigin = sourceHead.origin ? source : source.sharedSingletonOrigin;
+  return { methods: sourceHead.table, occurrences: new Map([[sourceHead, head]]) };
 }
 
 function hierarchyOf(value: RClass): Hierarchy {

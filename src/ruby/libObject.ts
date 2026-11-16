@@ -1,4 +1,4 @@
-import { copyHierarchy, includeHierarchy } from './classHierarchy';
+import { copyHierarchy, copySingletonHierarchy, includeHierarchy } from './classHierarchy';
 // code-gauge-allow-file fileNcss 921 -- Object lifecycle and exception construction share representation and state; splitting registration by size would scatter that concern.
 import {
   anonymousClassName,
@@ -277,8 +277,8 @@ function copySingleton(original: RClass, copy: RBasic): void {
   singleton.attached = copy;
   for (const included of original.includes) singleton.includes.push(included);
   for (const prepended of original.prepends) singleton.prepends.push(prepended);
-  const occurrences = copyHierarchy(original, singleton);
-  for (const [name, method] of original.methods)
+  const { occurrences, methods } = copySingletonHierarchy(original, singleton);
+  for (const [name, method] of methods)
     singleton.methods.set(name, {
       ...method,
       owner: method.owner === original ? singleton : method.owner,
