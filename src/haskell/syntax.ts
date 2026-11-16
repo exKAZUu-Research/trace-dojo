@@ -1,8 +1,3 @@
-/**
- * The surface syntax of a Haskell module after conversion from the parse tree. Later passes annotate it in place:
- * the renamer resolves names, and the type checker records types and class evidence.
- */
-
 /** A source range: 0-based rows and columns, the end column exclusive. */
 export interface Span {
   row: number;
