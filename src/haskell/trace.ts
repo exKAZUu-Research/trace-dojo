@@ -5,6 +5,7 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { CHAR_TYPE, CONS_CON, FLOAT_TYPE, NIL_CON, UNIT_CON } from './builtinTypes';
 import { compileProgram } from './compile';
+import type { ConInfo } from './entities';
 import { floatToDigits } from './primitives';
 import { runProgram } from './run';
 import { DisplayAbort, Runtime, type TraceFrame } from './runtime';
@@ -47,7 +48,7 @@ function variablesOf(runtime: Runtime, frame: TraceFrame): TraceVariables {
   const variables: TraceVariables = { vars: {}, referenceVars: {} };
   const context = frame.contexts.at(-1);
   if (!context) return variables;
-  let self: Value | undefined;
+  let self: { value: Value; type: Type } | undefined;
   for (const visible of context.visible) {
     const slot = context.env.at(visible.depth).slots[visible.index];
     if (slot === undefined) continue;
@@ -57,18 +58,26 @@ function variablesOf(runtime: Runtime, frame: TraceFrame): TraceVariables {
       return forced;
     });
     if (value === undefined) continue;
-    if (visible.name === 'this') self = value;
+    if (visible.name === 'this') self = { value, type: visible.type };
   }
   addSelfFields(runtime, variables, self);
   return variables;
 }
 
-function addSelfFields(runtime: Runtime, variables: TraceVariables, self: Value | undefined): void {
+function addSelfFields(
+  runtime: Runtime,
+  variables: TraceVariables,
+  entry: { value: Value; type: Type } | undefined
+): void {
+  if (!entry) return;
+  const self = entry.value;
   if (!(self instanceof ConValue) || !self.con.fieldNames) return;
   for (const [index, field] of self.fields.entries()) {
     const scalar = displayAttempt(runtime, () => {
       const forced = forceForDisplay(runtime, field);
-      return forced === undefined ? NOT_SCALAR : scalarOf(runtime, forced, { tag: 'tgen', index: -1 } as Type, 0);
+      return forced === undefined
+        ? NOT_SCALAR
+        : scalarOf(runtime, forced, constructorFieldType(self.con, entry.type, index), 0);
     });
     if (scalar !== undefined && scalar !== NOT_SCALAR) variables.vars[`this.${self.con.fieldNames[index]}`] = scalar;
   }
@@ -131,9 +140,17 @@ function isListValue(value: Value, type: Type): boolean {
   return false;
 }
 
+const UNKNOWN_TYPE: Type = { tag: 'tgen', index: -1 };
+
+function constructorFieldType(con: ConInfo, type: Type, position: number): Type {
+  const { args } = splitApp(prune(type));
+  const parameters = Array.from({ length: con.type.arity }, (_, index) => args[index] ?? UNKNOWN_TYPE);
+  return instantiateType(con.fieldTypes[position], parameters);
+}
+
 function elementType(type: Type, position: number): Type {
   const { args } = splitApp(prune(type));
-  return args[position] ?? ({ tag: 'tgen', index: -1 } as Type);
+  return args[position] ?? UNKNOWN_TYPE;
 }
 
 function isStringType(type: Type, value: Value): boolean {
@@ -327,9 +344,7 @@ class DisplayNodes {
     for (const [index, field] of value.fields.entries()) {
       const forced = forceForDisplay(this.runtime, field);
       if (forced === undefined) continue;
-      const fieldType = isTuple
-        ? elementType(type, index)
-        : instantiateType(con.fieldTypes[index], splitApp(prune(type)).args);
+      const fieldType = isTuple ? elementType(type, index) : constructorFieldType(con, type, index);
       const node = this.build(forced, fieldType, depth + 1);
       if (node) entries[con.fieldNames?.[index] ?? String(index)] = node;
     }

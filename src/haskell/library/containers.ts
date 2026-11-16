@@ -25,28 +25,34 @@ null STip = True
 null _ = False
 
 member :: Ord a => a -> Set a -> Bool
-member x STip = x ${BT}seq${BT} False
-member x (SBin _ y l r) = case compare x y of
-  LT -> member x l
-  GT -> member x r
-  EQ -> True
+member x tree = x ${BT}seq${BT} go tree
+  where
+    go STip = False
+    go (SBin _ y l r) = case compare x y of
+      LT -> go l
+      GT -> go r
+      EQ -> True
 
 notMember :: Ord a => a -> Set a -> Bool
 notMember x s = not (member x s)
 
 insert :: Ord a => a -> Set a -> Set a
-insert x STip = singleton x
-insert x t@(SBin sz y l r) = case compare x y of
-  LT -> balance y (insert x l) r
-  GT -> balance y l (insert x r)
-  EQ -> SBin sz x l r
+insert x tree = x ${BT}seq${BT} go tree
+  where
+    go STip = singleton x
+    go (SBin sz y l r) = case compare x y of
+      LT -> balance y (go l) r
+      GT -> balance y l (go r)
+      EQ -> SBin sz x l r
 
 delete :: Ord a => a -> Set a -> Set a
-delete x STip = x ${BT}seq${BT} STip
-delete x (SBin _ y l r) = case compare x y of
-  LT -> balance y (delete x l) r
-  GT -> balance y l (delete x r)
-  EQ -> glue l r
+delete x tree = x ${BT}seq${BT} go tree
+  where
+    go STip = STip
+    go (SBin _ y l r) = case compare x y of
+      LT -> balance y (go l) r
+      GT -> balance y l (go r)
+      EQ -> glue l r
 
 bin :: a -> Set a -> Set a -> Set a
 bin x l r = SBin (size l + size r + 1) x l r
@@ -447,11 +453,13 @@ null Tip = True
 null _ = False
 
 lookup :: Ord k => k -> Map k a -> Maybe a
-lookup k Tip = k ${BT}seq${BT} Nothing
-lookup k (Bin _ kx x l r) = case compare k kx of
-  LT -> lookup k l
-  GT -> lookup k r
-  EQ -> Just x
+lookup k tree = k ${BT}seq${BT} go tree
+  where
+    go Tip = Nothing
+    go (Bin _ kx x l r) = case compare k kx of
+      LT -> go l
+      GT -> go r
+      EQ -> Just x
 
 member :: Ord k => k -> Map k a -> Bool
 member k m = case lookup k m of
@@ -475,28 +483,34 @@ m ! k = case lookup k m of
 m !? k = lookup k m
 
 insert :: Ord k => k -> a -> Map k a -> Map k a
-insert kx x Tip = singleton kx x
-insert kx x (Bin sz ky y l r) = case compare kx ky of
-  LT -> balance ky y (insert kx x l) r
-  GT -> balance ky y l (insert kx x r)
-  EQ -> Bin sz kx x l r
+insert kx x tree = kx ${BT}seq${BT} go tree
+  where
+    go Tip = singleton kx x
+    go (Bin sz ky y l r) = case compare kx ky of
+      LT -> balance ky y (go l) r
+      GT -> balance ky y l (go r)
+      EQ -> Bin sz kx x l r
 
 insertWith :: Ord k => (a -> a -> a) -> k -> a -> Map k a -> Map k a
-insertWith _ kx x Tip = singleton kx x
-insertWith f kx x (Bin sy ky y l r) = case compare kx ky of
-  LT -> balance ky y (insertWith f kx x l) r
-  GT -> balance ky y l (insertWith f kx x r)
-  EQ -> Bin sy kx (f x y) l r
+insertWith f kx x tree = kx ${BT}seq${BT} go tree
+  where
+    go Tip = singleton kx x
+    go (Bin sy ky y l r) = case compare kx ky of
+      LT -> balance ky y (go l) r
+      GT -> balance ky y l (go r)
+      EQ -> Bin sy kx (f x y) l r
 
 insertWithKey :: Ord k => (k -> a -> a -> a) -> k -> a -> Map k a -> Map k a
 insertWithKey f kx x m = insertWith (f kx) kx x m
 
 delete :: Ord k => k -> Map k a -> Map k a
-delete k Tip = k ${BT}seq${BT} Tip
-delete k (Bin _ kx x l r) = case compare k kx of
-  LT -> balance kx x (delete k l) r
-  GT -> balance kx x l (delete k r)
-  EQ -> glue l r
+delete k tree = k ${BT}seq${BT} go tree
+  where
+    go Tip = Tip
+    go (Bin _ kx x l r) = case compare k kx of
+      LT -> balance kx x (go l) r
+      GT -> balance kx x l (go r)
+      EQ -> glue l r
 
 adjust :: Ord k => (a -> a) -> k -> Map k a -> Map k a
 adjust f = adjustWithKey (\_ x -> f x)
@@ -698,8 +712,13 @@ mapWithKey _ Tip = Tip
 mapWithKey f (Bin sx kx x l r) = Bin sx kx (f kx x) (mapWithKey f l) (mapWithKey f r)
 
 traverseWithKey :: Applicative t => (k -> a -> t b) -> Map k a -> t (Map k b)
-traverseWithKey _ Tip = pure Tip
-traverseWithKey f (Bin s k v l r) = liftA3 (\l' v' r' -> Bin s k v' l' r') (traverseWithKey f l) (f k v) (traverseWithKey f r)
+traverseWithKey = traverseUsing False
+
+traverseUsing :: Applicative t => Bool -> (k -> a -> t b) -> Map k a -> t (Map k b)
+traverseUsing _ _ Tip = pure Tip
+traverseUsing strict f (Bin count k x l r) =
+  liftA3 (\left y right -> forceValue strict y (Bin count k y left right))
+    (traverseUsing strict f l) (f k x) (traverseUsing strict f r)
 
 mapKeys :: Ord k2 => (k1 -> k2) -> Map k1 a -> Map k2 a
 mapKeys f m = fromList [(f k, x) | (k, x) <- toAscList m]
@@ -1197,7 +1216,7 @@ mapWithKey f (L.Bin size k x l r) =
   in y ${BT}seq${BT} right ${BT}seq${BT} left ${BT}seq${BT} L.Bin size k y left right
 
 traverseWithKey :: Applicative t => (k -> a -> t b) -> Map k a -> t (Map k b)
-traverseWithKey f m = fmap forceValues (L.traverseWithKey f m)
+traverseWithKey = L.traverseUsing True
 
 mapKeysWith :: Ord k2 => (a -> a -> a) -> (k1 -> k2) -> Map k1 a -> Map k2 a
 mapKeysWith c f m = fromListWith c [(f k, x) | (k, x) <- L.toAscList m]

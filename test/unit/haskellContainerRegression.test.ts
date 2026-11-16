@@ -262,3 +262,31 @@ test.each(['Data.Map', 'Data.Map.Strict'])('alterF searches before invoking the 
     expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
   }
 });
+
+test.each([
+  ['Data.Map', 'M.lookup key tree'],
+  ['Data.Map', 'M.insert key (1::Int) tree'],
+  ['Data.Map', 'M.insertWith (+) key (1::Int) tree'],
+  ['Data.Map.Strict', 'M.insertWith (+) key (1::Int) tree'],
+  ['Data.Map', 'M.delete key tree'],
+  ['Data.Map', 'M.adjust (+1) key tree'],
+  ['Data.Map', 'M.update (Just . (+1)) key tree'],
+  ['Data.Map', 'M.alter (const Nothing) key tree'],
+  ['Data.Set', 'M.insert key tree'],
+  ['Data.Set', 'M.delete key tree'],
+  ['Data.Set', 'M.member key tree'],
+])('keyed operations demand the key before the tree: %s %s', (module, expression) => {
+  const treeType = module === 'Data.Set' ? 'M.Set Int' : 'M.Map Int Int';
+  const source = `import qualified ${module} as M\nkey=error "key"::Int\ntree=error "tree"::${treeType}\nmain=print((${expression}) \`seq\` 1)`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: 'key' });
+});
+
+test.each(['Just', 'Right'])('strict map traversal forces produced values at construction: %s', (constructor) => {
+  const result = constructor === 'Just' ? 'Maybe Int' : 'Either () Int';
+  const source = `import qualified Data.Map.Strict as M\nmain=print(fmap M.size(M.traverseWithKey (\\k _->${constructor}(error(show k))::${result})(M.fromList[(k,())|k<-[1,2,3::Int]])))`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: constructor + ' ',
+    uncaughtException: '2',
+  });
+});

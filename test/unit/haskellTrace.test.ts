@@ -315,3 +315,22 @@ test('constructor fields retain declared String and Float display types', () => 
     entries: { 0: { kind: 'value', value: 0.1 } },
   });
 });
+
+test('this fields share declared constructor types with the object display', () => {
+  const source =
+    'data Car=Car {owner::String,tags::[String]}\ndescribe this=do\n  print(1::Int)\nmain=describe(Car "" ["","x"])';
+  const recording = traceProgram('haskell', source, source);
+  const item = recording.traceItems.find(({ vars }) => Object.hasOwn(vars, 'this.owner'));
+  expect(item?.vars['this.owner']).toBe('');
+  expect(item?.vars['this.tags']).toEqual(['', 'x']);
+});
+
+test.each(['Box (Box (1::Int))', 'Box (Just (1::Int))'])(
+  'polymorphic constructor display tolerates unknown arguments: %s',
+  (value) => {
+    const source = `data Box a=Box a deriving Show\nf::Show a=>a->IO ()\nf x=do\n  print x\nmain=f(${value})`;
+    const recording = traceProgram('haskell', source, source);
+    expect(recording.stdout).toBe(value.startsWith('Box (Box') ? 'Box (Box 1)\n' : 'Box (Just 1)\n');
+    expect(recording.traceItems.some(({ referenceVars }) => referenceVars.x?.kind === 'object')).toBe(true);
+  }
+);

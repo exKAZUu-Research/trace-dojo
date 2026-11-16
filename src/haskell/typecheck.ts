@@ -623,7 +623,7 @@ function checkMain(checker: Checker, module: RModule, builtins: Builtins): Evide
   if (!binding || !entity) {
     throw compileError(0, 'main が定義されていません。');
   }
-  if (!main && module.hasExportList) {
+  if (!main && module.hasExportList && module.name === 'Main') {
     throw compileError(binding.span, 'main が export されていません。');
   }
   const scheme = entity.scheme as Scheme;
