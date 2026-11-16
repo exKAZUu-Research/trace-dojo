@@ -54,6 +54,9 @@ test('ambiguous imported functions name public modules in the diagnostic', () =>
 test.each([
   ['[x]', '([] :: [Int])', '[x]'],
   ['(x:xs)', '([] :: [Int])', 'x : xs'],
+  ['[(),x]', '[]', '[(), x]'],
+  [String.raw`['\x41',x]`, '""', String.raw`['\x41', x]`],
+  ['[0x41,x]', '[]', '[0x41, x]'],
 ])('pattern failures preserve %s syntax', (pattern, value, rendered) => {
   const result = executeProgram('haskell', `main = print (let ${pattern} = ${value} in x)`);
   expect(result).toMatchObject({
@@ -183,6 +186,12 @@ test.each([
 test.each([
   ['module Main(main,M.fromMaybe) where\nimport qualified Data.Maybe as M\nmain=print 1', '1\n'],
   ['module Main(main,M.Maybe(..)) where\nimport qualified Data.Maybe as M\nmain=print 1', '1\n'],
+  ['module Main(main,M.Maybe(M.Just)) where\nimport qualified Data.Maybe as M\nmain=print 1', '1\n'],
+  ['module Main(main,Maybe(M.Just)) where\nimport qualified Data.Maybe as M\nmain=print 1', '1\n'],
+  [
+    'module Main(main,M.Maybe(N.Just)) where\nimport qualified Data.Maybe as M\nimport qualified Data.Maybe as N\nmain=print 1',
+    '1\n',
+  ],
   ['main=do {print [1,\n2]}', '[1,2]\n'],
   ['main=do\n  print [1,\n    2]', '[1,2]\n'],
   ['main=print(map(show.fst)[(1,2::Int)])', '["1"]\n'],
@@ -190,6 +199,17 @@ test.each([
   ['main=print(sum.map (*2) $ [1,2])', '6\n'],
   ['main=print((.succ) (+1) 1)', '3\n'],
   ['main=print((succ.succ) 1)', '3\n'],
+  ['main=print[x|x<-[1..3]]', '[1,2,3]\n'],
+  ['pattern=2\nmdo=3\nrec=4\nmain=print(pattern+mdo+rec)', '9\n'],
+  ['main=print$negate 1', '-1\n'],
+  ['main=print$(sum [1,2])', '3\n'],
+  ['import qualified Data.Map as M\nmain=print$(M.size.M.fromList)[(1,2)]', '1\n'],
+  ['main=print(map (+1).filter odd $ [1..5])', '[2,4,6]\n'],
+  ['main=print(sum.map (*2).filter odd $ [1..5])', '18\n'],
+  ['main=do\n  if True\n  then print 1\n  else print 2', '1\n'],
+  ['f x=if x>0\nthen 1\nelse 2\nmain=print(f 1)', '1\n'],
+  ['main=do\n  let y=if True\n      then 1\n      else 2\n  print y', '1\n'],
+  ['main=print(case True of\n  True -> if True\n  then 1\n  else 2\n  False -> 3)', '1\n'],
 ])('supported syntax retains GHC meaning: %s', (source, stdout) => {
   expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
@@ -229,4 +249,13 @@ test.each([
   ['import Text.Read\ng :: ReadS Int\ng=reads\nmain=print(g "1 x",readMaybe "2"::Maybe Int)', '([(1," x")],Just 2)\n'],
 ])('public type re-exports retain their implementation identity: %s', (source, stdout) => {
   expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test('string pattern failures preserve lexical escape spelling', () => {
+  const result = executeProgram('haskell', String.raw`main=print (let ["\x80\&0",x]=[] in length x)`);
+  expect(result).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: expect.stringContaining(String.raw`Non-exhaustive patterns in ["\x80\&0", x]`),
+  });
 });

@@ -16,7 +16,6 @@ import type {
   GuardedExpr,
   Import,
   ImportItem,
-  Literal,
   Module,
   Name,
   Operator,
@@ -24,6 +23,7 @@ import type {
   QName,
   Rhs,
   SigType,
+  SourceLiteral,
   Span,
   Stmt,
   TypeExpr,
@@ -267,9 +267,7 @@ function convertImportItem(node: Node, exporting = false): ImportItem {
   if (childrenNode) {
     const elements = fields(childrenNode, 'element');
     for (const element of elements) rejectUnsupported(element);
-    children = elements.some((element) => element.type === 'all_names')
-      ? 'all'
-      : elements.map((element) => plainName(element));
+    children = elements.some((element) => element.type === 'all_names') ? 'all' : elements.map(nameOf);
   }
   return { kind: 'type', name: nameOf(typeNode), children };
 }
@@ -916,20 +914,10 @@ export function convertExpr(node: Node): Expr {
       const fn = required(node, 'function');
       const argument = required(node, 'argument');
       rejectUnsupported(argument);
-      return applyExpression(convertExpr(fn), convertExpr(argument), span);
-    }
-    case 'projection':
-    case 'projection_selector': {
-      return convertComposition(node, span);
+      return { kind: 'app', fn: convertExpr(fn), arg: convertExpr(argument), span };
     }
     case 'operator_chain': {
-      return {
-        kind: 'chain',
-        items: chainItems(node, convertExpr).flatMap((item) =>
-          item.kind === 'operand' ? expressionItems(item.value) : [item]
-        ),
-        span,
-      };
+      return { kind: 'chain', items: chainItems(node, convertExpr), span };
     }
     case 'parens': {
       const inner = field(node, 'expression');
@@ -993,41 +981,6 @@ function convertNameExpression(node: Node, span: Span): Expr {
   if (node.text === '_') throw unsupportedError(span, '型の穴（_）');
   const { name, isConstructor } = qualifiedName(node);
   return isConstructor || name.name.startsWith(':') ? { kind: 'con', name, span } : { kind: 'var', name, span };
-}
-
-function expressionItems(expr: Expr): ChainItem<Expr>[] {
-  return expr.kind === 'chain' ? expr.items : [{ kind: 'operand', value: expr }];
-}
-
-function applyExpression(fn: Expr, arg: Expr, span: Span): Expr {
-  if (fn.kind !== 'chain') return { kind: 'app', fn, arg, span };
-  const items = [...fn.items];
-  const last = items.pop();
-  if (!last || last.kind !== 'operand') throw syntaxError(span, '書き方に誤りがあります。');
-  items.push({ kind: 'operand', value: { kind: 'app', fn: last.value, arg, span } });
-  return { kind: 'chain', items, span };
-}
-
-function convertComposition(node: Node, span: Span): Expr {
-  const dots = node.children.filter((child): child is Node => child?.type === '.');
-  const names = fields(node, 'field').map((fieldNode): Expr => ({
-    kind: 'var',
-    name: qualifiedName(fieldNode).name,
-    span: spanOf(fieldNode),
-  }));
-  const target = field(node, 'expression');
-  const items: ChainItem<Expr>[] = target ? expressionItems(convertExpr(target)) : expressionItems(names.shift()!);
-  for (const [index, name] of names.entries()) {
-    const dot = dots[target ? index : index + 1]!;
-    items.push(
-      { kind: 'operator', op: { name: '.', isConstructor: false, span: spanOf(dot) } },
-      { kind: 'operand', value: name }
-    );
-  }
-  const expr: Expr = { kind: 'chain', items, span };
-  return target
-    ? expr
-    : { kind: 'rightSection', op: { name: '.', isConstructor: false, span: spanOf(dots[0]!) }, right: expr, span };
 }
 
 function convertSection(node: Node, span: Span): Expr {
@@ -1205,20 +1158,20 @@ function chainItems<T>(node: Node, convertOperand: (operand: Node) => T): ChainI
   return items;
 }
 
-function convertLiteral(node: Node): Literal {
+function convertLiteral(node: Node): SourceLiteral {
   const span = spanOf(node);
   switch (node.type) {
     case 'integer': {
-      return { kind: 'int', value: parseIntegerLiteral(node.text, span) };
+      return { kind: 'int', value: parseIntegerLiteral(node.text, span), text: node.text };
     }
     case 'float': {
       return { kind: 'frac', value: parseFloatLiteral(node.text, span), text: node.text };
     }
     case 'char': {
-      return { kind: 'char', value: parseCharLiteral(node.text, span) };
+      return { kind: 'char', value: parseCharLiteral(node.text, span), text: node.text };
     }
     case 'string': {
-      return { kind: 'string', value: parseStringLiteral(node.text, span) };
+      return { kind: 'string', value: parseStringLiteral(node.text, span), text: node.text };
     }
     default: {
       throw syntaxError(span, '書き方に誤りがあります。');

@@ -66,9 +66,6 @@ export function isTrue(value: Value): boolean {
 }
 
 strict('newtypeField', 1, ([value]) => (value as ConValue).fields[0]);
-define('patternMatchError', 1, [], ([message], runtime) => {
-  throw new HaskellException(forceString(message, runtime), 'PatternMatchFail');
-});
 
 const unit = (): Value => nullary(UNIT_CON);
 

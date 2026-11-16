@@ -4,7 +4,7 @@ import { convertModule } from './convert';
 import { validateDialect } from './dialect';
 import type { Module } from './syntax';
 
-const parser = await loadParser('@willbooster/tree-sitter-haskell/tree-sitter-haskell.wasm');
+const parser = await loadParser('@willbooster/tree-sitter-haskell/tree-sitter-haskell_ghc2021.wasm');
 
 const MISSING_TOKEN_NAMES: Record<string, string> = {
   variable: '名前',

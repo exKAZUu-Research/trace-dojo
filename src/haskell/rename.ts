@@ -390,8 +390,9 @@ class Renamer {
         item.children === 'all'
           ? all
           : (item.children ?? []).map((child) => {
-              const found = all.find((candidate) => candidate.name === child.name);
-              if (!found) throw compileError(child.span, `${item.name.name} の中に ${child.name} はありません。`);
+              const found = this.lookupValue(child, false);
+              if (!this.childrenOf(entry, child.qualifier).includes(found))
+                throw compileError(child.span, `${item.name.name} の中に ${child.name} はありません。`);
               return found;
             });
       table.types.set(item.name.name, { entity: entry, children });

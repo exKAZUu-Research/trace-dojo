@@ -27,6 +27,8 @@ export type Literal =
   | { kind: 'char'; value: string }
   | { kind: 'string'; value: string };
 
+export type SourceLiteral = Literal & { text: string };
+
 /** An operator between operands, written as a symbol (`+`, `:`) or a name in backticks (`` `div` ``). */
 export interface Operator extends QName {
   isConstructor: boolean;
@@ -71,7 +73,7 @@ export type ChainItem<T> =
 export type Pat =
   | { kind: 'pvar'; name: Name; span: Span }
   | { kind: 'pwild'; span: Span }
-  | { kind: 'plit'; lit: Literal; negative: boolean; span: Span }
+  | { kind: 'plit'; lit: SourceLiteral; negative: boolean; span: Span }
   | { kind: 'pcon'; con: QName; args: Pat[]; span: Span }
   | { kind: 'ptuple'; elems: Pat[]; span: Span }
   | { kind: 'plist'; elems: Pat[]; span: Span }
@@ -150,7 +152,7 @@ export interface ImportItem {
   kind: 'value' | 'type';
   name: QName;
   /** For a type or class: `undefined` for the name alone, `'all'` for `(..)`, or the listed constructors and fields. */
-  children?: 'all' | Name[];
+  children?: 'all' | QName[];
 }
 
 export interface Import {

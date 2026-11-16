@@ -61,8 +61,11 @@ class DialectValidator {
   private checkToken(node: Node, context?: Layout): void {
     const firstOnLine = node.startPosition.row > this.previousRow;
     this.previousRow = node.endPosition.row;
-    if (firstOnLine && context && node.startIndex !== context.itemStart && this.column(node) <= context.indent)
-      fail(node);
+    if (firstOnLine && context && node.startIndex !== context.itemStart && this.column(node) <= context.indent) {
+      const conditionalSeparator =
+        node.parent?.type === 'conditional' && (node.type === 'then' || node.type === 'else');
+      if (!conditionalSeparator || this.column(node) < context.indent) fail(node);
+    }
   }
 
   private column(node: Node): number {

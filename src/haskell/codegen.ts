@@ -26,7 +26,7 @@ import {
   type ValueEntity,
 } from './entities';
 import { TailCall } from './machine';
-import { type PatternText, surfacePatternText } from './patternText';
+import { surfacePatternText } from './patternText';
 import { primitiveNamed, rationalToFloat } from './primitives';
 import type { LocalVar, RAlt, RBindGroup, RBinding, RClause, RExpr, RGuard, RPat, RRhs, RStmt } from './rast';
 import { type DictBuilders, dictBuilders, type Runtime } from './runtime';
@@ -407,14 +407,11 @@ export class Codegen {
     const savedVisible = this.visible.length;
     try {
       const plan = this.planPattern(pat, slot, false);
-      const message: PatternText = [
-        `${sourceSpanText(span)}: Non-exhaustive patterns in `,
-        pat.surface ? surfacePatternText(pat.surface) : patternText(pat),
-      ];
+      const text = pat.surface ? surfacePatternText(pat.surface) : patternText(pat);
       const fail: Core = {
-        k: 'app',
-        fn: { k: 'prim', prim: primitiveNamed('patternMatchError') },
-        args: [this.compilePatternText(message)],
+        k: 'error',
+        message: `${sourceSpanText(span)}: Non-exhaustive patterns in ${text}`,
+        kind: 'patternMatch',
       };
       return this.matchPlan(plan, this.localRef(target), fail);
     } finally {
@@ -422,26 +419,6 @@ export class Codegen {
       for (const [key, value] of saved) this.frame.slots.set(key, value);
       this.visible.length = savedVisible;
     }
-  }
-
-  private compilePatternText(text: PatternText): Core {
-    if (typeof text === 'string') return { k: 'str', value: text };
-    if (Array.isArray(text)) {
-      let result: Core = { k: 'str', value: '' };
-      for (let index = text.length - 1; index >= 0; index--) {
-        result = {
-          k: 'app',
-          fn: { k: 'global', global: this.supportGlobal('++') },
-          args: [this.compilePatternText(text[index]!), result],
-        };
-      }
-      return result;
-    }
-    return {
-      k: 'app',
-      fn: { k: 'global', global: this.supportGlobal(text.kind === 'char' ? 'patternCharText' : 'patternStringText') },
-      args: [{ k: text.kind === 'char' ? 'lit' : 'str', value: text.value }],
-    };
   }
 
   // -------------------------------------------------------------------------------------------------------------
