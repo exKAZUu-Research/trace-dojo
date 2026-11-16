@@ -5,8 +5,8 @@ import { lower } from './bytes';
 import * as conversionsModule from './conversions';
 import { compareBytes, compareNumbers, debugType, normalizeKeyString } from './conversions';
 import { deprecated, throwError, warn } from './errors';
-import * as interpModule from './interp';
-import { callCallback, callCallbackRefs } from './interp';
+import { callCallback, callCallbackRefs, callMethod } from './callables';
+import { cast } from './interp';
 import { naturalCompare } from './libString';
 import { defineAlias, defineConstant, defineFunction } from './native';
 import { arithmetic, compare, looseEquals, strictEquals, toFloat, toKey, toStr } from './operators';
@@ -80,7 +80,6 @@ defineFunction('count(Countable|array $value, int $mode = COUNT_NORMAL): int', (
   if (value instanceof PhpObject) {
     const countable = rt().classes.get('countable');
     if (countable && value.cls.isSubclassOf(countable)) {
-      const { callMethod } = interpModule;
       return callMethod(value, 'count', []);
     }
   }
@@ -834,7 +833,7 @@ function userComparator(name: string, callback: Value): (a: Value, b: Value) => 
         ? Number(result)
         : typeof result === 'number'
           ? result
-          : Number(interpModule.cast('int', result));
+          : Number(cast('int', result));
     return value < 0 ? -1 : value > 0 ? 1 : 0;
   };
 }

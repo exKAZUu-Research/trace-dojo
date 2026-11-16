@@ -27,15 +27,9 @@ import {
   throwError,
   warn,
 } from './errors';
-import {
-  callCallback,
-  callTargetOf,
-  callValue,
-  cast,
-  constantKey,
-  defineConstant as defineUserConstant,
-  iterate,
-} from './interp';
+import { callCallback, callTargetOf, callValue } from './callables';
+import { cast, iterate } from './interp';
+import { constantKey, defineConstant as defineUserConstant } from './statements';
 import { defineAlias, defineConstant, defineFunction } from './native';
 import { toFloat, toInt, toStr } from './operators';
 import { printR, varDump, varExport } from './output';

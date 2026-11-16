@@ -5,7 +5,7 @@ import { requireClass } from './classes';
 import { debugType } from './conversions';
 import { throwError } from './errors';
 import { collectGarbage } from './garbage';
-import { callTargetOf, closureFromCallable, closureTarget } from './interp';
+import { callTargetOf, closureFromCallable, closureTarget } from './callables';
 import { defineClass, installNatives, type NativeMethod } from './native';
 import { rt } from './runtime';
 import { type ClosureData, PhpObject, type Value } from './values';

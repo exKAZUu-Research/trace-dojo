@@ -5,7 +5,7 @@ import { canAccessProp, createObject, declForKey, propNameOf } from './classes';
 import * as conversionsModule from './conversions';
 import { formatFloatRepr } from './conversions';
 import { newThrowable, throwError } from './errors';
-import { callMethod } from './interp';
+import { callMethod } from './callables';
 import { defineConstant, defineFunction } from './native';
 import { PhpThrow, rt } from './runtime';
 import { PhpArray, type PhpClass, type PhpObject, Ref, UNINIT, type Value } from './values';

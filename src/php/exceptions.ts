@@ -3,7 +3,7 @@ import { type CallRecord, callStack } from './calls';
 import { createObject, findClass } from './classes';
 import { formatFloatRepr } from './conversions';
 import { setErrorFactories } from './errors';
-import { callMethod, callValue } from './interp';
+import { callMethod, callValue } from './callables';
 import { type ClassDefinition, defineClass, type NativeMethod } from './native';
 import { toStr } from './operators';
 import { rt, SCRIPT_PATH } from './runtime';
