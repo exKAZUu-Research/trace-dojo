@@ -1,3 +1,4 @@
+import { fma } from '../../c/library/binaryFloat';
 import { BINARY, UNARY } from '../../c/library/mathFunctions';
 import { CppRuntimeError, ProgramExit } from '../errors';
 import type { ExpressionCompiler } from '../expressionCompiler';
@@ -390,6 +391,11 @@ function mathFunctions(): Map<string, FunctionInfo[]> {
       integerVersion(name, 2, ([x, y]) => fn(x, y)),
     ]);
   }
+  functions.set('fma', [
+    native('fma', [FLOAT, FLOAT, FLOAT], FLOAT, ([x, y, z]) => fma(x as number, y as number, z as number, true)),
+    native('fma', [DOUBLE, DOUBLE, DOUBLE], DOUBLE, ([x, y, z]) => fma(x as number, y as number, z as number)),
+    native('fma', [LDOUBLE, LDOUBLE, LDOUBLE], LDOUBLE, ([x, y, z]) => fma(x as number, y as number, z as number)),
+  ]);
   functions.set('abs', [
     native('abs', [INT], INT, ([x]) => abs(x)),
     native('abs', [LONG], LONG, ([x]) => abs(x)),

@@ -1,3 +1,4 @@
+import { fma } from '../../c/library/binaryFloat';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import {
@@ -196,14 +197,16 @@ export function uniformInteger(engine: EngineValue, a: bigint, b: bigint, result
 }
 
 /** `std::generate_canonical<T, digits>`, a number in [0, 1) from enough engine calls for the type's digits. */
-function canonical(engine: EngineValue, digits: number): number {
+function canonical(engine: EngineValue, digits: number, isFloat: boolean): number {
+  const round = isFloat ? Math.fround : (value: number): number => value;
   const logR = engine.bits;
   const k = Math.max(1, Math.floor(digits / logR) + (digits % logR === 0 ? 0 : 1));
   const rp = 2 ** logR;
   let base = rp;
-  let sum = Number(engine.next());
-  for (let i = 1; i < k; i++, base *= rp) sum += Number(engine.next()) * base;
-  return sum / base;
+  let sum = round(Number(engine.next()));
+  // libc++ computes in the result type, and clang fuses `sum += value * base` into one rounding.
+  for (let i = 1; i < k; i++, base *= rp) sum = fma(round(Number(engine.next())), base, sum, isFloat);
+  return round(sum / base);
 }
 
 /** The engines of `<random>`, by name: `std::mt19937`, `std::mt19937_64`, and `std::random_device`. */
@@ -340,9 +343,10 @@ export function randomClasses(library: Library): LibraryTemplate[] {
         : 1;
     const draw = (engine: EngineValue, a: Value, b: Value): Value => {
       if (!isIntegral) {
-        const digits = type.kind === 'float' && type.name === 'float' ? 24 : 53;
-        const value = ((b as number) - (a as number)) * canonical(engine, digits) + (a as number);
-        return type.kind === 'float' && type.name === 'float' ? Math.fround(value) : value;
+        const isFloat = type.kind === 'float' && type.name === 'float';
+        const width = isFloat ? Math.fround((b as number) - (a as number)) : (b as number) - (a as number);
+        // `(b - a) * u + a` in the result type, which clang fuses into one rounding.
+        return fma(width, canonical(engine, isFloat ? 24 : 53, isFloat), a as number, isFloat);
       }
       const result = uniformInteger(engine, BigInt(a as number | bigint), BigInt(b as number | bigint), resultBits);
       const signed = type.kind === 'int' && !type.name.startsWith('u');

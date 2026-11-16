@@ -108,6 +108,25 @@ export class Runtime implements TracedRuntime<Frame> {
   private readonly writers: Record<'stdout' | 'stderr', ByteStream>;
   /** The state of `rand`. */
   randomState = 1;
+  /** The objects with static storage duration that have destructors, in the order their construction completed. */
+  readonly staticObjects: { box: Box; destroy: (frame: Frame, value: Value) => void }[] = [];
+
+  /** Destroys the objects with static storage duration, the last constructed first, as exiting the program does. */
+  destroyStaticObjects(): void {
+    const frame = this.pushFrame(undefined, undefined, undefined, undefined);
+    try {
+      while (this.staticObjects.length > 0) {
+        const { box, destroy } = this.staticObjects.pop() as {
+          box: Box;
+          destroy: (frame: Frame, value: Value) => void;
+        };
+        destroy(frame, box.value);
+      }
+    } finally {
+      this.popFrame();
+    }
+  }
+
   /** The exceptions whose handlers are running, the innermost last, which `throw;` rethrows. */
   readonly handling: CppException[] = [];
   /**

@@ -157,6 +157,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return this.unsupported(node.row, '関数の中のクラスの定義');
       }
       case 'function_definition': {
+        const assignment = asZeroAssignment(node);
+        if (assignment) return this.compileStatementBody(assignment);
         return this.error(node.row, '関数の中に関数は定義できません（ラムダ式は、この採点環境では使えません）。');
       }
       case 'using_declaration': {
@@ -383,17 +385,26 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       target = this.compileExpression(value);
     }
     const type = isAuto(declared.to) ? referenceTo(this.deduceAutoReference(declared.to, target)) : declared;
-    let bound: Expr;
-    let extends_ = false;
-    if (
+    // A const reference bound to a temporary extends the temporary's lifetime to the reference's, whether the
+    // temporary is the initializer's object or a converted value (C++20 [class.temporary]).
+    const isDirect = target.isLvalue && bindsDirectly(target.type, type.to);
+    const isTemporaryClass =
       !target.isLvalue &&
-      isConstType(type.to) &&
-      sameType(unqualified(target.type), unqualified(type.to), false) &&
-      target.type.kind === 'class'
-    ) {
-      // A const reference bound to a temporary extends the temporary's lifetime to the reference's (C++20 [class.temporary]).
-      bound = target;
+      target.type.kind === 'class' &&
+      type.to.kind === 'class' &&
+      target.type.cls.isDerivedFrom(type.to.cls);
+    let bound: Expr;
+    let heldType: Type = type.to;
+    let extends_ = false;
+    if (!isDirect && isConstType(type.to) && !target.functions && target.type.kind !== 'void') {
       extends_ = true;
+      if (isTemporaryClass) {
+        bound = target;
+        heldType = target.type;
+      } else {
+        bound = this.convert(target, unqualified(type.to), row);
+        heldType = unqualified(type.to);
+      }
     } else {
       bound = this.convert(target, type, row);
     }
@@ -401,8 +412,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     this.context.scope.names.set(name, { kind: 'local', local, isReference: true });
     const { slot } = local;
     if (extends_) {
-      const destroy = this.destroyerOf(type.to);
-      const holder = this.context.declareLocal(`\0${name}`, type.to, false);
+      const destroy = this.destroyerOf(heldType);
+      const holder = this.context.declareLocal(`\0${name}`, heldType, false);
       if (destroy) this.context.scope.destructibles.push({ slot: holder.slot, destroy });
       const make = bound.run;
       return {
@@ -1065,3 +1076,53 @@ export function endScope(
 }
 
 function doNothing(): undefined {}
+
+/**
+ * Reads `f(x, y) = 0;` in a function body as an assignment to what a call returns. The grammar takes it for a
+ * constructor declared pure virtual, which no function body can hold.
+ */
+function asZeroAssignment(node: Syntax): Syntax | undefined {
+  const declarator = fieldOf(node, 'declarator');
+  const clause = node.children.find((child) => child.type === 'pure_virtual_clause');
+  if (fieldOf(node, 'type') || !clause || declarator?.type !== 'function_declarator') return undefined;
+  const name = fieldOf(declarator, 'declarator');
+  const parameters = fieldOf(declarator, 'parameters');
+  if (name?.type !== 'identifier' || !parameters) return undefined;
+  const args: Syntax[] = [];
+  for (const parameter of parameters.children) {
+    const type = fieldOf(parameter, 'type');
+    if (
+      parameter.type !== 'parameter_declaration' ||
+      parameter.children.length !== 1 ||
+      type?.type !== 'type_identifier'
+    ) {
+      return undefined;
+    }
+    args.push({ ...type, type: 'identifier', field: undefined });
+  }
+  const argumentList: Syntax = { ...parameters, type: 'argument_list', field: 'arguments', children: args, all: args };
+  const callee: Syntax = { ...name, field: 'function' };
+  const call: Syntax = {
+    ...declarator,
+    type: 'call_expression',
+    field: 'left',
+    children: [callee, argumentList],
+    all: [callee, argumentList],
+  };
+  const zero: Syntax = { ...clause, type: 'number_literal', text: '0', field: 'right', children: [], all: [] };
+  const equals: Syntax = { ...clause, type: '=', text: '=', isNamed: false, field: undefined, children: [], all: [] };
+  const assignment: Syntax = {
+    ...node,
+    type: 'assignment_expression',
+    field: undefined,
+    children: [call, zero],
+    all: [call, equals, zero],
+  };
+  return { ...node, type: 'expression_statement', children: [assignment], all: [assignment] };
+}
+
+/** Whether a reference to `target` binds to an lvalue of `source` itself, rather than to a converted temporary. */
+function bindsDirectly(source: Type, target: Type): boolean {
+  if (source.kind === 'class' && target.kind === 'class') return source.cls.isDerivedFrom(target.cls);
+  return sameType(unqualified(source), unqualified(target), false);
+}

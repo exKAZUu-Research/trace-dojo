@@ -185,13 +185,10 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
           args[0].row,
           `${typeName(info.element)} の値は < で比べられません。比べ方を表す関数を渡してください。`
         );
-      const element = unqualified(info.element);
-      const isTrivial = element.kind !== 'class' || element.cls.library?.kind === 'pair';
       return native(name, params(args), VOID, ([first, last], { frame }) => {
         const values = range(first, last, info);
         frame.runtime.spend(values.length);
-        if (name === 'sort')
-          introsort(values, less(frame), isTrivial && element.kind !== 'class' ? 30 : isTrivialPair(element) ? 30 : 6);
+        if (name === 'sort') introsort(values, less(frame));
         else stableSort(values, less(frame));
         return;
       });
@@ -894,11 +891,6 @@ function backInserter(library: Library, container: Type): ClassInfo {
   return cls;
 }
 
-function isTrivialPair(type: Type): boolean {
-  if (type.kind !== 'class' || type.cls.library?.kind !== 'pair') return false;
-  return type.cls.fields.every((field) => field.type.kind !== 'class' || isTrivialPair(field.type));
-}
-
 function toIntValue(value: number, type: Extract<Type, { kind: 'int' }>): number {
   if (type.name === 'uint') return value >>> 0;
   if (type.name === 'int') return toInt32(value);
@@ -1187,11 +1179,14 @@ function heapSort(values: Range, first: number, last: number, less: Less): void 
   }
 }
 
+/** The length below which `__introsort` sorts by insertion, the same for every element type. */
+const INSERTION_SORT_LIMIT = 24;
+
 /** libc++'s `__introsort` (without the bitset partition, which only arithmetic types with `<` use). */
-function introsort(values: Range, less: Less, limit: number): void {
+function introsort(values: Range, less: Less): void {
   const length = values.length;
   if (length < 2) return;
-  sortPart(values, 0, length, less, 2 * Math.floor(Math.log2(length)), true, limit);
+  sortPart(values, 0, length, less, 2 * Math.floor(Math.log2(length)), true);
 }
 
 function sortPart(
@@ -1200,8 +1195,7 @@ function sortPart(
   end: number,
   less: Less,
   depthLimit: number,
-  isLeftmost: boolean,
-  limit: number
+  isLeftmost: boolean
 ): void {
   let first = start;
   let last = end;
@@ -1231,7 +1225,7 @@ function sortPart(
         return;
       }
     }
-    if (length < limit) {
+    if (length < INSERTION_SORT_LIMIT) {
       insertionSort(values, first, last, less, leftmost);
       return;
     }
@@ -1267,7 +1261,7 @@ function sortPart(
         continue;
       }
     }
-    sortPart(values, first, pivot, less, depth, leftmost, limit);
+    sortPart(values, first, pivot, less, depth, leftmost);
     leftmost = false;
     first = pivot + 1;
   }

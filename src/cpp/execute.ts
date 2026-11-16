@@ -71,8 +71,11 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
     } finally {
       runtime.popFrame();
     }
+    runtime.destroyStaticObjects();
   } catch (error) {
     uncaughtException = describeFailure(error);
+    // std::exit destroys the objects with static storage duration too.
+    if (error instanceof ProgramExit) uncaughtException = exitWithStatics(runtime);
   }
   runtime.flushOutput();
   if (!finalTurtles) {
@@ -85,6 +88,15 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
 function mainArguments(): unknown[] {
   const argv = new ArrayStore([new Ptr(cStringStore(PROGRAM_NAME), 0), new Ptr(undefined, 0)]);
   return [1, new Ptr(argv, 0)];
+}
+
+function exitWithStatics(runtime: Runtime): string | undefined {
+  try {
+    runtime.destroyStaticObjects();
+    return undefined;
+  } catch (error) {
+    return describeFailure(error);
+  }
 }
 
 function describeFailure(error: unknown): string | undefined {

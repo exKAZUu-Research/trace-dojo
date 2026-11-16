@@ -1,5 +1,6 @@
 import { binaryOperation, complement, convertScalar, negate } from '../c/arith';
 import type { BinaryOperator } from '../c/ast';
+import { fma } from '../c/library/binaryFloat';
 import { commonType, promote } from '../c/types';
 import { CompileError } from '../interpreter/diagnostics';
 import { byteAt } from './bytes';
@@ -595,8 +596,33 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       } catch {
         // An operation that fails (such as dividing by zero) is no constant; it stops the program when it runs.
       }
+      return expr;
     }
+    if (common.kind === 'float') this.contract(operator, expr, a, b, common.name === 'float');
     return expr;
+  }
+
+  /**
+   * Fuses a product into the addition or subtraction that uses it, as Apple clang does by default
+   * (`-ffp-contract=on`): `a * b + c` rounds once, like `std::fma(a, b, c)`. When both operands are products, the
+   * left one is fused. A product of constants is folded before, so it is not fused.
+   */
+  private contract(operator: string, expr: Expr, a: Expr, b: Expr, isFloat: boolean): void {
+    if (operator === '*') {
+      expr.product = { left: a.run as Eval<number>, right: b.run as Eval<number> };
+      return;
+    }
+    if (operator !== '+' && operator !== '-') return;
+    const sign = operator === '+' ? 1 : -1;
+    if (a.product) {
+      const { left, right } = a.product;
+      const addend = b.run as Eval<number>;
+      expr.run = (frame) => fma(left(frame), right(frame), sign * addend(frame), isFloat);
+    } else if (b.product) {
+      const { left, right } = b.product;
+      const addend = a.run as Eval<number>;
+      expr.run = (frame) => fma(sign * left(frame), right(frame), addend(frame), isFloat);
+    }
   }
 
   private shift(operator: '<<' | '>>', left: Expr, right: Expr, row: number): Expr {
@@ -733,6 +759,11 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const operation = operator === '-' ? negate(promoted as never) : complement(promoted as never);
     const run = converted.run;
     const expr: Expr = { type: promoted, isLvalue: false, row, run: (frame) => operation(run(frame) as number) };
+    // A negated product still fuses into an addition (`-(a * b) + c`).
+    if (operator === '-' && converted.product && converted.constant === undefined) {
+      const { left, right } = converted.product;
+      expr.product = { left: (frame) => -left(frame), right };
+    }
     if (converted.constant !== undefined) {
       try {
         expr.constant = operation(converted.constant);

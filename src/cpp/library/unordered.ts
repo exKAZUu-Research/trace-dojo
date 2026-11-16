@@ -623,13 +623,16 @@ export function unorderedClass(
   method('erase', [constRef(keyType)], SIZE_T, (self, [k], frame) => {
     const at = self.find(keyArg(k));
     if (at < 0) return 0n;
-    ops().destroy?.(frame, self.removeAt(at));
+    // The removal must run even when destroying an element does nothing (`?.` would skip its argument).
+    const removed = self.removeAt(at);
+    ops().destroy?.(frame, removed);
     return 1n;
   });
   method('erase', [constIterator], iterator, (self, [position], frame) => {
     const at = (position as Ptr).index;
     if ((position as Ptr).store !== self || at >= self.size) throw new CppRuntimeError('invalidIterator');
-    ops().destroy?.(frame, self.removeAt(at));
+    const removed = self.removeAt(at);
+    ops().destroy?.(frame, removed);
     return new Ptr(self, at);
   });
   method('swap', [referenceTo(classType(cls))], VOID, (self, [other]) => self.swap((other as Ptr).read() as HashValue));

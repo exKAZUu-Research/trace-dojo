@@ -30,7 +30,7 @@ import {
   unqualified,
   VOID,
 } from './types';
-import { ArrayStore, Box, type CObject, Liveness, Ptr, UNINIT, type Value } from './values';
+import { ArrayStore, Box, CObject, Liveness, Ptr, UNINIT, type Value } from './values';
 
 export interface CompileOptions {
   trace?: TraceOptions;
@@ -875,9 +875,9 @@ export class Compiler extends StatementCompiler {
   // Functions -------------------------------------------------------------------------------------------------------
 
   private functionDefinition(node: Syntax): void {
-    const declarator = fieldOf(node, 'declarator') as Syntax;
-    if (declarator.type !== 'function_declarator')
-      return this.error(node.row, '関数の定義には (...) で引数を書いてください。');
+    // A function returning a pointer or a reference wraps its function declarator (`int& f()`).
+    const declarator = innermostFunctionDeclarator(fieldOf(node, 'declarator') as Syntax);
+    if (!declarator) return this.error(node.row, '関数の定義には (...) で引数を書いてください。');
     const inner = fieldOf(declarator, 'declarator') as Syntax;
     if (inner.type === 'qualified_identifier') {
       this.outOfClassDefinition(node, inner);
@@ -1123,9 +1123,7 @@ export class Compiler extends StatementCompiler {
     if (declared.nameNode?.type === 'qualified_identifier') {
       this.error(node.row, `${declared.nameNode.text} の宣言はクラスの中に書いてください。`);
     }
-    let functionDeclarator: Syntax | undefined = declarator;
-    while (functionDeclarator && functionDeclarator.type !== 'function_declarator')
-      functionDeclarator = fieldOf(functionDeclarator, 'declarator');
+    const functionDeclarator = innermostFunctionDeclarator(declarator);
     if (this.hasSpecifier(node, 'static')) this.unsupported(node.row, 'static の関数（内部結合）');
     this.declareFunction(
       {
@@ -1222,8 +1220,9 @@ export class Compiler extends StatementCompiler {
       const init = this.staticInitialization(type, value, row);
       if (!init) return;
       const { index } = global;
+      const store = this.staticStore(type);
       const exec = this.fullExpression<undefined>((frame) => {
-        (frame.runtime.globals[index] as Box).value = init.run(frame);
+        store(frame, frame.runtime.globals[index] as Box, init.run(frame));
         return;
       });
       this.globalInitializers.push({
@@ -1291,10 +1290,24 @@ export class Compiler extends StatementCompiler {
     }
     let isDone = false;
     const run = this.fullExpression(init.run);
+    const store = this.staticStore(type);
     return (frame) => {
       if (isDone) return;
       isDone = true;
-      (frame.runtime.globals[index] as Box).value = run(frame);
+      store(frame, frame.runtime.globals[index] as Box, run(frame));
+    };
+  }
+
+  /**
+   * Stores the initialized value of a variable with static storage duration. Its storage was zero-initialized
+   * first, so the members its constructor leaves alone are zero; and an object with a destructor is destroyed when
+   * the program exits, the last constructed first (C++20 [basic.start.term]).
+   */
+  private staticStore(type: Type): (frame: Frame, box: Box, value: Value) => void {
+    const destroy = this.destroyerOf(type);
+    return (frame, box, value) => {
+      box.value = zeroFilled(value, type);
+      if (destroy) frame.runtime.staticObjects.push({ box, destroy });
     };
   }
 
@@ -1578,6 +1591,20 @@ const target = (type: Type): Type | undefined =>
   type.kind === 'pointer' || type.kind === 'reference' ? type.to : undefined;
 
 /** The value static storage starts with: zero for scalars, before dynamic initialization. */
+/** Gives the scalars an object never wrote the zero that static storage starts with. */
+function zeroFilled(value: Value, type: Type): Value {
+  if (value === UNINIT) return type.kind === 'class' || type.kind === 'array' ? value : zeroOf(type);
+  if (type.kind === 'array' && value instanceof ArrayStore) {
+    for (const [index, item] of value.values.entries()) value.values[index] = zeroFilled(item, type.of);
+  } else if (type.kind === 'class' && value instanceof CObject && !type.cls.library) {
+    for (const field of value.cls.fields) {
+      if (field.type.kind !== 'reference')
+        value.values[field.index] = zeroFilled(value.values[field.index], field.type);
+    }
+  }
+  return value;
+}
+
 function staticZero(type: Type): Value {
   if (type.kind === 'array') return new ArrayStore(Array.from({ length: type.length ?? 0 }, () => staticZero(type.of)));
   if (type.kind === 'class') return UNINIT;
@@ -1647,4 +1674,14 @@ function intMinOf(type: Extract<Type, { kind: 'int' }>): bigint {
 
 function intMaxOf(type: Extract<Type, { kind: 'int' }>): bigint {
   return intMax(type.name);
+}
+
+/** The function declarator of a declarator, which pointer and reference declarators may wrap (`int* f()`). */
+function innermostFunctionDeclarator(declarator: Syntax): Syntax | undefined {
+  let current: Syntax | undefined = declarator;
+  while (current && current.type !== 'function_declarator') {
+    if (current.type === 'parenthesized_declarator') return undefined;
+    current = fieldOf(current, 'declarator') ?? current.children.find((child) => child.type.endsWith('declarator'));
+  }
+  return current;
 }
