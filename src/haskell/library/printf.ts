@@ -5,7 +5,7 @@ export const PRINTF_SOURCE = String.raw`module Text.Printf.Internal where
 
 import Base
 
-data UPrintf = UInteger Integer Integer | UChar Char | UString String | UDouble Double
+data UPrintf = UInteger Integer Integer | UChar Char | UString String | UDouble Double | UFloat Float
 
 class PrintfArg a where
   formatArg :: a -> UPrintf
@@ -31,7 +31,7 @@ instance PrintfArg Double where
   formatArg x = UDouble x
 
 instance PrintfArg Float where
-  formatArg x = UDouble (realToFrac x)
+  formatArg x = UFloat x
 
 instance PrintfArg Char where
   formatArg c = UChar c
@@ -126,12 +126,15 @@ formatOne spec@(Spec minus plus space zero alt width prec c) u = case u of
     's' -> pad False (maybe str (\p -> take p str) prec)
     'v' -> pad False (maybe str (\p -> take p str) prec)
     _ -> badChar
-  UDouble d -> case c of
-    'v' -> formatOne (Spec minus plus space zero alt width prec 'g') u
-    _ -> if c ${BT}elem${BT} "eEfFgG"
-           then pad True (signedDouble d (caseConvert (showFn (toLower c) (abs d))))
-           else badChar
+  UDouble d -> formatReal d
+  UFloat d -> formatReal d
   where
+    formatReal :: RealFloat a => a -> String
+    formatReal d = case c of
+      'v' -> formatOne (Spec minus plus space zero alt width prec 'g') u
+      _ -> if c ${BT}elem${BT} "eEfFgG"
+             then pad True (signedDouble d (caseConvert (showFn (toLower c) (abs d))))
+             else badChar
     badChar = perror ("bad formatting char " ++ show c)
     digitsMin ds = case prec of
       Just p -> replicate (p - length ds) '0' ++ ds
