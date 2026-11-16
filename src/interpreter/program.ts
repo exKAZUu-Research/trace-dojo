@@ -17,6 +17,9 @@ import { tracePythonProgram } from '../python/trace';
 import { findRubyTraceAnnotations } from '../ruby/parse';
 import { executeRubyProgram } from '../ruby/run';
 import { traceRubyProgram } from '../ruby/trace';
+import { executeZigProgram } from '../zig/execute';
+import { findZigTraceAnnotations } from '../zig/parse';
+import { traceZigProgram } from '../zig/trace';
 import type { SourceDiagnostic } from './diagnostics';
 import type { ExecutionLimitError } from './limits';
 import type { ProgramInput, ProgramOutput } from './programIo';
@@ -77,6 +80,7 @@ const interpreters = {
     execute: executeRubyProgram,
   },
   c: { findTraceAnnotations: findCTraceAnnotations, record: traceCProgram, execute: executeCProgram },
+  zig: { findTraceAnnotations: findZigTraceAnnotations, record: traceZigProgram, execute: executeZigProgram },
 } satisfies Record<string, Interpreter>;
 
 /**
