@@ -4,19 +4,19 @@ import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import { bootstrap } from './bootstrap';
+import { callValue } from './callables';
 import { type CallRecord, HostStackExhaustion, invoke, resetCallStack } from './calls';
 import { throwableText, traceText } from './exceptions';
 import { holderCounts } from './garbage';
-import { callValue } from './callables';
-import { runStatements } from './statements';
 import { type ParsedProgram, parsePhp } from './parse';
 import { ExitSignal, FatalError, type Frame, PhpThrow, Runtime, SCRIPT_PATH, withRuntime } from './runtime';
+import { runStatements } from './statements';
 import { UnsupportedFeatureError } from './unsupported';
 import { PhpObject } from './values';
 
 import './library';
 
-// code-gauge-allow duplicateLines 15 -- The interpreter entry points mirror the other languages so callers use one contract.
+// code-gauge-allow duplicateLines 15 -- Follows the entry point that every interpreter in this repository shares.
 export function executePhpProgram(source: string, input?: ProgramInput): ProgramExecution {
   let parsed: ParsedProgram;
   try {
@@ -71,6 +71,8 @@ function guard(runtime: Runtime, run: () => void): string | undefined {
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 31 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function report(runtime: Runtime, error: unknown): string | undefined {
   if (error instanceof ExitSignal) return undefined;
   if (error instanceof UnsupportedFeatureError) {

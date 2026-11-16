@@ -1,5 +1,6 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 /** The next string in PHP's alphanumeric increment (`"a"` → `"b"`, `"Az"` → `"Ba"`, `"zz"` → `"aaa"`). */
+// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function incrementString(text: string): string {
   const chars = [...text];
   let index = chars.length - 1;
@@ -48,6 +49,7 @@ export function exactDecimal(value: number): { digits: string; point: number } {
  * Rounds a decimal digit string to `keep` digits, half to even as zend_dtoa does on the exact value, returning the
  * rounded digits and whether rounding carried into a new leading digit.
  */
+// code-gauge-allow duplicateLines 15 -- Rounds exact digits as the formatters of the other languages do, each kept beside its own language.
 function roundDigits(digits: string, keep: number): { digits: string; carried: boolean } {
   if (keep < 0) return { digits: '', carried: false };
   if (keep >= digits.length) return { digits: digits + '0'.repeat(keep - digits.length), carried: false };
@@ -153,7 +155,8 @@ export function phpRound(value: number, places: number, mode: RoundMode = 'halfU
   return result;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per rounding mode, as PHP defines them.
+// code-gauge-allow functionCognitiveComplexity 28 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 31 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function roundHelper(integral: number, value: number, exponent: number, places: number, mode: RoundMode): number {
   const valueAbs = Math.abs(value);
   const edge = (): number =>

@@ -16,6 +16,8 @@ export function setDestructor(run: (object: PhpObject) => void): void {
  * Frees the objects nothing reachable refers to, as PHP's reference counting does: an object in a cycle of garbage
  * stays until the end, since PHP's counting cannot free it either. Destructors run owners first.
  */
+// code-gauge-allow functionCognitiveComplexity 19 -- Visits every kind of runtime value that can hold references.
+// code-gauge-allow functionNcss 34 -- Visits every kind of runtime value that can hold references.
 export function collectGarbage(runtime: Runtime): void {
   if (runtime.objects.size === 0) return;
   runtime.spend();
@@ -64,6 +66,7 @@ function retainTurtles(runtime: Runtime, reached: Set<PhpObject>): void {
 }
 
 /** The objects reachable from the program's variables and the values its running code holds. */
+// code-gauge-allow functionNcss 50 -- Visits every kind of runtime value that can hold references.
 export function mark(runtime: Runtime): Set<PhpObject> {
   const reached = new Set<PhpObject>();
   const visitedArrays = new Set<PhpArray>();
@@ -241,6 +244,7 @@ export function referencedObjects(object: PhpObject): PhpObject[] {
 }
 
 /** Counts the holders of each reachable object: variables, elements, and properties that refer to it. */
+// code-gauge-allow functionNcss 56 -- Visits every kind of runtime value that can hold references.
 export function holderCounts(runtime: Runtime): Map<PhpObject, number> {
   const counts = new Map<PhpObject, number>();
   const visitedArrays = new Set<PhpArray>();

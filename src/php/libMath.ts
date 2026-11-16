@@ -147,6 +147,7 @@ defineFunction('dechex(int $num): string', ({ args }) => toBase(args[0] as bigin
 defineFunction('decbin(int $num): string', ({ args }) => toBase(args[0] as bigint, 2));
 defineFunction('decoct(int $num): string', ({ args }) => toBase(args[0] as bigint, 8));
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function fromBase(text: string, radix: number): Value {
   let value = 0n;
   let float = 0;

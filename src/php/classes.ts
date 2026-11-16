@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 700 -- Class linking, objects, properties, and methods share PHP's visibility rules.
+// code-gauge-allow-file fileNcss 670 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
 import { lower } from './bytes';
@@ -52,8 +52,6 @@ export function canDeclareEarly(decl: ClassDecl, declared: Set<string>): boolean
 
 // Declaration ----------------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionCognitiveComplexity 40 -- Class linking follows PHP's inheritance checks in order.
-// code-gauge-allow functionNcss 80 -- Class linking follows PHP's inheritance checks in order.
 export function declareClass(decl: ClassDecl, row: number): PhpClass {
   const runtime = rt();
   const key = lower(decl.name);
@@ -177,7 +175,7 @@ function propertyKey(cls: PhpClass, name: string, visibility: Visibility): strin
   return visibility === 'private' ? `\0${cls.name}\0${name}` : name;
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Property redeclaration follows PHP's checks in order.
+// code-gauge-allow functionNcss 37 -- Follows PHP's class linking and property access rules in their order of checks.
 function addProperty(cls: PhpClass, ast: PropertyDeclAst): void {
   const inherited = cls.propByName.get(ast.name);
   if (inherited && inherited.cls !== cls && inherited.visibility !== 'private') {
@@ -288,7 +286,7 @@ function addMethod(cls: PhpClass, ast: MethodDeclAst, scope = cls): void {
   cls.methods.set(method.lname, method);
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Trait composition follows PHP's conflict rules.
+// code-gauge-allow functionNcss 47 -- Follows PHP's class linking and property access rules in their order of checks.
 function applyTraits(cls: PhpClass, decl: ClassDecl): void {
   if (cls.traits.length === 0) return;
   const rules = decl.traits.flatMap((use) => use.rules);
@@ -361,7 +359,6 @@ function copyFunction(fn: Callable): Callable {
   return { ...fn, statics: new Map() };
 }
 
-// code-gauge-allow functionCognitiveComplexity 35 -- Inheritance checks follow PHP's order of messages.
 function checkInheritance(cls: PhpClass, row: number): void {
   for (const method of cls.methods.values()) {
     const parentMethod = cls.parent?.findMethod(method.lname);
@@ -429,6 +426,7 @@ function checkOverride(cls: PhpClass, method: Method, parent: Method): void {
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Follows PHP's class linking and property access rules in their order of checks.
 function signatureCompatible(child: Callable, parent: Callable): boolean {
   const childParams = child.params;
   const parentParams = parent.params;
@@ -448,6 +446,7 @@ function signatureCompatible(child: Callable, parent: Callable): boolean {
   return true;
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Follows PHP's class linking and property access rules in their order of checks.
 function signatureText(method: Method): string {
   const fn = method.fn;
   const params = fn.params
@@ -611,7 +610,7 @@ function guarded(object: PhpObject, key: string, run: () => Value): Value {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Property reads follow PHP's lookup with hooks, magic, and visibility.
+// code-gauge-allow functionNcss 35 -- Follows PHP's class linking and property access rules in their order of checks.
 export function readProp(object: PhpObject, name: string, scope: PhpClass | undefined, quiet = false): Value {
   rt().spend();
   const decl = lookupProp(object.cls, name, scope);
@@ -660,7 +659,7 @@ export function readProp(object: PhpObject, name: string, scope: PhpClass | unde
   return null;
 }
 
-// code-gauge-allow functionCognitiveComplexity 40 -- Property writes follow PHP's checks for hooks, magic, readonly, and types.
+// code-gauge-allow functionNcss 54 -- Follows PHP's class linking and property access rules in their order of checks.
 export function writeProp(object: PhpObject, name: string, value: Value, scope: PhpClass | undefined): void {
   rt().spend();
   const decl = lookupProp(object.cls, name, scope);
@@ -769,6 +768,7 @@ export function coerceProperty(decl: PropDecl, value: Value, object?: PhpObject)
 }
 
 /** The reference a property holds, creating it, for `=&`, by-reference arguments, and nested writes. */
+// code-gauge-allow functionCognitiveComplexity 19 -- Follows PHP's class linking and property access rules in their order of checks.
 export function propRef(object: PhpObject, name: string, scope: PhpClass | undefined): Ref {
   const decl = lookupProp(object.cls, name, scope);
   const key = decl && !decl.isStatic ? decl.key : name;
@@ -800,6 +800,7 @@ export function propRef(object: PhpObject, name: string, scope: PhpClass | undef
   return ref;
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Follows PHP's class linking and property access rules in their order of checks.
 export function unsetProp(object: PhpObject, name: string, scope: PhpClass | undefined): void {
   const decl = lookupProp(object.cls, name, scope);
   if (decl && !decl.isStatic) {
@@ -828,6 +829,7 @@ export function unsetProp(object: PhpObject, name: string, scope: PhpClass | und
   if (magic) callMagic(object, magic, [name]);
 }
 
+// code-gauge-allow functionCognitiveComplexity 20 -- Follows PHP's class linking and property access rules in their order of checks.
 export function issetProp(object: PhpObject, name: string, scope: PhpClass | undefined): boolean {
   const decl = lookupProp(object.cls, name, scope);
   if (decl && !decl.isStatic && canAccessProp(decl, scope)) {
@@ -912,6 +914,7 @@ export function readStaticProp(cls: PhpClass, name: string, scope: PhpClass | un
   return value;
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Follows PHP's class linking and property access rules in their order of checks.
 export function classConstant(cls: PhpClass, name: string, scope: PhpClass | undefined): Value {
   const constant = cls.findConst(name);
   if (!constant) throwError('Error', `Undefined constant ${cls.name}::${name}`);

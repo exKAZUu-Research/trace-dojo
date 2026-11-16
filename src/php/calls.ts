@@ -145,7 +145,7 @@ function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], 
 }
 
 /** Matches arguments to a native function's parameters, coercing them to the declared types. */
-// code-gauge-allow functionCognitiveComplexity 35 -- Argument binding follows PHP's rules for internal functions.
+// code-gauge-allow functionNcss 52 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function bindNative(
   fn: NativeFunction,
   args: ArgValue[],
@@ -262,7 +262,8 @@ function callerIsStrict(): boolean {
 
 // User functions -----------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Binds parameters as PHP's RECV opcodes do.
+// code-gauge-allow functionCognitiveComplexity 18 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
+// code-gauge-allow functionNcss 60 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row: number | undefined): Value {
   const runtime = rt();
   const { decl } = fn;
@@ -368,7 +369,8 @@ export function setDefaultEvaluator(run: (decl: FunctionDecl, index: number, fra
   evaluateDefault = run;
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Binds parameters as PHP's RECV opcodes do.
+// code-gauge-allow functionNcss 38 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
+// code-gauge-allow functionParameterCount 7 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function bindParams(
   frame: Frame,
   fn: UserFunction,
@@ -433,6 +435,7 @@ function bindRef(arg: ArgValue): Ref {
   return ref;
 }
 
+// code-gauge-allow functionParameterCount 7 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function checkParam(
   value: Value,
   param: Param,
@@ -516,6 +519,7 @@ export function parseSignature(signature: string): { name: string; params: Param
   return { name, params, returnType: returnText ? parseTypeText(returnText) : undefined };
 }
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function splitParams(text: string): string[] {
   const parts: string[] = [];
   let depth = 0;

@@ -1,9 +1,8 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+import { callCallback, callMethod } from './callables';
 import { createObject } from './classes';
-// code-gauge-allow-file fileNcss 600 -- The SPL data structures, each a small class of its own.
 import { debugType } from './conversions';
 import { deprecated, throwError, warn } from './errors';
-import { callCallback, callMethod } from './callables';
 import { iterate } from './interp';
 import { defineClass, type NativeMethod } from './native';
 import { compare, toKey } from './operators';

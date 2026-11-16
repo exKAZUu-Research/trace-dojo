@@ -52,6 +52,7 @@ export function utf8Chars(bytes: string): string[] {
 }
 
 /** The length of the valid UTF-8 sequence at `index`, or 1 for an invalid byte. */
+// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function utf8Length(bytes: string, index: number): number {
   const lead = bytes.charCodeAt(index);
   let length = 1;

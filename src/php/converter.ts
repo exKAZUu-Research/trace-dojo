@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 1200 -- One converter of every grammar node kind, which share the namespace and scope state.
+// code-gauge-allow-file fileNcss 860 -- One converter of the statements and expressions, which share the converter state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -78,8 +78,6 @@ export class Converter extends DeclarationConverter {
     return statements;
   }
 
-  // code-gauge-allow functionNcss 160 -- One case per statement kind, each delegating where it grows.
-  // code-gauge-allow functionCognitiveComplexity 60 -- One case per statement kind, each delegating where it grows.
   private statement(node: Node, topLevel: boolean): Stmt[] {
     const row = node.startPosition.row;
     if (this.pendingEcho && node.type !== 'comment') {
@@ -321,6 +319,7 @@ export class Converter extends DeclarationConverter {
     return { k: 'foreach', subject, key, value, byRef, body, row };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   private switchStatement(node: Node): Stmt {
     const row = node.startPosition.row;
     const subject = this.condition(node);
@@ -480,6 +479,7 @@ export class Converter extends DeclarationConverter {
     return statements;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   private useDeclaration(node: Node): void {
     const kindNode = node.childForFieldName('type');
     const kind = kindNode ? lower(kindNode.text) : 'class';
@@ -551,8 +551,6 @@ export class Converter extends DeclarationConverter {
     }
   }
 
-  // code-gauge-allow functionNcss 260 -- One case per expression kind, each delegating where it grows.
-  // code-gauge-allow functionCognitiveComplexity 90 -- One case per expression kind, each delegating where it grows.
   expr(node: Node): Expr {
     const row = node.startPosition.row;
     switch (node.type) {
@@ -835,7 +833,7 @@ export class Converter extends DeclarationConverter {
     return { k: 'const', name: this.resolveConstName(raw), row };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Calls to language constructs that the grammar parses as calls.
+  // code-gauge-allow functionNcss 34 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   private functionCall(node: Node): Expr {
     const row = node.startPosition.row;
     const fnNode = node.childForFieldName('function') as Node;
@@ -880,6 +878,8 @@ export class Converter extends DeclarationConverter {
     return { k: 'call', fn: this.expr(fnNode), args, fcc, row };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 29 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
+  // code-gauge-allow functionNcss 36 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   private args(node: Node): { args: Arg[]; fcc: boolean } {
     const args: Arg[] = [];
     let fcc = false;
@@ -1021,6 +1021,7 @@ export class Converter extends DeclarationConverter {
     return { k: 'match', subject, arms, row };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   private arrayItems(node: Node): ArrayItem[] {
     const items: ArrayItem[] = [];
     for (const child of node.namedChildren) {
@@ -1051,6 +1052,8 @@ export class Converter extends DeclarationConverter {
     return items;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 21 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
+  // code-gauge-allow functionNcss 35 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   private listLiteral(node: Node): Expr {
     const row = node.startPosition.row;
     const items: (ListItem | undefined)[] = [];
@@ -1137,7 +1140,7 @@ export class Converter extends DeclarationConverter {
    * Converts a double-quoted string or heredoc, reading its literal text from the source between the interpolated
    * expressions, since the grammar leaves line breaks out of its content nodes.
    */
-  // code-gauge-allow functionCognitiveComplexity 25 -- Interpolation follows each grammar part of a string.
+  // code-gauge-allow functionNcss 55 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   private interpolated(node: Node): Expr {
     const row = node.startPosition.row;
     const isHeredoc = node.type === 'heredoc';
@@ -1226,6 +1229,3 @@ export class Converter extends DeclarationConverter {
       .join('\n');
   }
 }
-
-
-

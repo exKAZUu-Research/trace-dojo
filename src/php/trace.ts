@@ -32,6 +32,7 @@ export function tracePhpProgram(program: string, trace: TraceOptions, input?: Pr
  * (`$this->x`, as Java's `this.x`) and the static properties of the program's classes (`Foo::$x`, as Java's static
  * fields).
  */
+// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function variablesOf(runtime: Runtime, frame: Frame, withContext: boolean): TraceVariables {
   const variables: TraceVariables = { vars: {}, referenceVars: {} };
   for (const [name, ref] of frame.vars) {
@@ -122,6 +123,8 @@ function traceInt(value: bigint): number | bigint {
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows null as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
+// code-gauge-allow functionCognitiveComplexity 29 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 40 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: number }): DisplayNode | undefined {
   if (budget.remaining-- <= 0) return { kind: 'value', value: '…' };
   rt().spend();

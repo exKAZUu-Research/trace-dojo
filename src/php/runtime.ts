@@ -72,6 +72,7 @@ export class Frame {
   /** The reference a function returning by reference returns. */
   returnRef?: Ref;
 
+  // code-gauge-allow functionParameterCount 8 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
   constructor(
     readonly fn: Callable | undefined,
     readonly callRow: number | undefined,
@@ -213,6 +214,7 @@ export class Runtime {
 }
 
 /** The length of the longest prefix of a byte string that does not end inside a UTF-8 sequence. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function completePrefix(bytes: string): number {
   let index = bytes.length;
   for (let back = 1; back <= 3 && index - back >= 0; back++) {

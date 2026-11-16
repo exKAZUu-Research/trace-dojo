@@ -1,21 +1,30 @@
-// code-gauge-allow-file fileNcss 600 -- One runner of every statement kind, which share the frame and completions.
+// code-gauge-allow-file fileNcss 482 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { ExecutionLimitError } from '../interpreter/limits';
+import { assignTo, bindRef, destructure, placeOf, unsetTarget } from './assignment';
 import type { Expr, FunctionDecl, Program, Stmt } from './ast';
-import { lower } from './bytes';
-import { invoke, setBodyRunner, setDefaultEvaluator } from './calls';
-import { canDeclareEarly, declareClass, findClass, propRef, readProp, setClassEvaluator, visibleProps, writeProp } from './classes';
-import { debugType, toBool } from './conversions';
 import { nestedBodies } from './astAnalysis';
+import { lower } from './bytes';
+import { callMethod } from './callables';
+import { invoke, setBodyRunner, setDefaultEvaluator } from './calls';
+import {
+  canDeclareEarly,
+  declareClass,
+  findClass,
+  propRef,
+  readProp,
+  setClassEvaluator,
+  visibleProps,
+  writeProp,
+} from './classes';
+import { debugType, toBool } from './conversions';
 import { E_DEPRECATED, E_WARNING, emitError, throwError, warn } from './errors';
 import { collectBeforeAllocation, collectGarbage, setDestructor } from './garbage';
+import { ev, evReturn } from './interp';
 import { looseEquals, setObjectConversions, toStr } from './operators';
 import { ElementPlace, share, VarPlace, writableContainer } from './places';
 import { ExitSignal, FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
 import { type Callable, type Key, PhpArray, type PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
-import { ev, evReturn } from './interp';
-import { assignTo, bindRef, destructure, placeOf, unsetTarget } from './assignment';
-import { callMethod } from './callables';
 
 type Completion =
   | undefined
@@ -125,8 +134,6 @@ function execList(statements: Stmt[], seek?: string): Completion {
   return undefined;
 }
 
-// code-gauge-allow functionNcss 130 -- One case per statement kind, each delegating where it grows.
-// code-gauge-allow functionCognitiveComplexity 60 -- One case per statement kind, each delegating where it grows.
 function execStmt(statement: Stmt, seek?: string): Completion {
   const runtime = rt();
   if (seek !== undefined) return seekInto(statement, seek);
@@ -297,6 +304,7 @@ function loopBody(body: Stmt[]): 'next' | Completion {
   return completion;
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- One case per statement kind, as PHP runs each kind differently.
 function forStatement(statement: Extract<Stmt, { k: 'for' }>, held: number): Completion {
   const runtime = rt();
   const frame = runtime.frame;
@@ -324,6 +332,7 @@ function forStatement(statement: Extract<Stmt, { k: 'for' }>, held: number): Com
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- One case per statement kind, as PHP runs each kind differently.
 function switchStatement(statement: Extract<Stmt, { k: 'switch' }>): Completion {
   const subject = ev(statement.subject);
   let start = -1;
@@ -363,7 +372,7 @@ function staticDeclaration(statement: Extract<Stmt, { k: 'static' }>, frame: Fra
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Try statements follow PHP's order of catch and finally.
+// code-gauge-allow functionNcss 48 -- One case per statement kind, as PHP runs each kind differently.
 function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Completion {
   const runtime = rt();
   let completion: Completion;
@@ -421,7 +430,8 @@ function catches(object: PhpObject, name: string): boolean {
   return cls !== undefined && object.cls.isSubclassOf(cls);
 }
 
-// code-gauge-allow functionCognitiveComplexity 40 -- Foreach follows PHP's iteration over arrays, references, and objects.
+// code-gauge-allow functionCognitiveComplexity 27 -- One case per statement kind, as PHP runs each kind differently.
+// code-gauge-allow functionNcss 43 -- One case per statement kind, as PHP runs each kind differently.
 function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completion {
   const runtime = rt();
   const frame = runtime.frame;
@@ -491,7 +501,8 @@ function bindForeachRef(target: Expr, ref: Ref): void {
   else bindRef(target, ref);
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Iteration over Iterator, IteratorAggregate, and plain objects.
+// code-gauge-allow functionCognitiveComplexity 23 -- One case per statement kind, as PHP runs each kind differently.
+// code-gauge-allow functionNcss 34 -- One case per statement kind, as PHP runs each kind differently.
 function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpObject): Completion {
   const runtime = rt();
   const iterator = iteratorOf(object);
@@ -547,7 +558,6 @@ export function iteratorOf(object: PhpObject): PhpObject | undefined {
   }
   return current;
 }
-
 
 function runBody(decl: FunctionDecl, frame: Frame): Value {
   if (frame.thisObj) {

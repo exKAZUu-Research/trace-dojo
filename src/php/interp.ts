@@ -1,22 +1,65 @@
-// code-gauge-allow-file fileNcss 800 -- One evaluator of every expression kind, which share the frame and values.
+// code-gauge-allow-file fileNcss 655 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import {
+  applyOperator,
+  assignExpression,
+  assignReference,
+  compoundAssign,
+  destructure,
+  incDec,
+  isset,
+  placeOf,
+} from './assignment';
 import type { ClassDecl, ClassRef, Expr } from './ast';
 import { lower } from './bytes';
+import {
+  callExpression,
+  callMethod,
+  callValue,
+  createArrow,
+  createClosure,
+  evalArgs,
+  methodCallExpression,
+  staticCallExpression,
+} from './callables';
 import { callStack, invoke } from './calls';
-import { canCall, checkInstantiable, classConstant, createObject, declareClass, findClass, instantiate, issetProp, readProp, readStaticProp, requireClass, visibleProps, writeProp } from './classes';
+import {
+  canCall,
+  checkInstantiable,
+  classConstant,
+  createObject,
+  declareClass,
+  findClass,
+  instantiate,
+  issetProp,
+  readProp,
+  readStaticProp,
+  requireClass,
+  visibleProps,
+  writeProp,
+} from './classes';
 import * as classesModule from './classes';
 import * as conversionsModule from './conversions';
 import { debugType, toBool } from './conversions';
 import { deprecated, notice, throwError, warn } from './errors';
-import { bitwiseNot, compare, looseEquals, negate, strictEquals, toFloat, toInt, toKey, toStr, unaryPlus } from './operators';
+import {
+  bitwiseNot,
+  compare,
+  looseEquals,
+  negate,
+  strictEquals,
+  toFloat,
+  toInt,
+  toKey,
+  toStr,
+  unaryPlus,
+} from './operators';
 import { readElement, share } from './places';
 import { ExitSignal, PhpThrow, rt } from './runtime';
+import { constantKey, iteratorOf } from './statements';
 import { UnsupportedFeatureError } from './unsupported';
 import { type ClosureData, isClosure, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
-import { constantKey, iteratorOf } from './statements';
-import { applyOperator, assignExpression, assignReference, compoundAssign, destructure, incDec, isset, placeOf } from './assignment';
-import { callExpression, callMethod, callValue, createArrow, createClosure, evalArgs, methodCallExpression, staticCallExpression } from './callables';
 
 export const SHORT = Symbol('nullsafe');
 export type Chain = Value | typeof SHORT;
@@ -44,8 +87,6 @@ export function ev(e: Expr): Value {
   return value === SHORT ? null : value;
 }
 
-// code-gauge-allow functionNcss 260 -- One case per expression kind, each delegating where it grows.
-// code-gauge-allow functionCognitiveComplexity 90 -- One case per expression kind, each delegating where it grows.
 export function evChain(e: Expr): Chain {
   const runtime = rt();
   switch (e.k) {
@@ -298,6 +339,8 @@ function isThrowableObject(object: PhpObject): boolean {
 }
 
 /** Evaluates an expression without the warnings an undefined variable or key would raise, as `??` and `empty` do. */
+// code-gauge-allow functionCognitiveComplexity 17 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionNcss 37 -- One case per expression kind, as PHP evaluates each kind differently.
 export function evQuiet(e: Expr): Value {
   const runtime = rt();
   switch (e.k) {
@@ -359,7 +402,6 @@ function globalsArray(): PhpArray {
   return array;
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Index reads follow PHP's rules per container type.
 export function readIndex(base: Value, index: Value, quiet: boolean): Value {
   if (base instanceof PhpArray) return readElement(base, toKey(index), quiet);
   if (typeof base === 'string') return readStringOffset(base, index, quiet);
@@ -379,6 +421,8 @@ export function isArrayAccess(object: PhpObject): boolean {
   return arrayAccess !== undefined && object.cls.isSubclassOf(arrayAccess);
 }
 
+// code-gauge-allow functionCognitiveComplexity 28 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionNcss 32 -- One case per expression kind, as PHP evaluates each kind differently.
 export function stringOffset(text: string, index: Value, quiet: boolean): number | undefined {
   let offset: bigint;
   if (typeof index === 'bigint') offset = index;
@@ -420,7 +464,7 @@ export function memberName(name: string | Expr): string {
   return typeof name === 'string' ? name : toStr(ev(name));
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Array literals follow PHP's rules for keys, spreads, and references.
+// code-gauge-allow functionCognitiveComplexity 21 -- One case per expression kind, as PHP evaluates each kind differently.
 function arrayLiteral(e: Extract<Expr, { k: 'array' }>): PhpArray {
   const runtime = rt();
   const array = new PhpArray();
@@ -530,6 +574,7 @@ function readConstant(name: string, fallback: string | undefined): Value {
   throwError('Error', `Undefined constant "${name}"`);
 }
 
+// code-gauge-allow functionCognitiveComplexity 19 -- One case per expression kind, as PHP evaluates each kind differently.
 function magicConstant(name: Extract<Expr, { k: 'magic' }>['name']): Value {
   const frame = rt().frame;
   const decl = frame.decl;
@@ -634,6 +679,8 @@ function cloneExpression(e: Extract<Expr, { k: 'clone' }>): Value {
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 24 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionNcss 32 -- One case per expression kind, as PHP evaluates each kind differently.
 export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
   const runtime = rt();
   const scope = runtime.frame.scope;
@@ -690,10 +737,9 @@ function cloneInternal(original: PhpObject): unknown {
   return internal;
 }
 
-
 // Operators ----------------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per binary operator.
+// code-gauge-allow functionNcss 38 -- One case per expression kind, as PHP evaluates each kind differently.
 function binary(e: Extract<Expr, { k: 'bin' }>): Value {
   const runtime = rt();
   switch (e.op) {
@@ -754,6 +800,7 @@ function compareForOrder(left: Value, right: Value): number {
   return compare(left, right);
 }
 
+// code-gauge-allow functionNcss 31 -- One case per expression kind, as PHP evaluates each kind differently.
 export function cast(type: string, value: Value): Value {
   switch (type) {
     case 'int': {

@@ -1,12 +1,13 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+import { callMethod } from './callables';
 import { declForKey, propNameOf } from './classes';
 import { formatFloat, formatFloatRepr } from './conversions';
-import { callMethod } from './callables';
 import { toStr } from './operators';
 import { typeToString } from './types';
 import { type ClosureData, isClosure, PhpArray, PhpObject, Ref, type Slot, UNINIT, type Value } from './values';
 
 /** The properties an object shows to `var_dump` and `print_r`: `__debugInfo`'s array, or its property table. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function debugEntries(object: PhpObject): [string | bigint, Slot, string][] {
   if (object.cls.findMethod('__debuginfo')) {
     const info = callMethod(object, '__debugInfo', []);
@@ -41,6 +42,7 @@ function debugLabel(key: string | bigint): string {
   return owner === '*' ? `"${name}":protected` : `"${name}":"${owner}":private`;
 }
 
+// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function closureDebug(object: PhpObject): [string, Value, string][] {
   const data = object.internal as ClosureData;
   const entries: [string, Value, string][] = [];
@@ -131,6 +133,8 @@ export function varDump(value: Value): string {
   return dumpValue(value, 1, new Set());
 }
 
+// code-gauge-allow functionCognitiveComplexity 26 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 42 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function dumpValue(value: Value, level: number, active: Set<object>): string {
   const pad = level > 1 ? ' '.repeat(level - 1) : '';
   if (value === null) return `${pad}NULL\n`;
@@ -198,6 +202,8 @@ function quoteExport(text: string): string {
   return `'${text.replaceAll(/['\\]/g, String.raw`\$&`).replaceAll('\0', `' . "\\0" . '`)}'`;
 }
 
+// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 39 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function exportValue(value: Value, level: number, active: Set<object>): string {
   if (value === null) return 'NULL';
   switch (typeof value) {

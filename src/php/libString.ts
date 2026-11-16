@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 900 -- The string functions, each a small closure of its own.
+// code-gauge-allow-file fileNcss 908 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { createHash } from 'node:crypto';
@@ -115,12 +115,7 @@ defineFunction(
         'ValueError',
         'str_pad(): Argument #4 ($pad_type) must be STR_PAD_LEFT, STR_PAD_RIGHT, or STR_PAD_BOTH'
       );
-    const total = length - text.length;
-    const fill = (count: number): string => pad.repeat(Math.ceil(count / pad.length)).slice(0, count);
-    if (type === 0) return fill(total) + text;
-    if (type === 1) return text + fill(total);
-    const left = Math.floor(total / 2);
-    return fill(left) + text + fill(total - left);
+    return padUnits([...text], length, [...pad], type);
   }
 );
 defineFunction('str_split(string $string, int $length = 1): array', ({ args }) => {
@@ -196,6 +191,7 @@ function offsetError(name: string, argument = 3, parameter = 'offset', haystack 
   );
 }
 
+// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function search(
   name: string,
   haystack: string,
@@ -272,6 +268,7 @@ function replaceAll(
   return checkLength(result + subject.slice(position));
 }
 
+// code-gauge-allow functionCognitiveComplexity 28 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function strReplace(args: Value[], refs: (Ref | undefined)[], insensitive: boolean): Value {
   const [search, replace, subject] = args;
   const count = { value: 0 };
@@ -338,6 +335,7 @@ defineFunction(
 );
 defineFunction(
   'substr_replace(array|string $string, array|string $replace, array|int $offset, array|int|null $length = null): string|array',
+  // code-gauge-allow functionCognitiveComplexity 21 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
   ({ args }) => {
     const [text, replace, offset, length] = args;
     const one = (subject: string, index: number): string => {
@@ -397,8 +395,34 @@ function isSpace(code: number): boolean {
   return code === 32 || (code >= 9 && code <= 13);
 }
 
+/** Compares two runs of digits that start with a zero as fractions: the first different digit decides. */
+function compareLeft(a: string, ap: number, b: string, bp: number): { result: number; ap: number; bp: number } {
+  for (; ; ap++, bp++) {
+    const da = ap < a.length && isDigit(at(a, ap));
+    const db = bp < b.length && isDigit(at(b, bp));
+    if (!da && !db) return { result: 0, ap, bp };
+    if (!da) return { result: -1, ap, bp };
+    if (!db) return { result: 1, ap, bp };
+    if (at(a, ap) !== at(b, bp)) return { result: at(a, ap) < at(b, bp) ? -1 : 1, ap, bp };
+  }
+}
+
+/** Compares two runs of digits as integers: the longer run wins, then the first different digit. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+function compareRight(a: string, ap: number, b: string, bp: number): { result: number; ap: number; bp: number } {
+  let bias = 0;
+  for (; ; ap++, bp++) {
+    const da = ap < a.length && isDigit(at(a, ap));
+    const db = bp < b.length && isDigit(at(b, bp));
+    if (!da && !db) return { result: bias, ap, bp };
+    if (!da) return { result: -1, ap, bp };
+    if (!db) return { result: 1, ap, bp };
+    if (bias === 0 && at(a, ap) !== at(b, bp)) bias = at(a, ap) < at(b, bp) ? -1 : 1;
+  }
+}
+
 /** Compares strings in natural order, as PHP's strnatcmp_ex does. */
-// code-gauge-allow functionCognitiveComplexity 40 -- Transcribes PHP's strnatcmp_ex.
+// code-gauge-allow functionNcss 46 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function naturalCompare(a: string, b: string, insensitive: boolean): number {
   if (a.length === 0 || b.length === 0) return a.length === b.length ? 0 : a.length > b.length ? 1 : -1;
   let ap = 0;
@@ -413,47 +437,9 @@ export function naturalCompare(a: string, b: string, insensitive: boolean): numb
     while (isSpace(ca)) ca = at(a, ++ap);
     while (isSpace(cb)) cb = at(b, ++bp);
     if (isDigit(ca) && isDigit(cb)) {
-      const fractional = ca === 48 || cb === 48;
-      let result = 0;
-      if (fractional) {
-        for (; ; ap++, bp++) {
-          const da = ap < a.length && isDigit(at(a, ap));
-          const db = bp < b.length && isDigit(at(b, bp));
-          if (!da && !db) break;
-          if (!da) {
-            result = -1;
-            break;
-          }
-          if (!db) {
-            result = 1;
-            break;
-          }
-          if (at(a, ap) !== at(b, bp)) {
-            result = at(a, ap) < at(b, bp) ? -1 : 1;
-            break;
-          }
-        }
-      } else {
-        let bias = 0;
-        for (; ; ap++, bp++) {
-          const da = ap < a.length && isDigit(at(a, ap));
-          const db = bp < b.length && isDigit(at(b, bp));
-          if (!da && !db) {
-            result = bias;
-            break;
-          }
-          if (!da) {
-            result = -1;
-            break;
-          }
-          if (!db) {
-            result = 1;
-            break;
-          }
-          if (bias === 0 && at(a, ap) !== at(b, bp)) bias = at(a, ap) < at(b, bp) ? -1 : 1;
-        }
-      }
-      if (result !== 0) return result;
+      const run = ca === 48 || cb === 48 ? compareLeft(a, ap, b, bp) : compareRight(a, ap, b, bp);
+      ({ ap, bp } = run);
+      if (run.result !== 0) return run.result;
       if (ap >= a.length && bp >= b.length) return 0;
       if (ap >= a.length) return -1;
       if (bp >= b.length) return 1;
@@ -496,6 +482,7 @@ defineFunction('strrchr(string $haystack, string $needle, bool $before_needle = 
   if (index === -1) return false;
   return args[2] === true ? haystack.slice(0, index) : haystack.slice(index);
 });
+// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 defineFunction('strtr(string $string, string|array $from, ?string $to = null): string', ({ args }) => {
   const text = s(args[0]);
   const from = args[1];
@@ -544,7 +531,8 @@ defineFunction(
     )
 );
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Transcribes PHP's wordwrap.
+// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 37 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function wordwrap(text: string, width: number, breakText: string, cut: boolean): string {
   if (text === '') return '';
   if (breakText === '') throwError('ValueError', 'wordwrap(): Argument #3 ($break) cannot be empty');
@@ -581,6 +569,7 @@ function wordwrap(text: string, width: number, breakText: string, cut: boolean):
   return result;
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 defineFunction('str_word_count(string $string, int $format = 0, ?string $characters = null): array|int', ({ args }) => {
   const text = s(args[0]);
   const format = args[1] === undefined ? 0 : n(args[1]);
@@ -641,6 +630,7 @@ const CODE_BY_ENTITY = new Map(HTML401_ENTITIES.map(([code, name]) => [name, cod
 
 defineFunction(
   'htmlentities(string $string, int $flags = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401, ?string $encoding = null, bool $double_encode = true): string',
+  // code-gauge-allow functionCognitiveComplexity 30 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
   ({ args }) => {
     const flags = args[1] === undefined ? 11n : (args[1] as bigint);
     const doubleEncode = args[3] !== false;
@@ -676,6 +666,7 @@ defineFunction(
 );
 defineFunction(
   'html_entity_decode(string $string, int $flags = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401, ?string $encoding = null): string',
+  // code-gauge-allow functionCognitiveComplexity 24 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
   ({ args }) => {
     const flags = args[1] === undefined ? 11n : (args[1] as bigint);
     return s(args[0]).replaceAll(/&(#[xX][\dA-Fa-f]+|#\d+|[A-Za-z][A-Za-z\d]*);/g, (match, body: string) => {
@@ -706,7 +697,8 @@ function allowedTags(value: Value): Set<string> {
 }
 
 /** Removes HTML and PHP tags as PHP's strip_tags does, keeping the allowed tags. */
-// code-gauge-allow functionCognitiveComplexity 30 -- Transcribes the states of PHP's php_strip_tags_ex.
+// code-gauge-allow functionCognitiveComplexity 26 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 37 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function stripTags(text: string, allowed: Set<string>): string {
   let result = '';
   let index = 0;
@@ -832,6 +824,7 @@ defineFunction('soundex(string $string): string', ({ args }) => {
   }
   return result.padEnd(4, '0');
 });
+// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 defineFunction('count_chars(string $string, int $mode = 0): array|string', ({ args }) => {
   const text = s(args[0]);
   const mode = args[1] === undefined ? 0 : n(args[1]);
@@ -918,6 +911,7 @@ defineFunction('str_increment(string $string): string', ({ args }) => {
     );
   return incrementString(text);
 });
+// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 defineFunction('str_decrement(string $string): string', ({ args }) => {
   const text = s(args[0]);
   if (text === '') throwError('ValueError', 'str_decrement(): Argument #1 ($string) cannot be empty');
@@ -983,6 +977,7 @@ for (const [name, pattern] of [
   ['ctype_print', /^[ -~]+$/],
   ['ctype_graph', /^[!-~]+$/],
 ] as const) {
+  // code-gauge-allow functionCognitiveComplexity 17 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
   defineFunction(`${name}(mixed $text): bool`, ({ args }) => {
     let [value] = args;
     if (typeof value === 'bigint') {
@@ -1036,6 +1031,16 @@ defineFunction('mb_str_split(string $string, int $length = 1, ?string $encoding 
   return PhpArray.list(parts);
 });
 
+/** Pads a sequence of bytes or characters to `length` units on the side `type` names, as `str_pad` does. */
+function padUnits(text: string[], length: number, pad: string[], type: number): string {
+  if (length <= text.length) return text.join('');
+  const total = length - text.length;
+  const fill = (count: number): string => Array.from({ length: count }, (_, index) => pad[index % pad.length]).join('');
+  const left = type === 0 ? total : type === 1 ? 0 : Math.floor(total / 2);
+  return fill(left) + text.join('') + fill(total - left);
+}
+
+// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function mbSearch(args: Value[], reverse: boolean, insensitive: boolean, name: string): Value {
   const haystack = chars(insensitive ? enc(dec(s(args[0])).toLowerCase()) : args[0]);
   const needle = chars(insensitive ? enc(dec(s(args[1])).toLowerCase()) : args[1]);
@@ -1082,14 +1087,7 @@ defineFunction(
     const type = args[3] === undefined ? 1 : n(args[3]);
     if (pad.length === 0)
       throwError('ValueError', 'mb_str_pad(): Argument #3 ($pad_string) must be a non-empty string');
-    if (length <= text.length) return text.join('');
-    const total = length - text.length;
-    const fill = (count: number): string =>
-      Array.from({ length: count }, (_, index) => pad[index % pad.length]).join('');
-    if (type === 0) return fill(total) + text.join('');
-    if (type === 1) return text.join('') + fill(total);
-    const left = Math.floor(total / 2);
-    return fill(left) + text.join('') + fill(total - left);
+    return padUnits(text, length, pad, type);
   }
 );
 defineFunction('mb_strwidth(string $string, ?string $encoding = null): int', ({ args }) => {

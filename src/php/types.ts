@@ -109,7 +109,6 @@ function acceptsName(type: TypeDecl, name: string): boolean {
   return false;
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Follows PHP's order of scalar coercions for unions.
 function coerceScalar(value: Value, type: TypeDecl): Value | typeof NO_MATCH {
   if (value instanceof PhpArray) return NO_MATCH;
   if (value instanceof PhpObject) {
@@ -178,7 +177,7 @@ function coerceScalar(value: Value, type: TypeDecl): Value | typeof NO_MATCH {
 }
 
 /** Whether a value has a declared type exactly, without coercion. */
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per builtin type name.
+// code-gauge-allow functionNcss 46 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function matches(
   value: Value,
   type: TypeDecl,

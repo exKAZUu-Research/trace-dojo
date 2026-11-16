@@ -8,7 +8,6 @@ import type { TypeDecl, Visibility } from './values';
 
 /** Converts the declarations of functions, parameters, types, and classes. */
 export abstract class DeclarationConverter extends ConverterBase {
-  // code-gauge-allow functionCognitiveComplexity 20 -- Function declarations share one shape across their grammar forms.
   protected functionDecl(node: Node, isClosure: boolean, className?: string): FunctionDecl {
     const attributes = node.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -65,7 +64,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Parameters share one shape across their grammar forms.
+  // code-gauge-allow functionNcss 49 -- Checks PHP's rules on the modifiers and parts of each declaration.
   protected params(node: Node, functionName: string, className?: string): ParamDecl[] {
     const params: ParamDecl[] = [];
     const seen = new Set<string>();
@@ -149,7 +148,6 @@ export abstract class DeclarationConverter extends ConverterBase {
     return lower(node.text.split('(')[0].trim()) as Visibility;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per type grammar form.
   protected typeDecl(node: Node): TypeDecl {
     switch (node.type) {
       case 'primitive_type':
@@ -202,8 +200,6 @@ export abstract class DeclarationConverter extends ConverterBase {
 
   // Classes -----------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- Class members share the class's modifiers and checks.
-  // code-gauge-allow functionNcss 90 -- Class members share the class's modifiers and checks.
   classDecl(node: Node, anonymous = false): ClassDecl {
     const attributes = node.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -396,7 +392,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Property declarations check PHP's rules on modifiers and hooks.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Checks PHP's rules on the modifiers and parts of each declaration.
   protected properties(member: Node, decl: ClassDecl, kind: ClassDecl['kind']): void {
     const attributes = member.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -451,6 +447,8 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 21 -- Checks PHP's rules on the modifiers and parts of each declaration.
+  // code-gauge-allow functionNcss 43 -- Checks PHP's rules on the modifiers and parts of each declaration.
   protected hooks(list: Node, prop: PropertyDeclAst, className: string): void {
     const hooks: NonNullable<PropertyDeclAst['hooks']> = {};
     let referencesBacking = false;

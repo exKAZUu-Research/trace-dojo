@@ -149,44 +149,26 @@ export function intToString(value: bigint): string {
   return value.toString();
 }
 
+/** The names of the scalar types, as `gettype` and error messages write them. */
+const SCALAR_TYPE_NAMES = {
+  boolean: { gettype: 'boolean', debug: 'bool' },
+  bigint: { gettype: 'integer', debug: 'int' },
+  number: { gettype: 'double', debug: 'float' },
+  string: { gettype: 'string', debug: 'string' },
+} as const;
+
 /** The PHP type name of a value, as `gettype` reports it. */
 export function getType(value: Value): string {
   if (value === null) return 'NULL';
-  switch (typeof value) {
-    case 'boolean': {
-      return 'boolean';
-    }
-    case 'bigint': {
-      return 'integer';
-    }
-    case 'number': {
-      return 'double';
-    }
-    case 'string': {
-      return 'string';
-    }
-  }
+  if (typeof value !== 'object') return SCALAR_TYPE_NAMES[typeof value as keyof typeof SCALAR_TYPE_NAMES].gettype;
   if (value instanceof PhpArray) return 'array';
-  return (value as PhpObject).cls.name === '(stream)' ? 'resource' : 'object';
+  return value.cls.name === '(stream)' ? 'resource' : 'object';
 }
 
 /** The type name in error messages and `get_debug_type`. */
 export function debugType(value: Value): string {
   if (value === null) return 'null';
-  switch (typeof value) {
-    case 'boolean': {
-      return 'bool';
-    }
-    case 'bigint': {
-      return 'int';
-    }
-    case 'number': {
-      return 'float';
-    }
-    case 'string': {
-      return 'string';
-    }
-  }
+  if (typeof value !== 'object') return SCALAR_TYPE_NAMES[typeof value as keyof typeof SCALAR_TYPE_NAMES].debug;
   if (value instanceof PhpArray) return 'array';
   const object = value as PhpObject;
   if (object.cls.name === '(stream)') return 'resource (stream)';
@@ -212,6 +194,7 @@ export function sign(value: number | bigint): number {
 }
 
 /** Compares two numbers of either kind exactly, as PHP compares an int with a float. */
+// code-gauge-allow functionCognitiveComplexity 26 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function compareNumbers(a: bigint | number, b: bigint | number): number {
   if (typeof a === 'bigint' && typeof b === 'bigint') return a < b ? -1 : a > b ? 1 : 0;
   const x = Number(a);

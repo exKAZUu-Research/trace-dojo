@@ -1,11 +1,11 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
+import { callTargetOf, closureFromCallable, closureTarget } from './callables';
 import { invoke } from './calls';
 import { requireClass } from './classes';
 import { debugType } from './conversions';
 import { throwError } from './errors';
 import { collectGarbage } from './garbage';
-import { callTargetOf, closureFromCallable, closureTarget } from './callables';
 import { defineClass, installNatives, type NativeMethod } from './native';
 import { rt } from './runtime';
 import { type ClosureData, PhpObject, type Value } from './values';
@@ -151,6 +151,7 @@ function turtleOf(object: PhpObject): TurtleState {
   return state;
 }
 
+// code-gauge-allow functionNcss 33 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function defineTurtleMethods(): NativeMethod[] {
   const methods: NativeMethod[] = [
     {

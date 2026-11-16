@@ -33,6 +33,7 @@ const BINARY: Record<string, [number, number, number]> = {
 };
 
 /** Writes an expression back as PHP code, as the message of a failed `assert` shows it. */
+// code-gauge-allow functionNcss 57 -- One case per expression kind, as PHP's zend_ast_export writes each.
 export function exportExpr(e: Expr, priority = 0): string {
   const wrap = (own: number, text: string): string => (priority > own ? `(${text})` : text);
   switch (e.k) {

@@ -1,11 +1,11 @@
-// code-gauge-allow-file fileNcss 1100 -- The array functions, each a small closure of its own.
+// code-gauge-allow-file fileNcss 748 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { lower } from './bytes';
+import { callCallback, callCallbackRefs, callMethod } from './callables';
 import * as conversionsModule from './conversions';
 import { compareBytes, compareNumbers, debugType, normalizeKeyString } from './conversions';
 import { deprecated, throwError, warn } from './errors';
-import { callCallback, callCallbackRefs, callMethod } from './callables';
 import { cast } from './interp';
 import { naturalCompare } from './libString';
 import { defineAlias, defineConstant, defineFunction } from './native';
@@ -335,7 +335,7 @@ function rangeNumber(value: Value): bigint | number {
   throwError('TypeError', `range(): Argument #1 ($start) must be of type string|int|float, ${debugType(value)} given`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 40 -- Transcribes PHP 8.3's range rules for chars, ints, and floats.
+// code-gauge-allow functionNcss 42 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function range(startValue: Value, endValue: Value, stepValue: Value): PhpArray {
   let step = typeof stepValue === 'number' ? stepValue : Number(stepValue);
   const stepIsFloat = typeof stepValue === 'number' && !Number.isInteger(stepValue);
@@ -814,6 +814,7 @@ function sortComparator(flags: bigint): (a: Value, b: Value) => number {
 }
 
 /** Calls a user comparison as PHP's sorts do, accepting a bool result with a deprecation. */
+// code-gauge-allow functionCognitiveComplexity 21 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function userComparator(name: string, callback: Value): (a: Value, b: Value) => number {
   let warned = false;
   return (a, b) => {
@@ -829,11 +830,7 @@ function userComparator(name: string, callback: Value): (a: Value, b: Value) => 
       return conversionsModule.toBool(callCallback(callback, [b, a])) ? -1 : 0;
     }
     const value =
-      typeof result === 'bigint'
-        ? Number(result)
-        : typeof result === 'number'
-          ? result
-          : Number(cast('int', result));
+      typeof result === 'bigint' ? Number(result) : typeof result === 'number' ? result : Number(cast('int', result));
     return value < 0 ? -1 : value > 0 ? 1 : 0;
   };
 }
@@ -908,6 +905,8 @@ defineFunction('natsort(array &$array): true', (ctx) =>
 defineFunction('natcasesort(array &$array): true', (ctx) =>
   sortArray(ctx, 'natcasesort', (a, b) => naturalCompare(toStr(valueOf(a[1])), toStr(valueOf(b[1])), true), false)
 );
+// code-gauge-allow functionCognitiveComplexity 18 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 32 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 defineFunction('array_multisort(&~$array, &~...$rest): bool', (ctx) => {
   const columns: { ref: Ref; order: number; flags: bigint }[] = [];
   for (const [index, value] of ctx.args.entries()) {

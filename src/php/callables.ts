@@ -1,20 +1,32 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
 import { lower } from './bytes';
 import { type ArgValue, type CallTarget, closureFunction, invoke, paramIsByRef } from './calls';
 import { canCall, lookupMethod, requireClass } from './classes';
 import { debugType } from './conversions';
 import { notice, throwError, warn } from './errors';
+import { type Chain, ev, evChain, iterate, resolveClassRef, SHORT } from './interp';
 import { toStr } from './operators';
 import { ElementPlace, share, VarPlace } from './places';
 import { type Frame, rt } from './runtime';
-import { type Callable, type ClosureData, isClosure, type Method, PhpArray, type PhpClass, PhpObject, Ref, type UserFunction, type Value } from './values';
-import { type Chain, SHORT, ev, evChain, iterate, resolveClassRef } from './interp';
-import { placeOf } from './assignment';
+import {
+  type Callable,
+  type ClosureData,
+  isClosure,
+  type Method,
+  PhpArray,
+  type PhpClass,
+  PhpObject,
+  Ref,
+  type UserFunction,
+  type Value,
+} from './values';
 
 // Calls --------------------------------------------------------------------------------------------------------------
 
 /** Evaluates call arguments, binding by-reference parameters to locations. */
+// code-gauge-allow functionNcss 54 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | undefined): ArgValue[] {
   const runtime = rt();
   const values: ArgValue[] = [];
@@ -106,7 +118,8 @@ function functionNameFor(target: CallTarget): string {
   return target.method ? `${target.method.scope.name}::${target.method.name}` : target.fn.name;
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Method calls follow PHP's lookup with visibility and __call.
+// code-gauge-allow functionCognitiveComplexity 29 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
+// code-gauge-allow functionNcss 48 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>): Chain {
   const runtime = rt();
   const object = evChain(e.obj);
@@ -179,21 +192,30 @@ function argsArray(args: ArgValue[]): PhpArray {
 }
 
 function magicClosure(object: PhpObject, magic: Method, methodName: string): PhpObject {
-  const native: Callable = {
+  return closureFromCallable({
+    fn: magicForwarder(magic, methodName, object, object.cls),
+    thisObj: object,
+    scope: object.cls,
+  });
+}
+
+/** A function that passes its arguments to `__call` or `__callStatic` with the name of the method a program called. */
+function magicForwarder(magic: Method, name: string, object: PhpObject | undefined, cls: PhpClass): Callable {
+  return {
     kind: 'native',
-    name: methodName,
+    name,
     params: [{ name: 'args', byRef: false, variadic: true, optional: true }],
     impl: ({ args }) =>
       invoke(
-        { fn: magic.fn, thisObj: object, scope: magic.scope, staticClass: object.cls, method: magic },
-        [{ v: methodName }, { v: PhpArray.list(args) }],
+        { fn: magic.fn, thisObj: object, scope: magic.scope, staticClass: cls, method: magic },
+        [{ v: name }, { v: PhpArray.list(args) }],
         undefined
       ),
   };
-  return closureFromCallable({ fn: native, thisObj: object, scope: object.cls });
 }
 
-// code-gauge-allow functionCognitiveComplexity 35 -- Static calls follow PHP's rules for parent::, self::, and instance forwarding.
+// code-gauge-allow functionCognitiveComplexity 25 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
+// code-gauge-allow functionNcss 42 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>): Value {
   const runtime = rt();
   const frame = runtime.frame;
@@ -297,7 +319,7 @@ export function closureTarget(closure: PhpObject): CallTarget {
  * The function a callable value names: a closure, an invokable object, a function name, `"Class::method"`, or
  * `[$objectOrClass, "method"]`.
  */
-// code-gauge-allow functionCognitiveComplexity 35 -- Resolves each form of PHP callable.
+// code-gauge-allow functionNcss 38 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 export function callTargetOf(value: Value, forCall: boolean): CallTarget {
   const runtime = rt();
   const scope = runtime.frame.scope;
@@ -348,20 +370,10 @@ export function callTargetOf(value: Value, forCall: boolean): CallTarget {
 }
 
 function magicTarget(object: PhpObject, magic: Method, name: string): CallTarget {
-  const native: Callable = {
-    kind: 'native',
-    name,
-    params: [{ name: 'args', byRef: false, variadic: true, optional: true }],
-    impl: ({ args }) =>
-      invoke(
-        { fn: magic.fn, thisObj: object, scope: magic.scope, staticClass: object.cls, method: magic },
-        [{ v: name }, { v: PhpArray.list(args) }],
-        undefined
-      ),
-  };
-  return { fn: native, thisObj: object };
+  return { fn: magicForwarder(magic, name, object, object.cls), thisObj: object };
 }
 
+// code-gauge-allow functionCognitiveComplexity 22 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 function staticCallable(className: string, methodName: string, scope: PhpClass | undefined): CallTarget {
   const frame = rt().frame;
   let cls: PhpClass;
@@ -378,20 +390,7 @@ function staticCallable(className: string, methodName: string, scope: PhpClass |
   const method = lookupMethod(cls, lower(methodName), scope);
   if (!method) {
     const magic = cls.findMethod('__callstatic');
-    if (magic) {
-      const native: Callable = {
-        kind: 'native',
-        name: methodName,
-        params: [{ name: 'args', byRef: false, variadic: true, optional: true }],
-        impl: ({ args }) =>
-          invoke(
-            { fn: magic.fn, scope: magic.scope, staticClass: cls, method: magic },
-            [{ v: methodName }, { v: PhpArray.list(args) }],
-            undefined
-          ),
-      };
-      return { fn: native, staticClass: cls };
-    }
+    if (magic) return { fn: magicForwarder(magic, methodName, undefined, cls), staticClass: cls };
     throwError('Error', `Call to undefined method ${cls.name}::${methodName}()`);
   }
   if (!canCall(method, scope))

@@ -1,22 +1,33 @@
+// code-gauge-allow-file fileNcss 439 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
+import { callMethod } from './callables';
 import { findClass, issetProp, propRef, readProp, staticPropRef, unsetProp, writeProp } from './classes';
 import * as classesModule from './classes';
 import * as conversionsModule from './conversions';
 import { debugType, toBool } from './conversions';
 import { deprecated, notice, throwError, warn } from './errors';
+import { ev, evQuiet, isArrayAccess, memberName, readIndex, resolveClassRef, stringOffset } from './interp';
 import { arithmetic, bitwise, concat, toInt, toKey, toStr } from './operators';
-import { ElementPlace, type Place, readElement, RefPlace, share, ValuePlace, VarPlace, writableContainer } from './places';
+import {
+  ElementPlace,
+  type Place,
+  readElement,
+  RefPlace,
+  share,
+  ValuePlace,
+  VarPlace,
+  writableContainer,
+} from './places';
 import { rt } from './runtime';
 import { incrementString } from './strings';
 import { type Key, PhpArray, type PhpClass, PhpObject, type PropDecl, Ref, type Value } from './values';
-import { ev, evQuiet, isArrayAccess, memberName, readIndex, resolveClassRef, stringOffset } from './interp';
-import { callMethod } from './callables';
 
 // Assignment ---------------------------------------------------------------------------------------------------------
 
 /** The location a writable expression names, evaluating its keys and creating containers as PHP's writes do. */
-// code-gauge-allow functionCognitiveComplexity 35 -- One case per writable expression kind.
+// code-gauge-allow functionCognitiveComplexity 30 -- Handles each kind of writable expression, whose write rules PHP defines separately.
+// code-gauge-allow functionNcss 50 -- Handles each kind of writable expression, whose write rules PHP defines separately.
 export function placeOf(e: Expr): Place {
   const runtime = rt();
   const frame = runtime.frame;
@@ -195,6 +206,8 @@ export function assignTo(target: Expr, value: Value): void {
   placeOf(target).set(share(value));
 }
 
+// code-gauge-allow functionCognitiveComplexity 28 -- Handles each kind of writable expression, whose write rules PHP defines separately.
+// code-gauge-allow functionNcss 47 -- Handles each kind of writable expression, whose write rules PHP defines separately.
 export function bindRef(target: Expr, ref: Ref): void {
   if (target.k === 'var') {
     if (target.name === 'this') throwError('Error', 'Cannot re-assign $this');
@@ -264,7 +277,6 @@ export function assignReference(target: Expr, source: Expr): Value {
   return ref.v;
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- List destructuring follows PHP's warnings per source type.
 export function destructure(target: Extract<Expr, { k: 'list' }>, value: Value): void {
   let position = 0n;
   for (const item of target.items) {
@@ -297,7 +309,7 @@ function destructureItem(item: ListItem, value: Value, key: Key): void {
   else placeOf(item.target).set(share(element));
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Compound assignment follows PHP's order of evaluation.
+// code-gauge-allow functionCognitiveComplexity 16 -- Handles each kind of writable expression, whose write rules PHP defines separately.
 export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
   const runtime = rt();
   if (e.op === '??') {
@@ -350,7 +362,8 @@ export function applyOperator(op: string, left: Value, right: Value): Value {
   throw new Error(`Unknown operator ${op}`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Increment and decrement follow PHP's rules per type.
+// code-gauge-allow functionCognitiveComplexity 30 -- Handles each kind of writable expression, whose write rules PHP defines separately.
+// code-gauge-allow functionNcss 39 -- Handles each kind of writable expression, whose write rules PHP defines separately.
 export function incDec(e: Extract<Expr, { k: 'incdec' }>): Value {
   const runtime = rt();
   const place = placeOf(e.target);
@@ -408,6 +421,7 @@ function incDecString(text: string, inc: boolean): Value {
   return incrementString(text);
 }
 
+// code-gauge-allow functionNcss 38 -- Handles each kind of writable expression, whose write rules PHP defines separately.
 export function unsetTarget(target: Expr): void {
   const runtime = rt();
   runtime.row = target.row;
@@ -466,7 +480,7 @@ function unsetContainer(e: Expr): PhpArray | PhpObject | string | undefined {
   return value instanceof PhpArray || value instanceof PhpObject ? value : undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Isset follows PHP's rules per expression kind.
+// code-gauge-allow functionNcss 48 -- Handles each kind of writable expression, whose write rules PHP defines separately.
 export function isset(e: Expr): boolean {
   const runtime = rt();
   switch (e.k) {

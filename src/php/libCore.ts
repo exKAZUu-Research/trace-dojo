@@ -1,6 +1,7 @@
-// code-gauge-allow-file fileNcss 700 -- The core builtin functions, each a small closure of its own.
+// code-gauge-allow-file fileNcss 496 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { lower } from './bytes';
+import { callCallback, callTargetOf, callValue } from './callables';
 import { callStack, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
 import { findClass, lookupMethod, visibleProps } from './classes';
@@ -27,14 +28,13 @@ import {
   throwError,
   warn,
 } from './errors';
-import { callCallback, callTargetOf, callValue } from './callables';
 import { cast, iterate } from './interp';
-import { constantKey, defineConstant as defineUserConstant } from './statements';
 import { defineAlias, defineConstant, defineFunction } from './native';
 import { toFloat, toInt, toStr } from './operators';
 import { printR, varDump, varExport } from './output';
 import { PhpThrow, rt } from './runtime';
 import { formatPrintf } from './sprintf';
+import { constantKey, defineConstant as defineUserConstant } from './statements';
 import { setCallableCheck } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import { isClosure, PhpArray, PhpClass, PhpObject, type Value } from './values';
@@ -190,6 +190,8 @@ defineFunction('settype(mixed &$var, string $type): bool', ({ args, refs }) => {
 });
 
 /** Parses an integer in a base as `intval($string, $base)` does, with base 0 detecting a prefix. */
+// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 43 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function parseIntBase(text: string, base: number): bigint {
   let rest = text.trimStart();
   let negative = false;
@@ -343,6 +345,7 @@ export function isCallable(value: Value): boolean {
 }
 
 /** Explains why a value is no valid callback, as PHP's messages for callable parameters do. */
+// code-gauge-allow functionCognitiveComplexity 21 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function callableProblem(value: Value): string {
   if (typeof value === 'string') {
     if (value.includes('::')) {

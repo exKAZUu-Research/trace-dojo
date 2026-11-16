@@ -53,6 +53,7 @@ export function toStr(value: Value): string {
 }
 
 /** Converts a value to an int as `(int)` and `intval` do. */
+// code-gauge-allow duplicateLines 19 -- Mirrors toFloat, as PHP converts each type to int and to float by separate rules.
 export function toInt(value: Value): bigint {
   if (value === null) return 0n;
   switch (typeof value) {
@@ -84,6 +85,7 @@ export function floatToIntCast(value: number): bigint {
 }
 
 /** Converts a value to a float as `(float)` and `floatval` do. */
+// code-gauge-allow duplicateLines 20 -- Mirrors toInt, as PHP converts each type to int and to float by separate rules.
 export function toFloat(value: Value): number {
   if (value === null) return 0;
   switch (typeof value) {
@@ -124,7 +126,8 @@ export function unsupportedOperands(op: string, left: Value, right: Value): neve
   throwError('TypeError', `Unsupported operand types: ${debugType(left)} ${op} ${debugType(right)}`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per arithmetic operator, as PHP's operators differ.
+// code-gauge-allow functionCognitiveComplexity 30 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 35 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function arithmetic(op: string, left: Value, right: Value): Value {
   if (op === '+' && left instanceof PhpArray && right instanceof PhpArray) return arrayUnion(left, right);
   if (left instanceof PhpArray || right instanceof PhpArray) unsupportedOperands(op, left, right);
@@ -163,6 +166,7 @@ export function arithmetic(op: string, left: Value, right: Value): Value {
   throw new Error(`Unknown arithmetic operator ${op}`);
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function power(a: bigint | number, b: bigint | number): bigint | number {
   if (typeof a === 'bigint' && typeof b === 'bigint' && b >= 0n) {
     if (a === 0n || a === 1n || b === 0n) return b === 0n ? 1n : a;
@@ -223,6 +227,7 @@ function bitwiseOperand(value: Value, op: string, left: Value, right: Value): bi
   return unsupportedOperands(op, left, right);
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function bitwise(op: string, left: Value, right: Value): Value {
   if ((op === '&' || op === '|' || op === '^') && typeof left === 'string' && typeof right === 'string') {
     return bytewise(op, left, right);
@@ -312,7 +317,7 @@ function compareStrings(a: string, b: string): number {
 }
 
 /** The result of PHP's `<=>`, where 1 also stands for values PHP cannot order. */
-// code-gauge-allow functionCognitiveComplexity 35 -- Transcribes PHP's zend_compare type pairs.
+// code-gauge-allow functionNcss 34 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function compare(a: Value, b: Value): number {
   if ((typeof a === 'bigint' || typeof a === 'number') && (typeof b === 'bigint' || typeof b === 'number')) {
     return compareNumbers(a, b);
@@ -388,6 +393,7 @@ function compareObjects(a: PhpObject, b: PhpObject): number {
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function looseEquals(a: Value, b: Value): boolean {
   if (a instanceof PhpArray && b instanceof PhpArray) {
     if (a.size !== b.size) return false;

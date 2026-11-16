@@ -1,11 +1,11 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { codePointBytes, utf8Length } from './bytes';
+import { callMethod } from './callables';
 import { canAccessProp, createObject, declForKey, propNameOf } from './classes';
 import * as conversionsModule from './conversions';
 import { formatFloatRepr } from './conversions';
 import { newThrowable, throwError } from './errors';
-import { callMethod } from './callables';
 import { defineConstant, defineFunction } from './native';
 import { PhpThrow, rt } from './runtime';
 import { PhpArray, type PhpClass, type PhpObject, Ref, UNINIT, type Value } from './values';
@@ -75,7 +75,7 @@ defineFunction('json_encode(mixed $value, int $flags = 0, int $depth = 512): str
   }
 });
 
-// code-gauge-allow functionCognitiveComplexity 35 -- Transcribes php_json_encode_zval per value type.
+// code-gauge-allow functionNcss 57 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function encode(value: Value, flags: bigint, level: number, maxDepth: number, active: Set<object>): string {
   rt().spend();
   if (value === null) return 'null';
@@ -160,7 +160,6 @@ function wrap(parts: string[], open: string, close: string, flags: bigint, level
   return `${open}\n${parts.map((part) => inner + part).join(',\n')}\n${'    '.repeat(level)}${close}`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Transcribes php_json_escape_string.
 function encodeString(text: string, flags: bigint): string {
   let result = '"';
   let index = 0;
@@ -327,7 +326,6 @@ class JsonParser {
     while (this.index < this.text.length && ' \t\n\r'.includes(this.text[this.index])) this.index++;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per JSON value kind.
   private value(depth: number): Value {
     rt().spend();
     this.skipSpace();
@@ -351,6 +349,8 @@ class JsonParser {
     throw new JsonError(4);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+  // code-gauge-allow functionNcss 34 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
   private object(depth: number): Value {
     this.index++;
     const array = new PhpArray();
@@ -402,7 +402,8 @@ class JsonParser {
     return array;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Decodes JSON string escapes into UTF-8 bytes.
+  // code-gauge-allow functionCognitiveComplexity 28 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+  // code-gauge-allow functionNcss 41 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
   private string(): string {
     this.index++;
     let result = '';

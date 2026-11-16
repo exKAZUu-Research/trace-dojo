@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 600 -- PCRE translation and the preg functions share the compiled pattern state.
+// code-gauge-allow-file fileNcss 526 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { dec, enc } from './bytes';
-import { throwError, warn } from './errors';
 import { callCallback } from './callables';
+import { throwError, warn } from './errors';
 import { defineConstant, defineFunction } from './native';
 import { toStr } from './operators';
 import { rt } from './runtime';
@@ -62,7 +62,6 @@ class PatternError extends Error {}
 
 const BRACKETS: Record<string, string> = { '(': ')', '{': '}', '[': ']', '<': '>' };
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Splits the delimiters and modifiers as PCRE's front end does.
 function translate(pattern: string): Compiled {
   const trimmed = pattern.replace(/^[ \t\n\r\v\f]+/, '');
   if (trimmed === '') throw new PatternError('Empty regular expression');
@@ -188,7 +187,6 @@ function unsupported(what: string): never {
 }
 
 /** Rewrites PCRE syntax that JavaScript spells differently, rejecting what JavaScript cannot express. */
-// code-gauge-allow functionCognitiveComplexity 60 -- Walks the pattern once, translating each PCRE construct.
 function convertSyntax(source: string, options: SyntaxOptions): string {
   let result = '';
   let index = 0;
@@ -652,6 +650,8 @@ defineFunction(
 );
 defineFunction(
   'preg_split(string $pattern, string $subject, int $limit = -1, int $flags = 0): array|false',
+  // code-gauge-allow functionCognitiveComplexity 29 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+  // code-gauge-allow functionNcss 33 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
   ({ args }) => {
     const compiled = compile('preg_split', args[0] as string);
     if (!compiled) return false;
