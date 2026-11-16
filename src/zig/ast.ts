@@ -240,7 +240,7 @@ export type Statement = Span &
     | VariableDeclaration
     | { kind: 'destructure'; targets: DestructureTarget[]; value: Expression }
     | { kind: 'expression'; expression: Expression }
-    | { kind: 'defer'; isErrdefer: boolean; capture?: Capture; body: Expression }
+    | { kind: 'defer'; isErrdefer: boolean; body: Expression }
   );
 
 export interface SourceFile {

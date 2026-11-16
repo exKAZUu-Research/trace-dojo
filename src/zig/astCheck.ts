@@ -192,13 +192,13 @@ class AstChecker {
     this.scope = { kind: 'function', parent: outer };
     const params: BlockScope = { kind: 'block', locals: [], parent: this.scope };
     try {
-      for (const param of fn.params) if (param.type) this.expression(param.type, 'value');
-      this.expression(fn.returnType, 'value');
+      // Each parameter is in scope for the types of the later ones and the return type.
       this.scope = params;
       for (const param of fn.params) {
-        if (param.name === '_') continue;
-        this.declare(param.name, 'function parameter', param);
+        if (param.type) this.expression(param.type, 'value');
+        if (param.name !== '_') this.declare(param.name, 'function parameter', param);
       }
+      this.expression(fn.returnType, 'value');
       this.blockStatements(fn.body.statements);
       this.checkUsed(params);
     } finally {
@@ -364,14 +364,7 @@ class AstChecker {
       }
       case 'defer': {
         this.withScope({ kind: 'defer', parent: this.scope }, () =>
-          this.withBlock(() => {
-            if (statement.capture) {
-              if (statement.capture.name === '_')
-                this.error(statement.capture, 'エラーを捨てる |_| は、書かずに省いてください。');
-              this.capture(statement.capture);
-            }
-            this.expression(statement.body, 'value');
-          })
+          this.withBlock(() => this.expression(statement.body, 'value'))
         );
         break;
       }
@@ -681,6 +674,8 @@ class AstChecker {
     const cases = (): void => {
       for (const each of expression.cases) {
         for (const item of each.items) {
+          // `_ =>` takes a non-exhaustive enum's unnamed values.
+          if (item.value.kind === 'identifier' && item.value.name === '_') continue;
           this.expression(item.value, 'value');
           if (item.last) this.expression(item.last, 'value');
         }

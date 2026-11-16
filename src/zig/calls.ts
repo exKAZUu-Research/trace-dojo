@@ -155,14 +155,21 @@ export abstract class CallCompiler extends BuiltinCompiler {
         `引数の数が合いません（${params.length - offset} 個が必要ですが、${argExpressions.length - offset} 個です）。`
       );
     }
-    const declaredTypes = this.parameterTypes(ref.decl);
-    const args: TExpr[] = argExpressions.map((arg, index) => {
-      const declared = declaredTypes[index];
+    // A parameter's type may refer to earlier parameters, as `b: @TypeOf(a)` does.
+    const declaredTypes: (Type | undefined)[] = [];
+    const args: TExpr[] = [];
+    for (const [index, arg] of argExpressions.entries()) {
+      const declared = this.parameterType(
+        ref.decl,
+        index,
+        args.map((each) => each.type)
+      );
+      declaredTypes.push(declared);
       const compiled = isTExpr(arg) ? arg : this.compile(arg, declared);
-      if (index === 0 && receiver) return this.bindReceiver(compiled, declared, expression);
-      if (!declared) return compiled;
-      return this.coerce(compiled, declared, isTExpr(arg) ? arg.span : arg);
-    });
+      if (index === 0 && receiver) args.push(this.bindReceiver(compiled, declared, expression));
+      else if (declared) args.push(this.coerce(compiled, declared, isTExpr(arg) ? arg.span : arg));
+      else args.push(compiled);
+    }
     const argTypes = args.map((arg) => arg.type);
     const instance = this.instantiate(ref, argTypes, expression);
     void resultType;
@@ -210,14 +217,29 @@ export abstract class CallCompiler extends BuiltinCompiler {
   }
 
   /** The declared parameter types of a function, with undefined for `anytype` parameters. */
-  private parameterTypes(decl: Extract<Decl, { kind: 'fn' }>): (Type | undefined)[] {
-    return this.inDeclarationScope(decl.namespace, () =>
-      decl.syntax.params.map((param) => (param.type ? this.compileType(param.type) : undefined))
-    );
+  /** The declared type of a parameter (undefined for `anytype`), seeing the earlier parameters' types. */
+  private parameterType(
+    decl: Extract<Decl, { kind: 'fn' }>,
+    index: number,
+    previous: readonly Type[]
+  ): Type | undefined {
+    const param = decl.syntax.params[index];
+    if (!param?.type) return undefined;
+    const typeExpression = param.type;
+    return this.inParameterScope(decl, previous, () => this.compileType(typeExpression));
   }
 
-  private inDeclarationScope<T>(namespace: Namespace, run: () => T): T {
-    const scope: Scope = { namespace, parent: namespace.scope as Scope | undefined };
+  /** Runs code in a function's declaration scope with its first parameters bound, for types that refer to them. */
+  private inParameterScope<T>(decl: Extract<Decl, { kind: 'fn' }>, types: readonly Type[], run: () => T): T {
+    const locals = new Map<string, LocalBinding>();
+    for (const [index, type] of types.entries()) {
+      const param = decl.syntax.params[index];
+      if (param && param.name !== '_') {
+        locals.set(param.name, { kind: 'local', name: param.name, slot: -1, type, isConst: true, known: false });
+      }
+    }
+    const namespace = decl.namespace;
+    const scope: Scope = { locals, parent: { namespace, parent: namespace.scope as Scope | undefined } };
     return this.withScope(scope, run);
   }
 
@@ -225,15 +247,17 @@ export abstract class CallCompiler extends BuiltinCompiler {
   instantiate(ref: FnRef, argTypes: readonly Type[], span: Span): FunctionInstance {
     const { decl } = ref;
     const syntax = decl.syntax;
-    const declared = this.parameterTypes(decl);
-    const paramTypes = declared.map((type, index) => type ?? argTypes[index]);
-    if (paramTypes.some((type) => type === undefined)) {
-      this.error(span, `関数「${syntax.name}」は anytype の引数を持つので、呼び出さずに値としては使えません。`);
+    const paramTypes: Type[] = [];
+    for (const [index, param] of syntax.params.entries()) {
+      const type = param.type ? this.parameterType(decl, index, paramTypes) : argTypes[index];
+      if (!type)
+        this.error(span, `関数「${syntax.name}」は anytype の引数を持つので、呼び出さずに値としては使えません。`);
+      paramTypes.push(type);
     }
     const key = `${this.idOf(decl)}(${paramTypes.map((type) => this.idOf(type as object)).join(',')})`;
     const existing = this.instances.get(key);
     if (existing) return existing;
-    const { returnType, inferredErrors } = this.inDeclarationScope(decl.namespace, () => {
+    const { returnType, inferredErrors } = this.inParameterScope(decl, paramTypes, () => {
       const payload = this.compileType(syntax.returnType);
       if (!syntax.inferredErrorSet) return { returnType: payload, inferredErrors: undefined };
       const errors: ErrorSetType = {
@@ -243,7 +267,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
       };
       return { returnType: errorUnionOf(errors, payload), inferredErrors: errors };
     });
-    const instance = new FunctionInstance(syntax.name, paramTypes as Type[], returnType);
+    const instance = new FunctionInstance(syntax.name, paramTypes, returnType);
     instance.isAtomic = this.atomicRow(syntax);
     this.instances.set(key, instance);
     const isMethod = decl.namespace !== this.root;
@@ -252,7 +276,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
         instance,
         syntax,
         namespace: decl.namespace,
-        paramTypes: paramTypes as Type[],
+        paramTypes,
         returnType,
         inferredErrors,
         isMethod,

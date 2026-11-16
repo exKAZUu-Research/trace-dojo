@@ -64,8 +64,9 @@ function describeUncaught(error: unknown): string | undefined {
   if (error instanceof ExitSignal) return undefined;
   if (error instanceof ZigPanic) return `panic: ${error.text}`;
   if (error instanceof OutOfMemory) return 'error: OutOfMemory';
+  // Zig's guard page makes deep recursion crash, whose address differs on every run.
   if (error instanceof StackOverflow || (error instanceof RangeError && /call stack/i.test(error.message))) {
-    return 'panic: stack overflow';
+    return 'Segmentation fault';
   }
   throw error;
 }

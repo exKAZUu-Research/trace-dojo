@@ -28,9 +28,13 @@ import { decodeCharacter, decodeIdentifier, decodeString, parseFloatText, parseI
 
 /** Converts tree-sitter's tree of a file into the AST, rejecting the syntax this grader does not run. */
 export function convertFile(root: Node): SourceFile {
+  source = root.text;
   const { members, fields } = containerMembers(root);
   return { members, fields };
 }
+
+/** The text of the file being converted, for checks of the spaces around operators. */
+let source = '';
 
 /** The keyword tokens that stand for values where an expression is expected. */
 const KEYWORD_VALUES = new Set(['null', 'undefined', 'unreachable', 'anyframe']);
@@ -281,15 +285,10 @@ function statement(node: Node): Statement {
     }
     case 'defer_statement':
     case 'errdefer_statement': {
+      // Zig 0.17's grammar has no capture after errdefer.
       const capture = node.namedChildren.find((child) => child.type === 'payload');
-      const captures = capture ? payload(capture) : [];
-      return {
-        kind: 'defer',
-        ...spanOf(node),
-        isErrdefer: node.type === 'errdefer_statement',
-        capture: captures[0],
-        body: deferBody(node),
-      };
+      if (capture) fail(capture, 'errdefer の後には、値を受け取る |err| を書けません。');
+      return { kind: 'defer', ...spanOf(node), isErrdefer: node.type === 'errdefer_statement', body: deferBody(node) };
     }
     case 'comptime_statement': {
       unavailable(node, 'comptime');
@@ -706,6 +705,7 @@ function binaryExpression(node: Node, span: Span): Expression {
   const operator = operatorNode.type as BinaryOperator;
   // Zig 0.17 has no `**` operator; its tokenizer reads two `*`s, which its parser rejects.
   if (operator === '**') fail(operatorNode, '演算子 ** はありません（配列を繰り返すには @splat を使います）。');
+  checkOperatorSpacing(operatorNode);
   const left = node.childForFieldName('left') as Node;
   const right = node.childForFieldName('right') as Node;
   // Zig's grammar does not chain comparisons, which tree-sitter's parses as nested binary expressions.
@@ -720,6 +720,20 @@ function binaryExpression(node: Node, span: Span): Expression {
     }
   }
   return { kind: 'binary', ...span, operator, left: expression(left), right: expression(right) };
+}
+
+function isSpace(char: string): boolean {
+  return /\s/.test(char);
+}
+
+/** Zig's parser rejects a binary operator with a space on one side only, such as `a+ b`. */
+function checkOperatorSpacing(operator: Node): void {
+  const before = source[operator.startIndex - 1] ?? '';
+  const after = source[operator.endIndex] ?? '';
+  if (operator.type === '&' && after === '&') fail(operator, '&& はありません（論理積は and と書きます）。');
+  if (isSpace(before) !== isSpace(after)) {
+    fail(operator, `演算子 ${operator.type} の両側の空白をそろえてください（片側だけに空白があります）。`);
+  }
 }
 
 function indexExpression(node: Node, span: Span): Expression {

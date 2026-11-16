@@ -308,6 +308,8 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private destructure(statement: Extract<Statement, { kind: 'destructure' }>): Stmt {
+    const sequential = this.sequentialDestructure(statement);
+    if (sequential) return sequential;
     const value = this.compile(statement.value);
     const type = value.type;
     const count = statement.targets.length;
@@ -358,6 +360,44 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
+  /**
+   * `a, b = .{ b, a };` stores each element as soon as it computes it, as Zig's result locations do, so that a later
+   * element sees an earlier one's new value.
+   */
+  private sequentialDestructure(statement: Extract<Statement, { kind: 'destructure' }>): Stmt | undefined {
+    const { value } = statement;
+    if (value.kind !== 'arrayInit' || value.type || statement.targets.some((target) => target.declaration))
+      return undefined;
+    if (value.elements.length !== statement.targets.length) {
+      this.error(
+        statement,
+        `分割代入の数が合いません（${statement.targets.length} 個ですが、値は ${value.elements.length} 個です）。`
+      );
+    }
+    const stores = statement.targets.map((target, index) => {
+      const destination = target.target as Expression;
+      const element = value.elements[index];
+      if (destination.kind === 'identifier' && destination.name === '_') {
+        const discarded = this.compile(element).eval;
+        return (frame: Frame): void => void discarded(frame);
+      }
+      const place = this.assignablePlace(destination);
+      const evaluate = this.coerce(this.compile(element, place.type), place.type, element).eval;
+      const locate = place.place.locate;
+      return (frame: Frame): void => {
+        const result = evaluate(frame);
+        const pointer = locate(frame);
+        storeInto(pointer.target, pointer.index, result);
+      };
+    });
+    return {
+      exec: this.simple(this.stepRow(statement), false, (frame) => {
+        for (const store of stores) store(frame);
+      }),
+      noreturn: false,
+    };
+  }
+
   private elementOf(value: TExpr, index: number, type: Type, isArray: boolean, span: Span): TExpr {
     if (value.known) {
       return known(type, isArray ? (value.value as ZArray).get(index) : (value.value as ZStruct).slots[index], span);
@@ -383,32 +423,15 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private deferStatement(statement: Extract<Statement, { kind: 'defer' }>): Stmt {
-    const fn = this.currentFn(statement);
-    const errorSet = fn.returnType.kind === 'error_union' ? fn.returnType.errorSet : undefined;
-    if (statement.isErrdefer && statement.capture && !errorSet) {
-      this.error(statement, 'エラーを返さない関数では、errdefer でエラーを受け取れません。');
-    }
-    const locals = new Map<string, LocalBinding>();
-    const body = this.withScope({ locals, parent: this.scope }, () => {
-      const capture = statement.capture;
-      const binding =
-        capture && capture.name !== '_' ? this.declareLocal(capture.name, errorSet as Type, true) : undefined;
-      const stmt = this.statementExpression(statement.body, statement.body);
-      return { stmt, binding };
-    });
-    const exec = body.stmt.exec;
-    const captureSlot = body.binding?.slot;
+    this.currentFn(statement);
+    const body = this.withScope({ locals: new Map(), parent: this.scope }, () =>
+      this.statementExpression(statement.body, statement.body)
+    );
+    const exec = body.exec;
     const isErrdefer = statement.isErrdefer;
     return {
       exec: (frame) => {
-        frame.defers.push({
-          isErrdefer,
-          run: (deferFrame, error) => {
-            if (captureSlot !== undefined) deferFrame.slots[captureSlot] = error;
-            exec(deferFrame);
-            if (captureSlot !== undefined) deferFrame.slots[captureSlot] = UNASSIGNED;
-          },
-        });
+        frame.defers.push({ isErrdefer, run: (deferFrame) => void exec(deferFrame) });
         return;
       },
       noreturn: false,
@@ -905,12 +928,20 @@ export abstract class StatementCompiler extends CallCompiler {
         : undefined;
       const evaluate = condition.eval;
       const bind = binding?.bind;
-      return this.combineBranches(expression, then, otherwise, resultType, asStatement, (frame) => {
-        const value = evaluate(frame);
-        if (value === NULL) return 1;
-        bind?.(frame, value instanceof Some ? value.value : value);
-        return 0;
-      });
+      return this.combineBranches(
+        expression,
+        then,
+        otherwise,
+        resultType,
+        asStatement,
+        (frame) => {
+          const value = evaluate(frame);
+          if (value === NULL) return 1;
+          bind?.(frame, value instanceof Some ? value.value : value);
+          return 0;
+        },
+        [binding?.binding]
+      );
     }
     // An error union: `if (eu) |value| ... else |err| ...`.
     if (condition.type.kind !== 'error_union') return this.error(expression.condition, 'エラー共用体の値が必要です。');
@@ -927,15 +958,23 @@ export abstract class StatementCompiler extends CallCompiler {
     const evaluate = condition.eval;
     const bind = binding?.bind;
     const bindError = errorBinding?.bind;
-    return this.combineBranches(expression, then, otherwise, resultType, asStatement, (frame) => {
-      const value = evaluate(frame);
-      if (value instanceof ErrorValue) {
-        bindError?.(frame, value);
-        return 1;
-      }
-      bind?.(frame, value);
-      return 0;
-    });
+    return this.combineBranches(
+      expression,
+      then,
+      otherwise,
+      resultType,
+      asStatement,
+      (frame) => {
+        const value = evaluate(frame);
+        if (value instanceof ErrorValue) {
+          bindError?.(frame, value);
+          return 1;
+        }
+        bind?.(frame, value);
+        return 0;
+      },
+      [binding?.binding, errorBinding?.binding]
+    );
   }
 
   private branch(
@@ -955,13 +994,29 @@ export abstract class StatementCompiler extends CallCompiler {
     otherwise: { stmt?: Stmt; value?: TExpr } | undefined,
     resultType: Type | undefined,
     asStatement: boolean,
-    select: (frame: Frame) => number
+    select: (frame: Frame) => number,
+    captures: readonly (LocalBinding | undefined)[] = []
   ): { stmt: Stmt; value: TExpr } {
+    const slots = captures.flatMap((binding) => (binding ? [binding.slot] : []));
+    const clear = (frame: Frame): void => {
+      for (const slot of slots) frame.slots[slot] = UNASSIGNED;
+    };
     if (asStatement) {
       const thenExec = (then.stmt as Stmt).exec;
       const otherwiseExec = otherwise?.stmt?.exec;
+      const branch = (frame: Frame): Jump | undefined =>
+        select(frame) === 0 ? thenExec(frame) : otherwiseExec?.(frame);
       const stmt: Stmt = {
-        exec: (frame) => (select(frame) === 0 ? thenExec(frame) : otherwiseExec?.(frame)),
+        exec:
+          slots.length === 0
+            ? branch
+            : (frame) => {
+                try {
+                  return branch(frame);
+                } finally {
+                  clear(frame);
+                }
+              },
         noreturn: Boolean((then.stmt as Stmt).noreturn && otherwise?.stmt?.noreturn),
       };
       return { stmt, value: known(VOID, undefined, span) };
@@ -975,9 +1030,18 @@ export abstract class StatementCompiler extends CallCompiler {
     const evaluateA = a.eval;
     const evaluateB = b.eval;
     const noreturn = thenValue.type.kind === 'noreturn' && otherwiseValue.type.kind === 'noreturn';
+    const choose = (frame: Frame): Value => (select(frame) === 0 ? evaluateA(frame) : evaluateB(frame));
     const value = runtime(
       noreturn ? NORETURN : type,
-      (frame) => (select(frame) === 0 ? evaluateA(frame) : evaluateB(frame)),
+      slots.length === 0
+        ? choose
+        : (frame) => {
+            try {
+              return choose(frame);
+            } finally {
+              clear(frame);
+            }
+          },
       span
     );
     return {
@@ -1124,6 +1188,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const otherwiseExec = otherwise?.stmt?.exec;
     const otherwiseValue = otherwise?.value?.eval;
     const hasBinding = binding !== undefined;
+    const bindingSlot = binding?.binding.slot;
     const loop = (frame: Frame): Jump | { value: Value } | undefined => {
       for (;;) {
         frame.runtime.spend();
@@ -1143,6 +1208,7 @@ export abstract class StatementCompiler extends CallCompiler {
         }
       }
       failure?.(frame);
+      if (bindingSlot !== undefined) frame.slots[bindingSlot] = UNASSIGNED;
       if (otherwiseExec) {
         const completion = otherwiseExec(frame);
         if (completion) return completion;
@@ -1307,6 +1373,8 @@ export abstract class StatementCompiler extends CallCompiler {
         }
       } finally {
         frame.temporaries.splice(frame.temporaries.length - values.length, values.length);
+        // The captures go out of scope, so that what they held no longer keeps turtles alive.
+        for (const slot of slots) if (slot !== undefined) frame.slots[slot] = UNASSIGNED;
       }
       if (otherwiseExec) {
         const completion = otherwiseExec(frame);
@@ -1546,6 +1614,8 @@ export abstract class StatementCompiler extends CallCompiler {
       value: TExpr | undefined;
       bind?: (frame: Frame, operand: Value, pointer: Pointer | undefined) => void;
       isElse: boolean;
+      /** Whether the prong is `_ =>`, which a non-exhaustive enum's unnamed values take. */
+      isUnnamed?: boolean;
       inline?: Map<unknown, { body: Stmt | undefined; value: TExpr | undefined; bind?: Prong['bind'] }>;
     }
     const seen = new Map<unknown, Span>();
@@ -1575,7 +1645,12 @@ export abstract class StatementCompiler extends CallCompiler {
     } finally {
       fn.targets.pop();
     }
-    this.checkExhaustive(expression, tagType, seen, elseProng !== undefined, union);
+    const unnamedProng = prongs.find((prong) => prong.isUnnamed);
+    if (unnamedProng && (tagType.kind !== 'enum' || tagType.exhaustive)) {
+      this.error(expression, '「_」の枝は、「_」で終わる enum の switch にだけ書けます。');
+    }
+    const namedValues = new Set(tagType.kind === 'enum' ? this.enumFields(tagType).map((field) => field.value) : []);
+    this.checkExhaustive(expression, tagType, seen, elseProng !== undefined || unnamedProng !== undefined, union);
     // Dispatch: a map from keys to prongs, then the ranges, then else.
     const table = new Map<unknown, Prong>();
     for (const prong of prongs) for (const value of prong.values) table.set(value, prong);
@@ -1587,6 +1662,7 @@ export abstract class StatementCompiler extends CallCompiler {
         for (const prong of ranged) {
           if (prong.ranges.some(([low, high]) => key >= low && key <= high)) return prong;
         }
+        if (unnamedProng && !namedValues.has(key)) return unnamedProng;
       }
       return elseProng;
     };
@@ -1699,7 +1775,9 @@ export abstract class StatementCompiler extends CallCompiler {
     const { operand, operandType, tagType, union, unionFields, resultType, asStatement, keyOf, seen } = context;
     const values: unknown[] = [];
     const ranges: [bigint, bigint][] = [];
-    for (const item of each.items) {
+    const isUnnamed = each.items.some((item) => item.value.kind === 'identifier' && item.value.name === '_');
+    if (isUnnamed && each.items.length > 1) this.error(each, '「_」の枝には、ほかの値を書けません。');
+    for (const item of isUnnamed ? [] : each.items) {
       const first = this.knownValue(
         this.coerce(this.compile(item.value, tagType), tagType, item.value),
         'switch の枝の値'
@@ -1809,11 +1887,11 @@ export abstract class StatementCompiler extends CallCompiler {
       if (types.some((type) => type !== types[0]))
         this.error(each, 'else の枝の値の型がそろわないので受け取れません（inline else を使ってください）。');
     }
-    const compiled = compileBody(
-      each.isElse && !union ? operandType : captureFor(keys.length > 0 ? keys : values),
-      undefined
-    );
-    return { values, ranges, ...compiled, isElse: each.isElse };
+    // Only a prong that captures needs its values' payloads to share a type.
+    const captureType =
+      !each.capture || (each.isElse && !union) ? operandType : captureFor(keys.length > 0 ? keys : values);
+    const compiled = compileBody(captureType, undefined);
+    return { values, ranges, ...compiled, isElse: each.isElse, isUnnamed };
   }
 
   /** The values of an enum, union, bool, or error set that no prong lists, which `else` matches. */
@@ -1882,11 +1960,17 @@ export abstract class StatementCompiler extends CallCompiler {
     }
     const errorSet = type.kind === 'error_union' ? type.errorSet : type;
     const returnType = fn.returnType;
-    if (returnType.kind !== 'error_union') {
+    // An error set known to be empty, such as a function's that never fails, gives `try` nothing to return.
+    const neverFails = errorSet.names !== undefined && errorSet.names.size === 0;
+    if (returnType.kind !== 'error_union' && !neverFails) {
       return this.error(expression, `エラーを返さない関数（${typeName(returnType)} 型）では、try は使えません。`);
     }
     this.recordErrors(type, undefined);
-    if (fn.inferredErrors !== returnType.errorSet && !errorSetIncludes(returnType.errorSet, errorSet)) {
+    if (
+      returnType.kind === 'error_union' &&
+      fn.inferredErrors !== returnType.errorSet &&
+      !errorSetIncludes(returnType.errorSet, errorSet)
+    ) {
       this.error(
         expression,
         `try で返すエラー ${typeName(errorSet)} は、戻り値の型 ${typeName(returnType)} に含まれません。`
@@ -1911,6 +1995,19 @@ export abstract class StatementCompiler extends CallCompiler {
     const type = operand.type;
     if (type.kind !== 'error_union') {
       return this.error(expression, `catch はエラー共用体の値にだけ使えます（${typeName(type)} 型です）。`);
+    }
+    // `x catch unreachable` reports the error it did not expect.
+    if (!expression.capture && unwrapParens(expression.handler).kind === 'unreachable') {
+      const evaluateOperand = operand.eval;
+      return runtime(
+        type.payload,
+        (frame) => {
+          const value = evaluateOperand(frame);
+          if (value instanceof ErrorValue) panic(`attempt to unwrap error: ${value.name}`);
+          return value;
+        },
+        expression
+      );
     }
     const capture = this.captureBinding(expression.capture, type.errorSet, undefined);
     const handler = this.withCapture(capture, () => this.compile(expression.handler, resultType ?? type.payload));
@@ -1952,12 +2049,16 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 }
 
+function unwrapParens(expression: Expression): Expression {
+  return expression.kind === 'paren' ? unwrapParens(expression.operand) : expression;
+}
+
 function runDefers(frame: Frame, mark: number, error: Value): void {
   while (frame.defers.length > mark) {
     const deferred = frame.defers.pop();
     if (!deferred) break;
     if (deferred.isErrdefer && error === undefined) continue;
-    deferred.run(frame, error);
+    deferred.run(frame);
   }
 }
 

@@ -63,7 +63,7 @@ export class Frame implements Slots, TracedFrame {
 
 export interface Deferred {
   isErrdefer: boolean;
-  run: (frame: Frame, error: Value) => void;
+  run: (frame: Frame) => void;
 }
 
 export class Runtime {

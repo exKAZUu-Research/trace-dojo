@@ -134,6 +134,8 @@ function scalarOf(value: Value, type: Type): Scalar | typeof NOT_SCALAR {
       return value instanceof ErrorValue ? `error.${value.name}` : NOT_SCALAR;
     }
     case 'optional': {
+      // An optional object is a reference, which shows among the references as Java's null references do.
+      if (!hasScalarElements(type.child)) return NOT_SCALAR;
       // oxlint-disable-next-line unicorn/no-null -- The trace format shows null as null.
       if (value === NULL) return null;
       return scalarOf(value instanceof Some ? value.value : value, type.child);
@@ -166,6 +168,7 @@ function toArrayItem(scalar: Scalar | typeof NOT_SCALAR): TraceScalar | TraceIte
 
 function hasScalarElements(type: Type): boolean {
   if (type.kind === 'array') return hasScalarElements(type.child);
+  if (type.kind === 'pointer' && type.size === 'slice' && !isString(type)) return hasScalarElements(type.child);
   if (type.kind === 'optional') return hasScalarElements(type.child);
   return type.kind === 'int' || type.kind === 'float' || type.kind === 'bool' || type.kind === 'enum' || isString(type);
 }

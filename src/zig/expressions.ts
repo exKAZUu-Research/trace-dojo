@@ -1254,7 +1254,12 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   private anonymousStructType(fields: StructField[]): StructType {
-    const key = fields.map((field) => `${field.name}:${typeName(field.type)}`).join(',');
+    const key = fields
+      .map((field) => {
+        const known = field.comptimeValue === undefined ? '' : `=${valueKey(field.comptimeValue)}`;
+        return `${field.name}:${typeName(field.type)}${known}`;
+      })
+      .join(',');
     let type = this.anonymousTypes.get(key);
     if (!type) {
       type = {
@@ -1277,7 +1282,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       .map((field) =>
         field.comptimeValue === undefined
           ? typeName(field.type)
-          : `${typeName(field.type)}=${String(field.comptimeValue)}`
+          : `${typeName(field.type)}=${valueKey(field.comptimeValue)}`
       )
       .join(',');
     let type = this.tupleTypes.get(key);
@@ -1427,6 +1432,30 @@ class SomeSlots implements Slots {
       },
     });
   }
+}
+
+/** A text that tells known values apart, for interning the types that carry them. */
+function valueKey(value: Value): string {
+  if (value instanceof BigFloat) return `f${value.kind}${value.sign}${value.mantissa}e${value.exponent}`;
+  if (typeof value === 'number') return `n${Object.is(value, -0) ? '-0' : String(value)}`;
+  if (typeof value === 'bigint' || typeof value === 'boolean' || value === undefined)
+    return `${typeof value}${String(value)}`;
+  if (value instanceof EnumLiteral || value instanceof ErrorValue) return `${value.constructor.name}.${value.name}`;
+  if (value === NULL) return 'null';
+  if (isType(value)) return `type ${typeName(value)}`;
+  return `object ${objectId(value)}`;
+}
+
+const objectIds = new WeakMap<object, number>();
+let nextObjectId = 1;
+
+function objectId(value: object): number {
+  let id = objectIds.get(value);
+  if (id === undefined) {
+    id = nextObjectId++;
+    objectIds.set(value, id);
+  }
+  return id;
 }
 
 function unwrapOptionalValue(value: Value): Value {
