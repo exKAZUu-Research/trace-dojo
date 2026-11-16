@@ -188,10 +188,16 @@ export function* toStrValue(value: Value): Gen<RString> {
   throw implicitConversionError(value, 'String');
 }
 
-export function combinedStringEncoding(leftBinary: boolean, leftAscii: boolean, right: RString): boolean {
+export function combinedStringEncoding(
+  leftBinary: boolean,
+  leftAscii: boolean,
+  right: RString,
+  incompatible?: (leftBinary: boolean, rightBinary: boolean) => RubyError
+): boolean {
   if (leftBinary === right.binary) return leftBinary;
   const rightAscii = stringBytes(right).every((byte) => byte < 0x80);
   if (!leftAscii && !rightAscii) {
+    if (incompatible) throw incompatible(leftBinary, right.binary);
     const leftName = rubyEncodingName(leftBinary);
     const rightName = rubyEncodingName(right.binary);
     throw rubyError(

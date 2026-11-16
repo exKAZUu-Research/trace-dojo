@@ -35,7 +35,13 @@ import {
 } from './errors';
 import { hashGet, hashSet, hashSetStored } from './hashes';
 import { makeRational } from './libRational';
-import { lastMatch, matchGlobal, normalizeSlashLiteralSource, regexpFromString } from './libRegexp';
+import {
+  lastMatch,
+  matchGlobal,
+  normalizeSlashLiteralSource,
+  regexpFromString,
+  regexpPatternEncoding,
+} from './libRegexp';
 import {
   boxFloat,
   invalidateMethodCaches,
@@ -454,7 +460,9 @@ export function* ev(e: Expr, frame: Frame): Gen {
       const parts = e.slashDelimited
         ? e.parts.map((part) => (typeof part === 'string' ? normalizeSlashLiteralSource(part) : part))
         : e.parts;
-      const source = yield* interpolateString(parts, frame);
+      const source = yield* interpolateString(parts, frame, (binary, ascii, part) =>
+        regexpPatternEncoding(binary, ascii, part, 'dynamic')
+      );
       const regexp = regexpFromString(source, {
         ignoreCase: e.flags.includes('i'),
         multiline: e.flags.includes('m'),
@@ -487,7 +495,7 @@ function* atCallRow<T>(row: number, action: () => Gen<T>): Gen<T> {
   }
 }
 
-function* interpolateString(parts: StrPart[], frame: Frame): Gen<RString> {
+function* interpolateString(parts: StrPart[], frame: Frame, combine = combinedStringEncoding): Gen<RString> {
   const chunks: Uint8Array[] = [];
   let length = 0;
   let binary = false;
@@ -500,10 +508,7 @@ function* interpolateString(parts: StrPart[], frame: Frame): Gen<RString> {
           ? stringFromBytes(Uint8Array.from(part.bytes ?? new TextEncoder().encode(part.text)))
           : yield* toSValue(yield* ev(part, frame));
     const bytes = stringBytes(segment);
-    binary =
-      index === 0
-        ? segment.binary && (bytes.length > 0 || parts.length > 1)
-        : combinedStringEncoding(binary, ascii, segment);
+    binary = index === 0 ? segment.binary && (bytes.length > 0 || parts.length > 1) : combine(binary, ascii, segment);
     length += bytes.length;
     if (length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
     rt().spend(Math.ceil(bytes.length / 256));

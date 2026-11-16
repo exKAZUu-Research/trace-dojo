@@ -9816,3 +9816,49 @@ p Regexp.new('a #\400',Regexp::EXTENDED).match?('a')
 `)
   ).toMatchObject({ stdout: '[true, #<Encoding:US-ASCII>]\n'.repeat(14) + 'true\ntrue\n#<Encoding:UTF-8>\ntrue\n' });
 });
+
+test('lookbehind permits unequal fixed branches only at its noncapturing root', () => {
+  expect(
+    run(String.raw`['(?:a|bc)','x(?:a|bc)','(?:a|bc)x','(?:(?:a|bc))','(?:a|bc){1}','(?:a|bc){0}','(?:a|bc){2}','(?:(?:a|bc)x|z)','(?:a|bc)(?:d|ef)','(a|bc)','(a|b)','((?:a|bc))','(?:a{2}|b{3})','(?:a|bc)?'].each do |body|
+  begin;Regexp.new('(?<='+body+')x');puts 'OK '+body;rescue RegexpError;puts 'NO '+body;end
+end
+p /(?<=(?:a|bc))x/.match?('bcx'),/(?<!(?:a|bc))x/.match?('x')
+`)
+  ).toMatchObject({
+    stdout:
+      'OK (?:a|bc)\nNO x(?:a|bc)\nNO (?:a|bc)x\nOK (?:(?:a|bc))\nOK (?:a|bc){1}\nNO (?:a|bc){0}\nNO (?:a|bc){2}\nNO (?:(?:a|bc)x|z)\nNO (?:a|bc)(?:d|ef)\nNO (a|bc)\nOK (a|b)\nNO ((?:a|bc))\nOK (?:a{2}|b{3})\nNO (?:a|bc)?\ntrue\ntrue\n',
+  });
+});
+
+test('regexp encoding mismatches use their construction context without catching user errors', () => {
+  expect(
+    run(String.raw`[[255.chr,'é'],['é',255.chr],[Regexp.new(255.chr),/é/],[/é/,Regexp.new(255.chr)]].each do |args|
+  begin;Regexp.union(*args);rescue ArgumentError=>e;p e.message;end
+end
+s=255.chr
+begin;/é#{s}/;rescue RegexpError=>e;p e.message;end
+begin;/#{s}é/;rescue RegexpError=>e;p e.message;end
+class PatternPart
+  def to_s;raise Encoding::CompatibilityError,'hook';end
+end
+begin;/#{PatternPart.new}/;rescue Encoding::CompatibilityError=>e;p e.message;end
+begin;"é#{s}";rescue Encoding::CompatibilityError;p :string_error;end
+`)
+  ).toMatchObject({
+    stdout:
+      '"incompatible encodings: ASCII-8BIT and UTF-8"\n"incompatible encodings: UTF-8 and ASCII-8BIT"\n"incompatible encodings: ASCII-8BIT and UTF-8"\n"incompatible encodings: UTF-8 and ASCII-8BIT"\n"encoding mismatch in dynamic regexp : UTF-8 and ASCII-8BIT"\n"encoding mismatch in dynamic regexp : ASCII-8BIT and UTF-8"\n"hook"\n:string_error\n',
+  });
+});
+
+test('position-based regexp loops share snapshots that survive later string mutations', () => {
+  expect(
+    run(String.raw`s='a1 '*12000
+c=0;i=0;while s.match?(/\d/,i);c+=1;i+=3;end;p c
+c=0;i=0;while (j=s.index(/\d/,i));c+=1;i=j+1;end;p c
+c=0;i=0;while (m=s.match(/\d/,i));c+=1;i=m.end(0);end;p c
+s=255.chr+'abc';m=s.match(/b/);s.replace('xyz');p m.string.bytes,m.string.frozen?,m.to_a
+s='éabc';m=s.match(/b/);s.replace('xyz');p m.string,m.to_a
+s='abc';m=s.match(/b/);s << 'd';s.reverse!;s.slice!(0);s.gsub!(/a/,'X');p m.string,m.to_a
+`)
+  ).toMatchObject({ stdout: '12000\n12000\n12000\n[255, 97, 98, 99]\ntrue\n["b"]\n"éabc"\n["b"]\n"abc"\n["b"]\n' });
+});

@@ -32,7 +32,7 @@ export function validateRegexpStructure(source: string): void {
 }
 
 function validateLookbehind(assertion: AST.LookbehindAssertion): void {
-  if (assertion.alternatives.some((alternative) => fixedWidth(alternative) === undefined))
+  if (!assertion.alternatives.every(validLookbehindAlternative))
     throw new SyntaxError('invalid pattern in look-behind');
   visitRegExpAST(assertion, {
     onCapturingGroupEnter() {
@@ -42,6 +42,14 @@ function validateLookbehind(assertion: AST.LookbehindAssertion): void {
       if (inner.kind === 'lookahead') throw new SyntaxError('invalid pattern in look-behind');
     },
   });
+}
+
+function validLookbehindAlternative(alternative: AST.Alternative): boolean {
+  if (fixedWidth(alternative) !== undefined) return true;
+  if (alternative.elements.length !== 1) return false;
+  let element = alternative.elements[0]!;
+  while (element.type === 'Quantifier' && element.min === 1 && element.max === 1) element = element.element;
+  return element.type === 'Group' && element.alternatives.every(validLookbehindAlternative);
 }
 
 function captureAlwaysParticipates(capture: AST.CapturingGroup, reference: AST.Backreference): boolean {

@@ -842,8 +842,10 @@ function matchData(state: MatchState): RObject {
 
 function matchSnapshot(source: RString): RString {
   if (source.frozen) return source;
-  const snapshot = copyStringEncoding(source);
-  snapshot.cls = source.cls;
+  const snapshot = new RString(source.cls, source.s);
+  snapshot.binary = source.binary;
+  snapshot.usAscii = source.usAscii;
+  snapshot.rawBytes = source.rawBytes;
   return snapshot;
 }
 
@@ -1061,7 +1063,7 @@ sdef('Regexp', 'union', [0, -1], function* (_self, args) {
     const part = isRegexp(item)
       ? regexpText(regexpToS(item), dataOf(item).encoding)
       : escapeRegexpPattern(yield* toStrValue(item));
-    binary = combinedStringEncoding(binary, ascii, part);
+    binary = regexpPatternEncoding(binary, ascii, part, 'union');
     const bytes = stringBytes(part);
     ascii &&= bytes.every((byte) => byte < 0x80);
     length += bytes.length + (parts.length > 0 ? 1 : 0);
@@ -1070,6 +1072,20 @@ sdef('Regexp', 'union', [0, -1], function* (_self, args) {
   }
   return makeRegexp(parts.length === 0 ? '(?!)' : parts.join('|'), { sourceBinary: binary });
 });
+
+export function regexpPatternEncoding(
+  binary: boolean,
+  ascii: boolean,
+  part: RString,
+  context: 'union' | 'dynamic'
+): boolean {
+  return combinedStringEncoding(binary, ascii, part, (leftBinary, rightBinary) => {
+    const encodings = `${leftBinary ? 'ASCII-8BIT' : RUBY_UTF8} and ${rightBinary ? 'ASCII-8BIT' : RUBY_UTF8}`;
+    return context === 'union'
+      ? argumentError(`incompatible encodings: ${encodings}`)
+      : rubyError(rt().c.RegexpError, `encoding mismatch in dynamic regexp : ${encodings}`);
+  });
+}
 
 function escapeRegexpPattern(pattern: RString): RString {
   const ascii = stringBytes(pattern).every((byte) => byte < 0x80);
