@@ -1,4 +1,4 @@
-import { isSpaceByte, parseFloatPrefix, parseIntegerPrefix } from '../../c/library/numberParsing';
+import { isFloatUnderflow, isSpaceByte, parseFloatPrefix, parseIntegerPrefix } from '../../c/library/numberParsing';
 import { byteArray, byteAt } from '../bytes';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
@@ -29,7 +29,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { NULL_PTR, Ptr, Store, type Value } from '../values';
+import { type ArrayStore, NULL_PTR, Ptr, Store, type Value } from '../values';
 import { formatFloat } from './formatting';
 import { randomAccessIterator } from './iterators';
 import type { Library } from './registry';
@@ -49,8 +49,17 @@ import { typeKey } from './templates';
 
 /** The value of a `std::string`: its bytes, as a string of character codes below 256. */
 export class StringValue extends Store {
+  private cStringCache?: { bytes: string; store: ArrayStore };
+
   constructor(public bytes: string) {
     super();
+  }
+
+  /** The null-terminated copy that `c_str()` and `data()` return, one array while the bytes stay the same. */
+  cString(): ArrayStore {
+    if (this.cStringCache?.bytes !== this.bytes)
+      this.cStringCache = { bytes: this.bytes, store: cStringStore(this.bytes) };
+    return this.cStringCache.store;
   }
 
   get length(): number {
@@ -480,7 +489,7 @@ export function stringClass(library: Library): ClassInfo {
     [s.bytes, target.bytes] = [target.bytes, s.bytes];
   });
   for (const name of ['c_str', 'data']) {
-    method(name, [], CONST_CHAR_PTR, (s) => new Ptr(cStringStore(s.bytes), 0), { isConst: true });
+    method(name, [], CONST_CHAR_PTR, (s) => new Ptr(s.cString(), 0), { isConst: true });
   }
   method(
     'copy',
@@ -822,15 +831,14 @@ export function stringFunctions(library: Library, cls: ClassInfo): Map<string, R
         [ref, pointerTo(SIZE_T)],
         resultType,
         ([text, index], { frame }) => {
-          const bytes = textOf(text);
-          const parsed = parseFloatPrefix(byteArray(bytes));
+          const bytes = byteArray(textOf(text));
+          const parsed = parseFloatPrefix(bytes);
           if (parsed.length === 0)
             return throwLibrary(frame, library.exception('invalid_argument'), `${name}: no conversion`);
-          let value = parsed.value;
-          if (resultType === FLOAT) value = Math.fround(value);
+          const isFloat = resultType === FLOAT;
+          const value = isFloat ? Math.fround(parsed.value) : parsed.value;
           const overflow = !Number.isFinite(value) && !parsed.isInfinityText;
-          const underflow = value === 0 && parsed.isNonzeroText;
-          if (overflow || underflow)
+          if (overflow || isFloatUnderflow(bytes, parsed, value, isFloat))
             return throwLibrary(frame, library.exception('out_of_range'), `${name}: out of range`);
           if (index instanceof Ptr && !index.isNull) index.write(BigInt(parsed.length));
           return value;

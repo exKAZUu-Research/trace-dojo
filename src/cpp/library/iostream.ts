@@ -1,4 +1,4 @@
-import { isExactFloatPrefix, isSpaceByte, parseFloatPrefix, parseIntegerPrefix } from '../../c/library/numberParsing';
+import { isFloatUnderflow, isSpaceByte, parseFloatPrefix, parseIntegerPrefix } from '../../c/library/numberParsing';
 import { byteArray, byteAt } from '../bytes';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
@@ -128,14 +128,15 @@ export class Streams {
   readonly istringstream: ClassInfo;
   readonly stringstream: ClassInfo;
   readonly ios: ClassInfo;
+  /** A manipulator that both `<<` and `>>` apply. */
   readonly manipulator: ClassInfo;
+  /** A manipulator that only `<<` applies, such as `std::endl` or `std::setfill('*')`. */
+  readonly outputManipulator: ClassInfo;
 
   constructor(private readonly library: Library) {
     this.ios = this.iosClass();
-    this.manipulator = new ClassInfo('std::__manipulator', 'class');
-    this.manipulator.isComplete = true;
-    this.manipulator.library = { kind: 'manipulator', args: [], size: 16, align: 8 };
-    this.manipulator.operations = { copy: (_frame, value) => value, assign: (_frame, _target, source) => source };
+    this.manipulator = manipulatorClass('std::__manipulator');
+    this.outputManipulator = manipulatorClass('std::__output_manipulator');
     this.ostream = this.streamClass('std::ostream', undefined, true, false);
     this.istream = this.streamClass('std::istream', undefined, false, true);
     this.ostringstream = this.streamClass('std::ostringstream', this.ostream, true, false);
@@ -285,10 +286,19 @@ export class Streams {
     }
   }
 
-  /** A manipulator as a value, which `<<` applies to the stream. */
-  manipulatorExpr(row: number, apply: (stream: StreamValue, frame: Frame) => void, name: string): Expr {
+  /** A manipulator as a value, which `<<` (and `>>` unless `isOutputOnly`) applies to the stream. */
+  manipulatorExpr(
+    row: number,
+    apply: (stream: StreamValue, frame: Frame) => void,
+    name: string,
+    isOutputOnly: boolean
+  ): Expr {
     const value = new ManipulatorValue(apply, name);
-    return { type: classType(this.manipulator), isLvalue: false, row, run: () => value };
+    return { type: this.manipulatorType(isOutputOnly), isLvalue: false, row, run: () => value };
+  }
+
+  manipulatorType(isOutputOnly: boolean): Type {
+    return classType(isOutputOnly ? this.outputManipulator : this.manipulator);
   }
 
   /** Compiles `<<` and `>>` of streams, and a stream used as a condition. */
@@ -315,7 +325,10 @@ export class Streams {
     }
     if (left.type.kind !== 'class' || !left.type.cls.isDerivedFrom(cls) || !right) return undefined;
     if (operator === '<<' && isOutput) return this.insertion(compiler, left, right, row);
-    if (operator === '>>' && isInput) return this.extraction(compiler, left, right, row);
+    if (operator === '>>' && isInput) {
+      const isManipulator = right.type.kind === 'class' && right.type.cls === this.manipulator;
+      return isManipulator ? this.applyTo(compiler, left, right, row) : this.extraction(compiler, left, right, row);
+    }
     if (operator === '<<' || operator === '>>') {
       return compiler.error(
         row,
@@ -346,7 +359,7 @@ export class Streams {
     if (right.functions)
       return compiler.error(row, `関数 ${right.functions.name} の後に (...) を書いて呼び出してください。`);
     const type = right.type;
-    if (type.kind === 'class' && type.cls === this.manipulator) {
+    if (type.kind === 'class' && [this.manipulator, this.outputManipulator].includes(type.cls)) {
       const run = right.run;
       return (frame, stream) => (run(frame) as ManipulatorValue).apply(stream, frame);
     }
@@ -362,15 +375,9 @@ export class Streams {
       if (isCharType(valueType)) {
         return (frame, stream) => stream.writeField(frame, String.fromCodePoint(asNumber(run(frame)) & 0xff));
       }
-      const isSigned = !['bool', 'uint', 'ulong', 'ullong', 'ushort', 'uchar'].includes(valueType.name);
-      const bits = ['long', 'ulong', 'llong', 'ullong'].includes(valueType.name) ? 64 : 32;
-      if (valueType.name === 'bool') {
-        return (frame, stream) => {
-          const flag = asNumber(run(frame)) !== 0;
-          if (stream.flags & FLAGS.boolalpha) stream.writeField(frame, flag ? 'true' : 'false');
-          else writeInteger(frame, stream, flag ? 1n : 0n, false, 32);
-        };
-      }
+      if (valueType.name === 'bool') return (frame, stream) => writeBool(frame, stream, asNumber(run(frame)) !== 0);
+      const isSigned = !['uint', 'ulong', 'ullong', 'ushort', 'uchar'].includes(valueType.name);
+      const bits = INTEGER_BITS[valueType.name] ?? 32;
       return (frame, stream) => writeInteger(frame, stream, BigInt(run(frame) as number | bigint), isSigned, bits);
     }
     if (valueType.kind === 'float') return (frame, stream) => writeFloat(frame, stream, run(frame) as number);
@@ -383,7 +390,7 @@ export class Streams {
           stream.writeField(frame, readCString(pointer));
         };
       }
-      return (frame, stream) => stream.writeField(frame, pointerText(run(frame) as Ptr));
+      return (frame, stream) => writePointer(frame, stream, run(frame) as Ptr);
     }
     return compiler.error(row, `演算子 << は std::ostream と ${typeName(type)} には使えません。`);
   }
@@ -420,6 +427,22 @@ export class Streams {
       const value = read(stream);
       if (value !== undefined) (target(frame) as Ptr).write(value);
     });
+  }
+
+  /** `stream >> manipulator`, which applies the manipulator without the input `sentry`. */
+  private applyTo(compiler: ExpressionCompiler, left: Expr, manipulator: Expr, row: number): Expr {
+    const location = left.isLvalue ? left.run : compiler.materialize(left).run;
+    const run = manipulator.run;
+    return {
+      type: left.type,
+      isLvalue: true,
+      row,
+      run: (frame) => {
+        const place = location(frame) as Ptr;
+        (run(frame) as ManipulatorValue).apply(place.read() as StreamValue, frame);
+        return place;
+      },
+    };
   }
 
   /** A formatted extraction, which reads only when the input `sentry` lets it. */
@@ -506,6 +529,29 @@ export class ManipulatorValue extends Store {
   }
 }
 
+function manipulatorClass(name: string): ClassInfo {
+  const cls = new ClassInfo(name, 'class');
+  cls.isComplete = true;
+  cls.library = { kind: 'manipulator', args: [], size: 16, align: 8 };
+  cls.operations = { copy: (_frame, value) => value, assign: (_frame, _target, source) => source };
+  return cls;
+}
+
+/** The width of an integer type `<<` writes in hex or oct: libc++ passes a `short` as `unsigned short`. */
+const INTEGER_BITS: Record<string, number> = { short: 16, ushort: 16, long: 64, ulong: 64, llong: 64, ullong: 64 };
+
+/** libc++'s `num_put::do_put(bool)`, which copies a `boolalpha` word as is, so the width neither pads it nor resets. */
+function writeBool(frame: Frame, stream: StreamValue, flag: boolean): void {
+  if (stream.flags & FLAGS.boolalpha) stream.write(frame, flag ? 'true' : 'false');
+  else writeInteger(frame, stream, flag ? 1n : 0n, false, 32);
+}
+
+/** libc++ writes a pointer as an integer with `showbase`, which gives a null pointer no `0x`. */
+function writePointer(frame: Frame, stream: StreamValue, pointer: Ptr): void {
+  const text = pointer.isNull ? '0' : pointerText(pointer);
+  stream.writeField(frame, text, paddingPoint(text));
+}
+
 /** Writes an integer as `num_put` does, with the stream's base, sign, and padding flags. */
 function writeInteger(frame: Frame, stream: StreamValue, value: bigint, isSigned: boolean, bits: number): void {
   const base = stream.flags & FLAGS.basefield;
@@ -526,7 +572,7 @@ function writeInteger(frame: Frame, stream: StreamValue, value: bigint, isSigned
     if (negative) prefix = '-';
     else if (isSigned && stream.flags & FLAGS.showpos) prefix = '+';
   }
-  stream.writeField(frame, prefix + text, prefix.length);
+  stream.writeField(frame, prefix + text, paddingPoint(prefix + text));
 }
 
 /** Writes a floating-point number as `num_put` does, with the stream's precision and float field. */
@@ -536,14 +582,19 @@ function writeFloat(frame: Frame, stream: StreamValue, value: number): void {
     field === FLAGS.fixed ? 'f' : field === FLAGS.scientific ? 'e' : field === FLAGS.floatfield ? 'a' : 'g';
   const text = formatFloat(value, {
     conversion,
-    precision: conversion === 'a' ? undefined : stream.precision,
+    // `printf` takes a negative precision as omitted.
+    precision: conversion === 'a' || stream.precision < 0 ? undefined : stream.precision,
     upper: (stream.flags & FLAGS.uppercase) !== 0,
     alternate: (stream.flags & FLAGS.showpoint) !== 0,
     sign: stream.flags & FLAGS.showpos ? '+' : '',
   });
-  const signLength = /^[+-]/.test(text) ? 1 : 0;
-  const internalAt = conversion === 'a' && /^[+-]?0x/i.test(text) ? signLength + 2 : signLength;
-  stream.writeField(frame, text, internalAt);
+  stream.writeField(frame, text, paddingPoint(text));
+}
+
+/** libc++'s `__num_put_base::__identify_padding` for `internal`: after a sign, or else after a `0x` prefix. */
+function paddingPoint(text: string): number {
+  if (/^[+-]/.test(text)) return 1;
+  return /^0x/i.test(text) ? 2 : 0;
 }
 
 /** The input `sentry`: fails unless the stream is good, then skips whitespace, failing at the end of the text. */
@@ -702,11 +753,7 @@ function readFloat(stream: StreamValue, isFloat: boolean): number {
     return 0;
   }
   const value = isFloat ? Math.fround(parsed.value) : parsed.value;
-  const isUnderflow =
-    parsed.isNonzeroText &&
-    Math.abs(value) < (isFloat ? 2 ** -126 : 2 ** -1022) &&
-    !isExactFloatPrefix(bytes, parsed.length, value);
-  if (!Number.isFinite(value) || isUnderflow) stream.failed = true;
+  if (!Number.isFinite(value) || isFloatUnderflow(bytes, parsed, value, isFloat)) stream.failed = true;
   return value;
 }
 

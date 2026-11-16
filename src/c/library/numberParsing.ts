@@ -117,7 +117,24 @@ export function parseFloatPrefix(
   };
 }
 
-export function isExactFloatPrefix(bytes: Uint8Array, length: number, value: number): boolean {
+/**
+ * Whether macOS `strtod` (`strtof` when `isFloat`) sets ERANGE for underflow: the text names a nonzero number whose
+ * rounded `value` is below the smallest normal number and differs from it.
+ */
+export function isFloatUnderflow(
+  bytes: Uint8Array,
+  parsed: { length: number; isNonzeroText: boolean },
+  value: number,
+  isFloat: boolean
+): boolean {
+  return (
+    parsed.isNonzeroText &&
+    Math.abs(value) < (isFloat ? 2 ** -126 : 2 ** -1022) &&
+    !isExactFloatPrefix(bytes, parsed.length, value)
+  );
+}
+
+function isExactFloatPrefix(bytes: Uint8Array, length: number, value: number): boolean {
   const text = new TextDecoder().decode(bytes.subarray(0, length)).trim().replace(/^[+-]/, '').toLowerCase();
   const hex = /^0x([\da-f]*)(?:\.([\da-f]*))?(?:p([+-]?\d+))?$/.exec(text);
   const decimal = /^(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/.exec(text);

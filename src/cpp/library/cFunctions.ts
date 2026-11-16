@@ -91,7 +91,8 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
   add(
     native('puts', [CONST_CHAR_PTR], INT, ([text], { frame }) => {
       frame.runtime.write('stdout', `${readCString(text as Ptr)}\n`);
-      return 0;
+      // macOS returns the newline it wrote.
+      return 10;
     })
   );
   add(
@@ -102,8 +103,10 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
   );
   add(
     native('fputs', [CONST_CHAR_PTR, streamType], INT, ([text, stream], { frame }) => {
-      frame.runtime.write(library.fileTarget(stream as Ptr), readCString(text as Ptr));
-      return 0;
+      const bytes = readCString(text as Ptr);
+      frame.runtime.write(library.fileTarget(stream as Ptr), bytes);
+      // macOS returns the number of bytes written.
+      return bytes.length;
     })
   );
   for (const name of ['fputc', 'putc']) {

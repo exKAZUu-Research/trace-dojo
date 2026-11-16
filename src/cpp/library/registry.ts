@@ -275,11 +275,15 @@ export class Library {
     ] as const) {
       this.addStd(name, { kind: 'class', cls });
     }
+    this.addStd('streamsize', { kind: 'type', type: LONG });
     for (const [name, apply] of Object.entries(MANIPULATORS)) {
-      this.addStd(name, { kind: 'value', make: (row) => streams.manipulatorExpr(row, apply, `std::${name}`) });
+      const isOutputOnly = OUTPUT_MANIPULATORS.has(name);
+      this.addStd(name, {
+        kind: 'value',
+        make: (row) => streams.manipulatorExpr(row, apply, `std::${name}`, isOutputOnly),
+      });
     }
     const manipulatorFunctions = new Map<string, FunctionInfo[]>();
-    const manipulatorType = classType(streams.manipulator);
     const parameterized: [string, Type, (stream: StreamValue, value: number) => void][] = [
       ['setw', INT, (stream, value) => (stream.width = value)],
       ['setprecision', INT, (stream, value) => (stream.precision = value)],
@@ -297,6 +301,7 @@ export class Library {
       ['resetiosflags', UINT, (stream, value) => (stream.flags &= ~value)],
     ];
     for (const [name, paramType, apply] of parameterized) {
+      const manipulatorType = streams.manipulatorType(OUTPUT_MANIPULATORS.has(name));
       manipulatorFunctions.set(name, [
         native(name, [paramType], manipulatorType, ([value]) => {
           const number = asNumber(value);
@@ -340,6 +345,9 @@ export class Library {
     }
   }
 }
+
+/** The manipulators that libc++ declares only for `<<`. */
+const OUTPUT_MANIPULATORS = new Set(['endl', 'ends', 'flush', 'setfill']);
 
 const MANIPULATORS: Record<string, (stream: StreamValue, frame: Frame) => void> = {
   endl: (stream, frame) => stream.write(frame, '\n'),

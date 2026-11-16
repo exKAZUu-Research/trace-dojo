@@ -1123,16 +1123,20 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         return v !== 0 && v !== 0n;
       };
     if (type.kind === 'pointer' || type.kind === 'nullptr') return (frame) => !(run(frame) as Ptr).isNull;
-    if (type.kind === 'class' && type.cls.library?.operator) {
-      const result = type.cls.library.operator(this, 'bool', [expr], row);
-      if (result) {
-        const test = result.run;
-        return (frame) => test(frame) !== 0;
-      }
+    const libraryBool = this.libraryBool(expr, row);
+    if (libraryBool) {
+      const test = libraryBool.run;
+      return (frame) => test(frame) !== 0;
     }
     if (type.kind === 'void') return this.error(row, '値を返さない関数（void）の結果は条件に使えません。');
     if (expr.functions) return this.error(row, `関数 ${expr.functions.name} の後に (...) を書いて呼び出してください。`);
     return this.error(row, `${typeName(type)} 型の値は条件に使えません。`);
+  }
+
+  /** A library class's conversion to `bool`, such as a stream's `explicit operator bool`, when `to` is `bool`. */
+  private libraryBool(expr: Expr, row: number, to: Type = BOOL): Expr | undefined {
+    if (expr.type.kind !== 'class' || !sameType(to, BOOL, false)) return undefined;
+    return expr.type.cls.library?.operator?.(this, 'bool', [expr], row);
   }
 
   /** An explicit conversion: `static_cast`, a C-style cast (`kind` 'C'), or a functional cast `T(x)`. */
@@ -1142,6 +1146,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return { type, isLvalue: false, row, run: (frame) => (run(frame), undefined), onlyCalls: expr.onlyCalls };
     }
     if (type.kind === 'reference') return this.convert(expr, type, row);
+    const explicitBool = this.libraryBool(expr, row, type);
+    if (explicitBool) return explicitBool;
     const value = this.rvalue(expr);
     if (isArithmetic(type) && isArithmetic(value.type))
       return convertArithmetic(value, unqualified(type) as ArithmeticType);
