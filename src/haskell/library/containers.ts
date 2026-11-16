@@ -1099,7 +1099,11 @@ alterFUsing strict f k m = k ${BT}seq${BT}
   in found ${BT}seq${BT} fmap (\result -> alterUsing strict (const result) k m) (f found)
 
 mapKeysMonotonic :: (k1 -> k2) -> Map k1 a -> Map k2 a
-mapKeysMonotonic f m = fromDistinctAscList [(f k,x) | (k,x) <- toAscList m]
+mapKeysMonotonic _ Tip = Tip
+mapKeysMonotonic f (Bin count k x l r) =
+  let left = mapKeysMonotonic f l
+      right = mapKeysMonotonic f r
+  in right ${BT}seq${BT} left ${BT}seq${BT} Bin count (f k) x left right
 
 fromDescList :: Eq k => [(k,a)] -> Map k a
 fromDescList xs = fromDistinctDescList (B.map B.last (groupBy (\(k,_) (l,_) -> k == l) xs))

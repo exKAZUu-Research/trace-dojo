@@ -290,3 +290,23 @@ test.each(['Just', 'Right'])('strict map traversal forces produced values at con
     uncaughtException: '2',
   });
 });
+
+test.each(['Data.Map', 'Data.Map.Strict'])(
+  'monotonic key transformations preserve tree order and lazy payloads in %s',
+  (module) => {
+    for (const count of [3, 7]) {
+      const source = `import qualified ${module} as M\nm=M.fromList[(k,())|k<-[1..${count}::Int]]\nmain=print(M.size(M.mapKeysMonotonic (\\k->error(show k)::Int) m))`;
+      expect(executeProgram('haskell', source)).toMatchObject({
+        kind: 'executed',
+        stdout: '',
+        uncaughtException: String(count),
+      });
+    }
+    const source = `import qualified ${module} as M\nimport qualified Data.Map as L\nmain=do\n  print(M.size(M.mapKeysMonotonic (+1)(L.singleton (1::Int)(undefined::Int))))\n  print(M.toList(M.mapKeysMonotonic (+1)(L.fromList[(1,'a'),(2,'b'),(3,'c')::(Int,Char)])))`;
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: "1\n[(2,'a'),(3,'b'),(4,'c')]\n",
+      uncaughtException: undefined,
+    });
+  }
+);
