@@ -12661,3 +12661,24 @@ test.each([String.raw`/\xA4\xA2/e`, String.raw`/\x82\xA0/s`])(
 test('Regexp literal encoding validates source characters even in extended comments', () => {
   expect(run('puts :before;p /a # é/ex')).toMatchObject({ kind: 'compileError' });
 });
+
+test('Produced enumerators retain their internal Producer identity when copied or printed', () => {
+  expect(run('e=Enumerator.produce(1){|x|x+1};p e,e.take(3),e.dup;g=Enumerator.new{|y|y<<1};p g')).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '#<Enumerator: #<Enumerator::Producer:0x00007f1a2b3c0000>:each>\n[1, 2, 3]\n#<Enumerator: #<Enumerator::Producer:0x00007f1a2b3c0000>:each>\n#<Enumerator: #<Enumerator::Generator:0x00007f1a2b3c0028>:each>\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Producer allocation and iteration remain separate from Generator overrides', () => {
+  expect(
+    run(
+      'class Enumerator::Generator;def each(*a);puts :wrong;end;end;p Enumerator.const_defined?(:Producer);p Enumerator.produce(1){|x|x+1}.take(2);p Enumerator::Producer.instance_method(:each).arity;begin;Enumerator::Producer.new.each{};rescue=>e;p e.class,e.message;end'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\n[1, 2]\n0\nArgumentError\n"uninitialized producer"\n',
+    uncaughtException: undefined,
+  });
+});

@@ -144,6 +144,7 @@ export function bootstrap(runtime: Runtime): void {
   defineClass('Chain', enumerator, enumerator);
   defineClass('Yielder', object, enumerator);
   defineClass('Generator', object, enumerator).includes.push(c.Enumerable);
+  defineClass('Producer', object, enumerator);
   defineClass('Lazy', enumerator, enumerator);
   defineClass('IO', object);
   defineClass('Method', object);

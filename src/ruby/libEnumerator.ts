@@ -1001,10 +1001,16 @@ def('Enumerator::Yielder', 'to_proc', 0, (self: RObject) => {
   proc.captured = [self];
   return proc;
 });
+def('Enumerator::Producer', 'each', 0, function* (self: RObject, _args, block) {
+  if (!block) throw rubyError(rt().c.LocalJumpError, 'no block given');
+  if (!self.data) throw argumentError('uninitialized producer');
+  return yield* invoke(coreMethod(rt().c['Enumerator::Generator'], 'each'), self, [], undefined, block, true);
+});
+
 sdef('Enumerator', 'produce', [0, 1], function (_self, args, block) {
   const step = requireBlock(block, rt().c.ArgumentError, 'no block given');
   const runtime = rt();
-  const generator = new RObject(runtime.c['Enumerator::Generator']);
+  const generator = new RObject(runtime.c['Enumerator::Producer']);
   const producer = nativeProc(1, function* ([yielder]) {
     try {
       let value = args.length > 0 ? args[0] : yield* callProc(step, [NIL]);
