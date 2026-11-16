@@ -2,6 +2,7 @@
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { CONS_CON, tupleCon, UNIT_CON } from './builtinTypes';
 import type { ConInfo } from './entities';
+import { changeIntegerBit, makeIntegerBit, testIntegerBit } from './integerBits';
 import { cons, NIL, nullary, type PrimResult, unpackString } from './machine';
 import { platformPower, platformUnary } from './platformMath';
 import type { Runtime } from './runtime';
@@ -238,8 +239,12 @@ strict('intShiftR', 2, ([a, b]) =>
   shiftCount(b) >= 64n ? ((a as bigint) < 0n ? -1n : 0n) : (a as bigint) >> (b as bigint)
 );
 strict('intPopCount', 1, ([a]) => BigInt(countOnes(BigInt.asUintN(64, a as bigint))));
-strict('integerAnd', 2, ([a, b]) => (a as bigint) & (b as bigint));
-strict('integerOr', 2, ([a, b]) => (a as bigint) | (b as bigint));
+define('integerAnd', 2, [0], ([a, b], runtime) =>
+  a === 0n ? 0n : (a as bigint) & (runtime.machine.force(b) as bigint)
+);
+define('integerOr', 2, [0], ([a, b], runtime) =>
+  a === -1n ? -1n : (a as bigint) | (runtime.machine.force(b) as bigint)
+);
 strict('integerXor', 2, ([a, b]) => (a as bigint) ^ (b as bigint));
 strict('integerComplement', 1, ([a]) => ~(a as bigint));
 define('integerShiftL', 2, [1], ([a, b], runtime) => {
@@ -253,14 +258,17 @@ define('integerShiftR', 2, [1], ([a, b], runtime) => {
   const count = shiftCount(b as bigint);
   return (runtime.machine.force(a) as bigint) >> count;
 });
-strict('integerTestBit', 2, ([a, b], runtime) => {
-  const value = a as bigint;
-  const index = b as bigint;
-  if (index < 0n) return bool(false);
-  const shifted = value >> index;
-  runtime.spend(Math.ceil(hexDigits(shifted) / 16));
-  return bool((shifted & 1n) !== 0n);
-});
+strict('integerTestBit', 2, ([a, b], runtime) => bool(testIntegerBit(a as bigint, b as bigint, runtime)));
+strict('integerBit', 1, ([index], runtime) => makeIntegerBit(index as bigint, runtime));
+for (const [name, change, identity] of [
+  ['integerSetBit', 'set', -1n],
+  ['integerClearBit', 'clear', 0n],
+] as const) {
+  define(name, 2, [0], ([a, b], runtime) =>
+    a === identity ? a : changeIntegerBit(a as bigint, runtime.machine.force(b) as bigint, change, runtime)
+  );
+}
+strict('integerComplementBit', 2, ([a, b], runtime) => changeIntegerBit(a as bigint, b as bigint, 'toggle', runtime));
 strict('integerPopCount', 1, ([a]) => {
   const value = a as bigint;
   const count = countOnes(value < 0n ? -value : value);

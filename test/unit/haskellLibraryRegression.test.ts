@@ -417,3 +417,48 @@ test.each([
     uncaughtException,
   });
 });
+
+test('Integer bit updates skip unchanged high bits and preserve signed word indices', () => {
+  const source =
+    'import Data.Bits\nmain=do\n  print(sum[clearBit(1::Integer)(1000000+i)|i<-[1..200::Int]])\n  print(clearBit(0::Integer)(error "index"),setBit(-1::Integer)(error "index"))\n  print(clearBit(1::Integer)100000000,setBit(-2::Integer)100000000)\n  print(testBit(-1::Integer)(-1),testBit(-3::Integer)(minBound::Int))\n  print(clearBit(-1::Integer)3,setBit(0::Integer)3,complementBit(5::Integer)2,bit 5::Integer)';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '200\n(0,-1)\n(1,-2)\n(True,True)\n(-9,8,1,32)\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['clearBit(1::Integer)(-1)', 'heap overflow'],
+  ['complementBit(0::Integer)(-1)', 'heap overflow'],
+  ['bit(-1)::Integer', 'heap overflow'],
+  ['clearBit(error "value"::Integer)(error "index")', 'value'],
+  ['setBit(error "value"::Integer)(error "index")', 'value'],
+  ['(error "left"::Integer) .&. 0', 'left'],
+  ['(error "left"::Integer) .|. (-1)', 'left'],
+])('Integer bit operations preserve demanded exceptions: %s', (expression, uncaughtException) => {
+  expect(executeProgram('haskell', `import Data.Bits\nmain=print(${expression})`)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException,
+  });
+});
+
+test('Integer logical identities skip only their undemanded right operand', () => {
+  expect(
+    executeProgram(
+      'haskell',
+      'import Data.Bits\nmain=print((0::Integer) .&. error "right",(-1::Integer) .|. error "right")'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '(0,-1)\n', uncaughtException: undefined });
+});
+
+test.each(['setBit(0::Integer)100000000', 'clearBit(-1::Integer)100000000', 'complementBit(0::Integer)100000000'])(
+  'changed high bits remain allocation bounded: %s',
+  (expression) => {
+    expect(executeProgram('haskell', `import Data.Bits\nmain=print(${expression})`)).toMatchObject({
+      kind: 'limitExceeded',
+      limit: 'operations',
+    });
+  }
+);

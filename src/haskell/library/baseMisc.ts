@@ -617,11 +617,11 @@ instance Bits Integer where
   shiftL x n = primitive "integerShiftL" x (toInteger n)
   shiftR x n = primitive "integerShiftR" x (toInteger n)
   testBit = primitive "integerTestBit"
-  setBit x i = x .|. shiftL 1 i
-  clearBit x i = x .&. complement (shiftL 1 i)
-  complementBit x i = x ${BT}xor${BT} shiftL 1 i
+  setBit = primitive "integerSetBit"
+  clearBit = primitive "integerClearBit"
+  complementBit = primitive "integerComplementBit"
   popCount x = fromInteger (primitive "integerPopCount" x)
-  bit i = shiftL 1 i
+  bit = primitive "integerBit"
   zeroBits = 0
 
 instance Bits Word where
