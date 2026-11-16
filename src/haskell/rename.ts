@@ -10,6 +10,7 @@ import {
   type ValueEntity,
 } from './entities';
 import { compileError, unsupportedError } from './errors';
+import { DEFAULT_FIXITY, resolveExprChain, resolvePatChain, sectionOperand } from './fixity';
 import { type CompiledModuleInfo, emptyExports, type ExportTable, type TypeLike } from './modules';
 import type {
   Binder,
@@ -31,7 +32,6 @@ import type {
 } from './rast';
 import type {
   Alt,
-  ChainItem,
   Constraint,
   Decl,
   Expr,
@@ -113,10 +113,6 @@ export interface RenameOptions {
   /** The original entities that desugaring refers to, such as `negate` for `-x`. */
   negate?: () => ValueEntity;
 }
-
-const DEFAULT_FIXITY: Fixity = { assoc: 'infixl', prec: 9 };
-/** Prefix minus binds like a left-associative operator of precedence 6. */
-const NEGATE_FIXITY: Fixity = { assoc: 'infixl', prec: 6 };
 
 class Candidates<T> {
   readonly map = new Map<string, T[]>();
@@ -798,7 +794,7 @@ class Renamer {
   // -------------------------------------------------------------------------------------------------------------
   // Expressions
 
-  // code-gauge-allow functionNcss 56 -- One short case per expression kind.
+  // code-gauge-allow functionNcss 57 -- One short case per expression kind.
   renameExpr(expr: Expr, scope: LocalScope): RExpr {
     const { span } = expr;
     switch (expr.kind) {
@@ -818,7 +814,10 @@ class Renamer {
         return this.renameExpr(expr.expr, scope);
       }
       case 'chain': {
-        return this.renameExpr(this.resolveChain(expr.items, scope, span), scope);
+        return this.renameExpr(
+          resolveExprChain(expr.items, span, (op) => this.fixityOf(op, scope)),
+          scope
+        );
       }
       case 'binop':
       case 'neg': {
@@ -875,7 +874,7 @@ class Renamer {
         return { k: 'comp', expr: this.renameExpr(expr.expr, inner), quals: stmts, span };
       }
       case 'leftSection': {
-        const left = this.sectionOperand(expr.op, expr.left, 'infixl', scope);
+        const left = sectionOperand(expr.op, expr.left, 'infixl', (op) => this.fixityOf(op, scope));
         return { k: 'app', fn: this.renameOperator(expr.op, scope), arg: this.renameExpr(left, scope), span };
       }
       case 'rightSection': {
@@ -886,7 +885,10 @@ class Renamer {
         return {
           k: 'rsection',
           op: this.renameOperator(expr.op, scope),
-          right: this.renameExpr(this.sectionOperand(expr.op, expr.right, 'infixr', scope), scope),
+          right: this.renameExpr(
+            sectionOperand(expr.op, expr.right, 'infixr', (op) => this.fixityOf(op, scope)),
+            scope
+          ),
           span,
         };
       }
@@ -999,127 +1001,6 @@ class Renamer {
     return entity.fixity ?? DEFAULT_FIXITY;
   }
 
-  /**
-   * A section's operand, whose outermost operator must bind tighter than the section's operator, or as tightly with
-   * the associativity that the side of the section needs.
-   */
-  private sectionOperand(op: Operator, operand: Expr, assoc: Fixity['assoc'], scope: LocalScope): Expr {
-    if (operand.kind !== 'chain') return operand;
-    const resolved = this.resolveChain(operand.items, scope, operand.span);
-    if (resolved.kind !== 'binop' && resolved.kind !== 'neg') return resolved;
-    const inner = resolved.kind === 'binop' ? this.fixityOf(resolved.op, scope) : NEGATE_FIXITY;
-    const outer = this.fixityOf(op, scope);
-    if (inner.prec > outer.prec || (inner.prec === outer.prec && inner.assoc === assoc && outer.assoc === assoc)) {
-      return resolved;
-    }
-    const innerName = resolved.kind === 'binop' ? resolved.op.name : '-';
-    throw compileError(
-      op.span,
-      `セクションの演算子 ${op.name} [${outer.assoc} ${outer.prec}] と、中の演算子 ${innerName} [${inner.assoc} ${inner.prec}] は、括弧なしでは書けません。`
-    );
-  }
-
-  /** Resolves an operator chain by the Haskell report's algorithm, which also places prefix minus. */
-  // code-gauge-allow functionCognitiveComplexity 30 -- The operator precedence algorithm of the Haskell report, including negation, reads best as one routine.
-  // code-gauge-allow functionNcss 39 -- The operator precedence algorithm of the Haskell report, including negation, reads best as one routine.
-  private resolveChain(items: ChainItem<Expr>[], scope: LocalScope, span: Span): Expr {
-    const tokens = items;
-    let position = 0;
-    const fixityAt = (item: ChainItem<Expr>): Fixity =>
-      item.kind === 'operator' ? this.fixityOf(item.op, scope) : NEGATE_FIXITY;
-    const parseNeg = (op1: Fixity, op1Name: string): Expr => {
-      const token = tokens[position];
-      if (!token) throw compileError(span, '書き方に誤りがあります。');
-      if (token.kind === 'negate') {
-        if (op1.prec >= 6) {
-          throw compileError(token.span, `前置きの - は、${op1Name} の後に括弧なしでは書けません。`);
-        }
-        position++;
-        const operand = parseNeg(NEGATE_FIXITY, '-');
-        const negated: Expr = {
-          kind: 'neg',
-          expr: operand,
-          span: { ...token.span, endRow: operand.span.endRow, endCol: operand.span.endCol },
-        };
-        return parse1(op1, op1Name, negated);
-      }
-      if (token.kind !== 'operand') throw compileError(token.op.span, '書き方に誤りがあります。');
-      position++;
-      return parse1(op1, op1Name, token.value);
-    };
-    const parse1 = (op1: Fixity, op1Name: string, left: Expr): Expr => {
-      let current = left;
-      for (;;) {
-        const token = tokens[position];
-        if (!token) return current;
-        if (token.kind !== 'operator') throw compileError(span, '書き方に誤りがあります。');
-        const op2 = fixityAt(token);
-        if (op1.prec === op2.prec && (op1.assoc !== op2.assoc || op1.assoc === 'infix')) {
-          throw compileError(
-            token.op.span,
-            `演算子 ${op1Name} [${op1.assoc} ${op1.prec}] と ${token.op.name} [${op2.assoc} ${op2.prec}] は、括弧なしでは並べられません。`
-          );
-        }
-        if (op1.prec > op2.prec || (op1.prec === op2.prec && op1.assoc === 'infixl')) return current;
-        position++;
-        const right = parseNeg(op2, token.op.name);
-        current = {
-          kind: 'binop',
-          op: token.op,
-          left: current,
-          right,
-          span: { row: current.span.row, col: current.span.col, endRow: right.span.endRow, endCol: right.span.endCol },
-        };
-      }
-    };
-    const result = parseNeg({ assoc: 'infix', prec: -1 }, '');
-    if (position !== tokens.length) throw compileError(span, '書き方に誤りがあります。');
-    return result;
-  }
-
-  // code-gauge-allow functionCognitiveComplexity 28 -- The operator precedence algorithm of the Haskell report reads best as one routine.
-  // code-gauge-allow functionNcss 32 -- The operator precedence algorithm of the Haskell report reads best as one routine.
-  private resolvePatChain(items: ChainItem<Pat>[], span: Span): Pat {
-    let position = 0;
-    const parseOperand = (): Pat => {
-      const token = items[position];
-      if (!token || token.kind !== 'operand') {
-        if (token?.kind === 'negate')
-          throw compileError(token.span, 'パターンの中では、- は数のリテラルの前にだけ書けます。');
-        throw compileError(span, '書き方に誤りがあります。');
-      }
-      position++;
-      return token.value;
-    };
-    const parse1 = (op1: Fixity, op1Name: string, left: Pat): Pat => {
-      let current = left;
-      for (;;) {
-        const token = items[position];
-        if (!token) return current;
-        if (token.kind !== 'operator') throw compileError(span, '書き方に誤りがあります。');
-        if (!token.op.isConstructor) {
-          throw compileError(token.op.span, `パターンの中では、関数 ${token.op.name} は使えません。`);
-        }
-        const op2 = this.lookupCon(token.op).entity.fixity ?? DEFAULT_FIXITY;
-        if (op1.prec === op2.prec && (op1.assoc !== op2.assoc || op1.assoc === 'infix')) {
-          throw compileError(token.op.span, `演算子 ${op1Name} と ${token.op.name} は、括弧なしでは並べられません。`);
-        }
-        if (op1.prec > op2.prec || (op1.prec === op2.prec && op1.assoc === 'infixl')) return current;
-        position++;
-        const right = parse1(op2, token.op.name, parseOperand());
-        current = {
-          kind: 'pcon',
-          con: token.op,
-          args: [current, right],
-          span: { row: current.span.row, col: current.span.col, endRow: right.span.endRow, endCol: right.span.endCol },
-        };
-      }
-    };
-    const result = parse1({ assoc: 'infix', prec: -1 }, '', parseOperand());
-    if (position !== items.length) throw compileError(span, '書き方に誤りがあります。');
-    return result;
-  }
-
   // -------------------------------------------------------------------------------------------------------------
   // Patterns
 
@@ -1181,7 +1062,10 @@ class Renamer {
         return { k: 'con', con, args, span };
       }
       case 'pchain': {
-        return this.renamePat(this.resolvePatChain(pat.items, span), binders);
+        return this.renamePat(
+          resolvePatChain(pat.items, span, (op) => this.lookupCon(op).entity.fixity ?? DEFAULT_FIXITY),
+          binders
+        );
       }
     }
   }

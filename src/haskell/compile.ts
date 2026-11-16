@@ -167,23 +167,21 @@ class LibraryCompiler {
     for (const [name, spec] of Object.entries(PUBLIC_MODULES)) {
       const source = this.internal.get(spec.from) as CompiledModuleInfo;
       const exports = emptyExports();
-      for (const valueName of spec.values) {
-        const entity = source.exports.values.get(valueName);
-        if (!entity) throw new Error(`${spec.from} has no ${valueName} for ${name}`);
-        exports.values.set(valueName, entity);
-      }
-      if (spec.overrides) {
-        const overrides = this.internal.get(spec.overrides.from) as CompiledModuleInfo;
-        for (const valueName of spec.overrides.values) {
-          const entity = overrides.exports.values.get(valueName);
-          if (!entity) throw new Error(`${spec.overrides.from} has no ${valueName} for ${name}`);
-          exports.values.set(valueName, entity);
-        }
-      }
+      this.exportValues(exports, spec.from, spec.values, name);
+      if (spec.overrides) this.exportValues(exports, spec.overrides.from, spec.overrides.values, name);
       for (const [typeName, children] of spec.types) exportType(exports, source, typeName, children, name);
       modules.set(name, { name, exports, instances: [] });
     }
     return modules;
+  }
+
+  private exportValues(exports: ExportTable, from: string, names: string[], moduleName: string): void {
+    const source = this.internal.get(from) as CompiledModuleInfo;
+    for (const valueName of names) {
+      const entity = source.exports.values.get(valueName);
+      if (!entity) throw new Error(`${from} has no ${valueName} for ${moduleName}`);
+      exports.values.set(valueName, entity);
+    }
   }
 
   turtleValues(): Map<string, ValueEntity> {

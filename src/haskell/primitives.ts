@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 420 -- The primitive table lists every built-in operation the Haskell library calls.
+// code-gauge-allow-file fileNcss 480 -- The primitive table lists every built-in operation the Haskell library calls.
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { CONS_CON, tupleCon, UNIT_CON } from './builtinTypes';
 import type { ConInfo } from './entities';
@@ -251,7 +251,7 @@ strict('integerPopCount', 1, ([a]) => {
 // ---------------------------------------------------------------------------------------------------------------
 // Double and Float
 
-// code-gauge-allow functionNcss 40 -- One definition per floating-point primitive.
+// code-gauge-allow functionNcss 41 -- One definition per floating-point primitive.
 function defineFloating(prefix: 'double' | 'float', round: (value: number) => number): void {
   strict(`${prefix}Add`, 2, ([a, b]) => round((a as number) + (b as number)));
   strict(`${prefix}Sub`, 2, ([a, b]) => round((a as number) - (b as number)));
@@ -443,6 +443,18 @@ function rationalToBinary(
 /** GHC's `floatToDigits` in base 10: the digits of a float and its exponent, x = 0.d1d2... * 10^exponent. */
 export function floatToDigits(value: number, isFloat: boolean): { digits: number[]; exponent: number } {
   if (value === 0) return { digits: [0], exponent: 0 };
+  const { r, s, mUp, mDn } = digitRatio(value, isFloat);
+  // Any estimate at most the exponent works, since the loop only raises it.
+  let k = Math.floor(Math.log10(Math.abs(value))) - 1;
+  while (k >= 0 ? r + mUp > 10n ** BigInt(k) * s : 10n ** BigInt(-k) * (r + mUp) > s) k++;
+  const scale = 10n ** BigInt(Math.abs(k));
+  const digits =
+    k >= 0 ? generateDigits(r, s * scale, mUp, mDn) : generateDigits(r * scale, s, mUp * scale, mDn * scale);
+  return { digits, exponent: k };
+}
+
+/** A float's magnitude as r / s, with mUp / s and mDn / s the halves of the gaps to its neighbors, as GHC sets them. */
+function digitRatio(value: number, isFloat: boolean): { r: bigint; s: bigint; mUp: bigint; mDn: bigint } {
   const precision = isFloat ? 24 : 53;
   const minExponent = (isFloat ? -125 : -1021) - precision;
   const decoded = decodeFloat(Math.abs(value), isFloat);
@@ -450,44 +462,37 @@ export function floatToDigits(value: number, isFloat: boolean): { digits: number
   const f = shift > 0 ? decoded.mantissa / 2n ** BigInt(shift) : decoded.mantissa;
   const e = shift > 0 ? decoded.exponent + shift : decoded.exponent;
   const isPowerOfTwo = f === 2n ** BigInt(precision - 1);
-  let r: bigint;
-  let s: bigint;
-  let mUp: bigint;
-  let mDn: bigint;
   if (e >= 0) {
     const be = 2n ** BigInt(e);
-    [r, s, mUp, mDn] = isPowerOfTwo ? [f * be * 4n, 4n, be * 2n, be] : [f * be * 2n, 2n, be, be];
-  } else {
-    [r, s, mUp, mDn] =
-      e > minExponent && isPowerOfTwo
-        ? [f * 4n, 2n ** BigInt(-e + 1) * 2n, 2n, 1n]
-        : [f * 2n, 2n ** BigInt(-e) * 2n, 1n, 1n];
+    return isPowerOfTwo
+      ? { r: f * be * 4n, s: 4n, mUp: be * 2n, mDn: be }
+      : { r: f * be * 2n, s: 2n, mUp: be, mDn: be };
   }
-  // Any estimate at most the exponent works, since the loop only raises it.
-  let k = Math.floor(Math.log10(Math.abs(value))) - 1;
-  while (k >= 0 ? r + mUp > 10n ** BigInt(k) * s : 10n ** BigInt(-k) * (r + mUp) > s) k++;
-  if (k >= 0) s *= 10n ** BigInt(k);
-  else {
-    const scale = 10n ** BigInt(-k);
-    r *= scale;
-    mUp *= scale;
-    mDn *= scale;
-  }
+  return e > minExponent && isPowerOfTwo
+    ? { r: f * 4n, s: 2n ** BigInt(-e + 1) * 2n, mUp: 2n, mDn: 1n }
+    : { r: f * 2n, s: 2n ** BigInt(-e) * 2n, mUp: 1n, mDn: 1n };
+}
+
+/** The decimal digits of r / s, which stop once they identify the value within the gaps mUp / s and mDn / s. */
+function generateDigits(r: bigint, s: bigint, mUp: bigint, mDn: bigint): number[] {
   const digits: number[] = [];
+  let rest = r;
+  let up = mUp;
+  let down = mDn;
   for (;;) {
-    const digit = (r * 10n) / s;
-    r = (r * 10n) % s;
-    mUp *= 10n;
-    mDn *= 10n;
+    const digit = (rest * 10n) / s;
+    rest = (rest * 10n) % s;
+    up *= 10n;
+    down *= 10n;
     // GHC excludes both ends of the rounding interval even for an even mantissa, so its digits are not always the shortest.
-    const low = r < mDn;
-    const high = r + mUp > s;
+    const low = rest < down;
+    const high = rest + up > s;
     if (!low && !high) {
       digits.push(Number(digit));
       continue;
     }
-    digits.push(Number(low && (!high || r * 2n < s) ? digit : digit + 1n));
-    return { digits, exponent: k };
+    digits.push(Number(low && (!high || rest * 2n < s) ? digit : digit + 1n));
+    return digits;
   }
 }
 
