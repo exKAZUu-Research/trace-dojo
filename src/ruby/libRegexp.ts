@@ -740,7 +740,7 @@ function assertHostMatchParity(
     data.foldCheck = { text, needed: regexpNeedsCasefoldParity(data.js.source, text) };
   const captureParity = (data.captureParity ??= requiresNativeCaptureParity(data.js.source));
   const feature = captureParity ? '正規表現の繰り返し・後読みキャプチャ' : undefined;
-  if (captureParity && options.binary && /[^\u0000-\u007F]/.test(text))
+  if (captureParity && options.binary && /\P{ASCII}/u.test(text))
     throw new UnsupportedFeatureError('正規表現の繰り返し・後読みキャプチャ');
   if (captureParity || (!options.binary && data.foldCheck?.text === text && data.foldCheck.needed))
     assertCasefoldParity(data, text, start, result, options.anchored, feature);

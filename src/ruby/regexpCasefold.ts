@@ -146,7 +146,7 @@ export function regexpNeedsCasefoldParity(source: string, subject: string): bool
     if (error instanceof RegExpSyntaxError) throw new UnsupportedFeatureError('正規表現の casefold 構文の検証');
     throw error;
   }
-  return expanding || /[^\u0000-\u007F]/.test(source + subject);
+  return expanding || /\P{ASCII}/u.test(source + subject);
 }
 
 // The bundled Ruby Wasm disagrees with Ruby 4.0.9 for these mappings, so the parity guard cannot validate them.
