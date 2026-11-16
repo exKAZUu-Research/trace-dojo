@@ -11756,7 +11756,16 @@ test('Pretty printing dispatches native inspect aliases at the object boundary',
 test('Bound native Method objects retain receiver-compatible implementations', () => {
   expect(
     run(
-      'p DATA.inspect==DATA.method(:inspect).call\np DATA.inspect==DATA.method(:inspect).to_proc.call\np DATA.inspect==DATA.method(:inspect).unbind.bind(DATA).call\np DATA.inspect==DATA.method(:inspect).unbind.bind_call(DATA)\np DATA.method(:read).call\np DATA.method(:rewind).call\np DATA.method(:read).to_proc.call\n__END__\nhello\n'
+      String.raw`p DATA.inspect==DATA.method(:inspect).call
+p DATA.inspect==DATA.method(:inspect).to_proc.call
+p DATA.inspect==DATA.method(:inspect).unbind.bind(DATA).call
+p DATA.inspect==DATA.method(:inspect).unbind.bind_call(DATA)
+p DATA.method(:read).call
+p DATA.method(:rewind).call
+p DATA.method(:read).to_proc.call
+__END__
+hello
+`
     )
   ).toMatchObject({
     kind: 'executed',
@@ -11769,7 +11778,25 @@ test('Bound native Method objects retain receiver-compatible implementations', (
 test('Native Enumerator consumers retain keyword yield tuples', () => {
   expect(
     run(
-      '[false,true].each do |adapter|\n e=Enumerator.new do |y|\n  if adapter;y.to_proc.call(a:1);y.to_proc.call(1,a:2)\n  else;y.yield(a:1);y.yield(1,a:2);end\n end\n p e.next,e.next;e.rewind;p e.next_values,e.next_values\n e.rewind;p e.to_a\n e.rewind;p e.with_index.to_a\n e.rewind;p e.with_object(:memo).to_a\n e.rewind;p e.lazy.map{|x|x}.force\n e.rewind;p e.lazy.with_index.force\nend\nclass K\n def self.echo(a:);a;end\nend\np K.method(:echo).to_proc.call(a:7)\np :echo.to_proc.call(K,a:8)\ny=Enumerator::Yielder.new{|a:|p a};y.yield(a:9);y.to_proc.call(a:10)\n'
+      String.raw`[false,true].each do |adapter|
+ e=Enumerator.new do |y|
+  if adapter;y.to_proc.call(a:1);y.to_proc.call(1,a:2)
+  else;y.yield(a:1);y.yield(1,a:2);end
+ end
+ p e.next,e.next;e.rewind;p e.next_values,e.next_values
+ e.rewind;p e.to_a
+ e.rewind;p e.with_index.to_a
+ e.rewind;p e.with_object(:memo).to_a
+ e.rewind;p e.lazy.map{|x|x}.force
+ e.rewind;p e.lazy.with_index.force
+end
+class K
+ def self.echo(a:);a;end
+end
+p K.method(:echo).to_proc.call(a:7)
+p :echo.to_proc.call(K,a:8)
+y=Enumerator::Yielder.new{|a:|p a};y.yield(a:9);y.to_proc.call(a:10)
+`
     )
   ).toMatchObject({
     kind: 'executed',
@@ -11782,7 +11809,25 @@ test('Native Enumerator consumers retain keyword yield tuples', () => {
 test('Find patterns fix candidate count while retaining live element reads', () => {
   expect(
     run(
-      'module M\n def self.===(v)\n  $calls+=1\n  case $op\n  when :pop;$a.pop\n  when :shift;$a.shift\n  when :push;$a.push(9)\n  when :unshift;$a.unshift(0)\n  end\n  true\n end\nend\n[:pop,:shift,:push,:unshift].each do |op|\n $op=op;$calls=0;$a=[1,2,3]\n p(($a in [*,M,nil,*r]));p r,$a,$calls\n $calls=0;$a=[1,2,3]\n p(($a in [*r,M,nil,*z]));p r,z,$a,$calls\nend\n'
+      String.raw`module M
+ def self.===(v)
+  $calls+=1
+  case $op
+  when :pop;$a.pop
+  when :shift;$a.shift
+  when :push;$a.push(9)
+  when :unshift;$a.unshift(0)
+  end
+  true
+ end
+end
+[:pop,:shift,:push,:unshift].each do |op|
+ $op=op;$calls=0;$a=[1,2,3]
+ p(($a in [*,M,nil,*r]));p r,$a,$calls
+ $calls=0;$a=[1,2,3]
+ p(($a in [*r,M,nil,*z]));p r,z,$a,$calls
+end
+`
     )
   ).toMatchObject({
     kind: 'executed',
@@ -11803,4 +11848,35 @@ test.each([
     kind: 'executed',
     uncaughtException: 'Unicode の複数文字 casefold は、この採点環境では使えません。',
   });
+});
+
+test('Ruby interval tokens ignore comments while preserving whitespace boundaries', () => {
+  expect(
+    run(
+      String.raw`['a{#hi\n2}b','a{2#hi\n}b','a{2,#hi\n3}b','a{1#hi\n2}b','a{2#hi\n,#more\n3}b','a{(?#hi)2}b','a{2,(?#hi)3}b','a{#hi\n 2}b','a{2 #hi\n}b','a{2,#hi\n 3}b','a{ 2 }b'].each do |raw|
+ source=raw.gsub('\\n',"\n")
+ r=Regexp.new('\\A(?x:'+source+')\\z')
+ p ['aab','aaab','a'*12+'b','a{2}b','a{2,3}b'].map{|value|r.match?(value)}
+end
+p Regexp.new('\\Aa{(?#hi)2}b\\z').match?('aab')
+p Regexp.new("\\Aa{#hi\n2}b\\z").match?("a{#hi\n2}b")
+p Regexp.new("(?x:a{2,#hi\n100000}b)").match?('aab')
+begin;Regexp.new("(?x:a{2,#hi\n100001}b)");rescue RegexpError=>e;p e.class;end
+`
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[true, false, false, false, false]\n[true, false, false, false, false]\n[true, true, false, false, false]\n[false, false, true, false, false]\n[true, true, false, false, false]\n[true, false, false, false, false]\n[true, true, false, false, false]\n[false, false, false, true, false]\n[false, false, false, true, false]\n[false, false, false, false, true]\n[false, false, false, true, false]\ntrue\ntrue\ntrue\nRegexpError\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Literal interval tokens recognize comments before matching', () => {
+  expect(
+    run(String.raw`p /(?x:a{#hi
+2}b)/.match?("aab")
+p /(?x:a{2,#hi
+3}b)/.match?("aaab")`)
+  ).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\n', uncaughtException: undefined });
 });
