@@ -784,6 +784,7 @@ function* symbolName(value: Value): Gen<string> {
 
 function* defineAttributes(self: RClass, names: Value[], reader: boolean, writer: boolean): Gen<RArray> {
   const frame = rt().frame;
+  const row = rt().currentRow;
   const visibility = frame.definitionOwner === self ? frame.defaultVisibility : 'public';
   const defined: Value[] = [];
   for (const value of names) {
@@ -792,11 +793,11 @@ function* defineAttributes(self: RClass, names: Value[], reader: boolean, writer
       throw nameError(`invalid attribute name '${name}'`, self, name);
     }
     if (reader) {
-      addMethod(self, { name, owner: self, visibility, body: { kind: 'reader', ivar: `@${name}` } });
+      addMethod(self, { name, owner: self, visibility, row, body: { kind: 'reader', ivar: `@${name}` } });
       defined.push(sym(name));
     }
     if (writer) {
-      addMethod(self, { name: `${name}=`, owner: self, visibility, body: { kind: 'writer', ivar: `@${name}` } });
+      addMethod(self, { name: `${name}=`, owner: self, visibility, row, body: { kind: 'writer', ivar: `@${name}` } });
       defined.push(sym(`${name}=`));
     }
   }

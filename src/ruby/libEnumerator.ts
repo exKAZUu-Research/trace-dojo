@@ -31,7 +31,7 @@ import {
 } from './interp';
 import { lazySourceDescription, setLazyDisplaySource } from './lazyDisplay';
 import { iterate, iterateYielded, STOP, zipCollections } from './libEnumerable';
-import { respondsToName } from './libMeta';
+import { advertisesPublicMethod, respondsToName } from './libMeta';
 import { rangeSize } from './libRange';
 import { setSize } from './libSet';
 import {
@@ -815,11 +815,10 @@ def('Enumerator', 'peek', 0, (self: RObject) => {
 });
 def('Enumerator', 'rewind', 0, function* (self: RObject) {
   const receiver = sourceOf(self).recv;
-  if (receiver !== self && respondsTo(receiver, 'rewind')) yield* callMethod(receiver, 'rewind', []);
+  if (receiver !== self) yield* tryImplicitConversion(receiver, 'rewind');
   if (self.cls === rt().c['Enumerator::Lazy']) {
     const data = self.data as LazyData;
-    if (data.steps.every((step) => step.kind === 'each_entry') && respondsTo(data.source, 'rewind'))
-      yield* callMethod(data.source, 'rewind', []);
+    if (data.steps.every((step) => step.kind === 'each_entry')) yield* tryImplicitConversion(data.source, 'rewind');
   }
   sourceOf(self).cursor = undefined;
   return self;
@@ -865,7 +864,7 @@ sdef('Enumerator', 'new', [0, 1], function* (self: RClass, args, block) {
   const [size] = args;
   if (size !== undefined) {
     const source = enumerator.data as EnumeratorSource;
-    if (size instanceof RProc || respondsTo(size, 'call')) {
+    if (size instanceof RProc || (yield* advertisesPublicMethod(size, 'call'))) {
       source.size = () => callMethod(size, 'call', []);
       const previousHeld = source.held;
       source.held = function () {
@@ -999,8 +998,7 @@ function lazyIterationSource(source: Value, args: Value[], displayArgs: Value[])
 
 function* lazySize(self: RObject): Gen {
   const { source, steps } = self.data as LazyData;
-  if (!respondsTo(source, 'size')) return NIL;
-  let size = yield* callMethod(source, 'size', []);
+  let size = (yield* tryImplicitConversion(source, 'size')) ?? NIL;
   for (const step of steps) size = nextLazySize(size, step);
   return size;
 }
@@ -1381,7 +1379,11 @@ function* streamFlattened(mapped: Value, next: (value: Value) => Gen<unknown>): 
       for (const item of mapped.items) if ((yield* next(item)) === STOP) return STOP;
       return;
     }
-    if (mapped instanceof RObject && respondsTo(mapped, 'force') && respondsTo(mapped, 'each')) {
+    if (
+      mapped instanceof RObject &&
+      (yield* advertisesPublicMethod(mapped, 'force')) &&
+      (yield* advertisesPublicMethod(mapped, 'each'))
+    ) {
       let stopped = false;
       yield* iterate(mapped, function* (item) {
         if ((yield* next(item)) === STOP) {

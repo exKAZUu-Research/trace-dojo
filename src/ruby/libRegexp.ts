@@ -24,6 +24,7 @@ import {
   inspectStringEncoding,
   setBytes,
   sliceStringEncoding,
+  stringUnitIndexAtByte,
   symbolString,
   textByteLengthOf,
 } from './libString';
@@ -372,7 +373,7 @@ export function translate(
     }
     out += char;
   }
-  validateRegexpStructure(out);
+  validateRegexpStructure(out, source, extended);
   return out;
 }
 
@@ -602,7 +603,7 @@ export function makeRegexp(
     if (error instanceof SyntaxError)
       throw rubyError(
         rt().c.RegexpError,
-        `${error.message === 'empty char-class' ? error.message : regexpSyntaxReason(source)}: /${source}/`
+        `${error.message === 'empty char-class' ? error.message : regexpSyntaxReason(source, options.extended)}: /${source}/`
       );
     throw error;
   }
@@ -612,7 +613,7 @@ export function makeRegexp(
   } catch {
     const names = regexpCaptureNames(source, options.extended);
     if (new Set(names).size !== names.length) throw new UnsupportedFeatureError('重複する名前付きキャプチャ');
-    throw rubyError(rt().c.RegexpError, `${regexpSyntaxReason(translated)}: /${source}/`);
+    throw rubyError(rt().c.RegexpError, `${regexpSyntaxReason(source, options.extended)}: /${source}/`);
   }
   const data: RegexpData = {
     source,
@@ -1021,11 +1022,17 @@ function invalidPatternMessage(pattern: RString): RString {
   return stringFromBytes(result.subarray(0, length), false, pattern.usAscii);
 }
 
-sdef('Regexp', ['new', 'compile'], [0, -1], function* (self: RClass, args, block) {
-  const value = new RObject(self);
-  yield* callMethod(value, 'initialize', args, undefined, block, { fcall: true, used: false });
-  return value;
-});
+sdef(
+  'Regexp',
+  ['new', 'compile'],
+  [0, -1],
+  function* (self: RClass, args, block, keywords) {
+    const value = new RObject(self);
+    yield* callMethod(value, 'initialize', args, keywords, block, { fcall: true, used: false });
+    return value;
+  },
+  { keywords: true }
+);
 def(
   'Regexp',
   'initialize',
@@ -1085,6 +1092,10 @@ export function regexpPatternEncoding(
       ? argumentError(`incompatible encodings: ${encodings}`)
       : rubyError(rt().c.RegexpError, `encoding mismatch in dynamic regexp : ${encodings}`);
   });
+}
+
+export function validateRegexpInterpolation(segment: RString): void {
+  if (!validStringEncoding(segment)) throw argumentError('invalid multibyte character');
 }
 
 function escapeRegexpPattern(pattern: RString): RString {
@@ -1735,6 +1746,8 @@ wrapFirst('scan', function* (self, args, block) {
   let lastStart: number | undefined;
   while (state) {
     const [from, to] = state.groups[0] as readonly [number, number];
+    let nextStart = charIndex(text, to) + (from === to ? 1 : 0);
+    let lastSearchStart = searchStart;
     setLastMatch(state);
     yield* callBlock(block, [scanValue(state)], false);
     if (
@@ -1745,18 +1758,27 @@ wrapFirst('scan', function* (self, args, block) {
       self.frozen !== snapshot.frozen
     ) {
       if (stringBytes(self).length !== sourceLength) throw rubyError(rt().c.RuntimeError, 'string modified');
+      [lastSearchStart, nextStart] = scanOffsetsAfterMutation(snapshot, self, searchStart, nextStart);
       text = self.s;
       sourceRawBytes = self.rawBytes;
       snapshot = matchSnapshot(self);
       validateRegexpSubject(regexp, self);
     }
-    lastStart = searchStart;
-    searchStart = charIndex(text, to) + (from === to ? 1 : 0);
+    lastStart = lastSearchStart;
+    searchStart = nextStart;
     state = execAt(regexp, text, searchStart, self, snapshot, true);
   }
   setLastMatch(lastStart === undefined ? undefined : execAt(regexp, text, lastStart, self, snapshot, true));
   return self;
 });
+function scanOffsetsAfterMutation(before: RString, after: RString, start: number, next: number): [number, number] {
+  const byteStart = textByteLengthOf(before, before.s.slice(0, unitIndex(before.s, start)));
+  const currentStart = charIndex(after.s, stringUnitIndexAtByte(after, byteStart));
+  if (next > charIndex(before.s, before.s.length)) return [currentStart, charIndex(after.s, after.s.length) + 1];
+  const byteNext = textByteLengthOf(before, before.s.slice(0, unitIndex(before.s, next)));
+  return [currentStart, charIndex(after.s, stringUnitIndexAtByte(after, byteNext))];
+}
+
 function scanValue(state: MatchState): Value {
   return state.groups.length > 1
     ? arr(state.groups.slice(1).map((_range, group) => groupText(state, group + 1)))

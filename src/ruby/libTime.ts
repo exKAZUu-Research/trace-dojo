@@ -6,6 +6,7 @@ import {
   toFloat,
   toInt,
   toStr,
+  toStrValue,
   tryImplicitConversion,
 } from './conversions';
 import { def, sdef } from './define';
@@ -729,7 +730,13 @@ export function timeDisplayOf(value: RObject): string | undefined {
 def('Time', 'to_s', 0, (self: RObject) => str(timeText(dataOf(self), false)));
 def('Time', 'inspect', 0, (self: RObject) => str(timeText(dataOf(self), true)));
 def('Time', 'strftime', 1, function* (self: RObject, [format]) {
-  return str(strftime(dataOf(self), yield* toStr(format)));
+  const pattern = yield* toStrValue(format);
+  const text = strftime(dataOf(self), pattern.s);
+  return stringFromBytes(
+    pattern.binary ? Uint8Array.from(text, (character) => character.codePointAt(0)!) : stringBytes(str(text)),
+    pattern.binary,
+    pattern.usAscii
+  );
 });
 for (const [name, read] of [
   ['year', (date: Date) => date.getUTCFullYear()],

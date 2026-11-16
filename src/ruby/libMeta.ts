@@ -1,6 +1,6 @@
 import type { Params } from './ast';
 import { addressOf, className, inspect, tryImplicitConversion } from './conversions';
-import { def, sdef, sundef } from './define';
+import { def, findCoreMethod, sdef, sundef } from './define';
 import { argumentError, frozenError, nameError, typeError } from './errors';
 import { digest, hashGet } from './hashes';
 import {
@@ -21,6 +21,7 @@ import {
   setClassVariable,
 } from './interp';
 import { procArity } from './libObject';
+import { nativeOwners } from './nativeOwners';
 import { type NativeSignature, nativeSignatures } from './nativeSignatures';
 import {
   invalidateMethodCaches,
@@ -120,6 +121,15 @@ export function* respondsToName(self: Value, name: string, includeAll: boolean):
   return false;
 }
 
+export function* advertisesPublicMethod(self: Value, name: string): Gen<boolean> {
+  const responder = classOf(self).findMethod('respond_to?');
+  if (responder && (responder.body.kind !== 'native' || !('builtinResponder' in responder.body.fn))) {
+    const args = methodArity(responder) === 1 ? [sym(name)] : [sym(name), false];
+    return truthy(yield* invoke(responder, self, args, undefined, undefined, true));
+  }
+  return yield* respondsToName(self, name, false);
+}
+
 const builtinRespondTo = Object.assign(
   function* (self: Value, args: Value[]): Gen<boolean> {
     return yield* respondsToName(self, yield* nameOf(args[0]), args.length > 1 && truthy(args[1]));
@@ -134,22 +144,56 @@ def('Kernel', 'respond_to_missing?', 2, () => false, { visibility: 'private' });
 interface MethodData {
   recv: Value;
   method: RMethod;
+  owner: RClass;
+  moduleBound: boolean;
   name: string;
   held(): Value[];
 }
 
-function methodObject(recv: Value, method: RMethod, name = method.name): RObject {
+function methodObject(
+  recv: Value,
+  method: RMethod,
+  name = method.name,
+  owner = methodReflectionOwner(method, classOf(recv)),
+  moduleBound = false
+): RObject {
   const object = new RObject(rt().c.Method);
   const data: MethodData = {
     recv,
     method,
+    owner,
+    moduleBound,
     name,
     held() {
-      return [this.recv, this.method.owner, ...(this.method.body.kind === 'proc' ? [this.method.body.proc] : [])];
+      return [
+        this.recv,
+        this.owner,
+        this.method.owner,
+        ...(this.method.body.kind === 'proc' ? [this.method.body.proc] : []),
+      ];
     },
   };
   object.data = data;
   return object;
+}
+
+function methodReflectionOwner(method: RMethod, receiverClass: RClass): RClass {
+  if (method.reflectionOwner) return method.reflectionOwner;
+  if (method.body.kind !== 'native' || method.missing || method.owner.isSingleton) return method.owner;
+  for (const ancestor of receiverClass.ancestors()) {
+    const owner = nativeOwners[`${ancestor.name}#${method.name}`];
+    if (owner) return rt().c[owner];
+  }
+  return method.owner;
+}
+
+export function aliasedMethod(method: RMethod, owner: RClass): RMethod {
+  return {
+    ...method,
+    reflectionOwner: owner,
+    nativeIdentityOwner:
+      method.body.kind === 'native' ? (method.nativeIdentityOwner ?? methodReflectionOwner(method, owner)) : undefined,
+  };
 }
 
 function methodIdentity(value: object): number {
@@ -162,10 +206,18 @@ function methodIdentity(value: object): number {
   return id;
 }
 
-function methodBodyIdentity(method: RMethod): object {
+function methodBodyIdentity(method: RMethod, owner: RClass): object {
   if (method.missing) return sym(method.name);
   const { body } = method;
-  return body.kind === 'native' ? body.fn : body;
+  if (body.kind !== 'native') return body;
+  const canonical = findCoreMethod(method.nativeIdentityOwner ?? owner, method.name);
+  return canonical?.body.kind === 'native' ? canonical.body.fn : body.fn;
+}
+
+function reflectedCallable(method: RMethod, owner: RClass): RMethod {
+  if (method.body.kind !== 'native' || method.missing) return method;
+  const canonical = findCoreMethod(method.nativeIdentityOwner ?? owner, method.name);
+  return canonical?.body.kind === 'native' ? { ...method, body: canonical.body } : method;
 }
 
 function* findForMethodObject(self: Value, name: string, publicOnly = false): Gen<RMethod> {
@@ -208,16 +260,16 @@ def(
   ['call', '()', '[]', '==='],
   [0, -1],
   function* (self: RObject, args, block, keywords, used) {
-    const { recv, method } = self.data as MethodData;
-    return yield* invoke(method, recv, args, keywords, block, used);
+    const { recv, method, owner } = self.data as MethodData;
+    return yield* invoke(reflectedCallable(method, owner), recv, args, keywords, block, used);
   },
   { keywords: true }
 );
 def('Method', 'to_proc', 0, (self: RObject) => {
-  const { recv, method } = self.data as MethodData;
+  const { recv, method, owner } = self.data as MethodData;
   const proc = nativeProc(
     methodArity(method),
-    (args, block, used, keywords) => invoke(method, recv, args, keywords, block, used),
+    (args, block, used, keywords) => invoke(reflectedCallable(method, owner), recv, args, keywords, block, used),
     true
   );
   proc.captured = [recv, method.owner, ...(method.body.kind === 'proc' ? [method.body.proc] : [])];
@@ -226,21 +278,22 @@ def('Method', 'to_proc', 0, (self: RObject) => {
 });
 def('Method', 'receiver', 0, (self: RObject) => (self.data as MethodData).recv);
 def('Method', 'unbind', 0, (self: RObject) => {
-  const { method, name } = self.data as MethodData;
-  return unboundMethod(method, name);
+  const { method, name, owner } = self.data as MethodData;
+  return unboundMethod(method, name, owner);
 });
 
-function unboundMethod(method: RMethod, name = method.name): RObject {
-  const unbound = methodObject(NIL, method, name);
+function unboundMethod(method: RMethod, name: string, owner: RClass): RObject {
+  const unbound = methodObject(NIL, method, name, owner);
   unbound.cls = rt().c.UnboundMethod;
   return unbound;
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Ruby method descriptions distinguish native signatures, user parameters, aliases, owners, and source locations.
+// code-gauge-allow functionCognitiveComplexity 26 -- Ruby method descriptions distinguish native signatures, user parameters, aliases, owners, and source locations.
 function* methodDescription(self: RObject): Gen<string> {
-  const { recv, method, name } = self.data as MethodData;
+  const { recv, method, name, owner: definingOwner, moduleBound } = self.data as MethodData;
   const unbound = self.cls === rt().c.UnboundMethod;
-  const owner = yield* methodOwnerPrefix(method, recv, unbound);
+  const inspectedOwner = method.reflectionOwner ? (method.nativeIdentityOwner ?? method.owner) : definingOwner;
+  const owner = yield* methodOwnerPrefix(inspectedOwner, recv, unbound || moduleBound);
   const definition =
     method.body.kind === 'user'
       ? method.body.def
@@ -261,18 +314,18 @@ function* methodDescription(self: RObject): Gen<string> {
     : methodArity(method) < 0
       ? '*'
       : Array.from({ length: methodArity(method) }, () => '_').join(', ');
-  const row = definition?.row;
+  const row = definition?.row ?? method.row;
   const kind = unbound ? 'UnboundMethod' : 'Method';
   return `#<${kind}: ${owner}${name}${name === method.name ? '' : `(${method.name})`}(${signature})${row === undefined ? '' : ` main.rb:${row + 1}`}>`;
 }
 
-function* methodOwnerPrefix(method: RMethod, recv: Value, unbound: boolean): Gen<string> {
-  if (!method.owner.isSingleton) {
-    const owner = className(method.owner);
-    const receiver = unbound ? owner : className(realClassOf(recv));
+function* methodOwnerPrefix(definingOwner: RClass, recv: Value, unbound: boolean): Gen<string> {
+  if (!definingOwner.isSingleton) {
+    const owner = className(definingOwner);
+    const receiver = unbound ? owner : className(recv instanceof RClass ? classOf(recv) : realClassOf(recv));
     return `${receiver}${receiver === owner ? '' : `(${owner})`}#`;
   }
-  const attached = method.owner.attached as Value;
+  const attached = definingOwner.attached as Value;
   const name = attached instanceof RClass ? className(attached) : yield* inspect(attached);
   if (unbound) return `#<Class:${name}>#`;
   const receiver = recv instanceof RClass ? className(recv) : yield* inspect(recv);
@@ -344,12 +397,14 @@ for (const owner of ['Method', 'UnboundMethod']) {
     const right = other.data as MethodData;
     return (
       left.recv === right.recv &&
-      left.method.owner === right.method.owner &&
-      methodBodyIdentity(left.method) === methodBodyIdentity(right.method)
+      left.moduleBound === right.moduleBound &&
+      (left.method.body.kind !== 'native' ||
+        (left.method.nativeIdentityOwner ?? left.owner) === (right.method.nativeIdentityOwner ?? right.owner)) &&
+      methodBodyIdentity(left.method, left.owner) === methodBodyIdentity(right.method, right.owner)
     );
   });
   def(owner, 'hash', 0, (self: RObject) => {
-    const { recv, method } = self.data as MethodData;
+    const { recv, method, owner: definingOwner } = self.data as MethodData;
     const receiver =
       recv instanceof RBasic
         ? `o${methodIdentity(recv)}`
@@ -359,7 +414,7 @@ for (const owner of ['Method', 'UnboundMethod']) {
             ? `${typeof recv}:${recv}`
             : 'nil';
     return BigInt(
-      `0x${digest(`${receiver}:${methodIdentity(method.owner)}:${methodIdentity(methodBodyIdentity(method))}`)}`
+      `0x${digest(`${receiver}:${methodIdentity(method.body.kind === 'native' ? (method.nativeIdentityOwner ?? definingOwner) : method.owner)}:${methodIdentity(methodBodyIdentity(method, definingOwner))}`)}`
     );
   });
   def(owner, 'arity', 0, (self: RObject) => BigInt(methodArity((self.data as MethodData).method)));
@@ -367,7 +422,7 @@ for (const owner of ['Method', 'UnboundMethod']) {
     return methodParameterList((self.data as MethodData).method);
   });
   def(owner, 'name', 0, (self: RObject) => sym((self.data as MethodData).name));
-  def(owner, 'owner', 0, (self: RObject) => (self.data as MethodData).method.owner);
+  def(owner, 'owner', 0, (self: RObject) => (self.data as MethodData).owner);
   def(owner, ['inspect', 'to_s'], 0, function* (self: RObject) {
     return str(yield* methodDescription(self));
   });
@@ -533,7 +588,7 @@ def('Module', 'alias_method', 2, function* (self: RClass, [newName, oldName]) {
   assertMutableClass(self);
   // An alias keeps the original method, whose owner and name `super` in it continues from.
   assertNoDefinitionHook(self, 'added');
-  self.methods.set(name, { ...method });
+  self.methods.set(name, aliasedMethod(method, self));
   invalidateMethodCaches();
   return sym(name);
 });
@@ -583,24 +638,32 @@ def('Module', 'instance_method', 1, function* (self: RClass, [name]) {
   const methodName = yield* nameOf(name);
   const method = self.findMethod(methodName);
   if (!method) throw nameError(`undefined method '${methodName}' for class '${className(self)}'`, self, methodName);
-  return unboundMethod(method, methodName);
+  return unboundMethod(method, methodName, methodReflectionOwner(method, self));
 });
 def('UnboundMethod', 'bind', 1, function* (self: RObject, [recv]) {
-  return methodObject(recv, validBoundMethod(self, recv), (self.data as MethodData).name);
+  const { name, owner } = self.data as MethodData;
+  return methodObject(recv, validBoundMethod(self, recv), name, owner, owner.isModule);
 });
 def(
   'UnboundMethod',
   'bind_call',
   [1, -1],
   function* (self: RObject, [recv, ...args], block, keywords, used) {
-    return yield* invoke(validBoundMethod(self, recv), recv, args, keywords, block, used);
+    const { owner } = self.data as MethodData;
+    return yield* invoke(reflectedCallable(validBoundMethod(self, recv), owner), recv, args, keywords, block, used);
   },
   { keywords: true }
 );
 
 function validBoundMethod(self: RObject, recv: Value): RMethod {
-  const { method } = self.data as MethodData;
-  assertMethodOwner(method.owner, recv, false);
+  const { method, owner } = self.data as MethodData;
+  assertMethodOwner(owner, recv, false);
+  if (
+    method.body.kind === 'native' &&
+    !isA(recv, method.owner) &&
+    !findCoreMethod(method.nativeIdentityOwner ?? owner, method.name)
+  )
+    throw new UnsupportedFeatureError('継承元の実装を持たないネイティブメソッドの別クラスへの束縛');
   return method;
 }
 
@@ -676,8 +739,10 @@ def('Module', 'prepend', [1, -1], function* (self: RClass, modules) {
 // Constants and class variables ----------------------------------------------------------------------------------------
 
 function* constantName(value: Value): Gen<string> {
-  const name = yield* nameOf(value);
-  if (!/^[\p{Uppercase}\p{Lt}][\w\P{ASCII}]*$/u.test(name)) throw nameError(`wrong constant name ${name}`, NIL, name);
+  const symbol = yield* symbolNameOf(value);
+  const name = symbol.name;
+  const valid = symbol.binary ? /^[A-Z][\w\P{ASCII}]*$/u : /^[\p{Uppercase}\p{Lt}][\w\P{ASCII}]*$/u;
+  if (!valid.test(name)) throw nameError(`wrong constant name ${name}`, NIL, name);
   return name;
 }
 

@@ -243,8 +243,8 @@ function group(
   };
 }
 
-/** Whether the program redefined how a value is shown, which then decides its text as a whole. */
 function showsItself(value: Value): boolean {
+  if (value instanceof RObject && structEntriesOf(value)) return false;
   const method = classOf(value).findMethod('inspect');
   return method !== undefined && method.body.kind !== 'native';
 }
@@ -296,12 +296,12 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = fa
     }
     return { kind: 'group', indent: 0, parts };
   }
-  if (value instanceof RObject && !showsItself(value)) {
+  if (value instanceof RObject) {
     const members = structEntriesOf(value);
-    if (members && members.length > 0) {
+    if (members) {
       const cls = realClassOf(value);
       const kind = cls.isSubclassOf(rt().c.Data) ? 'data' : 'struct';
-      const head = `#<${kind}${cls.name === undefined ? '' : ` ${cls.name}`}`;
+      const head = `#<${kind}${kind === 'struct' || cls.name !== undefined ? ` ${cls.name ?? ''}` : ''}`;
       if (seen.has(value)) return text(`${head}:...>`, budget);
       seen.add(value);
       try {

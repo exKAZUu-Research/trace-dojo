@@ -34,6 +34,7 @@ import {
   typeError,
 } from './errors';
 import { hashGet, hashSet, hashSetStored } from './hashes';
+import { aliasedMethod } from './libMeta';
 import { makeRational } from './libRational';
 import {
   lastMatch,
@@ -41,7 +42,9 @@ import {
   normalizeSlashLiteralSource,
   regexpFromString,
   regexpPatternEncoding,
+  validateRegexpInterpolation,
 } from './libRegexp';
+import { symbolFromString } from './libString';
 import {
   boxFloat,
   invalidateMethodCaches,
@@ -222,7 +225,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
     }
     case 'dsym': {
       const name = yield* interpolateString(e.parts, frame);
-      return RSymbol.of(name.s, name.binary, name.usAscii, stringBytes(name));
+      return symbolFromString(name);
     }
     case 'array': {
       return arr(yield* evalList(e.items, frame));
@@ -390,7 +393,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
       }
       assertMutableClass(owner);
       assertNoDefinitionHook(owner, 'added');
-      owner.methods.set(e.newName, { ...method });
+      owner.methods.set(e.newName, aliasedMethod(method, owner));
       invalidateMethodCaches();
       return NIL;
     }
@@ -460,9 +463,10 @@ export function* ev(e: Expr, frame: Frame): Gen {
       const parts = e.slashDelimited
         ? e.parts.map((part) => (typeof part === 'string' ? normalizeSlashLiteralSource(part) : part))
         : e.parts;
-      const source = yield* interpolateString(parts, frame, (binary, ascii, part) =>
-        regexpPatternEncoding(binary, ascii, part, 'dynamic')
-      );
+      const source = yield* interpolateString(parts, frame, {
+        combine: (binary, ascii, part) => regexpPatternEncoding(binary, ascii, part, 'dynamic'),
+        validate: validateRegexpInterpolation,
+      });
       const regexp = regexpFromString(source, {
         ignoreCase: e.flags.includes('i'),
         multiline: e.flags.includes('m'),
@@ -495,7 +499,17 @@ function* atCallRow<T>(row: number, action: () => Gen<T>): Gen<T> {
   }
 }
 
-function* interpolateString(parts: StrPart[], frame: Frame, combine = combinedStringEncoding): Gen<RString> {
+function* interpolateString(
+  parts: StrPart[],
+  frame: Frame,
+  {
+    combine = combinedStringEncoding,
+    validate,
+  }: {
+    combine?: typeof combinedStringEncoding;
+    validate?: (segment: RString) => void;
+  } = {}
+): Gen<RString> {
   const chunks: Uint8Array[] = [];
   let length = 0;
   let binary = false;
@@ -507,6 +521,7 @@ function* interpolateString(parts: StrPart[], frame: Frame, combine = combinedSt
         : 'text' in part
           ? stringFromBytes(Uint8Array.from(part.bytes ?? new TextEncoder().encode(part.text)))
           : yield* toSValue(yield* ev(part, frame));
+    validate?.(segment);
     const bytes = stringBytes(segment);
     binary = index === 0 ? segment.binary && (bytes.length > 0 || parts.length > 1) : combine(binary, ascii, segment);
     length += bytes.length;

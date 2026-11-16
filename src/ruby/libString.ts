@@ -278,6 +278,9 @@ export function sliceStringEncoding(self: RString, from: number, to = self.s.len
 export function textByteLengthOf(value: RString, text: string): number {
   return textByteLength(text, stringTextMode(value));
 }
+export function stringUnitIndexAtByte(value: RString, offset: number): number {
+  return textIndexAtByte(value.s, offset, stringTextMode(value));
+}
 export function inspectStringEncoding(self: RString, dump = false): string {
   const bytes = stringBytes(self);
   return self.binary || (self.usAscii && bytes.some((byte) => byte >= 0x80))
@@ -351,11 +354,13 @@ function binaryInspect(bytes: Uint8Array): string {
   if (result.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
   return `${result}"`;
 }
-def('String', ['to_sym', 'intern'], 0, (self: RString) => {
+def('String', ['to_sym', 'intern'], 0, (self: RString) => symbolFromString(self));
+
+export function symbolFromString(self: RString): RSymbol {
   if (self.rawBytes && !self.binary && !self.usAscii)
     throw rubyError(rt().c.EncodingError, `invalid symbol in encoding UTF-8 :${inspectRawBytes(self.rawBytes)}`);
   return RSymbol.of(self.s, self.binary, self.usAscii, stringBytes(self));
-});
+}
 def('String', 'to_i', [0, 1], function* (self: RString, args) {
   const base = args.length > 0 ? yield* toRubyInt(args[0]) : 10;
   if (base < 0 || base > 36 || base === 1) throw argumentError(`invalid radix ${base}`);

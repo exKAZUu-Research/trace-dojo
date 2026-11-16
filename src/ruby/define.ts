@@ -20,9 +20,13 @@ const specs: NativeSpec[] = [];
 const coreMethods = new WeakMap<RClass, Map<string, RMethod>>();
 
 export function coreMethod(owner: RClass, name: string): RMethod {
-  const method = coreMethods.get(owner)?.get(name);
+  const method = findCoreMethod(owner, name);
   if (!method) throw new Error(`Missing core method ${owner.name}#${name}`);
   return method;
+}
+
+export function findCoreMethod(owner: RClass, name: string): RMethod | undefined {
+  return coreMethods.get(owner)?.get(name);
 }
 
 export interface DefineOptions {

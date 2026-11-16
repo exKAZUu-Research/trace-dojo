@@ -1,10 +1,11 @@
 import { type AST, RegExpParser, RegExpSyntaxError, visitRegExpAST } from '@eslint-community/regexpp';
+import { parse as parseOniguruma } from 'oniguruma-parser/parser';
 
 import { ExecutionLimitError } from '../interpreter/limits';
 import { UnsupportedFeatureError } from './runtime';
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Host syntax validation and AST validation distinguish invalid patterns, unsupported forms, and exhausted budgets.
-export function validateRegexpStructure(source: string): void {
+// code-gauge-allow functionCognitiveComplexity 18 -- Source and host AST validation distinguish invalid patterns, unsupported forms, and exhausted budgets.
+export function validateRegexpStructure(source: string, rubySource: string, extended: boolean): void {
   if (!source.includes('(?<') && !/\\(?:[1-9]|k<)/.test(source)) return;
   try {
     new RegExp(source, 'u');
@@ -14,6 +15,7 @@ export function validateRegexpStructure(source: string): void {
     throw error;
   }
   try {
+    if (rubySource.includes('(?<')) validateSourceLookbehind(rubySource, extended);
     const pattern = new RegExpParser().parsePattern(source, 0, source.length, { unicode: true });
     visitRegExpAST(pattern, {
       onAssertionEnter(assertion) {
@@ -34,14 +36,33 @@ export function validateRegexpStructure(source: string): void {
 function validateLookbehind(assertion: AST.LookbehindAssertion): void {
   if (!assertion.alternatives.every(validLookbehindAlternative))
     throw new SyntaxError('invalid pattern in look-behind');
-  visitRegExpAST(assertion, {
-    onCapturingGroupEnter() {
-      if (assertion.negate) throw new SyntaxError('invalid pattern in look-behind');
-    },
-    onAssertionEnter(inner) {
-      if (inner.kind === 'lookahead') throw new SyntaxError('invalid pattern in look-behind');
-    },
-  });
+}
+
+function validateSourceLookbehind(source: string, extended: boolean): void {
+  try {
+    parseOniguruma(normalizeRubyUnicodeEscapes(source), {
+      flags: extended ? 'x' : '',
+      skipBackrefValidation: true,
+      skipPropertyNameValidation: true,
+    });
+  } catch (error) {
+    if (error instanceof RangeError) throw error;
+    if (error instanceof Error && error.message === 'Lookbehind includes a pattern not allowed by Oniguruma')
+      throw new SyntaxError('invalid pattern in look-behind');
+    throw new UnsupportedFeatureError('正規表現の後読みの構文の検証');
+  }
+}
+
+function normalizeRubyUnicodeEscapes(source: string): string {
+  return source.replaceAll(/\\(?:\\|u\{([\dA-Fa-f\s]+)\})/g, (raw, points: string | undefined) =>
+    points
+      ? points
+          .trim()
+          .split(/\s+/)
+          .map((point) => `\\x{${point}}`)
+          .join('')
+      : raw
+  );
 }
 
 function validLookbehindAlternative(alternative: AST.Alternative): boolean {
@@ -104,8 +125,10 @@ function fixedWidth(node: AST.Element | AST.Alternative): number | undefined {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Each parser diagnostic maps to a distinct Ruby error, with capture names included only where Ruby reports them.
-export function regexpSyntaxReason(source: string): string {
+// code-gauge-allow functionCognitiveComplexity 25 -- Each parser diagnostic maps to a distinct Ruby error, with capture names included only where Ruby reports them.
+export function regexpSyntaxReason(source: string, extended = false): string {
+  const rubyReason = onigurumaSyntaxReason(source, extended);
+  if (rubyReason) return rubyReason;
   try {
     new RegExpParser().parsePattern(source, 0, source.length, { unicode: true });
   } catch (error) {
@@ -117,7 +140,6 @@ export function regexpSyntaxReason(source: string): string {
         ['Nothing to repeat', 'target of repeat operator is not specified'],
         ['numbers out of order in {} quantifier', 'upper is smaller than lower in repeat range'],
         ['Range out of order in character class', 'empty range in char class'],
-        ['Invalid escape', 'invalid backref number/name'],
       ])
         if (error.message.endsWith(reason)) return message;
       if (error.message.endsWith('Invalid capture group name')) {
@@ -131,4 +153,38 @@ export function regexpSyntaxReason(source: string): string {
     }
   }
   return 'invalid pattern';
+}
+
+// code-gauge-allow functionCognitiveComplexity 28 -- Source-parser errors distinguish escape, group, class-range, and reference diagnostics that the host parser conflates.
+function onigurumaSyntaxReason(source: string, extended: boolean): string | undefined {
+  try {
+    parseOniguruma(normalizeRubyUnicodeEscapes(source), {
+      flags: extended ? 'x' : '',
+      skipPropertyNameValidation: true,
+    });
+  } catch (error) {
+    if (!(error instanceof Error)) return undefined;
+    const { message } = error;
+    const incompleteEscape = message.startsWith('Incomplete or invalid escape');
+    if (incompleteEscape && message.endsWith(String.raw`"\x"`)) return 'invalid hex escape';
+    if (incompleteEscape && message.endsWith(String.raw`"\u"`))
+      return source.endsWith(String.raw`\u`) ? 'too short escape sequence' : 'invalid Unicode escape';
+    if (message.startsWith('Invalid code point out of range')) return 'invalid Unicode range';
+    if (message.startsWith('Unsupported control character')) return 'too short control escape';
+    if (message.startsWith('Invalid or unsupported group option')) return invalidGroupReason(source);
+    if (message === 'Unclosed character class (started with "]")') return 'empty char-class';
+    if (message === 'Invalid character class range')
+      return /(?<!\\)(?:\\\\)*-\\[dDsSwWhHpP]/.test(source)
+        ? 'char-class value at end of range'
+        : 'unmatched range specifier in char-class';
+    if (message.startsWith('Not enough capturing groups defined')) return 'invalid backref number/name';
+  }
+  return undefined;
+}
+
+function invalidGroupReason(source: string): string {
+  const unclosedName = /\(\?<([^=!>][^>]*)$/.exec(source)?.[1];
+  if (unclosedName) return `invalid group name <${unclosedName}>`;
+  if (source.endsWith('(?<')) return 'end pattern with unmatched parenthesis';
+  return /\(\?[imx-]*$/.test(source) ? 'end pattern in group' : 'undefined group option';
 }

@@ -247,6 +247,9 @@ export type MethodBody =
 
 export interface RMethod {
   name: string;
+  row?: number;
+  reflectionOwner?: RClass;
+  nativeIdentityOwner?: RClass;
   missing?: boolean;
   superName?: string;
   owner: RClass;

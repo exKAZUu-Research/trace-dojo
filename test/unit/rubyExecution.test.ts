@@ -9862,3 +9862,158 @@ s='abc';m=s.match(/b/);s << 'd';s.reverse!;s.slice!(0);s.gsub!(/a/,'X');p m.stri
 `)
   ).toMatchObject({ stdout: '12000\n12000\n12000\n[255, 97, 98, 99]\ntrue\n["b"]\n"éabc"\n["b"]\n"abc"\n["b"]\n' });
 });
+
+test('regexp scan advances by original byte offsets after character-width mutations', () => {
+  expect(
+    run(String.raw`['éba','😀ba'].each do |s|
+ n=0;s.scan(/a/){n+=1;s[0]= s[0]=='é' ? 'xy' : 'abcd' if n==1};p s,n,$~.begin(0)
+end
+s='éba';n=0;s.scan(/(?=a)/){n+=1;s[0]='xy' if n==1};p s,n,$~.begin(0)
+s='xyba';n=0;s.scan(/a/){n+=1;s[0,2]='é' if n==1};p s,n,$~ && $~.begin(0)
+`)
+  ).toMatchObject({ kind: 'executed', stdout: '"xyba"\n1\n3\n"abcdba"\n1\n0\n"xyba"\n1\n3\n"éba"\n1\n2\n' });
+});
+
+test('regexp source assertions and invalid interpolated bytes retain Ruby behavior', () => {
+  expect(
+    run(String.raw`p 'a x'.scan(/(?<=\s|^)\w+/)
+['(?<=^|,)x','(?<!^)x','(?<=,|$)x','(?<=\b)\w','(?<=\w\b)','(?<=^#)x','(?<=^.)x','(?<=\u{61})x'].each{|s|p Regexp.new(s).match?('ax')}
+x="\xFF";begin;p /a#{x}b/;rescue=>e;p e.class,e.message;end
+x=255.chr;p /a#{x}b/.match?('a'+x+'b')
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '["a", "x"]\nfalse\ntrue\nfalse\ntrue\ntrue\nfalse\ntrue\ntrue\nArgumentError\n"invalid multibyte character"\ntrue\n',
+  });
+});
+
+test('Regexp constructors forward subclass keywords and blocks', () => {
+  expect(
+    run(String.raw`class R<Regexp
+ attr_reader :tag
+ def initialize(pattern,tag:,&block)
+  @tag=block ? block.call(tag) : tag
+  super(pattern)
+ end
+end
+r=R.new('a',tag:21){|x|x*2};p r.tag,r.match?('a')
+r=R.compile('b',tag:7);p r.tag,r.match?('b')
+class S<Regexp
+ attr_reader :options
+ def initialize(pattern,**options);@options=options;super(pattern);end
+end
+p S.compile('a',tag:1).options
+`)
+  ).toMatchObject({ kind: 'executed', stdout: '42\ntrue\n7\ntrue\n{tag: 1}\n' });
+});
+
+test('record formatting and reflected names preserve Ruby metadata and bytes', () => {
+  expect(
+    run(String.raw`class A
+  attr_accessor :x
+end
+p A.new.method(:x),A.instance_method(:x),A.new.method(:x=),A.method(:new),String.method(:name)
+pp Struct.new(:x).new(1)
+class P < Struct.new(:x,:y);def inspect = 'P!';end
+pp P.new(1,2)
+D=Data.define(:a){def inspect = 'DD'}
+pp D.new(1)
+s="\xFF";begin;p :"#{s}";rescue=>e;p e.class,e.message;end
+module C;end
+[192.chr,201.chr].each{|name|begin;p C.const_set(name,7);rescue NameError;p :invalid;end}
+p C.const_defined?(:À),C.const_defined?(:É)
+r=Time.utc(2024).strftime(255.chr+'%Y');p r.bytes,r.encoding
+s="\xFF";begin;p({"#{s}":1});rescue=>e;p e.class,e.message;end
+s=255.chr;p :"#{s}".to_s.bytes
+name='A'+255.chr;p C.const_set(name,8),C.const_get(name)
+pp Struct.new(nil).new,Data.define.new
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '#<Method: A#x() main.rb:2>\n#<UnboundMethod: A#x() main.rb:2>\n#<Method: A#x=(_) main.rb:2>\n#<Method: #<Class:A>(Class)#new(*)>\n#<Method: #<Class:String>(Module)#name()>\n#<struct  x=1>\n#<struct P x=1, y=2>\n#<data D a=1>\nEncodingError\n"invalid symbol in encoding UTF-8 :\\"\\\\xFF\\""\n:invalid\n:invalid\nfalse\nfalse\n[255, 50, 48, 50, 52]\n#<Encoding:BINARY (ASCII-8BIT)>\nEncodingError\n"invalid symbol in encoding UTF-8 :\\"\\\\xFF\\""\n[255]\n8\n8\n#<struct >\n#<data>\n',
+  });
+});
+
+test('native Method owners preserve binding and alias identity', () => {
+  expect(
+    run(String.raw`p [1].method(:map),[1].method(:map).owner,5.method(:positive?),(1..3).method(:sum),'a'.method(:between?)
+u=Array.instance_method(:map);p u.owner,u.bind([1,2]).call{|x|x*2},u==Enumerable.instance_method(:map)
+class A<Array;alias m map;end
+p A.instance_method(:m).owner,A.instance_method(:m)==Array.instance_method(:map)
+a=A.new([1]);x=a.method(:m);y=Array.instance_method(:map).bind(a);p x==y,x.hash==y.hash
+class B;def f;1;end;end
+class C<B;alias g f;end
+p C.instance_method(:g).owner,C.instance_method(:g)==B.instance_method(:f)
+c=C.new;p c.method(:g)==c.method(:f),c.method(:g).hash==c.method(:f).hash
+begin;u.bind(Object.new);rescue TypeError=>e;puts e.message;end
+p A.instance_method(:m),a.method(:m),C.instance_method(:g),c.method(:g)
+h={a:1};e=Array.instance_method(:entries).bind(h);p e.call,e==h.method(:entries),e.hash==h.method(:entries).hash
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '#<Method: Array#map()>\nArray\n#<Method: Integer(Numeric)#positive?()>\n#<Method: Range(Enumerable)#sum(*)>\n#<Method: String(Comparable)#between?(_, _)>\nArray\n[2, 4]\nfalse\nA\ntrue\ntrue\ntrue\nC\ntrue\ntrue\ntrue\nbind argument must be an instance of Array\n#<UnboundMethod: Array#m(map)()>\n#<Method: A(Array)#m(map)()>\n#<UnboundMethod: B#g(f)() main.rb:6>\n#<Method: C(B)#g(f)() main.rb:6>\n[[:a, 1]]\nfalse\ntrue\n',
+  });
+});
+
+test('external and lazy enumerators honor dynamically advertised protocols', () => {
+  expect(
+    run(String.raw`class Size
+ def respond_to_missing?(n,*)=n==:call
+ def method_missing(n,*);return 7 if n==:call;super;end
+ def to_int;3;end
+end
+e=Enumerator.new(Size.new){|y|y<<1};p e.size,e.to_a
+class C
+ include Enumerable
+ def initialize;@i=0;end
+ def each;@i+=1;yield @i;end
+ def respond_to_missing?(n,*)=[:size,:rewind].include?(n)
+ def method_missing(n,*);return 3 if n==:size;return @i=0 if n==:rewind;super;end
+end
+p C.new.lazy.size,C.new.lazy.map{|x|x}.size,C.new.lazy.take(2).size
+e=C.new.to_enum;p e.next;e.rewind;p e.next
+e=C.new.lazy;p e.next;e.rewind;p e.next
+class Item
+ def force;[];end
+ def respond_to_missing?(n,*)=n==:each
+ def method_missing(n,*);return yield 3 if n==:each;super;end
+end
+p [1].lazy.flat_map{Item.new}.force
+class Item2
+ def each;yield 4;end
+ def respond_to_missing?(n,*)=n==:force
+ def method_missing(n,*);return [] if n==:force;super;end
+end
+p [1].lazy.flat_map{Item2.new}.force
+`)
+  ).toMatchObject({ kind: 'executed', stdout: '7\n[1]\n3\n3\n2\n1\n1\n1\n1\n[3]\n[4]\n' });
+});
+
+test('regexp syntax diagnostics preserve Ruby categories before host translation', () => {
+  expect(
+    run(String.raw`['\x','\xZ','[\x]','\c','(?<n','[^]','(?','(?i','(?z)','(?P<a>x)','[a-\d]','[\d-a]','\u','\u12','\u{110000}'].each do |s|
+ begin;Regexp.new(s);rescue RegexpError=>e;p e.message;end
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '"invalid hex escape: /\\\\x/"\n"invalid hex escape: /\\\\xZ/"\n"invalid hex escape: /[\\\\x]/"\n"too short control escape: /\\\\c/"\n"invalid group name <n>: /(?<n/"\n"empty char-class: /[^]/"\n"end pattern in group: /(?/"\n"end pattern in group: /(?i/"\n"undefined group option: /(?z)/"\n"undefined group option: /(?P<a>x)/"\n"char-class value at end of range: /[a-\\\\d]/"\n"unmatched range specifier in char-class: /[\\\\d-a]/"\n"too short escape sequence: /\\\\u/"\n"invalid Unicode escape: /\\\\u12/"\n"invalid Unicode range: /\\\\u{110000}/"\n',
+  });
+});
+
+test('strftime retains binary, US-ASCII and invalid UTF-8 format bytes', () => {
+  expect(
+    run(String.raw`[255.chr+'%Y',233.chr+'%m',String.new('%Y',encoding:'US-ASCII'),"\xFF%Y",'é%Y'].each do |format|
+ r=Time.utc(2024).strftime(format);p r.bytes,r.encoding
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[255, 50, 48, 50, 52]\n#<Encoding:BINARY (ASCII-8BIT)>\n[233, 48, 49]\n#<Encoding:BINARY (ASCII-8BIT)>\n[50, 48, 50, 52]\n#<Encoding:US-ASCII>\n[255, 50, 48, 50, 52]\n#<Encoding:UTF-8>\n[195, 169, 50, 48, 50, 52]\n#<Encoding:UTF-8>\n',
+  });
+});
