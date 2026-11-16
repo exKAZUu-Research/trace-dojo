@@ -469,3 +469,27 @@ test.each(['setBit(0::Integer)100000000', 'clearBit(-1::Integer)100000000', 'com
     });
   }
 );
+
+test.each([
+  ['hh', '-257'],
+  ['h', '-65537'],
+  ['l', '-4294967297'],
+  ['ll', '-18446744073709551617'],
+  ['L', '-18446744073709551617'],
+])('printf rejects negatives below the %s unsigned range', (modifier, value) => {
+  for (const conversion of ['u', 'o', 'x', 'X', 'b']) {
+    expect(
+      executeProgram('haskell', `import Text.Printf\nmain=printf "%${modifier}${conversion}" (${value}::Integer)`)
+    ).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: 'printf: bad argument' });
+  }
+});
+
+test('printf unsigned offsets retain lower boundaries and unbounded positive inputs', () => {
+  const source =
+    'import Text.Printf\nmain=do\n  printf "%hhu|%hhu|%hhu|%hhu\\n" (-256::Int) (-255::Integer) (-1::Int) (256::Integer)\n  printf "%hx|%lx|%llx|%Lx\\n" (-65536::Integer) (-4294967296::Integer) (-18446744073709551616::Integer) (-18446744073709551616::Integer)';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '0|1|255|256\n0|0|0|0\n',
+    uncaughtException: undefined,
+  });
+});

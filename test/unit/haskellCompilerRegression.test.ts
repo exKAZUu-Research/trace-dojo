@@ -520,3 +520,39 @@ test('hidden instance methods remain unavailable', () => {
     ]),
   });
 });
+
+test.each([
+  ['case', 'case 1 of\n{ 1->print(1::Int); _->print 2 }'],
+  ['let', 'let\n{ x=1::Int }\n  print x'],
+  ['where', 'let f=x where\n{ x=1::Int }\n  print f'],
+])('opening %s braces cannot dedent left of enclosing layout', (_name, block) => {
+  expect(executeProgram('haskell', `main=do\n  ${block}`).kind).toBe('compileError');
+});
+
+test.each([
+  'case 1 of\n  { 1->print(1::Int); _->print 2 }',
+  'let\n  { x=1::Int }\n  print x',
+  'let f=x where\n      { x=1::Int }\n  print f',
+])('opening braces at or right of enclosing layout remain valid: %s', (block) => {
+  expect(executeProgram('haskell', `main=do\n  ${block}`)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([2, 4])('explicit opening braces respect enclosing indentation %i', (indent) => {
+  const prefix = `main=do\n${' '.repeat(indent)}do\n`;
+  for (const column of [0, indent - 1]) {
+    const source = `${prefix}${' '.repeat(column)}{ print(1::Int) }`;
+    expect(executeProgram('haskell', source).kind).toBe('compileError');
+  }
+  for (const column of [indent, indent + 2]) {
+    const source = `${prefix}${' '.repeat(column)}{ print(1::Int) }`;
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: '1\n',
+      uncaughtException: undefined,
+    });
+  }
+});

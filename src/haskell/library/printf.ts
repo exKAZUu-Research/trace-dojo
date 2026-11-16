@@ -1,6 +1,5 @@
 import { BT } from './source';
 
-/** `Text.Printf`, whose `printf` takes any number of arguments through the `PrintfType` class, as base does. */
 export const PRINTF_SOURCE = String.raw`module Text.Printf.Internal where
 
 import Base
@@ -162,14 +161,15 @@ formatOne spec@(Spec minus plus space zero alt width prec mods c) u = case u of
       Nothing -> ds
     charValue ch = if null mods then pad False [ch] else perror "illegal char conversion"
     unsigned n bound = if n < 0 then
-      let modulus = case mods of
+      let offset = case mods of
             "hh" -> 256
             "h" -> 65536
             "l" -> 4294967296
             "ll" -> 18446744073709551616
             "L" -> 18446744073709551616
             _ -> bound
-      in if modulus > 0 then n ${BT}mod${BT} modulus else perror "bad argument"
+          converted = n + offset
+      in if offset > 0 && converted >= 0 then converted else perror "bad argument"
       else n
     prefixAlt p ds = if alt && not (null ds) && ds /= "0" && not (p == "0" && head ds == '0') then p ++ ds else ds
     signed n ds = if n < 0 then '-' : ds else if plus then '+' : ds else if space then ' ' : ds else ds

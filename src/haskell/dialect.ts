@@ -56,7 +56,7 @@ class DialectValidator {
     let insideBraces = false;
     for (const child of children) {
       if (child.type === '{' || child.type === '}') {
-        this.visit(child);
+        this.visit(child, child.type === '{' ? context : undefined);
         insideBraces = child.type === '{';
         continue;
       }
@@ -73,9 +73,9 @@ class DialectValidator {
     const firstOnLine = node.startPosition.row > this.previousRow;
     this.previousRow = node.endPosition.row;
     if (firstOnLine && context && node.startIndex !== context.itemStart && this.column(node) <= context.indent) {
-      const conditionalSeparator =
-        node.parent?.type === 'conditional' && (node.type === 'then' || node.type === 'else');
-      if (!conditionalSeparator || this.column(node) < context.indent) fail(node);
+      const permitsEqualIndent =
+        node.type === '{' || (node.parent?.type === 'conditional' && (node.type === 'then' || node.type === 'else'));
+      if (!permitsEqualIndent || this.column(node) < context.indent) fail(node);
     }
   }
 
