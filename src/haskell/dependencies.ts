@@ -26,41 +26,50 @@ export function dependencyOrder(bindings: RBinding[]): RBinding[][] {
   );
 }
 
-/** Tarjan's algorithm, which emits the components in reverse topological order: dependencies first. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Tarjan's algorithm reads best as one routine.
-// code-gauge-allow functionNcss 34 -- Tarjan's algorithm reads best as one routine.
+// code-gauge-allow functionCognitiveComplexity 26 -- Explicit DFS enter, edge and exit phases share Tarjan's low-link state.
+// code-gauge-allow functionNcss 45 -- The traversal and component completion keep one set of graph state.
 function stronglyConnected(edges: readonly number[][]): number[][] {
   const indexOf = Array.from({ length: edges.length }, () => -1);
   const lowLink = Array.from({ length: edges.length }, () => 0);
   const onStack = Array.from({ length: edges.length }, () => false);
   const stack: number[] = [];
+  const frames: { node: number; next: number }[] = [];
   const result: number[][] = [];
   let counter = 0;
-  const visit = (node: number): void => {
+  const enter = (node: number): void => {
     indexOf[node] = counter;
     lowLink[node] = counter;
     counter++;
     stack.push(node);
     onStack[node] = true;
-    for (const next of edges[node]) {
-      if (indexOf[next] < 0) {
-        visit(next);
-        lowLink[node] = Math.min(lowLink[node], lowLink[next]);
-      } else if (onStack[next]) {
-        lowLink[node] = Math.min(lowLink[node], indexOf[next]);
-      }
-    }
-    if (lowLink[node] !== indexOf[node]) return;
-    const component: number[] = [];
-    for (;;) {
-      const member = stack.pop() as number;
-      onStack[member] = false;
-      component.push(member);
-      if (member === node) break;
-    }
-    result.push(component);
+    frames.push({ node, next: 0 });
   };
-  for (let node = 0; node < edges.length; node++) if (indexOf[node] < 0) visit(node);
+  for (let root = 0; root < edges.length; root++) {
+    if (indexOf[root] >= 0) continue;
+    enter(root);
+    while (frames.length > 0) {
+      const frame = frames.at(-1)!;
+      const { node } = frame;
+      const next = edges[node][frame.next++];
+      if (next !== undefined) {
+        if (indexOf[next] < 0) enter(next);
+        else if (onStack[next]) lowLink[node] = Math.min(lowLink[node], indexOf[next]);
+        continue;
+      }
+      frames.pop();
+      const parent = frames.at(-1);
+      if (parent) lowLink[parent.node] = Math.min(lowLink[parent.node], lowLink[node]);
+      if (lowLink[node] !== indexOf[node]) continue;
+      const component: number[] = [];
+      for (;;) {
+        const member = stack.pop() as number;
+        onStack[member] = false;
+        component.push(member);
+        if (member === node) break;
+      }
+      result.push(component);
+    }
+  }
   return result;
 }
 

@@ -437,3 +437,44 @@ test.each(['Data.Map', 'Data.Map.Strict'])(
     ).toMatchObject({ kind: 'executed', stdout: 'False\n', uncaughtException: undefined });
   }
 );
+
+test.each(['Data.Set', 'Data.Map', 'Data.Map.Strict'])(
+  'strict left folds demand every previous subtree in %s',
+  (module) => {
+    const tree = module === 'Data.Set' ? 'M.fromList[1,2,3::Int]' : 'M.fromList[(x,x)|x<-[1,2,3::Int]]';
+    const folds = ["M.foldl'", "F.foldl'"];
+    for (const fold of folds) {
+      for (const [callback, uncaughtException] of [
+        [String.raw`\_ x->if x==1 then error "bad" else 0::Int`, 'bad'],
+        [String.raw`\_ x->error(show x)::Int`, '1'],
+      ]) {
+        const source = `import qualified ${module} as M\nimport qualified Data.Foldable as F\nmain=print(${fold} (${callback}) 0 (${tree}))`;
+        expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
+      }
+    }
+    if (module !== 'Data.Set') {
+      expect(
+        executeProgram(
+          'haskell',
+          `import qualified ${module} as M\nmain=print(M.foldlWithKey' (\\_ k _->error(show k)::Int) 0 (${tree}))`
+        )
+      ).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: '1' });
+    }
+  }
+);
+
+test.each(['Data.Map', 'Data.Map.Strict'])('key sets preserve map shape and payload laziness in %s', (module) => {
+  for (const [keys, failures, uncaughtException] of [
+    ['[8,3,4,5,7,9,6,1,2::Int]', '[8,5]', '8'],
+    ['[1,2,4,8,6,9,5,3,7::Int]', '[6,2]', '2'],
+  ]) {
+    const source = `import qualified ${module} as M\nimport qualified Data.Set as S\nimport Data.List(foldl')\nm=foldl' (\\tree k->M.insert k () tree) M.empty ${keys}\nmain=print(S.size(S.filter (\\k->if k \`elem\` ${failures} then error(show k) else True)(M.keysSet m)))`;
+    expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
+  }
+  expect(
+    executeProgram(
+      'haskell',
+      `import qualified ${module} as M\nimport qualified Data.Map as L\nimport qualified Data.Set as S\nmain=print(S.toList(M.keysSet(L.singleton(1::Int)(undefined::Int))))`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '[1]\n', uncaughtException: undefined });
+});

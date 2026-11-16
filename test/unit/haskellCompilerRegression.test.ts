@@ -431,3 +431,19 @@ test.each(['Text.Read (Read(readsPrec))', 'Text.Printf (PrintfArg)', 'Text.Read 
     });
   }
 );
+
+test.each([false, true])(
+  'long binding chains compile without host recursion (cyclic=%s)',
+  { timeout: 30_000 },
+  (cyclic) => {
+    const count = 30_000;
+    const source =
+      Array.from({ length: count }, (_, index) => `x${index}=x${index + 1}`).join('\n') +
+      `\nx${count}=${cyclic ? 'x0' : '1'}\nmain=print(1::Int)`;
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: '1\n',
+      uncaughtException: undefined,
+    });
+  }
+);

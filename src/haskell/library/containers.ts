@@ -156,7 +156,7 @@ foldr' f z s = z ${BT}seq${BT} case s of
 foldl' :: (b -> a -> b) -> b -> Set a -> b
 foldl' f z s = z ${BT}seq${BT} case s of
   STip -> z
-  SBin _ x l r -> foldl' f (f (foldl' f z l) x) r
+  SBin _ x l r -> let left = foldl' f z l in left ${BT}seq${BT} foldl' f (f left x) r
 
 union :: Ord a => Set a -> Set a -> Set a
 union a STip = a
@@ -660,7 +660,8 @@ elems :: Map k a -> [a]
 elems = foldr (:) []
 
 keysSet :: Map k a -> S.Set k
-keysSet m = S.fromDistinctAscList (keys m)
+keysSet Tip = S.STip
+keysSet (Bin count k _ l r) = S.SBin count k (keysSet l) (keysSet r)
 
 fromSet :: (k -> a) -> S.Set k -> Map k a
 fromSet = fromSetUsing False
@@ -686,7 +687,7 @@ foldr' f z m = z ${BT}seq${BT} case m of
 foldl' :: (b -> a -> b) -> b -> Map k a -> b
 foldl' f z m = z ${BT}seq${BT} case m of
   Tip -> z
-  Bin _ _ x l r -> foldl' f (f (foldl' f z l) x) r
+  Bin _ _ x l r -> let left = foldl' f z l in left ${BT}seq${BT} foldl' f (f left x) r
 
 foldrWithKey :: (k -> a -> b -> b) -> b -> Map k a -> b
 foldrWithKey _ z Tip = z
@@ -704,7 +705,7 @@ foldrWithKey' f z m = z ${BT}seq${BT} case m of
 foldlWithKey' :: (a -> k -> b -> a) -> a -> Map k b -> a
 foldlWithKey' f z m = z ${BT}seq${BT} case m of
   Tip -> z
-  Bin _ k x l r -> foldlWithKey' f (f (foldlWithKey' f z l) k x) r
+  Bin _ k x l r -> let left = foldlWithKey' f z l in left ${BT}seq${BT} foldlWithKey' f (f left k x) r
 
 foldMapWithKey :: Monoid m => (k -> a -> m) -> Map k a -> m
 foldMapWithKey f = foldrWithKey (\k x acc -> f k x <> acc) mempty
