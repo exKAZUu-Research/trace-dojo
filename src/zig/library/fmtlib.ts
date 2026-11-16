@@ -83,7 +83,6 @@ function parseInt(bytes: number[], base: number, type: IntType): Value {
 }
 
 /** `std.fmt.parseFloat`: decimal or hexadecimal digits with `_`, `inf`, or `nan`, rounded to the type. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function parseFloat(bytes: number[], type: Extract<Type, { kind: 'float' }>): Value {
   const text = decodeUtf8(bytes);
   const match = /^([+-]?)(.*)$/s.exec(text) as RegExpExecArray;
@@ -92,23 +91,45 @@ function parseFloat(bytes: number[], type: Extract<Type, { kind: 'float' }>): Va
   let value: BigFloat;
   if (/^inf(inity)?$/i.test(body)) value = new BigFloat(negative, 'inf', 0n, 0);
   else if (/^nan$/i.test(body)) value = new BigFloat(false, 'nan', 0n, 0);
-  else if (
-    /^(\d(_?\d)*)?(\.(\d(_?\d)*)?)?([eE][+-]?\d(_?\d)*)?$/.test(body) &&
-    /\d/.test(body.split(/[eE]/)[0]) &&
-    !body.startsWith('_')
-  ) {
-    const parsed = parseFloatLiteral(
-      body.startsWith('.') ? `0${body}` : body.endsWith('.') ? `${body}0` : body,
-      type.bits
-    );
+  else if (isFloatNumber(body)) {
+    const parsed = parseFloatLiteral(body, type.bits);
     value = negative ? new BigFloat(true, parsed.kind, parsed.mantissa, parsed.exponent) : parsed;
-  } else if (/^0[xX][\da-fA-F](_?[\da-fA-F])*(\.([\da-fA-F](_?[\da-fA-F])*)?)?([pP][+-]?\d+)?$/.test(body)) {
-    const parsed = parseFloatLiteral(body.toLowerCase(), type.bits);
-    value = negative ? new BigFloat(true, parsed.kind, parsed.mantissa, parsed.exponent) : parsed;
-  } else {
-    return INVALID_CHARACTER;
-  }
+  } else return INVALID_CHARACTER;
   return type.bits <= 64 ? toNumber(value, type.bits as 16 | 32 | 64) : value;
+}
+
+// code-gauge-allow functionCognitiveComplexity 18 -- Scans both numeric radices with the same digit, separator, and exponent rules.
+function isFloatNumber(text: string): boolean {
+  const hexadecimal = text.slice(0, 2).toLowerCase() === '0x';
+  const base = hexadecimal ? 16 : 10;
+  let position = hexadecimal ? 2 : 0;
+  const scanDigits = (radix: number): number => {
+    let count = 0;
+    while (isDigit(text[position], radix)) {
+      count++;
+      position++;
+      if (text[position] === '_' && isDigit(text[position + 1], radix)) position++;
+    }
+    return count;
+  };
+  let digits = scanDigits(base);
+  if (text[position] === '.') {
+    position++;
+    digits += scanDigits(base);
+  }
+  if (digits === 0) return false;
+  if (text[position]?.toLowerCase() === (hexadecimal ? 'p' : 'e')) {
+    position++;
+    if (text[position] === '+' || text[position] === '-') position++;
+    if (scanDigits(10) === 0) return false;
+  }
+  return position === text.length;
+}
+
+function isDigit(character: string | undefined, base: number): boolean {
+  if (character === undefined) return false;
+  const code = character.codePointAt(0) ?? 0;
+  return (code >= 48 && code <= 57) || (base === 16 && (code | 32) >= 97 && (code | 32) <= 102);
 }
 
 function bytesOf(value: Value): number[] {

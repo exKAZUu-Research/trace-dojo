@@ -28,7 +28,7 @@ interface FieldLocation {
 
 const memories = new WeakMap<Value[], BufferMemory>();
 const referenceIds = new WeakMap<object, bigint>();
-const references = new WeakValueMap<bigint, object>();
+const references = new WeakValueMap<string, object>();
 let nextReferenceId = 1n;
 const errorReferenceIds = new WeakMap<object, bigint>();
 let nextErrorReferenceId = 1n;
@@ -66,7 +66,7 @@ export function bindBufferMemory(
 
 class BufferMemory {
   private readonly views = new Map<string, Value>();
-  private readonly referenceHolds = new Map<bigint, object>();
+  private readonly referenceHolds = new Map<string, object>();
 
   constructor(
     private readonly bytes: Value[],
@@ -228,9 +228,9 @@ class BufferMemory {
       case 'pointer': {
         if (type.size === 'slice') {
           const slice = value as Slice;
-          this.writeReference(offset, new Pointer(slice.target, slice.start));
+          this.writeReference(offset, new Pointer(slice.target, slice.start), type);
           this.writeBits(offset + 64, 64, BigInt(slice.length));
-        } else this.writeReference(offset, value);
+        } else this.writeReference(offset, value, type);
         return;
       }
       case 'optional': {
@@ -248,7 +248,7 @@ class BufferMemory {
       }
       case 'error_union': {
         const layout = errorUnionOffsets(type.payload);
-        if (value instanceof ErrorValue) this.writeReference(offset + layout.error * 8, value, 16);
+        if (value instanceof ErrorValue) this.writeReference(offset + layout.error * 8, value, type.errorSet, 16);
         else {
           this.writeBits(offset + layout.error * 8, 16, 0n);
           this.write(type.payload, offset + layout.payload * 8, value);
@@ -256,7 +256,7 @@ class BufferMemory {
         return;
       }
       case 'error_set': {
-        this.writeReference(offset, value, 16);
+        this.writeReference(offset, value, type, 16);
         return;
       }
     }
@@ -279,7 +279,7 @@ class BufferMemory {
       }
       case 'struct': {
         if (type.native?.storageSlots !== undefined || type.native?.kind === 'allocator') {
-          this.writeReference(offset, value);
+          this.writeReference(offset, value, type);
           return;
         }
         const offsets = fieldOffsets(type);
@@ -340,12 +340,13 @@ class BufferMemory {
 
   private reference(offset: number, type: Type, bits = 64): Value {
     const id = this.readBits(offset, bits);
-    const value = this.referenceHolds.get(id) ?? references.get(id);
-    if (value) this.referenceHolds.set(id, value);
+    const key = referenceKey(id, type, bits);
+    const value = this.referenceHolds.get(key) ?? references.get(key);
+    if (value) this.referenceHolds.set(key, value);
     return (value as Value) ?? undefinedValue(type);
   }
 
-  private writeReference(offset: number, value: Value, bits = 64): void {
+  private writeReference(offset: number, value: Value, type: Type, bits = 64): void {
     if (typeof value !== 'object') {
       this.writeBits(offset, bits, 0n);
       return;
@@ -364,8 +365,9 @@ class BufferMemory {
       }
       id = (base << 40n) + BigInt(location.index * 8);
     }
-    references.set(id, value);
-    this.referenceHolds.set(id, value);
+    const key = referenceKey(id, type, bits);
+    references.set(key, value);
+    this.referenceHolds.set(key, value);
     this.writeBits(offset, bits, id);
   }
 
@@ -375,6 +377,11 @@ class BufferMemory {
     const index = type.tagType.fields!.findIndex((field) => field.value === value);
     return index;
   }
+}
+
+function referenceKey(id: bigint, type: Type, bits: number): string {
+  const projection = bits === 16 ? 'error' : typeId(type.kind === 'pointer' ? type.child : type);
+  return `${id} ${projection}`;
 }
 
 function propertyIndex(property: string | symbol): number | undefined {

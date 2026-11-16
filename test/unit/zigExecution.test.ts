@@ -2212,3 +2212,58 @@ test.each(['anyerror', 'error{One,Two}!u8'])('dynamic error casts retain their r
     uncaughtException: 'panic: unexpected error code, found error.Two',
   });
 });
+
+test.each([
+  {
+    name: 'forward',
+    body: `const P=struct{p:*u8,q:*[2]u8};var a=[_]u8{7,8};const p=try f.allocator().create(P);p.*=.{.p=&a[0],.q=&a};std.debug.print("{} {} {} {}",.{p.p.*,p.q[0],p.q[1],p.p==&p.q[0]});`,
+    output: '7 7 8 true',
+  },
+  {
+    name: 'reverse',
+    body: `const P=struct{q:*[2]u8,p:*u8};var a=[_]u8{7,8};const p=try f.allocator().create(P);p.*=.{.q=&a,.p=&a[0]};std.debug.print("{} {} {} {}",.{p.p.*,p.q[0],p.q[1],p.p==&p.q[0]});`,
+    output: '7 7 8 true',
+  },
+  {
+    name: 'slices',
+    body: `const P=struct{s:[]u8,q:*[2]u8,p:*const u8};var a=[_]u8{7,8};const p=try f.allocator().create(P);p.*=.{.s=&a,.q=&a,.p=&a[0]};p.s[1]=9;std.debug.print("{} {} {} {}",.{p.p.*,p.q[0],p.q[1],p.p==&p.q[0]});`,
+    output: '7 7 9 true',
+  },
+])('fixed buffer pointer serialization preserves projections sharing an address: $name', ({ body, output }) => {
+  const source = `const std=@import("std");pub fn main()!void{var buf:[256]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);${body}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: output,
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['0x.8p1', '1'],
+  ['0x1p1_0', '1024'],
+  ['.5e1_0', '5000000000'],
+  ['0X.A_BP+1_0', '684'],
+  ['0x1.', '1'],
+  ['0x1', '1'],
+  ['0x1_e', '30'],
+  ['-0x.8p1', '-1'],
+])('float parsing accepts fractional and separated significands and exponents: %s', (text, output) => {
+  const source = `const std=@import("std");pub fn main()void{std.debug.print("{!}",.{std.fmt.parseFloat(f64,"${text}")});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: output,
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['0x.', '0x1p', '0x1p_1', '0x1p1__0', '0x1_.0', '0x1._0'])(
+  'float parsing rejects missing digits and misplaced separators: %s',
+  (text) => {
+    const source = `const std=@import("std");pub fn main()void{std.debug.print("{!}",.{std.fmt.parseFloat(f64,"${text}")});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'error.InvalidCharacter',
+      uncaughtException: undefined,
+    });
+  }
+);
