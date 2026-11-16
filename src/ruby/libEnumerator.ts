@@ -923,15 +923,14 @@ interface GeneratorData {
 def(
   'Enumerator',
   'initialize',
-  [0, 1],
-  // code-gauge-allow functionCognitiveComplexity 21 -- Receiver types, size conversion, frozen state and producer replacement retain native validation order.
-  // code-gauge-allow functionNcss 31 -- Initializer validation and rooted producer installation share the converted size and receiver.
+  [0, -1],
+  // code-gauge-allow functionCognitiveComplexity 22 -- Receiver types, size conversion, frozen state and producer replacement retain native validation order.
+  // code-gauge-allow functionNcss 33 -- Initializer validation and rooted producer installation share the converted size and receiver.
   function* (self: RObject, args, block) {
-    if (self.cls.isSubclassOf(rt().c['Enumerator::Chain']))
-      throw typeError('wrong argument type chain (expected enumerator)');
     if (self.cls.isSubclassOf(rt().c['Enumerator::Lazy']))
       throw new UnsupportedFeatureError('Enumerator::Lazy#initialize');
     if (!block) throw argumentError('tried to create Proc object without a block');
+    if (args.length > 1) throw argumentCountError(args.length, 0, 1);
     const producer = block;
     const [size] = args;
     let sizeProvider: (() => Value | Gen<Value>) | undefined;
@@ -950,6 +949,8 @@ def(
       }
     }
     assertMutableEnumerator(self);
+    if (self.cls.isSubclassOf(rt().c['Enumerator::Chain']))
+      throw typeError('wrong argument type chain (expected enumerator)');
     const generator = new RObject(rt().c['Enumerator::Generator']);
     const data: GeneratorData = {
       block: producer,

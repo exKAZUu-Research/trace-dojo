@@ -20158,3 +20158,629 @@ test.each(chainConstructionCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', uncaughtException: undefined, ...expected });
   }
 );
+
+const nativeEnumeratorInitializationCases = [
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"wrong argument type chain (expected enumerator)"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, nil);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, nil){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"wrong argument type chain (expected enumerator)"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, 2);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, 2){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"wrong argument type chain (expected enumerator)"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, "x");puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, "x"){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of String into Integer"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, Object.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, Object.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Object into Integer"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, Size.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, Size.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'convert\nTypeError\n"wrong argument type chain (expected enumerator)"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, BadSize.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, BadSize.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'convert\nRuntimeError\n"bad size"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, Callable.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, Callable.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"wrong argument type chain (expected enumerator)"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, -Float::INFINITY);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, -Float::INFINITY){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"-Infinity"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, Float::NAN);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, Float::NAN){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"NaN"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, 1,2);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, 1,2){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 2, expected 0..1)"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"wrong argument type chain (expected enumerator)"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, nil);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, nil){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"wrong argument type chain (expected enumerator)"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, 2);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, 2){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"wrong argument type chain (expected enumerator)"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, "x");puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, "x"){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of String into Integer"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, Object.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, Object.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Object into Integer"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, Size.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, Size.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'convert\nTypeError\n"wrong argument type chain (expected enumerator)"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, BadSize.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, BadSize.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'convert\nRuntimeError\n"bad size"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, Callable.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, Callable.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"wrong argument type chain (expected enumerator)"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, -Float::INFINITY);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, -Float::INFINITY){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"-Infinity"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, Float::NAN);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, Float::NAN){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"NaN"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, 1,2);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain;begin;Enumerator.instance_method(:initialize).bind_call(c, 1,2){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 2, expected 0..1)"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Enumerator::Chain: #<Enumerator::Chain: uninitialized>"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, nil);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, nil){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Enumerator::Chain: #<Enumerator::Chain: uninitialized>"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, 2);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, 2){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Enumerator::Chain: #<Enumerator::Chain: uninitialized>"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, "x");puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, "x"){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of String into Integer"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Object.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Object.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Object into Integer"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Size.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Size.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'convert\nFrozenError\n"can\'t modify frozen Enumerator::Chain: #<Enumerator::Chain: uninitialized>"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, BadSize.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, BadSize.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'convert\nRuntimeError\n"bad size"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Callable.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Callable.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Enumerator::Chain: #<Enumerator::Chain: uninitialized>"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, -Float::INFINITY);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, -Float::INFINITY){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"-Infinity"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Float::NAN);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Float::NAN){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"NaN"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, 1,2);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator::Chain.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, 1,2){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 2, expected 0..1)"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Enumerator::Chain: #<Enumerator::Chain: [[1]]>"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, nil);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, nil){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Enumerator::Chain: #<Enumerator::Chain: [[1]]>"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, 2);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, 2){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Enumerator::Chain: #<Enumerator::Chain: [[1]]>"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, "x");puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, "x"){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of String into Integer"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Object.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Object.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Object into Integer"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Size.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Size.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'convert\nFrozenError\n"can\'t modify frozen Enumerator::Chain: #<Enumerator::Chain: [[1]]>"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, BadSize.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, BadSize.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'convert\nRuntimeError\n"bad size"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Callable.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Callable.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Enumerator::Chain: #<Enumerator::Chain: [[1]]>"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, -Float::INFINITY);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, -Float::INFINITY){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"-Infinity"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Float::NAN);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Float::NAN){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"NaN"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, 1,2);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=[1].chain.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, 1,2){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 2, expected 0..1)"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'initialized\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, nil);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, nil){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'initialized\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, 2);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, 2){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'initialized\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, "x");puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, "x"){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of String into Integer"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, Object.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, Object.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Object into Integer"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, Size.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, Size.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'convert\ninitialized\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, BadSize.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, BadSize.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'convert\nRuntimeError\n"bad size"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, Callable.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, Callable.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'initialized\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, -Float::INFINITY);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, -Float::INFINITY){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"-Infinity"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, Float::NAN);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, Float::NAN){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"NaN"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, 1,2);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate;begin;Enumerator.instance_method(:initialize).bind_call(c, 1,2){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 2, expected 0..1)"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'initialized\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, nil);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, nil){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'initialized\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, 2);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, 2){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'initialized\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, "x");puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, "x"){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of String into Integer"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, Object.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, Object.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Object into Integer"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, Size.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, Size.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'convert\ninitialized\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, BadSize.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, BadSize.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'convert\nRuntimeError\n"bad size"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, Callable.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, Callable.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'initialized\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, -Float::INFINITY);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, -Float::INFINITY){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"-Infinity"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, Float::NAN);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, Float::NAN){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"NaN"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, 1,2);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.new{|y|y<<0};begin;Enumerator.instance_method(:initialize).bind_call(c, 1,2){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 2, expected 0..1)"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Enumerator: #<Enumerator: uninitialized>"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, nil);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, nil){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Enumerator: #<Enumerator: uninitialized>"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, 2);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, 2){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Enumerator: #<Enumerator: uninitialized>"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, "x");puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, "x"){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of String into Integer"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Object.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Object.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"no implicit conversion of Object into Integer"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Size.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Size.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'convert\nFrozenError\n"can\'t modify frozen Enumerator: #<Enumerator: uninitialized>"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, BadSize.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, BadSize.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'convert\nRuntimeError\n"bad size"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Callable.new);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Callable.new){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Enumerator: #<Enumerator: uninitialized>"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, -Float::INFINITY);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, -Float::INFINITY){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"-Infinity"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Float::NAN);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, Float::NAN){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"NaN"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, 1,2);puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"tried to create Proc object without a block"\n',
+  ],
+  [
+    'class Size;def to_int;puts :convert;2;end;end;class BadSize;def to_int;puts :convert;raise "bad size";end;end;class Callable;def call;puts :called;3;end;end;c=Enumerator.allocate.freeze;begin;Enumerator.instance_method(:initialize).bind_call(c, 1,2){|y|y<<1};puts :initialized;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"wrong number of arguments (given 2, expected 0..1)"\n',
+  ],
+] as const;
+
+test.each(nativeEnumeratorInitializationCases)(
+  'borrowed Enumerator initialization preserves native validation order: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
