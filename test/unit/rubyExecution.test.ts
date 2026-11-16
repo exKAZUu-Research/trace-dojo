@@ -15476,3 +15476,307 @@ const nativeSumFallbackCases = [
 test.each(nativeSumFallbackCases)('Sum retains public dispatch after numeric accumulation: %s', (source, stdout) => {
   expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
+
+const nativeAllocatedAdapterCases = [
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_with_index;rescue=>x;p x.class,x.message;end',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: uninitialized>:each_with_index>\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_with_index.take(0).force;rescue=>x;p x.class,x.message;end',
+    '[]\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_with_index.force;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_entry;rescue=>x;p x.class,x.message;end',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: uninitialized>:each_entry>\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_entry.take(0).force;rescue=>x;p x.class,x.message;end',
+    '[]\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_entry.force;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_slice(2);rescue=>x;p x.class,x.message;end',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: uninitialized>:each_slice(2)>\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_slice(2).take(0).force;rescue=>x;p x.class,x.message;end',
+    '[]\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_slice(2).force;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_cons(2);rescue=>x;p x.class,x.message;end',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: uninitialized>:each_cons(2)>\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_cons(2).take(0).force;rescue=>x;p x.class,x.message;end',
+    '[]\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_cons(2).force;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.with_object(1);rescue=>x;p x.class,x.message;end',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: uninitialized>:with_object(1)>\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.with_object(1).take(0).force;rescue=>x;p x.class,x.message;end',
+    '[]\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.with_object(1).force;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_with_object(1);rescue=>x;p x.class,x.message;end',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: uninitialized>:each_with_object(1)>\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_with_object(1).take(0).force;rescue=>x;p x.class,x.message;end',
+    '[]\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_with_object(1).force;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_with_index;rescue=>x;p x.class,x.message;end',
+    '#<Enumerator::Lazy: #<L: uninitialized>:each_with_index>\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_with_index.take(0).force;rescue=>x;p x.class,x.message;end',
+    '[]\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_with_index.force;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_entry;rescue=>x;p x.class,x.message;end',
+    '#<Enumerator::Lazy: #<L: uninitialized>:each_entry>\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_entry.take(0).force;rescue=>x;p x.class,x.message;end',
+    '[]\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_entry.force;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_slice(2);rescue=>x;p x.class,x.message;end',
+    '#<Enumerator::Lazy: #<L: uninitialized>:each_slice(2)>\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_slice(2).take(0).force;rescue=>x;p x.class,x.message;end',
+    '[]\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_slice(2).force;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_cons(2);rescue=>x;p x.class,x.message;end',
+    '#<Enumerator::Lazy: #<L: uninitialized>:each_cons(2)>\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_cons(2).take(0).force;rescue=>x;p x.class,x.message;end',
+    '[]\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_cons(2).force;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.with_object(1);rescue=>x;p x.class,x.message;end',
+    '#<Enumerator::Lazy: #<L: uninitialized>:with_object(1)>\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.with_object(1).take(0).force;rescue=>x;p x.class,x.message;end',
+    '[]\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.with_object(1).force;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_with_object(1);rescue=>x;p x.class,x.message;end',
+    '#<Enumerator::Lazy: #<L: uninitialized>:each_with_object(1)>\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_with_object(1).take(0).force;rescue=>x;p x.class,x.message;end',
+    '[]\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_with_object(1).force;rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_with_index{|*x|p x};rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_entry{|*x|p x};rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_entry(1){|*x|p x};rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_slice(2){|*x|p x};rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_cons(2){|*x|p x};rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.with_object(1){|*x|p x};rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=Enumerator::Lazy.allocate;begin;p e.each_with_object(1){|*x|p x};rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_with_index{|*x|p x};rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_entry{|*x|p x};rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_entry(1){|*x|p x};rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_slice(2){|*x|p x};rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_cons(2){|*x|p x};rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.with_object(1){|*x|p x};rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  [
+    'class L<Enumerator::Lazy;end;e=L.allocate;begin;p e.each_with_object(1){|*x|p x};rescue=>x;p x.class,x.message;end',
+    'ArgumentError\n"uninitialized enumerator"\n',
+  ],
+  ['e=Enumerator::Lazy.allocate;p e.to_enum', '#<Enumerator::Lazy: #<Enumerator::Lazy: uninitialized>:each>\n'],
+  ['e=Enumerator::Lazy.allocate;p e.enum_for(:each)', '#<Enumerator::Lazy: #<Enumerator::Lazy: uninitialized>:each>\n'],
+  [
+    'e=Enumerator::Lazy.allocate;p e.to_enum(:each_entry,1)',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: uninitialized>:each_entry(1)>\n',
+  ],
+  [
+    'e=Enumerator::Lazy.allocate;p e.to_enum(:map)',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: uninitialized>:_enumerable_map>\n',
+  ],
+  [
+    'e=Enumerator::Lazy.allocate;p e.to_enum(:each).take(0)',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: uninitialized>:each>:take(0)>\n',
+  ],
+  [
+    'e=Enumerator::Lazy.allocate;p e.to_enum.each(1)',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: uninitialized>:each(1)>\n',
+  ],
+  [
+    'e=Enumerator::Lazy.allocate;p e.to_enum.each(1).take(0)',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: uninitialized>:each(1)>:take(0)>\n',
+  ],
+  [
+    'e=Enumerator::Lazy.allocate;p e.each_entry(1).to_enum',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: uninitialized>:each_entry(1)>:each>\n',
+  ],
+  [
+    'e=Enumerator::Lazy.allocate;p e.to_enum.each_entry(1)',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: uninitialized>:each>:each_entry(1)>\n',
+  ],
+  ['e=[1,2].lazy;p e.to_enum', '#<Enumerator::Lazy: #<Enumerator::Lazy: [1, 2]>:each>\n'],
+  ['e=[1,2].lazy;p e.enum_for(:each)', '#<Enumerator::Lazy: #<Enumerator::Lazy: [1, 2]>:each>\n'],
+  ['e=[1,2].lazy;p e.to_enum(:each_entry,1)', '#<Enumerator::Lazy: #<Enumerator::Lazy: [1, 2]>:each_entry(1)>\n'],
+  ['e=[1,2].lazy;p e.to_enum(:map)', '#<Enumerator::Lazy: #<Enumerator::Lazy: [1, 2]>:_enumerable_map>\n'],
+  [
+    'e=[1,2].lazy;p e.to_enum(:each).take(0)',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: [1, 2]>:each>:take(0)>\n',
+  ],
+  ['e=[1,2].lazy;p e.to_enum.each(1)', '#<Enumerator::Lazy: #<Enumerator::Lazy: [1, 2]>:each(1)>\n'],
+  [
+    'e=[1,2].lazy;p e.to_enum.each(1).take(0)',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: [1, 2]>:each(1)>:take(0)>\n',
+  ],
+  [
+    'e=[1,2].lazy;p e.each_entry(1).to_enum',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: [1, 2]>:each_entry(1)>:each>\n',
+  ],
+  [
+    'e=[1,2].lazy;p e.to_enum.each_entry(1)',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: [1, 2]>:each>:each_entry(1)>\n',
+  ],
+  [
+    'e=[1,2].lazy.map{|x|x};p e.to_enum',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: [1, 2]>:map>:each>\n',
+  ],
+  [
+    'e=[1,2].lazy.map{|x|x};p e.enum_for(:each)',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: [1, 2]>:map>:each>\n',
+  ],
+  [
+    'e=[1,2].lazy.map{|x|x};p e.to_enum(:each_entry,1)',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: [1, 2]>:map>:each_entry(1)>\n',
+  ],
+  [
+    'e=[1,2].lazy.map{|x|x};p e.to_enum(:map)',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: [1, 2]>:map>:_enumerable_map>\n',
+  ],
+  [
+    'e=[1,2].lazy.map{|x|x};p e.to_enum(:each).take(0)',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: [1, 2]>:map>:each>:take(0)>\n',
+  ],
+  [
+    'e=[1,2].lazy.map{|x|x};p e.to_enum.each(1)',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: [1, 2]>:map>:each(1)>\n',
+  ],
+  [
+    'e=[1,2].lazy.map{|x|x};p e.to_enum.each(1).take(0)',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: [1, 2]>:map>:each(1)>:take(0)>\n',
+  ],
+  [
+    'e=[1,2].lazy.map{|x|x};p e.each_entry(1).to_enum',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: [1, 2]>:map>:each_entry(1)>:each>\n',
+  ],
+  [
+    'e=[1,2].lazy.map{|x|x};p e.to_enum.each_entry(1)',
+    '#<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: #<Enumerator::Lazy: [1, 2]>:map>:each>:each_entry(1)>\n',
+  ],
+] as const;
+
+test.each(nativeAllocatedAdapterCases)(
+  'Lazy adapter construction and enum display preserve native boundaries: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
+
+test('Lazy enum targets keep unavailable private Enumerable aliases explicit', () => {
+  expect(run('p [1,2].lazy.to_enum(:map).force')).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'Enumerator::Lazy#_enumerable_map は、この採点環境では使えません。',
+  });
+});

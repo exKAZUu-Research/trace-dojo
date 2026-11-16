@@ -1126,8 +1126,10 @@ function lazyPipeline(self: RObject): Pick<LazyData, 'source' | 'steps'> {
   return data.steps.length === 0 ? { source: self, steps: [] } : data;
 }
 
-function lazyAdapterPipeline(self: RObject): Pick<LazyData, 'source' | 'steps'> {
-  return self.data === undefined ? { source: self, steps: [] } : lazyPipeline(self);
+function makeLazyAdapter(self: RObject, step: LazyStep, eachArgs: Value[] = []): RObject {
+  const data = self.data === undefined ? { source: self, steps: [] } : lazyPipeline(self);
+  const source = eachArgs.length > 0 ? lazyIterationSource(data.source, eachArgs, []) : data.source;
+  return makeLazy(source, [...data.steps, step]);
 }
 
 function makeLazy(source: Value, steps: LazyStep[]): RObject {
@@ -1156,8 +1158,40 @@ function makeLazy(source: Value, steps: LazyStep[]): RObject {
 
 def('Enumerable', 'lazy', 0, (self) => makeLazy(self, []));
 def('Enumerator::Lazy', 'lazy', 0, (self) => self);
+const lazyEnumerableMethods = new Set([
+  'map',
+  'collect',
+  'flat_map',
+  'collect_concat',
+  'select',
+  'find_all',
+  'filter',
+  'filter_map',
+  'reject',
+  'grep',
+  'grep_v',
+  'zip',
+  'take',
+  'take_while',
+  'drop',
+  'drop_while',
+  'uniq',
+  'with_index',
+]);
+
 def('Enumerator::Lazy', ['to_enum', 'enum_for'], [0, -1], function* (self, args, block) {
-  return makeLazy(yield* invoke(coreMethod(rt().c.Kernel, 'to_enum'), self, args, undefined, block, true), []);
+  const enumerator = (yield* invoke(
+    coreMethod(rt().c.Kernel, 'to_enum'),
+    self,
+    args,
+    undefined,
+    block,
+    true
+  )) as RObject;
+  const source = sourceOf(enumerator);
+  if (lazyEnumerableMethods.has(source.method)) source.method = `_enumerable_${source.method}`;
+  setLazyDisplaySource(enumerator, self, source.args, source.method);
+  return makeLazy(enumerator, []);
 });
 
 for (const kind of [
@@ -1201,17 +1235,14 @@ for (const kind of ['each_slice', 'each_cons'] as const) {
   def('Enumerator::Lazy', kind, 1, function* (self: RObject, [count], block) {
     const { number: size, integer: exactCount } = yield* toIndexExact(count);
     if (size <= 0) throw argumentError(kind === 'each_cons' ? 'invalid size' : 'invalid slice size');
-    const data = lazyAdapterPipeline(self);
-    const lazy = makeLazy(data.source, [...data.steps, { kind, count: size, exactCount, args: [count] }]);
+    const lazy = makeLazyAdapter(self, { kind, count: size, exactCount, args: [count] });
     if (!block) return lazy;
     yield* runLazy(lazy, (value) => callProc(block, [value], { used: false }));
     return self;
   });
 }
 def('Enumerator::Lazy', 'each_entry', [0, -1], function* (self: RObject, args, block) {
-  const data = lazyAdapterPipeline(self);
-  const source = args.length > 0 ? lazyIterationSource(data.source, args, []) : data.source;
-  const lazy = makeLazy(source, [...data.steps, { kind: 'each_entry', args }]);
+  const lazy = makeLazyAdapter(self, { kind: 'each_entry', args }, args);
   if (!block) return lazy;
   yield* runLazy(lazy, (value) => callProc(block, [value], { used: false }));
   return self;
@@ -1222,8 +1253,7 @@ for (const name of ['each_with_object', 'with_object']) {
       yield* runLazy(self, (value) => callProc(block, [value, memo], { used: false }));
       return memo;
     }
-    const data = lazyAdapterPipeline(self);
-    return makeLazy(data.source, [...data.steps, { kind: 'each_with_object', memo, label: name, args: [memo] }]);
+    return makeLazyAdapter(self, { kind: 'each_with_object', memo, label: name, args: [memo] });
   });
 }
 for (const name of ['slice_when', 'slice_before', 'slice_after', 'chunk', 'chunk_while'])
@@ -1276,10 +1306,7 @@ def('Enumerator::Lazy', 'with_index', [0, 1], function* (self: RObject, args, bl
   return makeLazy(data.source, [...data.steps, { kind: 'with_index', offset, block, args: [offset] }]);
 });
 def('Enumerator::Lazy', 'each_with_index', 0, function* (self: RObject, _args, block) {
-  if (!block) {
-    const data = lazyPipeline(self);
-    return makeLazy(data.source, [...data.steps, { kind: 'with_index', offset: 0n, label: 'each_with_index' }]);
-  }
+  if (!block) return makeLazyAdapter(self, { kind: 'with_index', offset: 0n, label: 'each_with_index' });
   let index = 0n;
   return yield* runLazy(self, (value) => callProc(block, [value, index++], { used: false }));
 });
