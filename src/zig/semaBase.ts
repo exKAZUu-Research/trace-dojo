@@ -789,7 +789,7 @@ export abstract class SemaBase implements SemaApi {
   }
 
   // code-gauge-allow functionNcss 31 -- Checks each rule of Zig's type coercion or container analysis in turn.
-  // code-gauge-allow functionCognitiveComplexity 25 -- Checks each rule of Zig's type coercion or container analysis in turn.
+  // code-gauge-allow functionCognitiveComplexity 27 -- Checks each rule of Zig's type coercion or container analysis in turn.
   private coerceToPointer(expression: TExpr, to: Extract<Type, { kind: 'pointer' }>, span: Span): TExpr | undefined {
     const from = expression.type;
     if (from.kind === 'fn' || (from === NATIVE_FN_TYPE && expression.value instanceof FnRef)) {
@@ -818,7 +818,7 @@ export abstract class SemaBase implements SemaApi {
           const array = (value as Pointer).load() as ZArray;
           return new Slice(array, array.offset, length);
         }),
-        knownLength: length,
+        knownLength: expression.known ? length : expression.knownLength,
       };
     }
     return undefined;

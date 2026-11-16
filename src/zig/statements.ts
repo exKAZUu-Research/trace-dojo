@@ -238,11 +238,10 @@ export abstract class StatementCompiler extends CallCompiler {
             try {
               completion = run(frame);
             } catch (error) {
-              if (error instanceof Jump)
-                runDefers(frame, mark, isErrorReturn(error, fnTarget) ? error.value : undefined);
+              if (error instanceof Jump) runDefers(frame, mark, error, fnTarget);
               throw error;
             }
-            runDefers(frame, mark, completion && isErrorReturn(completion, fnTarget) ? completion.value : undefined);
+            runDefers(frame, mark, completion, fnTarget);
             return completion;
           } finally {
             clear(frame);
@@ -2313,13 +2312,16 @@ function unwrapParens(expression: Expression): Expression {
   return expression.kind === 'paren' ? unwrapParens(expression.operand) : expression;
 }
 
-function runDefers(frame: Frame, mark: number, error: Value): void {
-  while (frame.defers.length > mark) {
-    const deferred = frame.defers.pop();
-    if (!deferred) break;
-    if (deferred.isErrdefer && error === undefined) continue;
-    deferred.run(frame);
-  }
+function runDefers(frame: Frame, mark: number, completion: Jump | undefined, fnTarget: object | undefined): void {
+  const error = completion && isErrorReturn(completion, fnTarget) ? completion.value : undefined;
+  withHeldValues(frame, completion ? [completion.value] : [], () => {
+    while (frame.defers.length > mark) {
+      const deferred = frame.defers.pop();
+      if (!deferred) break;
+      if (deferred.isErrdefer && error === undefined) continue;
+      deferred.run(frame);
+    }
+  });
 }
 
 function isErrorReturn(jump: Jump, fnTarget: object | undefined): boolean {

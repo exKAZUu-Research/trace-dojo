@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 765 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 766 -- The file holds one layer of the compiler, whose parts share its private state.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -25,10 +25,11 @@ import type {
   UnaryOperator,
   VariableDeclaration,
 } from './ast';
-import { LiteralDecoder, parseFloatText, parseIntegerText } from './literals';
+import { LiteralDecoder, parseFloatText, parseIntegerText, validateCommentText } from './literals';
 
 /** Converts tree-sitter's tree of a file into the AST, rejecting the syntax this grader does not run. */
 export function convertFile(root: Node): SourceFile {
+  validateCommentText(root);
   source = root.text;
   literals = new LiteralDecoder();
   functions = [];

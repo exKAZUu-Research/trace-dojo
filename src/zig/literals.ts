@@ -7,6 +7,20 @@ function fail(node: Node, message: string): never {
   throw new CompileError([{ row: node.startPosition.row, message }]);
 }
 
+export function validateCommentText(root: Node): void {
+  const source = root.text;
+  const pending = [root];
+  while (pending.length > 0) {
+    const node = pending.pop() as Node;
+    if (node.type === 'comment' || node.type === 'doc_comment' || node.type === 'container_doc_comment') {
+      const text = node.text.endsWith('\r') && source[node.endIndex] === '\n' ? node.text.slice(0, -1) : node.text;
+      validateRawText(text.replaceAll(/\r?\n/g, ''), node);
+    } else {
+      for (const child of node.namedChildren) pending.push(child);
+    }
+  }
+}
+
 export class LiteralDecoder {
   private allocated = 0;
 
@@ -82,7 +96,7 @@ export class LiteralDecoder {
 function validateRawText(text: string, node: Node): void {
   for (let index = 0; index < text.length; index++) {
     const code = text.codePointAt(index) as number;
-    if (code < 0x20 || code === 0x7f) fail(node, 'リテラルに、そのまま書けない制御文字があります。');
+    if (code < 0x20 || code === 0x7f) fail(node, 'そのまま書けない制御文字があります。');
   }
 }
 

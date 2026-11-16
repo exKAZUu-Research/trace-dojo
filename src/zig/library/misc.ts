@@ -39,6 +39,12 @@ import { addMembers, compileArgs, expectArgs, fnMember, type Member, nativeStruc
 // std.unicode -----------------------------------------------------------------------------------------------------------
 
 const U3 = intType(false, 3);
+const UTF8_DECODE_ERRORS = [
+  'Utf8ExpectedContinuation',
+  'Utf8OverlongEncoding',
+  'Utf8EncodesSurrogateHalf',
+  'Utf8CodepointTooLarge',
+];
 
 function sequenceLength(first: number): number | undefined {
   if (first < 0x80) return 1;
@@ -84,15 +90,15 @@ function byteNumbers(value: Value): number[] {
   return elements(value).map((byte) => Number(byte as bigint));
 }
 
-/** Whether a byte string is valid UTF-8, and its code points. */
-function codepoints(bytes: number[]): number[] | undefined {
+function codepoints(bytes: number[]): number[] | string {
   const result: number[] = [];
   let index = 0;
   while (index < bytes.length) {
     const length = sequenceLength(bytes[index]);
-    if (length === undefined || index + length > bytes.length) return undefined;
+    if (length === undefined) return 'Utf8InvalidStartByte';
+    if (index + length > bytes.length) return 'TruncatedInput';
     const value = decode(bytes.slice(index, index + length));
-    if (typeof value === 'string') return undefined;
+    if (typeof value === 'string') return value;
     result.push(value);
     index += length;
   }
@@ -156,7 +162,7 @@ addMembers(UTF8_VIEW, {
   init: fnMember('Utf8View.init', (sema, call) => {
     const [text] = compileArgs(sema, expectArgs(sema, call, 1, 'Utf8View.init'), [CONST_U8_SLICE]);
     return computed(errorUnionOf(errorSetOf(['InvalidUtf8']), UTF8_VIEW), [text], call.span, ([value]) =>
-      codepoints(byteNumbers(value)) ? new ZStruct([value]) : ErrorValue.of('InvalidUtf8')
+      typeof codepoints(byteNumbers(value)) === 'string' ? ErrorValue.of('InvalidUtf8') : new ZStruct([value])
     );
   }),
   initUnchecked: fnMember('Utf8View.initUnchecked', (sema, call) => {
@@ -222,12 +228,7 @@ const UNICODE: Record<string, () => Member> = {
   utf8Decode: fnMember('std.unicode.utf8Decode', (sema, call) => {
     const [bytesArg] = expectArgs(sema, call, 1, 'utf8Decode');
     const bytes = constSlice(sema, bytesArg, U8);
-    const errors = errorSetOf([
-      'Utf8ExpectedContinuation',
-      'Utf8OverlongEncoding',
-      'Utf8EncodesSurrogateHalf',
-      'Utf8CodepointTooLarge',
-    ]);
+    const errors = errorSetOf(UTF8_DECODE_ERRORS);
     return computed(errorUnionOf(errors, U21), [bytes], call.span, ([value]) => {
       const result = decode(byteNumbers(value));
       return typeof result === 'string' ? ErrorValue.of(result) : BigInt(result);
@@ -244,19 +245,19 @@ const UNICODE: Record<string, () => Member> = {
     const [textArg] = expectArgs(sema, call, 1, 'utf8CountCodepoints');
     const text = constSlice(sema, textArg, U8);
     return computed(
-      errorUnionOf(errorSetOf(['Utf8InvalidStartByte', 'TruncatedInput']), USIZE),
+      errorUnionOf(errorSetOf(['Utf8InvalidStartByte', 'TruncatedInput', ...UTF8_DECODE_ERRORS]), USIZE),
       [text],
       call.span,
       ([value]) => {
         const points = codepoints(byteNumbers(value));
-        return points ? BigInt(points.length) : ErrorValue.of('Utf8InvalidStartByte');
+        return typeof points === 'string' ? ErrorValue.of(points) : BigInt(points.length);
       }
     );
   }),
   utf8ValidateSlice: fnMember('std.unicode.utf8ValidateSlice', (sema, call) => {
     const [textArg] = expectArgs(sema, call, 1, 'utf8ValidateSlice');
     const text = constSlice(sema, textArg, U8);
-    return computed(BOOL, [text], call.span, ([value]) => codepoints(byteNumbers(value)) !== undefined);
+    return computed(BOOL, [text], call.span, ([value]) => typeof codepoints(byteNumbers(value)) !== 'string');
   }),
 };
 

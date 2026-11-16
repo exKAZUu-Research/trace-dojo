@@ -473,7 +473,10 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     if (place) {
       const type = pointerTo(expression.type, place.isConst);
-      return runtime(type, (frame) => place.locate(frame), span);
+      return {
+        ...runtime(type, (frame) => place.locate(frame), span),
+        knownLength: expression.known && expression.type.kind === 'array' ? expression.type.length : undefined,
+      };
     }
     if (expression.known) {
       const storage = new Constant(copyForStorage(expression.value));
@@ -694,14 +697,17 @@ export abstract class ExpressionCompiler extends SemaBase {
       });
     };
     if (resultLength !== undefined) {
-      return runtime(
-        resultType,
-        (frame) => {
-          const { target, from, to } = compute(frame);
-          return new Pointer(new Constant(new ZArray(target.slots, from, to - from, sentinel !== undefined)), 0);
-        },
-        expression
-      );
+      return {
+        ...runtime(
+          resultType,
+          (frame) => {
+            const { target, from, to } = compute(frame);
+            return new Pointer(new Constant(new ZArray(target.slots, from, to - from, sentinel !== undefined)), 0);
+          },
+          expression
+        ),
+        knownLength: base.known || base.knownLength !== undefined ? resultLength : undefined,
+      };
     }
     return runtime(
       resultType,

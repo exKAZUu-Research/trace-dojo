@@ -1207,8 +1207,8 @@ test('known slice bounds survive pointer coercions and const aliases', () => {
     executeProgram(
       'zig',
       `const std = @import("std"); pub fn main() void {
-    var a = [_]u8{1,2,3}; const s: []u8 = &a; var b: [s.len]u8 = undefined; _ = &b;
-    var dynamic: []u8 = s; dynamic.len = 1; var index: usize = 2; _ = &index; _ = dynamic[index];
+    const a = [_]u8{1,2,3}; const s: []const u8 = &a; var b: [s.len]u8 = undefined; _ = &b;
+    var dynamic: []const u8 = s; dynamic.len = 1; var index: usize = 2; _ = &index; _ = dynamic[index];
   }`
     )
   ).toMatchObject({ kind: 'executed', uncaughtException: 'panic: index out of bounds: index 2, len 1' });
@@ -1471,4 +1471,59 @@ test('block sort matches reference callback and array hashes across cache bounda
       uncaughtException: undefined,
     });
   }
+});
+
+test('mutable-backed slices retain runtime bounds while arrays retain type bounds', () => {
+  for (const tail of [
+    'const s: []i32 = &a; _ = s[3];',
+    'const s: []i32 = &a; _ = s[1..4];',
+    'const s: []i32 = &a; _ = s[4..];',
+    'const s: []i32 = a[1..]; _ = s[2];',
+    'const s = @as([]i32, &a); _ = s[3];',
+    'const p = &a; const s: []const i32 = p; _ = s[3];',
+    'const s: []i32 = &a; var b: [4]i32 = undefined; @memcpy(&b, s);',
+    'const s: []i32 = &a; for (s, 0..4) |x, i| { _ = x; _ = i; }',
+  ]) {
+    const result = executeProgram('zig', `pub fn main() void { var a = [_]i32{1,2,3}; ${tail} }`);
+    expect(result).toMatchObject({ kind: 'executed', uncaughtException: expect.stringContaining('panic:') });
+  }
+  expect(executeProgram('zig', 'pub fn main() void { var a = [_]i32{1,2,3}; _ = &a; _ = a[3]; }').kind).toBe(
+    'compileError'
+  );
+});
+
+test('all comment kinds reject raw controls while ordinary whitespace and CRLF remain valid', () => {
+  for (const prefix of ['//', '///', '//!']) {
+    for (const control of ['\t', '\u0000', '\u0007', '\u007F', '\r']) {
+      const source = `${prefix} a${control}b\npub fn main() void {}`;
+      expect(executeProgram('zig', source).kind).toBe('compileError');
+    }
+    expect(executeProgram('zig', `${prefix} valid\r\npub fn main() void {}`).kind).toBe('executed');
+  }
+  expect(executeProgram('zig', 'pub fn main() void {\n\tconst\tx: u8 = 1; // valid\n\t_ = x;\n}').kind).toBe(
+    'executed'
+  );
+});
+
+test('UTF-8 counting preserves decoding errors and validation reports failure', () => {
+  const source = String.raw`const std=@import("std");
+fn report(s: []const u8) void {
+    const count=std.unicode.utf8CountCodepoints(s) catch |e| {
+        std.debug.print("{s} {}|", .{@errorName(e),std.unicode.utf8ValidateSlice(s)});
+        return;
+    };
+    std.debug.print("{d} {}|", .{count,std.unicode.utf8ValidateSlice(s)});
+}
+pub fn main() void {
+    report("\xC3"); report("\xE2\x82"); report("\xF0\x90\x80");
+    report("\x80"); report("\xC3x"); report("\xC0\x80");
+    report("\xED\xA0\x80"); report("\xF4\x90\x80\x80");
+    report(""); report("aé日");
+}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr:
+      'TruncatedInput false|TruncatedInput false|TruncatedInput false|Utf8InvalidStartByte false|Utf8ExpectedContinuation false|Utf8OverlongEncoding false|Utf8EncodesSurrogateHalf false|Utf8CodepointTooLarge false|0 true|3 true|',
+    uncaughtException: undefined,
+  });
 });

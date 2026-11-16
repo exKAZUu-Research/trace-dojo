@@ -310,3 +310,19 @@ pub fn main() void {
     expect(item.callLines.length).toBeLessThanOrEqual(1);
   }
 });
+
+test.each([
+  'fn make() Turtle { defer observe(); return Turtle.init(0,1); } pub fn main() void { const t=make(); t.forward(); }',
+  'pub fn main() void { const t=blk:{ defer observe(); break :blk Turtle.init(0,1); }; t.forward(); }',
+  'fn make(flag: bool) Turtle { defer observe(); return blk:{ defer observe(); if (flag) return Turtle.init(0,1); break :blk Turtle.init(0,1); }; } pub fn main() void { const t=make(true); t.forward(); }',
+  'fn make() ?Turtle { defer observe(); return Turtle.init(0,1); } pub fn main() void { const t=make().?; t.forward(); }',
+])('pending jump values remain reachable through deferred calls: %s', (body) => {
+  const source = `const std=@import("std");
+fn observe() void { const t=Turtle.init(0,0); std.debug.print("{}|", .{t.canMoveForward()}); }
+${body}`;
+  const result = traceProgram('zig', source, source);
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.stderr).not.toContain('true');
+  expect(result.stderr).toContain('false|');
+  expect(result.finalTurtles).toEqual([{ x: 0, y: 2, color: '#', dir: 'N' }]);
+});
