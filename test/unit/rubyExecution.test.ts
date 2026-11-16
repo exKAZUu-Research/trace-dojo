@@ -18036,3 +18036,32 @@ test('program globals share frozen literal and source-file identity', () => {
     stdout: '[true, true, true]\n',
   });
 });
+
+test.each(['(a*)?', '(?:(a*))?', '(a?){0,1}'])(
+  'regexp refuses divergent empty captures in optional groups: %s',
+  (pattern) => {
+    expect(run(`p Regexp.new(${JSON.stringify(pattern)}).match("b").to_a`)).toMatchObject({
+      stdout: '',
+      uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+    });
+  }
+);
+
+test('exact empty capture and zero-iteration captures retain native values', () => {
+  expect(run('p "b".match(/(a*){1}/).to_a;p "b".match(/(a){0}/).to_a')).toMatchObject({
+    stdout: '["", ""]\n["", nil]\n',
+  });
+});
+
+test.each([
+  'p /(a*)?/.match("").to_a',
+  'p "".scan(/(a*)?/)',
+  '/(a*)?/ =~ "";p $1',
+  String.raw`p "key=".match(/(\w+)=(\w*)?/).to_a`,
+  String.raw`p "ab".match(/(?<n>\d*)?ab/)[:n]`,
+])('nullable optional capture consumers fail explicitly: %s', (source) => {
+  expect(run(source)).toMatchObject({
+    stdout: '',
+    uncaughtException: '正規表現の繰り返し・後読みキャプチャは、この採点環境では使えません。',
+  });
+});

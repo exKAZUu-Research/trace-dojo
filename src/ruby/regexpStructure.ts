@@ -223,10 +223,7 @@ export function requiresNativeCaptureParity(source: string): boolean {
     onCapturingGroupEnter(node) {
       let parent: AST.Node | null = node.parent;
       while (parent) {
-        if (
-          (parent.type === 'Quantifier' && parent.max > 1) ||
-          (parent.type === 'Assertion' && parent.kind === 'lookbehind')
-        )
+        if (parent.type === 'Quantifier' || (parent.type === 'Assertion' && parent.kind === 'lookbehind'))
           needed = true;
         parent = parent.parent;
       }
