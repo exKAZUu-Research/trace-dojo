@@ -14807,3 +14807,61 @@ test('Percent words reject physical control-newline operands', () => {
         });
       }
 });
+
+const prettyRecordDispatchCases = [
+  [
+    'class C;def inspect;puts :inspected;"c"*40;end;end;S=Struct.new(:a){def inspect;raise "unused";end};pp S.new(1)',
+    '#<struct S a=1>\n',
+  ],
+  [
+    'class C;def inspect;puts :inspected;"c"*40;end;end;S=Struct.new(:a){def inspect;raise "unused";end};pp [S.new(1),S.new(2)]',
+    '[#<struct S a=1>, #<struct S a=2>]\n',
+  ],
+  [
+    'class C;def inspect;puts :inspected;"c"*40;end;end;S=Struct.new(:a){def inspect;raise "unused";end};pp({a:S.new(1),b:S.new(2)})',
+    '{a: #<struct S a=1>, b: #<struct S a=2>}\n',
+  ],
+  [
+    'class C;def inspect;puts :inspected;"c"*40;end;end;S=Struct.new(:a){def inspect;raise "unused";end};pp [S.new(C.new),S.new(C.new)]',
+    '[#<struct Sinspected\ninspected\n a=cccccccccccccccccccccccccccccccccccccccc>,\n #<struct S a=cccccccccccccccccccccccccccccccccccccccc>]\n',
+  ],
+  [
+    'class C;def inspect;puts :inspected;"c"*40;end;end;S=Struct.new(:a){def inspect;raise "unused";end};x=S.new(C.new);pp [x,x]',
+    '[#<struct Sinspected\ninspected\n a=cccccccccccccccccccccccccccccccccccccccc>,\n #<struct S a=cccccccccccccccccccccccccccccccccccccccc>]\n',
+  ],
+  [
+    'class C;def inspect;puts :inspected;"c"*40;end;end;S=Struct.new(:a){def inspect;raise "unused";end};pp [C.new,S.new(1),C.new]',
+    '[inspected\ncccccccccccccccccccccccccccccccccccccccc,inspected\n\n #<struct S a=1>,\n cccccccccccccccccccccccccccccccccccccccc]\n',
+  ],
+  [
+    'class C;def inspect;puts :inspected;"c"*40;end;end;S=Data.define(:a){def inspect;raise "unused";end};pp S.new(1)',
+    '#<data S a=1>\n',
+  ],
+  [
+    'class C;def inspect;puts :inspected;"c"*40;end;end;S=Data.define(:a){def inspect;raise "unused";end};pp [S.new(1),S.new(2)]',
+    '[#<data S a=1>, #<data S a=2>]\n',
+  ],
+  [
+    'class C;def inspect;puts :inspected;"c"*40;end;end;S=Data.define(:a){def inspect;raise "unused";end};pp({a:S.new(1),b:S.new(2)})',
+    '{a: #<data S a=1>, b: #<data S a=2>}\n',
+  ],
+  [
+    'class C;def inspect;puts :inspected;"c"*40;end;end;S=Data.define(:a){def inspect;raise "unused";end};pp [S.new(C.new),S.new(C.new)]',
+    '[#<data Sinspected\ninspected\n a=cccccccccccccccccccccccccccccccccccccccc>,\n #<data S a=cccccccccccccccccccccccccccccccccccccccc>]\n',
+  ],
+  [
+    'class C;def inspect;puts :inspected;"c"*40;end;end;S=Data.define(:a){def inspect;raise "unused";end};x=S.new(C.new);pp [x,x]',
+    '[#<data Sinspected\ninspected\n a=cccccccccccccccccccccccccccccccccccccccc>,\n #<data S a=cccccccccccccccccccccccccccccccccccccccc>]\n',
+  ],
+  [
+    'class C;def inspect;puts :inspected;"c"*40;end;end;S=Data.define(:a){def inspect;raise "unused";end};pp [C.new,S.new(1),C.new]',
+    '[inspected\ncccccccccccccccccccccccccccccccccccccccc,inspected\n\n #<data S a=1>,\n cccccccccccccccccccccccccccccccccccccccc]\n',
+  ],
+] as const;
+
+test.each(prettyRecordDispatchCases)(
+  'Pretty printing retains record dispatch across deferred callbacks: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);

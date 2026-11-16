@@ -246,7 +246,8 @@ function group(
   };
 }
 
-function showsItself(value: Value): boolean {
+function usesInspectCallback(value: Value): boolean {
+  if (value instanceof RObject && structEntriesOf(value) !== undefined) return false;
   const method = classOf(value).findMethod('inspect');
   return method !== undefined && !isCoreMethod(method, method.owner, 'inspect');
 }
@@ -255,8 +256,8 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = fa
   rt().spend();
   if (seen.size >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
   if (++budget.nodes > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
-  if (defer && showsItself(value)) return { kind: 'text', text: '', deferred: value };
-  if (value instanceof RArray && !showsItself(value)) {
+  if (defer && usesInspectCallback(value)) return { kind: 'text', text: '', deferred: value };
+  if (value instanceof RArray && !usesInspectCallback(value)) {
     if (seen.has(value)) return text('[...]', budget);
     seen.add(value);
     try {
@@ -270,7 +271,7 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = fa
       seen.delete(value);
     }
   }
-  if (value instanceof RHash && !showsItself(value)) {
+  if (value instanceof RHash && !usesInspectCallback(value)) {
     if (seen.has(value)) return text('{...}', budget);
     seen.add(value);
     value.iterating++;
@@ -288,7 +289,7 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = fa
       seen.delete(value);
     }
   }
-  if (value instanceof RString && !showsItself(value)) {
+  if (value instanceof RString && !usesInspectCallback(value)) {
     const lines = stringLines(value);
     if (lines.length <= 1) return text(yield* inspect(value), budget);
     const parts: Doc[] = [];
@@ -326,7 +327,7 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = fa
     value instanceof RObject &&
     !value.exception &&
     value.data === undefined &&
-    !showsItself(value) &&
+    !usesInspectCallback(value) &&
     isCoreMethod(classOf(value).findMethod('to_s'), rt().c.Kernel, 'to_s') &&
     value.ivars &&
     value.ivars.size > 0
@@ -357,7 +358,7 @@ function inspectionCallbackCount(value: Value, seen: Set<object>, budget: BuildB
   rt().spend();
   if (depth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
   if (++budget.nodes > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
-  if (showsItself(value)) return 1;
+  if (usesInspectCallback(value)) return 1;
   if (!(value instanceof RBasic) || seen.has(value)) return 0;
   seen.add(value);
   let count = 0;
