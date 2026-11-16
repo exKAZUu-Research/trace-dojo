@@ -1,5 +1,6 @@
 import { FUNCTION_TYPE } from './builtinTypes';
 import type { ClassEnv } from './classEnv';
+import { chargeCompilationWork } from './compilationBudget';
 import { DERIVABLE_CLASSES, deriveInstance } from './deriving';
 import {
   type ClassEntity,
@@ -30,9 +31,11 @@ import {
   instantiateType,
   type Kind,
   kindArrow,
+  mapType,
   matchType,
   type Pred,
   prune,
+  quantifyType,
   type Scheme,
   splitApp,
   STAR,
@@ -305,6 +308,7 @@ function validateInstanceTermination(info: InstanceInfo, span: Span): void {
 }
 
 function instanceTypeSize(type: Type, vars: Map<number, number>): number {
+  chargeCompilationWork();
   const current = prune(type);
   if (current.tag === 'tgen') vars.set(current.index, (vars.get(current.index) ?? 0) + 1);
   if (current.tag === 'tap') return instanceTypeSize(current.fn, vars) + instanceTypeSize(current.arg, vars);
@@ -447,11 +451,9 @@ function checkInstanceMethods(checker: Checker, declared: DeclaredInstance): Omi
 
 /** Replaces `TGen 0` (the class variable) by a type and shifts the other indices down by one. */
 function shiftGens(type: Type, replacement: Type): Type {
-  const pruned = prune(type);
-  if (pruned.tag === 'tgen') return pruned.index === 0 ? replacement : { tag: 'tgen', index: pruned.index - 1 };
-  if (pruned.tag === 'tap')
-    return { tag: 'tap', fn: shiftGens(pruned.fn, replacement), arg: shiftGens(pruned.arg, replacement) };
-  return pruned;
+  return mapType(type, (node) =>
+    node.tag === 'tgen' ? (node.index === 0 ? replacement : { tag: 'tgen', index: node.index - 1 }) : node
+  );
 }
 
 function checkClauses(checker: Checker, binding: Extract<RBinding, { k: 'fun' }>, type: Type): void {
@@ -567,7 +569,7 @@ function inferDerivedContext(checker: Checker, decl: RDataDecl, cls: ClassEntity
     const { head } = splitApp(type);
     if (head.tag === 'tvar') {
       // GHC infers constraints on the type's variables, such as `Show a` or `Show (b a)`.
-      const generic = generalizeParams(type, params);
+      const generic = quantifyType(type, params);
       const key = `${pred.cls.id}:${printer.show(generic)}`;
       if (!keys.has(key)) {
         keys.add(key);
@@ -587,16 +589,6 @@ function inferDerivedContext(checker: Checker, decl: RDataDecl, cls: ClassEntity
     }
   }
   return context.toSorted((a, b) => printer.showPred(a).localeCompare(printer.showPred(b)));
-}
-
-/** Replaces a derived instance's type parameters by its scheme's variables. */
-function generalizeParams(type: Type, params: readonly Type[]): Type {
-  const pruned = prune(type);
-  const index = params.indexOf(pruned);
-  if (index !== -1) return { tag: 'tgen', index };
-  if (pruned.tag === 'tap')
-    return { tag: 'tap', fn: generalizeParams(pruned.fn, params), arg: generalizeParams(pruned.arg, params) };
-  return pruned;
 }
 
 function sameContext(a: Pred[], b: Pred[]): boolean {

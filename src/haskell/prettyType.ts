@@ -1,13 +1,30 @@
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import { chargeCompilationWork } from './compilationBudget';
 import { type Pred, prune, splitApp, type TVar, type Type } from './types';
 
 /** Names the variables of the types printed in one message alike: `a`, `b`, ... in order of appearance. */
 export class TypePrinter {
   private readonly names = new Map<TVar, string>();
   private readonly used = new Set<string>();
+  private remaining = LIMITS.maxStringLength;
+  private depth = 0;
 
   constructor(private readonly genNames: readonly string[] = []) {}
 
   show(type: Type, precedence = 0): string {
+    chargeCompilationWork();
+    if (++this.depth > LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
+    try {
+      const text = this.showInner(type, precedence);
+      this.remaining -= text.length;
+      if (this.remaining < 0) throw new ExecutionLimitError('operations');
+      return text;
+    } finally {
+      this.depth--;
+    }
+  }
+
+  private showInner(type: Type, precedence: number): string {
     const pruned = prune(type);
     switch (pruned.tag) {
       case 'tvar': {
@@ -58,7 +75,10 @@ export class TypePrinter {
     if (name) return name;
     const base = variable.name ?? 'a';
     name = base;
-    for (let index = 0; this.used.has(name); index++) name = `${base}${index}`;
+    for (let index = 0; this.used.has(name); index++) {
+      chargeCompilationWork();
+      name = `${base}${index}`;
+    }
     this.used.add(name);
     this.names.set(variable, name);
     return name;

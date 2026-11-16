@@ -1,4 +1,7 @@
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import { chargeCompilationWork } from './compilationBudget';
 import type { ClassEntity, TypeEntity } from './entities';
+import { mapGraph, walkGraph, walkGraphPairs } from './typeGraph';
 
 export type Kind = { tag: 'star' } | { tag: 'arrow'; from: Kind; to: Kind } | KindVar;
 
@@ -11,6 +14,7 @@ export interface KindVar {
 export const STAR: Kind = { tag: 'star' };
 
 export function kindArrow(from: Kind, to: Kind): Kind {
+  chargeCompilationWork();
   return { tag: 'arrow', from, to };
 }
 
@@ -24,50 +28,63 @@ export function simpleKind(arity: number): Kind {
 let nextKindVar = 0;
 
 export function freshKindVar(): KindVar {
+  chargeCompilationWork();
   return { tag: 'kvar', id: nextKindVar++ };
 }
 
 export function pruneKind(kind: Kind): Kind {
-  if (kind.tag === 'kvar' && kind.ref) {
-    kind.ref = pruneKind(kind.ref);
-    return kind.ref;
+  if (kind.tag !== 'kvar' || !kind.ref) return kind;
+  const path: KindVar[] = [];
+  while (kind.tag === 'kvar' && kind.ref) {
+    chargeCompilationWork();
+    path.push(kind);
+    kind = kind.ref;
   }
+  for (const variable of path) variable.ref = kind;
   return kind;
 }
 
 /** Replaces the kind variables nothing determined with `*`, as Haskell 98 defaults them. */
 export function defaultKind(kind: Kind): Kind {
-  const pruned = pruneKind(kind);
-  if (pruned.tag === 'kvar') {
-    pruned.ref = STAR;
-    return STAR;
-  }
-  if (pruned.tag === 'arrow') return kindArrow(defaultKind(pruned.from), defaultKind(pruned.to));
-  return pruned;
+  return mapGraph<Kind>(kind, pruneKind, kindChildren, (node, mapped) => {
+    if (node.tag === 'kvar') {
+      node.ref = STAR;
+      return STAR;
+    }
+    return node.tag === 'arrow' ? kindArrow(mapped[0], mapped[1]) : node;
+  });
 }
 
 export function unifyKinds(a: Kind, b: Kind): boolean {
-  const x = pruneKind(a);
-  const y = pruneKind(b);
-  if (x === y) return true;
-  if (x.tag === 'kvar') {
-    if (occursKind(x, y)) return false;
-    x.ref = y;
-    return true;
+  for (const [x, y] of walkGraphPairs(a, b, pruneKind, kindChildren)) {
+    if (x === y) continue;
+    if (x.tag === 'kvar') {
+      if (occursKind(x, y)) return false;
+      x.ref = y;
+    } else if (y.tag === 'kvar') {
+      if (occursKind(y, x)) return false;
+      y.ref = x;
+    } else if (x.tag !== y.tag) return false;
   }
-  if (y.tag === 'kvar') return unifyKinds(y, x);
-  if (x.tag === 'star' && y.tag === 'star') return true;
-  if (x.tag === 'arrow' && y.tag === 'arrow') return unifyKinds(x.from, y.from) && unifyKinds(x.to, y.to);
-  return false;
+  return true;
 }
 
 function occursKind(variable: KindVar, kind: Kind): boolean {
-  const pruned = pruneKind(kind);
-  if (pruned === variable) return true;
-  return pruned.tag === 'arrow' && (occursKind(variable, pruned.from) || occursKind(variable, pruned.to));
+  for (const node of walkGraph(kind, pruneKind, kindChildren)) if (node === variable) return true;
+  return false;
+}
+
+function kindChildren(kind: Kind): Kind[] {
+  return kind.tag === 'arrow' ? [kind.from, kind.to] : [];
 }
 
 export function showKind(kind: Kind): string {
+  return printKind(kind, 0);
+}
+
+function printKind(kind: Kind, depth: number): string {
+  chargeCompilationWork();
+  if (depth > LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
   const pruned = pruneKind(kind);
   switch (pruned.tag) {
     case 'star': {
@@ -78,8 +95,8 @@ export function showKind(kind: Kind): string {
     }
     case 'arrow': {
       const from = pruneKind(pruned.from);
-      const left = from.tag === 'arrow' ? `(${showKind(from)})` : showKind(from);
-      return `${left} -> ${showKind(pruned.to)}`;
+      const left = from.tag === 'arrow' ? `(${printKind(from, depth + 1)})` : printKind(from, depth + 1);
+      return `${left} -> ${printKind(pruned.to, depth + 1)}`;
     }
   }
 }
@@ -121,40 +138,52 @@ export interface TGen {
 let nextTypeVar = 0;
 
 export function freshTypeVar(kind: Kind, level: number, name?: string): TVar {
+  chargeCompilationWork();
   return { tag: 'tvar', id: nextTypeVar++, kind, level, name };
 }
 
 export function freshSkolem(kind: Kind, level: number, name: string): TVar {
+  chargeCompilationWork();
   return { tag: 'tvar', id: nextTypeVar++, kind, level, name, skolem: true };
 }
 
 export function tcon(entity: TypeEntity): TCon {
+  chargeCompilationWork();
   return { tag: 'tcon', entity };
 }
 
 export function tap(fn: Type, ...args: Type[]): Type {
   let type = fn;
-  for (const arg of args) type = { tag: 'tap', fn: type, arg };
+  for (const arg of args) {
+    chargeCompilationWork();
+    type = { tag: 'tap', fn: type, arg };
+  }
   return type;
 }
 
 export function prune(type: Type): Type {
-  if (type.tag === 'tvar' && type.ref) {
-    type.ref = prune(type.ref);
-    return type.ref;
+  if (type.tag !== 'tvar' || !type.ref) return type;
+  const path: TVar[] = [];
+  while (type.tag === 'tvar' && type.ref) {
+    chargeCompilationWork();
+    path.push(type);
+    type = type.ref;
   }
+  for (const variable of path) variable.ref = type;
   return type;
 }
 
 /** The type with every bound variable replaced by what it stands for. */
 export function zonk(type: Type): Type {
-  const pruned = prune(type);
-  if (pruned.tag === 'tap') {
-    const fn = zonk(pruned.fn);
-    const arg = zonk(pruned.arg);
-    return fn === pruned.fn && arg === pruned.arg ? pruned : { tag: 'tap', fn, arg };
-  }
-  return pruned;
+  return mapType(type, (node) => node);
+}
+
+export function mapType(type: Type, leaf: (node: Type) => Type): Type {
+  return mapGraph(type, prune, typeChildren, (node, mapped) => {
+    if (node.tag !== 'tap') return leaf(node);
+    const [fn, arg] = mapped;
+    return fn === node.fn && arg === node.arg ? node : { tag: 'tap', fn, arg };
+  });
 }
 
 /** Splits an application into its head and arguments: `Either a b` into `Either` and `[a, b]`. */
@@ -162,45 +191,41 @@ export function splitApp(type: Type): { head: Type; args: Type[] } {
   const args: Type[] = [];
   let head = prune(type);
   while (head.tag === 'tap') {
-    args.unshift(head.arg);
+    chargeCompilationWork();
+    args.push(head.arg);
     head = prune(head.fn);
   }
-  return { head, args };
+  return { head, args: args.toReversed() };
 }
 
 export function kindOfType(type: Type): Kind {
-  const pruned = prune(type);
-  switch (pruned.tag) {
-    case 'tvar': {
-      return pruned.kind;
-    }
-    case 'tcon': {
-      return pruned.entity.kind;
-    }
-    case 'tap': {
-      const fnKind = pruneKind(kindOfType(pruned.fn));
-      return fnKind.tag === 'arrow' ? fnKind.to : STAR;
-    }
-    case 'tgen': {
-      return STAR;
-    }
+  let node = prune(type);
+  let applications = 0;
+  while (node.tag === 'tap') {
+    chargeCompilationWork();
+    applications++;
+    node = prune(node.fn);
   }
+  let kind = node.tag === 'tvar' ? node.kind : node.tag === 'tcon' ? node.entity.kind : STAR;
+  for (let index = 0; index < applications; index++) {
+    const fn = pruneKind(kind);
+    kind = fn.tag === 'arrow' ? fn.to : STAR;
+  }
+  return kind;
 }
 
 export function typeVarsOf(type: Type, into = new Set<TVar>()): Set<TVar> {
-  const pruned = prune(type);
-  if (pruned.tag === 'tvar') into.add(pruned);
-  else if (pruned.tag === 'tap') {
-    typeVarsOf(pruned.fn, into);
-    typeVarsOf(pruned.arg, into);
-  }
+  for (const node of walkGraph(type, prune, typeChildren)) if (node.tag === 'tvar') into.add(node);
   return into;
 }
 
 export function occursIn(variable: TVar, type: Type): boolean {
-  const pruned = prune(type);
-  if (pruned === variable) return true;
-  return pruned.tag === 'tap' && (occursIn(variable, pruned.fn) || occursIn(variable, pruned.arg));
+  for (const node of walkGraph(type, prune, typeChildren)) if (node === variable) return true;
+  return false;
+}
+
+export function typeChildren(type: Type): Type[] {
+  return type.tag === 'tap' ? [type.fn, type.arg] : [];
 }
 
 export interface Pred {
@@ -222,41 +247,46 @@ export function monoScheme(type: Type): Scheme {
 }
 
 export function instantiateType(type: Type, args: readonly Type[]): Type {
-  const pruned = prune(type);
-  switch (pruned.tag) {
-    case 'tgen': {
-      return args[pruned.index];
-    }
-    case 'tap': {
-      return { tag: 'tap', fn: instantiateType(pruned.fn, args), arg: instantiateType(pruned.arg, args) };
-    }
-    default: {
-      return pruned;
-    }
-  }
+  return mapType(type, (node) => (node.tag === 'tgen' ? args[node.index] : node));
 }
 
 /** Replaces the given variables by `TGen` indices, for building a scheme. */
 export function quantifyType(type: Type, vars: readonly TVar[]): Type {
-  const pruned = prune(type);
-  if (pruned.tag === 'tvar') {
-    const index = vars.indexOf(pruned);
-    return index === -1 ? pruned : { tag: 'tgen', index };
+  const indices = new Map(vars.map((variable, index) => [variable, index]));
+  return mapType(type, (node) => {
+    const index = node.tag === 'tvar' ? indices.get(node) : undefined;
+    return index === undefined ? node : { tag: 'tgen', index };
+  });
+}
+
+type UnificationFailure = 'mismatch' | 'occurs' | 'kind' | 'escape';
+type BindVariable = (variable: TVar, type: Type) => undefined | Exclude<UnificationFailure, 'mismatch'>;
+
+export function unifyTypes(a: Type, b: Type, bind: BindVariable): UnificationFailure | undefined {
+  for (const [x, y] of walkGraphPairs(a, b, prune, typeChildren)) {
+    const failure = unifyTypeNode(x, y, bind);
+    if (failure) return failure;
   }
-  if (pruned.tag === 'tap')
-    return { tag: 'tap', fn: quantifyType(pruned.fn, vars), arg: quantifyType(pruned.arg, vars) };
-  return pruned;
+  return undefined;
+}
+
+function unifyTypeNode(x: Type, y: Type, bind: BindVariable): UnificationFailure | undefined {
+  if (x === y) return undefined;
+  if (x.tag === 'tvar' && !x.skolem) return bind(x, y);
+  if (y.tag === 'tvar' && !y.skolem) return bind(y, x);
+  if (x.tag === 'tcon' && y.tag === 'tcon') return x.entity === y.entity ? undefined : 'mismatch';
+  return x.tag === 'tap' && y.tag === 'tap' ? undefined : 'mismatch';
 }
 
 /** Whether two types are the same after resolving bound variables. */
 export function typesEqual(a: Type, b: Type): boolean {
-  const x = prune(a);
-  const y = prune(b);
-  if (x === y) return true;
-  if (x.tag === 'tcon' && y.tag === 'tcon') return x.entity === y.entity;
-  if (x.tag === 'tap' && y.tag === 'tap') return typesEqual(x.fn, y.fn) && typesEqual(x.arg, y.arg);
-  if (x.tag === 'tgen' && y.tag === 'tgen') return x.index === y.index;
-  return false;
+  for (const [x, y] of walkGraphPairs(a, b, prune, typeChildren)) {
+    if (x === y) continue;
+    if (x.tag === 'tcon' && y.tag === 'tcon' && x.entity === y.entity) continue;
+    if (x.tag === 'tgen' && y.tag === 'tgen' && x.index === y.index) continue;
+    if (x.tag !== 'tap' || y.tag !== 'tap') return false;
+  }
+  return true;
 }
 
 /**
@@ -264,25 +294,30 @@ export function typesEqual(a: Type, b: Type): boolean {
  * of the type: a one-way match, as instance selection needs.
  */
 export function matchType(pattern: Type, type: Type, bindings: (Type | undefined)[]): boolean {
-  const p = prune(pattern);
-  const t = prune(type);
-  if (p.tag === 'tgen') {
-    const bound = bindings[p.index];
-    if (bound) return typesEqual(bound, t);
-    bindings[p.index] = t;
+  for (const [p, t] of walkGraphPairs(pattern, type, prune, typeChildren)) {
+    if (!matchTypeNode(p, t, bindings)) return false;
+  }
+  return true;
+}
+
+function matchTypeNode(pattern: Type, type: Type, bindings: (Type | undefined)[]): boolean {
+  if (pattern.tag === 'tgen') {
+    const bound = bindings[pattern.index];
+    if (bound) return typesEqual(bound, type);
+    bindings[pattern.index] = type;
     return true;
   }
-  if (p.tag === 'tcon') return t.tag === 'tcon' && t.entity === p.entity;
-  if (p.tag === 'tap') return t.tag === 'tap' && matchType(p.fn, t.fn, bindings) && matchType(p.arg, t.arg, bindings);
-  return p === t;
+  if (pattern.tag === 'tcon') return type.tag === 'tcon' && type.entity === pattern.entity;
+  if (pattern.tag === 'tap') return type.tag === 'tap';
+  return pattern === type;
 }
 
 /** Whether a pattern type could match the type once the type's variables are known. */
 export function couldMatch(pattern: Type, type: Type): boolean {
-  const p = prune(pattern);
-  const t = prune(type);
-  if (p.tag === 'tgen' || t.tag === 'tvar') return true;
-  if (p.tag === 'tcon') return t.tag === 'tcon' && t.entity === p.entity;
-  if (p.tag === 'tap') return t.tag === 'tap' && couldMatch(p.fn, t.fn) && couldMatch(p.arg, t.arg);
-  return false;
+  for (const [p, t] of walkGraphPairs(pattern, type, prune, typeChildren)) {
+    if (p.tag === 'tgen' || t.tag === 'tvar') continue;
+    if (p.tag === 'tcon' && t.tag === 'tcon' && p.entity === t.entity) continue;
+    if (p.tag !== 'tap' || t.tag !== 'tap') return false;
+  }
+  return true;
 }

@@ -44,6 +44,7 @@ import {
   type Type,
   typeVarsOf,
   unifyKinds,
+  unifyTypes,
   zonk,
 } from './types';
 
@@ -101,7 +102,7 @@ export class Checker {
   // Unification
 
   unify(actual: Type, expected: Type, span: Span, context?: string): void {
-    const failure = this.unifyTypes(actual, expected);
+    const failure = unifyTypes(actual, expected, (variable, type) => this.bindVar(variable, type));
     if (!failure) return;
     const printer = new TypePrinter();
     let message: string;
@@ -115,20 +116,6 @@ export class Checker {
       message = `型が合いません。${printer.show(expected)} が期待されているところに、${printer.show(actual)} があります。`;
     }
     typeError(span, context ? `${message}（${context}）` : message);
-  }
-
-  /** Unifies two types, telling why they cannot be made equal. */
-  private unifyTypes(a: Type, b: Type): undefined | 'mismatch' | 'occurs' | 'kind' | 'escape' {
-    const x = prune(a);
-    const y = prune(b);
-    if (x === y) return undefined;
-    if (x.tag === 'tvar' && !x.skolem) return this.bindVar(x, y);
-    if (y.tag === 'tvar' && !y.skolem) return this.bindVar(y, x);
-    if (x.tag === 'tcon' && y.tag === 'tcon') return x.entity === y.entity ? undefined : 'mismatch';
-    if (x.tag === 'tap' && y.tag === 'tap') {
-      return this.unifyTypes(x.fn, y.fn) ?? this.unifyTypes(x.arg, y.arg);
-    }
-    return 'mismatch';
   }
 
   private bindVar(variable: TVar, type: Type): undefined | 'occurs' | 'kind' | 'escape' {
@@ -149,7 +136,7 @@ export class Checker {
   }
 
   tryUnify(a: Type, b: Type): boolean {
-    return this.unifyTypes(a, b) === undefined;
+    return unifyTypes(a, b, (variable, type) => this.bindVar(variable, type)) === undefined;
   }
 
   freshVar(kind: Kind = STAR, name?: string): TVar {
@@ -933,9 +920,13 @@ export class Checker {
   generalize(type: Type, params: readonly DictParam[], outer: number): Scheme {
     const zonked = zonk(type);
     const vars: TVar[] = [];
+    const seen = new Set<TVar>();
     const add = (candidate: Type): void => {
       for (const variable of typeVarsOf(candidate))
-        if (variable.level > outer && !vars.includes(variable)) vars.push(variable);
+        if (variable.level > outer && !seen.has(variable)) {
+          seen.add(variable);
+          vars.push(variable);
+        }
     };
     add(zonked);
     for (const param of params) add(param.pred.type);

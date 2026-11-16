@@ -1,4 +1,7 @@
+import { execFileSync } from 'node:child_process';
+
 import { expect, test } from 'vitest';
+import { z } from 'zod';
 
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
@@ -682,4 +685,42 @@ test('a non-child hiding name leaves its independent value imported', () => {
   expect(
     executeProgram('haskell', 'import Data.Ord hiding (Down(comparing))\nmain=print(comparing id (1::Int) 1)')
   ).toMatchObject({ kind: 'executed', stdout: 'EQ\n', uncaughtException: undefined });
+});
+
+test('compact shared types compile without exponential memory growth', { timeout: 30_000 }, () => {
+  const output = execFileSync('bun', ['run', 'test/helpers/haskellCompilerMemory.ts'], {
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  const result = z
+    .object({ kind: z.literal('executed'), stdout: z.literal('1\n'), peakRatio: z.number() })
+    .parse(JSON.parse(output));
+  expect(result.peakRatio).toBeLessThan(1.5);
+});
+
+test('shared polymorphic types remain independent across instantiations', () => {
+  const count = 24;
+  const duplicate = 'f ('.repeat(count) + 'x' + ')'.repeat(count);
+  const project = (value: string): string => 'fst ('.repeat(count) + `g ${value}` + ')'.repeat(count);
+  const source = `f x=(x,x)\ng x=${duplicate}\nmain=print(${project('True')},${project("'x'")})`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: "(True,'x')\n",
+    uncaughtException: undefined,
+  });
+});
+
+test('compiler work limits contain expanding diagnostics and constraints and reset between programs', () => {
+  const value = 'f ('.repeat(30) + 'True' + ')'.repeat(30);
+  for (const main of ['main=print(y::Int)', 'main=print(y==y)']) {
+    expect(executeProgram('haskell', `f x=(x,x)\ny=${value}\n${main}`)).toMatchObject({
+      kind: 'limitExceeded',
+      limit: 'operations',
+    });
+    expect(executeProgram('haskell', 'main=print(1::Int)')).toMatchObject({
+      kind: 'executed',
+      stdout: '1\n',
+      uncaughtException: undefined,
+    });
+  }
 });

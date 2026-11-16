@@ -5,6 +5,7 @@ import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { PRIMITIVE_TYPES, TURTLE_TYPE, UNIT_TYPE } from './builtinTypes';
 import { ClassEnv } from './classEnv';
 import { Codegen, type CodegenSupport } from './codegen';
+import { withCompilationBudget } from './compilationBudget';
 import type { GlobalDef } from './core';
 import { type ClassEntity, type ConInfo, nextId, type TypeEntity, type ValueEntity } from './entities';
 import type { Builtins } from './infer';
@@ -374,35 +375,37 @@ export interface CompiledProgram {
 /** Compiles a program, throwing a `CompileError` for the errors GHC reports before running and for unsupported code. */
 export function compileProgram(source: string, atomicRows?: ReadonlySet<number>, traceTypes = false): CompiledProgram {
   const lib = getLibrary();
-  const parsed = parseHaskell(source);
-  const renamed = renameModule(parsed, {
-    modules: lib.modules,
-    implicitPrelude: true,
-    unsupportedModule: (name) => (Object.hasOwn(UNSUPPORTED_MODULES, name) ? UNSUPPORTED_MODULES[name] : undefined),
-    weakValues: lib.weakValues,
-    weakTypes: lib.weakTypes,
-    negate: lib.negate,
+  return withCompilationBudget(() => {
+    const parsed = parseHaskell(source);
+    const renamed = renameModule(parsed, {
+      modules: lib.modules,
+      implicitPrelude: true,
+      unsupportedModule: (name) => (Object.hasOwn(UNSUPPORTED_MODULES, name) ? UNSUPPORTED_MODULES[name] : undefined),
+      weakValues: lib.weakValues,
+      weakTypes: lib.weakTypes,
+      negate: lib.negate,
+    });
+    const checked = typecheckModule(renamed, {
+      env: new ClassEnv(lib.env),
+      builtins: lib.builtins,
+      isProgram: true,
+      derivingSupport: lib.derivingSupport,
+    });
+    const codegen = new Codegen({
+      support: lib.support,
+      atomicRows,
+      isProgram: true,
+      traceTypes,
+    });
+    codegen.compileTopBindings(renamed.values);
+    for (const instance of checked.instances)
+      codegen.compileInstance(instance.info, instance.bindings, instance.sourceDefined);
+    for (const binding of checked.defaults) codegen.compileDefault(binding);
+    const misplaced = codegen.checkAtomicClaims();
+    if (misplaced !== undefined) throw new CompileError([{ row: misplaced, message: misplacedHaskellAtomicMessage }]);
+    assert.ok(checked.main);
+    return { main: codegen.compileEntry(checked.main.entity, checked.main.evidence) };
   });
-  const checked = typecheckModule(renamed, {
-    env: new ClassEnv(lib.env),
-    builtins: lib.builtins,
-    isProgram: true,
-    derivingSupport: lib.derivingSupport,
-  });
-  const codegen = new Codegen({
-    support: lib.support,
-    atomicRows,
-    isProgram: true,
-    traceTypes,
-  });
-  codegen.compileTopBindings(renamed.values);
-  for (const instance of checked.instances)
-    codegen.compileInstance(instance.info, instance.bindings, instance.sourceDefined);
-  for (const binding of checked.defaults) codegen.compileDefault(binding);
-  const misplaced = codegen.checkAtomicClaims();
-  if (misplaced !== undefined) throw new CompileError([{ row: misplaced, message: misplacedHaskellAtomicMessage }]);
-  assert.ok(checked.main);
-  return { main: codegen.compileEntry(checked.main.entity, checked.main.evidence) };
 }
 
 function assertPublicExports(name: string, exports: ExportTable): void {
