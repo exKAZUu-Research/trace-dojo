@@ -355,3 +355,14 @@ test('named source modules run their exported main action', () => {
   ).toMatchObject({ kind: 'executed', stdout: '3.141592653589793\n', uncaughtException: undefined });
   expect(executeProgram('haskell', 'module Example() where\nmain=print 1').kind).toBe('compileError');
 });
+
+test.each([
+  'main::Monad m=>m ()\nmain=return ()',
+  'main::Num a=>IO a\nmain=return 1',
+  'main=(return 1::Num a=>IO a)',
+  'main=((do return 1)::Num a=>IO a)',
+  'main=(do return 1::Num a=>IO a)',
+  'main=do\n  (if True then return 1 else return 2::Num a=>IO a)',
+])('entry and IO annotations retain dictionary evidence: %s', (source) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});

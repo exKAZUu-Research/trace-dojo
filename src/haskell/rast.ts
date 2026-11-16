@@ -131,12 +131,11 @@ export type RBinding =
       k: 'fun';
       binder: Binder;
       clauses: RClause[];
+      type?: Type;
       sig?: RSigType;
       span: Span;
       /** The dictionaries the binding takes after generalization. */
       dictParams?: DictParam[];
-      /** Whether the binding is the implementation of an instance or default method, which `self` dictionaries reach. */
-      atomic?: boolean;
     }
   | {
       k: 'pat';

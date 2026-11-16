@@ -72,7 +72,7 @@ printfPutStr = primitive "putStr"
 printf :: PrintfType r => String -> r
 printf fmts = spr fmts []
 
-data Spec = Spec Bool Bool Bool Bool Bool (Maybe Int) (Maybe Int) Char
+data Spec = Spec Bool Bool Bool Bool Bool (Maybe Int) (Maybe Int) String Char
 
 perror :: String -> a
 perror s = errorWithoutStackTrace ("printf: " ++ s)
@@ -100,12 +100,21 @@ parseSpec s0 args = flags False False False False False s0
       _ -> case dimension s args of
         (width, r1, args1) -> case precision r1 args1 of
           (prec, r2, args2) ->
-            let r3 = dropWhile (\c -> c ${BT}elem${BT} "hlLqjzt") r2
+            let (mods,r3) = case args2 of
+                  (UInteger _ _:_) -> modifier r2
+                  (UChar _:_) -> modifier r2
+                  _ -> ("",r2)
                 left = minus || maybe False (< 0) width
                 width' = fmap abs width
             in case r3 of
-                 (c:r4) -> (Spec left plus space zero alt width' prec c, r4, args2)
+                 (c:r4) -> (Spec left plus space zero alt width' prec mods c, r4, args2)
                  [] -> perror "formatting string ended prematurely"
+    modifier ('h':'h':r) = ("hh",r)
+    modifier ('l':'l':r) = ("ll",r)
+    modifier ('h':r) = ("h",r)
+    modifier ('l':r) = ("l",r)
+    modifier ('L':r) = ("L",r)
+    modifier r = ("",r)
     dimension ('*':r) us = case us of
       [] -> perror "argument list ended prematurely"
       (u:rest) -> (Just (dynamicNumber u), r, rest)
@@ -118,7 +127,7 @@ parseSpec s0 args = flags False False False False False s0
     dynamicNumber _ = perror "bad formatting char 'd'"
 
 formatOne :: Spec -> UPrintf -> String
-formatOne spec@(Spec minus plus space zero alt width prec c) u = case u of
+formatOne spec@(Spec minus plus space zero alt width prec mods c) u = case u of
   UInteger n bound -> case c of
     'd' -> pad True (signed n (digitsMin (show (abs n))))
     'i' -> pad True (signed n (digitsMin (show (abs n))))
@@ -128,11 +137,11 @@ formatOne spec@(Spec minus plus space zero alt width prec c) u = case u of
     'X' -> pad True (prefixAlt "0X" (map toUpper (digitsMin (showIntAtBase 16 intToDigit (unsigned n bound) ""))))
     'o' -> pad True (prefixAlt "0" (digitsMin (showIntAtBase 8 intToDigit (unsigned n bound) "")))
     'b' -> pad True (prefixAlt "0b" (digitsMin (showIntAtBase 2 intToDigit (unsigned n bound) "")))
-    'c' -> pad False [chr (fromInteger n)]
+    'c' -> if null mods then pad False [chr (fromInteger n)] else perror "illegal char conversion"
     _ -> badChar
   UChar ch -> case c of
-    'c' -> pad False [ch]
-    'v' -> pad False [ch]
+    'c' -> charValue ch
+    'v' -> charValue ch
     _ -> formatOne spec (UInteger (toInteger (ord ch)) 0)
   UString str -> case c of
     's' -> pad False (maybe str (\p -> take p str) prec)
@@ -143,7 +152,7 @@ formatOne spec@(Spec minus plus space zero alt width prec c) u = case u of
   where
     formatReal :: RealFloat a => a -> String
     formatReal d = case c of
-      'v' -> formatOne (Spec minus plus space zero alt width prec 'g') u
+      'v' -> formatOne (Spec minus plus space zero alt width prec mods 'g') u
       _ -> if c ${BT}elem${BT} "eEfFgG"
              then pad True (signedDouble d (caseConvert (showFn (toLower c) (abs d))))
              else badChar
@@ -151,7 +160,17 @@ formatOne spec@(Spec minus plus space zero alt width prec c) u = case u of
     digitsMin ds = case prec of
       Just p -> if p == 0 && ds == "0" then "" else replicate (p - length ds) '0' ++ ds
       Nothing -> ds
-    unsigned n bound = if n < 0 then (if bound > 0 then bound + n else perror "bad argument") else n
+    charValue ch = if null mods then pad False [ch] else perror "illegal char conversion"
+    unsigned n bound = if n < 0 then
+      let modulus = case mods of
+            "hh" -> 256
+            "h" -> 65536
+            "l" -> 4294967296
+            "ll" -> 18446744073709551616
+            "L" -> 18446744073709551616
+            _ -> bound
+      in if modulus > 0 then n ${BT}mod${BT} modulus else perror "bad argument"
+      else n
     prefixAlt p ds = if alt && not (null ds) && ds /= "0" && not (p == "0" && head ds == '0') then p ++ ds else ds
     signed n ds = if n < 0 then '-' : ds else if plus then '+' : ds else if space then ' ' : ds else ds
     signedDouble d ds = if d < 0 || isNegativeZero d then '-' : ds else if plus then '+' : ds else if space then ' ' : ds else ds

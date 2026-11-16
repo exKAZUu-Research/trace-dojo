@@ -281,3 +281,30 @@ test.each(['toRational (undefined::Int)', 'fromInteger undefined::Rational'])(
     });
   }
 );
+
+test.each([
+  ['%lf', '(1.5::Double)', 'l'],
+  ['%hs', '"ab"', 'h'],
+  ...['z', 'j', 't', 'q'].map((modifier) => [`%${modifier}d`, '(40000::Int)', modifier]),
+])('printf rejects unsupported type-specific modifiers: %s', (format, value, char) => {
+  const source = `import Text.Printf\nmain=printf "${format}" ${value}`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: `printf: bad formatting char '${char}'`,
+  });
+});
+
+test('printf integral modifiers retain unsigned widths and reject character conversions', () => {
+  const source =
+    'import Text.Printf\nmain=do\n  printf "%hd|%hhx|%ld|%lld|%hhx\\n" (40000::Int) (40000::Int) (40000::Int) (40000::Int) (-1::Integer)';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '40000|9c40|40000|40000|ff\n',
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('haskell', 'import Text.Printf\nmain=printf "%hc" (65::Int)')).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'printf: illegal char conversion',
+  });
+});

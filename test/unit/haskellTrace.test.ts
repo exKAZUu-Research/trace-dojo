@@ -246,3 +246,72 @@ test('shared acyclic constructor graphs use one cumulative display allowance', (
     value: '…',
   });
 });
+
+test('recursive instance methods retain independent call frames', () => {
+  const source = `class C a where c::a->IO ()
+instance C Int where
+ c n=do
+   print n
+   if n>0 then c(n-1) else return()
+   print n
+main=c(2::Int)`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.stdout).toBe('2\n1\n0\n0\n1\n2\n');
+  expect(
+    recording.traceItems.filter(({ line }) => line === 4 || line === 6).map(({ callLines }) => callLines.length)
+  ).toEqual([1, 2, 3, 3, 2, 1]);
+});
+
+test.each([
+  'class C a where c::a->IO ()\ninstance C Int where\n c n=do -- atomic\n   print n\n   print n\nmain=c(2::Int)',
+  'class C a where\n c::a->IO ()\n c _=do -- atomic\n   print(1::Int)\n   print(2::Int)\ninstance C Int\nmain=c(0::Int)',
+])('user methods accept atomic declarations', (source) => {
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.stdout).toMatch(/^(?:2\n2\n|1\n2\n)$/);
+  expect(recording.traceItems.every(({ callLines }) => callLines.length === 0)).toBe(true);
+});
+
+test.each(['forM [1,2] $', 'for [1,2] $', 'traverse', 'flip traverse [1,2] $'])(
+  'applicative loop %s has no extra epilogue step',
+  (loop) => {
+    const call =
+      loop === 'traverse' ? String.raw`traverse (\x->do print(x::Int)) [1,2]` : `${loop} \\x->do print(x::Int)`;
+    const source = `import Control.Monad\nimport Data.Traversable\nmain=do\n  ${call}\n  print(3::Int)`;
+    const recording = traceProgram('haskell', source, source);
+    expect(recording.stdout).toBe('1\n2\n3\n');
+    const control = source.replace(call, String.raw`forM [1,2] $ \x->do print(x::Int)`);
+    expect(withoutLines(recording.traceItems)).toEqual(
+      withoutLines(traceProgram('haskell', control, control).traceItems)
+    );
+  }
+);
+
+test.each(['where', 'let'])('zero-argument %s actions preserve turtles in the caller scope', (scope) => {
+  const source =
+    scope === 'where'
+      ? 'main=do\n  t<-newTurtleAt 1 1\n  forward t\n  separator\n  where\n    separator=putStrLn "----"'
+      : 'main=do\n  t<-newTurtleAt 1 1\n  forward t\n  let separator=putStrLn "----"\n  separator';
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.stdout).toBe('----\n');
+  expect(recording.finalTurtles).toMatchObject([{ x: 1, y: 2 }]);
+  expect(recording.traceItems.at(-1)?.turtles).toMatchObject([{ x: 1, y: 2 }]);
+});
+
+test('constructor fields retain declared String and Float display types', () => {
+  const source =
+    'data Box a=Box {empty::String, nested::Maybe a, number::Float}\nmain=do\n  let box=Box "" (Just "") 0.1\n  let xs=[0.1::Float]\n  print(1::Int)';
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.traceItems.at(-1)?.referenceVars.box).toEqual({
+    kind: 'object',
+    entries: {
+      empty: { kind: 'value', value: '' },
+      nested: { kind: 'value', value: '' },
+      number: { kind: 'value', value: 0.1 },
+    },
+  });
+  expect(recording.traceItems.at(-1)?.vars.xs).toEqual([0.1]);
+  expect(recording.traceItems.at(-1)?.referenceVars.xs).toEqual({
+    kind: 'array',
+    entries: { 0: { kind: 'value', value: 0.1 } },
+  });
+});

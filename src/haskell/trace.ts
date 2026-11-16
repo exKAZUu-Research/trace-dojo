@@ -3,11 +3,12 @@ import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
-import { CHAR_TYPE, CONS_CON, NIL_CON, UNIT_CON } from './builtinTypes';
+import { CHAR_TYPE, CONS_CON, FLOAT_TYPE, NIL_CON, UNIT_CON } from './builtinTypes';
 import { compileProgram } from './compile';
+import { floatToDigits } from './primitives';
 import { runProgram } from './run';
 import { DisplayAbort, Runtime, type TraceFrame } from './runtime';
-import { prune, splitApp, type Type } from './types';
+import { instantiateType, prune, splitApp, type Type } from './types';
 import {
   ConValue,
   Dict,
@@ -175,13 +176,21 @@ function traceInt(value: bigint): number | bigint {
   return Number.isSafeInteger(number) ? number : value;
 }
 
+function traceFloat(value: number, type: Type): number {
+  const actual = prune(type);
+  if (actual.tag !== 'tcon' || actual.entity !== FLOAT_TYPE || !Number.isFinite(value) || value === 0) return value;
+  const { digits, exponent } = floatToDigits(Math.abs(value), true);
+  return Math.sign(value) * Number(`${digits.join('')}e${exponent - digits.length}`);
+}
+
 // code-gauge-allow functionCognitiveComplexity 26 -- One branch per kind of value shown as a scalar.
-// code-gauge-allow functionNcss 35 -- Scalar formatting handles primitive values and library abstract values together.
+// code-gauge-allow functionNcss 37 -- Scalar formatting handles primitive values and library abstract values together.
 function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Scalar | typeof NOT_SCALAR {
   runtime.spend();
   if (depth > 20) return NOT_SCALAR;
   if (typeof value === 'bigint') return traceInt(value);
-  if (typeof value === 'number' || typeof value === 'string') return value;
+  if (typeof value === 'number') return traceFloat(value, type);
+  if (typeof value === 'string') return value;
   if (!(value instanceof ConValue)) return NOT_SCALAR;
   if (containerKind(value)) return NOT_SCALAR;
   if (value.con.type.module === 'Base' && value.con.type.name === 'Ratio') {
@@ -236,11 +245,12 @@ class DisplayNodes {
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- One branch per kind of value shown as a node.
-  // code-gauge-allow functionNcss 32 -- Node formatting dispatches on each supported value representation.
+  // code-gauge-allow functionNcss 34 -- Node formatting dispatches on each supported value representation.
   private nodeOf(value: Value, type: Type, depth: number): DisplayNode | undefined {
     if (depth > 20) return { kind: 'value', value: '…' };
     if (typeof value === 'bigint') return { kind: 'value', value: traceInt(value) };
-    if (typeof value === 'number' || typeof value === 'string') return { kind: 'value', value };
+    if (typeof value === 'number') return { kind: 'value', value: traceFloat(value, type) };
+    if (typeof value === 'string') return { kind: 'value', value };
     if (value instanceof TurtleValue) {
       if (!value.turtle.isAlive) return undefined;
       return {
@@ -317,7 +327,9 @@ class DisplayNodes {
     for (const [index, field] of value.fields.entries()) {
       const forced = forceForDisplay(this.runtime, field);
       if (forced === undefined) continue;
-      const fieldType = isTuple ? elementType(type, index) : ({ tag: 'tgen', index: -1 } as Type);
+      const fieldType = isTuple
+        ? elementType(type, index)
+        : instantiateType(con.fieldTypes[index], splitApp(prune(type)).args);
       const node = this.build(forced, fieldType, depth + 1);
       if (node) entries[con.fieldNames?.[index] ?? String(index)] = node;
     }

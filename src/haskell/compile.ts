@@ -4,7 +4,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { PRIMITIVE_TYPES, TURTLE_TYPE, UNIT_TYPE } from './builtinTypes';
 import { ClassEnv } from './classEnv';
-import { Codegen, type CodegenSupport, globalOf } from './codegen';
+import { Codegen, type CodegenSupport } from './codegen';
 import type { GlobalDef } from './core';
 import { type ClassEntity, type ConInfo, nextId, type TypeEntity, type ValueEntity } from './entities';
 import { compileError } from './errors';
@@ -370,12 +370,13 @@ export function compileProgram(source: string, atomicRows?: ReadonlySet<number>)
   });
   const codegen = new Codegen({ support: lib.support, atomicRows, isProgram: true });
   codegen.compileTopBindings(renamed.values);
-  for (const instance of checked.instances) codegen.compileInstance(instance.info, instance.bindings);
+  for (const instance of checked.instances)
+    codegen.compileInstance(instance.info, instance.bindings, instance.sourceDefined);
   for (const binding of checked.defaults) codegen.compileDefault(binding);
   const misplaced = codegen.checkAtomicClaims();
   if (misplaced !== undefined) throw new CompileError([{ row: misplaced, message: misplacedHaskellAtomicMessage }]);
   const main = renamed.exports.values.get('main') ?? findMain(renamed);
-  return { main: globalOf(main, 'main', main) };
+  return { main: codegen.compileEntry(main, checked.mainEvidence) };
 }
 
 function assertPublicExports(name: string, exports: ExportTable): void {

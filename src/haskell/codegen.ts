@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 878 -- The Core generator covers every construct of the language in one pass over shared state.
+// code-gauge-allow-file fileNcss 888 -- The Core generator covers every construct of the language in one pass over shared state.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   CHAR_TYPE,
@@ -157,13 +157,17 @@ export class Codegen {
   }
 
   /** Registers how a module's instance's dictionary is built. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch fills one part of a dictionary: methods, defaults, and superclasses.
-  compileInstance(info: InstanceInfo, bindings: RBinding[]): void {
+  // code-gauge-allow functionCognitiveComplexity 18 -- Each branch fills one part of a dictionary: methods, defaults, and superclasses.
+  compileInstance(info: InstanceInfo, bindings: RBinding[], sourceDefined = false): void {
     for (const binding of bindings) {
       const fun = binding as Extract<RBinding, { k: 'fun' }>;
       const entity = (fun.binder as { kind: 'global'; entity: ValueEntity }).entity;
       this.ownDictParams.set(entity, fun.dictParams ?? []);
-      globalOf(entity, entity.name, entity).code = this.compileFunction(fun, entity.name, false);
+      globalOf(entity, entity.name, entity).code = this.compileFunction(
+        fun,
+        entity.name,
+        this.options.isProgram && sourceDefined
+      );
     }
     const superCodes = info.supers.map((evidence) => {
       const frame = new FrameScope(undefined);
@@ -211,7 +215,17 @@ export class Codegen {
     const fun = binding as Extract<RBinding, { k: 'fun' }>;
     const entity = (fun.binder as { kind: 'global'; entity: ValueEntity }).entity;
     this.ownDictParams.set(entity, fun.dictParams ?? []);
-    globalOf(entity, entity.name, entity).code = this.compileFunction(fun, entity.name, false);
+    globalOf(entity, entity.name, entity).code = this.compileFunction(fun, entity.name, this.options.isProgram);
+  }
+
+  compileEntry(entity: ValueEntity, evidence: Evidence[]): GlobalDef {
+    const global = globalOf(entity, entity.name, entity);
+    if (evidence.length === 0) return global;
+    return {
+      name: 'main',
+      entity,
+      code: { k: 'app', fn: { k: 'global', global }, args: evidence.map((item) => this.compileEvidence(item)) },
+    };
   }
 
   /**
@@ -309,11 +323,9 @@ export class Codegen {
     // function that defines it, as a loop or a block inside a Java method does.
     const info = isTop ? this.infoForBinding(binding, name) : undefined;
     if (dictParams.length + arity === 0) {
-      // An instance's method has no enclosing frame to hold the slots of its `where` and `let`.
-      if (!isTop && this.frame !== this.rootFrame) return this.compileClauseBody(binding, [], name);
       const frame = new FrameScope(this.frame);
       return this.withFrame(frame, () => {
-        const body = this.withVisible([], () => this.compileClauseBody(binding, [], name));
+        const body = this.withVisible(isTop ? [] : [...this.visible], () => this.compileClauseBody(binding, [], name));
         return { k: 'frame', size: frame.size, body, info } as Core;
       });
     }
@@ -346,7 +358,8 @@ export class Codegen {
     if (!this.options.isProgram) return false;
     const scheme: Scheme | undefined =
       binding.binder.kind === 'local' ? binding.binder.local.scheme : binding.binder.entity.scheme;
-    const type = scheme?.type ?? (binding.binder.kind === 'local' ? binding.binder.local.type : undefined);
+    const type =
+      binding.type ?? scheme?.type ?? (binding.binder.kind === 'local' ? binding.binder.local.type : undefined);
     if (!type) return false;
     return isIOType(resultAfter(type, binding.clauses[0].pats.length));
   }
@@ -869,13 +882,13 @@ export class Codegen {
   // -------------------------------------------------------------------------------------------------------------
   // do blocks
 
-  private compileTyped(expr: Extract<RExpr, { k: 'typed' }>): Core {
+  private compileTyped(expr: Extract<RExpr, { k: 'typed' }>, build = () => this.compileExpr(expr.expr)): Core {
     const params = expr.dictParams ?? [];
-    if (params.length === 0) return this.compileExpr(expr.expr);
+    if (params.length === 0) return build();
     const frame = new FrameScope(this.frame);
     const fn = this.withFrame(frame, (): Core => {
       for (const param of params) frame.slots.set(param, frame.alloc());
-      const body = this.compileExpr(expr.expr);
+      const body = build();
       return { k: 'lam', arity: params.length, size: frame.size, body };
     });
     return { k: 'app', fn, args: (expr.evidence ?? []).map((evidence) => this.compileEvidence(evidence)) };
@@ -1008,7 +1021,9 @@ export class Codegen {
    * Generates a statement's expression. A conditional (`if`, `case`, `when`, `unless`) records no step itself; its
    * branches run as blocks whose statements do, as Java's `if` statement does.
    */
+  // code-gauge-allow functionCognitiveComplexity 17 -- IO statement lowering preserves dictionary scopes and dispatches each control form.
   private compileStatementExpr(expr: RExpr): { code: Core; noStep: boolean } {
+    if (expr.k === 'typed' && expr.dictParams?.length) return this.compileTypedStatement(expr);
     const inner = stripDollar(expr, this.options.support);
     if (inner.k === 'if') {
       return {
@@ -1041,6 +1056,16 @@ export class Codegen {
     return { code: this.compileExpr(expr), noStep: isLoopStatement(inner, support) || isReturn(inner, support) };
   }
 
+  private compileTypedStatement(expr: Extract<RExpr, { k: 'typed' }>): { code: Core; noStep: boolean } {
+    let noStep = false;
+    const code = this.compileTyped(expr, () => {
+      const statement = this.compileStatementExpr(expr.expr);
+      noStep = statement.noStep;
+      return statement.code;
+    });
+    return { code, noStep };
+  }
+
   private returnUnit(): Core {
     return {
       k: 'app',
@@ -1051,6 +1076,8 @@ export class Codegen {
 
   /** An `IO` expression as a block: a `do` block as it is, `return ()` as it is, and others as one statement. */
   private ioBlock(expr: RExpr, binding?: { row: number; storesAnswer: boolean }): Core {
+    if (expr.k === 'typed' && expr.dictParams?.length)
+      return this.compileTyped(expr, () => this.ioBlock(expr.expr, binding));
     const inner = stripParens(expr);
     if (inner.k === 'do') return this.compileIODo(inner, binding);
     if (!binding && isReturnUnit(inner, this.options.support)) return this.compileExpr(inner);
@@ -1247,7 +1274,7 @@ function isIOType(type: Type): boolean {
 }
 
 function stripParens(expr: RExpr): RExpr {
-  return expr.k === 'typed' ? stripParens(expr.expr) : expr;
+  return expr.k === 'typed' && !expr.dictParams?.length ? stripParens(expr.expr) : expr;
 }
 
 /** `f $ x` as `f x`, which statements treat alike. */
@@ -1274,7 +1301,9 @@ const LOOP_FUNCTIONS = [
   'mapM_',
   'mapM',
   'for_',
+  'for',
   'traverse_',
+  'traverse',
   'zipWithM_',
   'zipWithM',
   'foldM',
@@ -1291,6 +1320,12 @@ function isLoopStatement(expr: RExpr, support: CodegenSupport): boolean {
   }
   if (head.k !== 'var' || head.ref.kind !== 'global') return false;
   const entity = head.ref.entity;
+  if (entity === support.value('flip')) {
+    const fn = args.at(-1);
+    if (fn?.k !== 'var' || fn.ref.kind !== 'global') return false;
+    const loop = fn.ref.entity;
+    return LOOP_FUNCTIONS.some((name) => support.value(name) === loop) && args.some((arg) => arg.k === 'lambda');
+  }
   if (!LOOP_FUNCTIONS.some((name) => support.value(name) === entity)) return false;
   return args.some((arg) => arg.k === 'lambda');
 }

@@ -48,12 +48,14 @@ export interface CheckedInstance {
   info: InstanceInfo;
   /** Each method's implementation binding, whose binder is the implementation's entity. */
   bindings: RBinding[];
+  sourceDefined: boolean;
 }
 
 export interface TypecheckResult {
   instances: CheckedInstance[];
   /** The default method implementations of the module's classes. */
   defaults: RBinding[];
+  mainEvidence: Evidence[];
 }
 
 export interface TypecheckOptions {
@@ -78,11 +80,12 @@ export function typecheckModule(module: RModule, options: TypecheckOptions): Typ
     checkInstanceSupers(checker, declared.info, declared.span);
   }
   checker.inferBindGroup(module.values, true);
-  for (const declared of [...instanceDecls, ...derived]) instances.push(checkInstanceMethods(checker, declared));
+  for (const declared of [...instanceDecls, ...derived])
+    instances.push({ ...checkInstanceMethods(checker, declared), sourceDefined: instanceDecls.includes(declared) });
   const defaults = module.classes.flatMap((decl) => checkDefaults(checker, decl));
-  if (options.isProgram) checkMain(checker, module, options.builtins);
+  const mainEvidence = options.isProgram ? checkMain(checker, module, options.builtins) : [];
   checker.solveTop();
-  return { instances, defaults };
+  return { instances, defaults, mainEvidence };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -395,7 +398,7 @@ function checkInstanceSupers(checker: Checker, info: InstanceInfo, span: Span): 
   info.supers = info.supers.map((evidence) => evidence);
 }
 
-function checkInstanceMethods(checker: Checker, declared: DeclaredInstance): CheckedInstance {
+function checkInstanceMethods(checker: Checker, declared: DeclaredInstance): Omit<CheckedInstance, 'sourceDefined'> {
   const { info } = declared;
   const bindings: RBinding[] = [];
   for (const binding of declared.bindings) {
@@ -452,6 +455,7 @@ function shiftGens(type: Type, replacement: Type): Type {
 }
 
 function checkClauses(checker: Checker, binding: Extract<RBinding, { k: 'fun' }>, type: Type): void {
+  binding.type = type;
   for (const clause of binding.clauses) {
     let remaining = type;
     for (const pat of clause.pats) {
@@ -603,7 +607,7 @@ function sameContext(a: Pred[], b: Pred[]): boolean {
 // ---------------------------------------------------------------------------------------------------------------
 // main
 
-function checkMain(checker: Checker, module: RModule, builtins: Builtins): void {
+function checkMain(checker: Checker, module: RModule, builtins: Builtins): Evidence[] {
   const main = module.exports.values.get('main');
   const binding = module.values.bindings.find((candidate) =>
     candidate.k === 'pat'
@@ -630,4 +634,5 @@ function checkMain(checker: Checker, module: RModule, builtins: Builtins): void 
     binding.span,
     'main の型は IO でなければなりません'
   );
+  return instantiated.evidence;
 }
