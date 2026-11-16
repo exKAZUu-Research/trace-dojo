@@ -35,10 +35,11 @@ import {
   ORDER,
   orderValue,
   subSlice,
+  tupleOf,
 } from './common';
 import { ALLOCATOR, ERROR_OUT_OF_MEMORY } from './heap';
 import { compileArgs, expectArgs, fnMember, type Member, nativeStruct, typeMember } from './native';
-import { sortValues } from './sorting';
+import { type SortAlgorithm, sortValues } from './sorting';
 
 function findSequence(haystack: Value[], needle: Value[], from: number): number {
   if (needle.length === 0) return from <= haystack.length ? from : -1;
@@ -379,6 +380,16 @@ const MEMBERS: Record<string, () => Member> = {
     findSequence(h, n as unknown as Value[], start)
   ),
   findPos: positionSearch('std.mem.findPos', 'slice', (h, start, n) => findSequence(h, n as unknown as Value[], start)),
+  indexOfAnyPos: positionSearch('std.mem.indexOfAnyPos', 'slice', (h, start, set) => {
+    for (let index = start; index < h.length; index++)
+      if ((set as unknown as Value[]).some((y) => equalValues(h[index], y))) return index;
+    return -1;
+  }),
+  findAnyPos: positionSearch('std.mem.findAnyPos', 'slice', (h, start, set) => {
+    for (let index = start; index < h.length; index++)
+      if ((set as unknown as Value[]).some((y) => equalValues(h[index], y))) return index;
+    return -1;
+  }),
   indexOfScalarPos: positionSearch('std.mem.indexOfScalarPos', 'scalar', (h, start, v) => {
     for (let index = start; index < h.length; index++) if (equalValues(h[index], v)) return index;
     return -1;
@@ -434,6 +445,20 @@ const MEMBERS: Record<string, () => Member> = {
   findMax: extremeIndex('std.mem.findMax', 1),
   indexOfMin: extremeIndex('std.mem.indexOfMin', -1),
   findMin: extremeIndex('std.mem.findMin', -1),
+  minMax: generic('std.mem.minMax', 2, (sema, call, type, [sliceArg]) => {
+    const slice = constSlice(sema, sliceArg, type);
+    return computed(tupleOf(sema, [type, type]), [slice], call.span, ([value]) => {
+      const items = elements(value);
+      if (items.length === 0) panic(PANIC.unreachable);
+      return new ZStruct([extreme(items, -1), extreme(items, 1)]);
+    });
+  }),
+  indexOfMinMax: () => minMaxIndexes('std.mem.indexOfMinMax'),
+  findMinMax: () => minMaxIndexes('std.mem.findMinMax'),
+  cut: () => cutter('std.mem.cut', 'slice', false),
+  cutLast: () => cutter('std.mem.cutLast', 'slice', true),
+  cutScalar: () => cutter('std.mem.cutScalar', 'scalar', false),
+  cutScalarLast: () => cutter('std.mem.cutScalarLast', 'scalar', true),
   indexOfDiff: () => diffMember('std.mem.indexOfDiff'),
   findDiff: () => diffMember('std.mem.findDiff'),
   lastIndexOfNone: sliceSearch('std.mem.lastIndexOfNone', 'slice', OPTIONAL_USIZE, (h, set) =>
@@ -587,8 +612,8 @@ const MEMBERS: Record<string, () => Member> = {
       return parts.flatMap((part, index) => (index === 0 ? part : [...glue, ...part]));
     });
   }),
-  sort: sorter('std.mem.sort', true),
-  sortUnstable: sorter('std.mem.sortUnstable', false),
+  sort: sorter('std.mem.sort', 'stable'),
+  sortUnstable: sorter('std.mem.sortUnstable', 'pdq'),
   zeroes: fnMember('std.mem.zeroes', (sema, call) => {
     const [typeArg] = expectArgs(sema, call, 1, 'std.mem.zeroes');
     const type = sema.compileType(typeArg);
@@ -653,7 +678,14 @@ function copier(name: string): () => Member {
     return computed(VOID, [destination, source], call.span, ([out, input]) => {
       const values = elements(input);
       const target = out as Slice;
-      if (values.length > target.length) panic('reached unreachable code');
+      // `copyForwards` loops over `dest[0..source.len]`, and `copyBackwards` asserts the length.
+      if (values.length > target.length) {
+        panic(
+          name.endsWith('Forwards')
+            ? `index out of bounds: index ${values.length}, len ${target.length}`
+            : PANIC.unreachable
+        );
+      }
       for (const [index, value] of values.entries()) target.set(index, value);
       return;
     });
@@ -693,7 +725,7 @@ function allocatingCall(type: Type, args: readonly TExpr[], span: Span, compute:
   );
 }
 
-function sorter(name: string, stable: boolean): () => Member {
+function sorter(name: string, algorithm: SortAlgorithm): () => Member {
   return generic(name, 4, (sema, call, type, [itemsArg, contextArg, lessThanArg]) => {
     const items = mutableSlice(sema, itemsArg, type);
     const context = sema.compile(contextArg);
@@ -710,7 +742,7 @@ function sorter(name: string, stable: boolean): () => Member {
         const sorted = sortValues(
           slice.values(),
           (a, b) => lessThan.call(frame, [contextValue, a, b]) as boolean,
-          stable,
+          algorithm,
           frame
         );
         for (const [index, value] of sorted.entries()) slice.set(index, value);
@@ -750,6 +782,47 @@ export function zeroValue(type: Type, fieldsOf: (type: StructType) => readonly S
       return undefinedValue(type);
     }
   }
+}
+
+/** `findMinMax(T, slice)`: the indexes of the first minimum and the first maximum. */
+function minMaxIndexes(name: string): Member {
+  return generic(name, 2, (sema, call, type, [sliceArg]) => {
+    const slice = constSlice(sema, sliceArg, type);
+    return computed(tupleOf(sema, [USIZE, USIZE]), [slice], call.span, ([value]) => {
+      const items = elements(value);
+      if (items.length === 0) panic(PANIC.unreachable);
+      let low = 0;
+      let high = 0;
+      for (const [index, item] of items.entries()) {
+        if (compareScalars(item, items[low]) < 0) low = index;
+        if (compareScalars(item, items[high]) > 0) high = index;
+      }
+      return new ZStruct([BigInt(low), BigInt(high)]);
+    });
+  })();
+}
+
+/** `cut(T, haystack, needle)` and its variants: the parts before and after the first or last match, or null. */
+function cutter(name: string, needleKind: 'slice' | 'scalar', last: boolean): Member {
+  return generic(name, 3, (sema, call, type, [haystackArg, needleArg]) => {
+    const haystack = constSlice(sema, haystackArg, type);
+    const needle =
+      needleKind === 'slice'
+        ? constSlice(sema, needleArg, type)
+        : sema.coerce(sema.compile(needleArg, type), type, needleArg);
+    const slice = sliceOf(type, true);
+    return computed(optionalOf(tupleOf(sema, [slice, slice])), [haystack, needle], call.span, ([h, n]) => {
+      const items = elements(h);
+      const pattern = needleKind === 'slice' ? elements(n) : [n];
+      const index = last ? findSequenceLast(items, pattern) : findSequence(items, pattern, 0);
+      if (index < 0) return NULL;
+      const whole = h as Slice;
+      return new ZStruct([
+        subSlice(whole, 0, index),
+        subSlice(whole, index + pattern.length, items.length - index - pattern.length),
+      ]);
+    });
+  })();
 }
 
 /** `findDiff(T, a, b)`: the first index where two slices differ, or where the shorter one ends. */

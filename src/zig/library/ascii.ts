@@ -1,6 +1,8 @@
+import { PANIC, panic } from '../arith';
+import { Constant } from '../expressions';
 import { runtime } from '../semaBase';
-import { BOOL, CONST_U8_SLICE, sliceOf, type StructType, type Type, U8 } from '../types';
-import { type Slice, type Value } from '../values';
+import { arrayOf, BOOL, CONST_U8_SLICE, pointerTo, sliceOf, type StructType, type Type, U8 } from '../types';
+import { Pointer, type Slice, type Value, ZArray } from '../values';
 import {
   allocating,
   allocatorArg,
@@ -65,6 +67,8 @@ function stringMapper(name: string, map: (c: number) => number): () => Member {
     return computed(sliceOf(U8, false), [output, input], call.span, ([out, value]) => {
       const source = bytes(value);
       const target = out as Slice;
+      // `std.debug.assert(output.len >= ascii_string.len)`.
+      if (target.length < source.length) panic(PANIC.unreachable);
       for (const [index, byte] of source.entries()) target.set(index, BigInt(map(byte)));
       return new (target.constructor as typeof Slice)(target.target, target.start, source.length);
     });
@@ -138,20 +142,23 @@ const MEMBERS: Record<string, () => Member> = {
     },
     OPTIONAL_USIZE
   ),
-  indexOfIgnoreCase: comparer(
-    'std.ascii.indexOfIgnoreCase',
-    (a, b) => {
-      for (let index = 0; index + b.length <= a.length; index++)
-        if (caseFold(a.slice(index, index + b.length), b) === 0) return optionalIndex(index);
-      return optionalIndex(-1);
-    },
-    OPTIONAL_USIZE
-  ),
+  lowercase: () => stringConstant('abcdefghijklmnopqrstuvwxyz'),
+  uppercase: () => stringConstant('ABCDEFGHIJKLMNOPQRSTUVWXYZ'),
+  letters: () => stringConstant('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'),
   whitespace: () => ({
     type: CONST_U8_SLICE,
     value: newSlice([0x20n, 0x09n, 0x0an, 0x0dn, 0x0bn, 0x0cn]),
   }),
 };
+
+/** A string constant such as `std.ascii.lowercase`, typed as a string literal is: `*const [n:0]u8`. */
+function stringConstant(text: string): Member {
+  const bytes = [...text].map((char) => BigInt(char.codePointAt(0) as number));
+  return {
+    type: pointerTo(arrayOf(bytes.length, U8, 0n), true),
+    value: new Pointer(new Constant(new ZArray([...bytes, 0n], 0, bytes.length)), 0),
+  };
+}
 
 let ascii: StructType | undefined;
 

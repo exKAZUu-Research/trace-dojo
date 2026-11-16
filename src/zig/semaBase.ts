@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 726 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 802 -- The file holds one layer of the compiler, whose parts share its private state.
 // code-gauge-allow-file duplicateLines 17 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { CompileError } from '../interpreter/diagnostics';
 import { PANIC, panic } from './arith';
@@ -146,6 +146,8 @@ export interface SemaApi {
   ): { call: (frame: Frame, args: Value[]) => Value; params: readonly Type[]; returnType: Type };
   addressOf(expression: TExpr): TExpr;
   structFields(type: StructType, span: Span): StructField[];
+  /** The tuple type of fields, the same type for the same field types. */
+  tupleType(fields: StructField[]): StructType;
   enumFields(type: EnumType): NonNullable<EnumType['fields']>;
   unionFields(type: UnionType): NonNullable<UnionType['fields']>;
   /** The declaration of a type with a name, such as a method of a struct. */
@@ -198,6 +200,7 @@ export abstract class SemaBase implements SemaApi {
   ): { call: (frame: Frame, args: Value[]) => Value; params: readonly Type[]; returnType: Type };
   abstract addressOf(expression: TExpr): TExpr;
   abstract findDecl(type: Type, name: string): Decl | undefined;
+  abstract tupleType(fields: StructField[]): StructType;
   /** Evaluates a function call at compile time, as a container-level constant's initializer does. */
   protected abstract evaluateAtCompileTime(expression: TExpr): Value;
   /** Whether `set` is the inferred error set (`!T`) of the function being analyzed, which takes in any error. */
@@ -395,8 +398,50 @@ export abstract class SemaBase implements SemaApi {
     });
     this.resolvingFields--;
     type.fields = fields;
+    for (const [index, field] of fields.entries()) {
+      if (this.holdsByValue(field.type, type, new Set())) {
+        this.error(
+          syntax.fields[index],
+          `構造体 ${typeName(type)} が、フィールドに自分自身を値として持っています（ポインタにしてください）。`
+        );
+      }
+    }
     void span;
     return fields;
+  }
+
+  /** Resolves the fields of the structs and unions a value of `type` holds in place, which its undefined value needs. */
+  private resolveLayout(type: Type, span: Span, seen: Set<Type>): void {
+    if (seen.has(type)) return;
+    seen.add(type);
+    if (type.kind === 'array' || type.kind === 'optional') this.resolveLayout(type.child, span, seen);
+    else if (type.kind === 'struct') {
+      for (const field of this.structFields(type, span)) this.resolveLayout(field.type, span, seen);
+    } else if (type.kind === 'union') {
+      for (const field of this.unionFields(type)) this.resolveLayout(field.type, span, seen);
+    }
+  }
+
+  /** Whether a value of `type` contains a `target` in place, not behind a pointer, which would have no size. */
+  private holdsByValue(type: Type, target: Type, seen: Set<Type>): boolean {
+    if (type === target) return true;
+    if (seen.has(type)) return false;
+    seen.add(type);
+    switch (type.kind) {
+      case 'array':
+      case 'optional': {
+        return this.holdsByValue(type.child, target, seen);
+      }
+      case 'struct': {
+        return (type.fields ?? []).some((field) => this.holdsByValue(field.type, target, seen));
+      }
+      case 'union': {
+        return (type.fields ?? []).some((field) => this.holdsByValue(field.type, target, seen));
+      }
+      default: {
+        return false;
+      }
+    }
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- Checks each rule of Zig's type coercion or container analysis in turn.
@@ -499,7 +544,10 @@ export abstract class SemaBase implements SemaApi {
     const from = expression.type;
     if (from === to) return expression;
     if (from.kind === 'noreturn') return { ...expression, type: to };
-    if (from.kind === 'undefined') return known(to, undefinedValue(to), span);
+    if (from.kind === 'undefined') {
+      this.resolveLayout(to, span, new Set());
+      return known(to, undefinedValue(to), span);
+    }
     switch (to.kind) {
       case 'int': {
         return this.coerceToInt(expression, to, span);
@@ -532,6 +580,13 @@ export abstract class SemaBase implements SemaApi {
       }
       case 'error_set': {
         return this.coerceToErrorSet(expression, to, span);
+      }
+      case 'fn': {
+        // A function body type such as `fn (i32) i32` takes a function declared with that signature.
+        if (from !== NATIVE_FN_TYPE || !(expression.value instanceof FnRef)) return undefined;
+        const fn = this.functionOf(expression, span);
+        if (!sameFnType(fn.params, fn.returnType, to)) return undefined;
+        return known(to, this.knownFunctionValue(expression, span), span);
       }
       case 'pointer': {
         return this.coerceToPointer(expression, to, span);
@@ -629,10 +684,8 @@ export abstract class SemaBase implements SemaApi {
   private coerceToOptional(expression: TExpr, to: Extract<Type, { kind: 'optional' }>, span: Span): TExpr | undefined {
     const from = expression.type;
     if (from.kind === 'null') return known(to, NULL, span);
-    if (from.kind === 'optional') {
-      if (inMemoryCoercible(from.child, to.child)) return { ...expression, type: to };
-      return undefined;
-    }
+    if (from.kind === 'optional' && inMemoryCoercible(from.child, to.child)) return { ...expression, type: to };
+    if (from.kind === 'optional' && to.child.kind !== 'optional') return undefined;
     const payload = this.tryCoerce(expression, to.child, span);
     if (!payload) return undefined;
     if (to.child.kind !== 'optional') return { ...payload, type: to, place: undefined };

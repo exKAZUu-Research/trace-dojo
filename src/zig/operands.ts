@@ -1,5 +1,6 @@
 import type { BinaryOperator } from './ast';
-import { type AnyFloat, BigFloat, compareFloats } from './floats';
+import { type AnyFloat, BigFloat, compareFloats, floatFromBigInt } from './floats';
+import type { TExpr } from './semaBase';
 import type { Type } from './types';
 import type { Value } from './values';
 
@@ -44,4 +45,11 @@ export function isZero(value: Value): boolean {
 export function sign(value: Value): number {
   if (typeof value === 'bigint') return value < 0n ? -1 : value > 0n ? 1 : 0;
   return compareFloats(value as AnyFloat, 0) ?? -1;
+}
+
+/** A known `comptime_int` or `comptime_float` operand as a float. */
+export function asFloat(operand: TExpr): AnyFloat {
+  return operand.type.kind === 'comptime_int'
+    ? floatFromBigInt(operand.value as bigint, 128)
+    : (operand.value as AnyFloat);
 }

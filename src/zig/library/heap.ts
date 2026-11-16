@@ -1,4 +1,4 @@
-// code-gauge-allow-file duplicateLines 16 -- Library types repeat the same shape of method on purpose, each over its own state.
+// code-gauge-allow-file duplicateLines 19 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { alignOf, sizeOf } from '../layout';
 import {
   known,
@@ -10,6 +10,7 @@ import {
   undefinedValue,
 } from '../semaBase';
 import {
+  BOOL,
   type EnumType,
   errorSetOf,
   errorUnionOf,
@@ -313,6 +314,12 @@ const ARENA_ALLOCATOR: StructType = allocatorInstanceType('heap.ArenaAllocator',
   deinit: fnMember('ArenaAllocator.deinit', (sema, call) => {
     expectArgs(sema, call, 0, 'deinit');
     return known(VOID, undefined, call.span);
+  }),
+  reset: fnMember('ArenaAllocator.reset', (sema, call) => {
+    // Any `ResetMode` succeeds: the arena keeps no memory of its own to give back or retain.
+    const [mode] = expectArgs(sema, call, 1, 'reset');
+    sema.compile(mode);
+    return known(BOOL, true, call.span);
   }),
 });
 

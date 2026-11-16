@@ -1,6 +1,6 @@
-import { divCeil, divExact, divFloor, divTrunc, mod, PANIC, panic, rem } from '../arith';
+import { divCeil, divExact, divFloor, divTrunc, floatMod, floatRem, mod, PANIC, panic, rem } from '../arith';
 import type { Expression } from '../ast';
-import { fusedMultiplyAdd, intFittingRange } from '../builtins';
+import { fusedMultiplyAdd, intFittingRange, roundFloat } from '../builtins';
 import { log2IntType } from '../expressions';
 import {
   type AnyFloat,
@@ -14,14 +14,17 @@ import {
   floatSqrt,
   FORMATS,
   isInfinite,
+  isIntegral,
   isNaNFloat,
+  negate,
   parseFloatLiteral,
   roundNumber,
   roundTo,
   signBit,
   toNumber,
+  truncateToBigInt,
 } from '../floats';
-import { known, type SemaApi, type TExpr } from '../semaBase';
+import { known, type NativeCall, type SemaApi, type TExpr } from '../semaBase';
 import {
   BOOL,
   COMPTIME_FLOAT,
@@ -42,7 +45,8 @@ import {
 } from '../types';
 import { ErrorValue, NULL, type Value } from '../values';
 import { compareScalars, computed, generic, ORDER, orderValue } from './common';
-import { expectArgs, fnMember, type Member, nativeStruct, typeMember } from './native';
+import { nativeEnum } from './heap';
+import { addMembers, expectArgs, fnMember, type Member, nativeStruct, typeMember } from './native';
 
 function floatArg(sema: SemaApi, arg: Expression, type?: Type): TExpr {
   let compiled = sema.compile(arg, type);
@@ -59,11 +63,69 @@ function bitsOf(type: Type): 16 | 32 | 64 | 80 | 128 {
 
 /** A function of one float, computed in double precision and rounded to its type, as `std.math` does for f32/f64. */
 function unaryFloat(name: string, compute: (x: number) => number): () => Member {
-  return fnMember(name, (sema, call) => {
+  return fnMember(name, unaryFloatCall(name, compute));
+}
+
+function unaryFloatCall(name: string, compute: (x: number) => number): (sema: SemaApi, call: NativeCall) => TExpr {
+  return (sema, call) => {
     const [arg] = expectArgs(sema, call, 1, name);
     const value = floatArg(sema, arg, call.resultType?.kind === 'float' ? call.resultType : undefined);
     const bits = bitsOf(value.type);
     return computed(value.type, [value], call.span, ([x]) => fromDouble(compute(toDouble(x as AnyFloat)), bits));
+  };
+}
+
+/** `log2` and `log10`, which give the floor of the logarithm for integers and the logarithm for floats. */
+function logarithm(name: string, base: bigint, compute: (x: number) => number): () => Member {
+  const forFloats = unaryFloatCall(name, compute);
+  return fnMember(name, (sema, call) => {
+    const [arg] = expectArgs(sema, call, 1, name);
+    const value = sema.compile(arg);
+    const type = value.type;
+    if (type.kind !== 'int' && type.kind !== 'comptime_int') return forFloats(sema, call);
+    if (base === 10n && type.kind === 'int' && type.signed) {
+      return sema.error(call.span, `${name} は符号付き整数には使えません（${typeName(type)} 型です）。`);
+    }
+    return computed(type, [value], call.span, ([x]) => {
+      let n = x as bigint;
+      if (n <= 0n) panic(PANIC.unreachable);
+      let result = 0n;
+      while (n >= base) {
+        n /= base;
+        result++;
+      }
+      return result;
+    });
+  });
+}
+
+/** The integer part of a float, or a bound past the type for an infinity, for `lossyCast`'s clamping. */
+function truncateOrInfinite(value: AnyFloat, type: IntType): bigint {
+  if (isInfinite(value)) return signBit(value) ? minInt(type) - 1n : maxInt(type) + 1n;
+  return truncateToBigInt(value);
+}
+
+/** `ang * rad_per_deg` and `ang * deg_per_rad`, with the decimal constants of Zig's `std.math`. */
+function angleConversion(name: string, constant: string): () => Member {
+  const factor128 = parseFloatLiteral(constant, 128);
+  return fnMember(name, (sema, call) => {
+    const [arg] = expectArgs(sema, call, 1, name);
+    const value = floatArg(sema, arg, call.resultType?.kind === 'float' ? call.resultType : undefined);
+    const bits = bitsOf(value.type);
+    const factor = floatOf(factor128, bits);
+    return computed(value.type, [value], call.span, ([x]) => floatArithmetic(x as AnyFloat, factor, '*', bits));
+  });
+}
+
+/** A function of two floats whose type is `@TypeOf(x, y)`, computed in double precision. */
+function binaryFloat(name: string, compute: (x: number, y: number) => number): () => Member {
+  return fnMember(name, (sema, call) => {
+    const args = expectArgs(sema, call, 2, name).map((arg) => floatArg(sema, arg));
+    const type = sema.peerType(args, call.span);
+    const [a, b] = args.map((arg) => sema.coerce(arg, type, arg.span));
+    return computed(type, [a, b], call.span, ([x, y]) =>
+      fromDouble(compute(toDouble(x as AnyFloat), toDouble(y as AnyFloat)), bitsOf(type))
+    );
   });
 }
 
@@ -93,6 +155,37 @@ function builtinAlias(name: string, builtin: string): () => Member {
 }
 
 const OVERFLOW_ERROR = errorSetOf(['Overflow']);
+
+/** `std.math.CompareOperator`. */
+const COMPARE_OPERATOR = nativeEnum('math.CompareOperator', ['lt', 'lte', 'eq', 'gte', 'gt', 'neq']);
+
+/** Whether a comparison's result (negative, zero, positive, or undefined when unordered) satisfies an operator. */
+function compareHolds(order: number | undefined, operator: bigint): boolean {
+  if (order === undefined) return operator === 5n;
+  return [order < 0, order <= 0, order === 0, order >= 0, order > 0, order !== 0][Number(operator)];
+}
+
+addMembers(ORDER as unknown as StructType, {
+  invert: fnMember('Order.invert', (sema, call) => {
+    expectArgs(sema, call, 0, 'invert');
+    const self = orderReceiver(sema, call);
+    return computed(ORDER, [self], call.span, ([order]) => 2n - (order as bigint));
+  }),
+  compare: fnMember('Order.compare', (sema, call) => {
+    const [opArg] = expectArgs(sema, call, 1, 'compare');
+    const self = orderReceiver(sema, call);
+    const operator = sema.coerce(sema.compile(opArg, COMPARE_OPERATOR), COMPARE_OPERATOR, opArg);
+    return computed(BOOL, [self, operator], call.span, ([order, op]) =>
+      compareHolds(Number(order as bigint) - 1, op as bigint)
+    );
+  }),
+});
+
+function orderReceiver(sema: SemaApi, call: NativeCall): TExpr {
+  const receiver = call.receiver;
+  if (!receiver) return sema.error(call.span, 'std.math.Order の値に対して呼び出してください。');
+  return sema.coerce(receiver, ORDER, call.span);
+}
 
 /** `add`, `sub`, and `mul` of `(T, a, b)`, returning `error.Overflow` when the result does not fit. */
 function checkedInt(name: string, compute: (a: bigint, b: bigint) => bigint): () => Member {
@@ -170,15 +263,15 @@ class UnexpectedRemainder extends Error {}
 const DIVISION_ERRORS = errorSetOf(['DivisionByZero', 'Overflow']);
 const MOD_ERRORS = errorSetOf(['DivisionByZero', 'NegativeDenominator']);
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionCognitiveComplexity 21 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function intDivision(
   name: string,
   errors: typeof DIVISION_ERRORS,
   compute: (a: bigint, b: bigint, type: IntType) => bigint
 ): () => Member {
   return generic(name, 3, (sema, call, type, [aArg, bArg]) => {
-    if (type.kind !== 'int')
-      return sema.error(call.span, `${name} は整数の型にだけ使えます（${typeName(type)} です）。`);
+    if (type.kind === 'float') return floatDivisionMember(sema, call, name, errors, type, [aArg, bArg]);
+    if (type.kind !== 'int') return sema.error(call.span, `${name} は数の型にだけ使えます（${typeName(type)} です）。`);
     const a = sema.coerce(sema.compile(aArg, type), type, aArg);
     const b = sema.coerce(sema.compile(bArg, type), type, bArg);
     return computed(errorUnionOf(errors, type), [a, b], call.span, ([x, y]) => {
@@ -197,6 +290,35 @@ function intDivision(
   });
 }
 
+/** `divTrunc`, `divFloor`, `divCeil`, `mod`, and `rem` of floats, which Zig computes with the builtins. */
+function floatDivisionMember(
+  sema: SemaApi,
+  call: NativeCall,
+  name: string,
+  errors: typeof DIVISION_ERRORS,
+  type: FloatType,
+  [aArg, bArg]: readonly Expression[]
+): TExpr {
+  const [a, b] = [aArg, bArg].map((arg) => sema.coerce(sema.compile(arg, type), type, arg));
+  const operation = name.slice('std.math.'.length);
+  return computed(errorUnionOf(errors, type), [a, b], call.span, ([x, y]) => {
+    const numerator = x as AnyFloat;
+    const denominator = y as AnyFloat;
+    const order = compareFloats(denominator, 0);
+    if (order === 0) return ErrorValue.of('DivisionByZero');
+    if (errors === MOD_ERRORS && order !== undefined && order < 0) return ErrorValue.of('NegativeDenominator');
+    if (operation === 'mod') return floatMod(numerator, denominator, type.bits);
+    if (operation === 'rem') return floatRem(numerator, denominator, type.bits);
+    const quotient = floatArithmetic(numerator, denominator, '/', type.bits);
+    if (operation === 'divExact') return isIntegral(quotient) ? quotient : ErrorValue.of('UnexpectedRemainder');
+    return roundFloat(
+      { divTrunc: '@trunc', divFloor: '@floor', divCeil: '@ceil' }[operation] as string,
+      quotient,
+      type.bits
+    );
+  });
+}
+
 function gcd(a: bigint, b: bigint): bigint {
   let x = a < 0n ? -a : a;
   let y = b < 0n ? -b : b;
@@ -205,6 +327,35 @@ function gcd(a: bigint, b: bigint): bigint {
 }
 
 const POW_ERRORS = errorSetOf(['Overflow', 'Underflow']);
+
+/** `std.math.powi`, transcribed: the power, or the name of the error it returns. */
+// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+function powi(x: bigint, y: bigint, type: IntType): bigint | 'Overflow' | 'Underflow' {
+  const oneOverflows = maxInt(type) < 1n;
+  const yEven = !oneOverflows && (y & 1n) === 0n;
+  if (x === 1n || y === 0n || (x === -1n && yEven)) return oneOverflows ? 'Overflow' : 1n;
+  if (x === -1n) return -1n;
+  if (x === 0n) return y > 0n ? 0n : 'Overflow';
+  if (y >= BigInt(type.bits)) return 'Overflow';
+  if (y < 0n) return 'Underflow';
+  let base = x;
+  let exponent = y;
+  let accumulator = 1n;
+  while (exponent > 1n) {
+    if ((exponent & 1n) === 1n) {
+      accumulator *= base;
+      if (!fitsInt(accumulator, type)) return 'Overflow';
+    }
+    exponent >>= 1n;
+    base *= base;
+    if (!fitsInt(base, type)) return 'Overflow';
+  }
+  if (exponent === 1n) {
+    accumulator *= base;
+    if (!fitsInt(accumulator, type)) return 'Overflow';
+  }
+  return accumulator;
+}
 
 const MEMBERS: Record<string, () => Member> = {
   pi: () => ({
@@ -287,8 +438,8 @@ const MEMBERS: Record<string, () => Member> = {
   cbrt: unaryFloat('std.math.cbrt', Math.cbrt),
   exp: unaryFloat('std.math.exp', Math.exp),
   exp2: unaryFloat('std.math.exp2', (x) => 2 ** x),
-  log2: unaryFloat('std.math.log2', Math.log2),
-  log10: unaryFloat('std.math.log10', Math.log10),
+  log2: logarithm('std.math.log2', 2n, Math.log2),
+  log10: logarithm('std.math.log10', 10n, Math.log10),
   log1p: unaryFloat('std.math.log1p', Math.log1p),
   acos: unaryFloat('std.math.acos', Math.acos),
   asin: unaryFloat('std.math.asin', Math.asin),
@@ -296,24 +447,16 @@ const MEMBERS: Record<string, () => Member> = {
   sinh: unaryFloat('std.math.sinh', Math.sinh),
   cosh: unaryFloat('std.math.cosh', Math.cosh),
   tanh: unaryFloat('std.math.tanh', Math.tanh),
-  degreesToRadians: unaryFloat('std.math.degreesToRadians', (x) => x * (Math.PI / 180)),
-  radiansToDegrees: unaryFloat('std.math.radiansToDegrees', (x) => x * (180 / Math.PI)),
-  atan2: fnMember('std.math.atan2', (sema, call) => {
-    const [yArg, xArg] = expectArgs(sema, call, 2, 'std.math.atan2');
-    const y = floatArg(sema, yArg);
-    const x = sema.coerce(floatArg(sema, xArg, y.type), y.type, xArg);
-    return computed(y.type, [y, x], call.span, ([a, b]) =>
-      fromDouble(Math.atan2(toDouble(a as AnyFloat), toDouble(b as AnyFloat)), bitsOf(y.type))
-    );
-  }),
-  hypot: fnMember('std.math.hypot', (sema, call) => {
-    const [xArg, yArg] = expectArgs(sema, call, 2, 'std.math.hypot');
-    const x = floatArg(sema, xArg);
-    const y = sema.coerce(floatArg(sema, yArg, x.type), x.type, yArg);
-    return computed(x.type, [x, y], call.span, ([a, b]) =>
-      fromDouble(Math.hypot(toDouble(a as AnyFloat), toDouble(b as AnyFloat)), bitsOf(x.type))
-    );
-  }),
+  degreesToRadians: angleConversion(
+    'std.math.degreesToRadians',
+    '0.0174532925199432957692369076848861271344287188854172545609719144'
+  ),
+  radiansToDegrees: angleConversion(
+    'std.math.radiansToDegrees',
+    '57.295779513082320876798154814105170332405472466564321549160243861'
+  ),
+  atan2: binaryFloat('std.math.atan2', Math.atan2),
+  hypot: binaryFloat('std.math.hypot', Math.hypot),
   log: generic('std.math.log', 3, (sema, call, type, [baseArg, xArg]) => {
     const base = sema.coerce(sema.compile(baseArg, type), type, baseArg);
     const x = sema.coerce(sema.compile(xArg, type), type, xArg);
@@ -328,19 +471,32 @@ const MEMBERS: Record<string, () => Member> = {
         return result;
       });
     }
-    return computed(type, [base, x], call.span, ([b, v]) =>
-      fromDouble(Math.log(toDouble(v as AnyFloat)) / Math.log(toDouble(b as AnyFloat)), bitsOf(type))
-    );
+    return computed(type, [base, x], call.span, ([b, v]) => {
+      const baseValue = toDouble(b as AnyFloat);
+      const value = toDouble(v as AnyFloat);
+      // Zig's `log` uses `log2` and `log10` for those bases, and `@log` for e.
+      const result =
+        baseValue === 2
+          ? Math.log2(value)
+          : baseValue === 10
+            ? Math.log10(value)
+            : Math.log(value) / (baseValue === Math.E ? 1 : Math.log(baseValue));
+      return fromDouble(result, bitsOf(type));
+    });
   }),
   pow: generic('std.math.pow', 3, (sema, call, type, [xArg, yArg]) => {
     const x = sema.coerce(sema.compile(xArg, type), type, xArg);
     const y = sema.coerce(sema.compile(yArg, type), type, yArg);
     if (type.kind === 'int') {
       return computed(type, [x, y], call.span, ([a, b]) => {
-        const result = integerPower(a as bigint, b as bigint);
-        if (result === undefined || !fitsInt(result, type)) panic(PANIC.unreachable);
+        // `powi(T, x, y) catch unreachable`.
+        const result = powi(a as bigint, b as bigint, type);
+        if (typeof result === 'string') panic(`attempt to unwrap error: ${result}`);
         return result;
       });
+    }
+    if (type.kind !== 'float' || (type.bits !== 32 && type.bits !== 64)) {
+      return sema.error(call.span, `std.math.pow は ${typeName(type)} 型には使えません（f32 か f64 にしてください）。`);
     }
     return computed(type, [x, y], call.span, ([a, b]) =>
       fromDouble(toDouble(a as AnyFloat) ** toDouble(b as AnyFloat), bitsOf(type))
@@ -351,10 +507,8 @@ const MEMBERS: Record<string, () => Member> = {
     const x = sema.coerce(sema.compile(xArg, type), type, xArg);
     const y = sema.coerce(sema.compile(yArg, type), type, yArg);
     return computed(errorUnionOf(POW_ERRORS, type), [x, y], call.span, ([a, b]) => {
-      const result = integerPower(a as bigint, b as bigint);
-      if (result === undefined) return ErrorValue.of('Underflow');
-      if (!fitsInt(result, type)) return ErrorValue.of(result < 0n ? 'Underflow' : 'Overflow');
-      return result;
+      const result = powi(a as bigint, b as bigint, type);
+      return typeof result === 'string' ? ErrorValue.of(result) : result;
     });
   }),
   clamp: fnMember('std.math.clamp', (sema, call) => {
@@ -373,7 +527,11 @@ const MEMBERS: Record<string, () => Member> = {
     const [aArg, bArg] = expectArgs(sema, call, 2, 'std.math.order');
     const a = sema.compile(aArg);
     const b = sema.compile(bArg, a.type);
-    return computed(ORDER, [a, b], call.span, ([x, y]) => orderValue(compareScalarsAny(x, y)));
+    return computed(ORDER, [a, b], call.span, ([x, y]) => {
+      // Zig's `order` reaches `unreachable` when neither `<`, `==`, nor `>` holds, as for NaN.
+      if ([x, y].some((value) => typeof value !== 'bigint' && isNaNFloat(value as AnyFloat))) panic(PANIC.unreachable);
+      return orderValue(compareScalarsAny(x, y));
+    });
   }),
   divTrunc: intDivision('std.math.divTrunc', DIVISION_ERRORS, (a, b) => divTrunc(a, b, undefined)),
   divFloor: intDivision('std.math.divFloor', DIVISION_ERRORS, (a, b) => divFloor(a, b, undefined)),
@@ -405,6 +563,118 @@ const MEMBERS: Record<string, () => Member> = {
     return computed(type, [sema.coerce(a, type), sema.coerce(b, type)], call.span, ([x, y]) => {
       const divisor = gcd(x as bigint, y as bigint);
       return divisor === 0n ? 0n : ((x as bigint) / divisor) * (y as bigint);
+    });
+  }),
+  CompareOperator: typeMember(() => COMPARE_OPERATOR),
+  compare: fnMember('std.math.compare', (sema, call) => {
+    const [aArg, opArg, bArg] = expectArgs(sema, call, 3, 'std.math.compare');
+    const a = sema.compile(aArg);
+    const operator = sema.coerce(sema.compile(opArg, COMPARE_OPERATOR), COMPARE_OPERATOR, opArg);
+    const b = sema.compile(bArg, a.type.kind.startsWith('comptime') ? undefined : a.type);
+    return computed(BOOL, [a, operator, b], call.span, ([x, op, y]) => {
+      const unordered = [x, y].some((value) => typeof value !== 'bigint' && isNaNFloat(value as AnyFloat));
+      return compareHolds(unordered ? undefined : compareScalarsAny(x, y), op as bigint);
+    });
+  }),
+  floorPowerOfTwo: generic('std.math.floorPowerOfTwo', 2, (sema, call, type, [valueArg]) => {
+    if (type.kind !== 'int')
+      return sema.error(call.span, `std.math.floorPowerOfTwo には整数の型を渡してください（${typeName(type)} です）。`);
+    const value = sema.coerce(sema.compile(valueArg, type), type, valueArg);
+    return computed(type, [value], call.span, ([x]) => {
+      const n = x as bigint;
+      return n <= 0n ? 0n : 1n << BigInt(n.toString(2).length - 1);
+    });
+  }),
+  ceilPowerOfTwo: generic('std.math.ceilPowerOfTwo', 2, (sema, call, type, [valueArg]) => {
+    if (type.kind !== 'int' || type.signed) {
+      return sema.error(
+        call.span,
+        `std.math.ceilPowerOfTwo には符号なし整数の型を渡してください（${typeName(type)} です）。`
+      );
+    }
+    const value = sema.coerce(sema.compile(valueArg, type), type, valueArg);
+    return computed(errorUnionOf(OVERFLOW_ERROR, type), [value], call.span, ([x]) => {
+      const n = x as bigint;
+      if (n === 0n) panic(PANIC.unreachable);
+      const power = n === 1n ? 1n : 1n << BigInt((n - 1n).toString(2).length);
+      return fitsInt(power, type) ? power : ErrorValue.of('Overflow');
+    });
+  }),
+  log2_int_ceil: generic('std.math.log2_int_ceil', 2, (sema, call, type, [xArg]) => {
+    if (type.kind !== 'int' || type.signed) {
+      return sema.error(
+        call.span,
+        `std.math.log2_int_ceil には符号なし整数の型を渡してください（${typeName(type)} です）。`
+      );
+    }
+    const x = sema.coerce(sema.compile(xArg, type), type, xArg);
+    return computed(log2IntType(intType(false, type.bits + 1)), [x], call.span, ([value]) => {
+      const n = value as bigint;
+      if (n === 0n) panic(PANIC.unreachable);
+      return n === 1n ? 0n : BigInt((n - 1n).toString(2).length);
+    });
+  }),
+  copysign: fnMember('std.math.copysign', (sema, call) => {
+    const [magnitudeArg, signArg] = expectArgs(sema, call, 2, 'std.math.copysign');
+    const magnitude = floatArg(sema, magnitudeArg);
+    const sign = sema.coerce(floatArg(sema, signArg, magnitude.type), magnitude.type, signArg);
+    return computed(magnitude.type, [magnitude, sign], call.span, ([m, s]) =>
+      signBit(m as AnyFloat) === signBit(s as AnyFloat) ? m : negate(m as AnyFloat)
+    );
+  }),
+  isPositiveZero: predicate('std.math.isPositiveZero', (x) => compareFloats(x, 0) === 0 && !signBit(x)),
+  isNegativeZero: predicate('std.math.isNegativeZero', (x) => compareFloats(x, 0) === 0 && signBit(x)),
+  asinh: unaryFloat('std.math.asinh', Math.asinh),
+  acosh: unaryFloat('std.math.acosh', Math.acosh),
+  atanh: unaryFloat('std.math.atanh', Math.atanh),
+  expm1: unaryFloat('std.math.expm1', Math.expm1),
+  isNormal: fnMember('std.math.isNormal', (sema, call) => {
+    const [arg] = expectArgs(sema, call, 1, 'std.math.isNormal');
+    const value = floatArg(sema, arg);
+    const minExponent = FORMATS[bitsOf(value.type)].minExponent;
+    return computed(BOOL, [value], call.span, ([x]) => {
+      if (isNaNFloat(x as AnyFloat) || isInfinite(x as AnyFloat)) return false;
+      const big = asBigFloat(x as AnyFloat);
+      return !big.isZero && big.exponent + big.mantissa.toString(2).length - 1 >= minExponent;
+    });
+  }),
+  ldexp: fnMember('std.math.ldexp', (sema, call) => {
+    const [xArg, nArg] = expectArgs(sema, call, 2, 'std.math.ldexp');
+    const x = floatArg(sema, xArg);
+    const n = sema.coerce(sema.compile(nArg, intType(true, 32)), intType(true, 32), nArg);
+    const bits = bitsOf(x.type);
+    return computed(x.type, [x, n], call.span, ([value, exponent]) => {
+      const big = asBigFloat(value as AnyFloat);
+      if (big.kind !== 'finite' || big.isZero) return value;
+      // Scaling by a power of two is exact until the result rounds to the type.
+      return floatOf(new BigFloat(big.sign, 'finite', big.mantissa, big.exponent + Number(exponent as bigint)), bits);
+    });
+  }),
+  log10_int: fnMember('std.math.log10_int', (sema, call) => {
+    const [arg] = expectArgs(sema, call, 1, 'std.math.log10_int');
+    const value = sema.compile(arg);
+    const type = value.type;
+    if (type.kind !== 'int' || type.signed) {
+      return sema.error(arg, `std.math.log10_int には符号なし整数を渡してください（${typeName(type)} 型です）。`);
+    }
+    return computed(log2IntType(type), [value], call.span, ([x]) => {
+      if ((x as bigint) === 0n) panic(PANIC.unreachable);
+      return BigInt((x as bigint).toString().length - 1);
+    });
+  }),
+  lossyCast: generic('std.math.lossyCast', 2, (sema, call, type, [valueArg]) => {
+    const value = sema.compile(valueArg);
+    if (type.kind === 'float') {
+      return computed(type, [value], call.span, ([x]) =>
+        typeof x === 'bigint' ? floatFromBigInt(x, type.bits) : floatOf(asBigFloat(x as AnyFloat), type.bits)
+      );
+    }
+    if (type.kind !== 'int')
+      return sema.error(call.span, `std.math.lossyCast には数の型を渡してください（${typeName(type)} です）。`);
+    return computed(type, [value], call.span, ([x]) => {
+      if (typeof x !== 'bigint' && isNaNFloat(x as AnyFloat)) return 0n;
+      const n = typeof x === 'bigint' ? x : truncateOrInfinite(x as AnyFloat, type);
+      return n >= maxInt(type) ? maxInt(type) : n <= minInt(type) ? minInt(type) : n;
     });
   }),
   floor: builtinAlias('std.math.floor', '@floor'),
@@ -534,15 +804,6 @@ function compareScalarsAny(a: Value, b: Value): number {
     return compareFloats(x, y) ?? 0;
   }
   return compareFloats(a as AnyFloat, b as AnyFloat) ?? 0;
-}
-
-function integerPower(base: bigint, exponent: bigint): bigint | undefined {
-  if (exponent < 0n) {
-    if (base === 1n) return 1n;
-    if (base === -1n) return exponent % 2n === 0n ? 1n : -1n;
-    return base === 0n ? undefined : 0n;
-  }
-  return base ** exponent;
 }
 
 let math: StructType | undefined;

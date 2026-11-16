@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 594 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 602 -- The file holds one layer of the compiler, whose parts share its private state.
 import {
   divCeil,
   divExact,
@@ -25,6 +25,7 @@ import {
   floatFromBigInt,
   floatOf,
   floatSqrt,
+  isIntegral,
   isNaNFloat,
   roundNumber,
   roundTo,
@@ -36,7 +37,6 @@ import { ZigPanic } from './runtime';
 import { copyForStorage, known, newArray, runtime, type TExpr } from './semaBase';
 import {
   BOOL,
-  COMPTIME_FLOAT,
   COMPTIME_INT,
   type EnumType,
   fitsInt,
@@ -231,6 +231,12 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         if (operand.type.kind !== 'int' && operand.type.kind !== 'comptime_int') {
           this.error(args[0], `@truncate は整数にだけ使えます（${typeName(operand.type)} 型です）。`);
         }
+        if (operand.type.kind === 'int' && operand.type.signed !== target.signed) {
+          this.error(
+            args[0],
+            `@truncate では符号を変えられません（${typeName(operand.type)} を ${typeName(target)} にしようとしています）。`
+          );
+        }
         if (operand.type.kind === 'int' && operand.type.bits < target.bits) {
           this.error(
             expression,
@@ -267,6 +273,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         }
         if (operand.known && target.kind === 'int') {
           const value = operand.value as AnyFloat;
+          if (isNaNFloat(value)) this.error(expression, `NaN は ${typeName(target)} 型にできません。`);
           try {
             return known(target, intFromFloat(value, target), expression);
           } catch {
@@ -538,6 +545,10 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
           }
         }
       };
+      if (name === '@divExact' && left.known && right.known) {
+        const quotient = floatOperationFor(left.value as AnyFloat, right.value as AnyFloat, bits);
+        if (!isIntegral(quotient)) this.error(expression, '割り切れない数を @divExact で割っています。');
+      }
       return this.combine([left, right], type, ([a, b]) => operation(a, b), expression);
     }
     if (type.kind !== 'int' && type.kind !== 'comptime_int') {
@@ -606,6 +617,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       if (isNaNFloat(x)) return y;
       if (isNaNFloat(y)) return x;
       const order = compareFloats(x, y) ?? 0;
+      // Zig orders -0 below +0 here, as the CPU's minimum and maximum instructions do.
+      if (order === 0 && signBit(x) !== signBit(y)) return isMax === signBit(x) ? y : x;
       return isMax ? (order >= 0 ? x : y) : order <= 0 ? x : y;
     };
     let type: Type = peer;
@@ -659,8 +672,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
   }
 
   private floatMath(name: string, expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
-    let operand = this.compile(expression.args[0], resultType);
-    if (operand.type.kind === 'comptime_int') operand = this.coerce(operand, COMPTIME_FLOAT, expression.args[0]);
+    const operand = this.compile(expression.args[0], resultType);
     const type = operand.type;
     if (type.kind !== 'float' && type.kind !== 'comptime_float') {
       return this.error(expression, `${name} は浮動小数点数にだけ使えます（${typeName(type)} 型です）。`);
@@ -943,7 +955,7 @@ const MATH_FUNCTIONS: Record<string, (x: number) => number> = {
   '@log10': Math.log10,
 };
 
-function roundFloat(name: string, value: AnyFloat, bits: FloatBits): AnyFloat {
+export function roundFloat(name: string, value: AnyFloat, bits: FloatBits): AnyFloat {
   if (typeof value === 'number') {
     switch (name) {
       case '@floor': {
@@ -972,7 +984,8 @@ function floatDivision(name: string, x: AnyFloat, y: AnyFloat, bits: FloatBits):
   if (name === '@divTrunc') return roundFloat('@trunc', quotient, bits);
   if (name === '@divFloor') return roundFloat('@floor', quotient, bits);
   if (name === '@divCeil') return roundFloat('@ceil', quotient, bits);
-  return quotient;
+  // Zig lowers a float `@divExact` to a division whose result it truncates.
+  return roundFloat('@trunc', quotient, bits);
 }
 
 function floatOperationFor(x: AnyFloat, y: AnyFloat, bits: FloatBits): AnyFloat {

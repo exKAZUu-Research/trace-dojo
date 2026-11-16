@@ -1,7 +1,7 @@
 import type { Expression, Span } from '../ast';
 import { byteValues } from '../builtins';
 import { checkFormat, FormatError, type Options, parseFormat, printValue, type Segment, type TypeInfo } from '../fmt';
-import type { Frame } from '../runtime';
+import { type Frame, ZigPanic } from '../runtime';
 import type { SemaApi } from '../semaBase';
 import { CONST_U8_SLICE, pointerTo, type StructField, type Type, typeName } from '../types';
 import { Pointer, type Value, type ZStruct } from '../values';
@@ -44,6 +44,7 @@ export function compilePrint(
     try {
       if (segment.spec === 'f') formatMethods.set(segment.arg, formatMethod(sema, fields[segment.arg].type, span));
       else checkFormat(segment.spec, fields[segment.arg].type, info, hasOptions);
+      checkKnownArguments(segment, fields);
     } catch (error) {
       if (error instanceof FormatError) return sema.error(span, `書式に誤りがあります: ${error.message}`);
       throw error;
@@ -57,6 +58,22 @@ export function compilePrint(
 }
 
 type FormatMethod = (frame: Frame, value: Value) => number[];
+
+/** The checks Zig makes on known arguments: a width or precision is an integer, and `{c}`/`{u}` fit `u8`/`u21`. */
+function checkKnownArguments(segment: Extract<Segment, { kind: 'placeholder' }>, fields: readonly StructField[]): void {
+  for (const option of [segment.width, segment.precision]) {
+    if (option.kind !== 'arg') continue;
+    const type = fields[option.index].type;
+    if (type.kind !== 'int' && type.kind !== 'comptime_int') {
+      throw new FormatError(`expected type '?usize', found '${typeName(type)}'`);
+    }
+  }
+  const value = fields[segment.arg].comptimeValue;
+  const limit = segment.spec === 'c' ? 0xffn : segment.spec === 'u' ? 0x1f_ff_ffn : undefined;
+  if (limit !== undefined && typeof value === 'bigint' && (value < 0n || value > limit)) {
+    throw new FormatError(`type '${segment.spec === 'c' ? 'u8' : 'u21'}' cannot represent integer value '${value}'`);
+  }
+}
 
 /** `{f}`: calls the value's `format(self, *std.Io.Writer)` method with a writer that collects the bytes. */
 function formatMethod(sema: SemaApi, type: Type, span: Span): FormatMethod {
@@ -95,6 +112,34 @@ function formatBytesOf(
   formatWithMethod: (arg: number, value: Value) => number[]
 ): number[] {
   const out: number[] = [];
+  try {
+    appendSegments(out, segments, fields, args, info, formatWithMethod);
+  } catch (error) {
+    // The bytes before a panic reach the stream, as Zig's writer has them in its buffer when the panic flushes it.
+    if (error instanceof ZigPanic) throw new PartialOutputPanic(error, out);
+    throw error;
+  }
+  return out;
+}
+
+/** A panic while formatting, with the bytes formatted before it. */
+export class PartialOutputPanic extends ZigPanic {
+  constructor(
+    panic: ZigPanic,
+    readonly partial: number[]
+  ) {
+    super(panic.text);
+  }
+}
+
+function appendSegments(
+  out: number[],
+  segments: readonly Segment[],
+  fields: readonly StructField[],
+  args: ZStruct,
+  info: TypeInfo,
+  formatWithMethod: (arg: number, value: Value) => number[]
+): void {
   const argValue = (index: number): Value => fields[index].comptimeValue ?? args.slots[index];
   for (const segment of segments) {
     if (segment.kind === 'literal') {
@@ -109,7 +154,6 @@ function formatBytesOf(
     if (segment.spec === 'f') out.push(...formatWithMethod(segment.arg, argValue(segment.arg)));
     else printValue(out, segment.spec, options, argValue(segment.arg), fields[segment.arg].type as Type, info);
   }
-  return out;
 }
 
 /** Decodes bytes written to a stream as UTF-8, as a terminal shows them. */

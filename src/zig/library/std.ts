@@ -7,6 +7,7 @@ import {
   CONST_U8_SLICE,
   errorSetOf,
   errorUnionOf,
+  intType,
   type StructType,
   TYPE,
   type Type,
@@ -28,7 +29,7 @@ import {
   typeMember,
   unavailableMember,
 } from './native';
-import { compilePrint, decodeOutput } from './print';
+import { compilePrint, decodeOutput, PartialOutputPanic } from './print';
 import { WRITER } from './writer';
 
 let std: StructType | undefined;
@@ -123,7 +124,14 @@ const DEBUG = nativeStruct('std.debug', {
       VOID,
       (frame) => {
         frame.runtime.spend();
-        frame.runtime.io.stderr.write(decodeOutput(print(frame)));
+        let bytes: number[];
+        try {
+          bytes = print(frame);
+        } catch (error) {
+          if (error instanceof PartialOutputPanic) frame.runtime.io.stderr.write(decodeOutput(error.partial));
+          throw error;
+        }
+        frame.runtime.io.stderr.write(decodeOutput(bytes));
         return;
       },
       call.span
@@ -171,7 +179,6 @@ const WRITE_ERROR = errorSetOf(['WriteFailed']);
 
 addIoMembers();
 
-// code-gauge-allow functionNcss 52 -- Defines the methods of one library type, each a short closure over its state.
 function addIoMembers(): void {
   addMembers(IO, {
     File: typeMember(() => FILE),
@@ -206,6 +213,12 @@ function addIoMembers(): void {
     }),
     reader: unavailableMember('標準入力やファイルからの読み込み'),
   });
+  addWriterMembers();
+}
+
+// code-gauge-allow functionNcss 60 -- Defines the methods of one library type, each a short closure over its state.
+// code-gauge-allow duplicateLines 17 -- Each writer method writes its own bytes through the same writer, in the same shape.
+function addWriterMembers(): void {
   addMembers(WRITER, {
     Error: typeMember(() => WRITE_ERROR),
     print: fnMember('Writer.print', (sema, call) => {
@@ -250,6 +263,54 @@ function addIoMembers(): void {
             length: Number(evaluateCount(frame) as bigint),
           }).fill(Number(evaluateByte(frame) as bigint));
           return writeTo(frame, writer(frame), repeated);
+        },
+        call.span
+      );
+    }),
+    write: fnMember('Writer.write', (sema, call) => {
+      const writer = writerOf(sema, call);
+      const [bytes] = compileArgs(sema, expectArgs(sema, call, 1, 'write'), [CONST_U8_SLICE]);
+      const evaluate = bytes.eval;
+      return runtime(
+        errorUnionOf(WRITE_ERROR, USIZE_TYPE()),
+        (frame) => {
+          const data = byteValues(evaluate(frame)).map(Number);
+          return writeTo(frame, writer(frame), data) ?? BigInt(data.length);
+        },
+        call.span
+      );
+    }),
+    splatBytesAll: fnMember('Writer.splatBytesAll', (sema, call) => {
+      const writer = writerOf(sema, call);
+      const [bytes, count] = compileArgs(sema, expectArgs(sema, call, 2, 'splatBytesAll'), [
+        CONST_U8_SLICE,
+        USIZE_TYPE(),
+      ]);
+      const evaluateBytes = bytes.eval;
+      const evaluateCount = count.eval;
+      return runtime(
+        errorUnionOf(WRITE_ERROR, VOID),
+        (frame) => {
+          const data = byteValues(evaluateBytes(frame)).map(Number);
+          const repeated = Array.from({ length: Number(evaluateCount(frame) as bigint) }, () => data).flat();
+          return writeTo(frame, writer(frame), repeated);
+        },
+        call.span
+      );
+    }),
+    printUnicodeCodepoint: fnMember('Writer.printUnicodeCodepoint', (sema, call) => {
+      const writer = writerOf(sema, call);
+      const [codePoint] = compileArgs(sema, expectArgs(sema, call, 1, 'printUnicodeCodepoint'), [intType(false, 21)]);
+      const evaluate = codePoint.eval;
+      return runtime(
+        errorUnionOf(WRITE_ERROR, VOID),
+        (frame) => {
+          const value = Number(evaluate(frame) as bigint);
+          // A surrogate half or a value past U+10FFFF prints as the replacement character.
+          const valid = value <= 0x10_ff_ff && !(value >= 0xd8_00 && value <= 0xdf_ff);
+          return writeTo(frame, writer(frame), [
+            ...new TextEncoder().encode(String.fromCodePoint(valid ? value : 0xff_fd)),
+          ]);
         },
         call.span
       );

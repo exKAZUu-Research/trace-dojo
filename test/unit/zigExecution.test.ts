@@ -145,6 +145,30 @@ pub fn main() void {
   expect(rows(pointlessDiscard)).toEqual([3]);
 });
 
+test('unstable sorts leave equal elements in the order of pdqsort and heapsort in Zig', () => {
+  const program = `const std = @import("std");
+const P = struct { name: []const u8, age: u32 };
+fn byAge(_: void, a: P, b: P) bool {
+    return a.age < b.age;
+}
+pub fn main() void {
+    var ps: [30]P = undefined;
+    const names = "abcdefghijklmnopqrstuvwxyz0123";
+    for (&ps, 0..) |*p, i| p.* = .{ .name = names[i..][0..1], .age = @intCast((i * 7) % 5) };
+    var q = ps;
+    std.sort.pdq(P, &q, {}, byAge);
+    for (q) |p| std.debug.print("{s}", .{p.name});
+    std.debug.print("\\n", .{});
+    q = ps;
+    std.sort.heap(P, &q, {}, byAge);
+    for (q) |p| std.debug.print("{s}", .{p.name});
+    std.debug.print("\\n", .{});
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    stderr: 'ufzkap2dixnsb0gvlqotyje3rhwm1c\nfkzuapnx2isdg0lvbq3yeojt1cmwrh\n',
+  });
+});
+
 test('assigning an anonymous literal writes each field in turn, as result locations do', () => {
   const program = `const std = @import("std");
 pub fn main() void {

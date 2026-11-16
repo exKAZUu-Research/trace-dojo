@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 563 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 590 -- The file holds one layer of the compiler, whose parts share its private state.
 import type { SourceDiagnostic } from '../interpreter/diagnostics';
 import type {
   Capture,
@@ -125,7 +125,7 @@ class AstChecker {
 
   // Containers ------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Mirrors one AstGen check over the constructs it covers.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Mirrors one AstGen check over the constructs it covers.
   checkContainer(
     members: readonly ContainerMember[],
     fields: readonly ContainerField[],
@@ -135,9 +135,12 @@ class AstChecker {
     const names = new Set<string>();
     const seen = new Map<string, Span>();
     for (const member of members) {
-      if (seen.has(member.name)) {
-        this.error(member, `名前「${member.name}」が、同じ型の中で2回宣言されています。`);
-      }
+      const local = this.outerLocal(member.name);
+      if (local)
+        this.error(member, `宣言「${member.name}」は、外側の${CATEGORY_NAMES[local.category]}と同じ名前です。`);
+      // Zig points at the first of the declarations that share a name.
+      const first = seen.get(member.name);
+      if (first) this.error(first, `名前「${member.name}」が、同じ型の中で2回宣言されています。`);
       seen.set(member.name, member);
       names.add(member.name);
       if (primitiveType(member.name) !== undefined || member.name === 'true' || member.name === 'false') {
@@ -147,13 +150,15 @@ class AstChecker {
         );
       }
     }
-    const fieldNames = new Set<string>();
+    const fieldSpans = new Map<string, Span>();
     for (const field of fields) {
       if (field.name === undefined) continue;
-      if (fieldNames.has(field.name) || seen.has(field.name)) {
-        this.error(field, `名前「${field.name}」が、同じ型の中で2回宣言されています。`);
+      const other = fieldSpans.get(field.name) ?? seen.get(field.name);
+      if (other) {
+        const first = other.row <= field.row ? other : field;
+        this.error(first, `名前「${field.name}」が、同じ型の中で2回宣言されています。`);
       }
-      fieldNames.add(field.name);
+      fieldSpans.set(field.name, field);
     }
     const namespace: NamespaceScope = { kind: 'namespace', names, parent };
     const outer = this.scope;
@@ -167,6 +172,16 @@ class AstChecker {
     } finally {
       this.scope = outer;
     }
+  }
+
+  /** The local of an enclosing function that a declaration in a type inside it would shadow. */
+  private outerLocal(name: string): LocalBinding | undefined {
+    for (let scope = this.scope; scope; scope = scope.parent) {
+      if (scope.kind !== 'block') continue;
+      const local = scope.locals.find((binding) => binding.name === name);
+      if (local) return local;
+    }
+    return undefined;
   }
 
   private checkFields(fields: readonly ContainerField[], container: Container | undefined): void {
@@ -482,9 +497,6 @@ class AstChecker {
         if (expression.otherwise) {
           const otherwise = expression.otherwise;
           this.withBlock(() => {
-            if (expression.elseCapture?.name === '_') {
-              this.error(expression.elseCapture, 'エラーを捨てる |_| は、書かずに省いてください。');
-            }
             this.capture(expression.elseCapture);
             this.expression(otherwise, 'value');
           });
@@ -568,6 +580,11 @@ class AstChecker {
         this.assignment(expression);
         break;
       }
+      case 'errorSetType': {
+        const duplicate = expression.names.find((name, index) => expression.names.indexOf(name) !== index);
+        if (duplicate) this.error(expression, `エラー集合に error.${duplicate} が2回書かれています。`);
+        break;
+      }
       default: {
         break;
       }
@@ -648,9 +665,6 @@ class AstChecker {
     if (expression.otherwise) {
       const otherwise = expression.otherwise;
       this.withBlock(() => {
-        if (expression.elseCapture?.name === '_') {
-          this.error(expression.elseCapture, 'エラーを捨てる |_| は、書かずに省いてください。');
-        }
         this.capture(expression.elseCapture);
         this.expression(otherwise, 'value');
       });

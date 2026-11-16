@@ -1,4 +1,3 @@
-// code-gauge-allow-file duplicateLines 17 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 /** `std.unicode`, `std.meta`, `std.enums`, and `std.PriorityQueue`. */
 import type { Span } from '../ast';
@@ -223,6 +222,13 @@ const UNICODE: Record<string, () => Member> = {
       return typeof result === 'string' ? ErrorValue.of(result) : BigInt(result);
     });
   }),
+  utf8ValidCodepoint: fnMember('std.unicode.utf8ValidCodepoint', (sema, call) => {
+    const [arg] = compileArgs(sema, expectArgs(sema, call, 1, 'utf8ValidCodepoint'), [intType(false, 21)]);
+    return computed(BOOL, [arg], call.span, ([value]) => {
+      const codePoint = value as bigint;
+      return codePoint <= 0x10_ff_ffn && !(codePoint >= 0xd8_00n && codePoint <= 0xdf_ffn);
+    });
+  }),
   utf8CountCodepoints: fnMember('std.unicode.utf8CountCodepoints', (sema, call) => {
     const [textArg] = expectArgs(sema, call, 1, 'utf8CountCodepoints');
     const text = constSlice(sema, textArg, U8);
@@ -314,6 +320,12 @@ const ENUMS: Record<string, () => Member> = {
       call.span,
       ([n]) => fields.find((field) => field.value === n)?.value ?? NULL
     );
+  }),
+  values: fnMember('std.enums.values', (sema, call) => {
+    const [typeArg] = expectArgs(sema, call, 1, 'std.enums.values');
+    const type = sema.compileType(typeArg);
+    if (type.kind !== 'enum') return sema.error(typeArg, 'values には enum の型を渡してください。');
+    return known(sliceOf(type, true), newSlice(sema.enumFields(type).map((field) => field.value)), call.span);
   }),
 };
 

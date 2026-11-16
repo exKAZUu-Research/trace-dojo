@@ -1,12 +1,12 @@
 import type { Span } from '../ast';
-// code-gauge-allow-file duplicateLines 25 -- Library types repeat the same shape of method on purpose, each over its own state.
+// code-gauge-allow-file duplicateLines 26 -- Library types repeat the same shape of method on purpose, each over its own state.
 import type { Frame } from '../runtime';
 import { known, runtime, type SemaApi } from '../semaBase';
 import { BOOL, fnType, optionalOf, type StructType, type Type, typeName, USIZE, VOID } from '../types';
-import { FnValue, NULL, type Slice, type Value } from '../values';
-import { compareScalars, constSlice, generic, mutableSlice, ORDER } from './common';
+import { FnValue, NULL, type Slice, type Value, ZStruct } from '../values';
+import { compareScalars, constSlice, generic, mutableSlice, ORDER, tupleOf } from './common';
 import { type Member, nativeFunction, nativeStruct } from './native';
-import { sortValues } from './sorting';
+import { type SortAlgorithm, sortValues } from './sorting';
 
 /** `std.sort.asc(T)` and `desc(T)`: comparison functions for `std.mem.sort`. */
 function comparator(name: string, direction: number): () => Member {
@@ -29,7 +29,7 @@ function comparator(name: string, direction: number): () => Member {
 }
 
 /** `sort(T, items, context, lessThan)` for each of Zig's sort algorithms. */
-function sorter(name: string, stable: boolean): () => Member {
+function sorter(name: string, algorithm: SortAlgorithm): () => Member {
   return generic(name, 4, (sema, call, type, [itemsArg, contextArg, lessThanArg]) => {
     const items = mutableSlice(sema, itemsArg, type);
     const context = sema.compile(contextArg);
@@ -45,7 +45,7 @@ function sorter(name: string, stable: boolean): () => Member {
         const sorted = sortValues(
           slice.values(),
           (a, b) => lessThan.call(frame, [contextValue, a, b]) as boolean,
-          stable,
+          algorithm,
           frame
         );
         for (const [index, value] of sorted.entries()) slice.set(index, value);
@@ -130,13 +130,51 @@ function partitionPoint(items: Value[], predicate: (item: Value) => boolean): nu
   return low;
 }
 
+/** `equalRange(T, items, context, compareFn)`: the bounds of the items the function finds equal. */
+function equalRangeMember(): Member {
+  return generic('std.sort.equalRange', 4, (sema, call, type, [itemsArg, contextArg, fnArg]) => {
+    const items = constSlice(sema, itemsArg, type);
+    const context = sema.compile(contextArg);
+    const fn = sema.functionOf(sema.compile(fnArg), fnArg);
+    checkParams(sema, 'std.sort.equalRange', fn.params, [context.type, type], fnArg);
+    const evaluateItems = items.eval;
+    const evaluateContext = context.eval;
+    return runtime(
+      tupleOf(sema, [USIZE, USIZE]),
+      (frame: Frame) => {
+        const values = (evaluateItems(frame) as Slice).values();
+        const contextValue = evaluateContext(frame);
+        const order = (item: Value): bigint => {
+          frame.runtime.spend();
+          return fn.call(frame, [contextValue, item]) as bigint;
+        };
+        let low = 0;
+        let high = values.length;
+        while (low < high) {
+          const middle = low + Math.floor((high - low) / 2);
+          const comparison = order(values[middle]);
+          if (comparison === 2n) low = middle + 1;
+          else if (comparison === 0n) high = middle;
+          else {
+            const lower = low + partitionPoint(values.slice(low, middle), (item) => order(item) === 2n);
+            const upper = middle + partitionPoint(values.slice(middle, high), (item) => order(item) !== 0n);
+            return new ZStruct([BigInt(lower), BigInt(upper)]);
+          }
+        }
+        return new ZStruct([BigInt(low), BigInt(low)]);
+      },
+      call.span
+    );
+  })();
+}
+
 const MEMBERS: Record<string, () => Member> = {
   asc: comparator('std.sort.asc', 1),
   desc: comparator('std.sort.desc', -1),
-  block: sorter('std.sort.block', true),
-  insertion: sorter('std.sort.insertion', true),
-  heap: sorter('std.sort.heap', false),
-  pdq: sorter('std.sort.pdq', false),
+  block: sorter('std.sort.block', 'stable'),
+  insertion: sorter('std.sort.insertion', 'stable'),
+  heap: sorter('std.sort.heap', 'heap'),
+  pdq: sorter('std.sort.pdq', 'pdq'),
   isSorted: reader(
     'std.sort.isSorted',
     2,
@@ -153,6 +191,7 @@ const MEMBERS: Record<string, () => Member> = {
     () => optionalOf(USIZE),
     (items, call) => binarySearch(items, (item) => call([item]) as bigint)
   ),
+  equalRange: () => equalRangeMember(),
   lowerBound: reader(
     'std.sort.lowerBound',
     1,

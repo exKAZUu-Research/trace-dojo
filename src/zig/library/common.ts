@@ -1,7 +1,17 @@
 import type { Expression, Span } from '../ast';
 import { ZigPanic } from '../runtime';
 import { known, runtime, type SemaApi, type TExpr } from '../semaBase';
-import { BOOL, type EnumType, errorUnionOf, optionalOf, sliceOf, type Type, typeName, USIZE } from '../types';
+import {
+  BOOL,
+  type EnumType,
+  errorUnionOf,
+  optionalOf,
+  sliceOf,
+  type StructType,
+  type Type,
+  typeName,
+  USIZE,
+} from '../types';
 import { NULL, Pointer, Slice, type Value, ZArray } from '../values';
 import { ALLOCATOR, ALLOCATOR_ERROR, nativeEnum } from './heap';
 import { compileArgs, expectArgs, fnMember, type Member } from './native';
@@ -32,6 +42,11 @@ export function elements(value: Value): Value[] {
   if (value instanceof Pointer) return (value.load() as ZArray).values();
   if (value instanceof ZArray) return value.values();
   return [];
+}
+
+/** The tuple type `struct { A, B, ... }` of some types. */
+export function tupleOf(sema: SemaApi, types: readonly Type[]): StructType {
+  return sema.tupleType(types.map((type, index) => ({ name: String(index), type, hasDefault: false })));
 }
 
 /** A new slice holding values. */

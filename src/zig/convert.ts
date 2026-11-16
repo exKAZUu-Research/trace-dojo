@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 723 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 761 -- The file holds one layer of the compiler, whose parts share its private state.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -1094,7 +1094,7 @@ function initializer(list: Node, span: Span, type: Expression | undefined): Expr
   }
   const elements = expressionChildren(list).map((child) => expression(child));
   // `.{}` and `T{}` initialize a struct with its default field values, or an empty array or tuple.
-  if (elements.length === 0) return { kind: 'structInit', ...span, type, fields: [] };
+  if (elements.length === 0 && type?.kind !== 'arrayType') return { kind: 'structInit', ...span, type, fields: [] };
   return { kind: 'arrayInit', ...span, type, elements };
 }
 

@@ -1,9 +1,18 @@
-// code-gauge-allow-file fileNcss 610 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 711 -- The file holds one layer of the compiler, whose parts share its private state.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
  */
-import { type AnyFloat, asBigFloat, type Decimal, type FloatBits, shortestDecimal } from './floats';
+import { PANIC, panic } from './arith';
+import {
+  type AnyFloat,
+  asBigFloat,
+  type BigFloat,
+  type Decimal,
+  type FloatBits,
+  FORMATS,
+  shortestDecimal,
+} from './floats';
 import { type EnumType, type StructField, type Type, typeName, type UnionType } from './types';
 import {
   type EnumLiteral,
@@ -201,6 +210,11 @@ export function checkFormat(spec: string, type: Type, info: TypeInfo, hasOptions
     throw new FormatError(`invalid format string '${spec}' for type '${typeName(type)}'`);
   };
   const kind = type.kind;
+  const special = SPECIAL_SPECIFIERS[spec];
+  if (special) {
+    if (!special.accepts(type)) invalid();
+    return;
+  }
   if (spec.length === 1) {
     switch (spec) {
       case '*': {
@@ -242,10 +256,7 @@ export function checkFormat(spec: string, type: Type, info: TypeInfo, hasOptions
           kind === 'enum'
         )
           return;
-        if (isByteString(type)) {
-          if (hasOptions) throw new FormatError('options are not allowed for hex string formatting');
-          return;
-        }
+        if (isByteString(type)) return;
         return invalid();
       }
       case 's': {
@@ -371,6 +382,8 @@ export function printValue(
   depth = MAX_DEPTH
 ): void {
   const kind = type.kind;
+  const special = SPECIAL_SPECIFIERS[spec];
+  if (special) return special.print(out, value, type, options);
   if (spec.length === 1) {
     switch (spec) {
       case 'd': {
@@ -397,7 +410,8 @@ export function printValue(
         if (kind === 'enum') return printInt(out, value as bigint, type.tagType as Type, base, upper, options);
         if (kind === 'float' || kind === 'comptime_float')
           return printFloatHex(out, value as AnyFloat, floatBits(type), upper, options);
-        // A byte string in hexadecimal.
+        // A byte string in hexadecimal, which Zig asserts has no width or precision.
+        forbidOptions(options);
         for (const byte of stringBytes(value, type)) out.push(...hexDigits(Number(byte), upper));
         return;
       }
@@ -447,10 +461,12 @@ export function printValue(
       return printValue(out, rest, options, value, type.payload, info, depth);
     }
     case 'error_set': {
+      forbidOptions(options);
       out.push(...utf8(`error.${(value as ErrorValue).name}`));
       return;
     }
     case 'enum': {
+      forbidOptions(options);
       const name = enumName(value as bigint, type, info);
       if (name !== undefined) out.push(...utf8(`.${name}`));
       else out.push(...utf8(`@fromBackingInt(${value as bigint})`));
@@ -559,6 +575,107 @@ export function printValue(
 function addressOf(value: Value): bigint {
   void value;
   return 0n;
+}
+
+/** Specifiers for strings and byte counts, which `printValue` handles before the others. */
+const SPECIAL_SPECIFIERS: Record<
+  string,
+  { accepts: (type: Type) => boolean; print: (out: number[], value: Value, type: Type, options: Options) => void }
+> = {
+  q: {
+    accepts: isByteString,
+    print: (out, value, type) => {
+      out.push(0x22, ...escapeString(stringBytes(value, type).map(Number)), 0x22);
+    },
+  },
+  B: {
+    accepts: (type) => type.kind === 'int' || type.kind === 'comptime_int',
+    print: (out, value, _type, options) => printByteSize(out, value as bigint, false, options),
+  },
+  Bi: {
+    accepts: (type) => type.kind === 'int' || type.kind === 'comptime_int',
+    print: (out, value, _type, options) => printByteSize(out, value as bigint, true, options),
+  },
+  b64: {
+    accepts: (type) => type.kind === 'pointer' && isByteString(type),
+    print: (out, value, type, options) => {
+      forbidOptions(options);
+      out.push(...utf8(btoa(String.fromCodePoint(...stringBytes(value, type).map(Number)))));
+    },
+  },
+};
+
+/** `std.zig.stringEscape`: escapes quotes, backslashes, control characters, and invalid or special UTF-8. */
+function escapeString(bytes: readonly number[]): number[] {
+  const out: number[] = [];
+  const hex = (byte: number): void => {
+    out.push(...utf8(`\\x${byte.toString(16).padStart(2, '0')}`));
+  };
+  let index = 0;
+  while (index < bytes.length) {
+    const byte = bytes[index];
+    const named = ESCAPES[byte];
+    if (named) out.push(...utf8(named));
+    else if (byte < 0x20 || byte === 0x7f) hex(byte);
+    else if (byte < 0x80) out.push(byte);
+    else {
+      const { length, escape } = utf8Sequence(bytes, index);
+      for (const each of bytes.slice(index, index + length)) {
+        if (escape) hex(each);
+        else out.push(each);
+      }
+      index += length;
+      continue;
+    }
+    index++;
+  }
+  return out;
+}
+
+const ESCAPES: Record<number, string> = {
+  0x09: String.raw`\t`,
+  0x0a: String.raw`\n`,
+  0x0d: String.raw`\r`,
+  0x5c: String.raw`\\`,
+  0x22: String.raw`\"`,
+};
+
+/** The UTF-8 sequence at a byte, and whether `stringEscape` writes it as hex escapes. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+function utf8Sequence(bytes: readonly number[], index: number): { length: number; escape: boolean } {
+  const byte = bytes[index];
+  const length = byte >= 0xf0 && byte < 0xf8 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 0;
+  // A truncated sequence, a stray continuation byte, or a bad lead byte is escaped one byte at a time.
+  if (length === 0 || index + length > bytes.length) return { length: 1, escape: true };
+  let codePoint = byte & (0xff >> (length + 1));
+  for (const continuation of bytes.slice(index + 1, index + length)) {
+    if ((continuation & 0xc0) !== 0x80) return { length: 1, escape: true };
+    codePoint = (codePoint << 6) | (continuation & 0x3f);
+  }
+  const overlong = codePoint < [0, 0, 0x80, 0x8_00, 0x1_00_00][length];
+  if (overlong || (codePoint >= 0xd8_00 && codePoint <= 0xdf_ff)) return { length: 1, escape: true };
+  const special = codePoint > 0x10_ff_ff || [0xfe_ff, 0x85, 0x20_28, 0x20_29].includes(codePoint);
+  return { length, escape: special };
+}
+
+/** `printByteSize`: a byte count in SI (`kB`, `MB`, ...) or IEC (`KiB`, `MiB`, ...) units. */
+function printByteSize(out: number[], value: bigint, binary: boolean, options: Options): void {
+  if (value === 0n) return alignBuffer(out, utf8('0B'), options);
+  const log2 = value.toString(2).length - 1;
+  // `std.math.log2(1000)` is 9, the integer part.
+  const magnitude = Math.min(Math.floor(log2 / (binary ? 10 : 9)), 8);
+  const base = binary ? 1024 : 1000;
+  const text =
+    magnitude === 0
+      ? value.toString()
+      : formatDecimal(shortestDecimal(Number(value) / base ** magnitude, 64), options.precision);
+  const suffix = magnitude === 0 ? 'B' : `${(binary ? ' KMGTPEZY' : ' kMGTPEZY')[magnitude]}${binary ? 'iB' : 'B'}`;
+  alignBuffer(out, utf8(text + suffix), options);
+}
+
+/** `optionsForbidden`, whose assertion fails in a Debug build when a placeholder gives a width or a precision. */
+function forbidOptions(options: Options): void {
+  if (options.width !== undefined || options.precision !== undefined) panic(PANIC.unreachable);
 }
 
 function floatBits(type: Type): FloatBits {
@@ -728,6 +845,7 @@ function formatScientific(input: Decimal, precision: number | undefined): string
   const decimal = precision === undefined ? input : roundDecimal(input, 'scientific', precision);
   const digits = decimal.mantissa.toString();
   const olength = digits.length;
+  if (precision !== undefined && 8 + precision > FLOAT_BUFFER_SIZE) return TOO_LONG;
   let text = decimal.sign ? '-' : '';
   text += digits[0];
   let fraction = digits.slice(1);
@@ -740,13 +858,25 @@ function formatScientific(input: Decimal, precision: number | undefined): string
   return `${text}e${exponent}`;
 }
 
+/**
+ * `Writer.printFloat` renders into a buffer sized for any f64 in decimal, `bufferSize(.decimal, f64)`, and prints
+ * `(float)` for text that does not fit, as longer floats and large precisions can.
+ */
+const FLOAT_BUFFER_SIZE = 347;
+const TOO_LONG = '(float)';
+
 /** `std.fmt.float.formatDecimal`. */
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionCognitiveComplexity 21 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function formatDecimal(input: Decimal, precision: number | undefined): string {
   if (input.special) return special(input);
   const decimal = precision === undefined ? input : roundDecimal(input, 'decimal', precision);
   const digits = decimal.mantissa.toString();
   const olength = digits.length;
+  const needed =
+    decimal.exponent >= 0
+      ? 2 + decimal.exponent + olength + (precision ?? 0)
+      : 2 + Math.max(-decimal.exponent + olength, precision ?? 0);
+  if (needed > FLOAT_BUFFER_SIZE) return TOO_LONG;
   let text = decimal.sign ? '-' : '';
   const pointOffset = decimal.exponent + olength;
   if (pointOffset <= 0) {
@@ -774,29 +904,58 @@ function formatDecimal(input: Decimal, precision: number | undefined): string {
 }
 
 /** `printFloatHex`: a float as `0x1.8p1`. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function printFloatHex(out: number[], value: AnyFloat, bits: FloatBits, upper: boolean, options: Options): void {
   const big = asBigFloat(value);
   let text = big.sign ? '-' : '';
   if (big.kind === 'nan') text += upper ? 'NAN' : 'nan';
   else if (big.kind === 'inf') text += upper ? 'INF' : 'inf';
-  else if (big.isZero) text += '0x0.0p0';
-  else {
-    const bitLength = big.mantissa.toString(2).length;
-    const exponent = big.exponent + bitLength - 1;
-    const fractionBits = bitLength - 1;
-    const padded = fractionBits % 4 === 0 ? fractionBits : fractionBits + (4 - (fractionBits % 4));
-    const fraction = (big.mantissa - (1n << BigInt(fractionBits))) << BigInt(padded - fractionBits);
-    let hex =
-      padded === 0
-        ? '0'
-        : fraction
-            .toString(16)
-            .padStart(padded / 4, '0')
-            .replace(/0+$/, '') || '0';
-    if (upper) hex = hex.toUpperCase();
-    text += `0x1.${hex}p${exponent}`;
-  }
-  void bits;
+  else if (big.isZero) {
+    const zeros =
+      options.precision === undefined ? '.0' : options.precision > 0 ? `.${'0'.repeat(options.precision)}` : '';
+    text += `0x0${zeros}p0`;
+  } else text += hexFloatDigits(big, bits, upper, options.precision);
   alignBuffer(out, utf8(text), options);
+}
+
+/** The digits and exponent of `Writer.printFloatHex` for a finite nonzero float, rounded to a precision if given. */
+// code-gauge-allow functionNcss 35 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+function hexFloatDigits(big: BigFloat, bits: FloatBits, upper: boolean, precision: number | undefined): string {
+  const format = FORMATS[bits];
+  const fractionalBits = format.precision - 1;
+  const digits = Math.ceil(fractionalBits / 4);
+  const bitLength = big.mantissa.toString(2).length;
+  let exponent = big.exponent + bitLength - 1;
+  // The significand with its integer bit at `fractionalBits`, or a subnormal's below the minimum exponent.
+  let mantissa: bigint;
+  if (exponent < format.minExponent) {
+    mantissa = big.mantissa << BigInt(big.exponent - (format.minExponent - fractionalBits));
+    exponent = format.minExponent;
+  } else {
+    mantissa = big.mantissa << BigInt(fractionalBits - bitLength + 1);
+  }
+  mantissa <<= BigInt(digits * 4 - fractionalBits);
+  if (precision !== undefined && precision < digits) {
+    let extraBits = (digits - precision) * 4;
+    while (extraBits > 2) {
+      mantissa = (mantissa >> 1n) | (mantissa & 1n);
+      extraBits--;
+    }
+    // Round to nearest, ties to even, as Zig does.
+    if ((mantissa & 0b100n) !== 0n) mantissa |= 1n;
+    mantissa += 1n;
+    mantissa >>= 2n;
+    mantissa <<= BigInt((digits - precision) * 4);
+    if ((mantissa & (1n << BigInt(1 + digits * 4))) !== 0n) {
+      mantissa >>= 1n;
+      exponent++;
+    }
+  }
+  let hex = mantissa.toString(16).padStart(1 + digits, '0');
+  if (upper) hex = hex.toUpperCase();
+  const trimmed = hex.slice(1).replace(/0+$/, '');
+  let fraction = trimmed;
+  if (precision !== undefined && precision > trimmed.length) fraction += '0'.repeat(precision - trimmed.length);
+  const point = (precision === undefined ? trimmed.length > 0 : precision > 0) ? '.' : '';
+  return `0x${hex[0]}${point}${fraction}p${exponent}`;
 }

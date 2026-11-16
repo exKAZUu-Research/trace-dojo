@@ -115,9 +115,13 @@ export function truncate(value: bigint, type: IntType): bigint {
   return wrapInt(value, type);
 }
 
-/** `@intFromFloat`, which truncates and checks that the integer part fits. */
+/**
+ * `@intFromFloat`, which truncates and checks that the integer part fits. NaN passes Zig's range check, which only
+ * rejects values beyond the bounds, and converts to 0 as the CPU's conversion gives.
+ */
 export function intFromFloat(value: AnyFloat, type: IntType): bigint {
-  if (isNaNFloat(value) || isInfinite(value)) panic(PANIC.floatToInt);
+  if (isNaNFloat(value)) return 0n;
+  if (isInfinite(value)) panic(PANIC.floatToInt);
   const integer = truncateToBigInt(value);
   if (!fitsInt(integer, type)) panic(PANIC.floatToInt);
   return integer;
@@ -158,14 +162,11 @@ export function floatRem(a: AnyFloat, b: AnyFloat, bits: FloatBits): AnyFloat {
   return roundTo(asBigFloat(floatArithmetic(x, product, '-', 128)), bits);
 }
 
+/** `@mod` of floats as Zig computes it: `fmod(fmod(a, b) + b, b)` for a negative `a`, else `fmod(a, b)`. */
 export function floatMod(a: AnyFloat, b: AnyFloat, bits: FloatBits): AnyFloat {
   const remainder = floatRem(a, b, bits);
-  const sign = compareFloats(remainder, 0);
-  if (sign === undefined || sign === 0) return remainder;
-  const divisorSign = compareFloats(b, 0);
-  return sign < 0 === (divisorSign !== undefined && divisorSign < 0)
-    ? remainder
-    : floatArithmetic(remainder, b, '+', bits);
+  if ((compareFloats(a, 0) ?? 0) >= 0) return remainder;
+  return floatRem(floatArithmetic(remainder, b, '+', bits), b, bits);
 }
 
 export { negate as floatNegate };

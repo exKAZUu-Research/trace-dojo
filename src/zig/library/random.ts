@@ -7,6 +7,7 @@ import { known, runtime, type SemaApi, type TExpr } from '../semaBase';
 import {
   arrayOf,
   BOOL,
+  fitsInt,
   type IntType,
   intType,
   maxInt,
@@ -15,7 +16,9 @@ import {
   TYPE,
   type Type,
   typeName,
+  U8,
   U64,
+  USIZE,
   VOID,
   wrapInt,
 } from '../types';
@@ -97,20 +100,64 @@ function uintLessThan(state: ZArray, type: IntType, lessThan: bigint): bigint {
   return m >> bits;
 }
 
-function uintAtMost(state: ZArray, type: IntType, atMost: bigint): bigint {
-  if (atMost === maxInt(type)) return randomInt(state, type);
-  return uintLessThan(state, type, atMost + 1n);
+/** `uintLessThanBiased`: `limitRangeBiased`, the high half of the product, without rejecting any value. */
+function uintLessThanBiased(state: ZArray, type: IntType, lessThan: bigint): bigint {
+  if (lessThan <= 0n) panic(PANIC.unreachable);
+  return (randomInt(state, type) * lessThan) >> BigInt(type.bits);
 }
 
-/** `intRangeLessThan` and `intRangeAtMost`, which work in the unsigned type of the same width. */
-function intRange(state: ZArray, type: IntType, atLeast: bigint, upper: bigint, inclusive: boolean): bigint {
+function uintAtMost(state: ZArray, type: IntType, atMost: bigint, biased = false): bigint {
+  if (atMost === maxInt(type)) return randomInt(state, type);
+  return (biased ? uintLessThanBiased : uintLessThan)(state, type, atMost + 1n);
+}
+
+/** `intRangeLessThan` and `intRangeAtMost` and their biased variants, which work in the unsigned type of the same width. */
+function intRange(
+  state: ZArray,
+  type: IntType,
+  atLeast: bigint,
+  upper: bigint,
+  inclusive: boolean,
+  biased = false
+): bigint {
   if (inclusive ? atLeast > upper : atLeast >= upper) panic(PANIC.unreachable);
   const unsigned = intType(false, type.bits);
   const lo = BigInt.asUintN(type.bits, atLeast);
   const hi = BigInt.asUintN(type.bits, upper);
   const span = BigInt.asUintN(type.bits, hi - lo);
-  const offset = inclusive ? uintAtMost(state, unsigned, span) : uintLessThan(state, unsigned, span);
+  const offset = inclusive
+    ? uintAtMost(state, unsigned, span, biased)
+    : (biased ? uintLessThanBiased : uintLessThan)(state, unsigned, span);
   return wrapInt(lo + offset, type);
+}
+
+/** `weightedIndex` with integer proportions: a point below their sum, found in the running totals. */
+function weightedIntIndex(state: ZArray, type: IntType, proportions: bigint[]): bigint {
+  const sum = proportions.reduce((total, value) => total + value, 0n);
+  if (!fitsInt(sum, type)) panic(PANIC.overflow);
+  const point = type.signed ? intRange(state, type, 0n, sum, false) : uintLessThan(state, type, sum);
+  let accumulator = 0n;
+  for (const [index, proportion] of proportions.entries()) {
+    accumulator += proportion;
+    if (point < accumulator) return BigInt(index);
+  }
+  return panic(PANIC.unreachable);
+}
+
+/** `weightedIndex` with float proportions: `@min(r.float(T) * sum, sum - floatEps(T))`, as Zig computes in `T`. */
+function weightedFloatIndex(state: ZArray, bits: 32 | 64, proportions: number[]): bigint {
+  const round = (value: number): number => (bits === 32 ? Math.fround(value) : value);
+  let sum = 0;
+  for (const proportion of proportions) sum = round(sum + proportion);
+  const epsilon = bits === 32 ? 2 ** -23 : 2 ** -52;
+  const point = Math.min(round(randomFloat(state, bits) * sum), round(sum - epsilon));
+  if (!(point < sum)) panic(PANIC.unreachable);
+  let accumulator = 0;
+  for (const [index, proportion] of proportions.entries()) {
+    accumulator = round(accumulator + proportion);
+    if (point < accumulator) return BigInt(index);
+  }
+  return panic(PANIC.unreachable);
 }
 
 function clz64(value: bigint): number {
@@ -268,6 +315,31 @@ addMembers(RANDOM, {
     intRange(state, type, low, high, false)
   ),
   intRangeAtMost: intMethod('intRangeAtMost', 3, (state, type, [low, high]) => intRange(state, type, low, high, true)),
+  uintLessThanBiased: intMethod('uintLessThanBiased', 2, (state, type, [lessThan]) =>
+    uintLessThanBiased(state, type, lessThan)
+  ),
+  uintAtMostBiased: intMethod('uintAtMostBiased', 2, (state, type, [atMost]) => uintAtMost(state, type, atMost, true)),
+  intRangeLessThanBiased: intMethod('intRangeLessThanBiased', 3, (state, type, [low, high]) =>
+    intRange(state, type, low, high, false, true)
+  ),
+  intRangeAtMostBiased: intMethod('intRangeAtMostBiased', 3, (state, type, [low, high]) =>
+    intRange(state, type, low, high, true, true)
+  ),
+  bytes: fnMember('Random.bytes', (sema, call) => {
+    const [buffer] = compileArgs(sema, expectArgs(sema, call, 1, 'bytes'), [sliceOf(U8, false)]);
+    const state = randomState(sema, call.receiver, call.span);
+    const evaluate = buffer.eval;
+    return runtime(
+      VOID,
+      (frame) => {
+        const slice = evaluate(frame) as Slice;
+        frame.runtime.spend(1 + Math.floor(slice.length / 8));
+        for (const [index, byte] of fill(state(frame), slice.length).entries()) slice.set(index, BigInt(byte));
+        return;
+      },
+      call.span
+    );
+  }),
   boolean: fnMember('Random.boolean', (sema, call) => {
     expectArgs(sema, call, 0, 'boolean');
     const state = randomState(sema, call.receiver, call.span);
@@ -282,6 +354,27 @@ addMembers(RANDOM, {
     const bits = type.bits;
     const state = randomState(sema, call.receiver, call.span);
     return runtime(type, (frame) => randomFloat(state(frame), bits), call.span);
+  }),
+  weightedIndex: fnMember('Random.weightedIndex', (sema, call) => {
+    const [typeArg, proportionsArg] = expectArgs(sema, call, 2, 'weightedIndex');
+    const type = sema.compileType(typeArg);
+    if (type.kind !== 'int' && (type.kind !== 'float' || (type.bits !== 32 && type.bits !== 64))) {
+      return sema.error(typeArg, `weightedIndex には整数か f32・f64 の型を渡してください（${typeName(type)} です）。`);
+    }
+    const [proportions] = compileArgs(sema, [proportionsArg], [sliceOf(type, true)]);
+    const state = randomState(sema, call.receiver, call.span);
+    const evaluate = proportions.eval;
+    return runtime(
+      USIZE,
+      (frame) => {
+        const values = (evaluate(frame) as Slice).values();
+        frame.runtime.spend(1 + values.length);
+        return type.kind === 'int'
+          ? weightedIntIndex(state(frame), type, values as bigint[])
+          : weightedFloatIndex(state(frame), type.bits as 32 | 64, values as number[]);
+      },
+      call.span
+    );
   }),
   shuffle: fnMember('Random.shuffle', (sema, call) => {
     const [typeArg, bufferArg] = expectArgs(sema, call, 2, 'shuffle');

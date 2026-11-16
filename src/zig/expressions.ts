@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 997 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 999 -- The file holds one layer of the compiler, whose parts share its private state.
 import {
   checked,
   divExact,
@@ -15,8 +15,18 @@ import {
   shiftRight,
 } from './arith';
 import type { BinaryOperator, Expression, ExpressionOf, Span } from './ast';
-import { type AnyFloat, BigFloat, compareFloats, type FloatBits, floatOf, negate, parseFloatLiteral } from './floats';
-import { comparisonTest, isArithmeticType, isIntegerType, isZero, sign } from './operands';
+import {
+  type AnyFloat,
+  BigFloat,
+  compareFloats,
+  floatArithmetic,
+  type FloatBits,
+  floatOf,
+  isIntegral,
+  negate,
+  parseFloatLiteral,
+} from './floats';
+import { asFloat, comparisonTest, isArithmeticType, isIntegerType, isZero, sign } from './operands';
 import { type Frame, Jump } from './runtime';
 import {
   addDecls,
@@ -96,6 +106,8 @@ class Constant {
 }
 
 export abstract class ExpressionCompiler extends SemaBase {
+  private readonly stringConstants = new Map<string, Constant>();
+
   // Abstract parts that later layers compile.
   protected abstract compileCall(expression: ExpressionOf<'call'>, resultType: Type | undefined): TExpr;
   protected abstract compileBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr;
@@ -273,15 +285,21 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   protected stringLiteral(bytes: readonly number[], span: Span): TExpr {
-    const array = new ZArray([...bytes.map(BigInt), 0n], 0, bytes.length);
+    // Equal literals share their constant data, so their pointers compare equal as in Zig.
+    const key = bytes.join(',');
+    let constant = this.stringConstants.get(key);
+    if (!constant) {
+      constant = new Constant(new ZArray([...bytes.map(BigInt), 0n], 0, bytes.length));
+      this.stringConstants.set(key, constant);
+    }
     const type = pointerTo(arrayOf(bytes.length, U8, 0n), true);
-    return known(type, new Pointer(new Constant(array), 0), span);
+    return known(type, new Pointer(constant, 0), span);
   }
 
   // Field access ----------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 36 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionNcss 38 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected fieldAccess(expression: ExpressionOf<'field'>): TExpr {
     const object = this.compile(expression.object);
     const { name } = expression;
@@ -300,6 +318,9 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     switch (type.kind) {
       case 'struct': {
+        if (type.isTuple && name === 'len') {
+          return known(COMPTIME_INT, BigInt(this.structFields(type, expression).length), expression);
+        }
         return this.structField(base, type, name, expression);
       }
       case 'union': {
@@ -341,9 +362,10 @@ export abstract class ExpressionCompiler extends SemaBase {
       const field = this.enumFields(type).find((each) => each.name === name);
       if (field) return known(type, field.value, span);
     }
-    if (type.kind === 'union' && type.tagType) {
+    if (type.kind === 'union') {
+      // The fields resolve first, which gives `union(enum)` its tag type.
       const field = this.unionFields(type).find((each) => each.name === name);
-      if (field) return this.typeMember(type.tagType, name, span);
+      if (field && type.tagType) return this.typeMember(type.tagType, name, span);
     }
     return this.error(span, `${typeName(type)} には、「${name}」という宣言がありません。`);
   }
@@ -464,10 +486,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (type.kind !== 'optional')
       return this.error(expression, `${typeName(type)} 型は optional ではないので、.? は使えません。`);
     const child = type.child;
-    if (operand.known) {
-      if (operand.value === NULL) this.error(expression, 'null の値に .? を使っています。');
-      return known(child, unwrapOptionalValue(operand.value), expression);
-    }
+    // A known null still panics only when the program runs, as in Zig.
+    if (operand.known && operand.value !== NULL) return known(child, unwrapOptionalValue(operand.value), expression);
     const evaluate = operand.eval;
     const place = operand.place;
     const unwrapPlace: Place | undefined = place && {
@@ -823,7 +843,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps one operation of the interpreter in one place.
+  // code-gauge-allow functionCognitiveComplexity 27 -- Keeps one operation of the interpreter in one place.
   private comparison(expression: ExpressionOf<'binary'>): TExpr {
     const { operator } = expression;
     let left = this.compile(expression.left);
@@ -846,6 +866,15 @@ export abstract class ExpressionCompiler extends SemaBase {
       return this.derived(optional, BOOL, (value) => (value === NULL) === isEqual);
     }
     const ordered = operator !== '==' && operator !== '!=';
+    const errorUnion = [left, right].find((operand) => operand.type.kind === 'error_union');
+    const error = [left, right].find((operand) => operand.type.kind === 'error_set');
+    if (errorUnion && error && !ordered) {
+      // An error union equals an error when it holds that error.
+      const isEqual = operator === '==';
+      const evaluateUnion = errorUnion.eval;
+      const evaluateError = error.eval;
+      return runtime(BOOL, (frame) => (evaluateUnion(frame) === evaluateError(frame)) === isEqual, expression);
+    }
     // Integers of any types compare by their values, without a common type.
     const type =
       isIntegerType(left.type) && isIntegerType(right.type) ? COMPTIME_INT : this.peerType([left, right], expression);
@@ -919,6 +948,10 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (bitwise && (left.type.kind === 'bool' || right.type.kind === 'bool')) {
       this.error(expression, `bool の値には ${operator} ではなく and・or を使います。`);
     }
+    const kinds = new Set([left.type.kind, right.type.kind]);
+    if (operator === '/' && kinds.has('comptime_int') && kinds.has('comptime_float') && !isZero(right.value)) {
+      this.checkMixedDivision(left, right, expression);
+    }
     const type = this.peerType([left, right], expression);
     if (!isArithmeticType(type)) {
       return this.error(expression, `${operator} は、数の型にだけ使えます（${typeName(type)} 型です）。`);
@@ -967,6 +1000,17 @@ export abstract class ExpressionCompiler extends SemaBase {
       default: {
         return '?';
       }
+    }
+  }
+
+  /** Zig rejects dividing a `comptime_int` and a `comptime_float` unless the quotient is an integer. */
+  private checkMixedDivision(left: TExpr, right: TExpr, span: Span): void {
+    const quotient = floatArithmetic(asFloat(left), asFloat(right), '/', 128);
+    if (!isIntegral(quotient)) {
+      this.error(
+        span,
+        'comptime_int と comptime_float の割り算は、割り切れないときは型を決めてください（7.0 / 2.0 のように書きます）。'
+      );
     }
   }
 
@@ -1280,7 +1324,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   private readonly anonymousTypes = new Map<string, StructType>();
   private readonly tupleTypes = new Map<string, StructType>();
 
-  protected tupleType(fields: StructField[]): StructType {
+  tupleType(fields: StructField[]): StructType {
     const key = fields
       .map((field) =>
         field.comptimeValue === undefined

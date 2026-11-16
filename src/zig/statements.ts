@@ -14,6 +14,7 @@ import {
   type Scope,
   type TExpr,
   UNASSIGNED,
+  undefinedValue,
 } from './semaBase';
 import {
   BOOL,
@@ -40,10 +41,11 @@ import {
   NULL,
   Pointer,
   type Slice,
+  type Slots,
   Some,
   storeInto,
   type Value,
-  type ZArray,
+  ZArray,
   type ZStruct,
   type ZUnion,
 } from './values';
@@ -523,13 +525,15 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss 32 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionNcss 33 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private assignment(expression: ExpressionOf<'assign'>, span: Span): Stmt {
     const row = this.stepRow(span);
     if (expression.targets.length !== 1) return this.error(expression, '書き方に誤りがあります。');
     const [target] = expression.targets;
     if (target.kind === 'identifier' && target.name === '_') {
-      const value = this.compile(expression.value);
+      const discarded = unwrapParens(expression.value);
+      const value =
+        discarded.kind === 'catch' ? this.compileCatch(discarded, undefined, true) : this.compile(expression.value);
       if (value.type.kind === 'error_union') {
         this.error(expression.value, 'エラーになりうる値は、_ = では捨てられません（try か catch で扱ってください）。');
       }
@@ -623,14 +627,25 @@ export abstract class StatementCompiler extends CallCompiler {
 
   /**
    * `x = .{ ... }` writes each field or element into `x` in turn, as Zig's result locations do, so that later fields see
-   * the earlier ones' new values.
+   * the earlier ones' new values; nested anonymous literals write into the nested fields the same way.
    */
-  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private anonymousInitAssignment(
     value: Expression,
     type: Type,
     place: NonNullable<TExpr['place']>
   ): ((frame: Frame) => void) | undefined {
+    const store = this.resultLocationStore(value, type);
+    if (!store) return undefined;
+    const locate = place.locate;
+    return (frame) => {
+      const pointer = locate(frame);
+      store(frame, pointer.target, pointer.index);
+    };
+  }
+
+  /** The code that writes an anonymous literal into the value at `holder.slots[index]`, or undefined for other values. */
+  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  private resultLocationStore(value: Expression, type: Type): ResultStore | undefined {
     if (
       value.kind === 'structInit' &&
       !value.type &&
@@ -638,38 +653,87 @@ export abstract class StatementCompiler extends CallCompiler {
       !type.isTuple &&
       value.fields.length > 0
     ) {
-      const fields = this.structFields(type, value);
-      const stores = fields.map((field, index) => {
-        const init = value.fields.find((each) => each.name === field.name);
-        const compiled = init
-          ? this.coerce(this.compile(init.value, field.type), field.type, init.value)
-          : field.hasDefault
-            ? known(field.type, field.defaultValue, value)
-            : this.error(value, `フィールド「${field.name}」の値がありません。`);
-        return { index, evaluate: compiled.eval };
-      });
-      for (const init of value.fields) {
-        if (!fields.some((field) => field.name === init.name))
-          this.error(init, `${typeName(type)} 型には、フィールド「${init.name}」がありません。`);
-      }
-      return (frame) => {
-        const struct = place.locate(frame).load() as ZStruct;
-        for (const { index, evaluate } of stores) storeInto(struct, index, evaluate(frame));
-      };
+      return this.fieldStores(value, type);
     }
-    if (value.kind === 'arrayInit' && !value.type && type.kind === 'array') {
-      if (value.elements.length !== type.length) {
-        this.error(value, `配列の長さが合いません（${type.length} 個が必要ですが、${value.elements.length} 個です）。`);
+    const tupleTypes =
+      type.kind === 'struct' && type.isTuple ? this.structFields(type, value).map((field) => field.type) : undefined;
+    if (value.kind === 'arrayInit' && !value.type && (type.kind === 'array' || tupleTypes)) {
+      const length = type.kind === 'array' ? type.length : (tupleTypes as Type[]).length;
+      if (value.elements.length !== length) {
+        this.error(value, `配列の長さが合いません（${length} 個が必要ですが、${value.elements.length} 個です）。`);
       }
-      const evaluators = value.elements.map(
-        (element) => this.coerce(this.compile(element, type.child), type.child, element).eval
+      const stores = value.elements.map((element, index) =>
+        this.slotStore(element, type.kind === 'array' ? type.child : (tupleTypes as Type[])[index])
       );
-      return (frame) => {
-        const array = place.locate(frame).load() as ZArray;
-        for (const [index, evaluate] of evaluators.entries()) storeInto(array, array.offset + index, evaluate(frame));
+      return (frame, holder, index) => {
+        const aggregate = holder.slots[index] as ZArray | ZStruct;
+        const offset = aggregate instanceof ZArray ? aggregate.offset : 0;
+        for (const [position, store] of stores.entries()) store(frame, aggregate, offset + position);
       };
     }
+    if (value.kind === 'structInit' && !value.type && type.kind === 'union' && value.fields.length === 1) {
+      return this.unionStore(value, type);
+    }
+    if (type.kind === 'optional' && isAggregateType(type.child)) return this.optionalStore(value, type);
     return undefined;
+  }
+
+  /** `x = .{ ... }` for an optional `x`: a non-null value is written in place, and a null one takes the whole value. */
+  private optionalStore(value: Expression, type: Extract<Type, { kind: 'optional' }>): ResultStore | undefined {
+    const inner = this.resultLocationStore(value, type.child);
+    if (!inner) return undefined;
+    const whole = this.coerce(this.compile(value, type), type, value).eval;
+    return (frame, holder, index) => {
+      const current = holder.slots[index];
+      if (current === NULL) storeInto(holder, index, whole(frame));
+      else if (current instanceof Some) inner(frame, { slots: [current.value] }, 0);
+      else inner(frame, holder, index);
+    };
+  }
+
+  private fieldStores(value: ExpressionOf<'structInit'>, type: Extract<Type, { kind: 'struct' }>): ResultStore {
+    const fields = this.structFields(type, value);
+    for (const init of value.fields) {
+      if (!fields.some((field) => field.name === init.name))
+        this.error(init, `${typeName(type)} 型には、フィールド「${init.name}」がありません。`);
+    }
+    const stores = fields.map((field) => {
+      const init = value.fields.find((each) => each.name === field.name);
+      if (init) return this.slotStore(init.value, field.type);
+      if (!field.hasDefault) return this.error(value, `フィールド「${field.name}」の値がありません。`);
+      const defaultValue = field.defaultValue;
+      return (_frame: Frame, holder: Slots, index: number) => storeInto(holder, index, defaultValue);
+    });
+    return (frame, holder, index) => {
+      const struct = holder.slots[index] as ZStruct;
+      for (const [position, store] of stores.entries()) store(frame, struct, position);
+    };
+  }
+
+  /** `u = .{ .a = ... }` makes `a` the active field first, so the value sees the new tag, as Zig's result location does. */
+  private unionStore(value: ExpressionOf<'structInit'>, type: Extract<Type, { kind: 'union' }>): ResultStore {
+    const [init] = value.fields;
+    const fields = this.unionFields(type);
+    const tag = fields.findIndex((field) => field.name === init.name);
+    if (tag === -1) return this.error(init, `${typeName(type)} 型には、フィールド「${init.name}」がありません。`);
+    const fieldType = fields[tag].type;
+    const store = this.slotStore(init.value, fieldType);
+    return (frame, holder, index) => {
+      const union = holder.slots[index] as ZUnion;
+      if (union.tag !== tag) {
+        union.tag = tag;
+        union.slots[0] = undefinedValue(fieldType);
+      }
+      store(frame, union, 0);
+    };
+  }
+
+  /** The code that writes a field's or element's value: in place for a nested anonymous literal, else as a whole. */
+  private slotStore(value: Expression, type: Type): ResultStore {
+    const nested = this.resultLocationStore(value, type);
+    if (nested) return nested;
+    const evaluate = this.coerce(this.compile(value, type), type, value).eval;
+    return (frame, holder, index) => storeInto(holder, index, evaluate(frame));
   }
 
   // Jumps -------------------------------------------------------------------------------------------------------------
@@ -891,7 +955,13 @@ export abstract class StatementCompiler extends CallCompiler {
 
   /** The type of what the `break`s of a target give, coercing each to it. */
   private resolveBreaks(target: JumpTarget, bodyNoreturn: boolean, span: Span): Type {
-    if (target.resultType) return target.resultType;
+    if (target.resultType) {
+      // A labeled block whose end is reachable gives `void` there.
+      if (!bodyNoreturn && target.kind === 'block' && target.resultType.kind !== 'void') {
+        this.coerce(known(VOID, undefined, span), target.resultType, span);
+      }
+      return target.resultType;
+    }
     const values = target.breaks.map((site) => site.value);
     if (!bodyNoreturn && target.kind === 'block') values.push(known(VOID, undefined, span));
     if (values.length === 0) return bodyNoreturn ? NORETURN : VOID;
@@ -1208,7 +1278,10 @@ export abstract class StatementCompiler extends CallCompiler {
           ? this.withoutSteps(() => this.statementExpression(expression.continueExpression as Expression, expression))
               .exec
           : undefined;
-        return { body: this.loopBody(expression.body), continueExec: continuation };
+        // Zig does not analyze the body of a loop whose condition is known to be false.
+        const neverRuns = kind === 'bool' && condition.known && condition.value === false;
+        const body: Stmt = neverRuns ? { exec: () => {}, noreturn: false } : this.loopBody(expression.body);
+        return { body, continueExec: continuation };
       }));
     } finally {
       fn.targets.pop();
@@ -1441,8 +1514,8 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** How a `for` reads an array, a pointer to one, or a slice, by value or by pointer. */
-  // code-gauge-allow functionNcss 46 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionNcss 50 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private forOperand(
     compiled: TExpr,
     byPointer: boolean,
@@ -1629,6 +1702,9 @@ export abstract class StatementCompiler extends CallCompiler {
       operandType.kind === 'struct' ||
       operandType.kind === 'float'
     ) {
+      // Zig points at the first string a prong lists.
+      const text = expression.cases.flatMap((each) => each.items).find((item) => item.value.kind === 'string');
+      if (text) this.error(text, '文字列では switch できません（std.mem.eql で比べてください）。');
       this.error(expression.operand, `${typeName(operandType)} 型の値は、switch で分けられません。`);
     }
     const target: JumpTarget = {
@@ -1660,10 +1736,16 @@ export abstract class StatementCompiler extends CallCompiler {
     const seen = new Map<unknown, Span>();
     const prongs: Prong[] = [];
     let elseProng: Prong | undefined;
+    // A labeled switch may `continue` into any prong, so only an unlabeled one skips the prongs it never reaches.
+    const reached =
+      operand.known && !union && !expression.label
+        ? this.reachedCase(expression, keyOf(operand.value), tagType)
+        : undefined;
     fn.targets.push(target);
     try {
       for (const each of expression.cases) {
         const prong = this.switchProng(each, {
+          skipped: reached !== undefined && each !== reached,
           operand,
           operandType,
           tagType,
@@ -1808,6 +1890,7 @@ export abstract class StatementCompiler extends CallCompiler {
       asStatement: boolean;
       keyOf: (value: Value) => unknown;
       seen: Map<unknown, Span>;
+      skipped: boolean;
     }
   ): unknown {
     const { operand, operandType, tagType, union, unionFields, resultType, asStatement, keyOf, seen } = context;
@@ -1899,6 +1982,13 @@ export abstract class StatementCompiler extends CallCompiler {
         };
         locals.set(each.tagCapture.name, binding);
       }
+      // Zig does not analyze a prong that a known operand never reaches.
+      if (context.skipped) {
+        const never: Stmt = { exec: () => panic(PANIC.unreachable), noreturn: true };
+        return asStatement
+          ? { body: never, value: undefined, bind }
+          : { body: undefined, value: known(NORETURN, undefined, each.body), bind };
+      }
       return this.withScope({ locals, parent: this.scope }, () => {
         if (asStatement) return { body: this.statementExpression(each.body, each.body), value: undefined, bind };
         return { body: undefined, value: this.compile(each.body, resultType), bind };
@@ -1941,6 +2031,25 @@ export abstract class StatementCompiler extends CallCompiler {
       !each.capture || (each.isElse && !union) ? operandType : captureFor(keys.length > 0 ? keys : values);
     const compiled = compileBody(captureType, undefined);
     return { values, ranges, ...compiled, isElse: each.isElse, isUnnamed };
+  }
+
+  /** The prong a known operand takes: the one listing its value, else the `else` or `_` prong. */
+  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  private reachedCase(expression: ExpressionOf<'switch'>, key: unknown, tagType: Type): SwitchCase | undefined {
+    const valueOf = (item: Expression): Value =>
+      this.knownValue(this.coerce(this.compile(item, tagType), tagType, item), 'switch の枝の値');
+    for (const each of expression.cases) {
+      for (const item of each.items) {
+        if (item.value.kind === 'identifier' && item.value.name === '_') continue;
+        const first = prongKey(valueOf(item.value));
+        if (!item.last && first === key) return each;
+        if (item.last && typeof key === 'bigint' && key >= (first as bigint) && key <= (valueOf(item.last) as bigint))
+          return each;
+      }
+    }
+    return expression.cases.find(
+      (each) => each.isElse || each.items.some((item) => item.value.kind === 'identifier' && item.value.name === '_')
+    );
   }
 
   /** The values of an enum, union, bool, or error set that no prong lists, which `else` matches. */
@@ -2044,7 +2153,8 @@ export abstract class StatementCompiler extends CallCompiler {
     );
   }
 
-  protected compileCatch(expression: ExpressionOf<'catch'>, resultType: Type | undefined): TExpr {
+  /** `x catch handler`; with `discarded`, as in `_ = x catch handler`, the payload and handler need no common type. */
+  protected compileCatch(expression: ExpressionOf<'catch'>, resultType: Type | undefined, discarded = false): TExpr {
     const operand = this.compile(expression.operand);
     const type = operand.type;
     if (type.kind !== 'error_union') {
@@ -2052,6 +2162,14 @@ export abstract class StatementCompiler extends CallCompiler {
     }
     // `x catch unreachable` reports the error it did not expect.
     if (!expression.capture && unwrapParens(expression.handler).kind === 'unreachable') {
+      // A library call the compiler folds still runs when the program does, as in Zig.
+      const isCall = ['call', 'builtinCall'].includes(unwrapParens(expression.operand).kind);
+      if (operand.known && operand.value instanceof ErrorValue && !isCall) {
+        this.error(
+          expression,
+          `エラー error.${operand.value.name} が返っているので、catch unreachable にはできません。`
+        );
+      }
       const evaluateOperand = operand.eval;
       return runtime(
         type.payload,
@@ -2064,11 +2182,16 @@ export abstract class StatementCompiler extends CallCompiler {
       );
     }
     const capture = this.captureBinding(expression.capture, type.errorSet, undefined);
-    const handler = this.withCapture(capture, () => this.compile(expression.handler, resultType ?? type.payload));
+    const handler = this.withCapture(capture, () =>
+      this.compile(expression.handler, discarded ? undefined : (resultType ?? type.payload))
+    );
     const payloadValue = runtime(type.payload, () => {}, expression);
-    const resultTypeOf =
-      handler.type.kind === 'noreturn' ? type.payload : this.peerType([payloadValue, handler], expression);
-    const otherwise = this.coerce(handler, resultTypeOf, expression.handler);
+    const resultTypeOf = discarded
+      ? VOID
+      : handler.type.kind === 'noreturn'
+        ? type.payload
+        : this.peerType([payloadValue, handler], expression);
+    const otherwise = discarded ? handler : this.coerce(handler, resultTypeOf, expression.handler);
     const evaluate = operand.eval;
     const evaluateHandler = otherwise.eval;
     const bind = capture?.bind;
@@ -2232,4 +2355,16 @@ function copiedIfStored(value: TExpr): (frame: Frame) => Value {
 /** A value captured or returned by value: an aggregate is copied, so that later writes to its source do not show. */
 function copyAggregate(value: Value): Value {
   return isAggregate(value) ? copyValue(value) : value;
+}
+
+/** Writes a value into `holder.slots[index]`. */
+type ResultStore = (frame: Frame, holder: Slots, index: number) => void;
+
+function isAggregateType(type: Type): boolean {
+  return type.kind === 'struct' || type.kind === 'array' || type.kind === 'union';
+}
+
+/** The key a prong's value has in a switch: an error's name, or the value itself. */
+function prongKey(value: Value): unknown {
+  return value instanceof ErrorValue ? value.name : value;
 }
