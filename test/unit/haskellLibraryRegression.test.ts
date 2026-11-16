@@ -248,3 +248,36 @@ test('zero block buffering errors preserve numeric precedence', () => {
     uncaughtException: 'hSetBuffering: invalid argument (illegal buffer size 0)',
   });
 });
+
+test('fmapDefault derives mapping through traverse independently of the Functor method', () => {
+  const source =
+    'import Data.Traversable\ndata Box a=Box a deriving Show\ninstance Functor Box where fmap=fmapDefault\ninstance Foldable Box where foldMap f(Box x)=f x\ninstance Traversable Box where traverse f(Box x)=Box <$> f x\nmain=print(fmap (+1)(Box (1::Int)))';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Box 2\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('lex preserves string-gap spelling while Read removes the gap', () => {
+  const source = String.raw`main=do
+  let token=['"','a','\\','\n',' ','\\','b','"']
+  print(lex token)
+  print(read token::String)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[("\\\"a\\\\\\n \\\\b\\\"","")]\n"ab"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['toRational (undefined::Int)', 'fromInteger undefined::Rational'])(
+  'rational constructors demand numeric fields: %s',
+  (expression) => {
+    expect(executeProgram('haskell', `main=print((${expression}) \`seq\` (1::Int))`)).toMatchObject({
+      kind: 'executed',
+      stdout: '',
+      uncaughtException: 'Prelude.undefined',
+    });
+  }
+);

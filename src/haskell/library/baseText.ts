@@ -377,7 +377,7 @@ lexString s = [(ch ++ str, u) | (ch, t) <- lexStrItem s, (str, u) <- lexString t
 
 lexStrItem :: ReadS String
 lexStrItem ('\\':'&':s) = [("\\&", s)]
-lexStrItem ('\\':c:s) | isSpace c = [("\\&", t) | '\\':t <- [dropWhile isSpace s]]
+lexStrItem ('\\':c:s) | isSpace c = [('\\':c:gap ++ "\\",t) | (gap,'\\':t) <- [span isSpace s]]
 lexStrItem s = lexLitChar s
 
 lexFracExp :: ReadS String
@@ -443,10 +443,14 @@ decodeString :: String -> Maybe String
 decodeString s = case s of
   "\"" -> Just ""
   _ -> case lexStrItem s of
-    [(item, t)] -> if item == "\\&" then decodeString t else case decodeLitChar item of
+    [(item, t)] -> if item == "\\&" || isStringGap item then decodeString t else case decodeLitChar item of
       Just c -> fmap (c :) (decodeString t)
       Nothing -> Nothing
     _ -> Nothing
+
+isStringGap :: String -> Bool
+isStringGap ('\\':c:_) = isSpace c
+isStringGap _ = False
 
 readDecimal :: String -> Integer
 readDecimal = primitive "readDecimal"

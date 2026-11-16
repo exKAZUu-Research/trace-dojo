@@ -454,13 +454,12 @@ const SET_VALUES = [
 /** The modules a program may import, by name. */
 export const PUBLIC_MODULES: Record<string, PublicModule> = {
   Prelude: PRELUDE,
-  'Data.List': { from: 'Base', types: [['Foldable', 'none']], values: DATA_LIST_VALUES },
+  'Data.List': { from: 'Base', types: [], values: DATA_LIST_VALUES },
   'Data.Char': {
     from: 'Base',
     types: [
       ['GeneralCategory', 'all'],
       ['Char', 'none'],
-      ['String', 'none'],
     ],
     values: [
       'chr',
@@ -609,7 +608,6 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
       'mfilter',
       '<$!>',
       'ap',
-      '<$>',
     ],
   },
   'Control.Applicative': {

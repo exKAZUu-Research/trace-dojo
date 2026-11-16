@@ -341,3 +341,17 @@ test.each([
     uncaughtException: undefined,
   });
 });
+
+test.each(['Data.List (Foldable)', 'Data.Char (String)', 'Control.Monad ((<$>))'])(
+  'explicit imports reject names absent from the GHC module: %s',
+  (item) => {
+    expect(executeProgram('haskell', `import ${item}\nmain=print 1`).kind).toBe('compileError');
+  }
+);
+
+test('named source modules run their exported main action', () => {
+  expect(
+    executeProgram('haskell', 'module Geometry(main,area) where\narea r=pi*r*r\nmain=print(area 1::Double)')
+  ).toMatchObject({ kind: 'executed', stdout: '3.141592653589793\n', uncaughtException: undefined });
+  expect(executeProgram('haskell', 'module Example() where\nmain=print 1').kind).toBe('compileError');
+});

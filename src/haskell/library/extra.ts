@@ -42,8 +42,20 @@ optional v = (Just <$> v) <|> pure Nothing
 (<**>) = liftA2 (flip ($))
 infixl 4 <**>
 
+data TraversalIdentity a = TraversalIdentity !a
+
+instance Functor TraversalIdentity where
+  fmap f (TraversalIdentity x) = TraversalIdentity (f x)
+
+instance Applicative TraversalIdentity where
+  pure = TraversalIdentity
+  TraversalIdentity f <*> TraversalIdentity x = TraversalIdentity (f x)
+
 fmapDefault :: Traversable t => (a -> b) -> t a -> t b
-fmapDefault = fmap
+fmapDefault f x = runTraversalIdentity (traverse (TraversalIdentity . f) x)
+
+runTraversalIdentity :: TraversalIdentity a -> a
+runTraversalIdentity (TraversalIdentity x) = x
 
 readInt :: Num a => a -> (Char -> Bool) -> (Char -> Int) -> ReadS a
 readInt base valid digit s = [(foldl (\n c -> n * base + fromIntegral (digit c)) 0 ds, rest) | (ds, rest) <- [span valid s], not (null ds)]

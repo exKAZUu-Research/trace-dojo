@@ -611,7 +611,7 @@ function convertConstructor(node: Node): ConDecl {
       if (!op.isConstructor) throw syntaxError(spanOf(operator), '構成子の演算子は「:」で始めてください。');
       return {
         name: { name: op.name, span: op.span },
-        fields: [convertFieldType(required(inner, 'left_operand')), convertFieldType(required(inner, 'right_operand'))],
+        ...constructorFields([required(inner, 'left_operand'), required(inner, 'right_operand')]),
         isInfix: true,
         span: spanOf(inner),
       };
@@ -653,14 +653,17 @@ function convertRecordConstructor(node: Node): ConDecl {
 function convertPrefixConstructor(node: Node): ConDecl {
   if (field(node, 'type')) throw syntaxError(spanOf(node), '書き方に誤りがあります。');
   const fieldNodes = fields(node, 'field');
-  const strictFields = fieldNodes.flatMap((fieldNode, index) => (isStrictField(fieldNode) ? [index] : []));
   return {
     name: plainName(required(node, 'name')),
-    fields: fieldNodes.map(convertFieldType),
-    ...(strictFields.length > 0 ? { strictFields } : {}),
+    ...constructorFields(fieldNodes),
     isInfix: false,
     span: spanOf(node),
   };
+}
+
+function constructorFields(nodes: Node[]): Pick<ConDecl, 'fields' | 'strictFields'> {
+  const strictFields = nodes.flatMap((node, index) => (isStrictField(node) ? [index] : []));
+  return { fields: nodes.map(convertFieldType), ...(strictFields.length > 0 ? { strictFields } : {}) };
 }
 
 function convertFieldType(node: Node): TypeExpr {

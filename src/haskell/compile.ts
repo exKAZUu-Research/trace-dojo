@@ -1,3 +1,5 @@
+import assert from 'node:assert/strict';
+
 import { CompileError } from '../interpreter/diagnostics';
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { PRIMITIVE_TYPES, TURTLE_TYPE, UNIT_TYPE } from './builtinTypes';
@@ -129,7 +131,8 @@ class LibraryCompiler {
     });
     if (name === 'Base') {
       this.base = renamed;
-      for (const name of ['Down', 'Accum', 'AccumR', 'FoldEndo']) this.baseType(name).cons[0].isNewtype = true;
+      for (const name of ['Down', 'Accum', 'AccumR', 'FoldEndo', 'TraversalIdentity'])
+        this.baseType(name).cons[0].isNewtype = true;
       setPrimitiveTypes(this.baseType('Bool').cons, this.baseType('Ordering').cons);
     }
     const checked = typecheckModule(renamed, {
@@ -212,6 +215,7 @@ class LibraryCompiler {
           });
         }
       }
+      assertPublicExports(name, exports);
       modules.set(name, { name, exports, instances: [] });
     }
     return modules;
@@ -350,9 +354,6 @@ export interface CompiledProgram {
 export function compileProgram(source: string, atomicRows?: ReadonlySet<number>): CompiledProgram {
   const lib = getLibrary();
   const parsed = parseHaskell(source);
-  if (parsed.name !== 'Main') {
-    throw compileError(0, `モジュール名は Main にしてください（${parsed.name} になっています）。`);
-  }
   const renamed = renameModule(parsed, {
     modules: lib.modules,
     implicitPrelude: true,
@@ -375,6 +376,14 @@ export function compileProgram(source: string, atomicRows?: ReadonlySet<number>)
   if (misplaced !== undefined) throw new CompileError([{ row: misplaced, message: misplacedHaskellAtomicMessage }]);
   const main = renamed.exports.values.get('main') ?? findMain(renamed);
   return { main: globalOf(main, 'main', main) };
+}
+
+function assertPublicExports(name: string, exports: ExportTable): void {
+  const values = KNOWN_LIBRARY_VALUES[name];
+  const types = KNOWN_LIBRARY_TYPES[name];
+  for (const value of exports.values.keys())
+    assert.ok(!values || values.includes(value), `${name} does not export ${value}`);
+  for (const type of exports.types.keys()) assert.ok(!types || types.includes(type), `${name} does not export ${type}`);
 }
 
 function findMain(module: RModule): ValueEntity {
