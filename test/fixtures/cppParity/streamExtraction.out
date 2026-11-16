@@ -1,0 +1,236 @@
+int[5abc] 500 rest=[abc]
+uint 500
+ushort 500
+llong 500
+ullong 500
+short 500
+double 011 rest=[]
+float 011
+bool 110
+char 500
+string [5abc]01
+int[0x10] 000 rest=[x10]
+uint 000
+ushort 000
+llong 000
+ullong 000
+short 000
+double 1601 rest=[]
+float 1601
+bool 000
+char 000
+string [0x10]01
+int[-12x] -1200 rest=[x]
+uint 429496728400
+ushort 6552400
+llong -1200
+ullong 1844674407370955160400
+short -1200
+double 011 rest=[]
+float 011
+bool 110
+char -00
+string [-12x]01
+int[+] 011 rest=[]
+uint 011
+ushort 011
+llong 011
+ullong 011
+short 011
+double 011 rest=[]
+float 011
+bool 011
+char +00
+string [+]01
+int[-] 011 rest=[]
+uint 011
+ushort 011
+llong 011
+ullong 011
+short 011
+double 011 rest=[]
+float 011
+bool 011
+char -00
+string [-]01
+int[- 1] 010 rest=[ 1]
+uint 010
+ushort 010
+llong 010
+ullong 010
+short 010
+double 010 rest=[ 1]
+float 010
+bool 010
+char -00
+string [-]00
+int[12 34] 1200 rest=[ 34]
+uint 1200
+ushort 1200
+llong 1200
+ullong 1200
+short 1200
+double 1200 rest=[ 34]
+float 1200
+bool 110
+char 100
+string [12]00
+int[99999999999] 214748364711 rest=[]
+uint 429496729511
+ushort 6553511
+llong 9999999999901
+ullong 9999999999901
+short 3276711
+double 1e+1101 rest=[]
+float 1e+1101
+bool 110
+char 900
+string [99999999999]01
+int[-99999999999] -214748364811 rest=[]
+uint 429496729511
+ushort 6553511
+llong -9999999999901
+ullong 1844674397370955161701
+short -3276811
+double -1e+1101 rest=[]
+float -1e+1101
+bool 110
+char -00
+string [-99999999999]01
+int[1e5] 100 rest=[e5]
+uint 100
+ushort 100
+llong 100
+ullong 100
+short 100
+double 10000001 rest=[]
+float 10000001
+bool 100
+char 100
+string [1e5]01
+int[  7] 701 rest=[]
+uint 701
+ushort 701
+llong 701
+ullong 701
+short 701
+double 701 rest=[]
+float 701
+bool 110
+char 700
+string [7]01
+int[] -711 rest=[]
+uint 711
+ushort 711
+llong 711
+ullong 711
+short 711
+double -711 rest=[]
+float -711
+bool 011
+char q11
+string [old]11
+int[   ] -711 rest=[]
+uint 711
+ushort 711
+llong 711
+ullong 711
+short 711
+double -711 rest=[]
+float -711
+bool 011
+char q11
+string [old]11
+int[0x] 000 rest=[x]
+uint 000
+ushort 000
+llong 000
+ullong 000
+short 000
+double 011 rest=[]
+float 011
+bool 000
+char 000
+string [0x]01
+int[077] 7701 rest=[]
+uint 7701
+ushort 7701
+llong 7701
+ullong 7701
+short 7701
+double 7701 rest=[]
+float 7701
+bool 110
+char 000
+string [077]01
+int[1.5] 100 rest=[.5]
+uint 100
+ushort 100
+llong 100
+ullong 100
+short 100
+double 1.501 rest=[]
+float 1.501
+bool 100
+char 100
+string [1.5]01
+int[.5] 010 rest=[.5]
+uint 010
+ushort 010
+llong 010
+ullong 010
+short 010
+double 0.501 rest=[]
+float 0.501
+bool 010
+char .00
+string [.5]01
+int[abc] 010 rest=[abc]
+uint 010
+ushort 010
+llong 010
+ullong 010
+short 010
+double 010 rest=[abc]
+float 010
+bool 010
+char a00
+string [abc]01
+int[-0] 001 rest=[]
+uint 001
+ushort 001
+llong 001
+ullong 001
+short 001
+double -001 rest=[]
+float -001
+bool 001
+char -00
+string [-0]01
+1e999 inf11
+1e-400 011
+0x1p3 801
+1.2.3 1.200
+1e+5x 011
+0x1.8p1 301
+3. 301
+1e-310 1e-31011
+255 8 777
+31 8 12
+310
+1000010
+42
+x1
+42 x
+42 x!
+9 2
+92
+XYcdef
+12
+b11
+b1
+c0
+abc|def|0
+line1line210keep1
+[ ]01
+011

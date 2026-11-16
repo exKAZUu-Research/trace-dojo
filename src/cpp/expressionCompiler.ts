@@ -884,8 +884,11 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const target = this.compileExpression(fieldOf(node, 'left') as Syntax);
     const rightNode = fieldOf(node, 'right') as Syntax;
     if (rightNode.type === 'initializer_list') {
-      if (normalized !== '=') return this.error(node.row, `${normalized} の右に {...} は書けません。`);
-      return this.assignList(target, rightNode);
+      const isStringAppend =
+        normalized === '+=' && target.type.kind === 'class' && target.type.cls.library?.kind === 'string';
+      if (normalized !== '=' && !isStringAppend)
+        return this.error(node.row, `${normalized} の右に {...} は書けません。`);
+      return this.assignList(normalized, target, rightNode);
     }
     const source = this.compileExpression(rightNode);
     return this.assign(normalized, target, source, node.row);
@@ -966,12 +969,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     };
   }
 
-  private assignList(target: Expr, list: Syntax): Expr {
+  private assignList(operator: string, target: Expr, list: Syntax): Expr {
     const type = unqualified(target.type);
     if (type.kind === 'array') return this.error(list.row, '配列にはまとめて代入できません。');
     const value = this.listInitializer(type, list, list.row);
     const source: Expr = { type, isLvalue: false, row: list.row, run: value, isTemporaryObject: type.kind === 'class' };
-    return this.assign('=', target, source, list.row);
+    return this.assign(operator, target, source, list.row);
   }
 
   /** Stops at an assignment to something that cannot be assigned: a const object, or a value without storage. */

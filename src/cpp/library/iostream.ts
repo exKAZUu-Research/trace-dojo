@@ -1,4 +1,4 @@
-import { parseFloatPrefix } from '../../c/library/numberParsing';
+import { isExactFloatPrefix, isSpaceByte, parseFloatPrefix, parseIntegerPrefix } from '../../c/library/numberParsing';
 import { byteArray, byteAt } from '../bytes';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
@@ -64,6 +64,8 @@ export class StreamValue extends Store {
   buffer = '';
   /** Where reading continues in the buffer. */
   position = 0;
+  /** Where writing continues in the buffer, overwriting what is there, as `basic_stringbuf`'s put area does. */
+  writePosition = 0;
   failed = false;
   atEnd = false;
 
@@ -83,10 +85,17 @@ export class StreamValue extends Store {
     throw new Error('A stream cannot be assigned');
   }
 
+  get isGood(): boolean {
+    return !this.failed && !this.atEnd;
+  }
+
+  /** Writes unless the stream has failed or reached its end, as an output `sentry` allows. */
   write(frame: Frame, bytes: string): void {
+    if (!this.isGood) return;
     if (this.target === 'buffer') {
-      this.buffer = this.buffer.slice(0, this.position) + bytes + this.buffer.slice(this.position + bytes.length);
-      this.position += bytes.length;
+      const at = this.writePosition;
+      this.buffer = this.buffer.slice(0, at) + bytes + this.buffer.slice(at + bytes.length);
+      this.writePosition += bytes.length;
       frame.runtime.reserve(Math.ceil(bytes.length / 8));
       if (this.buffer.length > 1_000_000) throw new CppRuntimeError('custom', '文字列が長すぎます。');
     } else {
@@ -96,6 +105,7 @@ export class StreamValue extends Store {
 
   /** Writes a formatted field, padded to the width, which the insertion then resets (C++20 [ostream.formatted]). */
   writeField(frame: Frame, text: string, internalAt = 0): void {
+    if (!this.isGood) return;
     const width = this.width;
     this.width = 0;
     if (text.length >= width) {
@@ -167,7 +177,6 @@ export class Streams {
       const make = (bytes: string): StreamValue => {
         const stream = new StreamValue('buffer');
         stream.buffer = bytes;
-        if (isOutput && !isInput) stream.position = 0;
         return stream;
       };
       cls.constructors = [
@@ -191,8 +200,7 @@ export class Streams {
           const stream = self as StreamValue;
           stream.buffer = ((text as Ptr).read() as StringValue).bytes;
           stream.position = 0;
-          stream.failed = false;
-          stream.atEnd = false;
+          stream.writePosition = 0;
           return;
         })
       );
@@ -252,7 +260,7 @@ export class Streams {
     method('unsetf', [UINT], VOID, (stream, [flags]) => {
       stream.flags &= ~asNumber(flags);
     });
-    method('good', [], BOOL, (stream) => (stream.failed || stream.atEnd ? 0 : 1), { isConst: true });
+    method('good', [], BOOL, (stream) => (stream.isGood ? 1 : 0), { isConst: true });
     method('fail', [], BOOL, (stream) => (stream.failed ? 1 : 0), { isConst: true });
     method('bad', [], BOOL, () => 0, { isConst: true });
     method('eof', [], BOOL, (stream) => (stream.atEnd ? 1 : 0), { isConst: true });
@@ -389,44 +397,32 @@ export class Streams {
     let read: (stream: StreamValue) => Value | undefined;
     if (type.kind === 'class' && type.cls === this.library.stringClass) {
       return this.extractWith(compiler, left, row, (frame, stream) => {
-        const token = readToken(stream);
-        if (token === undefined) return;
-        ((target(frame) as Ptr).read() as StringValue).bytes = token;
+        ((target(frame) as Ptr).read() as StringValue).bytes = readWord(stream);
       });
     }
     if (type.kind === 'int' && isCharType(type)) {
       read = (stream) => {
-        skipSpaces(stream);
-        if (stream.position >= stream.buffer.length) {
-          stream.atEnd = true;
-          stream.failed = true;
-          return;
-        }
-        return signedChar(byteAt(stream.buffer, stream.position++));
+        if (stream.position < stream.buffer.length) return signedChar(byteAt(stream.buffer, stream.position++));
+        stream.failed = true;
+        stream.atEnd = true;
+        return;
       };
+    } else if (type.kind === 'int' && type.name === 'bool') {
+      read = readBool;
     } else if (type.kind === 'int') {
       read = (stream) => readInteger(stream, type.name);
     } else if (type.kind === 'float') {
-      read = (stream) => {
-        const token = readNumberToken(stream);
-        if (token === undefined) return;
-        const parsed = parseFloatPrefix(byteArray(token));
-        if (parsed.length === 0) {
-          stream.failed = true;
-          return 0;
-        }
-        return type.name === 'float' ? Math.fround(parsed.value) : parsed.value;
-      };
+      read = (stream) => readFloat(stream, type.name === 'float');
     } else {
       return compiler.error(row, `演算子 >> は ${typeName(left.type)} と ${typeName(type)} には使えません。`);
     }
     return this.extractWith(compiler, left, row, (frame, stream) => {
-      if (stream.failed) return;
       const value = read(stream);
       if (value !== undefined) (target(frame) as Ptr).write(value);
     });
   }
 
+  /** A formatted extraction, which reads only when the input `sentry` lets it. */
   private extractWith(
     compiler: ExpressionCompiler,
     left: Expr,
@@ -441,7 +437,7 @@ export class Streams {
       run: (frame) => {
         const place = location(frame) as Ptr;
         const stream = place.read() as StreamValue;
-        if (!stream.failed) extract(frame, stream);
+        if (inputSentry(stream)) extract(frame, stream);
         return place;
       },
     };
@@ -465,16 +461,15 @@ export class Streams {
 const readLine = ([stream, text, delimiter]: unknown[]): Ptr => {
   const place = stream as Ptr;
   const source = place.read() as StreamValue;
-  const separator = delimiter === undefined ? '\n' : String.fromCodePoint(asNumber(delimiter) & 0xff);
-  const target = (text as Ptr).read() as StringValue;
-  if (source.failed || source.position >= source.buffer.length) {
+  if (!source.isGood) {
     source.failed = true;
-    source.atEnd = true;
-    target.bytes = '';
     return place;
   }
+  const separator = delimiter === undefined ? '\n' : String.fromCodePoint(asNumber(delimiter) & 0xff);
+  const target = (text as Ptr).read() as StringValue;
   const end = source.buffer.indexOf(separator, source.position);
   if (end === -1) {
+    if (source.position >= source.buffer.length) source.failed = true;
     target.bytes = source.buffer.slice(source.position);
     source.position = source.buffer.length;
     source.atEnd = true;
@@ -551,38 +546,44 @@ function writeFloat(frame: Frame, stream: StreamValue, value: number): void {
   stream.writeField(frame, text, internalAt);
 }
 
-function skipSpaces(stream: StreamValue): void {
-  if (!(stream.flags & FLAGS.skipws)) return;
-  while (stream.position < stream.buffer.length && /\s/.test(stream.buffer[stream.position])) stream.position++;
+/** The input `sentry`: fails unless the stream is good, then skips whitespace, failing at the end of the text. */
+function inputSentry(stream: StreamValue): boolean {
+  if (!stream.isGood) {
+    stream.failed = true;
+    return false;
+  }
+  if (stream.flags & FLAGS.skipws) {
+    while (stream.position < stream.buffer.length && isSpaceByte(byteAt(stream.buffer, stream.position)))
+      stream.position++;
+    if (stream.position >= stream.buffer.length) {
+      stream.failed = true;
+      stream.atEnd = true;
+      return false;
+    }
+  }
+  return true;
 }
 
-function readToken(stream: StreamValue): string | undefined {
-  skipSpaces(stream);
+/** Reads up to the next whitespace, or as many characters as the width allows, which it then resets. */
+function readWord(stream: StreamValue): string {
+  const limit = stream.width > 0 ? stream.width : Number.POSITIVE_INFINITY;
+  stream.width = 0;
   const start = stream.position;
-  while (stream.position < stream.buffer.length && !/\s/.test(stream.buffer[stream.position])) stream.position++;
-  if (stream.position >= stream.buffer.length) stream.atEnd = true;
-  if (stream.position === start) {
-    stream.failed = true;
-    return undefined;
+  while (stream.position - start < limit) {
+    if (stream.position >= stream.buffer.length) {
+      stream.atEnd = true;
+      break;
+    }
+    if (isSpaceByte(byteAt(stream.buffer, stream.position))) break;
+    stream.position++;
   }
+  if (stream.position === start) stream.failed = true;
   return stream.buffer.slice(start, stream.position);
 }
 
-/** Reads the characters a number may consist of, as `num_get` gathers them before converting. */
-function readNumberToken(stream: StreamValue): string | undefined {
-  skipSpaces(stream);
-  const match = /^[+-]?(?:\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)/.exec(
-    stream.buffer.slice(stream.position)
-  );
-  if (!match) {
-    if (stream.position >= stream.buffer.length) stream.atEnd = true;
-    stream.failed = true;
-    return undefined;
-  }
-  stream.position += match[0].length;
-  if (stream.position >= stream.buffer.length) stream.atEnd = true;
-  return match[0];
-}
+/** libc++'s `__num_get_base::__src`: the characters `num_get` gathers for integers, then `pP` for floating point. */
+const INTEGER_ATOMS = '0123456789abcdefABCDEFxX+-';
+const FLOAT_ATOMS = `${INTEGER_ATOMS}pP`;
 
 const INTEGER_RANGES: Record<string, [bigint, bigint]> = {
   short: [-(2n ** 15n), 2n ** 15n - 1n],
@@ -593,31 +594,167 @@ const INTEGER_RANGES: Record<string, [bigint, bigint]> = {
   ulong: [0n, 2n ** 64n - 1n],
   llong: [-(2n ** 63n), 2n ** 63n - 1n],
   ullong: [0n, 2n ** 64n - 1n],
-  bool: [0n, 1n],
 };
 
-/** Reads an integer as `num_get` does: a failure stores 0, and a value out of range stores the nearest limit. */
-function readInteger(stream: StreamValue, name: string): Value | undefined {
-  skipSpaces(stream);
-  const match = /^[+-]?\d+/.exec(stream.buffer.slice(stream.position));
-  if (!match) {
-    stream.failed = true;
-    // libc++ leaves the variable as it was when no character remains, and stores 0 for text that is no number.
-    if (stream.position >= stream.buffer.length) {
-      stream.atEnd = true;
-      return undefined;
-    }
-    return name === 'long' || name === 'ulong' || name === 'llong' || name === 'ullong' ? 0n : 0;
-  }
-  stream.position += match[0].length;
-  if (stream.position >= stream.buffer.length) stream.atEnd = true;
+/**
+ * Reads an integer as libc++'s `num_get` does: it gathers the characters an integer of the stream's base may hold, and
+ * fails storing 0 unless `strtoll` (`strtoull` for an unsigned type) converts all of them; a value out of range fails
+ * storing the nearest limit, though an unsigned type wraps a negated value that fits.
+ */
+function readInteger(stream: StreamValue, name: string): Value {
+  const base = numberBase(stream.flags);
+  const text = gatherInteger(stream, base);
   const [min, max] = INTEGER_RANGES[name] ?? INTEGER_RANGES.int;
-  let value = BigInt(match[0]);
-  if (min === 0n && value < 0n && name !== 'bool')
-    value = BigInt.asUintN(name === 'uint' || name === 'ushort' ? 32 : 64, value);
-  if (value < min || value > max) {
+  const isUnsigned = min === 0n;
+  const isNegated = isUnsigned && text.startsWith('-');
+  const digits = isNegated ? text.slice(1) : text;
+  const parsed = parseIntegerPrefix(byteArray(digits), base);
+  let value: bigint;
+  if (digits === '' || parsed.length !== digits.length) {
     stream.failed = true;
-    value = value < min ? min : max;
+    value = 0n;
+  } else if (parsed.value < min || parsed.value > max) {
+    stream.failed = true;
+    value = parsed.value > 0n ? max : min;
+  } else {
+    value = isNegated ? BigInt.asUintN(max.toString(2).length, -parsed.value) : parsed.value;
   }
-  return name === 'long' || name === 'ulong' || name === 'llong' || name === 'ullong' ? value : Number(value);
+  return ['long', 'ulong', 'llong', 'ullong'].includes(name) ? value : Number(value);
+}
+
+/** `ios_base::basefield` as `num_get` reads it: 0 (no base flag) takes the base from the number's prefix. */
+function numberBase(flags: number): number {
+  const field = flags & FLAGS.basefield;
+  if (field === FLAGS.oct) return 8;
+  if (field === FLAGS.hex) return 16;
+  return field === 0 ? 0 : 10;
+}
+
+/** libc++'s `__stage2_int_loop`: a leading sign, digits of the base, and the `x` of a `0x` prefix in base 16. */
+function gatherInteger(stream: StreamValue, base: number): string {
+  let text = '';
+  for (; stream.position < stream.buffer.length; stream.position++) {
+    const char = stream.buffer[stream.position];
+    if (text === '' && (char === '+' || char === '-')) {
+      text += char;
+      continue;
+    }
+    const atom = INTEGER_ATOMS.indexOf(char);
+    if (atom === -1 || atom >= 24 || ((base === 8 || base === 10) && atom >= base)) break;
+    if (base === 16 && atom >= 22 && !(text.length > 0 && text.length <= 2 && text.endsWith('0'))) break;
+    text += char;
+  }
+  if (stream.position >= stream.buffer.length) stream.atEnd = true;
+  return text;
+}
+
+/** Reads a `bool` as `num_get` does: a `long` that must be 0 or 1, or with `boolalpha` the word `true` or `false`. */
+function readBool(stream: StreamValue): Value {
+  if (stream.flags & FLAGS.boolalpha) {
+    const index = scanKeyword(stream, ['true', 'false']);
+    if (index === -1) stream.failed = true;
+    return index === 0 ? 1 : 0;
+  }
+  const value = readInteger(stream, 'long') as bigint;
+  if (value === 0n || value === 1n) return Number(value);
+  // libc++ replaces the state with failbit alone, dropping an eofbit the number set.
+  stream.failed = true;
+  stream.atEnd = false;
+  return 1;
+}
+
+/** libc++'s `__scan_keyword`: consumes characters while they may still spell a keyword, returning the one spelled. */
+function scanKeyword(stream: StreamValue, keywords: string[]): number {
+  const status = keywords.map(() => 'mightMatch');
+  for (let index = 0; stream.position < stream.buffer.length && status.includes('mightMatch'); index++) {
+    const char = stream.buffer[stream.position];
+    let consumed = false;
+    for (const [at, keyword] of keywords.entries()) {
+      if (status[at] !== 'mightMatch') continue;
+      if (keyword[index] !== char) {
+        status[at] = 'doesNotMatch';
+        continue;
+      }
+      consumed = true;
+      if (keyword.length === index + 1) status[at] = 'matches';
+    }
+    if (!consumed) continue;
+    stream.position++;
+    const candidates = status.filter((state) => state !== 'doesNotMatch').length;
+    for (const [at, keyword] of keywords.entries()) {
+      if (candidates > 1 && status[at] === 'matches' && keyword.length !== index + 1) status[at] = 'doesNotMatch';
+    }
+  }
+  if (stream.position >= stream.buffer.length) stream.atEnd = true;
+  return status.indexOf('matches');
+}
+
+/**
+ * Reads a floating-point number as libc++'s `num_get` does: it gathers the characters a number may hold and fails
+ * storing 0 unless `strtod` converts all of them; a result out of range fails but stays stored.
+ */
+function readFloat(stream: StreamValue, isFloat: boolean): number {
+  const text = gatherFloat(stream);
+  const bytes = byteArray(text);
+  const parsed = parseFloatPrefix(bytes);
+  if (text === '' || parsed.length !== text.length) {
+    stream.failed = true;
+    return 0;
+  }
+  const value = isFloat ? Math.fround(parsed.value) : parsed.value;
+  const isUnderflow =
+    parsed.isNonzeroText &&
+    Math.abs(value) < (isFloat ? 2 ** -126 : 2 ** -1022) &&
+    !isExactFloatPrefix(bytes, parsed.length, value);
+  if (!Number.isFinite(value) || isUnderflow) stream.failed = true;
+  return value;
+}
+
+/**
+ * Gathers the characters of a floating-point number as libc++'s `num_get` does, checking that a decimal digit or point
+ * leads: a character that fails that check is gathered but stays unread.
+ */
+function gatherFloat(stream: StreamValue): string {
+  let text = '';
+  const scan: FloatScan = { inUnits: true, exponent: 'E' };
+  let isLeadingParsed = false;
+  for (; stream.position < stream.buffer.length; stream.position++) {
+    const char = stream.buffer[stream.position];
+    if (!acceptsFloatChar(scan, text, char)) break;
+    text += char;
+    if (!isLeadingParsed) {
+      const lead = text[0] === '+' || text[0] === '-' ? text[1] : text[0];
+      if (lead !== undefined) {
+        if (!/[\d.]/.test(lead)) return text;
+        isLeadingParsed = true;
+      }
+    }
+  }
+  if (stream.position >= stream.buffer.length) stream.atEnd = true;
+  return text;
+}
+
+interface FloatScan {
+  /** Whether no decimal point or exponent has come yet. */
+  inUnits: boolean;
+  /** The exponent letter: `E`, or `P` after an `x`; lowercased once it has come. */
+  exponent: string;
+}
+
+/** libc++'s `__stage2_float_loop` for one character: whether the number takes it after `text`. */
+function acceptsFloatChar(scan: FloatScan, text: string, char: string): boolean {
+  if (char === '.') {
+    if (!scan.inUnits) return false;
+    scan.inUnits = false;
+    return true;
+  }
+  if (!FLOAT_ATOMS.includes(char)) return false;
+  if (char === '+' || char === '-') return text === '' || text.at(-1)?.toUpperCase() === scan.exponent.toUpperCase();
+  if (char === 'x' || char === 'X') {
+    scan.exponent = 'P';
+  } else if (char.toUpperCase() === scan.exponent) {
+    scan.exponent = scan.exponent.toLowerCase();
+    scan.inUnits = false;
+  }
+  return true;
 }
