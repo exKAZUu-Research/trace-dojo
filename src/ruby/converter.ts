@@ -489,25 +489,7 @@ export class Converter {
       }
       case 'string_array':
       case 'symbol_array': {
-        const interpolates = /^%[WI]/.test(node.text);
-        const delimiter = node.text[2];
-        const items = namedChildren(node)
-          .filter((child) => child.type !== 'comment')
-          .map((child): Expr => {
-            const parts: StrPart[] = interpolates
-              ? this.stringParts(child)
-              : [
-                  decodePercentLiteral(
-                    namedChildren(child)
-                      .map((part) => part.text)
-                      .join(''),
-                    delimiter,
-                    true
-                  ),
-                ];
-            return node.type === 'symbol_array' ? this.symbol(child, parts) : { k: 'str', parts };
-          });
-        return { k: 'array', items };
+        return this.percentArray(node);
       }
       case 'delimited_symbol': {
         const text = node.text;
@@ -780,6 +762,39 @@ export class Converter {
       parts.push(decoded.bytes ? { text: decoded.text, bytes: decoded.bytes } : decoded.text);
     }
     return parts;
+  }
+
+  private percentArray(node: Node): Expr {
+    const interpolates = /^%[WI]/.test(node.text);
+    const delimiter = node.text[2];
+    const items = namedChildren(node)
+      .filter((child) => child.type !== 'comment')
+      .map((child): Expr => {
+        if (
+          interpolates &&
+          child.namedChildren.some(
+            (part, index, children) =>
+              part?.type === 'escape_sequence' &&
+              /^\\(?:c|C-|M-)/.test(part.text) &&
+              part.text.includes('\n') &&
+              children[index + 1]?.type === 'heredoc_body'
+          )
+        )
+          this.unsupported(child, 'heredoc と制御文字の改行エスケープの組み合わせ');
+        const parts: StrPart[] = interpolates
+          ? this.stringParts(child)
+          : [
+              decodePercentLiteral(
+                namedChildren(child)
+                  .map((part) => part.text)
+                  .join(''),
+                delimiter,
+                true
+              ),
+            ];
+        return node.type === 'symbol_array' ? this.symbol(child, parts) : { k: 'str', parts };
+      });
+    return { k: 'array', items };
   }
 
   private symbol(node: Node, parts: StrPart[]): Expr {

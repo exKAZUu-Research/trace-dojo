@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { RegExpParser, visitRegExpAST } from '@eslint-community/regexpp';
 import { z } from 'zod';
@@ -14,7 +13,7 @@ import { rt, UnsupportedFeatureError } from './runtime';
 const requireFromRoot = createRequire(path.join(process.cwd(), 'package.json'));
 const wasmPath = requireFromRoot.resolve('@ruby/4.0-wasm-wasi/dist/ruby.wasm');
 const bridge = requireFromRoot.resolve('@ruby/wasm-wasi/dist/browser');
-const nativePath = fileURLToPath(new URL('regexpCasefoldProcess.cjs', import.meta.url));
+const nativePath = requireFromRoot.resolve('./src/ruby/regexpCasefoldProcess.cjs');
 const matchSchema = z.union([
   z.array(z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()]).nullable()).nullable(),
   z.enum(['timeout', 'unsupported']),

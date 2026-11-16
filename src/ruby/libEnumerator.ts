@@ -41,7 +41,7 @@ import {
   runToEnd,
 } from './interp';
 import { lazyDisplaySource, lazySourceDescription, setLazyDisplaySource } from './lazyDisplay';
-import { iterate, iterateYielded, type IterationResult, STOP, zipCollections } from './libEnumerable';
+import { iterateYielded, type IterationResult, STOP, zipCollections } from './libEnumerable';
 import { advertisesPublicMethod, respondsToName } from './libMeta';
 import { isNumericRangeOperand, rangeSize } from './libRange';
 import { fractionOf, isRational } from './libRational';
@@ -354,9 +354,7 @@ function sourceOf(self: RObject): EnumeratorSource {
 
 /** Runs the enumerator's method, passing each yielded value (several packed into an array) to `visit`. */
 export function* iterateEnumerator(self: RObject, visit: (value: Value) => Gen): Gen {
-  return yield* iterateEnumeratorArgs(self, (args) =>
-    visit(args.length === 0 ? NIL : args.length === 1 ? args[0] : arr(args))
-  );
+  return yield* iterateEnumeratorArgs(self, (args) => visit(packedYield(args)));
 }
 
 function* iterateEnumeratorArgs(self: RObject, visit: (args: Value[]) => Gen): Gen {
@@ -430,7 +428,7 @@ function* withIndex(self: RObject, args: Value[], block: RProc | undefined, name
   const userBlock = block;
   const source = sourceOf(self);
   const proc = nativeProc(-1, (yielded, _block, used) => {
-    const value = yielded.length === 0 ? NIL : yielded.length === 1 ? yielded[0] : arr(yielded);
+    const value = packedYield(yielded);
     return callProc(userBlock, [value, index++], { used });
   });
   return yield* runSource(source, proc);
@@ -440,7 +438,7 @@ def('Enumerator', ['with_object', 'each_with_object'], 1, function* (self: RObje
   const userBlock = block;
   const source = sourceOf(self);
   const proc = nativeProc(-1, (yielded, _block, used) => {
-    const value = yielded.length === 0 ? NIL : yielded.length === 1 ? yielded[0] : arr(yielded);
+    const value = packedYield(yielded);
     return callProc(userBlock, [value, memo], { used });
   });
   yield* runSource(source, proc);
@@ -851,7 +849,7 @@ function nextValues(self: RObject): Value[] {
 
 function nextValue(self: RObject): Value {
   const args = nextValues(self);
-  return args.length === 0 ? NIL : args.length === 1 ? args[0] : arr(args);
+  return packedYield(args);
 }
 
 function stopIteration(result: Value): unknown {
@@ -864,7 +862,7 @@ def('Enumerator', 'next', 0, (self: RObject) => nextValue(self));
 def('Enumerator', 'peek', 0, (self: RObject) => {
   const args = nextValues(self);
   (sourceOf(self).cursor as Cursor).peeked.unshift(args);
-  return args.length === 0 ? NIL : args.length === 1 ? args[0] : arr(args);
+  return packedYield(args);
 });
 def('Enumerator', 'rewind', 0, function* (self: RObject) {
   assertMutableEnumerator(self);
@@ -1297,7 +1295,7 @@ function* runLazy(
     const result = yield* iterateYielded(
       data.source,
       function* (yielded) {
-        const value = yielded.length === 0 ? NIL : yielded.length === 1 ? yielded[0] : arr(yielded);
+        const value = packedYield(yielded);
         const args = yielded.length === 0 && data.steps.length > 0 ? [NIL] : yielded;
         return yield* streamLazyStep(data.steps, states, 0, value, visitWithStop, args);
       },
@@ -1496,8 +1494,11 @@ function* runLazyStep(
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Lazy flattening retains recursive roots and distinguishes arrays from user to_ary conversions.
-function* streamFlattened(mapped: Value, next: (value: Value) => Gen<IterationResult>): Gen<IterationResult> {
+// code-gauge-allow functionCognitiveComplexity 21 -- Lazy flattening retains recursive roots and distinguishes arrays from user to_ary conversions.
+function* streamFlattened(
+  mapped: Value,
+  next: (value: Value, yielded?: Value[]) => Gen<IterationResult>
+): Gen<IterationResult> {
   const held = rt().held;
   const rootIndex = held.push(mapped) - 1;
   try {
@@ -1511,11 +1512,11 @@ function* streamFlattened(mapped: Value, next: (value: Value) => Gen<IterationRe
       (yield* advertisesPublicMethod(mapped, 'each'))
     ) {
       let stopped = false;
-      yield* iterate(mapped, function* (item) {
-        if ((yield* next(item)) === STOP) {
-          stopped = true;
-          return STOP;
-        }
+      yield* iterateYielded(mapped, function* (yielded) {
+        const item = packedYield(yielded);
+        const result = yield* next(item, yielded.length === 0 ? [NIL] : yielded);
+        if (result === STOP) stopped = true;
+        return result;
       });
       return stopped ? STOP : undefined;
     }
@@ -1607,3 +1608,7 @@ def('Enumerator::Lazy', ['inspect', 'to_s'], 0, function* (self: RObject) {
   }
   return str(text);
 });
+
+function packedYield(args: Value[]): Value {
+  return args.length === 0 ? NIL : args.length === 1 ? args[0] : arr(args);
+}

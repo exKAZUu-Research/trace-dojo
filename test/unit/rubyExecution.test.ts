@@ -14487,3 +14487,122 @@ test('Repeated native Unicode comparisons return within the process deadline', (
     })
   ).toBe('done\ndone\ndone\n');
 });
+
+const nestedLazyFeedbackCases = [
+  [
+    'inner=Enumerator.new{|y|v=y.yield(:a);y<<v}.lazy;n=0;e=Enumerator.new{|y|n+=1;raise "stop" if n==1;y<<1}.lazy.flat_map{|x|inner};e.feed(7);begin;e.next;rescue=>x;puts x.message;end;p e.next;p e.next',
+    'stop\n:a\n:a\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|v=y.yield(:a);y<<v}.lazy;n=0;e=Enumerator.new{|y|n+=1;raise "stop" if n==1;y<<1}.lazy.flat_map{|x|inner}.map{|x|x};e.feed(7);begin;e.next;rescue=>x;puts x.message;end;p e.next;p e.next',
+    'stop\n:a\n:a\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|v=y.yield(:a);y<<v}.lazy;n=0;e=Enumerator.new{|y|n+=1;raise "stop" if n==1;y<<1}.lazy.flat_map{|x|inner};begin;e.next;rescue=>x;puts x.message;end;e.feed(7);p e.next;p e.next',
+    'stop\n:a\n:a\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|v=y.yield(:a);y<<v}.lazy;n=0;e=Enumerator.new{|y|n+=1;raise "stop" if n==1;y<<1}.lazy.flat_map{|x|inner}.map{|x|x};begin;e.next;rescue=>x;puts x.message;end;e.feed(7);p e.next;p e.next',
+    'stop\n:a\n:a\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[1].lazy.flat_map{|x|inner}.map{|*x|x};p e.force',
+    '[:feedback, [nil]]\n[:feedback, [1]]\n[:feedback, [2, 3]]\n[[nil], [1], [2, 3]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy;e=[1].lazy.flat_map{|x|inner}.take(1);e.feed(7);5.times{begin;p e.next;rescue StopIteration;p :done;end}',
+    'nil\n:done\n:done\n:done\n:done\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.map{|*x|x};e=[1].lazy.flat_map{|x|inner}.map{|*x|x};p e.force',
+    '[:feedback, [nil]]\n[:feedback, [1]]\n[:feedback, [2, 3]]\n[[[nil]], [[1]], [[2, 3]]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.map{|*x|x};e=[1].lazy.flat_map{|x|inner}.take(1);e.feed(7);5.times{begin;p e.next;rescue StopIteration;p :done;end}',
+    '[nil]\n:done\n:done\n:done\n:done\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.each_slice(2);e=[1].lazy.flat_map{|x|inner}.map{|*x|x};p e.force',
+    '[:feedback, nil]\n[:feedback, [[nil, 1]]]\n[:feedback, nil]\n[[[nil, 1]], [[[2, 3]]]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.each_slice(2);e=[1].lazy.flat_map{|x|inner}.take(1);e.feed(7);5.times{begin;p e.next;rescue StopIteration;p :done;end}',
+    '[:feedback, nil]\n[nil, 1]\n:done\n:done\n:done\n:done\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.each_cons(2);e=[1].lazy.flat_map{|x|inner}.map{|*x|x};p e.force',
+    '[:feedback, nil]\n[:feedback, [[nil, 1]]]\n[:feedback, [[1, [2, 3]]]]\n[[[nil, 1]], [[1, [2, 3]]]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.each_cons(2);e=[1].lazy.flat_map{|x|inner}.take(1);e.feed(7);5.times{begin;p e.next;rescue StopIteration;p :done;end}',
+    '[:feedback, nil]\n[nil, 1]\n:done\n:done\n:done\n:done\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.each_entry;e=[1].lazy.flat_map{|x|inner}.map{|*x|x};p e.force',
+    '[:feedback, nil]\n[:feedback, nil]\n[:feedback, nil]\n[[nil], [1], [[2, 3]]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.each_entry;e=[1].lazy.flat_map{|x|inner}.take(1);e.feed(7);5.times{begin;p e.next;rescue StopIteration;p :done;end}',
+    'nil\n:done\n:done\n:done\n:done\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.each_with_object(:memo);e=[1].lazy.flat_map{|x|inner}.map{|*x|x};p e.force',
+    '[:feedback, [nil, :memo]]\n[:feedback, [1, :memo]]\n[:feedback, [[2, 3], :memo]]\n[[nil, :memo], [1, :memo], [[2, 3], :memo]]\n',
+  ],
+  [
+    'inner=Enumerator.new{|y|[[],[1],[2,3]].each{|a|v=y.yield(*a);p [:feedback,v]}}.lazy.each_with_object(:memo);e=[1].lazy.flat_map{|x|inner}.take(1);e.feed(7);5.times{begin;p e.next;rescue StopIteration;p :done;end}',
+    '[nil, :memo]\n:done\n:done\n:done\n:done\n',
+  ],
+  [
+    'class F;def force;raise "unused";end;def each;p yield;p yield(1);p yield(2,3);:done;end;end;p [1].lazy.flat_map{|x|F.new}.map{|*x|x}.force',
+    '[nil]\n[1]\n[2, 3]\n[[nil], [1], [2, 3]]\n',
+  ],
+] as const;
+
+test.each(nestedLazyFeedbackCases)('Nested Lazy producers retain tuples and feedback: %s', (source, stdout) => {
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+const percentLiteralBoundaryCases = [
+  ['def q(x);x;end;def b;"b";end;p "a%s" %q(b)', '"ab"\n'],
+  ['def Q(x);x;end;def b;"b";end;p "a%s" %Q(b)', '"ab"\n'],
+  [String.raw`p %w[hello \n]`, '["hello", "\\\\n"]\n'],
+  ['p %w[a\\\nb c]', '["a\\nb", "c"]\n'],
+  ['p %w[a \\\nb]', '["a", "\\nb"]\n'],
+  ['p %w[a\\\r\nb c]', '["a\\nb", "c"]\n'],
+  ['p %w[a \\\r\nb]', '["a", "\\nb"]\n'],
+  [String.raw`p %W[hello \n]`, '["hello", "\\n"]\n'],
+  ['p %W[a\\\nb c]', '["a\\nb", "c"]\n'],
+  ['p %W[a \\\nb]', '["a", "\\nb"]\n'],
+  ['p %W[a\\\r\nb c]', '["a\\nb", "c"]\n'],
+  ['p %W[a \\\r\nb]', '["a", "\\nb"]\n'],
+  [String.raw`p %i[hello \n]`, '[:hello, :"\\\\n"]\n'],
+  ['p %i[a\\\nb c]', '[:"a\\nb", :c]\n'],
+  ['p %i[a \\\nb]', '[:a, :"\\nb"]\n'],
+  ['p %i[a\\\r\nb c]', '[:"a\\nb", :c]\n'],
+  ['p %i[a \\\r\nb]', '[:a, :"\\nb"]\n'],
+  [String.raw`p %I[hello \n]`, '[:hello, :"\\n"]\n'],
+  ['p %I[a\\\nb c]', '[:"a\\nb", :c]\n'],
+  ['p %I[a \\\nb]', '[:a, :"\\nb"]\n'],
+  ['p %I[a\\\r\nb c]', '[:"a\\nb", :c]\n'],
+  ['p %I[a \\\r\nb]', '[:a, :"\\nb"]\n'],
+  ['p %W[#{<<EOS}\\\nbody\nEOS\ntail]', '["body\\n\\ntail"]\n'],
+  ['p %W[#{<<EOS} \\\nbody\nEOS\ntail]', '["body\\n", "\\ntail"]\n'],
+  ['p %W[#{<<EOS}\\\r\nbody\r\nEOS\r\ntail]', '["body\\n\\ntail"]\n'],
+  ['p %W[#{<<EOS} \\\r\nbody\r\nEOS\r\ntail]', '["body\\n", "\\ntail"]\n'],
+  ['p %I[#{<<EOS}\\\nbody\nEOS\ntail]', '[:"body\\n\\ntail"]\n'],
+  ['p %I[#{<<EOS} \\\nbody\nEOS\ntail]', '[:"body\\n", :"\\ntail"]\n'],
+  ['p %I[#{<<EOS}\\\r\nbody\r\nEOS\r\ntail]', '[:"body\\n\\ntail"]\n'],
+  ['p %I[#{<<EOS} \\\r\nbody\r\nEOS\r\ntail]', '[:"body\\n", :"\\ntail"]\n'],
+  ['def Q(x);x;end;b="Z";p "a%s" %Q(b)', '"aZ"\n'],
+  ['def q(x);x;end;b="Z";p "a%s" %q(b)', '"aZ"\n'],
+  ['p "a" "b";p %Q(a) "b"', '"ab"\n"ab"\n'],
+  ['b="Z";begin;p "a%s" %Q(b);rescue=>e;p e.class;end', 'NoMethodError\n'],
+] as const;
+
+test.each(percentLiteralBoundaryCases)(
+  'Percent literals retain calls, words and newline contents: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
