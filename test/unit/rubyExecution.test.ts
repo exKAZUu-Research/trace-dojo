@@ -13468,3 +13468,998 @@ test('Casefold parity is checked at each search position and for every capture',
     uncaughtException: undefined,
   });
 });
+
+const nativeProtocolRegressions = [
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy;e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '3\n[:feedback, 7]\n4\n[:feedback, nil]\n5\n[:feedback, nil]\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.map{|x|x};e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '3\n[:feedback, 3]\n4\n[:feedback, 4]\n5\n[:feedback, 5]\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.map{|x|x*2};e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '6\n[:feedback, 6]\n8\n[:feedback, 8]\n10\n[:feedback, 10]\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.select{|x|true};e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '3\n[:feedback, 3]\n4\n[:feedback, 4]\n5\n[:feedback, 5]\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.select{|x|x>3};e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '[:feedback, 3]\n4\n[:feedback, 4]\n5\n[:feedback, 5]\n:done\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.reject{|x|false};e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '3\n[:feedback, 3]\n4\n[:feedback, 4]\n5\n[:feedback, 5]\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.filter_map{|x|x*2};e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '6\n[:feedback, 6]\n8\n[:feedback, 8]\n10\n[:feedback, 10]\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.flat_map{|x|[x,x+10]};e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '3\n13\n[:feedback, 13]\n4\n14\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.take(3);e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '3\n[:feedback, 3]\n4\n[:feedback, 4]\n5\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.drop(1);e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '[:feedback, 3]\n4\n[:feedback, 4]\n5\n[:feedback, 5]\n:done\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.take_while{|x|true};e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '3\n[:feedback, 3]\n4\n[:feedback, 4]\n5\n[:feedback, 5]\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.drop_while{|x|false};e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '3\n[:feedback, 3]\n4\n[:feedback, 4]\n5\n[:feedback, 5]\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.compact;e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '3\n[:feedback, 3]\n4\n[:feedback, 4]\n5\n[:feedback, 5]\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.with_index;e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '[3, 0]\n[:feedback, [3, 0]]\n[4, 1]\n[:feedback, [4, 1]]\n[5, 2]\n[:feedback, [5, 2]]\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.zip([8,9,10]);e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '[3, 8]\n[:feedback, [3, 8]]\n[4, 9]\n[:feedback, [4, 9]]\n[5, 10]\n[:feedback, [5, 10]]\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.each_slice(1);e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '[3]\n[:feedback, 7]\n[4]\n[:feedback, nil]\n[5]\n[:feedback, nil]\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.each_cons(1);e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '[3]\n[:feedback, 7]\n[4]\n[:feedback, nil]\n[5]\n[:feedback, nil]\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.each_entry;e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '3\n[:feedback, nil]\n4\n[:feedback, nil]\n5\n[:feedback, nil]\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.each_with_object(:memo);e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '[3, :memo]\n[:feedback, 7]\n[4, :memo]\n[:feedback, nil]\n[5, :memo]\n[:feedback, nil]\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.map{|x|x*2}.each_slice(1);e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '[6]\n[:feedback, 6]\n[8]\n[:feedback, 8]\n[10]\n[:feedback, 10]\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.each_slice(1).map{|x|x};e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '[3]\n[:feedback, [3]]\n[4]\n[:feedback, [4]]\n[5]\n[:feedback, [5]]\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && true;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy;e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '"stop"\n3\n[:feedback, 7]\n4\n[:feedback, nil]\n5\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && true;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.map{|x|x};e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '"stop"\n3\n[:feedback, 3]\n4\n[:feedback, 4]\n5\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && true;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.map{|x|x*2};e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '"stop"\n6\n[:feedback, 6]\n8\n[:feedback, 8]\n10\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && false;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.each_entry.map{|x|x*2};e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '6\n[:feedback, nil]\n8\n[:feedback, nil]\n10\n[:feedback, nil]\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1 && true;[3,4,5].each{|i|v=y.yield(i);p [:feedback,v]}}.lazy.each_entry.map{|x|x*2};e.feed(7);begin;p e.next;rescue=>x;p x.message;end;3.times{begin;p e.next;rescue StopIteration;p :done;end}",
+    {
+      kind: 'executed',
+      stdout: '"stop"\n6\n[:feedback, nil]\n8\n[:feedback, nil]\n10\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=10**40;d=3;p n.fdiv(d);p n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '3.3333333333333336e+39\n3.3333333333333336e+39\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=10**23;d=3;p n.fdiv(d);p n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '3.333333333333333e+22\n3.333333333333333e+22\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=7**30;d=3;p n.fdiv(d);p n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '7.513113430230752e+24\n7.513113430230752e+24\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=10**400;d=3;p n.fdiv(d);p n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: 'Infinity\nInfinity\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**400);d=7;p n.fdiv(d);p n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '-Infinity\n-Infinity\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**400);d=2**53;p n.fdiv(d);p n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '-Infinity\n-Infinity\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**400);d=2**62;p n.fdiv(d);p n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '-Infinity\n-Infinity\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**400);d=10**300;p n.fdiv(d);p n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '-1.0e+100\n-1.0e+100\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**400);d=10**400;p n.fdiv(d);p n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '-1.0\n-1.0\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**400);d=3.0;p n.fdiv(d);p n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '-Infinity\n-Infinity\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**400);d=1e300;p n.fdiv(d);p n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '-1.0e+100\n-1.0e+100\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**400);d=1e-300;p n.fdiv(d);p n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '-Infinity\n-Infinity\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'puts :before;p defined?(1 if false)',
+    {
+      kind: 'compileError',
+    },
+  ],
+  [
+    'puts :before;p defined?(1 unless false)',
+    {
+      kind: 'compileError',
+    },
+  ],
+  [
+    'puts :before;p defined?(1 while 2)',
+    {
+      kind: 'compileError',
+    },
+  ],
+  [
+    'puts :before;p defined?(1 until 2)',
+    {
+      kind: 'compileError',
+    },
+  ],
+  [
+    'puts :before;p defined?(1 rescue 2)',
+    {
+      kind: 'compileError',
+    },
+  ],
+  [
+    'puts :before;p defined?((1 if false))',
+    {
+      kind: 'executed',
+      stdout: 'before\n"expression"\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'puts :before;p defined?(1 or 2)',
+    {
+      kind: 'executed',
+      stdout: 'before\n"expression"\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'puts :before;p defined?(1 and 2)',
+    {
+      kind: 'executed',
+      stdout: 'before\n"expression"\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'puts :before;p defined?(not true)',
+    {
+      kind: 'executed',
+      stdout: 'before\n"method"\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1;v=y.yield(:a);y<<v}.lazy;begin;e.next;rescue=>x;p x.message;end;e.feed(7);p e.next;p e.next",
+    {
+      kind: 'executed',
+      stdout: '"stop"\n:a\n7\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "n=0;e=Enumerator.new{|y|n+=1;raise 'stop' if n==1;v=y.yield(:a);y<<v}.lazy.map{|x|x};begin;e.next;rescue=>x;p x.message;end;e.feed(7);p e.next;p e.next",
+    {
+      kind: 'executed',
+      stdout: '"stop"\n:a\n:a\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'e=Enumerator.new{|y|[3,4,5].each{|i|v=y.yield(i,i+1);p [:feedback,v]}}.lazy;e.feed(7);5.times{begin;p e.next;rescue StopIteration;p :done;end}',
+    {
+      kind: 'executed',
+      stdout: '[3, 4]\n[:feedback, 7]\n[4, 5]\n[:feedback, nil]\n[5, 6]\n[:feedback, nil]\n:done\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'e=Enumerator.new{|y|[3,4,5].each{|i|v=y.yield(i,i+1);p [:feedback,v]}}.lazy.map{|*x|x};e.feed(7);5.times{begin;p e.next;rescue StopIteration;p :done;end}',
+    {
+      kind: 'executed',
+      stdout: '[3, 4]\n[:feedback, [3, 4]]\n[4, 5]\n[:feedback, [4, 5]]\n[5, 6]\n[:feedback, [5, 6]]\n:done\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'e=Enumerator.new{|y|[3,4,5].each{|i|v=y.yield(i,i+1);p [:feedback,v]}}.lazy.select{|x|false};e.feed(7);5.times{begin;p e.next;rescue StopIteration;p :done;end}',
+    {
+      kind: 'executed',
+      stdout: '[:feedback, [3, 4]]\n[:feedback, [4, 5]]\n[:feedback, [5, 6]]\n:done\n:done\n:done\n:done\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'e=Enumerator.new{|y|[3,4,5].each{|i|v=y.yield(i,i+1);p [:feedback,v]}}.lazy.filter_map{|x|false};e.feed(7);5.times{begin;p e.next;rescue StopIteration;p :done;end}',
+    {
+      kind: 'executed',
+      stdout: '[:feedback, [3, 4]]\n[:feedback, [4, 5]]\n[:feedback, [5, 6]]\n:done\n:done\n:done\n:done\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'e=Enumerator.new{|y|[3,4,5].each{|i|v=y.yield(i,i+1);p [:feedback,v]}}.lazy.flat_map{|x|[]};e.feed(7);5.times{begin;p e.next;rescue StopIteration;p :done;end}',
+    {
+      kind: 'executed',
+      stdout: '[:feedback, [3, 4]]\n[:feedback, [4, 5]]\n[:feedback, [5, 6]]\n:done\n:done\n:done\n:done\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'e=Enumerator.new{|y|[3,4,5].each{|i|v=y.yield(i,i+1);p [:feedback,v]}}.lazy.with_index;e.feed(7);5.times{begin;p e.next;rescue StopIteration;p :done;end}',
+    {
+      kind: 'executed',
+      stdout:
+        '[[3, 4], 0]\n[:feedback, [[3, 4], 0]]\n[[4, 5], 1]\n[:feedback, [[4, 5], 1]]\n[[5, 6], 2]\n[:feedback, [[5, 6], 2]]\n:done\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'e=Enumerator.new{|y|[3,4,5].each{|i|v=y.yield(i,i+1);p [:feedback,v]}}.lazy.each_slice(2);e.feed(7);5.times{begin;p e.next;rescue StopIteration;p :done;end}',
+    {
+      kind: 'executed',
+      stdout: '[:feedback, nil]\n[[3, 4], [4, 5]]\n[:feedback, 7]\n[:feedback, nil]\n[[5, 6]]\n:done\n:done\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'e=Enumerator.new{|y|[3,4,5].each{|i|v=y.yield(i,i+1);p [:feedback,v]}}.lazy.each_cons(2);e.feed(7);5.times{begin;p e.next;rescue StopIteration;p :done;end}',
+    {
+      kind: 'executed',
+      stdout:
+        '[:feedback, nil]\n[[3, 4], [4, 5]]\n[:feedback, 7]\n[[4, 5], [5, 6]]\n[:feedback, nil]\n:done\n:done\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'e=Enumerator.new{|y|[3,4,5].each{|i|v=y.yield(i,i+1);p [:feedback,v]}}.lazy.each_entry;e.feed(7);5.times{begin;p e.next;rescue StopIteration;p :done;end}',
+    {
+      kind: 'executed',
+      stdout: '[3, 4]\n[:feedback, nil]\n[4, 5]\n[:feedback, nil]\n[5, 6]\n[:feedback, nil]\n:done\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'e=Enumerator.new{|y|[3,4,5].each{|i|v=y.yield(i,i+1);p [:feedback,v]}}.lazy.map{|*x|x}.flat_map{|x|x}.map{|x|x*2};e.feed(7);5.times{begin;p e.next;rescue StopIteration;p :done;end}',
+    {
+      kind: 'executed',
+      stdout: '6\n8\n[:feedback, 8]\n8\n10\n[:feedback, 10]\n10\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'e=Enumerator.new{|y|[3,4,5].each{|i|v=y.yield(i,i+1);p [:feedback,v]}}.lazy.each_slice(1).map{|x|x}.each_entry;e.feed(7);5.times{begin;p e.next;rescue StopIteration;p :done;end}',
+    {
+      kind: 'executed',
+      stdout:
+        '[[3, 4]]\n[:feedback, [[3, 4]]]\n[[4, 5]]\n[:feedback, [[4, 5]]]\n[[5, 6]]\n[:feedback, [[5, 6]]]\n:done\n:done\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=1;d=2**62-1;p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '2.168404344971009e-19\n2.168404344971009e-19\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=1;d=2**62;p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '2.168404344971009e-19\n2.168404344971009e-19\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=1;d=10**300;p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '1.0e-300\n1.0e-300\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=1;d=-(10**400);p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '-0.0\n-0.0\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=1;d=10**500;p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '0.0\n0.0\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-1;d=2**53;p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '-1.1102230246251565e-16\n-1.1102230246251565e-16\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-1;d=2**62-1;p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '-2.168404344971009e-19\n-2.168404344971009e-19\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-1;d=10**300;p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '-1.0e-300\n-1.0e-300\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-1;d=-(10**400);p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '0.0\n0.0\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-1;d=10**500;p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '-0.0\n-0.0\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=10**40;d=2**62-1;p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '2.168404344971009e+21\n2.168404344971009e+21\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=10**40;d=2**62;p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '2.168404344971009e+21\n2.168404344971009e+21\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=10**40;d=-(10**400);p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '-0.0\n-0.0\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=10**40;d=10**500;p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '0.0\n0.0\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**40);d=2**53-1;p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '-1.1102230246251567e+24\n-1.1102230246251567e+24\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**40);d=10**500;p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '-0.0\n-0.0\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=10**400;d=2**53-1;p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: 'Infinity\nInfinity\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=10**400;d=10**500;p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '1.0e-100\n1.0e-100\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**400);d=2**53-1;p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '-Infinity\n-Infinity\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**400);d=10**500;p n.fdiv(d),n.quo(d).to_f',
+    {
+      kind: 'executed',
+      stdout: '-1.0e-100\n-1.0e-100\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=10**400;d=0.0;[:fdiv,:quo].each{|m|begin;p n.public_send(m,d);rescue=>e;p e.class,e.message;end}',
+    {
+      kind: 'executed',
+      stdout: 'ZeroDivisionError\n"divided by 0"\nZeroDivisionError\n"divided by 0"\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=10**400;d=-0.0;[:fdiv,:quo].each{|m|begin;p n.public_send(m,d);rescue=>e;p e.class,e.message;end}',
+    {
+      kind: 'executed',
+      stdout: 'ZeroDivisionError\n"divided by 0"\nZeroDivisionError\n"divided by 0"\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=10**400;d=Float::INFINITY;[:fdiv,:quo].each{|m|begin;p n.public_send(m,d);rescue=>e;p e.class,e.message;end}',
+    {
+      kind: 'executed',
+      stdout: 'FloatDomainError\n"Infinity"\nFloatDomainError\n"Infinity"\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=10**400;d=-Float::INFINITY;[:fdiv,:quo].each{|m|begin;p n.public_send(m,d);rescue=>e;p e.class,e.message;end}',
+    {
+      kind: 'executed',
+      stdout: 'FloatDomainError\n"-Infinity"\nFloatDomainError\n"-Infinity"\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=10**400;d=Float::NAN;[:fdiv,:quo].each{|m|begin;p n.public_send(m,d);rescue=>e;p e.class,e.message;end}',
+    {
+      kind: 'executed',
+      stdout: 'NaN\nNaN\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=10**400;d=5e-324;[:fdiv,:quo].each{|m|begin;p n.public_send(m,d);rescue=>e;p e.class,e.message;end}',
+    {
+      kind: 'executed',
+      stdout: 'Infinity\nInfinity\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=10**400;d=1e-300;[:fdiv,:quo].each{|m|begin;p n.public_send(m,d);rescue=>e;p e.class,e.message;end}',
+    {
+      kind: 'executed',
+      stdout: 'Infinity\nInfinity\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=10**400;d=-1e300;[:fdiv,:quo].each{|m|begin;p n.public_send(m,d);rescue=>e;p e.class,e.message;end}',
+    {
+      kind: 'executed',
+      stdout: '-1.0e+100\n-1.0e+100\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**400);d=0.0;[:fdiv,:quo].each{|m|begin;p n.public_send(m,d);rescue=>e;p e.class,e.message;end}',
+    {
+      kind: 'executed',
+      stdout: 'ZeroDivisionError\n"divided by 0"\nZeroDivisionError\n"divided by 0"\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**400);d=-0.0;[:fdiv,:quo].each{|m|begin;p n.public_send(m,d);rescue=>e;p e.class,e.message;end}',
+    {
+      kind: 'executed',
+      stdout: 'ZeroDivisionError\n"divided by 0"\nZeroDivisionError\n"divided by 0"\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**400);d=Float::INFINITY;[:fdiv,:quo].each{|m|begin;p n.public_send(m,d);rescue=>e;p e.class,e.message;end}',
+    {
+      kind: 'executed',
+      stdout: 'FloatDomainError\n"Infinity"\nFloatDomainError\n"Infinity"\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**400);d=-Float::INFINITY;[:fdiv,:quo].each{|m|begin;p n.public_send(m,d);rescue=>e;p e.class,e.message;end}',
+    {
+      kind: 'executed',
+      stdout: 'FloatDomainError\n"-Infinity"\nFloatDomainError\n"-Infinity"\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**400);d=Float::NAN;[:fdiv,:quo].each{|m|begin;p n.public_send(m,d);rescue=>e;p e.class,e.message;end}',
+    {
+      kind: 'executed',
+      stdout: 'NaN\nNaN\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**400);d=5e-324;[:fdiv,:quo].each{|m|begin;p n.public_send(m,d);rescue=>e;p e.class,e.message;end}',
+    {
+      kind: 'executed',
+      stdout: '-Infinity\n-Infinity\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**400);d=1e-300;[:fdiv,:quo].each{|m|begin;p n.public_send(m,d);rescue=>e;p e.class,e.message;end}',
+    {
+      kind: 'executed',
+      stdout: '-Infinity\n-Infinity\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'n=-(10**400);d=-1e300;[:fdiv,:quo].each{|m|begin;p n.public_send(m,d);rescue=>e;p e.class,e.message;end}',
+    {
+      kind: 'executed',
+      stdout: '1.0e+100\n1.0e+100\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;C.include A;C.include A;A.include B;p C.ancestors;p C.new.m;p S.ancestors;p S.new.m",
+    {
+      kind: 'executed',
+      stdout:
+        '[C, A, B, S, Object, Kernel, BasicObject]\n["C", "A", "B", "S"]\n[S, Object, Kernel, BasicObject]\n["S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;C.include A;C.include A;A.prepend B;p C.ancestors;p C.new.m;p S.ancestors;p S.new.m",
+    {
+      kind: 'executed',
+      stdout:
+        '[C, B, A, S, Object, Kernel, BasicObject]\n["C", "B", "A", "S"]\n[S, Object, Kernel, BasicObject]\n["S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;C.include A;C.prepend A;A.include B;p C.ancestors;p C.new.m;p S.ancestors;p S.new.m",
+    {
+      kind: 'executed',
+      stdout:
+        '[A, B, C, A, B, S, Object, Kernel, BasicObject]\n["A", "B", "C", "A", "B", "S"]\n[S, Object, Kernel, BasicObject]\n["S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;C.include A;C.prepend A;A.prepend B;p C.ancestors;p C.new.m;p S.ancestors;p S.new.m",
+    {
+      kind: 'executed',
+      stdout:
+        '[B, A, C, B, A, S, Object, Kernel, BasicObject]\n["B", "A", "C", "B", "A", "S"]\n[S, Object, Kernel, BasicObject]\n["S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;C.include A;S.include A;A.include B;p C.ancestors;p C.new.m;p S.ancestors;p S.new.m",
+    {
+      kind: 'executed',
+      stdout:
+        '[C, A, S, A, B, Object, Kernel, BasicObject]\n["C", "A", "S"]\n[S, A, B, Object, Kernel, BasicObject]\n["S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;C.include A;S.include A;A.prepend B;p C.ancestors;p C.new.m;p S.ancestors;p S.new.m",
+    {
+      kind: 'executed',
+      stdout:
+        '[C, B, A, S, B, A, Object, Kernel, BasicObject]\n["C", "B", "A", "S"]\n[S, B, A, Object, Kernel, BasicObject]\n["S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;C.prepend A;C.include A;A.include B;p C.ancestors;p C.new.m;p S.ancestors;p S.new.m",
+    {
+      kind: 'executed',
+      stdout:
+        '[A, B, C, S, Object, Kernel, BasicObject]\n["A", "B", "C", "S"]\n[S, Object, Kernel, BasicObject]\n["S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;C.prepend A;C.include A;A.prepend B;p C.ancestors;p C.new.m;p S.ancestors;p S.new.m",
+    {
+      kind: 'executed',
+      stdout:
+        '[B, A, C, S, Object, Kernel, BasicObject]\n["B", "A", "C", "S"]\n[S, Object, Kernel, BasicObject]\n["S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;S.include A;C.include A;A.include B;p C.ancestors;p C.new.m;p S.ancestors;p S.new.m",
+    {
+      kind: 'executed',
+      stdout: '[C, S, A, B, Object, Kernel, BasicObject]\n["C", "S"]\n[S, A, B, Object, Kernel, BasicObject]\n["S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;S.include A;C.include A;A.prepend B;p C.ancestors;p C.new.m;p S.ancestors;p S.new.m",
+    {
+      kind: 'executed',
+      stdout: '[C, S, B, A, Object, Kernel, BasicObject]\n["C", "S"]\n[S, B, A, Object, Kernel, BasicObject]\n["S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;S.include A;A.prepend B;A.include B;p C.ancestors;p C.new.m;p S.ancestors;p S.new.m",
+    {
+      kind: 'executed',
+      stdout:
+        '[C, S, B, A, B, Object, Kernel, BasicObject]\n["C", "S"]\n[S, B, A, B, Object, Kernel, BasicObject]\n["S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;S.include A;A.prepend B;A.prepend B;p C.ancestors;p C.new.m;p S.ancestors;p S.new.m",
+    {
+      kind: 'executed',
+      stdout:
+        '[C, S, B, A, B, Object, Kernel, BasicObject]\n["C", "S"]\n[S, B, A, B, Object, Kernel, BasicObject]\n["S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;A.prepend B;C.include A;A.include B;p C.ancestors;p C.new.m;p S.ancestors;p S.new.m",
+    {
+      kind: 'executed',
+      stdout:
+        '[C, B, A, B, S, Object, Kernel, BasicObject]\n["C", "B", "A", "B", "S"]\n[S, Object, Kernel, BasicObject]\n["S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;A.prepend B;C.include A;A.prepend B;p C.ancestors;p C.new.m;p S.ancestors;p S.new.m",
+    {
+      kind: 'executed',
+      stdout:
+        '[C, B, A, B, S, Object, Kernel, BasicObject]\n["C", "B", "A", "B", "S"]\n[S, Object, Kernel, BasicObject]\n["S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;B.include A;D.include B;C.include B;C.prepend A;C.include D;p C.ancestors;p C.new.m",
+    {
+      kind: 'executed',
+      stdout: '[A, C, D, B, A, S, Object, Kernel, BasicObject]\n["A", "C", "D", "B", "A", "S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;C.include D;C.prepend A;D.include B;B.include A;p C.ancestors;p C.new.m",
+    {
+      kind: 'executed',
+      stdout: '[A, C, D, B, A, S, Object, Kernel, BasicObject]\n["A", "C", "D", "B", "A", "S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;B.include A;o=C.new;o.singleton_class.prepend A;o.extend B;p o.singleton_class.ancestors.reject{|x|x==o.singleton_class};p o.m",
+    {
+      kind: 'executed',
+      stdout: '[A, B, C, S, Object, Kernel, BasicObject]\n["A", "B", "C", "S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;C.include A;K=A.dup;A.include B;K.include D;p C.ancestors;p K.ancestors;",
+    {
+      kind: 'executed',
+      stdout: '[C, A, B, S, Object, Kernel, BasicObject]\n[K, D]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;C.include A;K=C.dup;A.include B;K.include D;p C.ancestors;p K.ancestors;p K.new.m;",
+    {
+      kind: 'executed',
+      stdout:
+        '[C, A, B, S, Object, Kernel, BasicObject]\n[K, D, A, B, S, Object, Kernel, BasicObject]\n["C", "D", "A", "B", "S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;C.include A;K=A.dup;A.prepend B;K.include D;p C.ancestors;p K.ancestors;",
+    {
+      kind: 'executed',
+      stdout: '[C, B, A, S, Object, Kernel, BasicObject]\n[K, D]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;C.include A;K=C.dup;A.prepend B;K.include D;p C.ancestors;p K.ancestors;p K.new.m;",
+    {
+      kind: 'executed',
+      stdout:
+        '[C, B, A, S, Object, Kernel, BasicObject]\n[K, D, B, A, S, Object, Kernel, BasicObject]\n["C", "D", "B", "A", "S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;C.prepend A;K=A.dup;A.include B;K.include D;p C.ancestors;p K.ancestors;",
+    {
+      kind: 'executed',
+      stdout: '[A, B, C, S, Object, Kernel, BasicObject]\n[K, D]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;C.prepend A;K=C.dup;A.include B;K.include D;p C.ancestors;p K.ancestors;p K.new.m;",
+    {
+      kind: 'executed',
+      stdout:
+        '[A, B, C, S, Object, Kernel, BasicObject]\n[A, B, K, D, S, Object, Kernel, BasicObject]\n["A", "B", "C", "D", "S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;C.prepend A;K=A.dup;A.prepend B;K.include D;p C.ancestors;p K.ancestors;",
+    {
+      kind: 'executed',
+      stdout: '[B, A, C, S, Object, Kernel, BasicObject]\n[K, D]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    "module A;def m;['A']+super;end;end;module B;def m;['B']+super;end;end;module D;def m;['D']+super;end;end;class S;def m;['S'];end;end;class C<S;def m;['C']+super;end;end;C.prepend A;K=C.dup;A.prepend B;K.include D;p C.ancestors;p K.ancestors;p K.new.m;",
+    {
+      kind: 'executed',
+      stdout:
+        '[B, A, C, S, Object, Kernel, BasicObject]\n[B, A, K, D, S, Object, Kernel, BasicObject]\n["B", "A", "C", "D", "S"]\n',
+      uncaughtException: undefined,
+    },
+  ],
+  [
+    'module P;end;module Q;def m;"Q";end;end;module M;end;class S;prepend P;end;class C<S;prepend P;include M;def m;"C";end;end;S.include Q;module P;include Q;end;p C.ancestors;p C.new.m',
+    {
+      kind: 'executed',
+      stdout: '[P, C, M, P, S, Q, Object, Kernel, BasicObject]\n"C"\n',
+      uncaughtException: undefined,
+    },
+  ],
+] as const;
+
+test.each(nativeProtocolRegressions)(
+  'Native module chronology, Lazy feedback and numeric conversion: %s',
+  (source, expected) => {
+    expect(run(source)).toMatchObject(expected);
+  }
+);

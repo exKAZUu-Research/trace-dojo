@@ -99,12 +99,19 @@ export function* iterate(collection: Value, visit: Visit, args: Value[] = []): G
   }
 }
 
-export function* iterateYielded(collection: Value, visit: (args: Value[]) => Gen<unknown>, args: Value[] = []): Gen {
+export type IterationResult = Value | typeof STOP | void;
+
+export function* iterateYielded(
+  collection: Value,
+  visit: (args: Value[]) => Gen<IterationResult>,
+  args: Value[] = []
+): Gen {
   const signal = new StopSignal();
   const block = nativeProc(-1, function* (yielded) {
     rt().spend();
-    if ((yield* visit(yielded)) === STOP) throw signal;
-    return NIL;
+    const result = yield* visit(yielded);
+    if (result === STOP) throw signal;
+    return result ?? NIL;
   });
   try {
     return yield* callMethod(collection, 'each', args, undefined, block, { fcall: true });

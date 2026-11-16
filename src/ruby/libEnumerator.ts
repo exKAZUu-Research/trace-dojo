@@ -41,7 +41,7 @@ import {
   runToEnd,
 } from './interp';
 import { lazyDisplaySource, lazySourceDescription, setLazyDisplaySource } from './lazyDisplay';
-import { iterate, iterateYielded, STOP, zipCollections } from './libEnumerable';
+import { iterate, iterateYielded, type IterationResult, STOP, zipCollections } from './libEnumerable';
 import { advertisesPublicMethod, respondsToName } from './libMeta';
 import { isNumericRangeOperand, rangeSize } from './libRange';
 import { fractionOf, isRational } from './libRational';
@@ -1271,7 +1271,11 @@ def('Enumerator::Lazy', 'each_with_index', 0, function* (self: RObject, _args, b
 /** Runs a lazy chain: each element of the source passes the steps in turn, and `take` ends the iteration. */
 // code-gauge-allow functionCognitiveComplexity 26 -- Lazy transformations share one stopping, rooting and yielded-tuple lifecycle.
 // code-gauge-allow functionNcss 31 -- Lazy transformations share one stopping, rooting and yielded-tuple lifecycle.
-function* runLazy(self: RObject, visit: (value: Value, yielded?: Value[]) => Gen<unknown>, args: Value[] = []): Gen {
+function* runLazy(
+  self: RObject,
+  visit: (value: Value, yielded?: Value[]) => Gen<IterationResult>,
+  args: Value[] = []
+): Gen {
   const data = self.data as LazyData;
   const states: LazyState[] = data.steps.map((step) => ({
     seen: 0,
@@ -1284,7 +1288,7 @@ function* runLazy(self: RObject, visit: (value: Value, yielded?: Value[]) => Gen
   const arrays = rt().heldArrays;
   const arrayMark = arrays.length;
   let visitorStopped = false;
-  const visitWithStop = function* (value: Value, yielded?: Value[]): Gen<unknown> {
+  const visitWithStop = function* (value: Value, yielded?: Value[]): Gen<IterationResult> {
     const outcome = yield* visit(value, yielded);
     if (outcome === STOP) visitorStopped = true;
     return outcome;
@@ -1328,22 +1332,47 @@ interface LazyState {
   buffer?: Value[];
 }
 
+interface LazyFeedback {
+  value: Value;
+}
+
+// code-gauge-allow functionParameterCount 7 -- The traversal passes source tuples and their segment feedback independently.
 function* streamLazyStep(
   steps: LazyStep[],
   states: LazyState[],
   position: number,
   item: Value,
-  visit: (value: Value, yielded?: Value[]) => Gen<unknown>,
-  yielded: Value[] = [item]
-): Gen<unknown> {
+  visit: (value: Value, yielded?: Value[]) => Gen<IterationResult>,
+  yielded: Value[] = [item],
+  feedback?: LazyFeedback
+): Gen<IterationResult> {
+  const step = steps[position];
+  const adapter = step && ['each_slice', 'each_cons', 'each_entry', 'each_with_object'].includes(step.kind);
+  const memo = adapter ? undefined : (feedback ?? (step ? { value: item } : undefined));
+  const outcome = yield* runLazyStep(steps, states, position, item, visit, yielded, memo);
+  return outcome === STOP ? STOP : memo ? memo.value : outcome;
+}
+
+// code-gauge-allow functionParameterCount 7 -- Each transformation uses the current tuple and the shared segment feedback.
+function* runLazyStep(
+  steps: LazyStep[],
+  states: LazyState[],
+  position: number,
+  item: Value,
+  visit: (value: Value, yielded?: Value[]) => Gen<IterationResult>,
+  yielded: Value[] = [item],
+  feedback?: LazyFeedback
+): Gen<IterationResult> {
   const held = rt().held;
   const rootIndex = held.push(item) - 1;
   try {
     const step = steps[position];
     if (!step) return yield* visit(item, packedTerminalYields.has(yielded) ? [item] : yielded);
     const state = states[position];
-    const next = (value: Value, args: Value[] = [value]): Gen<unknown> =>
-      streamLazyStep(steps, states, position + 1, value, visit, args);
+    const next = (value: Value, args: Value[] = [value]): Gen<IterationResult> => {
+      if (feedback) feedback.value = value;
+      return streamLazyStep(steps, states, position + 1, value, visit, args, feedback);
+    };
     switch (step.kind) {
       case 'map': {
         return yield* next(yield* callProc(step.block, yielded));
@@ -1456,7 +1485,7 @@ function* streamLazyStep(
         return yield* next(values);
       }
       case 'each_entry': {
-        return yield* next(item);
+        return (yield* next(item)) === STOP ? STOP : NIL;
       }
       case 'each_with_object': {
         return yield* next(arr([item, step.memo]), [item, step.memo]);
@@ -1468,7 +1497,7 @@ function* streamLazyStep(
 }
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Lazy flattening retains recursive roots and distinguishes arrays from user to_ary conversions.
-function* streamFlattened(mapped: Value, next: (value: Value) => Gen<unknown>): Gen<unknown> {
+function* streamFlattened(mapped: Value, next: (value: Value) => Gen<IterationResult>): Gen<IterationResult> {
   const held = rt().held;
   const rootIndex = held.push(mapped) - 1;
   try {

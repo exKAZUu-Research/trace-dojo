@@ -1,5 +1,6 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { BlockDef, MethodDef } from './ast';
+import { hierarchyAncestors, initializeHierarchy } from './classHierarchy';
 import type { NativeSignature } from './nativeSignatures';
 import { rt } from './runtime';
 
@@ -294,7 +295,6 @@ export class RClass extends RBasic {
   /** The modules this module includes directly, the last included first. */
   readonly includes: RClass[] = [];
   readonly prepends: RClass[] = [];
-  readonly includePrependSnapshots = new Map<RClass, Set<RClass>>();
   /** The object a singleton class belongs to. */
   attached?: Value;
   /** The module whose constant first named this one, for names such as `Outer::Inner`. */
@@ -316,6 +316,7 @@ export class RClass extends RBasic {
   ) {
     super(cls);
     if (superclass) this.instanceKind = superclass.instanceKind;
+    initializeHierarchy(this);
   }
 
   get name(): string | undefined {
@@ -333,74 +334,7 @@ export class RClass extends RBasic {
   /** The classes and modules that method lookup visits, in order, as Ruby's `ancestors` lists them. */
   ancestors(): RClass[] {
     if (this.ancestorCache?.version === hierarchyVersion.value) return this.ancestorCache.list;
-    const list: RClass[] = [];
-    const seen = new Set<RClass>();
-    const seenPrepended = new Set<RClass>();
-    const seenInBody = new Set<RClass>();
-    const active = new Set<RClass>();
-    const superAncestors = this.superclass ? this.superclass.ancestors() : [];
-    const inSuper = new Set(superAncestors);
-    const chainMemo = new Map<RClass, RClass[]>();
-    const mergedPrepends = (modules: RClass[], inherited = new Set<RClass>()): RClass[] => {
-      const result: RClass[] = [];
-      for (const module of modules.toReversed()) {
-        let insertion = 0;
-        for (const item of fullPrependChain(module, new Set(inherited))) {
-          rt().spend();
-          if (inherited.has(item)) continue;
-          const existing = result.indexOf(item);
-          if (existing !== -1) insertion = Math.max(insertion, existing + 1);
-          else result.splice(insertion++, 0, item);
-        }
-      }
-      return result;
-    };
-    const fullPrependChain = (module: RClass, active: Set<RClass>): RClass[] => {
-      if (active.has(module)) return [];
-      const cached = chainMemo.get(module);
-      if (cached) return cached;
-      rt().spend();
-      active.add(module);
-      const members = [...mergedPrepends(module.prepends, active), module, ...mergedPrepends(module.includes, active)];
-      active.delete(module);
-      const seenInChain = new Set<RClass>();
-      const chain = members.filter((item) => !seenInChain.has(item) && !!seenInChain.add(item));
-      chainMemo.set(module, chain);
-      return chain;
-    };
-    const addModule = (module: RClass, placement: 'prepend' | 'body' = 'body', priorPrepends?: Set<RClass>): void => {
-      const visited = placement === 'prepend' ? seenPrepended : seen;
-      if (
-        visited.has(module) ||
-        active.has(module) ||
-        (placement !== 'prepend' && (inSuper.has(module) || seenInBody.has(module) || priorPrepends?.has(module)))
-      )
-        return;
-      visited.add(module);
-      active.add(module);
-      rt().spend();
-      for (const prepended of mergedPrepends(module.prepends))
-        if (
-          !seenPrepended.has(prepended) &&
-          !active.has(prepended) &&
-          !(
-            placement === 'body' &&
-            module !== this &&
-            (inSuper.has(prepended) || seen.has(prepended) || priorPrepends?.has(prepended))
-          )
-        ) {
-          seenPrepended.add(prepended);
-          if (placement === 'body' && module !== this) seenInBody.add(prepended);
-          rt().spend();
-          list.push(prepended);
-        }
-      list.push(module);
-      for (const included of module.includes)
-        addModule(included, placement, module === this ? this.includePrependSnapshots.get(included) : priorPrepends);
-      active.delete(module);
-    };
-    addModule(this);
-    for (const ancestor of superAncestors) list.push(ancestor);
+    const list = hierarchyAncestors(this);
     this.ancestorCache = { version: hierarchyVersion.value, list };
     return list;
   }

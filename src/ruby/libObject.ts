@@ -1,3 +1,4 @@
+import { copyHierarchy, includeHierarchy } from './classHierarchy';
 // code-gauge-allow-file fileNcss 921 -- Object lifecycle and exception construction share representation and state; splitting registration by size would scatter that concern.
 import {
   anonymousClassName,
@@ -252,8 +253,7 @@ function copyClass(source: RClass): RClass {
   copy.isUserDefined = source.isUserDefined;
   for (const included of source.includes) copy.includes.push(included);
   for (const prepended of source.prepends) copy.prepends.push(prepended);
-  for (const [included, prepends] of source.includePrependSnapshots)
-    copy.includePrependSnapshots.set(included, new Set(prepends));
+  copyHierarchy(source, copy);
   for (const [name, value] of source.constants) copy.constants.set(name, value);
   for (const [name, row] of source.constantRows) copy.constantRows.set(name, row);
   for (const [name, value] of source.classVariables) copy.classVariables.set(name, value);
@@ -275,8 +275,7 @@ function copySingleton(original: RClass, copy: RBasic): void {
   singleton.attached = copy;
   for (const included of original.includes) singleton.includes.push(included);
   for (const prepended of original.prepends) singleton.prepends.push(prepended);
-  for (const [included, prepends] of original.includePrependSnapshots)
-    singleton.includePrependSnapshots.set(included, new Set(prepends));
+  copyHierarchy(original, singleton);
   for (const [name, method] of original.methods)
     singleton.methods.set(name, { ...method, owner: method.owner === original ? singleton : method.owner });
   copy.singleton = singleton;
@@ -712,12 +711,9 @@ def(
     if (!(target instanceof RClass)) throw typeError('wrong argument type');
     if (target.frozen) throw frozenError(target, target.name ?? '');
     if (self.ancestors().includes(target)) throw argumentError('cyclic include detected');
-    const ancestors = target.ancestors();
-    if (!ancestors.includes(self)) {
-      target.includes.unshift(self);
-      target.includePrependSnapshots.set(self, new Set(ancestors.slice(0, ancestors.indexOf(target))));
-      invalidateMethodCaches();
-    }
+    includeHierarchy(target, self);
+    if (!target.includes.includes(self)) target.includes.unshift(self);
+    invalidateMethodCaches();
     return self;
   },
   { visibility: 'private' }
@@ -732,6 +728,7 @@ def(
     if (target.frozen)
       throw frozenError(target, target instanceof RClass ? (target.name ?? '') : yield* inspect(target));
     const singleton = singletonClassOf(target);
+    includeHierarchy(singleton, self);
     if (!singleton.includes.includes(self)) singleton.includes.unshift(self);
     invalidateMethodCaches();
     return target;

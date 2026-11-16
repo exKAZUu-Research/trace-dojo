@@ -24,6 +24,7 @@ import {
   floatStepCount,
   frexpDouble,
   fusedMultiplyAdd,
+  integerFloatDivision,
   ldexpDouble,
   roundedDouble,
 } from './floatMath';
@@ -253,22 +254,16 @@ for (const owner of ['Integer', 'Float']) {
   });
   def(owner, 'fdiv', 1, function* (self: Num, [other]) {
     if (!isNum(other)) return yield* coerceBinary(self, other, 'fdiv');
-    return typeof self === 'bigint' && typeof other === 'bigint'
-      ? bigintRatio(self, other)
+    return typeof self === 'bigint'
+      ? typeof other === 'bigint'
+        ? bigintRatio(self, other)
+        : integerFloatDivision(self, Number(other))
       : Number(self) / Number(other);
   });
   def(owner, 'quo', 1, (self: Num, [other]) => {
     if (!isNum(other)) return coerceBinary(self, other, 'quo', typeof self === 'bigint' ? 'Rational' : 'Float');
     if (typeof self === 'bigint' && typeof other === 'bigint') return makeRational(self, other);
-    if (typeof self === 'bigint' && typeof other === 'number' && Number.isFinite(other) && other !== 0) {
-      const fraction = floatFraction(other);
-      if (typeof fraction.numerator === 'bigint') {
-        const leftBits = integerBits(self);
-        const rightBits = integerBits(fraction.denominator);
-        chargeIntegerResult(leftBits + rightBits, (leftBits * rightBits) / 1024);
-        return bigintRatio(self * fraction.denominator, fraction.numerator);
-      }
-    }
+    if (typeof self === 'bigint') return integerFloatDivision(self, Number(other));
     return Number(self) / Number(other);
   });
   def(owner, 'remainder', 1, function* (self: Num, [other]) {

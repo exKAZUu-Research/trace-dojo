@@ -1238,8 +1238,8 @@ export class Converter {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of syntax node.
-  // code-gauge-allow functionNcss 35 -- The ordered cases for Ruby syntax conversion share state; splitting them solely for the metric would hide their sequencing.
+  // code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of syntax node.
+  // code-gauge-allow functionNcss 37 -- The ordered cases for Ruby syntax conversion share state; splitting them solely for the metric would hide their sequencing.
   private unary(node: Node): Expr {
     const operator = required(node.childForFieldName('operator')).text;
     const operandNode = required(node.childForFieldName('operand'));
@@ -1250,6 +1250,11 @@ export class Converter {
         namedChildren(operandNode).some((child) => this.directEndBlock(child))
       )
         this.fail(operandNode, 'END は文としてのみ書けます。');
+      if (
+        operandNode.type === 'parenthesized_statements' &&
+        namedChildren(operandNode).some((child) => /^(?:if|unless|while|until|rescue)_modifier$/.test(child.type))
+      )
+        this.fail(operandNode, 'defined? の引数に修飾文を直接書けません。');
       const context = this.ctx;
       this.ctx = { ...context, inDef: true, inLoop: true, inRescue: true, inClassBody: false };
       try {

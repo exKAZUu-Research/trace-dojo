@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 563 -- Reflection and encoded constant lookup share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 564 -- Reflection and encoded constant lookup share representation and state; splitting registration by size would scatter that concern.
 import type { Params } from './ast';
+import { prependHierarchy } from './classHierarchy';
 import { addressOf, className, inspect, stringEncodingName, tryImplicitConversion } from './conversions';
 import { def, findCoreMethod, isCoreMethod, sdef, sundef } from './define';
 import { argumentError, frozenError, nameError, rubyError, typeError, undefinedMethodError } from './errors';
@@ -788,11 +789,9 @@ def(
     if (!(target instanceof RClass)) throw typeError('wrong argument type');
     assertMutableClass(target);
     if (moduleDependsOn(self, target)) throw argumentError('cyclic prepend detected');
-    const beforeTarget = target.ancestors().slice(0, target.ancestors().indexOf(target));
-    if (!beforeTarget.includes(self)) {
-      target.prepends.unshift(self);
-      invalidateMethodCaches();
-    }
+    prependHierarchy(target, self);
+    if (!target.prepends.includes(self)) target.prepends.unshift(self);
+    invalidateMethodCaches();
     return self;
   },
   { visibility: 'private' }
