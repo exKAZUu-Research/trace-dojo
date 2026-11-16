@@ -9,6 +9,7 @@ import {
   supportsImplicitConversion,
   toFloat,
   toInt,
+  toRubyInt,
   toStr,
   toStrValue,
   tryImplicitConversion,
@@ -115,14 +116,13 @@ function nowNanoseconds(): bigint {
 // code-gauge-allow functionCognitiveComplexity 29 -- Time argument forms have different field order and coercion contracts.
 function* fieldArgs(
   args: Value[]
-): Gen<{ fields: number[]; seconds: number; exactSeconds: number | bigint | RObject }> {
+): Gen<{ fields: number[]; seconds: number; exactSeconds: { numerator: bigint; denominator: bigint } }> {
   const fields: number[] = [];
   for (const [index, arg] of args.slice(0, 5).entries()) fields.push(yield* fieldValue(arg, index));
   while (fields.length < 5) fields.push(fields.length < 3 ? 1 : 0);
-  const exactSeconds = args.length > 5 ? yield* secondsValue(args[5]) : 0;
-  const seconds = typeof exactSeconds === 'number' ? exactSeconds : yield* toFloat(exactSeconds);
-  if (!Number.isFinite(seconds))
-    throw floatDomainError(Number.isNaN(seconds) ? 'NaN' : seconds > 0 ? 'Infinity' : '-Infinity');
+  const value = args.length > 5 ? yield* secondsValue(args[5]) : 0;
+  const exactSeconds = offsetFraction(value, 0);
+  const seconds = yield* toRubyInt(floorDivide(exactSeconds.numerator, exactSeconds.denominator));
   for (const [index, width] of [16, 32, 32, 64].entries())
     if (fields[index + 1] < 0 || fields[index + 1] >= width) throw argumentError('argument out of range');
   if (seconds < 0 || seconds >= 64) throw argumentError('argument out of range');
@@ -266,15 +266,13 @@ function* buildTime(
   microseconds?: Value,
   exact?: Value
 ): Gen<RObject> {
-  const { fields, seconds, exactSeconds: convertedSeconds } = yield* fieldArgs(args);
+  const { fields, seconds: whole, exactSeconds } = yield* fieldArgs(args);
   const [year, month, day, hour, minute] = fields;
-  const whole = Math.floor(seconds);
   const date = new Date(0);
   date.setUTCFullYear(year, month - 1, day);
   date.setUTCHours(hour, minute, whole);
   if (Number.isNaN(date.getTime())) throw new UnsupportedFeatureError('JavaScript の日付範囲外の Time');
   const localNanoseconds = BigInt(date.getTime()) * 1_000_000n;
-  const exactSeconds = offsetFraction(convertedSeconds, 0);
   const fraction = exactSeconds.numerator - BigInt(whole) * exactSeconds.denominator;
   const hasMicroseconds = microseconds !== undefined && microseconds !== NIL;
   const microsecondsValue = !hasMicroseconds

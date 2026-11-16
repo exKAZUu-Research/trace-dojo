@@ -21209,3 +21209,1229 @@ test.each(reflectedMissingIdentityCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeCalendarBoundaryCases = [
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,0r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,0r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067200, 0, 0, 0, 0, "2024-01-01 00:00:00 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,0r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067200, 0, 0, 0, 0, "2024-01-01 00:00:00 1/1000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,0r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,0r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067200, 0, 0, 0, 0, "2024-01-01 00:00:00 1/100000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,0r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,0r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067200, 0, 0, 0, 0, "2024-01-01 00:00:00 1/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,1r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067200, 999999999, 0, 0, 0, "2024-01-01 00:00:00 999999999999999/1000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,1r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067201, 0, 1, 0, 0, "2024-01-01 00:00:01 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,1r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067201, 0, 1, 0, 0, "2024-01-01 00:00:01 1/1000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,1r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067200, 999999999, 0, 0, 0, "2024-01-01 00:00:00 99999999999999999999/100000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,1r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067201, 0, 1, 0, 0, "2024-01-01 00:00:01 1/100000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,1r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067200, 999999999, 0, 0, 0, "2024-01-01 00:00:00 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,1r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067201, 0, 1, 0, 0, "2024-01-01 00:00:01 1/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,59r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067258, 999999999, 58, 0, 0, "2024-01-01 00:00:58 999999999999999/1000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,59r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067259, 0, 59, 0, 0, "2024-01-01 00:00:59 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,59r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067259, 0, 59, 0, 0, "2024-01-01 00:00:59 1/1000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,59r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067258, 999999999, 58, 0, 0, "2024-01-01 00:00:58 99999999999999999999/100000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,59r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067259, 0, 59, 0, 0, "2024-01-01 00:00:59 1/100000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,59r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067258, 999999999, 58, 0, 0, "2024-01-01 00:00:58 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,59r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067259, 0, 59, 0, 0, "2024-01-01 00:00:59 1/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,60r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067259, 999999999, 59, 0, 0, "2024-01-01 00:00:59 999999999999999/1000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,60r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067260, 0, 0, 1, 0, "2024-01-01 00:01:00 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,60r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067260, 0, 0, 1, 0, "2024-01-01 00:01:00 1/1000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,60r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067259, 999999999, 59, 0, 0, "2024-01-01 00:00:59 99999999999999999999/100000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,60r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067260, 0, 0, 1, 0, "2024-01-01 00:01:00 1/100000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,60r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067259, 999999999, 59, 0, 0, "2024-01-01 00:00:59 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,60r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067260, 0, 0, 1, 0, "2024-01-01 00:01:00 1/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,61r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067260, 999999999, 0, 1, 0, "2024-01-01 00:01:00 999999999999999/1000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,61r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,61r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,61r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067260, 999999999, 0, 1, 0, "2024-01-01 00:01:00 99999999999999999999/100000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,61r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,61r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067260, 999999999, 0, 1, 0, "2024-01-01 00:01:00 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,61r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,64r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,64r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,64r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,64r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,64r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,64r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,64r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,0.9999999999999999);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067200, 999999999, 0, 0, 0, "2024-01-01 00:00:00 9007199254740991/9007199254740992 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,60.99999999999999);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067260, 999999999, 0, 1, 0, "2024-01-01 00:01:00 140737488355327/140737488355328 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,-0.0);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067200, 0, 0, 0, 0, "2024-01-01 00:00:00 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,Float::INFINITY);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"Infinity"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,Float::NAN);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"NaN"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,10**400);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'RangeError\n"bignum too big to convert into \'long\'"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,0,0,Rational(10**400,3));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'RangeError\n"bignum too big to convert into \'long\'"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,0r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,0r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704153600, 0, 0, 0, 0, "2024-01-02 00:00:00 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,0r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704153600, 0, 0, 0, 0, "2024-01-02 00:00:00 1/1000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,0r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,0r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704153600, 0, 0, 0, 0, "2024-01-02 00:00:00 1/100000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,0r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,0r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704153600, 0, 0, 0, 0, "2024-01-02 00:00:00 1/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,1r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704153600, 999999999, 0, 0, 0, "2024-01-02 00:00:00 999999999999999/1000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,1r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,1r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,1r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704153600, 999999999, 0, 0, 0, "2024-01-02 00:00:00 99999999999999999999/100000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,1r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,1r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704153600, 999999999, 0, 0, 0, "2024-01-02 00:00:00 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,1r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,59r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,59r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,59r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,59r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,59r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,59r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,59r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,60r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,60r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,60r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,60r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,60r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,60r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,60r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,61r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,61r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,61r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,61r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,61r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,61r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,61r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,64r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,64r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,64r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,64r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,64r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,64r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,64r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,0.9999999999999999);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704153600, 999999999, 0, 0, 0, "2024-01-02 00:00:00 9007199254740991/9007199254740992 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,60.99999999999999);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,-0.0);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704153600, 0, 0, 0, 0, "2024-01-02 00:00:00 UTC"]\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,Float::INFINITY);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"Infinity"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,Float::NAN);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"NaN"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,10**400);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'RangeError\n"bignum too big to convert into \'long\'"\n',
+  ],
+  [
+    'begin;t=Time.utc(2024,1,1,24,0,Rational(10**400,3));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'RangeError\n"bignum too big to convert into \'long\'"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,0r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,0r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034800, 0, 0, 0, 0, "2024-01-01 00:00:00 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,0r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034800, 0, 0, 0, 0, "2024-01-01 00:00:00 1/1000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,0r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,0r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034800, 0, 0, 0, 0, "2024-01-01 00:00:00 1/100000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,0r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,0r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034800, 0, 0, 0, 0, "2024-01-01 00:00:00 1/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,1r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034800, 999999999, 0, 0, 0, "2024-01-01 00:00:00 999999999999999/1000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,1r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034801, 0, 1, 0, 0, "2024-01-01 00:00:01 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,1r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034801, 0, 1, 0, 0, "2024-01-01 00:00:01 1/1000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,1r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034800, 999999999, 0, 0, 0, "2024-01-01 00:00:00 99999999999999999999/100000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,1r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034801, 0, 1, 0, 0, "2024-01-01 00:00:01 1/100000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,1r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034800, 999999999, 0, 0, 0, "2024-01-01 00:00:00 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,1r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034801, 0, 1, 0, 0, "2024-01-01 00:00:01 1/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,59r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034858, 999999999, 58, 0, 0, "2024-01-01 00:00:58 999999999999999/1000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,59r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034859, 0, 59, 0, 0, "2024-01-01 00:00:59 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,59r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034859, 0, 59, 0, 0, "2024-01-01 00:00:59 1/1000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,59r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034858, 999999999, 58, 0, 0, "2024-01-01 00:00:58 99999999999999999999/100000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,59r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034859, 0, 59, 0, 0, "2024-01-01 00:00:59 1/100000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,59r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034858, 999999999, 58, 0, 0, "2024-01-01 00:00:58 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,59r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034859, 0, 59, 0, 0, "2024-01-01 00:00:59 1/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,60r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034859, 999999999, 59, 0, 0, "2024-01-01 00:00:59 999999999999999/1000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,60r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034860, 0, 0, 1, 0, "2024-01-01 00:01:00 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,60r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034860, 0, 0, 1, 0, "2024-01-01 00:01:00 1/1000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,60r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034859, 999999999, 59, 0, 0, "2024-01-01 00:00:59 99999999999999999999/100000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,60r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034860, 0, 0, 1, 0, "2024-01-01 00:01:00 1/100000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,60r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034859, 999999999, 59, 0, 0, "2024-01-01 00:00:59 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,60r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034860, 0, 0, 1, 0, "2024-01-01 00:01:00 1/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,61r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034860, 999999999, 0, 1, 0, "2024-01-01 00:01:00 999999999999999/1000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,61r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,61r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,61r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034860, 999999999, 0, 1, 0, "2024-01-01 00:01:00 99999999999999999999/100000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,61r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,61r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034860, 999999999, 0, 1, 0, "2024-01-01 00:01:00 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,61r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,64r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,64r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,64r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,64r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,64r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,64r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,64r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,0.9999999999999999);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034800, 999999999, 0, 0, 0, "2024-01-01 00:00:00 9007199254740991/9007199254740992 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,60.99999999999999);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034860, 999999999, 0, 1, 0, "2024-01-01 00:01:00 140737488355327/140737488355328 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,-0.0);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704034800, 0, 0, 0, 0, "2024-01-01 00:00:00 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,Float::INFINITY);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"Infinity"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,Float::NAN);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"NaN"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,10**400);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'RangeError\n"bignum too big to convert into \'long\'"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,0,0,Rational(10**400,3));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'RangeError\n"bignum too big to convert into \'long\'"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,0r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,0r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704121200, 0, 0, 0, 0, "2024-01-02 00:00:00 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,0r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704121200, 0, 0, 0, 0, "2024-01-02 00:00:00 1/1000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,0r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,0r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704121200, 0, 0, 0, 0, "2024-01-02 00:00:00 1/100000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,0r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,0r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704121200, 0, 0, 0, 0, "2024-01-02 00:00:00 1/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,1r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704121200, 999999999, 0, 0, 0, "2024-01-02 00:00:00 999999999999999/1000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,1r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,1r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,1r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704121200, 999999999, 0, 0, 0, "2024-01-02 00:00:00 99999999999999999999/100000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,1r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,1r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704121200, 999999999, 0, 0, 0, "2024-01-02 00:00:00 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,1r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,59r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,59r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,59r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,59r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,59r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,59r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,59r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,60r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,60r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,60r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,60r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,60r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,60r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,60r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,61r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,61r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,61r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,61r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,61r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,61r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,61r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,64r-Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,64r);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,64r+Rational(1,10**15));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,64r-Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,64r+Rational(1,10**20));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,64r-Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,64r+Rational(1,10**400));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,0.9999999999999999);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704121200, 999999999, 0, 0, 0, "2024-01-02 00:00:00 9007199254740991/9007199254740992 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,60.99999999999999);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,-0.0);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704121200, 0, 0, 0, 0, "2024-01-02 00:00:00 +0900"]\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,Float::INFINITY);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"Infinity"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,Float::NAN);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"NaN"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,10**400);p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'RangeError\n"bignum too big to convert into \'long\'"\n',
+  ],
+  [
+    'begin;t=Time.local(2024,1,1,24,0,Rational(10**400,3));p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'RangeError\n"bignum too big to convert into \'long\'"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,0r-Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,0r,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067200, 0, 0, 0, 0, "2024-01-01 00:00:00 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,0r+Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067200, 0, 0, 0, 0, "2024-01-01 00:00:00 1/1000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,0r-Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,0r+Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067200, 0, 0, 0, 0, "2024-01-01 00:00:00 1/100000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,0r-Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,0r+Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067200, 0, 0, 0, 0, "2024-01-01 00:00:00 1/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,1r-Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067200, 999999999, 0, 0, 0, "2024-01-01 00:00:00 999999999999999/1000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,1r,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067201, 0, 1, 0, 0, "2024-01-01 00:00:01 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,1r+Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067201, 0, 1, 0, 0, "2024-01-01 00:00:01 1/1000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,1r-Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067200, 999999999, 0, 0, 0, "2024-01-01 00:00:00 99999999999999999999/100000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,1r+Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067201, 0, 1, 0, 0, "2024-01-01 00:00:01 1/100000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,1r-Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067200, 999999999, 0, 0, 0, "2024-01-01 00:00:00 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,1r+Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067201, 0, 1, 0, 0, "2024-01-01 00:00:01 1/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,59r-Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067258, 999999999, 58, 0, 0, "2024-01-01 00:00:58 999999999999999/1000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,59r,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067259, 0, 59, 0, 0, "2024-01-01 00:00:59 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,59r+Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067259, 0, 59, 0, 0, "2024-01-01 00:00:59 1/1000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,59r-Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067258, 999999999, 58, 0, 0, "2024-01-01 00:00:58 99999999999999999999/100000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,59r+Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067259, 0, 59, 0, 0, "2024-01-01 00:00:59 1/100000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,59r-Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067258, 999999999, 58, 0, 0, "2024-01-01 00:00:58 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,59r+Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067259, 0, 59, 0, 0, "2024-01-01 00:00:59 1/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,60r-Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067259, 999999999, 59, 0, 0, "2024-01-01 00:00:59 999999999999999/1000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,60r,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067260, 0, 0, 1, 0, "2024-01-01 00:01:00 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,60r+Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067260, 0, 0, 1, 0, "2024-01-01 00:01:00 1/1000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,60r-Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067259, 999999999, 59, 0, 0, "2024-01-01 00:00:59 99999999999999999999/100000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,60r+Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067260, 0, 0, 1, 0, "2024-01-01 00:01:00 1/100000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,60r-Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067259, 999999999, 59, 0, 0, "2024-01-01 00:00:59 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,60r+Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067260, 0, 0, 1, 0, "2024-01-01 00:01:00 1/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,61r-Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067260, 999999999, 0, 1, 0, "2024-01-01 00:01:00 999999999999999/1000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,61r,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,61r+Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,61r-Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067260, 999999999, 0, 1, 0, "2024-01-01 00:01:00 99999999999999999999/100000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,61r+Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,61r-Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067260, 999999999, 0, 1, 0, "2024-01-01 00:01:00 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,61r+Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,64r-Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,64r,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,64r+Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,64r-Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,64r+Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,64r-Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,64r+Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,0.9999999999999999,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067200, 999999999, 0, 0, 0, "2024-01-01 00:00:00 9007199254740991/9007199254740992 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,60.99999999999999,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067260, 999999999, 0, 1, 0, "2024-01-01 00:01:00 140737488355327/140737488355328 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,-0.0,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704067200, 0, 0, 0, 0, "2024-01-01 00:00:00 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,Float::INFINITY,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"Infinity"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,Float::NAN,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"NaN"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,10**400,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'RangeError\n"bignum too big to convert into \'long\'"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,0,0,Rational(10**400,3),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'RangeError\n"bignum too big to convert into \'long\'"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,0r-Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,0r,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704153600, 0, 0, 0, 0, "2024-01-02 00:00:00 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,0r+Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704153600, 0, 0, 0, 0, "2024-01-02 00:00:00 1/1000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,0r-Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,0r+Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704153600, 0, 0, 0, 0, "2024-01-02 00:00:00 1/100000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,0r-Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,0r+Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704153600, 0, 0, 0, 0, "2024-01-02 00:00:00 1/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,1r-Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704153600, 999999999, 0, 0, 0, "2024-01-02 00:00:00 999999999999999/1000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,1r,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,1r+Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,1r-Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704153600, 999999999, 0, 0, 0, "2024-01-02 00:00:00 99999999999999999999/100000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,1r+Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,1r-Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704153600, 999999999, 0, 0, 0, "2024-01-02 00:00:00 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999/10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,1r+Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,59r-Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,59r,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,59r+Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,59r-Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,59r+Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,59r-Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,59r+Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,60r-Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,60r,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,60r+Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,60r-Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,60r+Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,60r-Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,60r+Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,61r-Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,61r,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,61r+Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,61r-Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,61r+Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,61r-Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,61r+Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,64r-Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,64r,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,64r+Rational(1,10**15),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,64r-Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,64r+Rational(1,10**20),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,64r-Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,64r+Rational(1,10**400),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,0.9999999999999999,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704153600, 999999999, 0, 0, 0, "2024-01-02 00:00:00 9007199254740991/9007199254740992 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,60.99999999999999,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"sec out of range"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,-0.0,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    '[1704153600, 0, 0, 0, 0, "2024-01-02 00:00:00 +0000"]\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,Float::INFINITY,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"Infinity"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,Float::NAN,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'FloatDomainError\n"NaN"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,10**400,"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'RangeError\n"bignum too big to convert into \'long\'"\n',
+  ],
+  [
+    'begin;t=Time.new(2024,1,1,24,0,Rational(10**400,3),"+00:00");p [t.to_i,t.nsec,t.sec,t.min,t.hour,t.inspect];rescue=>e;p e.class,e.message;end',
+    'RangeError\n"bignum too big to convert into \'long\'"\n',
+  ],
+  [
+    'class Rational;def to_f;raise "no Float conversion";end;end;begin;t=Time.utc(2024,1,1,0,0,Rational(1,3));p t,t.nsec;rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 1/3 UTC\n333333333\n',
+  ],
+  [
+    'class Rational;def to_f;raise "no Float conversion";end;end;class Seconds;def to_r;puts :rational;Rational(1,3);end;def to_int;puts :integer;99;end;end;begin;t=Time.utc(2024,1,1,0,0,Seconds.new);p t,t.nsec;rescue=>e;p e.class,e.message;end',
+    'rational\n2024-01-01 00:00:00 1/3 UTC\n333333333\n',
+  ],
+  [
+    'class Rational;def to_f;raise "no Float conversion";end;end;begin;t=Time.utc(2024,1,1,0,0,1r-Rational(1,10**20));p t,t.nsec;rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 99999999999999999999/100000000000000000000 UTC\n999999999\n',
+  ],
+  [
+    'class Rational;def to_f;raise "no Float conversion";end;end;class Seconds;def to_r;puts :rational;1r-Rational(1,10**20);end;def to_int;puts :integer;99;end;end;begin;t=Time.utc(2024,1,1,0,0,Seconds.new);p t,t.nsec;rescue=>e;p e.class,e.message;end',
+    'rational\n2024-01-01 00:00:00 99999999999999999999/100000000000000000000 UTC\n999999999\n',
+  ],
+  [
+    'class Rational;def to_f;raise "no Float conversion";end;end;begin;t=Time.utc(2024,1,1,0,0,61r-Rational(1,10**20));p t,t.nsec;rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:01:00 99999999999999999999/100000000000000000000 UTC\n999999999\n',
+  ],
+  [
+    'class Rational;def to_f;raise "no Float conversion";end;end;class Seconds;def to_r;puts :rational;61r-Rational(1,10**20);end;def to_int;puts :integer;99;end;end;begin;t=Time.utc(2024,1,1,0,0,Seconds.new);p t,t.nsec;rescue=>e;p e.class,e.message;end',
+    'rational\n2024-01-01 00:01:00 99999999999999999999/100000000000000000000 UTC\n999999999\n',
+  ],
+  [
+    'class Rational;def to_f;raise "no Float conversion";end;end;begin;t=Time.utc(2024,1,1,0,0,64r);p t,t.nsec;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Rational;def to_f;raise "no Float conversion";end;end;class Seconds;def to_r;puts :rational;64r;end;def to_int;puts :integer;99;end;end;begin;t=Time.utc(2024,1,1,0,0,Seconds.new);p t,t.nsec;rescue=>e;p e.class,e.message;end',
+    'rational\nArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Rational;def to_f;raise "no Float conversion";end;end;begin;t=Time.utc(2024,1,1,0,0,Rational(-1,10**400));p t,t.nsec;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"argument out of range"\n',
+  ],
+  [
+    'class Rational;def to_f;raise "no Float conversion";end;end;class Seconds;def to_r;puts :rational;Rational(-1,10**400);end;def to_int;puts :integer;99;end;end;begin;t=Time.utc(2024,1,1,0,0,Seconds.new);p t,t.nsec;rescue=>e;p e.class,e.message;end',
+    'rational\nArgumentError\n"argument out of range"\n',
+  ],
+] as const;
+
+test.each(nativeCalendarBoundaryCases)(
+  'calendar seconds retain exact fractions through validation and construction: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
