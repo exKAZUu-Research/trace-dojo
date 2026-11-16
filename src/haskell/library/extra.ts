@@ -9,13 +9,6 @@ compareLength _ n | n < 0 = GT
 compareLength [] n = compare 0 n
 compareLength (_:xs) n = if n == 0 then GT else compareLength xs (n - 1)
 
-inits1 :: [a] -> [[a]]
-inits1 = tail . inits
-
-tails1 :: [a] -> [[a]]
-tails1 [] = []
-tails1 xs@(_:rest) = xs : tails1 rest
-
 applyWhen :: Bool -> (a -> a) -> a -> a
 applyWhen b f x = if b then f x else x
 

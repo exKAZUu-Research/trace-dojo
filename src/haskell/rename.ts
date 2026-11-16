@@ -332,14 +332,10 @@ class Renamer {
       return;
     }
     const entry = exports.types.get(name);
+    const constructor = exports.values.get(name);
+    if (imp.hiding && item.children === undefined && constructor) into.values.set(name, constructor);
     if (!entry) {
-      // `hiding (C)` may name a data constructor.
-      const constructor = exports.values.get(name);
       if (!imp.hiding && constructor?.unsupported) throw unsupportedError(item.name.span, constructor.unsupported);
-      if (imp.hiding && constructor) {
-        into.values.set(name, constructor);
-        return;
-      }
       if (imp.hiding) return;
       throw compileError(item.name.span, `モジュール ${imp.module} は ${name} を export していません。`);
     }

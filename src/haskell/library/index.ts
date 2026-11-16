@@ -204,8 +204,6 @@ const PRELUDE: PublicModule = {
 const DATA_LIST_VALUES = [
   'compareLength',
   'deleteFirstsBy',
-  'inits1',
-  'tails1',
   ...PRELUDE_LIST,
   'foldl',
   "foldl'",

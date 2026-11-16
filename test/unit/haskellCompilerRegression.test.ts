@@ -556,3 +556,41 @@ test.each([2, 4])('explicit opening braces respect enclosing indentation %i', (i
     });
   }
 });
+
+test.each([
+  'import Data.Ord hiding (Down)\nmain=print(Down(1::Int))',
+  'import Data.Ord hiding (Down(..))\nmain=print(Down(1::Int))',
+  'import Data.Ord hiding (Down(Down))\nmain=print(Down(1::Int))',
+  'import qualified Data.Ord as O hiding (Down)\nmain=print(O.Down(1::Int))',
+  'import Data.Ord hiding (Down)\nmain=print(undefined::Down Int)',
+  'import qualified Data.Ord as O hiding (Down)\nmain=print(undefined::O.Down Int)',
+  'import Data.Ord (Down)\nmain=print(Down(1::Int))',
+])('type hiding removes same-named constructors without widening explicit imports: %s', (source) => {
+  expect(executeProgram('haskell', source).kind).toBe('compileError');
+});
+
+test.each([
+  ['import Data.Ord (Down(..))\nmain=print(Down(1::Int))', 'Down 1\n'],
+  ['import Data.Ord hiding (Down())\nmain=print(Down(1::Int))', 'Down 1\n'],
+  ['import Data.Ord hiding (Down)\nmain=print(comparing id (1::Int) 1)', 'EQ\n'],
+  ['import qualified Data.Ord as O hiding (Down)\nmain=print(O.comparing id (1::Int) 1)', 'EQ\n'],
+])('constructor selection and unrelated imports remain usable: %s', (source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test.each(['inits1', 'tails1'])('NonEmpty-producing %s reports its missing API', (name) => {
+  for (const source of [
+    `import Data.List\nmain=print(${name} [1,2::Int])`,
+    `import Data.List (${name})\nmain=print(1::Int)`,
+  ]) {
+    const result = executeProgram('haskell', source);
+    expect(result).toMatchObject({
+      kind: 'compileError',
+      diagnostics: expect.arrayContaining([
+        expect.objectContaining({ message: expect.stringContaining('この採点環境では使えません') }),
+      ]),
+    });
+    if (result.kind === 'compileError')
+      expect(result.diagnostics.some(({ message }) => message.includes(name))).toBe(true);
+  }
+});
