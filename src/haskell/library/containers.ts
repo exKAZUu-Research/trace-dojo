@@ -719,3 +719,133 @@ instance Ord k => Semigroup (Map k v) where
 instance Ord k => Monoid (Map k v) where
   mempty = Tip
 `;
+
+/** The functions of Data.Map.Strict that differ from Data.Map: each evaluates the values it stores. */
+export const STRICT_MAP_VALUES = [
+  'singleton',
+  'insert',
+  'insertWith',
+  'insertWithKey',
+  'adjust',
+  'adjustWithKey',
+  'update',
+  'alter',
+  'fromList',
+  'fromListWith',
+  'fromListWithKey',
+  'fromAscList',
+  'fromDistinctAscList',
+  'fromSet',
+  'map',
+  'mapWithKey',
+  'traverseWithKey',
+  'mapKeysWith',
+  'mapMaybe',
+  'mapMaybeWithKey',
+  'unionWith',
+  'unionWithKey',
+  'unionsWith',
+  'intersectionWith',
+  'intersectionWithKey',
+  'differenceWith',
+];
+
+export const STRICT_MAP_SOURCE = String.raw`module Data.Map.Strict.Internal where
+
+import Base hiding (map, insert, lookup, mapMaybe)
+import qualified Base as B
+import qualified Data.Set.Internal as S
+import qualified Data.Map.Internal as L
+import Data.Map.Internal (Map)
+
+forceValues :: Map k a -> Map k a
+forceValues m = L.foldr seq () m ${BT}seq${BT} m
+
+singleton :: k -> a -> Map k a
+singleton k x = x ${BT}seq${BT} L.singleton k x
+
+insert :: Ord k => k -> a -> Map k a -> Map k a
+insert k x m = x ${BT}seq${BT} L.insert k x m
+
+insertWith :: Ord k => (a -> a -> a) -> k -> a -> Map k a -> Map k a
+insertWith f k x m = case L.lookup k m of
+  Nothing -> insert k x m
+  Just y -> insert k (f x y) m
+
+insertWithKey :: Ord k => (k -> a -> a -> a) -> k -> a -> Map k a -> Map k a
+insertWithKey f k = insertWith (f k) k
+
+adjust :: Ord k => (a -> a) -> k -> Map k a -> Map k a
+adjust f = adjustWithKey (\_ x -> f x)
+
+adjustWithKey :: Ord k => (k -> a -> a) -> k -> Map k a -> Map k a
+adjustWithKey f k m = case L.lookup k m of
+  Nothing -> m
+  Just x -> insert k (f k x) m
+
+update :: Ord k => (a -> Maybe a) -> k -> Map k a -> Map k a
+update f k m = case L.lookup k m of
+  Nothing -> m
+  Just x -> case f x of
+    Nothing -> L.delete k m
+    Just x' -> insert k x' m
+
+alter :: Ord k => (Maybe a -> Maybe a) -> k -> Map k a -> Map k a
+alter f k m = case f (L.lookup k m) of
+  Nothing -> L.delete k m
+  Just x -> insert k x m
+
+fromList :: Ord k => [(k, a)] -> Map k a
+fromList = B.foldl (\t (k, x) -> insert k x t) L.empty
+
+fromListWith :: Ord k => (a -> a -> a) -> [(k, a)] -> Map k a
+fromListWith f = B.foldl (\t (k, x) -> insertWith f k x t) L.empty
+
+fromListWithKey :: Ord k => (k -> a -> a -> a) -> [(k, a)] -> Map k a
+fromListWithKey f = B.foldl (\t (k, x) -> insertWith (f k) k x t) L.empty
+
+fromAscList :: Eq k => [(k, a)] -> Map k a
+fromAscList xs = forceValues (L.fromAscList xs)
+
+fromDistinctAscList :: [(k, a)] -> Map k a
+fromDistinctAscList xs = forceValues (L.fromDistinctAscList xs)
+
+fromSet :: (k -> a) -> S.Set k -> Map k a
+fromSet f s = forceValues (L.fromSet f s)
+
+map :: (a -> b) -> Map k a -> Map k b
+map f m = forceValues (L.map f m)
+
+mapWithKey :: (k -> a -> b) -> Map k a -> Map k b
+mapWithKey f m = forceValues (L.mapWithKey f m)
+
+traverseWithKey :: Applicative t => (k -> a -> t b) -> Map k a -> t (Map k b)
+traverseWithKey f m = fmap forceValues (L.traverseWithKey f m)
+
+mapKeysWith :: Ord k2 => (a -> a -> a) -> (k1 -> k2) -> Map k1 a -> Map k2 a
+mapKeysWith c f m = forceValues (L.mapKeysWith c f m)
+
+mapMaybe :: (a -> Maybe b) -> Map k a -> Map k b
+mapMaybe f m = forceValues (L.mapMaybe f m)
+
+mapMaybeWithKey :: (k -> a -> Maybe b) -> Map k a -> Map k b
+mapMaybeWithKey f m = forceValues (L.mapMaybeWithKey f m)
+
+unionWith :: Ord k => (a -> a -> a) -> Map k a -> Map k a -> Map k a
+unionWith f a b = forceValues (L.unionWith f a b)
+
+unionWithKey :: Ord k => (k -> a -> a -> a) -> Map k a -> Map k a -> Map k a
+unionWithKey f a b = forceValues (L.unionWithKey f a b)
+
+unionsWith :: Ord k => (a -> a -> a) -> [Map k a] -> Map k a
+unionsWith f ms = forceValues (L.unionsWith f ms)
+
+intersectionWith :: Ord k => (a -> b -> c) -> Map k a -> Map k b -> Map k c
+intersectionWith f a b = forceValues (L.intersectionWith f a b)
+
+intersectionWithKey :: Ord k => (k -> a -> b -> c) -> Map k a -> Map k b -> Map k c
+intersectionWithKey f a b = forceValues (L.intersectionWithKey f a b)
+
+differenceWith :: Ord k => (a -> b -> Maybe a) -> Map k a -> Map k b -> Map k a
+differenceWith f a b = forceValues (L.differenceWith f a b)
+`;

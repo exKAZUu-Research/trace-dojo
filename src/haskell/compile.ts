@@ -172,6 +172,14 @@ class LibraryCompiler {
         if (!entity) throw new Error(`${spec.from} has no ${valueName} for ${name}`);
         exports.values.set(valueName, entity);
       }
+      if (spec.overrides) {
+        const overrides = this.internal.get(spec.overrides.from) as CompiledModuleInfo;
+        for (const valueName of spec.overrides.values) {
+          const entity = overrides.exports.values.get(valueName);
+          if (!entity) throw new Error(`${spec.overrides.from} has no ${valueName} for ${name}`);
+          exports.values.set(valueName, entity);
+        }
+      }
       for (const [typeName, children] of spec.types) exportType(exports, source, typeName, children, name);
       modules.set(name, { name, exports, instances: [] });
     }

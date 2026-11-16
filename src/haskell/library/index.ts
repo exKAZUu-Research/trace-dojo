@@ -2,7 +2,7 @@ import { BASE_CORE } from './baseCore';
 import { BASE_LIST } from './baseList';
 import { BASE_MISC, BASE_UNSUPPORTED } from './baseMisc';
 import { BASE_TEXT } from './baseText';
-import { MAP_SOURCE, SET_SOURCE } from './containers';
+import { MAP_SOURCE, SET_SOURCE, STRICT_MAP_SOURCE, STRICT_MAP_VALUES } from './containers';
 import { PRINTF_SOURCE } from './printf';
 import { BASE_TUPLES } from './tuples';
 
@@ -11,6 +11,7 @@ export const LIBRARY_SOURCES: { name: string; source: string }[] = [
   { name: 'Base', source: [BASE_CORE, BASE_LIST, BASE_TEXT, BASE_MISC, BASE_UNSUPPORTED, BASE_TUPLES].join('\n') },
   { name: 'Data.Set.Internal', source: SET_SOURCE },
   { name: 'Data.Map.Internal', source: MAP_SOURCE },
+  { name: 'Data.Map.Strict.Internal', source: STRICT_MAP_SOURCE },
   { name: 'Text.Printf.Internal', source: PRINTF_SOURCE },
 ];
 
@@ -21,6 +22,8 @@ export interface PublicModule {
   types: [string, 'all' | 'none' | string[]][];
   /** Further modules whose whole export lists this one re-exports. */
   include?: string[];
+  /** Values taken from another library module in place of the ones of `from` with the same names. */
+  overrides?: { from: string; values: string[] };
 }
 
 const PRIMITIVE_TYPES: PublicModule['types'] = [
@@ -653,7 +656,12 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
     ],
   },
   'Data.Map': { from: 'Data.Map.Internal', types: [['Map', 'none']], values: MAP_VALUES },
-  'Data.Map.Strict': { from: 'Data.Map.Internal', types: [['Map', 'none']], values: MAP_VALUES },
+  'Data.Map.Strict': {
+    from: 'Data.Map.Internal',
+    types: [['Map', 'none']],
+    values: MAP_VALUES,
+    overrides: { from: 'Data.Map.Strict.Internal', values: STRICT_MAP_VALUES },
+  },
   'Data.Set': { from: 'Data.Set.Internal', types: [['Set', 'none']], values: SET_VALUES },
   'Text.Printf': {
     from: 'Text.Printf.Internal',
