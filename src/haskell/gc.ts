@@ -177,14 +177,15 @@ function pushStackFrame(frame: Frame, scannedEnvs: Set<Env>, push: Push): void {
 }
 
 /** Pushes what a value refers to: a closure or a thunk only the variables its code reads. */
-// code-gauge-allow functionCognitiveComplexity 21 -- One branch per kind of runtime value.
-// code-gauge-allow functionNcss 37 -- One branch per kind of runtime value.
+// code-gauge-allow functionCognitiveComplexity 22 -- One branch per kind of runtime value.
+// code-gauge-allow functionNcss 39 -- One branch per kind of runtime value.
 function pushReferences(value: object, push: Push): void {
   if (value instanceof ConValue) {
     for (const field of value.fields) push(field);
   } else if (value instanceof Thunk) {
     if (value.state === 'done') push(value.value);
     else if (value.code) pushRefs(freeVarsOf(value.code), value.env, push);
+    else push(value.target);
   } else if (value instanceof Closure) {
     pushRefs(freeVarsOf(value.lam), value.env, push);
   } else if (value instanceof Partial) {

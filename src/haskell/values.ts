@@ -80,6 +80,8 @@ export type ThunkState = 'pending' | 'evaluating' | 'done';
 export class Thunk {
   state: ThunkState = 'pending';
   value: Value | undefined;
+  /** Another thunk whose value this one takes, set when the evaluator drops this thunk's update frame. */
+  target: Thunk | undefined;
 
   constructor(
     public code: Core | undefined,
@@ -87,6 +89,25 @@ export class Thunk {
     /** Computes the value natively, for thunks the evaluator builds itself (such as a string's rest). */
     public native?: () => Slot | TailCall
   ) {}
+
+  /** Stores the computed value, dropping what computed it. */
+  update(value: Value): void {
+    this.state = 'done';
+    this.value = value;
+    this.code = undefined;
+    this.env = undefined;
+    this.native = undefined;
+    this.target = undefined;
+  }
+
+  /** Makes this thunk take another thunk's value instead of computing its own. */
+  redirect(target: Thunk): void {
+    this.state = 'pending';
+    this.code = undefined;
+    this.env = undefined;
+    this.native = undefined;
+    this.target = target;
+  }
 
   static of(value: Value): Thunk {
     const thunk = new Thunk(undefined, undefined);

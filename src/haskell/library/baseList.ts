@@ -397,7 +397,8 @@ listMinimum (x:xs) = listFoldl' min x xs
 
 listLength :: [a] -> Int
 listLength xs = lenAcc xs 0
-  where lenAcc [] n = n
+  where lenAcc :: [a] -> Int -> Int
+        lenAcc [] n = n
         lenAcc (_:ys) n = let n' = n + 1 in n' ${BT}seq${BT} lenAcc ys n'
 
 listSum :: Num a => [a] -> a

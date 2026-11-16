@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 827 -- The Core generator covers every construct of the language in one pass over shared state.
+// code-gauge-allow-file fileNcss 833 -- The Core generator covers every construct of the language in one pass over shared state.
 import {
   CHAR_TYPE,
   CONS_CON,
@@ -673,7 +673,7 @@ export class Codegen {
       const entity = ref.entity;
       if (entity.sort === 'method') {
         const [classEvidence, ...rest] = evidence;
-        head = { k: 'method', dict: this.compileEvidence(classEvidence), index: entity.method?.index as number };
+        head = this.methodCore(classEvidence, entity.method?.index as number);
         evidence = rest;
       } else if (entity.sort === 'field') {
         head = { k: 'global', global: Codegen.fieldGlobal(entity.field as FieldInfo) };
@@ -1102,7 +1102,19 @@ export class Codegen {
   }
 
   private methodOf(evidence: Evidence, cls: ClassEntity, name: string): Core {
-    const index = cls.methods.findIndex((method) => method.name === name);
+    return this.methodCore(
+      evidence,
+      cls.methods.findIndex((method) => method.name === name)
+    );
+  }
+
+  /** A class method: an instance's own implementation when the instance is known and needs no dictionaries. */
+  private methodCore(evidence: Evidence, index: number): Core {
+    const resolved = resolveEvidence(evidence);
+    if (resolved.kind === 'instance' && resolved.args.length === 0) {
+      const implementation = resolved.instance.methods[index];
+      if (implementation) return { k: 'global', global: globalOf(implementation, implementation.name, implementation) };
+    }
     return { k: 'method', dict: this.compileEvidence(evidence), index };
   }
 

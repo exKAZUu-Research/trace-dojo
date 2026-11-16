@@ -23,7 +23,14 @@ import {
 } from './values';
 
 export type Frame =
-  | { k: 'update'; thunk: Thunk; code: Core | undefined; env: Env | undefined; native?: () => Slot | TailCall }
+  | {
+      k: 'update';
+      thunk: Thunk;
+      code: Core | undefined;
+      env: Env | undefined;
+      native?: () => Slot | TailCall;
+      target: Thunk | undefined;
+    }
   | { k: 'apply'; args: Slot[] }
   | { k: 'case'; core: CaseCore; env: Env }
   | { k: 'charCase'; core: Extract<Core, { k: 'charCase' }>; env: Env }
@@ -298,8 +305,20 @@ export class Machine {
       return;
     }
     if (slot.state === 'evaluating') throw loopError();
+    this.squeezeUpdateFrame(slot);
     slot.state = 'evaluating';
-    this.stack.push({ k: 'update', thunk: slot, code: slot.code, env: slot.env, native: slot.native });
+    this.stack.push({
+      k: 'update',
+      thunk: slot,
+      code: slot.code,
+      env: slot.env,
+      native: slot.native,
+      target: slot.target,
+    });
+    if (slot.target) {
+      state.enter(slot.target);
+      return;
+    }
     if (!slot.native) {
       state.evaluate(slot.code as Core, slot.env);
       return;
@@ -307,6 +326,18 @@ export class Machine {
     const result = slot.native();
     if (result instanceof TailCall) state.applyTo(result.fn, result.args);
     else state.enter(result);
+  }
+
+  /**
+   * Drops the update frame on top of the stack, if any, when a thunk is entered: the thunk it updates takes the entered
+   * thunk's value, as GHC's stack squeezing does. Without it, a loop whose each step ends by entering the next step's
+   * thunk (such as `seq n (go (n + 1))`) keeps a frame per step.
+   */
+  private squeezeUpdateFrame(entered: Thunk): void {
+    const top = this.stack.at(-1);
+    if (top?.k !== 'update') return;
+    this.stack.pop();
+    top.thunk.redirect(entered);
   }
 
   /** Applies a function to arguments: a call when it has them all, a partial application when it lacks some. */
@@ -333,7 +364,7 @@ export class Machine {
       state.mode = 'primNext';
       return;
     }
-    // A call of a Haskell function counts as an operation; a primitive's cost is its own to charge.
+    // A call counts as an operation, as does a primitive's (in `stepPrim`), which may charge more for its own work.
     this.runtime.spend();
     this.runtime.allocate(fn.lam.size);
     const frameEnv = new Env(fn.lam.size, fn.env, fn.lam.info);
@@ -358,6 +389,7 @@ export class Machine {
       frame.position++;
     }
     this.stack.pop();
+    this.runtime.spend();
     const result = frame.prim.fn(frame.args, this.runtime);
     if (result instanceof TailCall) state.applyTo(result.fn, result.args);
     else state.enter(result);
@@ -372,12 +404,7 @@ export class Machine {
         return true;
       }
       case 'update': {
-        const thunk = frame.thunk;
-        thunk.state = 'done';
-        thunk.value = state.value as Value;
-        thunk.code = undefined;
-        thunk.env = undefined;
-        thunk.native = undefined;
+        frame.thunk.update(state.value as Value);
         return false;
       }
       case 'apply': {
@@ -499,6 +526,7 @@ export class Machine {
         frame.thunk.code = frame.code;
         frame.thunk.env = frame.env;
         frame.thunk.native = frame.native;
+        frame.thunk.target = frame.target;
       } else if (frame.k === 'do') {
         unwindBlock(this, frame);
       }
