@@ -690,6 +690,12 @@ instance Eq a => Eq (Down a) where
 
 instance Ord a => Ord (Down a) where
   compare (Down x) (Down y) = compare y x
+  Down x < Down y = y < x
+  Down x > Down y = y > x
+  Down x <= Down y = y <= x
+  Down x >= Down y = y >= x
+  min (Down x) (Down y) = Down (max y x)
+  max (Down x) (Down y) = Down (min y x)
 
 instance Show a => Show (Down a) where
   showsPrec d (Down x) = showParen (d >= 11) (showString "Down " . showsPrec 11 x)

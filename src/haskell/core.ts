@@ -25,7 +25,7 @@ export type Core = (
   | { k: 'local'; depth: number; index: number }
   | { k: 'global'; global: GlobalDef }
   | { k: 'lit'; value: Value }
-  | { k: 'str'; value: string }
+  | { k: 'str'; value: readonly string[] }
   | { k: 'app'; fn: Core; args: Core[] }
   | LamCore
   | { k: 'frame'; size: number; body: Core; info: FunctionInfo | undefined }

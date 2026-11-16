@@ -493,3 +493,69 @@ test('printf unsigned offsets retain lower boundaries and unbounded positive inp
     uncaughtException: undefined,
   });
 });
+
+test.each(['Float', 'Double'])('Down delegates partial floating comparisons for %s', (type) => {
+  const source = `import Data.Ord\nimport Data.List\nmain=do\n  let n=Down(0/0::${type}); x=Down 1\n  print(n<x,n>x,n<=x,n>=x)\n  print(sort[n,x])`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(False,False,False,False)\n[Down NaN,Down 1.0]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Down preserves independently defined ordering and extrema methods', () => {
+  const source =
+    'import Data.Ord\ndata K=K Int deriving(Eq,Show)\ninstance Ord K where\n compare _ _=EQ\n _ < _=True\n max(K x)(K y)=K(100+x)\n min(K x)(K y)=K(200+y)\nmain=print(Down(K 0)<Down(K 0),max(Down(K 1))(Down(K 2)),min(Down(K 1))(Down(K 2)))';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(True,Down (K 201),Down (K 102))\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  [String.raw`main=putStr ['\xd800','\xdc00']`, '??'],
+  [String.raw`main=putChar '\xd800'`, '?'],
+  [
+    String.raw`import Data.Char
+main=putStr "before" >> putChar(chr 55296) >> putStr "after"`,
+    'before?after',
+  ],
+  [String.raw`main=putStr "a\xdfff\&b"`, 'a?b'],
+  [
+    String.raw`import System.IO
+main=hPutStr stdout "\xd800\xdc00\x10000\xfffd"`,
+    '??𐀀�',
+  ],
+])('output encodes each Haskell Char before buffering: %s', (source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test('output transliteration preserves internal code points and partial writes', () => {
+  expect(
+    executeProgram(
+      'haskell',
+      String.raw`import Data.Char
+main=print(ord '\xd800',ord '\xdc00')`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '(55296,56320)\n', uncaughtException: undefined });
+  expect(executeProgram('haskell', String.raw`main=putStr ('\xd800':error "tail")`)).toMatchObject({
+    kind: 'executed',
+    stdout: '?',
+    uncaughtException: 'tail',
+  });
+});
+
+test('string literals preserve escaped surrogate boundaries and supplementary characters', () => {
+  const source = String.raw`import Data.Char
+f "\xd800\xdc00"=1::Int
+f _=2
+main=do
+  print(length "\xd800\xdc00",map ord "\xd800\xdc00",length "\x10000")
+  print(f "\x10000",f ['\xd800','\xdc00'])`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(2,[55296,56320],1)\n(2,1)\n',
+    uncaughtException: undefined,
+  });
+});

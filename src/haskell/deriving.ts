@@ -99,7 +99,7 @@ class Builder {
   }
 
   str(value: string): RExpr {
-    return { k: 'lit', lit: { kind: 'string', value }, span: this.span };
+    return { k: 'lit', lit: { kind: 'string', value: [...value] }, span: this.span };
   }
 
   int(value: number): RExpr {

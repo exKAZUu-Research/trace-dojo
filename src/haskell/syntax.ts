@@ -25,7 +25,7 @@ export type Literal =
   | { kind: 'int'; value: bigint }
   | { kind: 'frac'; value: number; text: string }
   | { kind: 'char'; value: string }
-  | { kind: 'string'; value: string };
+  | { kind: 'string'; value: string[] };
 
 export type SourceLiteral = Literal & { text: string };
 

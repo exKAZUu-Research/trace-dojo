@@ -664,3 +664,22 @@ test('shared pattern matches remain deferred and retain full-pattern failures', 
     });
   }
 });
+
+test.each([
+  'Data.Tuple hiding (Solo(getSolo))',
+  'qualified Data.Tuple hiding (Solo(wibble))',
+  'Data.Ord hiding (Down(imaginary))',
+  'Data.Ord hiding (Unknown(getDown))',
+])('unknown hiding children are ignored: %s', (item) => {
+  expect(executeProgram('haskell', `import ${item}\nmain=print(1::Int)`)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('a non-child hiding name leaves its independent value imported', () => {
+  expect(
+    executeProgram('haskell', 'import Data.Ord hiding (Down(comparing))\nmain=print(comparing id (1::Int) 1)')
+  ).toMatchObject({ kind: 'executed', stdout: 'EQ\n', uncaughtException: undefined });
+});

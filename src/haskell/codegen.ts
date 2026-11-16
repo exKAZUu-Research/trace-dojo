@@ -760,7 +760,7 @@ export class Codegen {
       nameArg?.k === 'lit' &&
       nameArg.lit.kind === 'string'
     ) {
-      const primitive = primitiveNamed(nameArg.lit.value);
+      const primitive = primitiveNamed(nameArg.lit.value.join(''));
       const prim: Core = { k: 'prim', prim: primitive };
       if (args.length === 1) return primitive.arity === 0 ? { k: 'app', fn: prim, args: [] } : prim;
       return { k: 'app', fn: prim, args: args.slice(1).map((rest) => this.compileExpr(rest)) };
@@ -965,7 +965,9 @@ export class Codegen {
             ? {
                 k: 'app',
                 fn: this.methodOf(stmt.fail, support.monadFail(), 'fail'),
-                args: [{ k: 'str', value: `Pattern match failure in 'do' block at ${sourceSpanText(stmt.pat.span)}` }],
+                args: [
+                  { k: 'str', value: [...`Pattern match failure in 'do' block at ${sourceSpanText(stmt.pat.span)}`] },
+                ],
               }
             : { k: 'error', message: 'Pattern match failure', kind: 'patternMatch' };
           return { k: 'lam', arity: 1, size: frame.size, body: this.matchPlan(plan, rest, fail) } as Core;
@@ -1432,7 +1434,7 @@ function patternText(pat: RPat): string {
       return `${pat.local.name}@${patternText(pat.pat)}`;
     }
     case 'lit': {
-      return pat.lit.kind === 'string' ? JSON.stringify(pat.lit.value) : String((pat.lit as { value: unknown }).value);
+      return pat.lit.kind === 'string' ? JSON.stringify(pat.lit.value.join('')) : String(pat.lit.value);
     }
     case 'con': {
       if (pat.con.type.special === 'tuple') return `(${pat.args.map(patternText).join(', ')})`;

@@ -77,10 +77,10 @@ export function parseCharLiteral(text: string, span: Span): string {
   return chars[0];
 }
 
-export function parseStringLiteral(text: string, span: Span): string {
+export function parseStringLiteral(text: string, span: Span): string[] {
   if (text.startsWith('"""')) throw unsupportedError(span, '複数行の文字列（MultilineStrings）');
   const body = text.slice(1, -1);
-  return readChars(body, span, true).chars.join('');
+  return readChars(body, span, true).chars;
 }
 
 /** Reads the characters of a literal's body, each one code point, resolving escapes and string gaps. */

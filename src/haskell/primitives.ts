@@ -725,7 +725,9 @@ function writeLazily(slot: Slot, runtime: Runtime, channel: 'stdout' | 'stderr',
   try {
     let current = runtime.machine.force(slot) as ConValue;
     while (current.con === CONS_CON) {
-      buffer += runtime.machine.force(current.fields[0]) as string;
+      const character = runtime.machine.force(current.fields[0]) as string;
+      const codePoint = character.codePointAt(0)!;
+      buffer += codePoint >= 0xd8_00 && codePoint <= 0xdf_ff ? '?' : character;
       if (buffer.length >= 256) {
         out.write(buffer);
         buffer = '';

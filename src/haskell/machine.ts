@@ -64,12 +64,10 @@ export function cons(head: Slot, tail: Slot): ConValue {
   return new ConValue(CONS_CON, [head, tail]);
 }
 
-/** A string literal's characters from `index` on, unpacked one cell at a time as they are demanded. */
-export function unpackString(text: string, index: number): Value {
+export function unpackString(text: string | readonly string[], index: number): Value {
   if (index >= text.length) return NIL();
-  const code = text.codePointAt(index) as number;
-  const char = String.fromCodePoint(code);
-  const next = index + char.length;
+  const char = typeof text === 'string' ? String.fromCodePoint(text.codePointAt(index) as number) : text[index];
+  const next = index + (typeof text === 'string' ? char.length : 1);
   return cons(char, next >= text.length ? NIL() : new Thunk(undefined, undefined, () => unpackString(text, next)));
 }
 

@@ -343,16 +343,7 @@ class Renamer {
       throw unsupportedError(item.name.span, entry.entity.entity.unsupported);
     }
     into.types.set(name, { entity: entry.entity, children: [] });
-    const children =
-      item.children === 'all'
-        ? entry.children
-        : (item.children ?? []).map((child) => {
-            const found = entry.children.find((candidate) => candidate.name === child.name);
-            if (!found) {
-              throw compileError(child.span, `${name} の中に ${child.name} はありません。`);
-            }
-            return found;
-          });
+    const children = importChildren(item, entry.children, imp.hiding);
     for (const child of children) {
       if (!imp.hiding && child.unsupported) throw unsupportedError(item.name.span, child.unsupported);
       into.values.set(child.name, child);
@@ -1522,4 +1513,15 @@ function rtypeMentions(type: RType, name: string): boolean {
       return rtypeMentions(type.from, name) || rtypeMentions(type.to, name);
     }
   }
+}
+
+function importChildren(item: ImportItem, available: ValueEntity[], hiding: boolean): ValueEntity[] {
+  if (item.children === 'all') return available;
+  const children: ValueEntity[] = [];
+  for (const child of item.children ?? []) {
+    const found = available.find((candidate) => candidate.name === child.name);
+    if (found) children.push(found);
+    else if (!hiding) throw compileError(child.span, `${item.name.name} の中に ${child.name} はありません。`);
+  }
+  return children;
 }
