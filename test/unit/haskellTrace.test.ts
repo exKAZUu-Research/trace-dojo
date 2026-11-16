@@ -395,3 +395,55 @@ test.each([
     withoutLines(traceProgram('haskell', control, control).traceItems)
   );
 });
+
+test('recursive calls inside traversal lambdas retain their call steps', () => {
+  const source = `import Control.Monad
+
+main :: IO ()
+main = do
+  t <- newTurtle
+  walk t 1
+
+walk :: Turtle -> Int -> IO ()
+walk t 0 = return ()
+walk t n = do
+  forM_ [1, 2 :: Int] $ \\i -> do
+    右を向く t
+    walk t (n - 1)
+`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.traceItems.map(({ line, callLines }) => ({ line, callLines }))).toEqual([
+    { line: 0, callLines: [] },
+    { line: 5, callLines: [] },
+    { line: 11, callLines: [6] },
+    { line: 12, callLines: [6] },
+    { line: 13, callLines: [6] },
+    { line: 11, callLines: [6] },
+    { line: 12, callLines: [6] },
+    { line: 13, callLines: [6] },
+  ]);
+});
+
+test('recursive calls in nested blocks with continuations retain their call steps', () => {
+  const source = `main :: IO ()
+main=do
+  t <- newTurtle
+  walk t 1
+
+walk :: Turtle -> Int -> IO ()
+walk t 0 = return ()
+walk t n = do
+  if n > 0 then do
+    右を向く t
+    walk t (n-1)
+  else return ()
+  return ()
+`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.traceItems.map(({ line, callLines }) => ({ line, callLines }))).toEqual([
+    { line: 0, callLines: [] },
+    { line: 3, callLines: [] },
+    { line: 10, callLines: [4] },
+    { line: 11, callLines: [4] },
+  ]);
+});
