@@ -549,41 +549,31 @@ def('Enumerable', 'take', 1, function* (self, [countValue]) {
   });
   return arr(items);
 });
-defineIterationMethods(
-  'take_while',
-  0,
-  ({ collectInto }) =>
-    function* (self, _args, block) {
-      if (!block) return makeEnumerator(self, 'take_while', []);
-      const items: Value[] = [];
-      yield* collectInto(self, [items], function* (value) {
-        if (!truthy(yield* call(block, value))) return STOP;
-        items.push(value);
-      });
-      return arr(items);
-    }
-);
+def('Enumerable', 'take_while', 0, function* (self, _args, block) {
+  if (!block) return makeEnumerator(self, 'take_while', []);
+  const items: Value[] = [];
+  yield* collectInto(self, [items], function* (value) {
+    if (!truthy(yield* call(block, value))) return STOP;
+    items.push(value);
+  });
+  return arr(items);
+});
 def('Enumerable', 'drop', 1, function* (self, [countValue]) {
   const count = yield* toIndex(countValue);
   if (count < 0) throw argumentError('attempt to drop negative size');
   return arr((yield* toArray(self)).slice(count));
 });
-defineIterationMethods(
-  'drop_while',
-  0,
-  ({ collectInto }) =>
-    function* (self, _args, block) {
-      if (!block) return makeEnumerator(self, 'drop_while', []);
-      const items: Value[] = [];
-      let dropping = true;
-      yield* collectInto(self, [items], function* (value) {
-        if (dropping && truthy(yield* call(block, value))) return;
-        dropping = false;
-        items.push(value);
-      });
-      return arr(items);
-    }
-);
+def('Enumerable', 'drop_while', 0, function* (self, _args, block) {
+  if (!block) return makeEnumerator(self, 'drop_while', []);
+  const items: Value[] = [];
+  let dropping = true;
+  yield* collectInto(self, [items], function* (value) {
+    if (dropping && truthy(yield* call(block, value))) return;
+    dropping = false;
+    items.push(value);
+  });
+  return arr(items);
+});
 
 // Ordering ------------------------------------------------------------------------------------------------------------
 

@@ -12029,3 +12029,89 @@ test('Dynamic redundant repeat compilation fails explicitly', () => {
     uncaughtException: 'この正規表現は、この採点環境では使えません。',
   });
 });
+
+test('Native Array while methods slice live storage after predicate mutation', () => {
+  expect(
+    run(String.raw`[:take_while,:drop_while].each do |method|
+ [:clear,:shift,:pop,:unshift,:push,:replace].each do |operation|
+  [true,false].each do |answer|
+   a=[1,2,3];visited=[]
+   result=a.send(method) do |value|
+    visited<<value
+    if visited.size==1
+     case operation
+     when :clear;a.clear
+     when :shift;a.shift
+     when :pop;a.pop
+     when :unshift;a.unshift(0)
+     when :push;a.push(4)
+     when :replace;a.replace([7,8])
+     end
+    end
+    answer && visited.size<3
+   end
+   p [method,operation,answer,result,a,visited]
+  end
+ end
+end
+class A<Array;def each;end;end
+a=A.new([1,2,3]);p a.take_while{|x|a.clear;true}
+a=A.new([1,2,3]);p a.drop_while{|x|a.clear;false}
+a=[1,2,3];p Enumerable.instance_method(:take_while).bind(a).call{|x|a.clear;true}
+a=[1,2,3];p Enumerable.instance_method(:drop_while).bind(a).call{|x|a.clear;false}
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[:take_while, :clear, true, [], [], [1]]\n[:take_while, :clear, false, [], [], [1]]\n[:take_while, :shift, true, [2, 3], [2, 3], [1, 3]]\n[:take_while, :shift, false, [], [2, 3], [1]]\n[:take_while, :pop, true, [1, 2], [1, 2], [1, 2]]\n[:take_while, :pop, false, [], [1, 2], [1]]\n[:take_while, :unshift, true, [0, 1], [0, 1, 2, 3], [1, 1, 2]]\n[:take_while, :unshift, false, [], [0, 1, 2, 3], [1]]\n[:take_while, :push, true, [1, 2], [1, 2, 3, 4], [1, 2, 3]]\n[:take_while, :push, false, [], [1, 2, 3, 4], [1]]\n[:take_while, :replace, true, [7, 8], [7, 8], [1, 8]]\n[:take_while, :replace, false, [], [7, 8], [1]]\n[:drop_while, :clear, true, [], [], [1]]\n[:drop_while, :clear, false, [], [], [1]]\n[:drop_while, :shift, true, [], [2, 3], [1, 3]]\n[:drop_while, :shift, false, [2, 3], [2, 3], [1]]\n[:drop_while, :pop, true, [], [1, 2], [1, 2]]\n[:drop_while, :pop, false, [1, 2], [1, 2], [1]]\n[:drop_while, :unshift, true, [2, 3], [0, 1, 2, 3], [1, 1, 2]]\n[:drop_while, :unshift, false, [0, 1, 2, 3], [0, 1, 2, 3], [1]]\n[:drop_while, :push, true, [3, 4], [1, 2, 3, 4], [1, 2, 3]]\n[:drop_while, :push, false, [1, 2, 3, 4], [1, 2, 3, 4], [1]]\n[:drop_while, :replace, true, [], [7, 8], [1, 8]]\n[:drop_while, :replace, false, [7, 8], [7, 8], [1]]\n[]\n[]\n[1]\n[1]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Dynamic reference bounds are validated before capability classification', () => {
+  expect(
+    run(String.raw`['a','foo!','a b','a.b','a:b','+a',':x',' a','a\\b','ä','あ','+1'].each do |name|
+ ['<',"'"].each do |open|
+  ['+2147483648','-2147483648','+999999999999999999999'].each do |level|
+   source='(?<'+name+'>a)\\k'+open+name+level+(open=='<' ? '>' : "'")
+   begin;Regexp.new(source);rescue RegexpError=>e;puts e.message;end
+  end
+ end
+end
+['(a)\\k<2147483648>','(a)\\k<-2147483648>','(a)\\g<2147483648>','(a)\\g<-2147483648>','(?<a>a)\\g<2147483648>'].each do |source|
+ begin;Regexp.new(source);rescue RegexpError=>e;puts e.message;end
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "too big number: /(?<a>a)\\k<a+2147483648>/\ntoo big number: /(?<a>a)\\k<a-2147483648>/\ntoo big number: /(?<a>a)\\k<a+999999999999999999999>/\ntoo big number: /(?<a>a)\\k'a+2147483648'/\ntoo big number: /(?<a>a)\\k'a-2147483648'/\ntoo big number: /(?<a>a)\\k'a+999999999999999999999'/\ntoo big number: /(?<foo!>a)\\k<foo!+2147483648>/\ntoo big number: /(?<foo!>a)\\k<foo!-2147483648>/\ntoo big number: /(?<foo!>a)\\k<foo!+999999999999999999999>/\ntoo big number: /(?<foo!>a)\\k'foo!+2147483648'/\ntoo big number: /(?<foo!>a)\\k'foo!-2147483648'/\ntoo big number: /(?<foo!>a)\\k'foo!+999999999999999999999'/\ntoo big number: /(?<a b>a)\\k<a b+2147483648>/\ntoo big number: /(?<a b>a)\\k<a b-2147483648>/\ntoo big number: /(?<a b>a)\\k<a b+999999999999999999999>/\ntoo big number: /(?<a b>a)\\k'a b+2147483648'/\ntoo big number: /(?<a b>a)\\k'a b-2147483648'/\ntoo big number: /(?<a b>a)\\k'a b+999999999999999999999'/\ntoo big number: /(?<a.b>a)\\k<a.b+2147483648>/\ntoo big number: /(?<a.b>a)\\k<a.b-2147483648>/\ntoo big number: /(?<a.b>a)\\k<a.b+999999999999999999999>/\ntoo big number: /(?<a.b>a)\\k'a.b+2147483648'/\ntoo big number: /(?<a.b>a)\\k'a.b-2147483648'/\ntoo big number: /(?<a.b>a)\\k'a.b+999999999999999999999'/\ntoo big number: /(?<a:b>a)\\k<a:b+2147483648>/\ntoo big number: /(?<a:b>a)\\k<a:b-2147483648>/\ntoo big number: /(?<a:b>a)\\k<a:b+999999999999999999999>/\ntoo big number: /(?<a:b>a)\\k'a:b+2147483648'/\ntoo big number: /(?<a:b>a)\\k'a:b-2147483648'/\ntoo big number: /(?<a:b>a)\\k'a:b+999999999999999999999'/\ntoo big number: /(?<+a>a)\\k<+a+2147483648>/\ntoo big number: /(?<+a>a)\\k<+a-2147483648>/\ntoo big number: /(?<+a>a)\\k<+a+999999999999999999999>/\ntoo big number: /(?<+a>a)\\k'+a+2147483648'/\ntoo big number: /(?<+a>a)\\k'+a-2147483648'/\ntoo big number: /(?<+a>a)\\k'+a+999999999999999999999'/\ntoo big number: /(?<:x>a)\\k<:x+2147483648>/\ntoo big number: /(?<:x>a)\\k<:x-2147483648>/\ntoo big number: /(?<:x>a)\\k<:x+999999999999999999999>/\ntoo big number: /(?<:x>a)\\k':x+2147483648'/\ntoo big number: /(?<:x>a)\\k':x-2147483648'/\ntoo big number: /(?<:x>a)\\k':x+999999999999999999999'/\ntoo big number: /(?< a>a)\\k< a+2147483648>/\ntoo big number: /(?< a>a)\\k< a-2147483648>/\ntoo big number: /(?< a>a)\\k< a+999999999999999999999>/\ntoo big number: /(?< a>a)\\k' a+2147483648'/\ntoo big number: /(?< a>a)\\k' a-2147483648'/\ntoo big number: /(?< a>a)\\k' a+999999999999999999999'/\ntoo big number: /(?<a\\b>a)\\k<a\\b+2147483648>/\ntoo big number: /(?<a\\b>a)\\k<a\\b-2147483648>/\ntoo big number: /(?<a\\b>a)\\k<a\\b+999999999999999999999>/\ntoo big number: /(?<a\\b>a)\\k'a\\b+2147483648'/\ntoo big number: /(?<a\\b>a)\\k'a\\b-2147483648'/\ntoo big number: /(?<a\\b>a)\\k'a\\b+999999999999999999999'/\ntoo big number: /(?<ä>a)\\k<ä+2147483648>/\ntoo big number: /(?<ä>a)\\k<ä-2147483648>/\ntoo big number: /(?<ä>a)\\k<ä+999999999999999999999>/\ntoo big number: /(?<ä>a)\\k'ä+2147483648'/\ntoo big number: /(?<ä>a)\\k'ä-2147483648'/\ntoo big number: /(?<ä>a)\\k'ä+999999999999999999999'/\ntoo big number: /(?<あ>a)\\k<あ+2147483648>/\ntoo big number: /(?<あ>a)\\k<あ-2147483648>/\ntoo big number: /(?<あ>a)\\k<あ+999999999999999999999>/\ntoo big number: /(?<あ>a)\\k'あ+2147483648'/\ntoo big number: /(?<あ>a)\\k'あ-2147483648'/\ntoo big number: /(?<あ>a)\\k'あ+999999999999999999999'/\ntoo big number: /(?<+1>a)\\k<+1+2147483648>/\ntoo big number: /(?<+1>a)\\k<+1-2147483648>/\ntoo big number: /(?<+1>a)\\k<+1+999999999999999999999>/\ntoo big number: /(?<+1>a)\\k'+1+2147483648'/\ntoo big number: /(?<+1>a)\\k'+1-2147483648'/\ntoo big number: /(?<+1>a)\\k'+1+999999999999999999999'/\ntoo big number: /(a)\\k<2147483648>/\ntoo big number: /(a)\\k<-2147483648>/\ntoo big number: /(a)\\g<2147483648>/\ntoo big number: /(a)\\g<-2147483648>/\ntoo big number: /(?<a>a)\\g<2147483648>/\n",
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['+2147483648', '-2147483648', '+999999999999999999999'])(
+  'Oversized nesting references reject before execution: %s',
+  (level) => {
+    expect(run(String.raw`puts :before;p /(?<a>a)\k<a${level}>/`)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test.each(['+2147483647', '-2147483647', '+0002147483647'])(
+  'Valid nesting limits retain unavailable classification: %s',
+  (level) => {
+    expect(run(String.raw`puts :before;p /(?<a>a)\k<a${level}>/`)).toMatchObject({
+      kind: 'executed',
+      stdout: 'before\n',
+      uncaughtException: '正規表現のネストレベル付き後方参照は、この採点環境では使えません。',
+    });
+  }
+);
+
+test('Numeric-looking capture names retain explicit capability classification', () => {
+  expect(run(String.raw`puts :before;p /(?<+2147483648>a)\k<+2147483648>/`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'before\n',
+    uncaughtException: '正規表現の特殊なキャプチャ名は、この採点環境では使えません。',
+  });
+});

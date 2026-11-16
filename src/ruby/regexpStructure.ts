@@ -98,6 +98,7 @@ function aliasedCaptureTokens(tokens: Token[]): { tokens: Token[]; nestingRefere
     nestingReference ||= reference.nesting;
     const numeric = /^-?\d+$/.test(reference.name) || (match[1] === 'g' && /^[+-]/.test(reference.name));
     if (numeric) {
+      validateReferenceNumber(reference.name);
       if (aliases.size > 0 && (reference.name !== '0' || match[1] === 'k'))
         throw new RegexpEncodingError('numbered backref/call is not allowed. (use name)');
       return { ...token, raw: `\\${match[1]}<${reference.name}>` };
@@ -127,7 +128,12 @@ function rubyReference(payload: string, backreference: boolean, closing: string)
   const offset = sign + 1;
   if (!/^[+-]\d+$/.test(payload.slice(offset)))
     throw new RegexpEncodingError(`invalid group name <${payload}${closing}>`);
+  validateReferenceNumber(payload.slice(offset));
   return { name: payload.slice(0, offset), nesting: true };
+}
+
+function validateReferenceNumber(value: string): void {
+  if (Math.abs(Number(value)) > 0x7f_ff_ff_ff) throw new RegexpEncodingError('too big number');
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- Source assertions are wrapped for AST parsing while group balance remains checked before recursive parsing.

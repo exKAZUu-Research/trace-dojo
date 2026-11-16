@@ -1297,6 +1297,26 @@ def('Array', 'drop', 1, function* (self: RArray, [countValue]) {
   if (count < 0) throw argumentError('attempt to drop negative size');
   return arr(self.items.slice(count));
 });
+def('Array', 'take_while', 0, function* (self: RArray, _args, block) {
+  if (!block) return makeEnumerator(self, 'take_while', []);
+  const boundary = yield* whileBoundary(self, block);
+  return arr(self.items.slice(0, boundary));
+});
+def('Array', 'drop_while', 0, function* (self: RArray, _args, block) {
+  if (!block) return makeEnumerator(self, 'drop_while', []);
+  const boundary = yield* whileBoundary(self, block);
+  return arr(self.items.slice(boundary));
+});
+
+function* whileBoundary(self: RArray, block: RProc): Gen<number> {
+  let index = 0;
+  for (; index < self.items.length; index++) {
+    rt().spend();
+    if (!truthy(yield* call(block, self.items[index]))) break;
+  }
+  return index;
+}
+
 def('Array', 'sum', [0, 1], (self: RArray, args, block) => sum(self, args, block, iterateArray));
 def('Array', ['inject', 'reduce'], [0, -1], (self: RArray, args, block) => inject(self, args, block));
 def('Array', 'max', [0, 1], function* (self: RArray, args, block) {
