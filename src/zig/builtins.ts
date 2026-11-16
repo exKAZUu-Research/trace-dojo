@@ -31,6 +31,7 @@ import {
   toNumber,
 } from './floats';
 import { importStd } from './library/std';
+import { ZigPanic } from './runtime';
 import { copyForStorage, known, newArray, runtime, type TExpr } from './semaBase';
 import {
   BOOL,
@@ -868,7 +869,14 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
   /** An expression computed from others, known when they all are. */
   protected combine(operands: readonly TExpr[], type: Type, compute: (values: Value[]) => Value, span: Span): TExpr {
     if (operands.every((operand) => operand.known)) {
-      return known(type, compute(operands.map((operand) => operand.value)), span);
+      try {
+        return known(type, compute(operands.map((operand) => operand.value)), span);
+      } catch (error) {
+        // Zig reports the safety check that known operands fail as a compile error.
+        if (error instanceof ZigPanic)
+          this.error(span, `値が決まっている計算が、実行時のエラー（${error.text}）になります。`);
+        throw error;
+      }
     }
     const evaluators = operands.map((operand) => operand.eval);
     return runtime(type, (frame) => compute(evaluators.map((evaluate) => evaluate(frame))), span);

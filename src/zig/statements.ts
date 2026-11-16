@@ -724,6 +724,10 @@ export abstract class StatementCompiler extends CallCompiler {
     return (frame) => new Jump('return', target, evaluate(frame));
   }
 
+  protected growsErrorSet(set: ErrorSetType): boolean {
+    return this.fn?.inferredErrors === set;
+  }
+
   /** Adds the errors a returned value may hold to the function's inferred error set. */
   private recordErrors(type: Type, value: TExpr | undefined): void {
     const inferred = this.fn?.inferredErrors;

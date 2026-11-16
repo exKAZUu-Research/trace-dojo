@@ -704,6 +704,16 @@ function single(captures: Capture[], node: Node): Capture {
 const COMPARISONS = new Set(['==', '!=', '<', '>', '<=', '>=']);
 
 function binaryExpression(node: Node, span: Span): Expression {
+  return binaryWith(
+    node,
+    span,
+    expression(node.childForFieldName('left') as Node),
+    expression(node.childForFieldName('right') as Node)
+  );
+}
+
+/** A binary expression with the operator of `node` and the given operands, which may differ from its children. */
+function binaryWith(node: Node, span: Span, leftOperand: Expression, rightOperand: Expression): Expression {
   const operatorNode = node.childForFieldName('operator') as Node;
   const operator = operatorNode.type as BinaryOperator;
   // Zig 0.17 has no `**` operator; its tokenizer reads two `*`s, which its parser rejects.
@@ -722,7 +732,35 @@ function binaryExpression(node: Node, span: Span): Expression {
       }
     }
   }
-  return { kind: 'binary', ...span, operator, left: expression(left), right: expression(right) };
+  return { kind: 'binary', ...span, operator, left: leftOperand, right: rightOperand };
+}
+
+interface RangeParts {
+  start: Expression;
+  end: Expression | undefined;
+}
+
+/**
+ * The two ends of a range such as `0..n - 1` in a for operand or a slice. Zig parses each end as a whole expression,
+ * while tree-sitter's grammar binds `..` tighter than any operator (`(0..n) - 1`), so the operators around it are
+ * moved back to the end they belong to. Returns undefined when `node` holds no range.
+ */
+function rangeParts(node: Node): RangeParts | undefined {
+  if (node.type === 'range_expression') {
+    const end = node.childForFieldName('right');
+    return { start: expression(node.childForFieldName('left') as Node), end: end ? expression(end) : undefined };
+  }
+  if (node.type !== 'binary_expression') return undefined;
+  const left = node.childForFieldName('left') as Node;
+  const right = node.childForFieldName('right') as Node;
+  const leftParts = rangeParts(left);
+  if (leftParts) {
+    if (!leftParts.end) fail(node, '書き方に誤りがあります。');
+    return { start: leftParts.start, end: binaryWith(node, spanOf(node), leftParts.end, expression(right)) };
+  }
+  const rightParts = rangeParts(right);
+  if (!rightParts) return undefined;
+  return { start: binaryWith(node, spanOf(node), expression(left), rightParts.start), end: rightParts.end };
 }
 
 function isSpace(char: string): boolean {
@@ -743,15 +781,14 @@ function indexExpression(node: Node, span: Span): Expression {
   const object = expression(node.childForFieldName('object') as Node);
   const indexNode = node.childForFieldName('index') as Node;
   const sentinelNode = node.childForFieldName('sentinel');
-  if (indexNode.type === 'range_expression') {
-    const start = indexNode.childForFieldName('left') as Node;
-    const end = indexNode.childForFieldName('right');
+  const range = rangeParts(indexNode);
+  if (range) {
     return {
       kind: 'slice',
       ...span,
       object,
-      start: expression(start),
-      end: end ? expression(end) : undefined,
+      start: range.start,
+      end: range.end,
       sentinel: sentinelNode ? expression(sentinelNode) : undefined,
     };
   }
@@ -845,7 +882,7 @@ function ifExpression(node: Node, span: Span): Expression {
     capture,
     consequent: expression(thenNode),
     elseCapture,
-    otherwise: otherwiseNode ? expression(otherwiseNode) : undefined,
+    otherwise: otherwiseNode ? elseBranch(otherwiseNode) : undefined,
   };
 }
 
@@ -895,7 +932,7 @@ function whileExpression(node: Node, span: Span, outerLabel: Label | undefined):
     continueExpression,
     body: expression(bodyNode),
     elseCapture,
-    otherwise: otherwiseNode ? expression(otherwiseNode) : undefined,
+    otherwise: otherwiseNode ? elseBranch(otherwiseNode) : undefined,
   };
 }
 
@@ -920,15 +957,9 @@ function forExpression(node: Node, span: Span, outerLabel: Label | undefined): E
       pendingRange = undefined;
       continue;
     }
-    if (child.type === 'range_expression') {
-      const start = child.childForFieldName('left') as Node;
-      const end = child.childForFieldName('right');
-      operands.push({
-        ...spanOf(child),
-        value: expression(start),
-        rangeEnd: end ? expression(end) : undefined,
-        isRange: true,
-      });
+    const range = rangeParts(child);
+    if (range) {
+      operands.push({ ...spanOf(child), value: range.start, rangeEnd: range.end, isRange: true });
     } else {
       operands.push({ ...spanOf(child), value: expression(child), isRange: false });
     }
@@ -960,8 +991,19 @@ function forExpression(node: Node, span: Span, outerLabel: Label | undefined): E
     operands,
     captures: payload(payloadNode),
     body: expression(bodyNode),
-    otherwise: otherwiseNode ? expression(otherwiseNode) : undefined,
+    otherwise: otherwiseNode ? elseBranch(otherwiseNode) : undefined,
   };
+}
+
+/**
+ * The expression after `else`. tree-sitter's grammar parses an assignment there, as in `else x = 2;`, as a variable
+ * declaration without `var`, the node it uses for assignment statements.
+ */
+function elseBranch(node: Node): Expression {
+  if (node.type !== 'variable_declaration') return expression(node);
+  const converted = variableStatement(node);
+  if (converted.kind !== 'expression') fail(node, '書き方に誤りがあります。');
+  return converted.expression;
 }
 
 function payload(node: Node): Capture[] {

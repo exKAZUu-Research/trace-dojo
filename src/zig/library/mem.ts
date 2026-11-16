@@ -9,6 +9,7 @@ import {
   optionalOf,
   pointerTo,
   sliceOf,
+  type StructField,
   type StructType,
   TYPE,
   type Type,
@@ -547,7 +548,11 @@ const MEMBERS: Record<string, () => Member> = {
   zeroes: fnMember('std.mem.zeroes', (sema, call) => {
     const [typeArg] = expectArgs(sema, call, 1, 'std.mem.zeroes');
     const type = sema.compileType(typeArg);
-    return known(type, zeroValue(type), call.span);
+    return known(
+      type,
+      zeroValue(type, (struct) => sema.structFields(struct, call.span)),
+      call.span
+    );
   }),
   cutPrefix: sliceSearch('std.mem.cutPrefix', 'slice', optionalOf(CONST_U8_SLICE), (h, n) => {
     const needle = n as unknown as Value[];
@@ -673,7 +678,7 @@ function sorter(name: string, stable: boolean): () => Member {
 }
 
 /** `std.mem.zeroes`: a value whose bits are all zero. */
-export function zeroValue(type: Type): Value {
+export function zeroValue(type: Type, fieldsOf: (type: StructType) => readonly StructField[]): Value {
   switch (type.kind) {
     case 'int':
     case 'enum': {
@@ -690,12 +695,12 @@ export function zeroValue(type: Type): Value {
     }
     case 'array': {
       return newArray(
-        Array.from({ length: type.length }, () => zeroValue(type.child)),
+        Array.from({ length: type.length }, () => zeroValue(type.child, fieldsOf)),
         type.sentinel
       );
     }
     case 'struct': {
-      return new ZStruct((type.fields ?? []).map((field) => zeroValue(field.type)));
+      return new ZStruct(fieldsOf(type).map((field) => zeroValue(field.type, fieldsOf)));
     }
     default: {
       return undefinedValue(type);

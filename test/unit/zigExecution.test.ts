@@ -65,6 +65,36 @@ pub fn main(init: std.process.Init) !void {
   });
 });
 
+test('ranges with arithmetic ends, assignments after else, decl literals, and mixed int and float operands run', () => {
+  const program = `const std = @import("std");
+const S = struct {
+    v: i32,
+    fn init(v: i32) S {
+        return .{ .v = v };
+    }
+};
+fn check(n: usize) !usize {
+    return if (n > 3) error.TooBig else n;
+}
+pub fn main() void {
+    const a = [_]i32{ 1, 3, 5, 7, 9 };
+    var n: usize = 3;
+    _ = &n;
+    for (0..n - 1) |i| std.debug.print("{d}", .{a[i + 1 ..][0]});
+    var lo: usize = 0;
+    var hi: usize = a.len;
+    while (lo < hi) {
+        const mid = (lo + hi) / 2;
+        if (a[mid] < 7) lo = mid + 1 else hi = mid;
+    }
+    const s: S = .init(4);
+    var x: f64 = 0.5;
+    _ = &x;
+    std.debug.print(" {d} {d} {d} {any} {!}\\n", .{ lo, s.v, x * s.v, a[n - 2 .. n + 1], check(n + 1) });
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({ stderr: '35 3 4 2 { 3, 5, 7 } error.TooBig\n' });
+});
+
 test('assigning an anonymous literal writes each field in turn, as result locations do', () => {
   const program = `const std = @import("std");
 pub fn main() void {

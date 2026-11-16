@@ -8,10 +8,10 @@ import {
   asBigFloat,
   BigFloat,
   bigFloatOf,
-  compareFloats,
   floatFromBigInt,
   floatOf,
   FORMATS,
+  isInfinite,
   isIntegral,
   roundTo,
   truncateToBigInt,
@@ -29,6 +29,7 @@ import {
   type ErrorSetType,
   errorUnionOf,
   fitsInt,
+  type FloatType,
   type IntType,
   intType,
   isComptimeOnly,
@@ -47,7 +48,7 @@ import {
 } from './types';
 import {
   type EnumLiteral,
-  type ErrorValue,
+  ErrorValue,
   type FnValue,
   NativeHandle,
   NULL,
@@ -199,6 +200,8 @@ export abstract class SemaBase implements SemaApi {
   abstract findDecl(type: Type, name: string): Decl | undefined;
   /** Evaluates a function call at compile time, as a container-level constant's initializer does. */
   protected abstract evaluateAtCompileTime(expression: TExpr): Value;
+  /** Whether `set` is the inferred error set (`!T`) of the function being analyzed, which takes in any error. */
+  protected abstract growsErrorSet(set: ErrorSetType): boolean;
 
   // Scopes ----------------------------------------------------------------------------------------------------------
 
@@ -528,15 +531,7 @@ export abstract class SemaBase implements SemaApi {
         return this.coerceToErrorUnion(expression, to, span);
       }
       case 'error_set': {
-        if (from.kind !== 'error_set') return undefined;
-        if (to.names === undefined) return { ...expression, type: to };
-        if (expression.known) {
-          const { name } = expression.value as ErrorValue;
-          if (!to.names.has(name)) this.error(span, `error.${name} は、エラー集合 ${typeName(to)} にありません。`);
-          return known(to, expression.value, span);
-        }
-        if (from.names && [...from.names].every((name) => to.names?.has(name))) return { ...expression, type: to };
-        return undefined;
+        return this.coerceToErrorSet(expression, to, span);
       }
       case 'pointer': {
         return this.coerceToPointer(expression, to, span);
@@ -614,7 +609,7 @@ export abstract class SemaBase implements SemaApi {
     if ((from.kind === 'comptime_int' || from.kind === 'int') && expression.known) {
       const integer = expression.value as bigint;
       const converted = floatFromBigInt(integer, to.bits);
-      if (truncateToBigInt(converted) !== integer || !Number.isFinite(Number(compareFloats(converted, 0) ?? 0))) {
+      if (isInfinite(converted) || truncateToBigInt(converted) !== integer) {
         this.error(span, `${typeName(to)} 型では、整数 ${integer} を表せません。`);
       }
       return known(to, converted, span);
@@ -625,8 +620,7 @@ export abstract class SemaBase implements SemaApi {
       return this.derived(expression, to, (value) => floatOf(asBigFloat(value as AnyFloat), to.bits));
     }
     if (from.kind === 'int') {
-      const magnitudeBits = from.signed ? from.bits - 1 : from.bits;
-      if (magnitudeBits > FORMATS[to.bits].precision) return undefined;
+      if (!intFitsFloatExactly(from, to)) return undefined;
       return this.derived(expression, to, (value) => floatFromBigInt(value as bigint, to.bits));
     }
     return undefined;
@@ -645,6 +639,23 @@ export abstract class SemaBase implements SemaApi {
     return this.derived(payload, to, (value) => new Some(value));
   }
 
+  private coerceToErrorSet(expression: TExpr, to: ErrorSetType, span: Span): TExpr | undefined {
+    const from = expression.type;
+    if (from.kind !== 'error_set') return undefined;
+    if (to.names === undefined) return { ...expression, type: to };
+    if (this.growsErrorSet(to)) {
+      addErrors(to, from, expression);
+      return { ...expression, type: to };
+    }
+    if (expression.known) {
+      const { name } = expression.value as ErrorValue;
+      if (!to.names.has(name)) this.error(span, `error.${name} は、エラー集合 ${typeName(to)} にありません。`);
+      return known(to, expression.value, span);
+    }
+    if (from.names && [...from.names].every((name) => to.names?.has(name))) return { ...expression, type: to };
+    return undefined;
+  }
+
   private coerceToErrorUnion(
     expression: TExpr,
     to: Extract<Type, { kind: 'error_union' }>,
@@ -652,6 +663,7 @@ export abstract class SemaBase implements SemaApi {
   ): TExpr | undefined {
     const from = expression.type;
     if (from.kind === 'error_union') {
+      if (this.growsErrorSet(to.errorSet)) addErrors(to.errorSet, from.errorSet, undefined);
       if (!errorSetIncludes(to.errorSet, from.errorSet) || !inMemoryCoercible(from.payload, to.payload))
         return undefined;
       return { ...expression, type: to };
@@ -830,8 +842,12 @@ export abstract class SemaBase implements SemaApi {
     }
     if (a.kind === 'float' && b.kind === 'float') return a.bits >= b.bits ? a : b;
     if ((a.kind === 'int' && b.kind === 'float') || (a.kind === 'float' && b.kind === 'int')) {
-      const allKnownInts = all.every((expression) => expression.type.kind !== 'int' || expression.known);
-      return allKnownInts ? (a.kind === 'float' ? a : b) : undefined;
+      const float = a.kind === 'float' ? a : (b as FloatType);
+      const exact = all.every(
+        (expression) =>
+          expression.type.kind !== 'int' || expression.known || intFitsFloatExactly(expression.type, float)
+      );
+      return exact ? float : undefined;
     }
     if (a.kind === 'enum_literal' && (b.kind === 'enum' || b.kind === 'union')) return b;
     if (b.kind === 'enum_literal' && (a.kind === 'enum' || a.kind === 'union')) return a;
@@ -875,6 +891,20 @@ function fractional(value: BigFloat, to: Type): string {
 
 function describeFloat(value: BigFloat): string {
   return String(floatOf(value, 64));
+}
+
+/** Adds the errors a value of an error set may hold to an inferred error set. */
+function addErrors(to: ErrorSetType, from: ErrorSetType, value: TExpr | undefined): void {
+  if (!to.names) return;
+  if (value?.known && value.value instanceof ErrorValue) to.names.add(value.value.name);
+  else if (from.names) for (const name of from.names) to.names.add(name);
+  else to.names = undefined;
+}
+
+/** Whether a float type represents every value of an integer type exactly, which lets them be peers at run time. */
+function intFitsFloatExactly(int: IntType, float: FloatType): boolean {
+  const magnitudeBits = int.signed ? int.bits - 1 : int.bits;
+  return magnitudeBits <= FORMATS[float.bits].precision;
 }
 
 /** Whether every value of one integer type fits another. */

@@ -1,4 +1,5 @@
 import type { Expression, Span } from '../ast';
+import { ZigPanic } from '../runtime';
 import { known, runtime, type SemaApi, type TExpr } from '../semaBase';
 import { BOOL, type EnumType, errorUnionOf, optionalOf, sliceOf, type Type, typeName, USIZE } from '../types';
 import { NULL, Pointer, Slice, type Value, ZArray } from '../values';
@@ -82,7 +83,14 @@ export function optionalIndex(index: number): Value {
 
 /** Computes a value from arguments, at compile time when they are all known. */
 export function computed(type: Type, args: readonly TExpr[], span: Span, compute: (values: Value[]) => Value): TExpr {
-  if (args.every((arg) => arg.known)) return known(type, compute(args.map((arg) => arg.value)), span);
+  if (args.every((arg) => arg.known)) {
+    try {
+      return known(type, compute(args.map((arg) => arg.value)), span);
+    } catch (error) {
+      // A library function runs when the program does, so a panic for known arguments still happens at run time.
+      if (!(error instanceof ZigPanic)) throw error;
+    }
+  }
   const evaluators = args.map((arg) => arg.eval);
   return runtime(
     type,

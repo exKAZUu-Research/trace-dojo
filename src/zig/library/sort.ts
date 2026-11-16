@@ -1,6 +1,7 @@
+import type { Span } from '../ast';
 // code-gauge-allow-file duplicateLines 25 -- Library types repeat the same shape of method on purpose, each over its own state.
 import type { Frame } from '../runtime';
-import { known, runtime } from '../semaBase';
+import { known, runtime, type SemaApi } from '../semaBase';
 import { BOOL, fnType, optionalOf, type StructType, type Type, typeName, USIZE, VOID } from '../types';
 import { FnValue, NULL, type Slice, type Value } from '../values';
 import { compareScalars, constSlice, generic, mutableSlice, ORDER } from './common';
@@ -33,6 +34,7 @@ function sorter(name: string, stable: boolean): () => Member {
     const items = mutableSlice(sema, itemsArg, type);
     const context = sema.compile(contextArg);
     const lessThan = sema.functionOf(sema.compile(lessThanArg), lessThanArg);
+    checkParams(sema, name, lessThan.params, [context.type, type, type], lessThanArg);
     const evaluateItems = items.eval;
     const evaluateContext = context.eval;
     return runtime(
@@ -57,6 +59,7 @@ function sorter(name: string, stable: boolean): () => Member {
 /** Functions of `(T, items, context, f)` that read the items with a function of the context and elements. */
 function reader(
   name: string,
+  elementCount: 1 | 2,
   resultType: (type: Type) => Type,
   compute: (items: Value[], call: (args: Value[]) => Value) => Value
 ): () => Member {
@@ -64,6 +67,7 @@ function reader(
     const items = constSlice(sema, itemsArg, type);
     const context = sema.compile(contextArg);
     const fn = sema.functionOf(sema.compile(fnArg), fnArg);
+    checkParams(sema, name, fn.params, [context.type, ...Array.from({ length: elementCount }, () => type)], fnArg);
     const evaluateItems = items.eval;
     const evaluateContext = context.eval;
     return runtime(
@@ -79,6 +83,21 @@ function reader(
       call.span
     );
   });
+}
+
+/** Zig requires the function's parameters to be exactly the context's type followed by the element type. */
+function checkParams(
+  sema: SemaApi,
+  name: string,
+  params: readonly Type[],
+  expected: readonly Type[],
+  span: Span
+): void {
+  if (params.length === expected.length && params.every((param, index) => param === expected[index])) return;
+  sema.error(
+    span,
+    `${name} に渡す関数の引数は、(${expected.map((type) => typeName(type)).join(', ')}) にしてください。`
+  );
 }
 
 function binarySearch(items: Value[], order: (item: Value) => bigint): Value {
@@ -120,6 +139,7 @@ const MEMBERS: Record<string, () => Member> = {
   pdq: sorter('std.sort.pdq', false),
   isSorted: reader(
     'std.sort.isSorted',
+    2,
     () => BOOL,
     (items, call) => {
       for (let index = 1; index < items.length; index++)
@@ -129,26 +149,31 @@ const MEMBERS: Record<string, () => Member> = {
   ),
   binarySearch: reader(
     'std.sort.binarySearch',
+    1,
     () => optionalOf(USIZE),
     (items, call) => binarySearch(items, (item) => call([item]) as bigint)
   ),
   lowerBound: reader(
     'std.sort.lowerBound',
+    1,
     () => USIZE,
     (items, call) => BigInt(partitionPoint(items, (item) => (call([item]) as bigint) === 2n))
   ),
   upperBound: reader(
     'std.sort.upperBound',
+    1,
     () => USIZE,
     (items, call) => BigInt(partitionPoint(items, (item) => (call([item]) as bigint) !== 0n))
   ),
   partitionPoint: reader(
     'std.sort.partitionPoint',
+    1,
     () => USIZE,
     (items, call) => BigInt(partitionPoint(items, (item) => call([item]) as boolean))
   ),
   argMin: reader(
     'std.sort.argMin',
+    2,
     () => optionalOf(USIZE),
     (items, call) => {
       if (items.length === 0) return NULL;
@@ -159,6 +184,7 @@ const MEMBERS: Record<string, () => Member> = {
   ),
   argMax: reader(
     'std.sort.argMax',
+    2,
     () => optionalOf(USIZE),
     (items, call) => {
       if (items.length === 0) return NULL;
@@ -169,6 +195,7 @@ const MEMBERS: Record<string, () => Member> = {
   ),
   min: reader(
     'std.sort.min',
+    2,
     (type) => optionalOf(type),
     (items, call) => {
       if (items.length === 0) return NULL;
@@ -179,6 +206,7 @@ const MEMBERS: Record<string, () => Member> = {
   ),
   max: reader(
     'std.sort.max',
+    2,
     (type) => optionalOf(type),
     (items, call) => {
       if (items.length === 0) return NULL;

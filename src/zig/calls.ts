@@ -66,6 +66,15 @@ export abstract class CallCompiler extends BuiltinCompiler {
       const field = this.fieldAccess(callee);
       return this.callValue(field, undefined, expression, resultType);
     }
+    if (callee.kind === 'enumLiteral' && resultType) {
+      // A decl literal such as `.init(42)` names a declaration of the result type, seen through `?` and `!`.
+      let namespace = resultType;
+      while (namespace.kind === 'optional' || namespace.kind === 'error_union') {
+        namespace = namespace.kind === 'optional' ? namespace.child : namespace.payload;
+      }
+      const member = this.typeMember(namespace, callee.name, callee);
+      return this.callValue(member, undefined, expression, resultType);
+    }
     const target = this.compile(callee);
     return this.callValue(target, undefined, expression, resultType);
   }
