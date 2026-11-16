@@ -299,7 +299,7 @@ class AstChecker {
         crossedNamespace = true;
       }
     }
-    this.error(span, `「${name}」は宣言されていません。`);
+    if (primitiveType(name) === undefined) this.error(span, `「${name}」は宣言されていません。`);
   }
 
   private capture(capture: Capture | undefined): void {

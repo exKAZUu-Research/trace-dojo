@@ -20,8 +20,7 @@ import {
   USIZE,
   VOID,
 } from '../types';
-import type { Pointer} from '../values';
-import { ErrorValue, FnValue, NULL, Slice, Some, type Value, ZArray, ZStruct, ZUnion } from '../values';
+import { ErrorValue, FnValue, NULL, type Pointer, Slice, Some, type Value, ZArray, ZStruct, ZUnion } from '../values';
 import { computed, constSlice, elements, equalValues, mutableSlice, newSlice } from './common';
 import { ALLOCATOR, ALLOCATOR_ERROR, ERROR_OUT_OF_MEMORY } from './heap';
 import { addMembers, compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';

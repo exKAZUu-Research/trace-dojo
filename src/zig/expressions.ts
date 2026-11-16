@@ -238,6 +238,9 @@ export abstract class ExpressionCompiler extends SemaBase {
   protected identifier(name: string, span: Span): TExpr {
     const binding = this.lookup(name);
     if (!binding) {
+      // tree-sitter's grammar lacks some primitive type names, such as `f80`.
+      const primitive = primitiveType(name);
+      if (primitive) return known(TYPE, primitive, span);
       return this.error(span, `「${name}」は宣言されていません。`);
     }
     if (binding.kind === 'local') return this.localReference(binding, span);

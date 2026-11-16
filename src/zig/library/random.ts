@@ -18,8 +18,7 @@ import {
   VOID,
   wrapInt,
 } from '../types';
-import type { Pointer, Slice} from '../values';
-import { NativeHandle, type Value, ZArray, ZStruct } from '../values';
+import { NativeHandle, type Pointer, type Slice, type Value, ZArray, ZStruct } from '../values';
 import { addMembers, compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
 
 const MASK = (1n << 64n) - 1n;
@@ -124,7 +123,8 @@ function randomFloat(state: ZArray, bits: 32 | 64): number {
     let leading = clz64(rand);
     if (leading >= 41) {
       leading = 41 + clz64(randomInt(state, U64));
-      if (leading === 41 + 64) leading += clz64(BigInt.asUintN(32, randomInt(state, intType(false, 32))) | 0x7_ffn) - 32;
+      if (leading === 41 + 64)
+        leading += clz64(BigInt.asUintN(32, randomInt(state, intType(false, 32))) | 0x7_ffn) - 32;
     }
     const mantissa = Number(rand & 0x7f_ff_ffn);
     const word = ((126 - leading) << 23) | mantissa;
