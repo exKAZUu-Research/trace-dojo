@@ -633,7 +633,7 @@ class Renamer {
   }
 
   // code-gauge-allow functionCognitiveComplexity 22 -- Class declarations combine signatures, defaults, and fixities.
-  // code-gauge-allow functionNcss 35 -- Class declarations combine signatures, defaults, and fixities.
+  // code-gauge-allow functionNcss 37 -- Class declarations combine signatures, defaults, and fixities.
   private renameClass(decl: Extract<Decl, { kind: 'class' }>): void {
     const like = this.ownTypes.get(decl.name.name) as { kind: 'class'; entity: ClassEntity };
     const entity = like.entity;
@@ -671,7 +671,9 @@ class Renamer {
           `${binding.names[0].name} は、クラス ${entity.name} のメソッドではありません。`
         );
       }
-      defaults.push(this.renameFunBinding(binding, { kind: 'global', entity: method }, new LocalScope()));
+      const renamed = this.renameFunBinding(binding, { kind: 'global', entity: method }, new LocalScope());
+      renamed.sig = methods.find((candidate) => candidate.entity === method)?.sig;
+      defaults.push(renamed);
     }
     for (const member of decl.decls) {
       if (member.kind === 'fixity') continue;

@@ -370,3 +370,26 @@ test('shared polymorphic values keep each call display instantiation separate', 
     { kind: 'object', entries: { 0: { kind: 'array', entries: {} } } },
   ]);
 });
+
+test.each(['c::a->IO () -- atomic', 'c::a\n   ->IO () -- atomic'])(
+  'class defaults retain atomic signature spans: %s',
+  (signature) => {
+    const source = `class C a where\n ${signature}\n c _=do\n   print(1::Int)\n   print(2::Int)\ninstance C Int\nmain=c(0::Int)`;
+    const recording = traceProgram('haskell', source, source);
+    expect(recording.stdout).toBe('1\n2\n');
+    expect(recording.traceItems.every(({ callLines }) => callLines.length === 0)).toBe(true);
+  }
+);
+
+test.each([
+  'walk _ 0=return ()\nwalk t n=do\n  forward t\n  walk t(n-1)',
+  'walk _ 0=pure ()\nwalk t n=do\n  forward t\n  walk t(n-1)',
+  'walk t n | n==0=return ()\n         | otherwise=do\n  forward t\n  walk t(n-1)',
+])('tail loops have no call-line epilogue with base clause %s', (definition) => {
+  const prefix = 'main=do\n  t<-newTurtle\n  walk t(3::Int)\n';
+  const source = prefix + definition;
+  const control = prefix + 'walk t n=if n>0 then do\n  forward t\n  walk t(n-1)\n  else return ()';
+  expect(withoutLines(traceProgram('haskell', source, source).traceItems)).toEqual(
+    withoutLines(traceProgram('haskell', control, control).traceItems)
+  );
+});

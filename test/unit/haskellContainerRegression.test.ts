@@ -310,3 +310,18 @@ test.each(['Data.Map', 'Data.Map.Strict'])(
     });
   }
 );
+
+test.each(['Data.Set', 'Data.Map', 'Data.Map.Strict'])(
+  'neighboring searches preserve Ord method argument order in %s',
+  (module) => {
+    const single = module === 'Data.Set' ? 'M.singleton(K 1 (error "stored"))' : 'M.singleton(K 1 (error "stored")) ()';
+    for (const search of ['lookupLT', 'lookupLE', 'lookupGT', 'lookupGE']) {
+      const source = `import qualified ${module} as M\ndata K=K Int Int deriving Show\ninstance Eq K where K a b==K c d=a==c && b==d\ninstance Ord K where compare(K a b)(K c d)=case compare a c of EQ->compare b d; x->x\nmain=print(M.${search}(K 1(error "key"))(${single}))`;
+      expect(executeProgram('haskell', source)).toMatchObject({
+        kind: 'executed',
+        stdout: '',
+        uncaughtException: 'key',
+      });
+    }
+  }
+);

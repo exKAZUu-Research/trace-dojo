@@ -371,3 +371,14 @@ test.each([
 ])('entry and IO annotations retain dictionary evidence: %s', (source) => {
   expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
+
+test.each([
+  'module Example(x) where\n(main,x)=(putStrLn "ok",1::Int)',
+  'module Example() where\nJust main=Just(putStrLn "ok")',
+])('named modules run their unexported pattern-bound main: %s', (source) => {
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'ok\n',
+    uncaughtException: undefined,
+  });
+});

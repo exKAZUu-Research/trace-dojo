@@ -2,7 +2,7 @@ import { CONS_CON, NIL_CON } from './builtinTypes';
 import type { CaseCore, Core } from './core';
 import { constructorFieldType, slotDisplayType, typedSlot, UNKNOWN_TYPE } from './displayTypes';
 import type { ConInfo } from './entities';
-import { type DoFrame, finishMatch, runBlock, statementDone, unwindBlock } from './ioBlocks';
+import { type DoFrame, finishMatch, markTailSelfCall, runBlock, statementDone, unwindBlock } from './ioBlocks';
 import type { Primitive } from './primitives';
 import type { Runtime } from './runtime';
 import type { Type } from './types';
@@ -374,6 +374,7 @@ export class Machine {
     // A call counts as an operation, as does a primitive's (in `stepPrim`), which may charge more for its own work.
     this.runtime.spend();
     this.runtime.allocate(fn.lam.size);
+    markTailSelfCall(this, fn.lam.info);
     const frameEnv = new Env(fn.lam.size, fn.env, fn.lam.info);
     for (let index = 0; index < arity; index++) frameEnv.slots[index] = args[index];
     state.evaluate(fn.lam.body, frameEnv);

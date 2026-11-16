@@ -187,9 +187,8 @@ formatOne spec@(Spec minus plus space zero alt width prec mods c) u = case u of
         Just _ -> False
     pad numeric s = case width of
       Nothing -> s
-      Just w -> let n = w - length s in
-        if n <= 0 then s
-        else if minus then s ++ replicate n ' '
+      Just w -> if w <= length s then s else let n = w - length s in
+        if minus then s ++ replicate n ' '
         else if zero && (not numeric || zeroPadding) then (if numeric then zeroPad n s else replicate n '0' ++ s)
         else replicate n ' ' ++ s
     zeroPad n (sign:rest) | sign ${BT}elem${BT} "+- " = sign : zeroPad n rest

@@ -1,4 +1,4 @@
-import type { IODoCore, VisibleVar } from './core';
+import type { FunctionInfo, IODoCore, VisibleVar } from './core';
 import type { Machine, RunState } from './machine';
 import type { TraceFrame } from './runtime';
 import type { Env, IODo, Slot } from './values';
@@ -69,6 +69,18 @@ export function runBlock(machine: Machine, state: RunState, action: IODo): void 
     runtime.steps.stepBinding(action.code.bindingRow, action.code.bindingStoresAnswer ?? false);
   }
   startStatement(machine, state, frame);
+}
+
+export function markTailSelfCall(machine: Machine, info: FunctionInfo | undefined): void {
+  const top = machine.runtime.frames.at(-1);
+  if (!info || top?.info !== info || top === machine.runtime.frames[0]) return;
+  let index = machine.stack.length - 1;
+  while (machine.stack[index]?.k === 'update') index--;
+  if (machine.stack[index]?.k !== 'runIO') return;
+  const caller = machine.stack[index - 1];
+  if (caller?.k !== 'do' || caller.traceFrame !== top || caller.index !== caller.code.stmts.length - 1) return;
+  const stmt = caller.code.stmts[caller.index];
+  if (stmt.kind === 'exp' && stmt.onlyCalls) caller.silent = true;
 }
 
 /**

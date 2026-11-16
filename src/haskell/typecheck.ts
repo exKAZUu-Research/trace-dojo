@@ -55,7 +55,7 @@ export interface TypecheckResult {
   instances: CheckedInstance[];
   /** The default method implementations of the module's classes. */
   defaults: RBinding[];
-  mainEvidence: Evidence[];
+  main?: { entity: ValueEntity; evidence: Evidence[] };
 }
 
 export interface TypecheckOptions {
@@ -83,9 +83,9 @@ export function typecheckModule(module: RModule, options: TypecheckOptions): Typ
   for (const declared of [...instanceDecls, ...derived])
     instances.push({ ...checkInstanceMethods(checker, declared), sourceDefined: instanceDecls.includes(declared) });
   const defaults = module.classes.flatMap((decl) => checkDefaults(checker, decl));
-  const mainEvidence = options.isProgram ? checkMain(checker, module, options.builtins) : [];
+  const main = options.isProgram ? checkMain(checker, module, options.builtins) : undefined;
   checker.solveTop();
-  return { instances, defaults, mainEvidence };
+  return { instances, defaults, main };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -607,7 +607,11 @@ function sameContext(a: Pred[], b: Pred[]): boolean {
 // ---------------------------------------------------------------------------------------------------------------
 // main
 
-function checkMain(checker: Checker, module: RModule, builtins: Builtins): Evidence[] {
+function checkMain(
+  checker: Checker,
+  module: RModule,
+  builtins: Builtins
+): { entity: ValueEntity; evidence: Evidence[] } {
   const main = module.exports.values.get('main');
   const binding = module.values.bindings.find((candidate) =>
     candidate.k === 'pat'
@@ -634,5 +638,5 @@ function checkMain(checker: Checker, module: RModule, builtins: Builtins): Evide
     binding.span,
     'main の型は IO でなければなりません'
   );
-  return instantiated.evidence;
+  return { entity, evidence: instantiated.evidence };
 }

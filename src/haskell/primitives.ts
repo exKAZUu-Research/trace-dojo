@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 504 -- The primitive table lists every built-in operation the Haskell library calls.
+// code-gauge-allow-file fileNcss 507 -- The primitive table lists every built-in operation the Haskell library calls.
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { CONS_CON, tupleCon, UNIT_CON } from './builtinTypes';
 import type { ConInfo } from './entities';
@@ -242,13 +242,17 @@ strict('integerAnd', 2, ([a, b]) => (a as bigint) & (b as bigint));
 strict('integerOr', 2, ([a, b]) => (a as bigint) | (b as bigint));
 strict('integerXor', 2, ([a, b]) => (a as bigint) ^ (b as bigint));
 strict('integerComplement', 1, ([a]) => ~(a as bigint));
-strict('integerShiftL', 2, ([a, b], runtime) => {
-  const count = shiftCount(b);
-  if (a === 0n) return 0n;
-  runtime.spend(Math.ceil((hexDigits(a as bigint) * 4 + Number(count)) / 64));
-  return (a as bigint) << count;
+define('integerShiftL', 2, [1], ([a, b], runtime) => {
+  const count = shiftCount(b as bigint);
+  const value = runtime.machine.force(a) as bigint;
+  if (value === 0n) return 0n;
+  runtime.spend(Math.ceil((hexDigits(value) * 4 + Number(count)) / 64));
+  return value << count;
 });
-strict('integerShiftR', 2, ([a, b]) => (a as bigint) >> shiftCount(b));
+define('integerShiftR', 2, [1], ([a, b], runtime) => {
+  const count = shiftCount(b as bigint);
+  return (runtime.machine.force(a) as bigint) >> count;
+});
 strict('integerPopCount', 1, ([a]) => {
   const value = a as bigint;
   const count = countOnes(value < 0n ? -value : value);

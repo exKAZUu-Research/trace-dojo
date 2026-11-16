@@ -347,16 +347,16 @@ link2 l@(SBin sl kl ll lr) r@(SBin sr kr rl rr) =
   else glue l r
 
 lookupLT :: Ord a => a -> Set a -> Maybe a
-lookupLT x tree = x ${BT}seq${BT} (nearest (\y -> y < x) False) tree
+lookupLT x tree = x ${BT}seq${BT} (nearest (\y -> if x <= y then LT else GT) False) tree
 
 lookupGT :: Ord a => a -> Set a -> Maybe a
-lookupGT x tree = x ${BT}seq${BT} (nearest (\y -> y > x) True) tree
+lookupGT x tree = x ${BT}seq${BT} (nearest (\y -> if x < y then LT else GT) True) tree
 
 lookupLE :: Ord a => a -> Set a -> Maybe a
-lookupLE x tree = x ${BT}seq${BT} (nearest (\y -> y <= x) False) tree
+lookupLE x tree = x ${BT}seq${BT} (nearest (compare x) False) tree
 
 lookupGE :: Ord a => a -> Set a -> Maybe a
-lookupGE x tree = x ${BT}seq${BT} (nearest (\y -> y >= x) True) tree
+lookupGE x tree = x ${BT}seq${BT} (nearest (compare x) True) tree
 
 instance Eq a => Eq (Set a) where
   a == b = size a == size b && toAscList a == toAscList b
@@ -388,15 +388,13 @@ instance Foldable Set where
   sum s = B.sum (toAscList s)
   product s = B.product (toAscList s)
 
-nearest :: (a -> Bool) -> Bool -> Set a -> Maybe a
-nearest _ _ STip = Nothing
-nearest matches lower (SBin _ x l r) =
-  let preferred = if lower then l else r
-      other = if lower then r else l
-  in if matches x then case nearest matches lower preferred of
-       Just found -> Just found
-       Nothing -> Just x
-     else nearest matches lower other
+nearest :: (a -> Ordering) -> Bool -> Set a -> Maybe a
+nearest compareKey lower = go Nothing
+  where go best STip = best
+        go best (SBin _ x l r) = case compareKey x of
+          EQ -> Just x
+          LT -> go (if lower then Just x else best) l
+          GT -> go (if lower then best else Just x) r
 
 powerSet :: Set a -> Set (Set a)
 powerSet s = fromDistinctAscList (B.map fromDistinctAscList (subsets (toAscList s)))
@@ -942,16 +940,16 @@ splitAt n m = if n >= size m then (m,Tip) else go n m
           EQ -> strictPair l (insertMin k x r)
 
 lookupLT :: Ord k => k -> Map k v -> Maybe (k, v)
-lookupLT k tree = k ${BT}seq${BT} (nearest (\key -> key < k) False) tree
+lookupLT k tree = k ${BT}seq${BT} (nearest (\key -> if k <= key then LT else GT) False) tree
 
 lookupGT :: Ord k => k -> Map k v -> Maybe (k, v)
-lookupGT k tree = k ${BT}seq${BT} (nearest (\key -> key > k) True) tree
+lookupGT k tree = k ${BT}seq${BT} (nearest (\key -> if k < key then LT else GT) True) tree
 
 lookupLE :: Ord k => k -> Map k v -> Maybe (k, v)
-lookupLE k tree = k ${BT}seq${BT} (nearest (\key -> key <= k) False) tree
+lookupLE k tree = k ${BT}seq${BT} (nearest (compare k) False) tree
 
 lookupGE :: Ord k => k -> Map k v -> Maybe (k, v)
-lookupGE k tree = k ${BT}seq${BT} (nearest (\key -> key >= k) True) tree
+lookupGE k tree = k ${BT}seq${BT} (nearest (compare k) True) tree
 
 split :: Ord k => k -> Map k a -> (Map k a, Map k a)
 split k m = case splitLookup k m of (l,_,r) -> (l,r)
@@ -990,15 +988,13 @@ instance Ord k => Semigroup (Map k v) where
 instance Ord k => Monoid (Map k v) where
   mempty = Tip
 
-nearest :: (k -> Bool) -> Bool -> Map k a -> Maybe (k,a)
-nearest _ _ Tip = Nothing
-nearest matches lower (Bin _ k x l r) =
-  let preferred = if lower then l else r
-      other = if lower then r else l
-  in if matches k then case nearest matches lower preferred of
-       Just found -> Just found
-       Nothing -> Just (k,x)
-     else nearest matches lower other
+nearest :: (k -> Ordering) -> Bool -> Map k a -> Maybe (k,a)
+nearest compareKey lower = go Nothing
+  where go best Tip = best
+        go best (Bin _ k x l r) = case compareKey k of
+          EQ -> Just (k,x)
+          LT -> go (if lower then Just (k,x) else best) l
+          GT -> go (if lower then best else Just (k,x)) r
 
 mapAccum :: (a -> b -> (a,c)) -> a -> Map k b -> (a,Map k c)
 mapAccum f = mapAccumWithKey (\a _ x -> f a x)

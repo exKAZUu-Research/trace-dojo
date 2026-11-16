@@ -308,3 +308,29 @@ test('printf integral modifiers retain unsigned widths and reject character conv
     uncaughtException: 'printf: illegal char conversion',
   });
 });
+
+test.each(['%*d', '%*s', '%*f'])('minimum dynamic printf widths do not overflow padding: %s', (format) => {
+  const value = format.endsWith('s') ? '"ab"' : format.endsWith('f') ? '(1.5::Double)' : '(2::Int)';
+  const expected = format.endsWith('s') ? '[ab]' : format.endsWith('f') ? '[1.5]' : '[2]';
+  expect(
+    executeProgram('haskell', `import Text.Printf\nmain=printf "[${format}]" (minBound::Int) ${value}`)
+  ).toMatchObject({ kind: 'executed', stdout: expected, uncaughtException: undefined });
+});
+
+test.each(['shiftL', 'shiftR'])('Integer %s validates the count before forcing its value', (shift) => {
+  for (const [count, uncaughtException] of [
+    ['(-1)', 'arithmetic overflow'],
+    ['error "count"', 'count'],
+  ]) {
+    const source = `import Data.Bits\nmain=print(${shift} (error "value"::Integer) (${count}))`;
+    expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
+  }
+  for (const type of ['Int', 'Word']) {
+    const source = `import Data.Bits\nmain=print(${shift} (error "value"::${type}) (-1))`;
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: '',
+      uncaughtException: 'value',
+    });
+  }
+});

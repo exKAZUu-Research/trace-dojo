@@ -7,7 +7,6 @@ import { ClassEnv } from './classEnv';
 import { Codegen, type CodegenSupport } from './codegen';
 import type { GlobalDef } from './core';
 import { type ClassEntity, type ConInfo, nextId, type TypeEntity, type ValueEntity } from './entities';
-import { compileError } from './errors';
 import type { Builtins } from './infer';
 import { LIBRARY_SOURCES, PUBLIC_MODULES, UNSUPPORTED_MODULES, UNSUPPORTED_VALUES } from './library';
 import { KNOWN_LIBRARY_TYPES, KNOWN_LIBRARY_VALUES } from './library/knownValues';
@@ -380,8 +379,8 @@ export function compileProgram(source: string, atomicRows?: ReadonlySet<number>,
   for (const binding of checked.defaults) codegen.compileDefault(binding);
   const misplaced = codegen.checkAtomicClaims();
   if (misplaced !== undefined) throw new CompileError([{ row: misplaced, message: misplacedHaskellAtomicMessage }]);
-  const main = renamed.exports.values.get('main') ?? findMain(renamed);
-  return { main: codegen.compileEntry(main, checked.mainEvidence) };
+  assert.ok(checked.main);
+  return { main: codegen.compileEntry(checked.main.entity, checked.main.evidence) };
 }
 
 function assertPublicExports(name: string, exports: ExportTable): void {
@@ -390,15 +389,6 @@ function assertPublicExports(name: string, exports: ExportTable): void {
   for (const value of exports.values.keys())
     assert.ok(!values || values.includes(value), `${name} does not export ${value}`);
   for (const type of exports.types.keys()) assert.ok(!types || types.includes(type), `${name} does not export ${type}`);
-}
-
-function findMain(module: RModule): ValueEntity {
-  for (const binding of module.values.bindings) {
-    if (binding.k === 'fun' && binding.binder.kind === 'global' && binding.binder.entity.name === 'main') {
-      return binding.binder.entity;
-    }
-  }
-  throw compileError(0, 'main が定義されていません。');
 }
 
 export type { ConInfo };
