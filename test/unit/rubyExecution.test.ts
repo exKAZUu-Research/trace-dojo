@@ -33408,3 +33408,1667 @@ test.each(numericConversionRefusals)(
     expect(run(source)).toMatchObject({ kind: 'executed', uncaughtException: message });
   }
 );
+
+const nativeProtectedConversionControlCases = [
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'rational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'rational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'rational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'rational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'rational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'rational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'rational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'rational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'rational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'rational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'rational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'rational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'rational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'rational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'rational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'rational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'rational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'rational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'rational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'rational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'rational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'rational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'rational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'rational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'rational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'rational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'rational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'rational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'rational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'rational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'rational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'rational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'rational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'rational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'rational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'rational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'rational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'rational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'rational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'rational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'rational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'rational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'rational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'rational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'rational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'rational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'rational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'rational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'rational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'rational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'rational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'rational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'rational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;public;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'rational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(9/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(9/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(1/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(1/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(9/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(9/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(1/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(1/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(9/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(9/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(1/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(1/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;private;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(9/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(9/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(1/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(1/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(9/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(9/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(1/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(1/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(9/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(9/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(1/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n(1/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nrational\n(2/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nrational\n(2/3)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;protected;def to_r;puts :rational;2r;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nrational\n(3/2)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n9\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n9\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n9\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n:escaped\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n:escaped\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n:escaped\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n:escaped\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n:escaped\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n:escaped\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nRuntimeError\n"boom"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nRuntimeError\n"boom"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nRuntimeError\n"boom"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nSystemExit\n"exit"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nSystemExit\n"exit"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nSystemExit\n"exit"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nUncaughtThrowError\n"uncaught throw :other"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nUncaughtThrowError\n"uncaught throw :other"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nUncaughtThrowError\n"uncaught throw :other"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;public;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n9\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n9\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n9\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n:escaped\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n:escaped\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n:escaped\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n:escaped\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n:escaped\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n:escaped\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nRuntimeError\n"boom"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nRuntimeError\n"boom"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nRuntimeError\n"boom"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nSystemExit\n"exit"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nSystemExit\n"exit"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nSystemExit\n"exit"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nUncaughtThrowError\n"uncaught throw :other"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nUncaughtThrowError\n"uncaught throw :other"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nUncaughtThrowError\n"uncaught throw :other"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;private;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n9\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n9\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n9\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n:escaped\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n:escaped\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n:escaped\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n:escaped\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n:escaped\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\n:escaped\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{next 9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{n+=1;redo if n<2;9}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{begin;n+=1;raise "again" if n<2;9;rescue;retry;end}};:outer_after;end;p outer',
+    'hook\nensure\nnil\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nRuntimeError\n"boom"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nRuntimeError\n"boom"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nRuntimeError\n"boom"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'hook\nensure\n"boom"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nSystemExit\n"exit"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nSystemExit\n"exit"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nSystemExit\n"exit"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{exit 0}};:outer_after;end;p outer',
+    'hook\nensure\n"exit"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nUncaughtThrowError\n"uncaught throw :other"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nUncaughtThrowError\n"uncaught throw :other"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nUncaughtThrowError\n"uncaught throw :other"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;protected;def to_r;puts :hook;begin;@cb.call;ensure;puts :ensure;p $!&.message;end;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(3,x,exception:false);rescue Exception=>e;p e.class,e.message;end;:after;end;def outer;n=0;p catch(:done){drive{throw :other,9}};:outer_after;end;p outer',
+    'hook\nensure\n"uncaught throw :other"\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{throw :done,9};p catch(:done){begin;p Rational(3);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    '(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{throw :done,9};p catch(:done){begin;p Rational(3,1r/2);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    'hook\n(6/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{throw :done,9};p catch(:done){begin;p Rational(3,1r/2,exception:false);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    'hook\n(6/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{return :escaped};p catch(:done){begin;p Rational(3);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    '(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{return :escaped};p catch(:done){begin;p Rational(3,1r/2);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    'hook\n(6/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{return :escaped};p catch(:done){begin;p Rational(3,1r/2,exception:false);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    'hook\n(6/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{break :escaped};p catch(:done){begin;p Rational(3);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    '(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{break :escaped};p catch(:done){begin;p Rational(3,1r/2);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    'hook\n(6/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{break :escaped};p catch(:done){begin;p Rational(3,1r/2,exception:false);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    'hook\n(6/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{next 9};p catch(:done){begin;p Rational(3);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    '(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{next 9};p catch(:done){begin;p Rational(3,1r/2);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    'hook\n(6/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{next 9};p catch(:done){begin;p Rational(3,1r/2,exception:false);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    'hook\n(6/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{n+=1;redo if n<2;9};p catch(:done){begin;p Rational(3);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    '(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{n+=1;redo if n<2;9};p catch(:done){begin;p Rational(3,1r/2);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    'hook\n(6/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{n+=1;redo if n<2;9};p catch(:done){begin;p Rational(3,1r/2,exception:false);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    'hook\n(6/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{begin;n+=1;raise "again" if n<2;9;rescue;retry;end};p catch(:done){begin;p Rational(3);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    '(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{begin;n+=1;raise "again" if n<2;9;rescue;retry;end};p catch(:done){begin;p Rational(3,1r/2);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    'hook\n(6/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{begin;n+=1;raise "again" if n<2;9;rescue;retry;end};p catch(:done){begin;p Rational(3,1r/2,exception:false);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    'hook\n(6/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{raise "boom"};p catch(:done){begin;p Rational(3);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    '(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{raise "boom"};p catch(:done){begin;p Rational(3,1r/2);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    'hook\n(6/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{raise "boom"};p catch(:done){begin;p Rational(3,1r/2,exception:false);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    'hook\n(6/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{exit 0};p catch(:done){begin;p Rational(3);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    '(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{exit 0};p catch(:done){begin;p Rational(3,1r/2);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    'hook\n(6/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{exit 0};p catch(:done){begin;p Rational(3,1r/2,exception:false);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    'hook\n(6/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{throw :other,9};p catch(:done){begin;p Rational(3);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    '(3/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{throw :other,9};p catch(:done){begin;p Rational(3,1r/2);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    'hook\n(6/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class Integer;def to_r;puts :hook;$cb.call;end;end;def outer;n=0;$cb=proc{throw :other,9};p catch(:done){begin;p Rational(3,1r/2,exception:false);rescue Exception=>e;p e.class,e.message;end;:after};:outer_after;end;p outer',
+    'hook\n(6/1)\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def to_int;puts :hook;p $!&.message;3;end;end;begin;raise "outer";rescue=>e;p catch(:done){begin;p Rational(X.new);rescue=>x;p x.class,x.message;end;p $!&.message;:after};p $!&.message;end',
+    'hook\n"outer"\n(3/1)\n"outer"\n:after\n"outer"\n',
+  ],
+  [
+    'class X;def to_int;puts :hook;p $!&.message;3;end;end;begin;raise "outer";rescue=>e;p catch(:done){begin;p Rational(X.new,exception:false);rescue=>x;p x.class,x.message;end;p $!&.message;:after};p $!&.message;end',
+    'hook\n"outer"\n(3/1)\n"outer"\n:after\n"outer"\n',
+  ],
+  [
+    'class X;def to_int;puts :hook;p $!&.message;raise "inner";end;end;begin;raise "outer";rescue=>e;p catch(:done){begin;p Rational(X.new);rescue=>x;p x.class,x.message;end;p $!&.message;:after};p $!&.message;end',
+    'hook\n"outer"\nTypeError\n"can\'t convert X into Rational"\n"outer"\n:after\n"outer"\n',
+  ],
+  [
+    'class X;def to_int;puts :hook;p $!&.message;raise "inner";end;end;begin;raise "outer";rescue=>e;p catch(:done){begin;p Rational(X.new,exception:false);rescue=>x;p x.class,x.message;end;p $!&.message;:after};p $!&.message;end',
+    'hook\n"outer"\nnil\n"outer"\n:after\n"outer"\n',
+  ],
+  [
+    'class X;def to_int;puts :hook;p $!&.message;throw :done,9;end;end;begin;raise "outer";rescue=>e;p catch(:done){begin;p Rational(X.new);rescue=>x;p x.class,x.message;end;p $!&.message;:after};p $!&.message;end',
+    'hook\n"outer"\nTypeError\n"can\'t convert X into Rational"\n"outer"\n:after\n"outer"\n',
+  ],
+  [
+    'class X;def to_int;puts :hook;p $!&.message;throw :done,9;end;end;begin;raise "outer";rescue=>e;p catch(:done){begin;p Rational(X.new,exception:false);rescue=>x;p x.class,x.message;end;p $!&.message;:after};p $!&.message;end',
+    'hook\n"outer"\nnil\n"outer"\n:after\n"outer"\n',
+  ],
+  [
+    'class X;def to_r;puts :hook;p $!&.message;3;end;end;begin;raise "outer";rescue=>e;p catch(:done){begin;p Rational(X.new);rescue=>x;p x.class,x.message;end;p $!&.message;:after};p $!&.message;end',
+    'hook\n"outer"\nTypeError\n"can\'t convert X to Rational (X#to_r gives Integer)"\n"outer"\n:after\n"outer"\n',
+  ],
+  [
+    'class X;def to_r;puts :hook;p $!&.message;3;end;end;begin;raise "outer";rescue=>e;p catch(:done){begin;p Rational(X.new,exception:false);rescue=>x;p x.class,x.message;end;p $!&.message;:after};p $!&.message;end',
+    'hook\n"outer"\nnil\n"outer"\n:after\n"outer"\n',
+  ],
+  [
+    'class X;def to_r;puts :hook;p $!&.message;raise "inner";end;end;begin;raise "outer";rescue=>e;p catch(:done){begin;p Rational(X.new);rescue=>x;p x.class,x.message;end;p $!&.message;:after};p $!&.message;end',
+    'hook\n"outer"\nRuntimeError\n"inner"\n"outer"\n:after\n"outer"\n',
+  ],
+  [
+    'class X;def to_r;puts :hook;p $!&.message;raise "inner";end;end;begin;raise "outer";rescue=>e;p catch(:done){begin;p Rational(X.new,exception:false);rescue=>x;p x.class,x.message;end;p $!&.message;:after};p $!&.message;end',
+    'hook\n"outer"\nnil\n"outer"\n:after\n"outer"\n',
+  ],
+  [
+    'class X;def to_r;puts :hook;p $!&.message;throw :done,9;end;end;begin;raise "outer";rescue=>e;p catch(:done){begin;p Rational(X.new);rescue=>x;p x.class,x.message;end;p $!&.message;:after};p $!&.message;end',
+    'hook\n"outer"\n9\n"outer"\n',
+  ],
+  [
+    'class X;def to_r;puts :hook;p $!&.message;throw :done,9;end;end;begin;raise "outer";rescue=>e;p catch(:done){begin;p Rational(X.new,exception:false);rescue=>x;p x.class,x.message;end;p $!&.message;:after};p $!&.message;end',
+    'hook\n"outer"\nnil\n"outer"\n:after\n"outer"\n',
+  ],
+] as const;
+
+test.each(nativeProtectedConversionControlCases)(
+  'Protected Rational conversion retains native control-state boundaries: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
+
+const nativeRepeatedConversionControlCases = [
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;public;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'rational\n9\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;public;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'rational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;public;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'rational\n9\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;public;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'rational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;public;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'rational\n:escaped\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;public;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'rational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;public;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'rational\n:escaped\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;public;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'rational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;public;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'rational\n:escaped\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;public;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'rational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;public;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'rational\n:escaped\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;public;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'rational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;public;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'rational\nRuntimeError\n"boom"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;public;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'rational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;public;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'rational\nRuntimeError\n"boom"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;public;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'rational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;private;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'integer\nrational\n9\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;private;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'integer\nrational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;private;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'integer\nrational\n9\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;private;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'integer\nrational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;private;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'integer\nrational\n:escaped\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;private;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'integer\nrational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;private;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'integer\nrational\n:escaped\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;private;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'integer\nrational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;private;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'integer\nrational\n:escaped\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;private;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'integer\nrational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;private;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'integer\nrational\n:escaped\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;private;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'integer\nrational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;private;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'integer\nrational\nRuntimeError\n"boom"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;private;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'integer\nrational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;private;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'integer\nrational\nRuntimeError\n"boom"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;private;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'integer\nrational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;protected;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'integer\nrational\n9\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;protected;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'integer\nrational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;protected;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'integer\nrational\n9\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;protected;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{throw :done,9}};:outer_after;end;p outer',
+    'integer\nrational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;protected;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'integer\nrational\n:escaped\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;protected;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'integer\nrational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;protected;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'integer\nrational\n:escaped\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;protected;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{return :escaped}};:outer_after;end;p outer',
+    'integer\nrational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;protected;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'integer\nrational\n:escaped\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;protected;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'integer\nrational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;protected;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'integer\nrational\n:escaped\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;protected;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{break :escaped}};:outer_after;end;p outer',
+    'integer\nrational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;protected;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'integer\nrational\nRuntimeError\n"boom"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;protected;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'integer\nrational\nnil\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;protected;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'integer\nrational\nRuntimeError\n"boom"\n:after\n:outer_after\n',
+  ],
+  [
+    'class X;def initialize(cb);@cb=cb;end;def to_int;puts :integer;@cb.call;end;protected;def to_r;puts :rational;@cb.call;end;end;def drive(&cb);x=X.new(cb);begin;p Rational(x,3,exception:false);rescue=>e;p e.class,e.message;end;:after;end;def outer;p catch(:done){drive{raise "boom"}};:outer_after;end;p outer',
+    'integer\nrational\nnil\n:after\n:outer_after\n',
+  ],
+] as const;
+
+test.each(nativeRepeatedConversionControlCases)(
+  'Repeated protected conversions retain nonlocal control targets: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);

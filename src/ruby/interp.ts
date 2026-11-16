@@ -80,6 +80,7 @@ import {
   rootValues,
   rt,
   RubyError,
+  RubyJump,
   Scope,
   ThrowSignal,
   UnsupportedFeatureError,
@@ -103,6 +104,15 @@ import {
 } from './values';
 
 export type Gen<T = Value> = Generator<unknown, T, unknown>;
+
+export function* protectRuby<T>(body: Gen<T>): Gen<T | undefined> {
+  try {
+    return yield* body;
+  } catch (error) {
+    if (error instanceof RubyJump) return undefined;
+    throw error;
+  }
+}
 
 const GENERATOR_PROTOTYPE = Object.getPrototypeOf(Object.getPrototypeOf((function* () {})()));
 

@@ -8,10 +8,10 @@ import { bigintRatio } from './floatMath';
 import { formatString } from './format';
 import { digest } from './hashes';
 import { chargeIntegerResult, integerBits, integerGcd } from './integerBudget';
-import { callMethod, type Gen, invoke } from './interp';
+import { callMethod, type Gen, invoke, protectRuby } from './interp';
 import { advertisesPublicMethod } from './libMeta';
 import { isRubyFloat, NIL, RArray, RObject, RString, RSymbol, type Value } from './objects';
-import { rt, RubyError, UnsupportedFeatureError } from './runtime';
+import { rt, UnsupportedFeatureError } from './runtime';
 import { arr, isA, realClassOf, str, truthy } from './values';
 
 /** A Rational's value in lowest terms, with a positive denominator. */
@@ -380,20 +380,26 @@ function* convertRationalArguments(args: Value[], raise: boolean): Gen {
   if (isRational(first) && (second === undefined || (yield* exactOne(second)))) return first;
   if (second === undefined) {
     if (typeof first === 'bigint') return makeRational(first, 1n);
-    return raise ? yield* convertToRational(first, false) : ((yield* rescueRationalConversion(first)) ?? NIL);
+    return raise
+      ? yield* convertToRational(first, false)
+      : ((yield* protectRuby(convertToRational(first, false))) ?? NIL);
   }
   return yield* convertRationalPair(first, second, raise);
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Native checked conversions, rescued exceptions and numeric division share ordered operands.
+// code-gauge-allow functionCognitiveComplexity 21 -- Native checked conversions, protected VM execution and numeric division share ordered operands.
 function* convertRationalPair(first: Value, second: Value, raise: boolean): Gen {
   if (!isA(first, rt().c.Numeric)) {
-    const converted = raise ? yield* convertToRational(first, true) : yield* rescueRationalConversion(first);
+    const converted = raise
+      ? yield* convertToRational(first, true)
+      : yield* protectRuby(convertToRational(first, false));
     if (converted === undefined) return NIL;
     first = converted;
   }
   if (!isA(second, rt().c.Numeric)) {
-    const converted = raise ? yield* convertToRational(second, true) : yield* rescueRationalConversion(second);
+    const converted = raise
+      ? yield* convertToRational(second, true)
+      : yield* protectRuby(convertToRational(second, false));
     if (converted === undefined) return NIL;
     second = converted;
   }
@@ -402,7 +408,7 @@ function* convertRationalPair(first: Value, second: Value, raise: boolean): Gen 
     isA(second, rt().c.Numeric) &&
     (typeof first !== 'bigint' || typeof second !== 'bigint')
   ) {
-    first = (yield* rescueRationalConversion(first)) ?? first;
+    first = (yield* protectRuby(convertToRational(first, false))) ?? first;
     if (second === 1n) return first;
     if (typeof first === 'bigint')
       return yield* invoke(coreMethod(rt().c.Integer, '/'), first, [second], undefined, undefined, true);
@@ -421,12 +427,8 @@ function* normalizeRationalArgument(value: Value, raise: boolean): Gen<Value | u
   if (isRubyFloat(value)) return floatToRational(Number(value));
   if (value instanceof RString) return yield* rationalFromString(value, raise);
   if (!(yield* advertisesPublicMethod(value, 'to_r'))) {
-    try {
-      const converted = yield* tryImplicitConversion(value, 'to_int');
-      if (typeof converted === 'bigint') return converted;
-    } catch (error) {
-      if (!(error instanceof RubyError)) throw error;
-    }
+    const converted = yield* protectRuby(tryImplicitConversion(value, 'to_int'));
+    if (typeof converted === 'bigint') return converted;
   }
   return value;
 }
@@ -443,16 +445,6 @@ function* convertToRational(value: Value, checked: boolean): Gen<RObject | typeo
   throw typeError(
     `can't convert ${realClassOf(value).name} to Rational (${realClassOf(value).name}#to_r gives ${realClassOf(converted).name})`
   );
-}
-
-function* rescueRationalConversion(value: Value): Gen<RObject | undefined> {
-  try {
-    const result = yield* convertToRational(value, false);
-    return result instanceof RObject ? result : undefined;
-  } catch (error) {
-    if (error instanceof RubyError) return undefined;
-    throw error;
-  }
 }
 
 function* exactOne(value: Value): Gen<boolean> {

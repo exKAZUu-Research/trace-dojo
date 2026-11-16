@@ -140,39 +140,51 @@ export interface FrameExtra {
   finished?: boolean;
 }
 
+export abstract class RubyJump {}
+
 /** A Ruby exception raised in the program, carrying the exception object. */
-export class RubyError {
-  constructor(readonly exception: RObject) {}
+export class RubyError extends RubyJump {
+  constructor(readonly exception: RObject) {
+    super();
+  }
 }
 
 /** Leaves a loop (`inBlock` false) or the call that received a block (`tag` is the call's tag). */
-export class BreakSignal {
+export class BreakSignal extends RubyJump {
   constructor(
     readonly value: Value,
     readonly tag: object | undefined
-  ) {}
+  ) {
+    super();
+  }
 }
 
-export class NextSignal {
-  constructor(readonly value: Value) {}
+export class NextSignal extends RubyJump {
+  constructor(readonly value: Value) {
+    super();
+  }
 }
 
-export class ReturnSignal {
+export class ReturnSignal extends RubyJump {
   constructor(
     readonly value: Value,
     readonly target: Frame
-  ) {}
+  ) {
+    super();
+  }
 }
 
-export class RetrySignal {}
+export class RetrySignal extends RubyJump {}
 
-export class RedoSignal {}
+export class RedoSignal extends RubyJump {}
 
-export class ThrowSignal {
+export class ThrowSignal extends RubyJump {
   constructor(
     readonly tag: Value,
     readonly value: Value
-  ) {}
+  ) {
+    super();
+  }
 }
 
 /** Ends the program as `exit` does, which the trace and the grader do not count as a failure. */
