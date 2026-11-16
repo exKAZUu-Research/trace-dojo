@@ -2,13 +2,28 @@ import type { Expression, Span } from '../ast';
 import { FunctionInstance } from '../functions';
 import type { Frame } from '../runtime';
 import { known, NATIVE_FN_TYPE, type NativeCall, NativeFn, runtime, type SemaApi, type TExpr } from '../semaBase';
-import { type Decl, type Namespace, type StructField, type StructType, TYPE, type Type } from '../types';
+import {
+  type Decl,
+  type Namespace,
+  type StructField,
+  type StructType,
+  TYPE,
+  type Type,
+  VOID as VOID_TYPE,
+} from '../types';
 import { NativeHandle, type Value } from '../values';
 
 /** A declaration's type and value, which a native namespace resolves on first use. */
 export interface Member {
   type: Type;
   value: Value;
+  /** What learners call a member this grader does not run, which referring to it reports. */
+  unavailable?: string;
+}
+
+/** A member of Zig's library that this grader does not run. */
+export function unavailableMember(what: string): () => Member {
+  return () => ({ type: TYPE, value: VOID_TYPE, unavailable: what });
 }
 
 /** A struct type whose declarations the grader implements, such as `std.mem` or `std.ArrayList(i32)`. */

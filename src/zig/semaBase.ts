@@ -262,13 +262,9 @@ export abstract class SemaBase implements SemaApi {
     };
     let type: Type;
     if (container.containerKind === 'struct') {
-      type = {
-        kind: 'struct',
-        isTuple: false,
-        namespace,
-        layout: container.layout,
-        fields: undefined,
-      };
+      // `struct { u32, u32 }`, whose fields have types only, declares a tuple.
+      const isTuple = container.fields.length > 0 && container.fields.every((field) => field.name === undefined);
+      type = { kind: 'struct', isTuple, namespace, layout: container.layout, fields: undefined };
     } else if (container.containerKind === 'enum') {
       type = { kind: 'enum', namespace, tagType: undefined, fields: undefined, exhaustive: true };
     } else {
@@ -292,7 +288,8 @@ export abstract class SemaBase implements SemaApi {
         return known(NATIVE_FN_TYPE, new FnRef(decl) as unknown as Value, span);
       }
       case 'native': {
-        const { type, value } = decl.resolve();
+        const { type, value, unavailable } = decl.resolve();
+        if (unavailable) this.error(span, `${unavailable}は、この採点環境では使えません。`);
         return known(type, value, span);
       }
       default: {
@@ -372,9 +369,10 @@ export abstract class SemaBase implements SemaApi {
     const fields: StructField[] = [];
     this.resolvingFields++;
     this.inContainerScope(type.namespace, () => {
-      for (const field of syntax.fields) {
-        if (field.name === undefined || !field.type)
-          this.error(field, '構造体のフィールドには名前と型を書いてください。');
+      for (const [index, field] of syntax.fields.entries()) {
+        if (!field.type) this.error(field, '構造体のフィールドには型を書いてください。');
+        if (field.name === undefined && !type.isTuple)
+          this.error(field, '構造体のフィールドには名前を書いてください。');
         const fieldType = this.compileType(field.type);
         let defaultValue: Value | undefined;
         if (field.value) {
@@ -382,7 +380,7 @@ export abstract class SemaBase implements SemaApi {
           defaultValue = this.knownValue(compiled, 'フィールドの初期値');
         }
         fields.push({
-          name: field.name,
+          name: field.name ?? String(index),
           type: fieldType,
           defaultValue,
           hasDefault: field.value !== undefined,

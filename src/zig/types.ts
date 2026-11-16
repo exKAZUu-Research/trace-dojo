@@ -166,7 +166,7 @@ export type Decl =
       cell?: { slots: Value[] };
     }
   | { kind: 'fn'; syntax: FunctionDeclaration; namespace: Namespace }
-  | { kind: 'native'; name: string; resolve: () => { type: Type; value: Value } };
+  | { kind: 'native'; name: string; resolve: () => { type: Type; value: Value; unavailable?: string } };
 
 // Simple types --------------------------------------------------------------------------------------------------------
 

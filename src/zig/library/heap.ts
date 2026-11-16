@@ -23,7 +23,17 @@ import {
   VOID,
 } from '../types';
 import { Cell, ErrorValue, NativeHandle, Pointer, Slice, ZArray, ZStruct } from '../values';
-import { compileArgs, expectArgs, fnMember, handle, type Member, nativeCall, nativeStruct, typeMember } from './native';
+import {
+  compileArgs,
+  expectArgs,
+  fnMember,
+  handle,
+  type Member,
+  nativeCall,
+  nativeStruct,
+  typeMember,
+  unavailableMember,
+} from './native';
 
 export const ERROR_OUT_OF_MEMORY = ErrorValue.of('OutOfMemory');
 const OUT_OF_MEMORY = ERROR_OUT_OF_MEMORY;
@@ -310,9 +320,7 @@ export function heapNamespace(): StructType {
     ArenaAllocator: typeMember(() => ARENA_ALLOCATOR),
     FixedBufferAllocator: typeMember(() => FIXED_BUFFER_ALLOCATOR),
     Check: typeMember(() => CHECK),
-    c_allocator: fnMember('std.heap.c_allocator', (sema, call) =>
-      sema.error(call.span, 'C との連携（std.heap.c_allocator）は、この採点環境では使えません。')
-    ),
+    c_allocator: unavailableMember('C との連携（std.heap.c_allocator）'),
   });
   return heap;
 }

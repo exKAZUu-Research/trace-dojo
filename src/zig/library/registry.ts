@@ -6,7 +6,7 @@ import { HASH_MAP_MEMBERS } from './hashMap';
 import { mathNamespace } from './math';
 import { memNamespace } from './mem';
 import { enumsNamespace, metaNamespace, PRIORITY_QUEUE, unicodeNamespace } from './misc';
-import { fnMember } from './native';
+import { unavailableMember } from './native';
 import { randomNamespace } from './random';
 import { sortNamespace } from './sort';
 import { registerLazy } from './std';
@@ -32,9 +32,4 @@ const UNAVAILABLE: Record<string, string> = {
   DoublyLinkedList: '侵入型の連結リスト（std.DoublyLinkedList。@fieldParentPtr が要る）',
   SinglyLinkedList: '侵入型の連結リスト（std.SinglyLinkedList。@fieldParentPtr が要る）',
 };
-for (const [name, what] of Object.entries(UNAVAILABLE)) {
-  registerLazy(
-    name,
-    fnMember(`std.${name}`, (sema, call) => sema.error(call.span, `${what}は、この採点環境では使えません。`))
-  );
-}
+for (const [name, what] of Object.entries(UNAVAILABLE)) registerLazy(name, unavailableMember(what));

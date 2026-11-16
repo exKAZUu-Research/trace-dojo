@@ -26,6 +26,7 @@ import {
   nativeCall,
   nativeStruct,
   typeMember,
+  unavailableMember,
 } from './native';
 import { compilePrint, decodeOutput } from './print';
 
@@ -87,12 +88,7 @@ export function importStd(): StructType {
 
 /** Members that exist in Zig's library but that this grader rejects, with what learners call them. */
 function unavailableMembers(members: Record<string, string>): Record<string, () => Member> {
-  return Object.fromEntries(
-    Object.entries(members).map(([name, what]) => [
-      name,
-      fnMember(name, (sema, call) => sema.error(call.span, `${what}は、この採点環境では使えません。`)),
-    ])
-  );
+  return Object.fromEntries(Object.entries(members).map(([name, what]) => [name, unavailableMember(what)]));
 }
 
 /** Library modules that load on first use, to keep the grader's startup light. */
@@ -181,18 +177,10 @@ function addIoMembers(): void {
   addMembers(IO, {
     File: typeMember(() => FILE),
     Writer: typeMember(() => WRITER),
-    Reader: fnMember('std.Io.Reader', (sema, call) =>
-      sema.error(call.span, '標準入力やファイルからの読み込み（std.Io.Reader）は、この採点環境では使えません。')
-    ),
-    Dir: fnMember('std.Io.Dir', (sema, call) =>
-      sema.error(call.span, 'ファイルの読み書き（std.Io.Dir）は、この採点環境では使えません。')
-    ),
-    net: fnMember('std.Io.net', (sema, call) =>
-      sema.error(call.span, 'ネットワーク（std.Io.net）は、この採点環境では使えません。')
-    ),
-    Clock: fnMember('std.Io.Clock', (sema, call) =>
-      sema.error(call.span, '時刻（std.Io.Clock）は、この採点環境では使えません。')
-    ),
+    Reader: unavailableMember('標準入力やファイルからの読み込み（std.Io.Reader）'),
+    Dir: unavailableMember('ファイルの読み書き（std.Io.Dir）'),
+    net: unavailableMember('ネットワーク（std.Io.net）'),
+    Clock: unavailableMember('時刻（std.Io.Clock）'),
   });
   addMembers(FILE, {
     stdout: fnMember('std.Io.File.stdout', (sema, call) => {
@@ -203,9 +191,7 @@ function addIoMembers(): void {
       expectArgs(sema, call, 0, 'std.Io.File.stderr');
       return known(FILE, handle('file', { fd: 2 }), call.span);
     }),
-    stdin: fnMember('std.Io.File.stdin', (sema, call) =>
-      sema.error(call.span, '標準入力（std.Io.File.stdin）は、この採点環境では使えません。')
-    ),
+    stdin: unavailableMember('標準入力（std.Io.File.stdin）'),
     Writer: typeMember(() => FILE_WRITER),
     writer: fnMember('File.writer', (sema, call) => fileWriter(sema, call)),
     writerStreaming: fnMember('File.writerStreaming', (sema, call) => fileWriter(sema, call)),
@@ -219,9 +205,7 @@ function addIoMembers(): void {
         return;
       });
     }),
-    reader: fnMember('File.reader', (sema, call) =>
-      sema.error(call.span, '標準入力やファイルからの読み込みは、この採点環境では使えません。')
-    ),
+    reader: unavailableMember('標準入力やファイルからの読み込み'),
   });
   addMembers(WRITER, {
     print: fnMember('Writer.print', (sema, call) => {
