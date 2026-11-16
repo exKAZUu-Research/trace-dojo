@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 761 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 765 -- The file holds one layer of the compiler, whose parts share its private state.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -30,12 +30,14 @@ import { decodeCharacter, decodeIdentifier, decodeString, parseFloatText, parseI
 /** Converts tree-sitter's tree of a file into the AST, rejecting the syntax this grader does not run. */
 export function convertFile(root: Node): SourceFile {
   source = root.text;
+  functions = [];
   const { members, fields } = containerMembers(root);
-  return { members, fields };
+  return { members, fields, functions };
 }
 
 /** The text of the file being converted, for checks of the spaces around operators. */
 let source = '';
+let functions: FunctionDeclaration[] = [];
 
 /** The keyword tokens that stand for values where an expression is expected. */
 const KEYWORD_VALUES = new Set(['null', 'undefined', 'unreachable', 'anyframe']);
@@ -136,7 +138,7 @@ function functionDeclaration(node: Node): FunctionDeclaration {
   if (!nameNode) fail(node, '関数の名前がありません。');
   if (!body) unavailable(node, '本体のない関数の宣言');
   const { returnType, inferredErrorSet } = returnTypeOf(node);
-  return {
+  const declaration: FunctionDeclaration = {
     kind: 'fn',
     ...spanOf(node),
     name: decodeIdentifier(nameNode),
@@ -148,6 +150,8 @@ function functionDeclaration(node: Node): FunctionDeclaration {
     body: block(body),
     bodyRow: body.startPosition.row,
   };
+  functions.push(declaration);
+  return declaration;
 }
 
 function returnTypeOf(node: Node): { returnType: Expression; inferredErrorSet: boolean } {

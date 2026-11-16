@@ -1,12 +1,8 @@
 // code-gauge-allow-file duplicateLines 19 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { panic } from '../arith';
-/**
- * `std.HashMap` and `std.HashMapUnmanaged` (with `AutoHashMap` and `StringHashMap`), transcribed from Zig's open
- * addressing so that iteration visits entries in Zig's order, and the array hash maps, which keep insertion order.
- */
 import type { Expression, Span } from '../ast';
 import type { Frame } from '../runtime';
-import { known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
+import { copyForStorage, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
   BOOL,
   CONST_U8_SLICE,
@@ -17,11 +13,13 @@ import {
   type StructType,
   TYPE,
   type Type,
+  typeId,
   typeName,
   U32,
   VOID,
 } from '../types';
 import { ErrorValue, NativeHandle, NULL, Pointer, type Value, ZArray, ZStruct } from '../values';
+import { WeakValueMap } from '../weakValueMap';
 import { elements, equalValues } from './common';
 import { autoHashBytes, wyhash } from './hashing';
 import { ALLOCATOR, ALLOCATOR_ERROR, ERROR_OUT_OF_MEMORY } from './heap';
@@ -212,13 +210,13 @@ interface MapTypes {
   valueIterator: StructType;
 }
 
-const mapTypes = new Map<string, MapTypes>();
+const mapTypes = new WeakValueMap<string, StructType>();
 
 /** A hash map's type for its key and value types, managed (holding its allocator) or not. */
 function hashMapType(name: string, keyType: Type, valueType: Type, kind: KeyKind, managed: boolean): StructType {
-  const key = `${name} ${typeName(keyType)} ${typeName(valueType)}`;
+  const key = `${name} ${typeId(keyType)} ${typeId(valueType)}`;
   const existing = mapTypes.get(key);
-  if (existing) return existing.map;
+  if (existing) return existing;
   const keyPointer = pointerTo(keyType, false);
   const valuePointer = pointerTo(valueType, false);
   const entry = nativeStruct(`${name}.Entry`, {}, [
@@ -242,7 +240,7 @@ function hashMapType(name: string, keyType: Type, valueType: Type, kind: KeyKind
   const keyIterator = nativeStruct(`${name}.KeyIterator`, {});
   const valueIterator = nativeStruct(`${name}.ValueIterator`, {});
   const types: MapTypes = { map, entry, kv, getOrPutResult, iterator, keyIterator, valueIterator };
-  mapTypes.set(key, types);
+  mapTypes.set(key, map);
   defineMembers(types, keyType, valueType, kind, managed);
   return map;
 }
@@ -305,7 +303,7 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
           frame.runtime.spend();
           return run(
             state(frame),
-            evaluators.map((evaluate) => evaluate(frame)),
+            evaluators.map((evaluate) => copyForStorage(evaluate(frame))),
             frame
           );
         },

@@ -380,3 +380,110 @@ pub fn main(init: std.process.Init) !void {
     uncaughtException: undefined,
   });
 });
+
+test('native containers copy records and nominal map types stay independent across executions', () => {
+  const program = `const std = @import("std");
+const P = struct { x: i32 };
+fn order(_: void, a: P, b: P) std.math.Order { return std.math.order(a.x, b.x); }
+pub fn main(init: std.process.Init) !void {
+    var p = P{ .x = 1 };
+    var map = std.AutoHashMap(u8, P).init(init.gpa);
+    defer map.deinit();
+    try map.put(1, p);
+    var queue: std.PriorityQueue(P, void, order) = .empty;
+    defer queue.deinit(init.gpa);
+    try queue.push(init.gpa, p);
+    p.x = 3;
+    std.debug.print("{} {}|", .{map.get(1).?.x, queue.peek().?.x});
+    map.getPtr(1).?.x = 7;
+    std.debug.print("{} {}", .{p.x, map.get(1).?.x});
+}`;
+  for (let run = 0; run < 3; run++) {
+    expect(executeProgram('zig', program)).toMatchObject({
+      kind: 'executed',
+      stderr: '1 1|3 7',
+      uncaughtException: undefined,
+    });
+  }
+});
+
+test('zeroed values reserve nested storage and integer square root scales to u64', () => {
+  for (const type of ['[4294967296]u8', '[1001][1000]u8']) {
+    expect(
+      executeProgram(
+        'zig',
+        `const std = @import("std"); pub fn main() void { const a = std.mem.zeroes(${type}); _ = a; }`
+      )
+    ).toEqual({ kind: 'limitExceeded', limit: 'storage' });
+  }
+  const program = `const std = @import("std");
+pub fn main() void {
+    var x: u64 = 18446744073709551615;
+    _ = &x;
+    std.debug.print("{} {} {d}", .{
+        std.math.sqrt(x), std.math.sqrt(@as(u64, 1000000000000000000)), std.mem.zeroes(f128),
+    });
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: '4294967295 1000000000 0',
+    uncaughtException: undefined,
+  });
+});
+
+test('extended rounding keeps exact digits and fused multiply-add preserves special values', () => {
+  const program = `const std = @import("std");
+pub fn main() void {
+    const x: f128 = 9007199254740993.5;
+    const inf = std.math.inf(f64);
+    const nan = std.math.nan(f64);
+    std.debug.print("{d} {d} {d} {d}|{d} {d} {d} {d} {d}", .{
+        @floor(x), @ceil(x), @trunc(-x), @round(-x),
+        @mulAdd(f64, inf, 2.0, 3.0), @mulAdd(f64, 0, inf, 3.0),
+        @mulAdd(f64, inf, 2, -inf), @mulAdd(f64, nan, 2, 3), @mulAdd(f64, 2, 3, inf),
+    });
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: '9007199254740993 9007199254740994 -9007199254740993 -9007199254740994|inf nan nan nan inf',
+    uncaughtException: undefined,
+  });
+});
+
+test('assignments and aggregate coercions evaluate side-effecting sources once', () => {
+  const program = `const std = @import("std");
+var n: i32 = 0;
+fn index(i: *usize) usize { const old = i.*; i.* += 1; return old; }
+fn pair() struct { i32, i32 } { n += 1; return .{ n, n }; }
+const P = struct { i32, i32 };
+fn cast(x: u64) !?u8 { return @intCast(x); }
+pub fn main() void {
+    var a = [_]u8{ 10, 20, 30 };
+    var i: usize = 0;
+    a[index(&i)] += 1;
+    const b: [2]i32 = pair();
+    const c: P = pair();
+    std.debug.print("{any} {}|{any} {} {} {}|{!?}", .{ a, i, b, c.@"0", c.@"1", n, cast(7) });
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: '{ 11, 20, 30 } 1|{ 1, 1 } 2 2 2|7',
+    uncaughtException: undefined,
+  });
+});
+
+test('tagged unions preserve explicit enum values and require the declared tag order', () => {
+  const program = `const std = @import("std");
+const E = enum(u8) { a = 5, b = 10 };
+const U = union(E) { a: i32, b: i32 };
+pub fn main() void {
+    const x: U = .{ .b = 3 };
+    const tag: E = x;
+    std.debug.print("{} {} {}", .{ @intFromEnum(tag), tag == .b, @intFromEnum(x) });
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: '10 true 10',
+    uncaughtException: undefined,
+  });
+});

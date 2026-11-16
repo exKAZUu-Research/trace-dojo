@@ -198,3 +198,26 @@ pub fn main() void {
   expect(result.traceItems.at(-1)?.vars).toEqual({ n: 1, after: 2 });
   expect(result.finalVars).toEqual({ n: 1, after: 2 });
 });
+
+test('atomic helpers in local containers and declaration-literal constructors keep their step rules', () => {
+  const qualified = makeProgram('S.init');
+  const inferred = makeProgram('.init');
+  const result = traceProgram('zig', qualified, qualified);
+  expect(result.finalTurtles).toEqual([{ x: 0, y: 3, color: '#', dir: 'N' }]);
+  expect(withoutLines(traceProgram('zig', inferred, inferred).traceItems)).toEqual(withoutLines(result.traceItems));
+  expect(result.traceItems.filter((item) => item.callLines.length > 0)).toEqual([]);
+});
+
+const makeProgram = (callee: string): string => `pub fn main() void {
+    const S = struct {
+        t: Turtle,
+        fn init() @This() { // atomic
+            const t = Turtle.init();
+            t.forward();
+            t.forward();
+            return .{ .t = t };
+        }
+    };
+    const s: S = ${callee}();
+    s.t.forward();
+}`;

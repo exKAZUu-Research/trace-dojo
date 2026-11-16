@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 999 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 1000 -- The file holds one layer of the compiler, whose parts share its private state.
 import {
   checked,
   divExact,

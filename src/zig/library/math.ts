@@ -13,6 +13,7 @@ import {
   floatOf,
   floatSqrt,
   FORMATS,
+  integerSqrt,
   isInfinite,
   isIntegral,
   isNaNFloat,
@@ -426,11 +427,7 @@ const MEMBERS: Record<string, () => Member> = {
     const type = value.type;
     if (type.kind === 'int') {
       const result = intType(false, Math.ceil(type.bits / 2));
-      return computed(result, [value], call.span, ([x]) => {
-        let root = 0n;
-        while ((root + 1n) * (root + 1n) <= (x as bigint)) root++;
-        return root;
-      });
+      return computed(result, [value], call.span, ([x]) => integerSqrt(x as bigint));
     }
     const float = floatArg(sema, arg);
     return computed(float.type, [float], call.span, ([x]) => floatSqrt(x as AnyFloat, bitsOf(float.type)));

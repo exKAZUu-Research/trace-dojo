@@ -1,5 +1,6 @@
 import type { Container, FunctionDeclaration, VariableDeclaration } from './ast';
 import type { Value } from './values';
+import { WeakValueMap } from './weakValueMap';
 
 /** Zig's types. Types that Zig compares by structure are interned, so that `===` tells whether two are the same. */
 export type Type =
@@ -318,7 +319,7 @@ export function typeId(type: Type): number {
   return id;
 }
 
-const interned = new Map<string, Type>();
+const interned = new WeakValueMap<string, Type>();
 
 function intern<T extends Type>(key: string, create: () => T): T {
   let type = interned.get(key) as T | undefined;

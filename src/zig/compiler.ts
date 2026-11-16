@@ -112,14 +112,7 @@ class Compiler extends StatementCompiler {
 
   /** Every `// atomic` must stand on a function's header, from `fn` to the body's `{`. */
   private checkAnnotations(): void {
-    const headers: FunctionDeclaration[] = [];
-    const collect = (members: SourceFile['members']): void => {
-      for (const member of members) {
-        if (member.kind === 'fn') headers.push(member);
-        else if (member.value?.kind === 'container') collect(member.value.members);
-      }
-    };
-    collect(this.file.members);
+    const headers = this.file.functions;
     for (const row of this.atomicRows) {
       if (!headers.some((fn) => fn.row <= row && row <= fn.bodyRow)) {
         throw new CompileError([{ row, message: misplacedAtomicMessage }]);

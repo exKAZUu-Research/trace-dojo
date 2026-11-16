@@ -244,6 +244,7 @@ export type Statement = Span &
   );
 
 export interface SourceFile {
+  functions: FunctionDeclaration[];
   members: ContainerMember[];
   fields: ContainerField[];
 }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 802 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 835 -- The file holds one layer of the compiler, whose parts share its private state.
 // code-gauge-allow-file duplicateLines 17 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { CompileError } from '../interpreter/diagnostics';
 import { CompilationStorage, valueSlots } from './allocation';
@@ -135,6 +135,7 @@ export interface NativeCall {
 export interface SemaApi {
   compile(expression: Expression, resultType?: Type): TExpr;
   compileType(expression: Expression): Type;
+  reserveStorage(type: Type, span: Span): void;
   coerce(expression: TExpr, type: Type, span?: Span): TExpr;
   error(span: Span, message: string): never;
   knownValue(expression: TExpr, what: string): Value;
@@ -187,6 +188,11 @@ export abstract class SemaBase implements SemaApi {
 
   constructor(readonly root: Namespace) {
     this.scope = { namespace: root };
+  }
+
+  reserveStorage(type: Type, span: Span): void {
+    this.resolveLayout(type, span, new Set());
+    this.storage.reserve(type);
   }
 
   error(span: Span, message: string): never {
@@ -522,6 +528,8 @@ export abstract class SemaBase implements SemaApi {
             this.error(syntax, `union にフィールド「${tag.name}」がありません。`);
           }
         }
+        if (fields.some((field, index) => field.name !== tagFields[index]?.name))
+          this.error(syntax, 'union のフィールドの順序は、タグの enum とそろえてください。');
         type.tagType = tagType;
       }
     });
@@ -602,7 +610,13 @@ export abstract class SemaBase implements SemaApi {
           return known(to, field.value, span);
         }
         if (from.kind === 'union' && from.tagType === to) {
-          return this.derived(expression, to, (value) => BigInt((value as ZUnion).tag));
+          const fields = this.unionFields(from);
+          const tags = this.enumFields(to);
+          return this.derived(
+            expression,
+            to,
+            (value) => tags.find((tag) => tag.name === fields[(value as ZUnion).tag].name)?.value
+          );
         }
         return undefined;
       }
@@ -627,10 +641,10 @@ export abstract class SemaBase implements SemaApi {
         return undefined;
       }
       case 'array': {
-        return this.coerceToArray(expression, to, span);
+        return this.coerceAggregateSource(expression, (source) => this.coerceToArray(source, to, span));
       }
       case 'struct': {
-        return this.coerceToStruct(expression, to, span);
+        return this.coerceAggregateSource(expression, (source) => this.coerceToStruct(source, to, span));
       }
       default: {
         return undefined;
@@ -767,6 +781,31 @@ export abstract class SemaBase implements SemaApi {
 
   /** A function value that the compiler knows, as a runtime function pointer. */
   protected abstract knownFunctionValue(expression: TExpr, span: Span): FnValue;
+
+  private coerceAggregateSource(expression: TExpr, convert: (source: TExpr) => TExpr | undefined): TExpr | undefined {
+    if (expression.known) return convert(expression);
+    const held = new WeakMap<Frame, Value>();
+    const result = convert({ ...expression, eval: (frame) => held.get(frame) });
+    if (!result) return undefined;
+    return runtime(
+      result.type,
+      (frame) => {
+        const source = expression.eval(frame);
+        const previous = held.get(frame);
+        const mark = frame.temporaries.length;
+        held.set(frame, source);
+        frame.temporaries.push(source);
+        try {
+          return result.eval(frame);
+        } finally {
+          frame.temporaries.length = mark;
+          if (previous === undefined) held.delete(frame);
+          else held.set(frame, previous);
+        }
+      },
+      expression.span
+    );
+  }
 
   private coerceToArray(expression: TExpr, to: Extract<Type, { kind: 'array' }>, span: Span): TExpr | undefined {
     const from = expression.type;

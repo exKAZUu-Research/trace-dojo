@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 602 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 616 -- The file holds one layer of the compiler, whose parts share its private state.
 import {
   divCeil,
   divExact,
@@ -351,10 +351,11 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         const type = operand.type;
         if (type.kind === 'union' && type.tagType) {
           const tagType = type.tagType;
-          this.enumFields(tagType);
+          const tags = this.enumFields(tagType);
+          const fields = this.unionFields(type);
           return this.derived(operand, tagType.tagType as IntType, (value) => {
-            const field = (tagType.fields ?? [])[(value as ZUnion).tag];
-            return field.value;
+            const name = fields[(value as ZUnion).tag].name;
+            return tags.find((field) => field.name === name)?.value;
           });
         }
         if (type.kind !== 'enum')
@@ -485,7 +486,9 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     resultType: Type | undefined,
     kind: 'int' | 'float' | 'enum'
   ): Type {
-    const target = resultType?.kind === 'optional' ? resultType.child : resultType;
+    let target = resultType;
+    while (target?.kind === 'optional' || target?.kind === 'error_union')
+      target = target.kind === 'optional' ? target.child : target.payload;
     if (!target) {
       return this.error(
         expression,
@@ -956,6 +959,7 @@ const MATH_FUNCTIONS: Record<string, (x: number) => number> = {
   '@log10': Math.log10,
 };
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Handles native and exact rounding with the same four rounding modes.
 export function roundFloat(name: string, value: AnyFloat, bits: FloatBits): AnyFloat {
   if (typeof value === 'number') {
     switch (name) {
@@ -975,9 +979,19 @@ export function roundFloat(name: string, value: AnyFloat, bits: FloatBits): AnyF
       }
     }
   }
-  const double = toNumber(value);
-  const result = roundFloat(name, double, 64) as number;
-  return roundTo(asBigFloat(result), bits);
+  if (value.kind !== 'finite' || value.exponent >= 0) return roundTo(value, bits);
+  const denominator = 1n << BigInt(-value.exponent);
+  let integer = value.mantissa / denominator;
+  const remainder = value.mantissa % denominator;
+  const increment =
+    remainder !== 0n &&
+    (name === '@floor'
+      ? value.sign
+      : name === '@ceil'
+        ? !value.sign
+        : name !== '@trunc' && remainder * 2n >= denominator);
+  if (increment) integer++;
+  return roundTo(new BigFloat(value.sign, 'finite', integer, 0), bits);
 }
 
 function floatDivision(name: string, x: AnyFloat, y: AnyFloat, bits: FloatBits): AnyFloat {
@@ -1000,7 +1014,9 @@ function convertFloat(value: AnyFloat, bits: FloatBits): AnyFloat {
 }
 
 export function fusedMultiplyAdd(a: BigFloat, b: BigFloat, c: BigFloat, bits: FloatBits): AnyFloat {
-  // Exact product and sum in 128-bit... the exact rational is rounded once.
+  if (a.kind !== 'finite' || b.kind !== 'finite')
+    return floatOf(asBigFloat(floatArithmetic(floatArithmetic(a, b, '*', 128), c, '+', 128)), bits);
+  if (c.kind !== 'finite') return floatOf(c, bits);
   const product = {
     sign: a.sign !== b.sign,
     mantissa: a.mantissa * b.mantissa,
@@ -1016,7 +1032,7 @@ function addExact(a: BigFloat, b: BigFloat): BigFloat {
   const x = (a.sign ? -a.mantissa : a.mantissa) << BigInt(a.exponent - exponent);
   const y = (b.sign ? -b.mantissa : b.mantissa) << BigInt(b.exponent - exponent);
   const sum = x + y;
-  return new BigFloat(sum < 0n, 'finite', sum < 0n ? -sum : sum, exponent);
+  return new BigFloat(sum < 0n || (sum === 0n && a.sign && b.sign), 'finite', sum < 0n ? -sum : sum, exponent);
 }
 
 /** The smallest integer type that holds every value from `low` to `high`, as `std.math.IntFittingRange` gives. */

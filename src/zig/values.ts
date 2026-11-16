@@ -2,6 +2,7 @@ import type { TurtleState } from '../interpreter/turtleWorld';
 import type { BigFloat } from './floats';
 import type { FunctionInstance } from './functions';
 import type { Type } from './types';
+import { WeakValueMap } from './weakValueMap';
 
 /**
  * A value of the running program. Integers of every type are bigints, floats are numbers or BigFloats, enums are their
@@ -88,7 +89,7 @@ export class ZUnion implements Slots {
 }
 
 export class EnumLiteral {
-  private static readonly cache = new Map<string, EnumLiteral>();
+  private static readonly cache = new WeakValueMap<string, EnumLiteral>();
 
   private constructor(readonly name: string) {}
 
@@ -104,7 +105,7 @@ export class EnumLiteral {
 
 /** An error value, which every error set shares by name. */
 export class ErrorValue {
-  private static readonly cache = new Map<string, ErrorValue>();
+  private static readonly cache = new WeakValueMap<string, ErrorValue>();
 
   private constructor(readonly name: string) {}
 

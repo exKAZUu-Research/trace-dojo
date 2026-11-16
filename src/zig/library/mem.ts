@@ -1,6 +1,7 @@
 // code-gauge-allow-file duplicateLines 25 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
+import { floatFromBigInt } from '../floats';
 import type { Frame } from '../runtime';
 import { known, newArray, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
@@ -13,12 +14,14 @@ import {
   type StructType,
   TYPE,
   type Type,
+  typeId,
   typeName,
   U8,
   USIZE,
   VOID,
 } from '../types';
 import { NULL, type Pointer, Slice, type Value, ZStruct } from '../values';
+import { WeakValueMap } from '../weakValueMap';
 import {
   allocating,
   allocatorArg,
@@ -126,11 +129,11 @@ function slicePart(value: Value, start: number, length: number): Slice {
 
 type DelimiterKind = 'scalar' | 'sequence' | 'any';
 
-const iteratorTypes = new Map<string, StructType>();
+const iteratorTypes = new WeakValueMap<string, StructType>();
 
 /** `std.mem.SplitIterator(T, kind)` or `TokenIterator`: fields `buffer`, `index`, and `delimiter`, as in Zig. */
 function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: Type): StructType {
-  const key = `${kind} ${delimiter} ${typeName(child)}`;
+  const key = `${kind} ${delimiter} ${typeId(child)}`;
   let type = iteratorTypes.get(key);
   if (type) return type;
   const delimiterType = delimiter === 'scalar' ? child : sliceOf(child, true);
@@ -617,6 +620,7 @@ const MEMBERS: Record<string, () => Member> = {
   zeroes: fnMember('std.mem.zeroes', (sema, call) => {
     const [typeArg] = expectArgs(sema, call, 1, 'std.mem.zeroes');
     const type = sema.compileType(typeArg);
+    sema.reserveStorage(type, call.span);
     return known(
       type,
       zeroValue(type, (struct) => sema.structFields(struct, call.span)),
@@ -761,7 +765,7 @@ export function zeroValue(type: Type, fieldsOf: (type: StructType) => readonly S
       return 0n;
     }
     case 'float': {
-      return type.bits <= 64 ? 0 : undefinedValue(type);
+      return floatFromBigInt(0n, type.bits);
     }
     case 'bool': {
       return false;

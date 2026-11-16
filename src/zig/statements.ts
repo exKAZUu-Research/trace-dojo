@@ -524,7 +524,7 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss 33 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionNcss 36 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private assignment(expression: ExpressionOf<'assign'>, span: Span): Stmt {
     const row = this.stepRow(span);
     if (expression.targets.length !== 1) return this.error(expression, '書き方に誤りがあります。');
@@ -559,15 +559,20 @@ export abstract class StatementCompiler extends CallCompiler {
       };
     }
     const operator = expression.operator.slice(0, -1);
-    const current = runtime(type, (frame) => place.locate(frame).load(), target, place);
+    const locationSlot = this.localSlot();
+    const current = runtime(type, (frame) => (frame.slots[locationSlot] as Pointer).load(), target);
     void targetExpression;
     const combined = this.compoundValue(current, operator, expression.value, expression);
     const evaluate = combined.eval;
     return {
       exec: this.simple(row, false, (frame) => {
-        const result = evaluate(frame);
         const pointer = place.locate(frame);
-        pointer.target.slots[pointer.index] = result;
+        frame.slots[locationSlot] = pointer;
+        try {
+          storeInto(pointer.target, pointer.index, evaluate(frame));
+        } finally {
+          frame.slots[locationSlot] = UNASSIGNED;
+        }
       }),
       noreturn: false,
     };
@@ -2316,7 +2321,8 @@ function isCallOnly(expression: Expression): boolean {
 function isObjectCreation(expression: Expression): boolean {
   if (expression.kind === 'call') {
     const callee = expression.callee;
-    const name = callee.kind === 'field' ? callee.name : callee.kind === 'identifier' ? callee.name : '';
+    const name =
+      callee.kind === 'field' || callee.kind === 'identifier' || callee.kind === 'enumLiteral' ? callee.name : '';
     return name.startsWith('init');
   }
   if (expression.kind === 'structInit') return true;

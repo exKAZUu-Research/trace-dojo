@@ -39,7 +39,7 @@ const SAFETY_LOCK = nativeStruct('debug.SafetyLock', {}, [
 /** The cache line of the reference toolchain's CPU (aarch64), which sets the first capacity. */
 const CACHE_LINE = 128;
 
-const listTypes = new Map<Type, StructType>();
+const listTypes = new WeakMap<Type, StructType>();
 
 /** `std.ArrayList(T)`: a struct with Zig's fields, so that it prints and copies as Zig's does. */
 export function arrayListType(child: Type): StructType {

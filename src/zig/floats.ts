@@ -353,7 +353,7 @@ export function floatSqrt(value: AnyFloat, bits: FloatBits): AnyFloat {
     : roundRational(false, num, 1n << BigInt(-resultExponent), format);
 }
 
-function integerSqrt(value: bigint): bigint {
+export function integerSqrt(value: bigint): bigint {
   if (value < 2n) return value;
   let x = 1n << BigInt(Math.ceil(bitLength(value) / 2));
   for (;;) {

@@ -1,8 +1,7 @@
 import { indexOutOfBounds, PANIC, panic } from '../arith';
-/** `std.unicode`, `std.meta`, `std.enums`, and `std.PriorityQueue`. */
 import type { Span } from '../ast';
 import type { Frame } from '../runtime';
-import { FnRef, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
+import { copyForStorage, FnRef, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
   BOOL,
   CONST_U8_SLICE,
@@ -14,6 +13,7 @@ import {
   type StructType,
   TYPE,
   type Type,
+  typeId,
   typeName,
   U8,
   U21,
@@ -21,6 +21,7 @@ import {
   VOID,
 } from '../types';
 import { ErrorValue, FnValue, NULL, type Pointer, Slice, Some, type Value, ZArray, ZStruct, ZUnion } from '../values';
+import { WeakValueMap } from '../weakValueMap';
 import { computed, constSlice, elements, equalValues, mutableSlice, newSlice } from './common';
 import { ALLOCATOR, ALLOCATOR_ERROR, ERROR_OUT_OF_MEMORY } from './heap';
 import { addMembers, compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
@@ -331,7 +332,7 @@ const ENUMS: Record<string, () => Member> = {
 
 // std.PriorityQueue -----------------------------------------------------------------------------------------------------
 
-const queueTypes = new Map<string, StructType>();
+const queueTypes = new WeakValueMap<string, StructType>();
 
 function priorityQueueType(
   element: Type,
@@ -421,7 +422,7 @@ function priorityQueueType(
     for (const value of values) {
       const current = queue.slots[0] as Slice;
       const grown = new Slice(current.target, current.start, current.length + 1);
-      grown.set(current.length, value);
+      grown.set(current.length, copyForStorage(value));
       queue.slots[0] = grown;
       siftUp(frame, queue, grown.length - 1);
     }
@@ -526,7 +527,7 @@ export const PRIORITY_QUEUE = fnMember('std.PriorityQueue', (sema, call) => {
   }
   return known(
     TYPE,
-    priorityQueueType(element, context, compare, `${typeName(element)} ${typeName(context)} ${id}`),
+    priorityQueueType(element, context, compare, `${typeId(element)} ${typeId(context)} ${id}`),
     call.span
   );
 });
