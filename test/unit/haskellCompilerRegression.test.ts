@@ -724,3 +724,27 @@ test('compiler work limits contain expanding diagnostics and constraints and res
     });
   }
 });
+
+test('type synonym dependencies compile or report cycles without overflowing Node', { timeout: 30_000 }, () => {
+  const bundle = execFileSync(
+    'bun',
+    ['build', 'test/helpers/haskellCompilerNode.ts', '--target=node', '--packages=external'],
+    { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
+  );
+  const output = execFileSync('node', ['--input-type=module'], {
+    input: bundle,
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  const results = z.array(z.object({ kind: z.string() }).passthrough()).parse(JSON.parse(output));
+  expect(results).toHaveLength(4);
+  for (const index of [0, 2]) {
+    expect(results[index]).toMatchObject({ kind: 'executed', stdout: '1\n' });
+    expect(results[index].uncaughtException).toBeUndefined();
+  }
+  for (const index of [1, 3])
+    expect(results[index]).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining('循環しています') })],
+    });
+});

@@ -157,34 +157,48 @@ function arrowKind(params: readonly Kind[], result: Kind): Kind {
   return kind;
 }
 
-/** Orders synonyms so that each comes after those it mentions, rejecting cycles. */
 function orderSynonyms(decls: RSynonymDecl[]): RSynonymDecl[] {
   const byEntity = new Map(decls.map((decl) => [decl.entity, decl]));
   const ordered: RSynonymDecl[] = [];
   const state = new Map<RSynonymDecl, 'visiting' | 'done'>();
-  const visit = (decl: RSynonymDecl): void => {
-    const current = state.get(decl);
-    if (current === 'done') return;
-    if (current === 'visiting') throw compileError(decl.span, `型シノニム ${decl.entity.name} が循環しています。`);
+  const frames: { decl: RSynonymDecl; dependencies: Generator<RSynonymDecl> }[] = [];
+  const enter = (decl: RSynonymDecl): void => {
     state.set(decl, 'visiting');
-    const walk = (type: RType): void => {
-      if (type.k === 'con') {
-        const dependency = byEntity.get(type.entity);
-        if (dependency) visit(dependency);
-      } else if (type.k === 'app') {
-        walk(type.fn);
-        walk(type.arg);
-      } else if (type.k === 'fun') {
-        walk(type.from);
-        walk(type.to);
-      }
-    };
-    walk(decl.rhs);
-    state.set(decl, 'done');
-    ordered.push(decl);
+    frames.push({ decl, dependencies: synonymDependencies(decl.rhs, byEntity) });
   };
-  for (const decl of decls) visit(decl);
+  for (const root of decls) {
+    if (state.has(root)) continue;
+    enter(root);
+    while (frames.length > 0) {
+      const frame = frames.at(-1)!;
+      const next = frame.dependencies.next();
+      if (next.done) {
+        state.set(frame.decl, 'done');
+        ordered.push(frame.decl);
+        frames.pop();
+        continue;
+      }
+      const dependency = next.value;
+      const current = state.get(dependency);
+      if (current === 'visiting')
+        throw compileError(dependency.span, `型シノニム ${dependency.entity.name} が循環しています。`);
+      if (current !== 'done') enter(dependency);
+    }
+  }
   return ordered;
+}
+
+function* synonymDependencies(type: RType, byEntity: ReadonlyMap<TypeEntity, RSynonymDecl>): Generator<RSynonymDecl> {
+  const work = [type];
+  while (work.length > 0) {
+    chargeCompilationWork();
+    const node = work.pop()!;
+    if (node.k === 'con') {
+      const dependency = byEntity.get(node.entity);
+      if (dependency) yield dependency;
+    } else if (node.k === 'app') work.push(node.arg, node.fn);
+    else if (node.k === 'fun') work.push(node.to, node.from);
+  }
 }
 
 function methodScheme(checker: Checker, decl: RClassDecl, sig: RClassDecl['methods'][number]['sig']): Scheme {
