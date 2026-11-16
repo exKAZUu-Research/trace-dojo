@@ -440,27 +440,55 @@ function rationalToBinary(
   return negative ? -result : result;
 }
 
-/** The shortest decimal digits that identify a float, and its exponent: x = 0.d1d2... * 10^exponent. */
+/** GHC's `floatToDigits` in base 10: the digits of a float and its exponent, x = 0.d1d2... * 10^exponent. */
 export function floatToDigits(value: number, isFloat: boolean): { digits: number[]; exponent: number } {
   if (value === 0) return { digits: [0], exponent: 0 };
-  const magnitude = Math.abs(value);
-  let text: string;
-  if (isFloat) {
-    text = '';
-    for (let precision = 1; precision <= 9; precision++) {
-      const candidate = magnitude.toPrecision(precision);
-      if (Math.fround(Number(candidate)) === magnitude) {
-        text = Number(candidate).toExponential();
-        break;
-      }
-    }
+  const precision = isFloat ? 24 : 53;
+  const minExponent = (isFloat ? -125 : -1021) - precision;
+  const decoded = decodeFloat(Math.abs(value), isFloat);
+  const shift = minExponent - decoded.exponent;
+  const f = shift > 0 ? decoded.mantissa / 2n ** BigInt(shift) : decoded.mantissa;
+  const e = shift > 0 ? decoded.exponent + shift : decoded.exponent;
+  const isPowerOfTwo = f === 2n ** BigInt(precision - 1);
+  let r: bigint;
+  let s: bigint;
+  let mUp: bigint;
+  let mDn: bigint;
+  if (e >= 0) {
+    const be = 2n ** BigInt(e);
+    [r, s, mUp, mDn] = isPowerOfTwo ? [f * be * 4n, 4n, be * 2n, be] : [f * be * 2n, 2n, be, be];
   } else {
-    text = magnitude.toExponential();
+    [r, s, mUp, mDn] =
+      e > minExponent && isPowerOfTwo
+        ? [f * 4n, 2n ** BigInt(-e + 1) * 2n, 2n, 1n]
+        : [f * 2n, 2n ** BigInt(-e) * 2n, 1n, 1n];
   }
-  const [mantissa, exponentText] = text.split('e');
-  const digits = Array.from(mantissa.replace('.', ''), Number);
-  while (digits.length > 1 && digits.at(-1) === 0) digits.pop();
-  return { digits, exponent: Number(exponentText) + 1 };
+  // Any estimate at most the exponent works, since the loop only raises it.
+  let k = Math.floor(Math.log10(Math.abs(value))) - 1;
+  while (k >= 0 ? r + mUp > 10n ** BigInt(k) * s : 10n ** BigInt(-k) * (r + mUp) > s) k++;
+  if (k >= 0) s *= 10n ** BigInt(k);
+  else {
+    const scale = 10n ** BigInt(-k);
+    r *= scale;
+    mUp *= scale;
+    mDn *= scale;
+  }
+  const digits: number[] = [];
+  for (;;) {
+    const digit = (r * 10n) / s;
+    r = (r * 10n) % s;
+    mUp *= 10n;
+    mDn *= 10n;
+    // GHC excludes both ends of the rounding interval even for an even mantissa, so its digits are not always the shortest.
+    const low = r < mDn;
+    const high = r + mUp > s;
+    if (!low && !high) {
+      digits.push(Number(digit));
+      continue;
+    }
+    digits.push(Number(low && (!high || r * 2n < s) ? digit : digit + 1n));
+    return { digits, exponent: k };
+  }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
