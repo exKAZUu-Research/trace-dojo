@@ -222,13 +222,14 @@ function defineMembers(type: StructType, child: Type): void {
     appendNTimes: method(
       'appendNTimes',
       { args: [child, USIZE], result: allocating(VOID), allocator: true },
-      (list, [value, count], frame) =>
-        insertValues(
-          frame,
-          list,
-          list.items.length,
-          Array.from({ length: Number(count as bigint) }, () => value)
-        )
+      (list, [value, count], frame) => {
+        const length = list.items.length + Number(count as bigint);
+        if (!ensureTotalCapacity(frame, list, length, child)) return ERROR_OUT_OF_MEMORY;
+        for (let index = list.items.length; index < length; index++)
+          list.items.target.slots[list.items.start + index] = copyForStorage(value);
+        setLength(list, length);
+        return;
+      }
     ),
     insert: method(
       'insert',
@@ -388,7 +389,11 @@ function defineMembers(type: StructType, child: Type): void {
     }),
     clone: method('clone', { args: [], result: allocating(type), byValue: true, allocator: true }, (list, _, frame) => {
       const copy = listOf(
-        new ZStruct([new Slice(new ZArray(list.items.values()), 0, list.items.length), 0n, new ZStruct([0n])])
+        new ZStruct([
+          new Slice(new ZArray(list.items.values().map(copyForStorage)), 0, list.items.length),
+          0n,
+          new ZStruct([0n]),
+        ])
       );
       copy.allocator = list.allocator;
       if (!reallocate(frame, copy, list.capacity, child)) return ERROR_OUT_OF_MEMORY;

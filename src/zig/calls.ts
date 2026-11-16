@@ -38,7 +38,6 @@ export interface FunctionCompilation {
   paramTypes: readonly Type[];
   returnType: Type;
   inferredErrors?: ErrorSetType;
-  /** The types of `anytype` parameters, which an instance fixes. */
   isMethod: boolean;
 }
 
@@ -48,7 +47,6 @@ export abstract class CallCompiler extends BuiltinCompiler {
   private nextInstanceId = 1;
 
   protected abstract compileFunctionBody(compilation: FunctionCompilation): void;
-  /** Whether the program records steps, so that compiled functions check for atomic annotations. */
   protected abstract atomicRow(fn: FunctionDeclaration): boolean;
 
   // Calls -------------------------------------------------------------------------------------------------------------
@@ -213,7 +211,6 @@ export abstract class CallCompiler extends BuiltinCompiler {
     return this.coerce(receiver, declared, span);
   }
 
-  /** The declared parameter types of a function, with undefined for `anytype` parameters. */
   /** The declared type of a parameter (undefined for `anytype`), seeing the earlier parameters' types. */
   private parameterType(
     decl: Extract<Decl, { kind: 'fn' }>,

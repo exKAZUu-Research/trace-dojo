@@ -54,7 +54,7 @@ import {
   VOID,
   wrapInt,
 } from './types';
-import { ErrorValue, Pointer, Slice, type Value, ZArray, ZStruct, ZUnion } from './values';
+import { ErrorValue, Pointer, Slice, storeInto, type Value, ZArray, ZStruct, ZUnion } from './values';
 
 /** Builtins of stages C and D, which this grader rejects with the stage's message. */
 const UNAVAILABLE = new Map<string, string>([
@@ -848,10 +848,10 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         const out = target.view(evaluateDestination(frame));
         const input = from.view(evaluateSource(frame));
         if (out.length !== input.length) panic(PANIC.memcpyLengths);
-        const values = input.slots.slots.slice(input.start, input.start + input.length);
+        const values = input.slots.slots.slice(input.start, input.start + input.length).map(copyForStorage);
         if (name === '@memcpy' && out.slots === input.slots && Math.abs(out.start - input.start) < out.length)
           panic(PANIC.memcpyAlias);
-        for (const [index, value] of values.entries()) out.slots.slots[out.start + index] = value;
+        for (const [index, value] of values.entries()) storeInto(out.slots, out.start + index, value);
         return;
       },
       expression
@@ -870,8 +870,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       VOID,
       (frame) => {
         const out = target.view(evaluateDestination(frame));
-        const filler = evaluateValue(frame);
-        for (let index = 0; index < out.length; index++) out.slots.slots[out.start + index] = filler;
+        const filler = copyForStorage(evaluateValue(frame));
+        for (let index = 0; index < out.length; index++) storeInto(out.slots, out.start + index, filler);
         return;
       },
       expression

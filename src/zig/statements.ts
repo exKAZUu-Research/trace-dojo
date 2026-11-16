@@ -147,7 +147,7 @@ export abstract class StatementCompiler extends CallCompiler {
           }
           return slot;
         });
-        const body = this.blockStatements(syntax.body.statements, syntax.body);
+        const body = this.blockStatements(syntax.body.statements, syntax.body, true);
         const payload =
           compilation.returnType.kind === 'error_union' ? compilation.returnType.payload : compilation.returnType;
         if (!body.noreturn && payload.kind !== 'void' && payload.kind !== 'noreturn') {
@@ -186,8 +186,7 @@ export abstract class StatementCompiler extends CallCompiler {
 
   // Blocks ----------------------------------------------------------------------------------------------------------
 
-  /** Compiles statements in a scope of their own, running their defers and hiding their locals when it ends. */
-  protected blockStatements(statements: readonly Statement[], span: Span): Stmt {
+  protected blockStatements(statements: readonly Statement[], span: Span, keepLocals = false): Stmt {
     const locals = new Map<string, LocalBinding>();
     const scope: Scope = { locals, parent: this.scope };
     return this.withScope(scope, () => {
@@ -204,7 +203,7 @@ export abstract class StatementCompiler extends CallCompiler {
         }
       }
       void span;
-      const slots = [...locals.values()].map((binding) => binding.slot);
+      const slots = keepLocals ? [] : [...locals.values()].map((binding) => binding.slot);
       const execs = compiled.map((stmt) => stmt.exec);
       const run = (frame: Frame): Jump | undefined => {
         for (const exec of execs) {
@@ -1297,8 +1296,8 @@ export abstract class StatementCompiler extends CallCompiler {
     const otherwiseExec = otherwise?.stmt?.exec;
     const otherwiseValue = otherwise?.value?.eval;
     const hasBinding = binding !== undefined;
-    const bindingSlot = binding?.binding.slot;
-    const loop = (frame: Frame): Jump | { value: Value } | undefined => {
+    const captureSlots = [binding?.binding.slot, errorBinding?.binding.slot].filter((slot) => slot !== undefined);
+    const loop = clearingLocals(captureSlots, (frame: Frame): Jump | { value: Value } | undefined => {
       for (;;) {
         frame.runtime.spend();
         if (!test(frame)) break;
@@ -1317,14 +1316,14 @@ export abstract class StatementCompiler extends CallCompiler {
         }
       }
       failure?.(frame);
-      if (bindingSlot !== undefined) frame.slots[bindingSlot] = UNASSIGNED;
+      if (binding) frame.slots[binding.binding.slot] = UNASSIGNED;
       if (otherwiseExec) {
         const completion = otherwiseExec(frame);
         if (completion) return completion;
       }
       if (otherwiseValue) return { value: otherwiseValue(frame) };
       return undefined;
-    };
+    });
     const valueType = asStatement ? VOID : this.loopType(target, otherwise?.value, infinite, expression);
     const stmt: Stmt = {
       exec: (frame) => {
@@ -1649,7 +1648,7 @@ export abstract class StatementCompiler extends CallCompiler {
       try {
         const body = this.withScope({ locals, parent: this.scope }, () => this.loopBody(expression.body));
         return {
-          body: body.exec,
+          body: clearingLocals(binding ? [binding.slot] : [], body.exec),
           slot: binding?.slot,
           evaluate: element.eval,
           storesAnswer: storesAnswerValue(element.type),
@@ -1990,8 +1989,13 @@ export abstract class StatementCompiler extends CallCompiler {
           : { body: undefined, value: known(NORETURN, undefined, each.body), bind };
       }
       return this.withScope({ locals, parent: this.scope }, () => {
-        if (asStatement) return { body: this.statementExpression(each.body, each.body), value: undefined, bind };
-        return { body: undefined, value: this.compile(each.body, resultType), bind };
+        const slots = [...locals.values()].map((binding) => binding.slot);
+        if (asStatement) {
+          const body = this.statementExpression(each.body, each.body);
+          return { body: { ...body, exec: clearingLocals(slots, body.exec) }, value: undefined, bind };
+        }
+        const value = this.compile(each.body, resultType);
+        return { body: undefined, value: { ...value, eval: clearingLocals(slots, value.eval) }, bind };
       });
     };
     if (each.isInline) {
@@ -2154,6 +2158,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** `x catch handler`; with `discarded`, as in `_ = x catch handler`, the payload and handler need no common type. */
+  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps error-union analysis and handler evaluation together.
   protected compileCatch(expression: ExpressionOf<'catch'>, resultType: Type | undefined, discarded = false): TExpr {
     const operand = this.compile(expression.operand);
     const type = operand.type;
@@ -2193,7 +2198,7 @@ export abstract class StatementCompiler extends CallCompiler {
         : this.peerType([payloadValue, handler], expression);
     const otherwise = discarded ? handler : this.coerce(handler, resultTypeOf, expression.handler);
     const evaluate = operand.eval;
-    const evaluateHandler = otherwise.eval;
+    const evaluateHandler = clearingLocals(capture ? [capture.binding.slot] : [], otherwise.eval);
     const bind = capture?.bind;
     return runtime(
       resultTypeOf,
@@ -2367,4 +2372,15 @@ function isAggregateType(type: Type): boolean {
 /** The key a prong's value has in a switch: an error's name, or the value itself. */
 function prongKey(value: Value): unknown {
   return value instanceof ErrorValue ? value.name : value;
+}
+
+function clearingLocals<T>(slots: readonly number[], run: (frame: Frame) => T): (frame: Frame) => T {
+  if (slots.length === 0) return run;
+  return (frame) => {
+    try {
+      return run(frame);
+    } finally {
+      for (const slot of slots) frame.slots[slot] = UNASSIGNED;
+    }
+  };
 }

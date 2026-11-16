@@ -301,9 +301,11 @@ export function compareFloats(a: AnyFloat, b: AnyFloat): -1 | 0 | 1 | undefined 
   const x = asBigFloat(a);
   const y = asBigFloat(b);
   if (x.kind === 'nan' || y.kind === 'nan') return undefined;
-  const xs = signedRank(x);
-  const ys = signedRank(y);
-  if (xs !== undefined && ys !== undefined) return xs < ys ? -1 : xs > ys ? 1 : 0;
+  if (x.kind === 'inf' || y.kind === 'inf') {
+    const xs = infinityRank(x);
+    const ys = infinityRank(y);
+    return xs < ys ? -1 : xs > ys ? 1 : 0;
+  }
   const rx = toRational(x);
   const ry = toRational(y);
   const left = (rx.sign ? -rx.num : rx.num) * ry.den;
@@ -311,11 +313,8 @@ export function compareFloats(a: AnyFloat, b: AnyFloat): -1 | 0 | 1 | undefined 
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-/** The rank of an infinity, or of zero, which finite comparisons handle otherwise. */
-function signedRank(value: BigFloat): number | undefined {
-  if (value.kind === 'inf') return value.sign ? -Infinity : Infinity;
-  if (value.mantissa === 0n) return 0;
-  return undefined;
+function infinityRank(value: BigFloat): number {
+  return value.kind === 'inf' ? (value.sign ? -1 : 1) : 0;
 }
 
 export function isNaNFloat(value: AnyFloat): boolean {

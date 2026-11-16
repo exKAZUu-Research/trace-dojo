@@ -146,7 +146,6 @@ export function floatValue(value: bigint | AnyFloat, bits: FloatBits): AnyFloat 
   return typeof value === 'bigint' ? floatFromBigInt(value, bits) : value;
 }
 
-/** Floating-point arithmetic, where `%` is `@rem` (the result has the dividend's sign). */
 export function floatOperation(a: AnyFloat, b: AnyFloat, operator: '+' | '-' | '*' | '/', bits: FloatBits): AnyFloat {
   return floatArithmetic(a, b, operator, bits);
 }
@@ -155,6 +154,7 @@ export function floatRem(a: AnyFloat, b: AnyFloat, bits: FloatBits): AnyFloat {
   if (typeof a === 'number' && typeof b === 'number') return a % b;
   const x = asBigFloat(a);
   const y = asBigFloat(b);
+  if (x.kind === 'finite' && y.kind === 'inf') return roundTo(x, bits);
   if (x.kind !== 'finite' || y.kind !== 'finite' || y.isZero) return new BigFloat(false, 'nan', 0n, 0);
   // a - trunc(a / b) * b, computed exactly.
   const quotient = truncateToBigInt(floatArithmetic(x, y, '/', 128));

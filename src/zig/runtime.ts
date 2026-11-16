@@ -72,6 +72,7 @@ export class Runtime {
   readonly world = new TurtleWorld();
   readonly steps = new StepTracker();
   readonly frames: Frame[] = [];
+  private readonly outputDecoders = [new TextDecoder(), new TextDecoder()];
   /** The storage of container-level variables, which garbage collection starts from. */
   readonly globals: Slots[] = [];
   /** Values that native objects hold, such as a hash map's entries, reached through their handles. */
@@ -83,6 +84,17 @@ export class Runtime {
 
   spend(cost = 1): void {
     this.budget.spend(cost);
+  }
+
+  writeOutput(fd: number, bytes: readonly number[]): void {
+    const index = fd === 2 ? 1 : 0;
+    const text = this.outputDecoders[index].decode(new Uint8Array(bytes), { stream: true });
+    (index === 1 ? this.io.stderr : this.io.stdout).write(text);
+  }
+
+  finishOutput(): void {
+    this.io.stdout.write(this.outputDecoders[0].decode());
+    this.io.stderr.write(this.outputDecoders[1].decode());
   }
 
   /** Counts slots that a program allocates, ending it as Zig does when memory runs out. */

@@ -128,10 +128,10 @@ const DEBUG = nativeStruct('std.debug', {
         try {
           bytes = print(frame);
         } catch (error) {
-          if (error instanceof PartialOutputPanic) frame.runtime.io.stderr.write(decodeOutput(error.partial));
+          if (error instanceof PartialOutputPanic) frame.runtime.writeOutput(2, error.partial);
           throw error;
         }
-        frame.runtime.io.stderr.write(decodeOutput(bytes));
+        frame.runtime.writeOutput(2, bytes);
         return;
       },
       call.span
@@ -207,7 +207,7 @@ function addIoMembers(): void {
       const evaluate = receiver.eval;
       return nativeCall(errorUnionOf(WRITE_ERROR, VOID), [bytes], call.span, ([value], frame) => {
         const file = evaluate(frame) as NativeHandle;
-        writeStream(frame.runtime.io, file.state.fd as number, byteValues(value).map(Number));
+        frame.runtime.writeOutput(file.state.fd as number, byteValues(value).map(Number));
         return;
       });
     }),
@@ -323,7 +323,7 @@ function addWriterMembers(): void {
         (frame) => {
           const state = writer(frame);
           if (state.fd !== undefined) {
-            writeStream(frame.runtime.io, state.fd, state.buffered);
+            frame.runtime.writeOutput(state.fd, state.buffered);
             state.buffered = [];
           }
           return;
@@ -434,19 +434,12 @@ function writeTo(frame: Parameters<TExpr['eval']>[0], state: WriterState, bytes:
     return undefined;
   }
   if (state.buffered.length + bytes.length > state.capacity) {
-    writeStream(frame.runtime.io, state.fd as number, [...state.buffered, ...bytes]);
+    frame.runtime.writeOutput(state.fd as number, [...state.buffered, ...bytes]);
     state.buffered = [];
     return undefined;
   }
   state.buffered.push(...bytes);
   return undefined;
-}
-
-function writeStream(io: Parameters<TExpr['eval']>[0]['runtime']['io'], fd: number, bytes: readonly number[]): void {
-  if (bytes.length === 0) return;
-  const text = decodeOutput(bytes);
-  if (fd === 2) io.stderr.write(text);
-  else io.stdout.write(text);
 }
 
 // std.process ---------------------------------------------------------------------------------------------------------

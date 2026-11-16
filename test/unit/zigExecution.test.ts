@@ -291,3 +291,92 @@ pub fn main() void {
     uncaughtException: undefined,
   });
 });
+
+test('UTF-8 output spans debug writes and independent file writer flushes', () => {
+  const program = `const std = @import("std");
+pub fn main(init: std.process.Init) !void {
+    var buf: [1]u8 = undefined;
+    var w = std.Io.File.stdout().writer(init.io, &buf);
+    const out = &w.interface;
+    for ([_]u8{ 0xe3, 0x81, 0x82 }) |byte| {
+        std.debug.print("{c}", .{byte});
+        try out.writeByte(byte);
+        try out.flush();
+    }
+    std.debug.print("{c}", .{@as(u8, 0xe3)});
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'あ',
+    stderr: 'あ�',
+    uncaughtException: undefined,
+  });
+});
+
+test('memory builtins copy aggregate values while preserving destination pointers', () => {
+  const program = `const std = @import("std");
+const P = struct { x: i32 };
+pub fn main() void {
+    var a = [_]P{ .{ .x = 1 }, .{ .x = 3 }, .{ .x = 5 } };
+    var b: [3]P = undefined;
+    const p = &b[0].x;
+    @memcpy(&b, &a);
+    b[0].x = 2;
+    std.debug.print("{} {} {}|", .{ a[0].x, b[0].x, p.* });
+    @memmove(a[1..3], a[0..2]);
+    std.debug.print("{} {} {}|", .{ a[0].x, a[1].x, a[2].x });
+    @memset(&b, .{ .x = 7 });
+    b[0].x = 8;
+    std.debug.print("{} {} {}", .{ p.*, b[1].x, b[2].x });
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 2 2|1 1 3|8 7 7',
+    uncaughtException: undefined,
+  });
+});
+
+test('extended float library comparisons and remainder handle finite values, infinities, and NaN', () => {
+  const program = `const std = @import("std");
+pub fn main() void {
+    const a = [_]f128{ 1.0, 2.0 };
+    const b = [_]f128{ 1.0, 2.0 };
+    const inf = std.math.inf(f128);
+    const nan = std.math.nan(f128);
+    std.debug.print("{} {} {} {} {} {} {} {d} {d}", .{
+        std.mem.eql(f128, &a, &b), std.mem.indexOfScalar(f128, &a, 2.0).?,
+        std.sort.asc(f128)({}, 1.0, 2.0), inf > @as(f128, 1.0), -inf < @as(f128, -1.0),
+        std.sort.asc(f128)({}, nan, 1.0), std.mem.eql(f128, &[_]f128{nan}, &[_]f128{nan}),
+        @rem(@as(f128, 1.0), inf), @rem(@as(f128, -1.0), -inf),
+    });
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 1 true true true false false 1 -1',
+    uncaughtException: undefined,
+  });
+});
+
+test('ArrayList clones own aggregate elements and reject unbounded appendNTimes', () => {
+  const program = `const std = @import("std");
+const P = struct { x: [2]i32 };
+pub fn main(init: std.process.Init) !void {
+    var a: std.ArrayList(P) = .empty;
+    defer a.deinit(init.gpa);
+    try a.append(init.gpa, .{ .x = .{ 1, 3 } });
+    var b = try a.clone(init.gpa);
+    defer b.deinit(init.gpa);
+    b.items[0].x[0] = 2;
+    try b.appendNTimes(init.gpa, .{ .x = .{ 4, 5 } }, 2);
+    b.items[1].x[0] = 6;
+    std.debug.print("{} {} {} {}|", .{ a.items[0].x[0], b.items[0].x[0], b.items[1].x[0], b.items[2].x[0] });
+    b.appendNTimes(init.gpa, .{ .x = .{ 0, 0 } }, 4294967296) catch |err| {
+        std.debug.print("{s} {}", .{ @errorName(err), b.items.len });
+    };
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 2 6 4|OutOfMemory 3',
+    uncaughtException: undefined,
+  });
+});

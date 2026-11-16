@@ -165,3 +165,36 @@ test('an atomic annotation outside a function header is a compile error', () => 
   expect(() => traceProgram('zig', program, program)).toThrow(/atomic/);
   expect(executeProgram('zig', program)).toMatchObject({ kind: 'executed' });
 });
+
+test.each(['', 'return;'])('main retains its outer locals through final collection (%s)', (ending) => {
+  const program = `pub fn main() void {
+    const t = Turtle.init();
+    t.forward();
+    const n: i32 = 3;
+    _ = n;
+    { const gone = Turtle.init(3, 3); gone.forward(); }
+    ${ending}
+}`;
+  const result = traceProgram('zig', program, program);
+  expect(result.finalVars).toEqual({ n: 3 });
+  expect(result.finalTurtles).toEqual([{ x: 0, y: 1, color: '#', dir: 'N' }]);
+  expect(executeProgram('zig', program)).toMatchObject({ finalTurtles: result.finalTurtles });
+});
+
+test('capture variables leave traces when while, catch, switch, and inline-for scopes end', () => {
+  const program = `const std = @import("std");
+fn fail() error{Oops}!void { return error.Oops; }
+pub fn main() void {
+    const n: ?i32 = 1;
+    while (n) |v| { std.debug.print("{}", .{v}); break; }
+    fail() catch |err| { std.debug.print("{s}", .{@errorName(err)}); };
+    switch (n.?) { 1 => |value| { std.debug.print("{}", .{value}); }, else => {} }
+    inline for (.{ 1, 2 }) |item| { std.debug.print("{}", .{item}); }
+    const after: i32 = 2;
+    _ = after;
+}`;
+  const result = traceProgram('zig', program, program);
+  expect(result.stderr).toBe('1Oops112');
+  expect(result.traceItems.at(-1)?.vars).toEqual({ n: 1, after: 2 });
+  expect(result.finalVars).toEqual({ n: 1, after: 2 });
+});

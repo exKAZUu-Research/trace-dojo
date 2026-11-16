@@ -1,4 +1,5 @@
 import type { Expression, Span } from '../ast';
+import { BigFloat, compareFloats } from '../floats';
 import { ZigPanic } from '../runtime';
 import { known, runtime, type SemaApi, type TExpr } from '../semaBase';
 import {
@@ -70,13 +71,14 @@ export function mutableSlice(sema: SemaApi, arg: Expression, child: Type): TExpr
 
 /** Whether two elements are equal, as `==` compares them. */
 export function equalValues(a: Value, b: Value): boolean {
+  if (a instanceof BigFloat && b instanceof BigFloat) return compareFloats(a, b) === 0;
   if (a instanceof Pointer && b instanceof Pointer) return a.equals(b);
   return a === b;
 }
 
-/** Compares two scalars: -1, 0, or 1. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Handles each kind of value the operation accepts.
+// code-gauge-allow functionCognitiveComplexity 18 -- Handles each kind of value the operation accepts.
 export function compareScalars(a: Value, b: Value): number {
+  if (a instanceof BigFloat && b instanceof BigFloat) return compareFloats(a, b) ?? Number.NaN;
   if (typeof a === 'bigint' && typeof b === 'bigint') return a < b ? -1 : a > b ? 1 : 0;
   if (typeof a === 'number' && typeof b === 'number') return a < b ? -1 : a > b ? 1 : 0;
   if (typeof a === 'boolean' && typeof b === 'boolean') return Number(a) - Number(b);

@@ -53,6 +53,7 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
   } catch (error) {
     uncaughtException = describeUncaught(error);
   }
+  runtime.finishOutput();
   return {
     finalBoard: runtime.world.boardText(),
     finalTurtles: runtime.world.turtleTraces(),
