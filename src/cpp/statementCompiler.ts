@@ -4,7 +4,7 @@ import type { Expr } from './expr';
 import { ExpressionCompiler } from './expressionCompiler';
 import { destroyTemporaries } from './objectCompiler';
 import { BREAK, type Completion, CONTINUE, type Eval, type Exec, type Frame, RETURN } from './runtime';
-import { Scope } from './scopes';
+import { type Entity, Scope } from './scopes';
 import { isObjectCreation, onlyCalls } from './stepRules';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
@@ -219,9 +219,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (type.kind === 'reference') return this.referenceDeclarator(name, type, value, declarator.row);
     if (type.kind === 'void') return this.error(declarator.row, `void 型の変数 ${name} は作れません。`);
     let init: Eval<Value>;
-    let constant: number | bigint | undefined;
     let createsObject = false;
+    let entity: Extract<Entity, { kind: 'local' }>;
     if (isAuto(type)) {
+      let constant: number | bigint | undefined;
       if (!value || value.type === 'initializer_list' || value.type === 'argument_list') {
         if (value?.type === 'argument_list' && value.children.length === 1) {
           const expr = this.compileExpression(value.children[0]);
@@ -241,27 +242,31 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         init = this.copyInitializer(type, expr, declarator.row, false);
         constant = isConstType(type) ? this.rvalue(expr).constant : undefined;
       }
+      entity = this.declareVariable(name, type);
+      entity.constant = constant;
     } else {
       if (type.kind === 'array' && type.length === undefined && value) type = this.completeArrayType(type, value);
       if (type.kind === 'array' && type.length === undefined)
         return this.error(declarator.row, `配列 ${name} の大きさを書いてください。`);
+      // The variable's name is usable in its own initializer (C++20 [basic.scope.pdecl]).
+      entity = this.declareVariable(name, type);
       const compiled = this.initializerOf(type, value, declarator, name);
       init = compiled.init;
-      constant = compiled.constant;
+      entity.constant = compiled.constant;
       createsObject = compiled.createsObject;
     }
     if (this.isClassLike(type) && !value) createsObject = true;
-    const local = this.context.declareLocal(name, type, false);
-    this.context.scope.names.set(name, { kind: 'local', local, isReference: false, constant });
+    const { local } = entity;
     const destroy = this.destroyerOf(type);
     if (destroy) this.context.scope.destructibles.push({ slot: local.slot, destroy });
     const { slot } = local;
+    // A variable must be declared before its initializer runs, which may name it (C++20 [basic.scope.pdecl]).
     const exec: Exec = (frame) => {
-      const store = new Box(init(frame));
+      const store = new Box(UNINIT);
       frame.slots[slot] = store;
+      store.value = init(frame);
       return;
     };
-    // A variable must be declared before its initializer runs, which may name it (C++20 [basic.scope.pdecl]).
     return {
       exec: this.fullExpression(exec),
       hasInitializer: value !== undefined,
@@ -269,11 +274,24 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     };
   }
 
+  private declareVariable(name: string, type: Type): Extract<Entity, { kind: 'local' }> {
+    const local = this.context.declareLocal(name, type, false);
+    const entity: Extract<Entity, { kind: 'local' }> = { kind: 'local', local, isReference: false };
+    this.context.scope.names.set(name, entity);
+    return entity;
+  }
+
+  /** A declarator, or the variable with arguments that `asDirectInitialization` reads it as. */
+  protected variableOrFunctionDeclarator(base: Type, declarator: Syntax): Syntax {
+    const declared = this.applyDeclarator(base, declarator);
+    return (declared.function ? this.asDirectInitialization(declarator, declared.function) : undefined) ?? declarator;
+  }
+
   /**
    * Reads `Turtle t(x, y);` as a variable with constructor arguments when the grammar took it for a function
    * declaration: its "parameters" are names of variables, not types, so C++ reads it as a variable.
    */
-  private asDirectInitialization(declarator: Syntax, functionDeclarator: Syntax): Syntax | undefined {
+  protected asDirectInitialization(declarator: Syntax, functionDeclarator: Syntax): Syntax | undefined {
     const parameters = fieldOf(functionDeclarator, 'parameters');
     const name = fieldOf(functionDeclarator, 'declarator');
     if (!parameters || !name || name.type !== 'identifier' || parameters.children.length === 0) return undefined;
@@ -362,13 +380,16 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   /** The length of an array declared without one, which its initializer decides. */
   completeArrayType(type: Extract<Type, { kind: 'array' }>, value: Syntax): Type {
-    if (value.type === 'initializer_list') return { ...type, length: value.children.length };
+    if (value.type === 'initializer_list') return { ...type, length: this.bracedArrayLength(type, value) };
     if (value.type === 'string_literal' || value.type === 'concatenated_string') {
       const literal = this.compileExpression(value);
       if (literal.literalBytes !== undefined) return { ...type, length: literal.literalBytes.length + 1 };
     }
     return this.error(value.row, '配列の初期値には {...} か文字列リテラルを書いてください。');
   }
+
+  /** The length of an array of unknown bound that a braced list initializes. */
+  abstract bracedArrayLength(type: Extract<Type, { kind: 'array' }>, list: Syntax): number;
 
   private referenceDeclarator(
     name: string,
@@ -440,7 +461,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   private staticLocal(node: Syntax): Exec {
     const base = this.specifiedType(node);
-    for (const declarator of fieldsOf(node, 'declarator')) {
+    for (const written of fieldsOf(node, 'declarator')) {
+      const declarator = this.variableOrFunctionDeclarator(base, written);
       const declared = this.applyDeclarator(base, declarator);
       const name = declared.name as string;
       this.checkRedeclaration(name, declarator.row);
@@ -455,8 +477,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       const { index } = global;
       const initialize = this.staticInitializer(global, type, value, declarator, name);
       const exec: Exec = (frame) => {
-        initialize(frame);
         frame.slots[slot] = frame.runtime.globals[index];
+        initialize(frame);
         return;
       };
       this.context.scope.slots.splice(this.context.scope.slots.indexOf(slot), 1);
@@ -1122,7 +1144,7 @@ function asZeroAssignment(node: Syntax): Syntax | undefined {
 }
 
 /** Whether a reference to `target` binds to an lvalue of `source` itself, rather than to a converted temporary. */
-function bindsDirectly(source: Type, target: Type): boolean {
+export function bindsDirectly(source: Type, target: Type): boolean {
   if (source.kind === 'class' && target.kind === 'class') return source.cls.isDerivedFrom(target.cls);
   return sameType(unqualified(source), unqualified(target), false);
 }

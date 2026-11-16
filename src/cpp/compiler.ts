@@ -8,7 +8,7 @@ import type { Library } from './library/registry';
 import { invoke, newObject, virtualKey, zeroOf } from './objectCompiler';
 import { type CompiledFunction, type Eval, type Exec, type Frame, holdAll, RETURN } from './runtime';
 import { type Entity, FunctionContext, type Scope } from './scopes';
-import { endScope, StatementCompiler } from './statementCompiler';
+import { bindsDirectly, endScope, StatementCompiler } from './statementCompiler';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
   type Access,
@@ -590,8 +590,13 @@ export class Compiler extends StatementCompiler {
     };
   }
 
-  /** The constructor a class without any gets, which initializes its base and members as their defaults say. */
+  /**
+   * The constructor a class without any gets, which initializes its base and members as their defaults say; none when
+   * it is deleted, which records why, or has nothing to do.
+   */
   private implicitDefaultConstructor(cls: ClassInfo): FunctionInfo | undefined {
+    cls.implicitDefaultError = implicitDefaultError(cls);
+    if (cls.implicitDefaultError) return undefined;
     const fn: FunctionInfo = { ...this.syntheticFunction(cls, cls.name), isConstructor: true };
     const context = new FunctionContext(fn, cls, VOID);
     const saved = this.context;
@@ -723,6 +728,7 @@ export class Compiler extends StatementCompiler {
     const args = initializer ? this.initializerArguments(initializer) : [];
     if (base.constructors.length === 0) {
       if (args.length > 0) this.error(row, `${base.name} には引数をとるコンストラクタがありません。`);
+      if (base.implicitDefaultError) this.error(row, base.implicitDefaultError);
       const implicit = base.implicitDefault;
       return (frame) => {
         (frame.self?.read() as CObject).cls = base;
@@ -1105,7 +1111,8 @@ export class Compiler extends StatementCompiler {
       return this.error(node.row, '宣言する名前を書いてください。');
     }
     const base = this.specifiedType(node);
-    for (const declarator of declarators) {
+    for (const written of declarators) {
+      const declarator = this.variableOrFunctionDeclarator(base, written);
       const declared = this.applyDeclarator(base, declarator);
       if (declared.function && declarator.type !== 'init_declarator') {
         this.functionDeclaration(node, declarator, declared);
@@ -1315,13 +1322,8 @@ export class Compiler extends StatementCompiler {
 
   copyInitializer(type: Type, expr: Expr, row: number, isList: boolean): Eval<Value> {
     if (type.kind === 'array') {
-      if (
-        expr.literalBytes !== undefined &&
-        type.of.kind === 'int' &&
-        (type.of.name === 'char' || type.of.name === 'schar' || type.of.name === 'uchar')
-      ) {
+      if (expr.literalBytes !== undefined && isCharacterArray(type))
         return this.charArrayFromLiteral(type, expr.literalBytes, row);
-      }
       return this.error(row, `配列は ${typeName(expr.type)} 型の値では初期化できません。{...} を使ってください。`);
     }
     if (isList) this.checkNarrowing(expr, type, row);
@@ -1386,6 +1388,7 @@ export class Compiler extends StatementCompiler {
       if (!resolved.fn.native) this.checkAccess(resolved.fn.access, cls, cls, row, `${cls.name} のコンストラクタ`);
       return this.constructWith(cls, resolved, [], row);
     }
+    if (cls.implicitDefaultError) return this.error(row, cls.implicitDefaultError);
     const implicit = cls.implicitDefault;
     const zeroed = isValueInitialized;
     const zeroFields = cls.fields.map((field) =>
@@ -1450,62 +1453,132 @@ export class Compiler extends StatementCompiler {
   }
 
   private aggregateInitializer(cls: ClassInfo, elements: Syntax[], row: number): Eval<Value> {
-    const fields = cls.ownFields;
-    if (elements.length > fields.length)
-      return this.error(row, `${cls.name} のメンバは ${fields.length} 個なので、初期値が多すぎます。`);
-    const inits = fields.map((field, index) => {
-      const element = elements[index];
-      if (element) return this.elementInitializer(field.type, element);
-      if (field.initializer) {
-        const node = field.initializer;
-        return node.type === 'initializer_list'
-          ? this.listInitializer(field.type, node, row)
-          : this.copyInitializer(field.type, this.compileExpression(node), row, false);
-      }
-      if (field.type.kind === 'reference') return this.error(row, `参照のメンバ ${field.name} に初期値がありません。`);
-      return this.valueInitialized(field.type, row).run as Eval<Value>;
-    });
-    return (frame) => {
-      const object = newObject(cls);
-      return holdAll(frame, inits, (values) => {
-        for (const [index, value] of values.entries()) object.values[fields[index].index] = value as Value;
-        return object;
-      });
-    };
+    const clauses: Clauses = { nodes: elements, next: 0, compiled: new Map() };
+    const run = this.takeMemberClauses(cls, clauses, row)();
+    if (clauses.next < elements.length) return this.error(row, `${cls.name} を初期化する {...} の値が多すぎます。`);
+    return run;
   }
 
   private arrayInitializer(type: Extract<Type, { kind: 'array' }>, elements: Syntax[], row: number): Eval<Value> {
-    const length = type.length ?? elements.length;
-    if (elements.length > length) return this.error(row, `配列の要素は ${length} 個なので、初期値が多すぎます。`);
-    const elementType = type.of;
-    // Braces may be left out around the elements of a nested array (brace elision), which take values in order.
-    if (elementType.kind === 'array' && elements.length > 0 && elements[0].type !== 'initializer_list') {
-      const inner = elementType.length ?? 0;
-      const groups: Syntax[][] = [];
-      for (let index = 0; index < elements.length; index += inner) groups.push(elements.slice(index, index + inner));
-      if (groups.length > length) return this.error(row, `配列の要素は ${length} 個なので、初期値が多すぎます。`);
-      const groupInits = groups.map((group) => this.arrayInitializer(elementType, group, row));
-      const zero = this.valueInitialized(elementType, row);
-      return (frame) =>
-        new ArrayStore(
-          Array.from({ length }, (_, index) =>
-            groupInits[index] ? groupInits[index](frame) : (zero.run(frame) as Value)
-          )
-        );
+    const literal = this.bracedStringLiteral(type, elements);
+    if (literal) return this.copyInitializer(type, literal, row, false);
+    const clauses: Clauses = { nodes: elements, next: 0, compiled: new Map() };
+    const run = this.takeArrayClauses(type, clauses, row)();
+    if (clauses.next < elements.length)
+      return this.error(row, `配列の要素は ${type.length} 個なので、初期値が多すぎます。`);
+    return run;
+  }
+
+  bracedArrayLength(type: Extract<Type, { kind: 'array' }>, list: Syntax): number {
+    const elements = list.children.filter((child) => child.type !== 'comment');
+    const literal = this.bracedStringLiteral(type, elements);
+    if (literal) return (literal.literalBytes as string).length + 1;
+    const clauses: Clauses = { nodes: elements, next: 0, compiled: new Map() };
+    let length = 0;
+    for (; clauses.next < elements.length; length++) this.takeClauses(type.of, clauses, list.row);
+    return length;
+  }
+
+  /** The string literal that initializes a character array in braces (`char s[4] = {"abc"}`, C++20 [dcl.init.string]). */
+  private bracedStringLiteral(type: Extract<Type, { kind: 'array' }>, elements: Syntax[]): Expr | undefined {
+    if (elements.length !== 1 || (elements[0].type !== 'string_literal' && elements[0].type !== 'concatenated_string'))
+      return undefined;
+    const literal = this.compileExpression(elements[0]);
+    return literal.literalBytes !== undefined && isCharacterArray(type) ? literal : undefined;
+  }
+
+  /**
+   * Takes the clauses of a braced list that initialize an object: the next one, or, when that one is no braced list
+   * and cannot initialize the object, which is an array or an aggregate, as many as its elements take, as if braces
+   * enclosed them (brace elision, C++20 [dcl.init.aggr]). Compiling the initializer waits for the returned function,
+   * so that counting the clauses compiles none.
+   */
+  private takeClauses(type: Type, clauses: Clauses, row: number): () => Eval<Value> {
+    const node = clauses.nodes[clauses.next];
+    if (node.type !== 'initializer_list' && (type.kind === 'array' || type.kind === 'class')) {
+      const expr = this.clauseExpression(node, clauses);
+      if (type.kind === 'array' && !(expr.literalBytes !== undefined && isCharacterArray(type)))
+        return this.takeArrayClauses(type, clauses, row);
+      const isOwnClass = expr.type.kind === 'class' && type.kind === 'class' && expr.type.cls.isDerivedFrom(type.cls);
+      if (type.kind === 'class' && !isOwnClass && this.isAggregate(type.cls))
+        return this.takeMemberClauses(type.cls, clauses, row);
     }
-    const inits = elements.map((element) => this.elementInitializer(elementType, element));
-    const rest =
-      elementType.kind === 'array'
-        ? this.arrayInitializer(elementType, [], row)
-        : (this.valueInitialized(elementType, row).run as Eval<Value>);
-    return (frame) => {
-      frame.runtime.reserve(length);
-      const values: Value[] = [];
-      return holdAll(frame, inits, (initial) => {
-        for (let index = 0; index < length; index++)
-          values.push(index < initial.length ? (initial[index] as Value) : rest(frame));
-        return new ArrayStore(values);
+    clauses.next++;
+    if (node.type === 'initializer_list') return () => this.listInitializer(type, node, node.row);
+    const expr = this.clauseExpression(node, clauses);
+    if (type.kind === 'reference') return () => this.memberReference(type, expr, node.row);
+    return () => this.copyInitializer(type, expr, node.row, true);
+  }
+
+  /** Binds a reference member of an aggregate, whose lifetime a temporary it binds to takes (C++20 [class.temporary]). */
+  private memberReference(type: Extract<Type, { kind: 'reference' }>, expr: Expr, row: number): Eval<Value> {
+    if ((expr.isLvalue && bindsDirectly(expr.type, type.to)) || !isConstType(type.to))
+      return this.convert(expr, type, row).run as Eval<Value>;
+    const value = this.convert(expr, unqualified(type.to), row).run;
+    return (frame) => new Ptr(new Box(value(frame) as Value), 0);
+  }
+
+  private clauseExpression(node: Syntax, clauses: Clauses): Expr {
+    let expr = clauses.compiled.get(node);
+    if (!expr) {
+      expr = this.compileExpression(node);
+      clauses.compiled.set(node, expr);
+    }
+    return expr;
+  }
+
+  private takeArrayClauses(type: Extract<Type, { kind: 'array' }>, clauses: Clauses, row: number): () => Eval<Value> {
+    const taken: (() => Eval<Value>)[] = [];
+    while (taken.length < (type.length ?? Infinity) && clauses.next < clauses.nodes.length)
+      taken.push(this.takeClauses(type.of, clauses, row));
+    return () => {
+      const length = type.length ?? taken.length;
+      const inits = taken.map((take) => take());
+      const elementType = type.of;
+      const rest =
+        inits.length === length
+          ? undefined
+          : elementType.kind === 'array'
+            ? this.arrayInitializer(elementType, [], row)
+            : (this.valueInitialized(elementType, row).run as Eval<Value>);
+      return (frame) => {
+        frame.runtime.reserve(length);
+        const values: Value[] = [];
+        return holdAll(frame, inits, (initial) => {
+          for (let index = 0; index < length; index++)
+            values.push(index < initial.length ? (initial[index] as Value) : (rest as Eval<Value>)(frame));
+          return new ArrayStore(values);
+        });
+      };
+    };
+  }
+
+  private takeMemberClauses(cls: ClassInfo, clauses: Clauses, row: number): () => Eval<Value> {
+    const fields = cls.ownFields;
+    const taken = fields.map((field) =>
+      clauses.next < clauses.nodes.length ? this.takeClauses(field.type, clauses, row) : undefined
+    );
+    return () => {
+      const inits = fields.map((field, index) => {
+        const take = taken[index];
+        if (take) return take();
+        if (field.initializer) {
+          const node = field.initializer;
+          return node.type === 'initializer_list'
+            ? this.listInitializer(field.type, node, row)
+            : this.copyInitializer(field.type, this.compileExpression(node), row, false);
+        }
+        if (field.type.kind === 'reference')
+          return this.error(row, `参照のメンバ ${field.name} に初期値がありません。`);
+        return this.valueInitialized(field.type, row).run as Eval<Value>;
       });
+      return (frame) => {
+        const object = newObject(cls);
+        return holdAll(frame, inits, (values) => {
+          for (const [index, value] of values.entries()) object.values[fields[index].index] = value as Value;
+          return object;
+        });
+      };
     };
   }
 
@@ -1550,6 +1623,48 @@ export class Compiler extends StatementCompiler {
     }
     return undefined;
   }
+}
+
+/**
+ * Why the implicit default constructor of a class is deleted, which only a use of it reports (C++20
+ * [class.default.ctor]): a member that nothing initializes and that needs an initializer.
+ */
+function implicitDefaultError(cls: ClassInfo): string | undefined {
+  if (cls.base && cls.base.constructors.length === 0 && cls.base.implicitDefaultError)
+    return cls.base.implicitDefaultError;
+  for (const field of cls.ownFields) {
+    if (field.initializer) continue;
+    if (field.type.kind === 'reference') return `参照のメンバ ${field.name} は、コンストラクタで初期化してください。`;
+    let element: Type = field.type;
+    while (element.kind === 'array') element = element.of;
+    if (element.kind !== 'class') {
+      if (isConstType(field.type)) return `const のメンバ ${field.name} は、コンストラクタで初期化してください。`;
+      continue;
+    }
+    const member = element.cls;
+    if (member.implicitDefaultError) return member.implicitDefaultError;
+    if (!member.library && member.constructors.length > 0 && !member.constructors.some(isDefaultConstructor))
+      return `${member.name} にはデフォルトコンストラクタがないので、メンバ ${field.name} はコンストラクタで初期化してください。`;
+  }
+  return undefined;
+}
+
+function isDefaultConstructor(fn: FunctionInfo): boolean {
+  return fn.params.every((param) => param.defaultValue !== undefined);
+}
+
+/** The initializer-clauses of a braced list, which the elements of an aggregate take in order. */
+interface Clauses {
+  readonly nodes: readonly Syntax[];
+  next: number;
+  /** The clauses compiled to see whether they initialize an element whose braces may be left out. */
+  readonly compiled: Map<Syntax, Expr>;
+}
+
+/** Whether an array's elements are characters, which a string literal can initialize. */
+function isCharacterArray(type: Extract<Type, { kind: 'array' }>): boolean {
+  const element = type.of;
+  return element.kind === 'int' && (element.name === 'char' || element.name === 'schar' || element.name === 'uchar');
 }
 
 /** Whether two functions take the same parameter types, as redeclarations and overloads compare them. */
