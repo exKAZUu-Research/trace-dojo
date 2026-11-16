@@ -3,6 +3,7 @@ import type { Core, FunctionInfo, IODoCore, LamCore } from './core';
 import type { ConInfo, InstanceInfo } from './entities';
 import type { RunNext, TailCall } from './machine';
 import type { Primitive } from './primitives';
+import type { Type } from './types';
 
 /**
  * A value in weak head normal form: an integer (`Int` and `Integer` as bigints), a floating-point number, a
@@ -10,8 +11,19 @@ import type { Primitive } from './primitives';
  */
 export type Value = bigint | number | string | ConValue | FunValue | IOAction | Dict | TurtleValue;
 
-/** What a variable or a field holds: a value, or a thunk that computes one. */
-export type Slot = Value | Thunk;
+export type Slot = Value | Thunk | TypedSlot;
+
+export class TypedSlot {
+  constructor(
+    readonly slot: Slot,
+    readonly type: Type
+  ) {}
+}
+
+export function untypedSlot(slot: Slot): Value | Thunk {
+  while (slot instanceof TypedSlot) slot = slot.slot;
+  return slot;
+}
 
 export class Env {
   readonly slots: (Slot | undefined)[];
@@ -78,6 +90,7 @@ export type FunValue = Closure | PrimFn | Partial;
 export type ThunkState = 'pending' | 'evaluating' | 'done';
 
 export class Thunk {
+  displayType: Type | undefined;
   state: ThunkState = 'pending';
   value: Value | undefined;
   /** Another thunk whose value this one takes, set when the evaluator drops this thunk's update frame. */
@@ -88,7 +101,9 @@ export class Thunk {
     public env: Env | undefined,
     /** Computes the value natively, for thunks the evaluator builds itself (such as a string's rest). */
     public native?: () => Slot | TailCall
-  ) {}
+  ) {
+    this.displayType = code?.displayType;
+  }
 
   /** Stores the computed value, dropping what computed it. */
   update(value: Value): void {

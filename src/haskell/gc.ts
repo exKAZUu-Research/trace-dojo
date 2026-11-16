@@ -16,6 +16,7 @@ import {
   type Slot,
   Thunk,
   TurtleValue,
+  untypedSlot,
 } from './values';
 
 const freeCache = new WeakMap<Core, LocalRef[]>();
@@ -134,6 +135,7 @@ export function markReachable(runtime: Runtime, checkTime: () => void): Set<Turt
   const seen = new Set<object>();
   const pending: Slot[] = [];
   const push = (slot: Slot | undefined): void => {
+    slot = slot === undefined ? undefined : untypedSlot(slot);
     if (slot !== undefined && typeof slot === 'object' && !seen.has(slot)) pending.push(slot);
   };
   pushRoots(runtime, push);

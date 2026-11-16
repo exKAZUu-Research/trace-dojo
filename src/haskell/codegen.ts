@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 888 -- The Core generator covers every construct of the language in one pass over shared state.
+// code-gauge-allow-file fileNcss 892 -- The Core generator covers every construct of the language in one pass over shared state.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   CHAR_TYPE,
@@ -68,6 +68,7 @@ export interface CodegenOptions {
   atomicRows?: ReadonlySet<number>;
   /** Whether the module is the program, whose source positions errors show. */
   isProgram: boolean;
+  traceTypes?: boolean;
 }
 
 class FrameScope {
@@ -603,8 +604,13 @@ export class Codegen {
   // -------------------------------------------------------------------------------------------------------------
   // Expressions
 
-  // code-gauge-allow functionNcss 58 -- One short case per expression kind, each delegating to a helper.
   compileExpr(expr: RExpr): Core {
+    const code = this.compileExprInner(expr);
+    return this.options.traceTypes && expr.type ? { ...code, displayType: expr.type } : code;
+  }
+
+  // code-gauge-allow functionNcss 58 -- One short case per expression kind, each delegating to a helper.
+  private compileExprInner(expr: RExpr): Core {
     switch (expr.k) {
       case 'var': {
         return this.compileVar(expr);

@@ -21,7 +21,7 @@ export interface FunctionInfo {
   isAtomic: boolean;
 }
 
-export type Core =
+export type Core = (
   | { k: 'local'; depth: number; index: number }
   | { k: 'global'; global: GlobalDef }
   | { k: 'lit'; value: Value }
@@ -38,7 +38,8 @@ export type Core =
   | { k: 'super'; dict: Core; index: number }
   | { k: 'dict'; instance: InstanceInfo; args: Core[] }
   | { k: 'error'; message: string; kind: 'error' | 'patternMatch' }
-  | IODoCore;
+  | IODoCore
+) & { displayType?: Type };
 
 export interface LamCore {
   k: 'lam';

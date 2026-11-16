@@ -351,7 +351,7 @@ export interface CompiledProgram {
 }
 
 /** Compiles a program, throwing a `CompileError` for the errors GHC reports before running and for unsupported code. */
-export function compileProgram(source: string, atomicRows?: ReadonlySet<number>): CompiledProgram {
+export function compileProgram(source: string, atomicRows?: ReadonlySet<number>, traceTypes = false): CompiledProgram {
   const lib = getLibrary();
   const parsed = parseHaskell(source);
   const renamed = renameModule(parsed, {
@@ -368,7 +368,12 @@ export function compileProgram(source: string, atomicRows?: ReadonlySet<number>)
     isProgram: true,
     derivingSupport: lib.derivingSupport,
   });
-  const codegen = new Codegen({ support: lib.support, atomicRows, isProgram: true });
+  const codegen = new Codegen({
+    support: lib.support,
+    atomicRows,
+    isProgram: true,
+    traceTypes,
+  });
   codegen.compileTopBindings(renamed.values);
   for (const instance of checked.instances)
     codegen.compileInstance(instance.info, instance.bindings, instance.sourceDefined);

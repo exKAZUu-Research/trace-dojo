@@ -20,7 +20,7 @@ export type VarRef = { kind: 'local'; local: LocalVar } | { kind: 'global'; enti
 
 export type Binder = VarRef;
 
-export type RExpr =
+export type RExpr = (
   | {
       k: 'var';
       ref: VarRef;
@@ -28,12 +28,11 @@ export type RExpr =
       span: Span;
       /** The dictionaries the variable's instantiated scheme takes, in order. */
       evidence?: Evidence[];
-      type?: Type;
     }
   | { k: 'con'; con: ConInfo; span: Span }
-  | { k: 'lit'; lit: Literal; span: Span; evidence?: Evidence; type?: Type }
+  | { k: 'lit'; lit: Literal; span: Span; evidence?: Evidence }
   | { k: 'app'; fn: RExpr; arg: RExpr; span: Span }
-  | { k: 'lambda'; pats: RPat[]; body: RExpr; span: Span; type?: Type }
+  | { k: 'lambda'; pats: RPat[]; body: RExpr; span: Span }
   | { k: 'let'; binds: RBindGroup; body: RExpr; span: Span }
   | { k: 'if'; cond: RExpr; ifTrue: RExpr; ifFalse: RExpr; span: Span }
   | { k: 'case'; scrutinee: RExpr; alts: RAlt[]; span: Span }
@@ -43,7 +42,6 @@ export type RExpr =
       span: Span;
       /** The `Monad` dictionary of the block's monad. */
       monad?: Evidence;
-      type?: Type;
     }
   | { k: 'tuple'; elems: RExpr[]; span: Span }
   | { k: 'list'; elems: RExpr[]; span: Span }
@@ -52,7 +50,8 @@ export type RExpr =
   | { k: 'rsection'; op: RExpr; right: RExpr; span: Span }
   | { k: 'typed'; expr: RExpr; sig: RSigType; span: Span; dictParams?: DictParam[]; evidence?: Evidence[] }
   | { k: 'recordCon'; con: ConInfo; fields: RFieldBind[]; span: Span }
-  | { k: 'recordUpdate'; expr: RExpr; fields: RFieldBind[]; span: Span; cons?: ConInfo[] };
+  | { k: 'recordUpdate'; expr: RExpr; fields: RFieldBind[]; span: Span; cons?: ConInfo[] }
+) & { type?: Type };
 
 export interface RFieldBind {
   field: FieldInfo;

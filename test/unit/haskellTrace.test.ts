@@ -334,3 +334,39 @@ test.each(['Box (Box (1::Int))', 'Box (Just (1::Int))'])(
     expect(recording.traceItems.some(({ referenceVars }) => referenceVars.x?.kind === 'object')).toBe(true);
   }
 );
+
+test.each([
+  ['Box (""::String)', { kind: 'value', value: '' }],
+  ['Box (Just "")', { kind: 'value', value: '' }],
+  ['Box (0.1::Float)', { kind: 'value', value: 0.1 }],
+  ['Box [0.1::Float]', { kind: 'array', entries: { 0: { kind: 'value', value: 0.1 } } }],
+])('polymorphic calls preserve concrete display types: %s', (value, node) => {
+  const source = `data Box a=Box a deriving Show\nf::Show a=>a->IO ()\nf x=do\n  print x\nmain=f(${value})`;
+  const recording = traceProgram('haskell', source, source);
+  const item = recording.traceItems.find(({ referenceVars }) => referenceVars.x?.kind === 'object');
+  expect(item?.referenceVars.x).toEqual({ kind: 'object', entries: { 0: node } });
+});
+
+test('display types survive generic constructors, forwarding and list cases', () => {
+  const source =
+    'data Box a=Box a deriving Show\nbox x=Box x\npass x=case x of y->f y\nf x=print(1::Int)\nmain=do\n  pass(box "")\n  mapM_ f [box(0.1::Float)]';
+  const recording = traceProgram('haskell', source, source);
+  const nodes = recording.traceItems
+    .filter(({ referenceVars }) => referenceVars.x?.kind === 'object')
+    .map(({ referenceVars }) => referenceVars.x);
+  expect(nodes).toContainEqual({ kind: 'object', entries: { 0: { kind: 'value', value: '' } } });
+  expect(nodes).toContainEqual({ kind: 'object', entries: { 0: { kind: 'value', value: 0.1 } } });
+});
+
+test('shared polymorphic values keep each call display instantiation separate', () => {
+  const source =
+    'data Box a=Box a\nshared=Box []\nf x=print(1::Int)\nmain=do\n  f(shared::Box String)\n  f(shared::Box [Int])';
+  const recording = traceProgram('haskell', source, source);
+  const nodes = recording.traceItems
+    .filter(({ referenceVars }) => referenceVars.x?.kind === 'object')
+    .map(({ referenceVars }) => referenceVars.x);
+  expect(nodes).toEqual([
+    { kind: 'object', entries: { 0: { kind: 'value', value: '' } } },
+    { kind: 'object', entries: { 0: { kind: 'array', entries: {} } } },
+  ]);
+});

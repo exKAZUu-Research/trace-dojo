@@ -452,7 +452,7 @@ export class Checker {
 
   inferExpr(expr: RExpr): Type {
     const type = this.inferExprInner(expr);
-    if (expr.k === 'var' || expr.k === 'lit' || expr.k === 'lambda') expr.type = type;
+    expr.type = type;
     return type;
   }
 

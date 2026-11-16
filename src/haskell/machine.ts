@@ -1,9 +1,11 @@
 import { CONS_CON, NIL_CON } from './builtinTypes';
 import type { CaseCore, Core } from './core';
+import { constructorFieldType, slotDisplayType, typedSlot, UNKNOWN_TYPE } from './displayTypes';
 import type { ConInfo } from './entities';
 import { type DoFrame, finishMatch, runBlock, statementDone, unwindBlock } from './ioBlocks';
 import type { Primitive } from './primitives';
 import type { Runtime } from './runtime';
+import type { Type } from './types';
 import {
   Closure,
   ConValue,
@@ -19,6 +21,7 @@ import {
   PrimFn,
   type Slot,
   Thunk,
+  untypedSlot,
   type Value,
 } from './values';
 
@@ -32,7 +35,7 @@ export type Frame =
       target: Thunk | undefined;
     }
   | { k: 'apply'; args: Slot[] }
-  | { k: 'case'; core: CaseCore; env: Env }
+  | { k: 'case'; core: CaseCore; env: Env; displayType: Type | undefined }
   | { k: 'charCase'; core: Extract<Core, { k: 'charCase' }>; env: Env }
   | { k: 'method'; index: number }
   | { k: 'super'; index: number }
@@ -108,6 +111,7 @@ export class Machine {
 
   /** Evaluates a slot to weak head normal form. */
   force(slot: Slot): Value {
+    slot = untypedSlot(slot);
     if (!(slot instanceof Thunk)) return slot;
     if (slot.state === 'done') return slot.value as Value;
     return this.run({ mode: 'enter', slot }) as Value;
@@ -128,6 +132,10 @@ export class Machine {
 
   /** Creates the slot for an argument or binding: a value when it needs no evaluation, else a thunk. */
   makeSlot(code: Core, env: Env | undefined): Slot {
+    return typedSlot(this.makeUntypedSlot(code, env), code.displayType);
+  }
+
+  private makeUntypedSlot(code: Core, env: Env | undefined): Slot {
     switch (code.k) {
       case 'local': {
         return (env as Env).at(code.depth).slots[code.index] as Slot;
@@ -169,7 +177,7 @@ export class Machine {
     if (code.k === 'lit' || code.k === 'lam' || code.k === 'global' || code.k === 'prim' || code.k === 'iodo') {
       return this.makeSlot(code, env);
     }
-    return new Thunk(code, env);
+    return typedSlot(new Thunk(code, env), code.displayType);
   }
 
   // code-gauge-allow functionNcss 35 -- The main loop dispatches on the machine mode and handles limits and exceptions in one place.
@@ -237,7 +245,7 @@ export class Machine {
       case 'con':
       case 'prim':
       case 'iodo': {
-        state.returnValue(code.k === 'str' ? unpackString(code.value, 0) : this.makeSlot(code, env));
+        state.returnValue(code.k === 'str' ? unpackString(code.value, 0) : untypedSlot(this.makeSlot(code, env)));
         return;
       }
       case 'app': {
@@ -261,7 +269,7 @@ export class Machine {
       case 'charCase': {
         this.stack.push(
           code.k === 'case'
-            ? { k: 'case', core: code, env: env as Env }
+            ? { k: 'case', core: code, env: env as Env, displayType: this.scrutineeDisplayType(code.scrut, env) }
             : { k: 'charCase', core: code, env: env as Env }
         );
         state.code = code.scrut;
@@ -290,7 +298,8 @@ export class Machine {
 
   /** Enters a slot: a value returns, and a pending thunk is evaluated with a frame that updates it. */
   private stepEnter(state: RunState): void {
-    const slot = state.value;
+    const slot = untypedSlot(state.value);
+    state.value = slot;
     if (!(slot instanceof Thunk)) {
       state.mode = 'return';
       return;
@@ -333,6 +342,8 @@ export class Machine {
     const top = this.stack.at(-1);
     if (top?.k !== 'update') return;
     this.stack.pop();
+    if (this.runtime.steps.recorder && (entered.displayType || top.thunk.displayType))
+      top.thunk.displayType = slotDisplayType(entered, top.thunk.displayType ?? UNKNOWN_TYPE);
     top.thunk.redirect(entered);
   }
 
@@ -373,8 +384,9 @@ export class Machine {
     const frame = this.stack.at(-1) as Extract<Frame, { k: 'prim' }>;
     const strict = frame.prim.strict;
     while (frame.position < frame.args.length) {
-      const arg = frame.args[frame.position];
+      const arg = untypedSlot(frame.args[frame.position]);
       const isStrict = strict === 'all' || strict.includes(frame.position);
+      if (isStrict) frame.args[frame.position] = arg;
       if (isStrict && arg instanceof Thunk) {
         if (arg.state !== 'done') {
           state.enter(arg);
@@ -408,7 +420,7 @@ export class Machine {
         return false;
       }
       case 'case': {
-        this.selectAlternative(state, frame.core, frame.env);
+        this.selectAlternative(state, frame.core, frame.env, frame.displayType);
         return false;
       }
       case 'charCase': {
@@ -442,14 +454,27 @@ export class Machine {
     }
   }
 
-  private selectAlternative(state: RunState, core: CaseCore, env: Env): void {
+  private scrutineeDisplayType(code: Core, env: Env | undefined): Type | undefined {
+    if (!this.runtime.steps.recorder) return;
+    const type =
+      code.k === 'local'
+        ? slotDisplayType((env as Env).at(code.depth).slots[code.index] as Slot, code.displayType ?? UNKNOWN_TYPE)
+        : code.displayType;
+    return type && (type.tag === 'tvar' || type.tag === 'tgen') ? undefined : type;
+  }
+
+  private selectAlternative(state: RunState, core: CaseCore, env: Env, type: Type | undefined): void {
     const scrutinee = state.value as ConValue;
-    if (core.bindIndex !== undefined) env.slots[core.bindIndex] = scrutinee;
+    if (core.bindIndex !== undefined) env.slots[core.bindIndex] = typedSlot(scrutinee, type);
     const alt = core.alts.get(scrutinee.con.tag);
     if (alt) {
       const { slots } = alt;
       for (let index = 0; index < slots.length; index++) {
-        if (slots[index] >= 0) env.slots[slots[index]] = scrutinee.fields[index];
+        if (slots[index] >= 0)
+          env.slots[slots[index]] = typedSlot(
+            scrutinee.fields[index],
+            type ? constructorFieldType(scrutinee.con, type, index) : undefined
+          );
       }
       state.evaluate(alt.body, env);
       return;
