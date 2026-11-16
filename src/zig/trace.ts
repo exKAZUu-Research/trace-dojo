@@ -194,6 +194,17 @@ function basicScalar(value: Value): TraceScalar {
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNode | undefined {
+  if (typeof value !== 'object') return displayValue(value, type, seen);
+  if (seen.has(value)) return undefined;
+  seen.add(value);
+  try {
+    return displayValue(value, type, seen);
+  } finally {
+    seen.delete(value);
+  }
+}
+
+function displayValue(value: Value, type: Type, seen: Set<unknown>): DisplayNode | undefined {
   if (value === UNASSIGNED) return undefined;
   if (type.kind === 'fn' || (type.kind === 'pointer' && type.child.kind === 'fn')) return undefined;
   if (value instanceof NativeHandle) {
@@ -218,13 +229,7 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
     case 'pointer': {
       if (type.size === 'slice') return sequenceNode((value as Slice).values(), type.child, seen);
       const target = (value as Pointer).load();
-      if (seen.has(target)) return undefined;
-      seen.add(target);
-      try {
-        return displayNodeOf(target, type.child, seen);
-      } finally {
-        seen.delete(target);
-      }
+      return displayNodeOf(target, type.child, seen);
     }
     case 'array': {
       return sequenceNode((value as ZArray).values(), type.child, seen);

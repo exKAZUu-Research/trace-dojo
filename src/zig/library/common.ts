@@ -13,7 +13,7 @@ import {
   typeName,
   USIZE,
 } from '../types';
-import { FnValue, NULL, Pointer, Slice, storeInto, type Value, ZArray } from '../values';
+import { compileTimeReadable, FnValue, NULL, Pointer, Slice, storeInto, type Value, ZArray } from '../values';
 import { ALLOCATOR, ALLOCATOR_ERROR, nativeEnum } from './heap';
 import { compileArgs, expectArgs, fnMember, type Member } from './native';
 
@@ -115,7 +115,7 @@ export function computed(
   span: Span,
   compute: (values: Value[], frame?: Frame) => Value
 ): TExpr {
-  if (args.every((arg) => arg.known)) {
+  if (args.every((arg) => arg.known && compileTimeReadable(arg.value))) {
     try {
       return known(type, compute(args.map((arg) => arg.value)), span);
     } catch (error) {

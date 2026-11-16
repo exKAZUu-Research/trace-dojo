@@ -127,13 +127,17 @@ export function intFromFloat(value: AnyFloat, type: IntType): bigint {
   return integer;
 }
 
-export function shiftLeft(a: bigint, amount: bigint, type: IntType): bigint {
+export function checkShiftAmount(amount: bigint, type: IntType): void {
   if (amount >= BigInt(type.bits)) panic(PANIC.shiftTooLarge);
+}
+
+export function shiftLeft(a: bigint, amount: bigint, type: IntType): bigint {
+  checkShiftAmount(amount, type);
   return wrapInt(a << amount, type);
 }
 
 export function shiftRight(a: bigint, amount: bigint, type: IntType): bigint {
-  if (amount >= BigInt(type.bits)) panic(PANIC.shiftTooLarge);
+  checkShiftAmount(amount, type);
   return a >> amount;
 }
 

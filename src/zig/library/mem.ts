@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 545 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 560 -- Groups the related standard library operations that share this module.
 // code-gauge-allow-file duplicateLines 25 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
@@ -53,28 +53,34 @@ interface AllocationPlan {
   build: () => Value[];
 }
 
-function findSequence(haystack: Value[], needle: Value[], from: number): number {
+function comparisonBudget(sema: SemaApi, frame?: Frame): typeof equalValues {
+  return (a, b) => {
+    if (frame) frame.runtime.spend();
+    else sema.spendCompilation();
+    return equalValues(a, b);
+  };
+}
+
+function findSequence(haystack: Value[], needle: Value[], from: number, equal: typeof equalValues): number {
   if (needle.length === 0) return from <= haystack.length ? from : -1;
   outer: for (let index = from; index + needle.length <= haystack.length; index++) {
     for (let offset = 0; offset < needle.length; offset++) {
-      if (!equalValues(haystack[index + offset], needle[offset])) continue outer;
+      if (!equal(haystack[index + offset], needle[offset])) continue outer;
     }
     return index;
   }
   return -1;
 }
 
-function findSequenceLast(haystack: Value[], needle: Value[]): number {
+function findSequenceLast(haystack: Value[], needle: Value[], equal: typeof equalValues): number {
   for (let index = haystack.length - needle.length; index >= 0; index--) {
-    if (needle.every((value, offset) => equalValues(haystack[index + offset], value))) return index;
+    if (needle.every((value, offset) => equal(haystack[index + offset], value))) return index;
   }
   return -1;
 }
 
-function startsWith(haystack: Value[], needle: Value[], at = 0): boolean {
-  return (
-    at + needle.length <= haystack.length && needle.every((value, offset) => equalValues(haystack[at + offset], value))
-  );
+function startsWith(haystack: Value[], needle: Value[], equal: typeof equalValues, at = 0): boolean {
+  return at + needle.length <= haystack.length && needle.every((value, offset) => equal(haystack[at + offset], value));
 }
 
 /** `(T, slice, other)` functions that compare two slices or a slice and a scalar, known at compile time when both are. */
@@ -82,14 +88,14 @@ function sliceSearch(
   name: string,
   second: 'slice' | 'scalar',
   resultType: Type,
-  compute: (haystack: Value[], operand: Value) => Value
+  compute: (haystack: Value[], operand: Value, equal: typeof equalValues) => Value
 ): () => Member {
   return generic(name, 3, (sema, call, type, [haystack, operand]) => {
     const a = constSlice(sema, haystack, type);
     const b =
       second === 'slice' ? constSlice(sema, operand, type) : sema.coerce(sema.compile(operand, type), type, operand);
-    return computed(resultType, [a, b], call.span, ([x, y]) =>
-      compute(elements(x), second === 'slice' ? (elements(y) as unknown as Value) : y)
+    return computed(resultType, [a, b], call.span, ([x, y], frame) =>
+      compute(elements(x), second === 'slice' ? (elements(y) as unknown as Value) : y, comparisonBudget(sema, frame))
     );
   });
 }
@@ -97,16 +103,21 @@ function sliceSearch(
 function positionSearch(
   name: string,
   second: 'slice' | 'scalar',
-  compute: (haystack: Value[], start: number, operand: Value) => number
+  compute: (haystack: Value[], start: number, operand: Value, equal: typeof equalValues) => number
 ): () => Member {
   return generic(name, 4, (sema, call, type, [haystack, startArg, operand]) => {
     const a = constSlice(sema, haystack, type);
     const [start] = compileArgs(sema, [startArg], [USIZE]);
     const b =
       second === 'slice' ? constSlice(sema, operand, type) : sema.coerce(sema.compile(operand, type), type, operand);
-    return computed(OPTIONAL_USIZE, [a, start, b], call.span, ([x, s, y]) =>
+    return computed(OPTIONAL_USIZE, [a, start, b], call.span, ([x, s, y], frame) =>
       optionalIndex(
-        compute(elements(x), Number(s as bigint), second === 'slice' ? (elements(y) as unknown as Value) : y)
+        compute(
+          elements(x),
+          Number(s as bigint),
+          second === 'slice' ? (elements(y) as unknown as Value) : y,
+          comparisonBudget(sema, frame)
+        )
       )
     );
   });
@@ -117,13 +128,14 @@ function trimmer(name: string, start: boolean, end: boolean): () => Member {
   return generic(name, 3, (sema, call, type, [sliceArg, stripArg]) => {
     const slice = constSlice(sema, sliceArg, type);
     const strip = constSlice(sema, stripArg, type);
-    return computed(sliceOf(type, true), [slice, strip], call.span, ([value, values]) => {
+    return computed(sliceOf(type, true), [slice, strip], call.span, ([value, values], frame) => {
       const items = elements(value);
       const set = elements(values);
+      const equal = comparisonBudget(sema, frame);
       let from = 0;
       let to = items.length;
-      if (start) while (from < to && set.some((each) => equalValues(each, items[from]))) from++;
-      if (end) while (to > from && set.some((each) => equalValues(each, items[to - 1]))) to--;
+      if (start) while (from < to && set.some((each) => equal(each, items[from]))) from++;
+      if (end) while (to > from && set.some((each) => equal(each, items[to - 1]))) to--;
       return slicePart(value, from, to - from);
     });
   });
@@ -158,14 +170,18 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
   );
   type = created;
   iteratorTypes.set(key, type);
-  const isDelimiter = (buffer: Value[], index: number, value: Value): boolean => {
-    if (delimiter === 'scalar') return equalValues(buffer[index], value);
+  const isDelimiter = (buffer: Value[], index: number, value: Value, equal: typeof equalValues): boolean => {
+    if (delimiter === 'scalar') return equal(buffer[index], value);
     const set = elements(value);
-    if (delimiter === 'any') return set.some((each) => equalValues(each, buffer[index]));
-    return startsWith(buffer, set, index);
+    if (delimiter === 'any') return set.some((each) => equal(each, buffer[index]));
+    return startsWith(buffer, set, equal, index);
   };
   const delimiterLength = (value: Value): number => (delimiter === 'sequence' ? elements(value).length : 1);
-  const method = (name: string, returnType: Type, run: (state: ZStruct) => Value): (() => Member) =>
+  const method = (
+    name: string,
+    returnType: Type,
+    run: (state: ZStruct, equal: typeof equalValues) => Value
+  ): (() => Member) =>
     fnMember(`${key}.${name}`, (sema, call) => {
       expectArgs(sema, call, 0, name);
       const state = iteratorState(sema, call.receiver, created, call.span);
@@ -173,26 +189,26 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
         returnType,
         (frame) => {
           frame.runtime.spend();
-          return run(state(frame));
+          return run(state(frame), comparisonBudget(sema, frame));
         },
         call.span
       );
     });
-  const tokenPeek = (state: ZStruct): { start: number; end: number } | undefined => {
+  const tokenPeek = (state: ZStruct, equal: typeof equalValues): { start: number; end: number } | undefined => {
     const buffer = elements(state.slots[0]);
     let index = Number(state.slots[1] as bigint);
-    while (index < buffer.length && isDelimiter(buffer, index, state.slots[2]))
+    while (index < buffer.length && isDelimiter(buffer, index, state.slots[2], equal))
       index += delimiterLength(state.slots[2]);
     state.slots[1] = BigInt(index);
     if (index === buffer.length) return undefined;
     let end = index;
-    while (end < buffer.length && !isDelimiter(buffer, end, state.slots[2])) end++;
+    while (end < buffer.length && !isDelimiter(buffer, end, state.slots[2], equal)) end++;
     return { start: index, end };
   };
   const members: Record<string, () => Member> =
     kind === 'split'
       ? {
-          next: method('next', optionalOf(resultSlice), (state) => {
+          next: method('next', optionalOf(resultSlice), (state, equal) => {
             const startValue = state.slots[1];
             if (startValue === NULL) return NULL;
             const start = Number(startValue as bigint);
@@ -202,8 +218,8 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
             for (let index = start; index < buffer.length; index++) {
               if (
                 delimiter === 'sequence'
-                  ? startsWith(buffer, elements(state.slots[2]), index)
-                  : isDelimiter(buffer, index, state.slots[2])
+                  ? startsWith(buffer, elements(state.slots[2]), equal, index)
+                  : isDelimiter(buffer, index, state.slots[2], equal)
               ) {
                 found = index;
                 break;
@@ -218,11 +234,11 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
             }
             return subSlice(state.slots[0] as Slice, start, end - start);
           }),
-          first: method('first', resultSlice, (state) => {
+          first: method('first', resultSlice, (state, equal) => {
             const buffer = elements(state.slots[0]);
             let end = buffer.length;
             for (let index = 0; index < buffer.length; index++) {
-              if (isDelimiter(buffer, index, state.slots[2])) {
+              if (isDelimiter(buffer, index, state.slots[2], equal)) {
                 end = index;
                 break;
               }
@@ -230,14 +246,14 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
             state.slots[1] = end === buffer.length ? NULL : BigInt(end + delimiterLength(state.slots[2]));
             return subSlice(state.slots[0] as Slice, 0, end);
           }),
-          peek: method('peek', optionalOf(resultSlice), (state) => {
+          peek: method('peek', optionalOf(resultSlice), (state, equal) => {
             const startValue = state.slots[1];
             if (startValue === NULL) return NULL;
             const start = Number(startValue as bigint);
             const buffer = elements(state.slots[0]);
             let end = buffer.length;
             for (let index = start; index < buffer.length; index++) {
-              if (isDelimiter(buffer, index, state.slots[2])) {
+              if (isDelimiter(buffer, index, state.slots[2], equal)) {
                 end = index;
                 break;
               }
@@ -256,21 +272,21 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
           }),
         }
       : {
-          next: method('next', optionalOf(resultSlice), (state) => {
-            const token = tokenPeek(state);
+          next: method('next', optionalOf(resultSlice), (state, equal) => {
+            const token = tokenPeek(state, equal);
             if (!token) return NULL;
             state.slots[1] = BigInt(token.end);
             return subSlice(state.slots[0] as Slice, token.start, token.end - token.start);
           }),
-          peek: method('peek', optionalOf(resultSlice), (state) => {
-            const token = tokenPeek(state);
+          peek: method('peek', optionalOf(resultSlice), (state, equal) => {
+            const token = tokenPeek(state, equal);
             if (!token) return NULL;
             return subSlice(state.slots[0] as Slice, token.start, token.end - token.start);
           }),
-          rest: method('rest', resultSlice, (state) => {
+          rest: method('rest', resultSlice, (state, equal) => {
             const buffer = elements(state.slots[0]);
             let index = Number(state.slots[1] as bigint);
-            while (index < buffer.length && isDelimiter(buffer, index, state.slots[2]))
+            while (index < buffer.length && isDelimiter(buffer, index, state.slots[2], equal))
               index += delimiterLength(state.slots[2]);
             return subSlice(state.slots[0] as Slice, index, buffer.length - index);
           }),
@@ -339,87 +355,93 @@ const MEMBERS: Record<string, () => Member> = {
       return xs.length === ys.length && xs.every((value, index) => equalValues(value, ys[index]));
     });
   }),
-  startsWith: sliceSearch('std.mem.startsWith', 'slice', BOOL, (haystack, needle) =>
-    startsWith(haystack, needle as unknown as Value[])
+  startsWith: sliceSearch('std.mem.startsWith', 'slice', BOOL, (haystack, needle, equal) =>
+    startsWith(haystack, needle as unknown as Value[], equal)
   ),
-  endsWith: sliceSearch('std.mem.endsWith', 'slice', BOOL, (haystack, needle) => {
+  endsWith: sliceSearch('std.mem.endsWith', 'slice', BOOL, (haystack, needle, equal) => {
     const values = needle as unknown as Value[];
-    return startsWith(haystack, values, haystack.length - values.length) && values.length <= haystack.length;
+    return startsWith(haystack, values, equal, haystack.length - values.length) && values.length <= haystack.length;
   }),
-  indexOf: sliceSearch('std.mem.indexOf', 'slice', OPTIONAL_USIZE, (h, n) =>
-    optionalIndex(findSequence(h, n as unknown as Value[], 0))
+  indexOf: sliceSearch('std.mem.indexOf', 'slice', OPTIONAL_USIZE, (h, n, equal) =>
+    optionalIndex(findSequence(h, n as unknown as Value[], 0, equal))
   ),
-  find: sliceSearch('std.mem.find', 'slice', OPTIONAL_USIZE, (h, n) =>
-    optionalIndex(findSequence(h, n as unknown as Value[], 0))
+  find: sliceSearch('std.mem.find', 'slice', OPTIONAL_USIZE, (h, n, equal) =>
+    optionalIndex(findSequence(h, n as unknown as Value[], 0, equal))
   ),
-  lastIndexOf: sliceSearch('std.mem.lastIndexOf', 'slice', OPTIONAL_USIZE, (h, n) =>
-    optionalIndex(findSequenceLast(h, n as unknown as Value[]))
+  lastIndexOf: sliceSearch('std.mem.lastIndexOf', 'slice', OPTIONAL_USIZE, (h, n, equal) =>
+    optionalIndex(findSequenceLast(h, n as unknown as Value[], equal))
   ),
-  findLast: sliceSearch('std.mem.findLast', 'slice', OPTIONAL_USIZE, (h, n) =>
-    optionalIndex(findSequenceLast(h, n as unknown as Value[]))
+  findLast: sliceSearch('std.mem.findLast', 'slice', OPTIONAL_USIZE, (h, n, equal) =>
+    optionalIndex(findSequenceLast(h, n as unknown as Value[], equal))
   ),
-  indexOfScalar: sliceSearch('std.mem.indexOfScalar', 'scalar', OPTIONAL_USIZE, (h, v) =>
-    optionalIndex(h.findIndex((x) => equalValues(x, v)))
+  indexOfScalar: sliceSearch('std.mem.indexOfScalar', 'scalar', OPTIONAL_USIZE, (h, v, equal) =>
+    optionalIndex(h.findIndex((x) => equal(x, v)))
   ),
-  findScalar: sliceSearch('std.mem.findScalar', 'scalar', OPTIONAL_USIZE, (h, v) =>
-    optionalIndex(h.findIndex((x) => equalValues(x, v)))
+  findScalar: sliceSearch('std.mem.findScalar', 'scalar', OPTIONAL_USIZE, (h, v, equal) =>
+    optionalIndex(h.findIndex((x) => equal(x, v)))
   ),
-  lastIndexOfScalar: sliceSearch('std.mem.lastIndexOfScalar', 'scalar', OPTIONAL_USIZE, (h, v) =>
-    optionalIndex(h.findLastIndex((x) => equalValues(x, v)))
+  lastIndexOfScalar: sliceSearch('std.mem.lastIndexOfScalar', 'scalar', OPTIONAL_USIZE, (h, v, equal) =>
+    optionalIndex(h.findLastIndex((x) => equal(x, v)))
   ),
-  findScalarLast: sliceSearch('std.mem.findScalarLast', 'scalar', OPTIONAL_USIZE, (h, v) =>
-    optionalIndex(h.findLastIndex((x) => equalValues(x, v)))
+  findScalarLast: sliceSearch('std.mem.findScalarLast', 'scalar', OPTIONAL_USIZE, (h, v, equal) =>
+    optionalIndex(h.findLastIndex((x) => equal(x, v)))
   ),
-  indexOfAny: sliceSearch('std.mem.indexOfAny', 'slice', OPTIONAL_USIZE, (h, set) =>
-    optionalIndex(h.findIndex((x) => (set as unknown as Value[]).some((y) => equalValues(x, y))))
+  indexOfAny: sliceSearch('std.mem.indexOfAny', 'slice', OPTIONAL_USIZE, (h, set, equal) =>
+    optionalIndex(h.findIndex((x) => (set as unknown as Value[]).some((y) => equal(x, y))))
   ),
-  findAny: sliceSearch('std.mem.findAny', 'slice', OPTIONAL_USIZE, (h, set) =>
-    optionalIndex(h.findIndex((x) => (set as unknown as Value[]).some((y) => equalValues(x, y))))
+  findAny: sliceSearch('std.mem.findAny', 'slice', OPTIONAL_USIZE, (h, set, equal) =>
+    optionalIndex(h.findIndex((x) => (set as unknown as Value[]).some((y) => equal(x, y))))
   ),
-  lastIndexOfAny: sliceSearch('std.mem.lastIndexOfAny', 'slice', OPTIONAL_USIZE, (h, set) =>
-    optionalIndex(h.findLastIndex((x) => (set as unknown as Value[]).some((y) => equalValues(x, y))))
+  lastIndexOfAny: sliceSearch('std.mem.lastIndexOfAny', 'slice', OPTIONAL_USIZE, (h, set, equal) =>
+    optionalIndex(h.findLastIndex((x) => (set as unknown as Value[]).some((y) => equal(x, y))))
   ),
-  findLastAny: sliceSearch('std.mem.findLastAny', 'slice', OPTIONAL_USIZE, (h, set) =>
-    optionalIndex(h.findLastIndex((x) => (set as unknown as Value[]).some((y) => equalValues(x, y))))
+  findLastAny: sliceSearch('std.mem.findLastAny', 'slice', OPTIONAL_USIZE, (h, set, equal) =>
+    optionalIndex(h.findLastIndex((x) => (set as unknown as Value[]).some((y) => equal(x, y))))
   ),
-  indexOfNone: sliceSearch('std.mem.indexOfNone', 'slice', OPTIONAL_USIZE, (h, set) =>
-    optionalIndex(h.findIndex((x) => !(set as unknown as Value[]).some((y) => equalValues(x, y))))
+  indexOfNone: sliceSearch('std.mem.indexOfNone', 'slice', OPTIONAL_USIZE, (h, set, equal) =>
+    optionalIndex(h.findIndex((x) => !(set as unknown as Value[]).some((y) => equal(x, y))))
   ),
-  findNone: sliceSearch('std.mem.findNone', 'slice', OPTIONAL_USIZE, (h, set) =>
-    optionalIndex(h.findIndex((x) => !(set as unknown as Value[]).some((y) => equalValues(x, y))))
+  findNone: sliceSearch('std.mem.findNone', 'slice', OPTIONAL_USIZE, (h, set, equal) =>
+    optionalIndex(h.findIndex((x) => !(set as unknown as Value[]).some((y) => equal(x, y))))
   ),
-  indexOfPos: positionSearch('std.mem.indexOfPos', 'slice', (h, start, n) =>
-    findSequence(h, n as unknown as Value[], start)
+  indexOfPos: positionSearch('std.mem.indexOfPos', 'slice', (h, start, n, equal) =>
+    findSequence(h, n as unknown as Value[], start, equal)
   ),
-  findPos: positionSearch('std.mem.findPos', 'slice', (h, start, n) => findSequence(h, n as unknown as Value[], start)),
-  indexOfAnyPos: positionSearch('std.mem.indexOfAnyPos', 'slice', (h, start, set) => {
+  findPos: positionSearch('std.mem.findPos', 'slice', (h, start, n, equal) =>
+    findSequence(h, n as unknown as Value[], start, equal)
+  ),
+  indexOfAnyPos: positionSearch('std.mem.indexOfAnyPos', 'slice', (h, start, set, equal) => {
     for (let index = start; index < h.length; index++)
-      if ((set as unknown as Value[]).some((y) => equalValues(h[index], y))) return index;
+      if ((set as unknown as Value[]).some((y) => equal(h[index], y))) return index;
     return -1;
   }),
-  findAnyPos: positionSearch('std.mem.findAnyPos', 'slice', (h, start, set) => {
+  findAnyPos: positionSearch('std.mem.findAnyPos', 'slice', (h, start, set, equal) => {
     for (let index = start; index < h.length; index++)
-      if ((set as unknown as Value[]).some((y) => equalValues(h[index], y))) return index;
+      if ((set as unknown as Value[]).some((y) => equal(h[index], y))) return index;
     return -1;
   }),
-  indexOfScalarPos: positionSearch('std.mem.indexOfScalarPos', 'scalar', (h, start, v) => {
-    for (let index = start; index < h.length; index++) if (equalValues(h[index], v)) return index;
+  indexOfScalarPos: positionSearch('std.mem.indexOfScalarPos', 'scalar', (h, start, v, equal) => {
+    for (let index = start; index < h.length; index++) if (equal(h[index], v)) return index;
     return -1;
   }),
-  findScalarPos: positionSearch('std.mem.findScalarPos', 'scalar', (h, start, v) => {
-    for (let index = start; index < h.length; index++) if (equalValues(h[index], v)) return index;
+  findScalarPos: positionSearch('std.mem.findScalarPos', 'scalar', (h, start, v, equal) => {
+    for (let index = start; index < h.length; index++) if (equal(h[index], v)) return index;
     return -1;
   }),
-  count: sliceSearch('std.mem.count', 'slice', USIZE, (h, n) => {
+  count: sliceSearch('std.mem.count', 'slice', USIZE, (h, n, equal) => {
     const needle = n as unknown as Value[];
     if (needle.length === 0) panic(PANIC.unreachable);
     let found = 0n;
-    for (let index = findSequence(h, needle, 0); index !== -1; index = findSequence(h, needle, index + needle.length))
+    for (
+      let index = findSequence(h, needle, 0, equal);
+      index !== -1;
+      index = findSequence(h, needle, index + needle.length, equal)
+    )
       found++;
     return found;
   }),
-  countScalar: sliceSearch('std.mem.countScalar', 'scalar', USIZE, (h, v) =>
-    BigInt(h.filter((x) => equalValues(x, v)).length)
+  countScalar: sliceSearch('std.mem.countScalar', 'scalar', USIZE, (h, v, equal) =>
+    BigInt(h.filter((x) => equal(x, v)).length)
   ),
   // code-gauge-allow functionNcss 32 -- Keeps bounded substring search with argument analysis.
   // code-gauge-allow functionCognitiveComplexity 25 -- Keeps bounded substring search with argument analysis.
@@ -513,55 +535,38 @@ const MEMBERS: Record<string, () => Member> = {
   rotate: generic('std.mem.rotate', 3, (sema, call, type, [itemsArg, amountArg]) => {
     const items = mutableSlice(sema, itemsArg, type);
     const amount = sema.coerce(sema.compile(amountArg, USIZE), USIZE, amountArg);
-    const evaluateItems = items.eval;
-    const evaluateAmount = amount.eval;
-    return runtime(
-      VOID,
-      (frame) => {
-        const slice = evaluateItems(frame) as Slice;
-        const shift = Number(evaluateAmount(frame) as bigint);
-        // `items[0..amount]` panics as Zig's slicing does when the amount is past the end.
-        if (shift > slice.length) panic(`end index ${shift} out of bounds for slice of length ${slice.length}`);
-        const values = slice.values();
-        frame.runtime.spend(values.length);
-        storeSliceValues(slice, [...values.slice(shift), ...values.slice(0, shift)]);
-        return;
-      },
-      call.span
-    );
+    return nativeCall(VOID, [items, amount], call.span, ([value, amount], frame) => {
+      const slice = value as Slice;
+      const shift = Number(amount as bigint);
+      // `items[0..amount]` panics as Zig's slicing does when the amount is past the end.
+      if (shift > slice.length) panic(`end index ${shift} out of bounds for slice of length ${slice.length}`);
+      const values = slice.values();
+      frame.runtime.spend(values.length);
+      storeSliceValues(slice, [...values.slice(shift), ...values.slice(0, shift)]);
+      return;
+    });
   }),
   reverse: generic('std.mem.reverse', 2, (sema, call, type, [itemsArg]) => {
     const items = mutableSlice(sema, itemsArg, type);
-    const evaluate = items.eval;
-    return runtime(
-      VOID,
-      (frame) => {
-        const slice = evaluate(frame) as Slice;
-        const values = slice.values().toReversed();
-        frame.runtime.spend(values.length);
-        storeSliceValues(slice, values);
-        return;
-      },
-      call.span
-    );
+    return nativeCall(VOID, [items], call.span, ([value], frame) => {
+      const slice = value as Slice;
+      const values = slice.values().toReversed();
+      frame.runtime.spend(values.length);
+      storeSliceValues(slice, values);
+      return;
+    });
   }),
   swap: generic('std.mem.swap', 3, (sema, call, type, [aArg, bArg]) => {
     const [a, b] = compileArgs(sema, [aArg, bArg], [pointerTo(type, false), pointerTo(type, false)]);
-    const evaluateA = a.eval;
-    const evaluateB = b.eval;
-    return runtime(
-      VOID,
-      (frame) => {
-        const x = evaluateA(frame) as Pointer;
-        const y = evaluateB(frame) as Pointer;
-        const temporary = copyForStorage(x.load());
-        const other = copyForStorage(y.load());
-        storeInto(x.target, x.index, other);
-        storeInto(y.target, y.index, temporary);
-        return;
-      },
-      call.span
-    );
+    return nativeCall(VOID, [a, b], call.span, ([a, b]) => {
+      const x = a as Pointer;
+      const y = b as Pointer;
+      const temporary = copyForStorage(x.load());
+      const other = copyForStorage(y.load());
+      storeInto(x.target, x.index, other);
+      storeInto(y.target, y.index, temporary);
+      return;
+    });
   }),
   copyForwards: copier('std.mem.copyForwards'),
   copyBackwards: copier('std.mem.copyBackwards'),
@@ -688,16 +693,8 @@ const MEMBERS: Record<string, () => Member> = {
       call.span
     );
   }),
-  cutPrefix: sliceSearch('std.mem.cutPrefix', 'slice', optionalOf(CONST_U8_SLICE), (h, n) => {
-    const needle = n as unknown as Value[];
-    return startsWith(h, needle) ? newSlice(h.slice(needle.length)) : NULL;
-  }),
-  cutSuffix: sliceSearch('std.mem.cutSuffix', 'slice', optionalOf(CONST_U8_SLICE), (h, n) => {
-    const needle = n as unknown as Value[];
-    return needle.length <= h.length && startsWith(h, needle, h.length - needle.length)
-      ? newSlice(h.slice(0, h.length - needle.length))
-      : NULL;
-  }),
+  cutPrefix: cutMember('std.mem.cutPrefix', false),
+  cutSuffix: cutMember('std.mem.cutSuffix', true),
   splitScalar: iteratorFactory('std.mem.splitScalar', 'split', 'scalar'),
   splitSequence: iteratorFactory('std.mem.splitSequence', 'split', 'sequence'),
   splitAny: iteratorFactory('std.mem.splitAny', 'split', 'any'),
@@ -705,6 +702,24 @@ const MEMBERS: Record<string, () => Member> = {
   tokenizeSequence: iteratorFactory('std.mem.tokenizeSequence', 'token', 'sequence'),
   tokenizeAny: iteratorFactory('std.mem.tokenizeAny', 'token', 'any'),
 };
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps generic prefix and suffix validation with the resulting shared-storage view.
+function cutMember(name: string, suffix: boolean): () => Member {
+  return generic(name, 3, (sema, call, type, [sourceArg, needleArg]) => {
+    const source = constSlice(sema, sourceArg, type);
+    const needle = constSlice(sema, needleArg, type);
+    return computed(optionalOf(sliceOf(type, true)), [source, needle], call.span, ([value, pattern], frame) => {
+      const input = value as Slice;
+      const target = pattern as Slice;
+      if (target.length > input.length) return NULL;
+      const offset = suffix ? input.length - target.length : 0;
+      const equal = comparisonBudget(sema, frame);
+      for (let index = 0; index < target.length; index++)
+        if (!equal(input.get(offset + index), target.get(index))) return NULL;
+      return new Slice(input.target, input.start + (suffix ? 0 : target.length), input.length - target.length);
+    });
+  });
+}
 
 function lexicographic(a: Value[], b: Value[]): number {
   const length = Math.min(a.length, b.length);
@@ -925,10 +940,11 @@ function cutter(name: string, needleKind: 'slice' | 'scalar', last: boolean): Me
         ? constSlice(sema, needleArg, type)
         : sema.coerce(sema.compile(needleArg, type), type, needleArg);
     const slice = sliceOf(type, true);
-    return computed(optionalOf(tupleOf(sema, [slice, slice])), [haystack, needle], call.span, ([h, n]) => {
+    return computed(optionalOf(tupleOf(sema, [slice, slice])), [haystack, needle], call.span, ([h, n], frame) => {
       const items = elements(h);
       const pattern = needleKind === 'slice' ? elements(n) : [n];
-      const index = last ? findSequenceLast(items, pattern) : findSequence(items, pattern, 0);
+      const equal = comparisonBudget(sema, frame);
+      const index = last ? findSequenceLast(items, pattern, equal) : findSequence(items, pattern, 0, equal);
       if (index < 0) return NULL;
       const whole = h as Slice;
       return new ZStruct([

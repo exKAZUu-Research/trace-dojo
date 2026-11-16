@@ -1,5 +1,6 @@
 // code-gauge-allow-file duplicateLines 20 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { PANIC, panic } from './arith';
+import { isDiscardName } from './ast';
 import type { Capture, Expression, ExpressionOf, Label, Span, Statement, SwitchCase } from './ast';
 import { CallCompiler, type FunctionCompilation } from './calls';
 import type { FunctionInstance } from './functions';
@@ -133,7 +134,7 @@ export abstract class StatementCompiler extends CallCompiler {
         instance.paramSlots = syntax.params.map((param, index) => {
           const slot = this.localSlot();
           const type = compilation.paramTypes[index];
-          if (param.name !== '_') {
+          if (!isDiscardName(param)) {
             const binding: LocalBinding = {
               kind: 'local',
               name: param.name,
@@ -252,7 +253,7 @@ export abstract class StatementCompiler extends CallCompiler {
     });
   }
 
-  private declareLocal(name: string, type: Type, isConst: boolean, value?: TExpr): LocalBinding {
+  private declareLocal(name: string, type: Type, isConst: boolean, value?: TExpr, quotedName = false): LocalBinding {
     const fn = this.currentFn({ row: 0, col: 0, endRow: 0 });
     const slot = this.localSlot();
     const binding: LocalBinding = {
@@ -265,7 +266,7 @@ export abstract class StatementCompiler extends CallCompiler {
       known: Boolean(isConst && (value?.known || value?.staticResult)),
       value: isConst ? (value?.known ? value.value : value?.staticResult?.value) : undefined,
     };
-    if (name !== '_') {
+    if (!isDiscardName({ name, quotedName })) {
       this.scope.locals?.set(name, binding);
       fn.instance.locals.push({ name, slot, type, isReceiver: false });
     }
@@ -305,7 +306,7 @@ export abstract class StatementCompiler extends CallCompiler {
       );
     }
     if (type.kind === 'noreturn') return { exec: this.valueExec(value), noreturn: true };
-    const binding = this.declareLocal(statement.name, type, statement.isConst, value);
+    const binding = this.declareLocal(statement.name, type, statement.isConst, value, statement.quotedName);
     const { slot } = binding;
     const evaluate = value.eval;
     const row = isUndefined ? undefined : this.stepRow(statement);
@@ -347,14 +348,20 @@ export abstract class StatementCompiler extends CallCompiler {
             `変数「${target.declaration.name}」の型 ${typeName(coerced.type)} は、コンパイルのときだけの型です。`
           );
         }
-        const binding = this.declareLocal(target.declaration.name, coerced.type, target.declaration.isConst, coerced);
+        const binding = this.declareLocal(
+          target.declaration.name,
+          coerced.type,
+          target.declaration.isConst,
+          coerced,
+          target.declaration.quotedName
+        );
         const convert = coerced;
         return (frame: Frame): void => {
           frame.slots[binding.slot] = copyForFrame(frame, convert.eval(frame), convert.type);
         };
       }
       const destination = target.target as Expression;
-      if (destination.kind === 'identifier' && destination.name === '_') return () => {};
+      if (destination.kind === 'identifier' && isDiscardName(destination)) return () => {};
       const place = this.assignablePlace(destination);
       const convert = this.coerce(elementExpression, place.type, target);
       return (frame: Frame): void => {
@@ -394,7 +401,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const stores = statement.targets.map((target, index) => {
       const destination = target.target as Expression;
       const element = value.elements[index];
-      if (destination.kind === 'identifier' && destination.name === '_') {
+      if (destination.kind === 'identifier' && isDiscardName(destination)) {
         const discarded = this.compile(element).eval;
         return (frame: Frame): void => void discarded(frame);
       }
@@ -545,7 +552,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const row = this.stepRow(span);
     if (expression.targets.length !== 1) return this.error(expression, '書き方に誤りがあります。');
     const [target] = expression.targets;
-    if (target.kind === 'identifier' && target.name === '_') {
+    if (target.kind === 'identifier' && isDiscardName(target)) {
       const discarded = unwrapParens(expression.value);
       const value =
         discarded.kind === 'catch' ? this.compileCatch(discarded, undefined, true) : this.compile(expression.value);
@@ -1183,7 +1190,7 @@ export abstract class StatementCompiler extends CallCompiler {
         bind: (frame: Frame, value: Value, pointer?: Pointer) => void;
       }
     | undefined {
-    if (!capture || capture.name === '_') return undefined;
+    if (!capture || isDiscardName(capture)) return undefined;
     if (capture.byPointer) {
       const place = operand?.place;
       if (!place) return this.error(capture, '|*x| で受け取るには、変数などの場所が要ります。');
@@ -1328,16 +1335,11 @@ export abstract class StatementCompiler extends CallCompiler {
         frame.runtime.spend();
         if (!test(frame)) break;
         if (hasBinding) frame.runtime.steps.stepBinding(row, storesAnswer);
-        const completion = runBody(bodyExec, frame, id);
-        if (completion) {
-          if (completion.target === id) {
-            if (completion.kind === 'break') return { value: completion.value };
-          } else {
-            return completion;
-          }
-        }
+        const completion = loopExit(runBody(bodyExec, frame, id), id);
+        if (completion) return completion;
         if (continueExec) {
-          continueExec(frame);
+          const completion = loopExit(runBody(continueExec, frame, id), id);
+          if (completion) return completion;
           frame.runtime.steps.step(row);
         }
       }
@@ -1456,7 +1458,7 @@ export abstract class StatementCompiler extends CallCompiler {
     if (lengths.some((length) => length !== lengths[0])) this.error(expression, 'for の対象の長さが違います。');
     const locals = new Map<string, LocalBinding>();
     const bindings = expression.captures.map((capture, index) => {
-      if (capture.name === '_') return;
+      if (isDiscardName(capture)) return;
       const operand = operands[index];
       const type = capture.byPointer ? operand.type : operand.type;
       const binding = this.newLocal(capture.name, type, true);
@@ -1677,7 +1679,7 @@ export abstract class StatementCompiler extends CallCompiler {
       this.compilationBudget.spend();
       const locals = new Map<string, LocalBinding>();
       let binding: LocalBinding | undefined;
-      if (capture && capture.name !== '_') {
+      if (capture && !isDiscardName(capture)) {
         binding = this.newLocal(capture.name, element.type, true);
         binding = { ...binding, known: element.known, value: element.value };
         locals.set(capture.name, binding);
@@ -1941,7 +1943,7 @@ export abstract class StatementCompiler extends CallCompiler {
       );
     const values: unknown[] = [];
     const ranges: [bigint, bigint][] = [];
-    const isUnnamed = each.items.some((item) => item.value.kind === 'identifier' && item.value.name === '_');
+    const isUnnamed = each.items.some((item) => item.value.kind === 'identifier' && isDiscardName(item.value));
     if (isUnnamed && each.items.length > 1) this.error(each, '「_」の枝には、ほかの値を書けません。');
     for (const item of isUnnamed ? [] : each.items) {
       const first = this.knownValue(
@@ -2001,7 +2003,7 @@ export abstract class StatementCompiler extends CallCompiler {
       const locals = new Map<string, LocalBinding>();
       let bind: ((frame: Frame, value: Value, pointer: Pointer | undefined) => void) | undefined;
       const capture = each.capture;
-      if (capture && capture.name !== '_') {
+      if (capture && !isDiscardName(capture)) {
         if (capture.byPointer) {
           if (!operand.place || operand.place.isConst)
             this.error(capture, '|*x| で受け取るには、変数の値を switch してください。');
@@ -2018,7 +2020,7 @@ export abstract class StatementCompiler extends CallCompiler {
           };
         }
       }
-      if (each.tagCapture && each.tagCapture.name !== '_') {
+      if (each.tagCapture && !isDiscardName(each.tagCapture)) {
         if (!each.isInline) this.error(each.tagCapture, 'タグを受け取れるのは inline の枝だけです。');
         const binding = {
           ...this.newLocal(each.tagCapture.name, tagType, true),
@@ -2100,7 +2102,7 @@ export abstract class StatementCompiler extends CallCompiler {
       this.knownValue(this.coerce(this.compile(item, tagType), tagType, item), 'switch の枝の値');
     for (const each of expression.cases) {
       for (const item of each.items) {
-        if (item.value.kind === 'identifier' && item.value.name === '_') continue;
+        if (item.value.kind === 'identifier' && isDiscardName(item.value)) continue;
         const first = prongKey(valueOf(item.value));
         if (!item.last && first === key) return each;
         if (item.last && typeof key === 'bigint' && key >= (first as bigint) && key <= (valueOf(item.last) as bigint))
@@ -2108,7 +2110,7 @@ export abstract class StatementCompiler extends CallCompiler {
       }
     }
     return expression.cases.find(
-      (each) => each.isElse || each.items.some((item) => item.value.kind === 'identifier' && item.value.name === '_')
+      (each) => each.isElse || each.items.some((item) => item.value.kind === 'identifier' && isDiscardName(item.value))
     );
   }
 
@@ -2336,6 +2338,12 @@ function runBody(body: Exec, frame: Frame, id: object): Jump | undefined {
     if (error instanceof Jump && error.target === id) return error;
     throw error;
   }
+}
+
+function loopExit(completion: Jump | undefined, id: object): Jump | { value: Value } | undefined {
+  if (!completion) return undefined;
+  if (completion.target !== id) return completion;
+  return completion.kind === 'break' ? { value: completion.value } : undefined;
 }
 
 function conditionKind(type: Type, hasCapture: boolean): 'bool' | 'optional' | 'error_union' {

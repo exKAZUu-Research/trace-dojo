@@ -406,7 +406,15 @@ function writerOf(sema: SemaApi, call: NativeCall): (frame: Parameters<TExpr['ev
 function writeRepeated(frame: Parameters<TExpr['eval']>[0], state: WriterState, data: number[], count: number): Value {
   const length = data.length * count;
   const end = state.end + length;
-  if (state.fd === undefined && end > state.capacity) return WRITE_FAILED;
+  if (state.fd === undefined && end > state.capacity) {
+    const available = Math.max(0, state.capacity - state.end);
+    writeTo(
+      frame,
+      state,
+      Array.from({ length: available }, (_, index) => data[index % data.length])
+    );
+    return WRITE_FAILED;
+  }
   if (end > state.capacity || !Number.isFinite(state.capacity)) checkOutputSize(end);
   return writeTo(
     frame,

@@ -1,5 +1,5 @@
-// code-gauge-allow-file fileNcss 492 -- Groups the related standard library operations that share this module.
-import { divCeil, divExact, divFloor, divTrunc, floatMod, floatRem, mod, PANIC, panic, rem } from '../arith';
+// code-gauge-allow-file fileNcss 500 -- Groups the related standard library operations that share this module.
+import { checked, divCeil, divExact, divFloor, divTrunc, floatMod, floatRem, mod, PANIC, panic, rem } from '../arith';
 import type { Expression } from '../ast';
 import { fusedMultiplyAdd, intFittingRange, roundFloat } from '../builtins';
 import { log2IntType } from '../expressions';
@@ -458,9 +458,16 @@ const MEMBERS: Record<string, () => Member> = {
   signbit: predicate('std.math.signbit', (x) => signBit(x)),
   sqrt: fnMember('std.math.sqrt', (sema, call) => {
     const [arg] = expectArgs(sema, call, 1, 'std.math.sqrt');
-    const value = sema.compile(arg, call.resultType);
+    const value = sema.compile(arg);
     const type = value.type;
+    if (type.kind === 'comptime_int') {
+      const integer = value.value as bigint;
+      if (integer < 0n || integer > maxInt(intType(false, 128)))
+        return sema.error(arg, '整数の平方根には、0 以上で u128 の範囲内の値を渡してください。');
+      return known(COMPTIME_INT, integerSqrt(integer), call.span);
+    }
     if (type.kind === 'int') {
+      if (type.signed) return sema.error(arg, '整数の平方根には、符号なしの整数を渡してください。');
       const result = intType(false, Math.ceil(type.bits / 2));
       return computed(result, [value], call.span, ([x]) => integerSqrt(x as bigint));
     }
@@ -599,7 +606,8 @@ const MEMBERS: Record<string, () => Member> = {
     const type = sema.peerType([a, b], call.span);
     return computed(type, [sema.coerce(a, type), sema.coerce(b, type)], call.span, ([x, y]) => {
       const divisor = gcd(x as bigint, y as bigint);
-      return divisor === 0n ? 0n : ((x as bigint) / divisor) * (y as bigint);
+      const result = divisor === 0n ? 0n : ((x as bigint) / divisor) * (y as bigint);
+      return type.kind === 'int' ? checked(result, type) : result;
     });
   }),
   CompareOperator: typeMember(() => COMPARE_OPERATOR),

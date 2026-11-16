@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 623 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 629 -- The file holds one layer of the compiler, whose parts share its private state.
 import {
+  checkShiftAmount,
   divCeil,
   divExact,
   divFloor,
@@ -469,7 +470,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
   private importBuiltin(expression: ExpressionOf<'builtinCall'>): TExpr {
     const [path] = expression.args;
     if (path.kind !== 'string') return this.error(expression, '@import の引数は、文字列のリテラルにしてください。');
-    const name = String.fromCodePoint(...path.bytes);
+    const name = new TextDecoder().decode(new Uint8Array(path.bytes));
     if (name === 'std') return known(TYPE, importStd(), expression);
     if (name === 'builtin' || name === 'root')
       return this.error(expression, `@import("${name}") は、この採点環境では使えません。`);
@@ -708,7 +709,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     return this.derived(operand, type, apply);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private overflowBuiltin(name: string, expression: ExpressionOf<'builtinCall'>): TExpr {
     const [leftSyntax, rightSyntax] = expression.args;
     let left = this.compile(leftSyntax);
@@ -719,6 +720,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       return this.error(expression, `${name} は整数の型にだけ使えます（${typeName(type)} 型です）。`);
     left = this.coerce(left, type, leftSyntax);
     right = this.coerce(right, name === '@shlWithOverflow' ? log2IntType(type) : type, rightSyntax);
+    if (name === '@shlWithOverflow') this.checkKnownShift(right, type, rightSyntax);
     const bit = intType(false, 1);
     const tuple = this.tupleType([
       { name: '0', type, hasDefault: false },
@@ -727,6 +729,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     const compute = (a: Value, b: Value): Value => {
       const x = a as bigint;
       const y = b as bigint;
+      if (name === '@shlWithOverflow') checkShiftAmount(y, type);
       const exact =
         name === '@addWithOverflow'
           ? x + y
@@ -748,12 +751,14 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       return this.error(expression, `${name} は整数の型にだけ使えます（${typeName(type)} 型です）。`);
     const amountType = log2IntType(type);
     const right = this.coerce(this.compile(expression.args[1], amountType), amountType, expression.args[1]);
+    this.checkKnownShift(right, type, expression.args[1]);
     return this.combine(
       [left, right],
       type,
       ([a, b]) => {
         const x = a as bigint;
         const y = b as bigint;
+        checkShiftAmount(y, type);
         if (name === '@shlExact') {
           const shifted = x << y;
           if (wrapInt(shifted, type) !== shifted) panic(PANIC.leftShiftOverflow);

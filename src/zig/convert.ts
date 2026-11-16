@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 766 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 768 -- The file holds one layer of the compiler, whose parts share its private state.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -44,6 +44,10 @@ let functions: FunctionDeclaration[] = [];
 
 /** The keyword tokens that stand for values where an expression is expected. */
 const KEYWORD_VALUES = new Set(['null', 'undefined', 'unreachable', 'anyframe']);
+
+function identifierName(node: Node): { name: string; quotedName: boolean } {
+  return { name: literals.decodeIdentifier(node), quotedName: node.text.startsWith('@') };
+}
 
 function spanOf(node: Node): Span {
   return {
@@ -144,7 +148,7 @@ function functionDeclaration(node: Node): FunctionDeclaration {
   const declaration: FunctionDeclaration = {
     kind: 'fn',
     ...spanOf(node),
-    name: literals.decodeIdentifier(nameNode),
+    ...identifierName(nameNode),
     isPub: hasToken(node, 'pub'),
     isInline: hasToken(node, 'inline'),
     params: parameters(node.childForFieldName('parameters') as Node),
@@ -182,7 +186,7 @@ function parameters(node: Node): Parameter[] {
       const isAnytype = typeNode.type === 'builtin_type' && typeNode.text === 'anytype';
       return {
         ...spanOf(child),
-        name: nameNode ? literals.decodeIdentifier(nameNode) : '_',
+        ...(nameNode ? identifierName(nameNode) : { name: '_' }),
         type: isAnytype ? undefined : typeExpression(typeNode),
       };
     });
@@ -208,7 +212,7 @@ function variableHeader(node: Node): VariableDeclaration | undefined {
   return {
     kind: 'var',
     ...spanOf(node),
-    name: literals.decodeIdentifier(nameNode),
+    ...identifierName(nameNode),
     isConst: keyword.type === 'const',
     isPub: hasToken(node, 'pub'),
     type: typeNode ? typeExpression(typeNode) : undefined,
@@ -227,14 +231,14 @@ function containerField(node: Node): ContainerField {
   if (typeNode && nameNode) {
     return {
       ...spanOf(node),
-      name: literals.decodeIdentifier(nameNode),
+      ...identifierName(nameNode),
       type: typeExpression(typeNode),
       value,
     };
   }
   if (!nameNode) fail(node, '書き方に誤りがあります。');
   // A bare name is an enum's or a union's field, or the type of a tuple's field; the container decides which.
-  if (nameNode.type === 'identifier') return { ...spanOf(node), name: literals.decodeIdentifier(nameNode), value };
+  if (nameNode.type === 'identifier') return { ...spanOf(node), ...identifierName(nameNode), value };
   return { ...spanOf(node), type: typeExpression(nameNode), value };
 }
 
@@ -413,7 +417,7 @@ function destructure(node: Node, equals: number): Statement {
       targets.push({
         ...spanOf(first),
         declaration: {
-          name: literals.decodeIdentifier(nameNode),
+          ...identifierName(nameNode),
           isConst: keyword.type === 'const',
           type: typeNode ? typeExpression(typeNode) : undefined,
         },
@@ -484,7 +488,7 @@ export function expression(node: Node): Expression {
       return { kind: 'bool', ...span, value: node.text === 'true' };
     }
     case 'identifier': {
-      return { kind: 'identifier', ...span, name: literals.decodeIdentifier(node) };
+      return { kind: 'identifier', ...span, ...identifierName(node) };
     }
     case 'builtin_type': {
       return { kind: 'builtinType', ...span, name: node.text };
@@ -1031,7 +1035,7 @@ function payload(node: Node): Capture[] {
   for (const child of node.children) {
     if (child.type === '*') byPointer = true;
     else if (child.type === 'identifier') {
-      captures.push({ ...spanOf(child), name: literals.decodeIdentifier(child), byPointer });
+      captures.push({ ...spanOf(child), ...identifierName(child), byPointer });
       byPointer = false;
     }
   }

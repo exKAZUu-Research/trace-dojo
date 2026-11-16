@@ -33,6 +33,28 @@ export interface Slots {
   slots: Value[];
 }
 
+const immutableStorage = new WeakSet<object>();
+
+export function markConstantStorage(storage: Slots): void {
+  if (immutableStorage.has(storage.slots)) return;
+  immutableStorage.add(storage);
+  immutableStorage.add(storage.slots);
+  const visit = (value: Value): void => {
+    if (value instanceof ZArray || value instanceof ZStruct || value instanceof ZUnion) markConstantStorage(value);
+    else if (value instanceof Some) visit(value.value);
+  };
+  for (const value of storage.slots) visit(value);
+}
+
+export function compileTimeReadable(value: Value): boolean {
+  if (value instanceof Pointer) return immutableStorage.has(value.storageLocation().storage);
+  if (value instanceof Slice) return immutableStorage.has(value.target.slots);
+  if (value instanceof ZArray || value instanceof ZStruct || value instanceof ZUnion)
+    return value.slots.every(compileTimeReadable);
+  if (value instanceof Some) return compileTimeReadable(value.value);
+  return !(value instanceof NativeHandle);
+}
+
 /** A variable's storage. */
 export class Cell implements Slots {
   slots: Value[];
@@ -192,6 +214,10 @@ export const NULL = NullValue.instance;
 /** A non-null value of an optional whose payload is itself optional, so that `?(?T)` tells its two nulls apart. */
 export class Some {
   constructor(readonly value: Value) {}
+}
+
+export function optionalSome(value: Value, payload: Type): Value {
+  return payload.kind === 'optional' ? new Some(value) : value;
 }
 
 /** A function, as a value of a function type or a function pointer. */

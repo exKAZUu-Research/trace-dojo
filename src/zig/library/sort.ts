@@ -3,7 +3,7 @@ import type { Span } from '../ast';
 import { type Frame, withHeldValues } from '../runtime';
 import { copyForFrame, known, type SemaApi } from '../semaBase';
 import { BOOL, fnType, optionalOf, type StructType, type Type, typeName, USIZE, VOID } from '../types';
-import { FnValue, NULL, Slice, type Value, ZStruct } from '../values';
+import { FnValue, NULL, optionalSome, Slice, type Value, ZStruct } from '../values';
 import { blockSortFunction, runBlockSort } from './blockSort';
 import { compareScalars, constSlice, generic, mutableSlice, ORDER, tupleOf } from './common';
 import { type Member, nativeCall, nativeFunction, nativeStruct } from './native';
@@ -238,7 +238,7 @@ const MEMBERS: Record<string, () => Member> = {
     (type) => optionalOf(type),
     (items, call, frame, type) => {
       const index = extremum(items, call, frame, type, false);
-      return index === NULL ? NULL : items.get(Number(index as bigint));
+      return index === NULL ? NULL : optionalSome(items.get(Number(index as bigint)), type);
     }
   ),
   max: reader(
@@ -247,7 +247,7 @@ const MEMBERS: Record<string, () => Member> = {
     (type) => optionalOf(type),
     (items, call, frame, type) => {
       const index = extremum(items, call, frame, type, true);
-      return index === NULL ? NULL : items.get(Number(index as bigint));
+      return index === NULL ? NULL : optionalSome(items.get(Number(index as bigint)), type);
     }
   ),
 };

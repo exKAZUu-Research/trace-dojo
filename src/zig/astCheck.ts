@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 590 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 595 -- The file holds one layer of the compiler, whose parts share its private state.
 import type { SourceDiagnostic } from '../interpreter/diagnostics';
+import { isDiscardName } from './ast';
 import type {
   Capture,
   Container,
@@ -8,6 +9,7 @@ import type {
   Expression,
   FunctionDeclaration,
   Label,
+  NamedSpan,
   SourceFile,
   Span,
   Statement,
@@ -125,7 +127,7 @@ class AstChecker {
 
   // Containers ------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Mirrors one AstGen check over the constructs it covers.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Mirrors one AstGen check over the constructs it covers.
   // code-gauge-allow functionNcss 34 -- Checks declarations and fields in their shared container scope.
   checkContainer(
     members: readonly ContainerMember[],
@@ -144,7 +146,10 @@ class AstChecker {
       if (first) this.error(first, `名前「${member.name}」が、同じ型の中で2回宣言されています。`);
       seen.set(member.name, member);
       names.add(member.name);
-      if (primitiveType(member.name) !== undefined || member.name === 'true' || member.name === 'false') {
+      if (
+        !member.quotedName &&
+        (primitiveType(member.name) !== undefined || member.name === 'true' || member.name === 'false')
+      ) {
         this.error(
           member,
           `「${member.name}」は組み込みの名前なので、宣言には使えません（@"${member.name}" と書いてください）。`
@@ -189,14 +194,14 @@ class AstChecker {
     if (container?.containerKind === 'enum') {
       for (const [index, field] of fields.entries()) {
         if (field.type) this.error(field, 'enum のフィールドには型を書けません。');
-        if (field.name === '_' && index !== fields.length - 1) {
+        if (isDiscardName(field) && index !== fields.length - 1) {
           this.error(field, '「_」は enum の最後のフィールドにだけ書けます。');
         }
-        if (field.name === '_' && field.value) this.error(field, '「_」には値を書けません。');
+        if (isDiscardName(field) && field.value) this.error(field, '「_」には値を書けません。');
         if (field.value && !container.argument) {
           this.error(field, '値を指定する enum には、enum(u8) のように整数の型を書いてください。');
         }
-        if (field.name === '_' && !container.argument) {
+        if (isDiscardName(field) && !container.argument) {
           this.error(field, '「_」で終わる enum には、enum(u8) のように整数の型を書いてください。');
         }
         if (field.value) this.expression(field.value, 'value');
@@ -233,7 +238,7 @@ class AstChecker {
       this.scope = params;
       for (const param of fn.params) {
         if (param.type) this.expression(param.type, 'value');
-        if (param.name !== '_') this.declare(param.name, 'function parameter', param);
+        if (!isDiscardName(param)) this.declare(param.name, 'function parameter', param);
       }
       this.expression(fn.returnType, 'value');
       this.blockStatements(fn.body.statements);
@@ -248,9 +253,9 @@ class AstChecker {
 
   // Bindings --------------------------------------------------------------------------------------------------------
 
-  private declare(name: string, category: Category, span: Span): LocalBinding {
+  private declare(name: string, category: Category, span: NamedSpan): LocalBinding {
     const what = CATEGORY_NAMES[category];
-    if (primitiveType(name) !== undefined) {
+    if (!span.quotedName && primitiveType(name) !== undefined) {
       this.error(span, `「${name}」は組み込みの型の名前なので、${what}の名前には使えません。`);
     }
     for (let scope = this.scope; scope; scope = scope.parent) {
@@ -322,9 +327,9 @@ class AstChecker {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Mirrors one AstGen check over the constructs it covers.
-  private reference(name: string, span: Span, use: Use): void {
-    if (name === '_') {
+  // code-gauge-allow functionCognitiveComplexity 25 -- Mirrors one AstGen check over the constructs it covers.
+  private reference(name: string, span: NamedSpan, use: Use): void {
+    if (isDiscardName({ name, quotedName: span.quotedName })) {
       this.error(span, '「_」は、値を捨てる代入（_ = x;）の左辺にだけ書けます。');
       return;
     }
@@ -346,11 +351,11 @@ class AstChecker {
         crossedNamespace = true;
       }
     }
-    if (primitiveType(name) === undefined) this.error(span, `「${name}」は宣言されていません。`);
+    if (span.quotedName || primitiveType(name) === undefined) this.error(span, `「${name}」は宣言されていません。`);
   }
 
   private capture(capture: Capture | undefined): void {
-    if (!capture || capture.name === '_') return;
+    if (!capture || isDiscardName(capture)) return;
     this.declare(capture.name, 'capture', capture);
   }
 
@@ -380,7 +385,7 @@ class AstChecker {
         if (statement.type?.kind === 'arrayType' && statement.type.count === undefined) {
           this.error(statement.type, '配列の長さを [_] で省くのは、[_]i32{ 1, 2 } のような初期化のときだけです。');
         }
-        if (statement.name !== '_') {
+        if (!isDiscardName(statement)) {
           this.declare(statement.name, statement.isConst ? 'local constant' : 'local variable', statement);
         } else {
           this.error(statement, '「_」という名前の変数は宣言できません。');
@@ -392,12 +397,11 @@ class AstChecker {
         for (const target of statement.targets) {
           if (target.declaration) {
             if (target.declaration.type) this.expression(target.declaration.type, 'value');
-            if (target.declaration.name !== '_') {
-              this.declare(
-                target.declaration.name,
-                target.declaration.isConst ? 'local constant' : 'local variable',
-                target
-              );
+            if (!isDiscardName(target.declaration)) {
+              this.declare(target.declaration.name, target.declaration.isConst ? 'local constant' : 'local variable', {
+                ...target,
+                ...target.declaration,
+              });
             }
           } else if (target.target && !isDiscard(target.target)) {
             this.expression(target.target, 'ref');
@@ -481,7 +485,7 @@ class AstChecker {
       case 'catch': {
         this.expression(expression.operand, 'value');
         this.withBlock(() => {
-          if (expression.capture?.name === '_') {
+          if (expression.capture && isDiscardName(expression.capture)) {
             this.error(expression.capture, 'エラーを捨てる |_| は、書かずに省いてください。');
           }
           this.capture(expression.capture);
@@ -534,7 +538,12 @@ class AstChecker {
       }
       case 'structInit': {
         if (expression.type) this.expression(expression.type, 'value');
-        for (const field of expression.fields) this.expression(field.value, 'value');
+        const names = new Set<string>();
+        for (const field of expression.fields) {
+          if (names.has(field.name)) this.error(field, `フィールド「${field.name}」を2回初期化しています。`);
+          names.add(field.name);
+          this.expression(field.value, 'value');
+        }
         break;
       }
       case 'arrayInit': {
@@ -692,7 +701,7 @@ class AstChecker {
       const operand = expression.operands[index];
       if (!operand) continue;
       if (capture.byPointer && operand.isRange) this.error(capture, '範囲の値は |*x| で受け取れません。');
-      if (capture.name === '_' && operand.isRange && !operand.rangeEnd) {
+      if (isDiscardName(capture) && operand.isRange && !operand.rangeEnd) {
         this.error(capture, '終わりのない範囲を _ で捨てることはできません。');
       }
     }
@@ -714,7 +723,7 @@ class AstChecker {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 26 -- Mirrors one AstGen check over the constructs it covers.
+  // code-gauge-allow functionCognitiveComplexity 27 -- Mirrors one AstGen check over the constructs it covers.
   private switchExpression(expression: Extract<Expression, { kind: 'switch' }>): void {
     const byPointer = expression.cases.some((each) => each.capture?.byPointer);
     this.expression(expression.operand, byPointer ? 'ref' : 'value');
@@ -722,15 +731,15 @@ class AstChecker {
       for (const each of expression.cases) {
         for (const item of each.items) {
           // `_ =>` takes a non-exhaustive enum's unnamed values.
-          if (item.value.kind === 'identifier' && item.value.name === '_') continue;
+          if (item.value.kind === 'identifier' && isDiscardName(item.value)) continue;
           this.expression(item.value, 'value');
           if (item.last) this.expression(item.last, 'value');
         }
         this.withBlock(() => {
-          if (each.capture?.name === '_' && !each.tagCapture) {
+          if (each.capture && isDiscardName(each.capture) && !each.tagCapture) {
             this.error(each.capture, '受け取らない値の |_| は、書かずに省いてください。');
           }
-          if (each.tagCapture?.name === '_') {
+          if (each.tagCapture && isDiscardName(each.tagCapture)) {
             this.error(each.tagCapture, '受け取らないタグの |_| は、書かずに省いてください。');
           }
           this.capture(each.capture);
@@ -805,7 +814,7 @@ function unwrapParens(expression: Expression): Expression {
 }
 
 function isDiscard(expression: Expression): boolean {
-  return expression.kind === 'identifier' && expression.name === '_';
+  return expression.kind === 'identifier' && isDiscardName(expression);
 }
 
 function isAssignable(expression: Expression): boolean {

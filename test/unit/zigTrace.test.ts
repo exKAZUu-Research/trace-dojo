@@ -326,3 +326,13 @@ ${body}`;
   expect(result.stderr).toContain('false|');
   expect(result.finalTurtles).toEqual([{ x: 0, y: 2, color: '#', dir: 'N' }]);
 });
+
+test('cyclic slice graphs render without changing execution or losing later steps', () => {
+  const source = `const std=@import("std");const Node=struct{children:[]Node};pub fn main()void{var nodes:[2]Node=undefined;nodes[0]=.{.children=nodes[1..2]};nodes[1]=.{.children=nodes[0..1]};const n=nodes[0].children.len;std.debug.print("{}",.{n});}`;
+  const execution = executeProgram('zig', source);
+  const recorded = traceProgram('zig', source, source);
+  expect(recorded.stderr).toBe(execution.kind === 'executed' ? execution.stderr : undefined);
+  expect(recorded.stderr).toBe('1');
+  expect(recorded.uncaughtException).toBeUndefined();
+  expect(recorded.traceItems.length).toBeGreaterThan(1);
+});

@@ -30,7 +30,20 @@ import {
   USIZE,
   VOID,
 } from '../types';
-import { ErrorValue, FnValue, NULL, type Pointer, Slice, Some, type Value, ZArray, ZStruct, ZUnion } from '../values';
+import {
+  ErrorValue,
+  FnValue,
+  NULL,
+  optionalSome,
+  type Pointer,
+  Slice,
+  Some,
+  UNASSIGNED,
+  type Value,
+  ZArray,
+  ZStruct,
+  ZUnion,
+} from '../values';
 import { WeakValueMap } from '../weakValueMap';
 import { computed, constSlice, elements, equalValues, mutableSlice, newSlice, storeSliceValue } from './common';
 import { ALLOCATOR, ALLOCATOR_ERROR, ERROR_OUT_OF_MEMORY } from './heap';
@@ -446,15 +459,18 @@ function priorityQueueType(
     storeSliceValue(items, index, last);
     const shrunk = new Slice(items.target, items.start, items.length - 1);
     queue.slots[0] = shrunk;
-    if (index === shrunk.length) return item;
-    if (index === 0) {
-      siftDown(frame, queue, index);
-    } else {
-      const parent = shrunk.get((index - 1) >> 1);
-      if (order(frame, queue, last, parent) === 2n) siftDown(frame, queue, index);
-      else siftUp(frame, queue, index);
-    }
-    return item;
+    items.target.slots[items.start + shrunk.length] = UNASSIGNED;
+    return withHeldValues(frame, [item, last], () => {
+      if (index === shrunk.length) return item;
+      if (index === 0) {
+        siftDown(frame, queue, index);
+      } else {
+        const parent = shrunk.get((index - 1) >> 1);
+        if (order(frame, queue, last, parent) === 2n) siftDown(frame, queue, index);
+        else siftUp(frame, queue, index);
+      }
+      return item;
+    });
   };
   addMembers(type, {
     empty: () => ({ type, value: new ZStruct([new Slice(new ZArray([]), 0, 0), 0n, undefinedValue(context)]) }),
@@ -482,10 +498,10 @@ function priorityQueueType(
     ),
     peek: method('peek', [], optionalOf(element), false, (_, queue) => {
       const items = queue.slots[0] as Slice;
-      return items.length > 0 ? items.get(0) : NULL;
+      return items.length > 0 ? optionalSome(items.get(0), element) : NULL;
     }),
     pop: method('pop', [], optionalOf(element), false, (frame, queue) =>
-      (queue.slots[0] as Slice).length > 0 ? popIndex(frame, queue, 0) : NULL
+      (queue.slots[0] as Slice).length > 0 ? optionalSome(popIndex(frame, queue, 0), element) : NULL
     ),
     popIndex: method('popIndex', [USIZE], element, false, (frame, queue, [index]) =>
       popIndex(frame, queue, Number(index as bigint))
@@ -494,6 +510,7 @@ function priorityQueueType(
     capacity: method('capacity', [], USIZE, false, (_, queue) => queue.slots[1]),
     clearRetainingCapacity: method('clearRetainingCapacity', [], VOID, false, (_, queue) => {
       const items = queue.slots[0] as Slice;
+      for (let index = 0; index < items.length; index++) items.target.slots[items.start + index] = UNASSIGNED;
       queue.slots[0] = new Slice(items.target, items.start, 0);
       return;
     }),

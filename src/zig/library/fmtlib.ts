@@ -84,7 +84,7 @@ function parseInt(bytes: number[], base: number, type: IntType): Value {
 /** `std.fmt.parseFloat`: decimal or hexadecimal digits with `_`, `inf`, or `nan`, rounded to the type. */
 // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function parseFloat(bytes: number[], type: Extract<Type, { kind: 'float' }>): Value {
-  const text = String.fromCodePoint(...bytes);
+  const text = new TextDecoder().decode(new Uint8Array(bytes));
   const match = /^([+-]?)(.*)$/s.exec(text) as RegExpExecArray;
   const negative = match[1] === '-';
   const body = match[2];
@@ -142,9 +142,12 @@ const MEMBERS: Record<string, () => Member> = {
         `std.fmt.parseFloat には浮動小数点数の型を渡してください（${typeName(type)} です）。`
       );
     const buffer = constSlice(sema, bufferArg, U8);
-    return computed(errorUnionOf(errorSetOf(['InvalidCharacter']), type), [buffer], call.span, ([text]) =>
-      parseFloat(bytesOf(text), type)
-    );
+    return computed(errorUnionOf(errorSetOf(['InvalidCharacter']), type), [buffer], call.span, ([text], frame) => {
+      const bytes = bytesOf(text);
+      if (frame) frame.runtime.spend(bytes.length);
+      else sema.spendCompilation(bytes.length);
+      return parseFloat(bytes, type);
+    });
   }),
   charToDigit: fnMember('std.fmt.charToDigit', (sema, call) => {
     const [c, base] = compileArgs(sema, expectArgs(sema, call, 2, 'std.fmt.charToDigit'), [U8, U8]);

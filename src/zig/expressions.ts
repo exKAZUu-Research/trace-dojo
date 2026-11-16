@@ -87,6 +87,7 @@ import {
   EnumLiteral,
   ErrorValue,
   FnValue,
+  markConstantStorage,
   NULL,
   Pointer,
   Slice,
@@ -146,7 +147,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         return runtime({ kind: 'noreturn' }, () => panic(PANIC.unreachable), expression);
       }
       case 'identifier': {
-        return this.identifier(expression.name, expression);
+        return this.identifier(expression.name, expression, expression.quotedName);
       }
       case 'builtinType': {
         const type = primitiveType(expression.name);
@@ -252,12 +253,12 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Names -----------------------------------------------------------------------------------------------------------
 
-  protected identifier(name: string, span: Span): TExpr {
+  protected identifier(name: string, span: Span, quotedName = false): TExpr {
     const binding = this.lookup(name);
     if (!binding) {
       // tree-sitter's grammar lacks some primitive type names, such as `f80`.
       const primitive = primitiveType(name);
-      if (primitive) return known(TYPE, primitive, span);
+      if (primitive && !quotedName) return known(TYPE, primitive, span);
       return this.error(span, `「${name}」は宣言されていません。`);
     }
     if (binding.kind === 'local') return this.localReference(binding, span);
@@ -304,6 +305,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     let storage = this.constants.get(key);
     if (!storage) {
       storage = new Constant(copyForStorage(value));
+      markConstantStorage(storage);
       this.constants.set(key, storage);
     }
     return new Pointer(storage, 0);
@@ -323,7 +325,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     let type = object.type;
     if (type.kind === 'pointer' && type.size === 'one') {
       if (type.child.kind === 'array') {
-        if (name === 'len') return known(USIZE, BigInt(type.child.length), expression);
+        if (name === 'len') return this.fixedResult(object, USIZE, BigInt(type.child.length), expression);
         return this.error(expression, `配列へのポインタには、フィールド「${name}」がありません。`);
       }
       base = this.dereferenced(object, expression);
@@ -332,7 +334,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     switch (type.kind) {
       case 'struct': {
         if (type.isTuple && name === 'len') {
-          return known(COMPTIME_INT, BigInt(this.structFields(type, expression).length), expression);
+          return this.fixedResult(base, COMPTIME_INT, BigInt(this.structFields(type, expression).length), expression);
         }
         return this.structField(base, type, name, expression);
       }
@@ -340,7 +342,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         return this.unionField(base, type, name, expression);
       }
       case 'array': {
-        if (name === 'len') return known(USIZE, BigInt(type.length), expression);
+        if (name === 'len') return this.fixedResult(base, USIZE, BigInt(type.length), expression);
         break;
       }
       case 'pointer': {
@@ -533,7 +535,7 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Indexing and slicing ----------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps static bounds and the corresponding storage location together.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps static bounds and the corresponding storage location together.
   // code-gauge-allow functionNcss 32 -- Keeps static bounds and the corresponding storage location together.
   protected index(expression: ExpressionOf<'index'>): TExpr {
     const object = this.compile(expression.object);
@@ -567,7 +569,11 @@ export abstract class ExpressionCompiler extends SemaBase {
       const value = evaluateObject(frame);
       return withHeldValues(frame, [value], () => access(value, index.eval(frame) as bigint));
     };
-    const staticSource = object.known ? object.value : object.place?.compileTimePointer?.load();
+    const staticSource = object.known
+      ? object.value
+      : type.kind === 'array'
+        ? object.place?.compileTimePointer?.load()
+        : undefined;
     const staticElement =
       index.known && staticSource !== undefined ? access(staticSource, index.value as bigint) : undefined;
     const place: Place = {
@@ -1210,8 +1216,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const int = type;
     const amountType = log2IntType(int);
     const right = this.coerce(this.compile(expression.right, amountType), amountType, expression.right);
-    if (expression.operator !== '<<|' && right.known && (right.value as bigint) >= BigInt(int.bits))
-      this.error(expression.right, `シフトの量 ${right.value as bigint} は、${typeName(int)} 型のビット数以上です。`);
+    if (expression.operator !== '<<|') this.checkKnownShift(right, int, expression.right);
     const operation =
       expression.operator === '<<'
         ? (a: Value, b: Value): Value => shiftLeft(a as bigint, b as bigint, int)
@@ -1222,6 +1227,11 @@ export abstract class ExpressionCompiler extends SemaBase {
     const evaluateLeft = left.eval;
     const evaluateRight = right.eval;
     return runtime(type, (frame) => operation(evaluateLeft(frame), evaluateRight(frame)), expression);
+  }
+
+  protected checkKnownShift(amount: TExpr, type: IntType, span: Span): void {
+    if (amount.known && (amount.value as bigint) >= BigInt(type.bits))
+      this.error(span, `シフトの量 ${amount.value as bigint} は、${typeName(type)} 型のビット数以上です。`);
   }
 
   /** `a ++ b`: concatenates arrays whose lengths are known at compile time. */
@@ -1351,9 +1361,6 @@ export abstract class ExpressionCompiler extends SemaBase {
     for (const init of expression.fields) {
       if (!fields.some((field) => field.name === init.name)) {
         this.error(init, `${typeName(type)} 型には、フィールド「${init.name}」がありません。`);
-      }
-      if (expression.fields.filter((other) => other.name === init.name).length > 1) {
-        this.error(init, `フィールド「${init.name}」を2回初期化しています。`);
       }
     }
     const order = [

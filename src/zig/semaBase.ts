@@ -1,9 +1,10 @@
-// code-gauge-allow-file fileNcss 886 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 890 -- The file holds one layer of the compiler, whose parts share its private state.
 // code-gauge-allow-file duplicateLines 18 -- Undefined and zero initializers share aggregate shapes but differ in scalar and optional values.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { CompilationStorage, valueSlots } from './allocation';
 import { PANIC, panic } from './arith';
+import { isDiscardName } from './ast';
 import type { Container, ContainerMember, Expression, FunctionDeclaration, SourceFile, Span } from './ast';
 import {
   type AnyFloat,
@@ -52,6 +53,7 @@ import {
   type EnumLiteral,
   ErrorValue,
   type FnValue,
+  markConstantStorage,
   NativeHandle,
   NULL,
   Pointer,
@@ -336,7 +338,13 @@ export abstract class SemaBase implements SemaApi {
       }
       default: {
         this.resolveVariable(decl);
-        if (decl.kind === 'const') return known(decl.type as Type, decl.value, span);
+        if (decl.kind === 'const') {
+          const pointer = new Pointer(decl.cell as Slots, 0);
+          return {
+            ...known(decl.type as Type, decl.value, span),
+            place: { isConst: true, locate: () => pointer, compileTimePointer: pointer },
+          };
+        }
         const cell = decl.cell as Slots;
         const type = decl.type as Type;
         return runtime(type, () => cell.slots[0], span, {
@@ -379,6 +387,8 @@ export abstract class SemaBase implements SemaApi {
         decl.type = compiled.type;
         if (decl.kind === 'const') {
           decl.value = compiled.value;
+          decl.cell = { slots: [copyForStorage(compiled.value)] };
+          markConstantStorage(decl.cell);
         } else {
           decl.cell = { slots: [copyForStorage(compiled.value)] };
           const owner = decl.namespace.name.replace(/^main\.?/, '');
@@ -488,7 +498,7 @@ export abstract class SemaBase implements SemaApi {
     this.inContainerScope(type.namespace, () => {
       const declaredTag = syntax.argument ? this.compileType(syntax.argument) : undefined;
       if (declaredTag && declaredTag.kind !== 'int') this.error(syntax, 'enum のタグの型は整数の型にしてください。');
-      const named = syntax.fields.filter((field) => field.name !== '_');
+      const named = syntax.fields.filter((field) => !isDiscardName(field));
       type.exhaustive = named.length === syntax.fields.length;
       const fields: { name: string; value: bigint }[] = [];
       let next = 0n;

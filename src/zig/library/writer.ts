@@ -44,7 +44,12 @@ export function writeTo(frame: Frame, state: WriterState, bytes: readonly number
   frame.runtime.spend();
   const end = state.end + bytes.length;
   if (end > state.capacity) {
-    if (state.fd === undefined) return ErrorValue.of('WriteFailed');
+    if (state.fd === undefined) {
+      const available = Math.max(0, state.capacity - state.end);
+      for (let index = 0; index < available; index++) state.buffer.set(state.end + index, BigInt(bytes[index]));
+      state.end += available;
+      return ErrorValue.of('WriteFailed');
+    }
     frame.runtime.writeOutput(state.fd, [...bufferedBytes(state), ...bytes]);
     state.end = 0;
     return undefined;

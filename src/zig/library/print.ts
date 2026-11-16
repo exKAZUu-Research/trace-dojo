@@ -4,16 +4,16 @@ import { checkFormat, FormatError, type Options, parseFormat, printValue, type S
 import { type Frame, withHeldValues, ZigPanic } from '../runtime';
 import { copyForFrame, type SemaApi } from '../semaBase';
 import { CONST_U8_SLICE, pointerTo, type StructField, type Type, typeName } from '../types';
-import { ErrorValue, Pointer, type Value, type ZStruct } from '../values';
+import { compileTimeReadable, ErrorValue, Pointer, type Value, type ZStruct } from '../values';
 import { bufferedBytes, bufferingWriter, WRITER, type WriterState, writerState, writerValue, writeTo } from './writer';
 
 export type CompiledPrint = (frame: Frame, destination?: WriterState) => number[];
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Checks the complete format against its argument types.
+// code-gauge-allow functionCognitiveComplexity 21 -- Checks the complete format against its argument types.
 // code-gauge-allow functionNcss 39 -- Keeps format checking and the resulting formatter together.
 export function compilePrint(sema: SemaApi, formatArg: Expression, argsArg: Expression, span: Span): CompiledPrint {
   const format = sema.compile(formatArg, CONST_U8_SLICE);
-  if (!format.known)
+  if (!format.known || !compileTimeReadable(format.value))
     sema.error(
       formatArg,
       '書式の文字列は、コンパイルのときに決まっていなければなりません（文字列のリテラルを書いてください）。'

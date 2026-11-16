@@ -1,8 +1,7 @@
 import { PANIC, panic } from '../arith';
 import { Constant } from '../expressions';
-import { runtime } from '../semaBase';
-import { arrayOf, BOOL, CONST_U8_SLICE, pointerTo, sliceOf, type StructType, type Type, U8 } from '../types';
-import { Pointer, type Slice, type Value, ZArray } from '../values';
+import { arrayOf, BOOL, pointerTo, sliceOf, type StructType, type Type, U8 } from '../types';
+import { markConstantStorage, Pointer, type Slice, type Value, ZArray } from '../values';
 import {
   allocating,
   allocatorArg,
@@ -16,8 +15,8 @@ import {
   ORDER,
   orderValue,
 } from './common';
-import { ERROR_OUT_OF_MEMORY } from './heap';
-import { compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
+import { allocatorState, ERROR_OUT_OF_MEMORY, reserveNativeAllocation } from './heap';
+import { compileArgs, expectArgs, fnMember, type Member, nativeCall, nativeStruct } from './native';
 
 const isAlpha = (c: number): boolean => (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
 const isDigit = (c: number): boolean => c >= 0x30 && c <= 0x39;
@@ -81,18 +80,13 @@ function allocMapper(name: string, map: (c: number) => number): () => Member {
     const [allocatorArgument, inArg] = expectArgs(sema, call, 2, name);
     const allocator = allocatorArg(sema, allocatorArgument);
     const input = constSlice(sema, inArg, U8);
-    const evaluate = input.eval;
-    return runtime(
-      allocating(sliceOf(U8, false)),
-      (frame) => {
-        allocator.eval(frame);
-        const source = bytes(evaluate(frame));
-        if (!frame.runtime.canAllocate(source.length)) return ERROR_OUT_OF_MEMORY;
-        frame.runtime.allocate(source.length);
-        return newSlice(source.map((byte) => BigInt(map(byte))));
-      },
-      call.span
-    );
+    return nativeCall(allocating(sliceOf(U8, false)), [allocator, input], call.span, ([allocator, input], frame) => {
+      const complete = reserveNativeAllocation(frame, allocatorState(allocator), (input as Slice).length, U8);
+      if (!complete) return ERROR_OUT_OF_MEMORY;
+      const result = newSlice(bytes(input).map((byte) => BigInt(map(byte))));
+      complete(result.target);
+      return result;
+    });
   });
 }
 
@@ -181,18 +175,17 @@ const MEMBERS: Record<string, () => Member> = {
   lowercase: () => stringConstant('abcdefghijklmnopqrstuvwxyz'),
   uppercase: () => stringConstant('ABCDEFGHIJKLMNOPQRSTUVWXYZ'),
   letters: () => stringConstant('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'),
-  whitespace: () => ({
-    type: CONST_U8_SLICE,
-    value: newSlice([0x20n, 0x09n, 0x0an, 0x0dn, 0x0bn, 0x0cn]),
-  }),
+  whitespace: () => stringConstant(' \t\n\r\v\f'),
 };
 
 /** A string constant such as `std.ascii.lowercase`, typed as a string literal is: `*const [n:0]u8`. */
 function stringConstant(text: string): Member {
   const bytes = [...text].map((char) => BigInt(char.codePointAt(0) as number));
+  const storage = new Constant(new ZArray([...bytes, 0n], 0, bytes.length, true));
+  markConstantStorage(storage);
   return {
     type: pointerTo(arrayOf(bytes.length, U8, 0n), true),
-    value: new Pointer(new Constant(new ZArray([...bytes, 0n], 0, bytes.length, true)), 0),
+    value: new Pointer(storage, 0),
   };
 }
 

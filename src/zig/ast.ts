@@ -5,6 +5,10 @@ export interface Span {
   endRow: number;
 }
 
+export interface NamedSpan extends Span {
+  quotedName?: boolean;
+}
+
 export type AssignOperator =
   | '='
   | '*='
@@ -59,23 +63,23 @@ export type BinaryOperator =
 export type UnaryOperator = '!' | '~' | '-' | '-%' | '&';
 
 /** A capture between bars, such as `|x|`, `|*p|`, or one of the names in `|x, i|`. */
-export interface Capture extends Span {
+export interface Capture extends NamedSpan {
   name: string;
   byPointer: boolean;
 }
 
-export interface Label extends Span {
+export interface Label extends NamedSpan {
   name: string;
 }
 
-export interface ContainerField extends Span {
+export interface ContainerField extends NamedSpan {
   /** Undefined for a field of a tuple type, which has a type only. */
   name?: string;
   type?: Expression;
   value?: Expression;
 }
 
-export interface FunctionDeclaration extends Span {
+export interface FunctionDeclaration extends NamedSpan {
   kind: 'fn';
   name: string;
   isPub: boolean;
@@ -89,13 +93,13 @@ export interface FunctionDeclaration extends Span {
   bodyRow: number;
 }
 
-export interface Parameter extends Span {
+export interface Parameter extends NamedSpan {
   name: string;
   /** Undefined for `anytype`. */
   type?: Expression;
 }
 
-export interface VariableDeclaration extends Span {
+export interface VariableDeclaration extends NamedSpan {
   kind: 'var';
   name: string;
   isConst: boolean;
@@ -128,7 +132,7 @@ export type Expression = Span &
     | { kind: 'null' }
     | { kind: 'undefined' }
     | { kind: 'unreachable' }
-    | { kind: 'identifier'; name: string }
+    | { kind: 'identifier'; name: string; quotedName?: boolean }
     | { kind: 'enumLiteral'; name: string }
     | { kind: 'errorValue'; name: string }
     | { kind: 'field'; object: Expression; name: string }
@@ -231,7 +235,7 @@ export interface FieldInit extends Span {
 
 export interface DestructureTarget extends Span {
   /** A declaration such as `const x` or `var y: i32`, or else an expression to assign to. */
-  declaration?: { name: string; isConst: boolean; type?: Expression };
+  declaration?: { name: string; quotedName?: boolean; isConst: boolean; type?: Expression };
   target?: Expression;
 }
 
@@ -247,4 +251,8 @@ export interface SourceFile {
   functions: FunctionDeclaration[];
   members: ContainerMember[];
   fields: ContainerField[];
+}
+
+export function isDiscardName(node: { name?: string; quotedName?: boolean }): boolean {
+  return node.name === '_' && !node.quotedName;
 }

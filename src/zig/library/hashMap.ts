@@ -3,7 +3,7 @@ import { allocationSlots } from '../allocation';
 import { panic } from '../arith';
 import type { Expression, Span } from '../ast';
 import type { Frame } from '../runtime';
-import { copyForFrame, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
+import { copyForFrame, copyForStorage, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
   BOOL,
   CONST_U8_SLICE,
@@ -19,7 +19,19 @@ import {
   U32,
   VOID,
 } from '../types';
-import { ErrorValue, NativeHandle, NULL, Pointer, Some, type Value, ZArray, ZStruct, ZUnion } from '../values';
+import {
+  ErrorValue,
+  NativeHandle,
+  NULL,
+  optionalSome,
+  Pointer,
+  Some,
+  storeInto,
+  type Value,
+  ZArray,
+  ZStruct,
+  ZUnion,
+} from '../values';
 import { WeakValueMap } from '../weakValueMap';
 import { elements, equalValues } from './common';
 import { autoHashBytes, wyhash } from './hashing';
@@ -120,8 +132,8 @@ function putNoClobber(frame: Frame, state: MapState, key: Value, value: Value, k
   }
   state.available--;
   state.metadata[index] = 0x80 | fingerprint(hash);
-  state.keys.slots[index] = key;
-  state.values.slots[index] = value;
+  storeInto(state.keys, index, key);
+  storeInto(state.values, index, value);
   state.size++;
 }
 
@@ -202,16 +214,16 @@ function getOrPut(
   if (firstTombstone < state.capacity) index = firstTombstone;
   state.available--;
   state.metadata[index] = 0x80 | print;
-  state.keys.slots[index] = undefinedValue(keyType);
-  state.values.slots[index] = undefinedValue(valueType);
+  storeInto(state.keys, index, undefinedValue(keyType));
+  storeInto(state.values, index, undefinedValue(valueType));
   state.size++;
   return { index, found: false };
 }
 
 function removeAt(state: MapState, index: number, keyType: Type, valueType: Type): void {
   state.metadata[index] = 1;
-  state.keys.slots[index] = undefinedValue(keyType);
-  state.values.slots[index] = undefinedValue(valueType);
+  storeInto(state.keys, index, undefinedValue(keyType));
+  storeInto(state.values, index, undefinedValue(valueType));
   state.size--;
   state.available++;
 }
@@ -346,8 +358,8 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       (state, [key, value], frame) => {
         const slot = getOrPut(frame, state, key, keyType, valueType, kind);
         if (!slot) return ERROR_OUT_OF_MEMORY;
-        state.keys.slots[slot.index] = key;
-        state.values.slots[slot.index] = value;
+        storeInto(state.keys, slot.index, key);
+        storeInto(state.values, slot.index, value);
         return;
       }
     ),
@@ -358,8 +370,8 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
         const slot = getOrPut(frame, state, key, keyType, valueType, kind);
         if (!slot) return ERROR_OUT_OF_MEMORY;
         if (slot.found) panic('reached unreachable code');
-        state.keys.slots[slot.index] = key;
-        state.values.slots[slot.index] = value;
+        storeInto(state.keys, slot.index, key);
+        storeInto(state.values, slot.index, value);
         return;
       }
     ),
@@ -375,10 +387,10 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
         const slot = getOrPut(frame, state, key, keyType, valueType, kind);
         if (!slot) return ERROR_OUT_OF_MEMORY;
         const previous = slot.found
-          ? new ZStruct([state.keys.slots[slot.index], state.values.slots[slot.index]])
+          ? new ZStruct([copyForStorage(state.keys.slots[slot.index]), copyForStorage(state.values.slots[slot.index])])
           : NULL;
-        state.keys.slots[slot.index] = key;
-        state.values.slots[slot.index] = value;
+        storeInto(state.keys, slot.index, key);
+        storeInto(state.values, slot.index, value);
         return previous;
       }
     ),
@@ -388,7 +400,7 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       (state, [key], frame) => {
         const slot = getOrPut(frame, state, key, keyType, valueType, kind);
         if (!slot) return ERROR_OUT_OF_MEMORY;
-        if (!slot.found) state.keys.slots[slot.index] = key;
+        if (!slot.found) storeInto(state.keys, slot.index, key);
         return new ZStruct([new Pointer(state.keys, slot.index), new Pointer(state.values, slot.index), slot.found]);
       }
     ),
@@ -399,15 +411,15 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
         const slot = getOrPut(frame, state, key, keyType, valueType, kind);
         if (!slot) return ERROR_OUT_OF_MEMORY;
         if (!slot.found) {
-          state.keys.slots[slot.index] = key;
-          state.values.slots[slot.index] = value;
+          storeInto(state.keys, slot.index, key);
+          storeInto(state.values, slot.index, value);
         }
         return new ZStruct([new Pointer(state.keys, slot.index), new Pointer(state.values, slot.index)]);
       }
     ),
     get: method('get', { args: [keyType], result: optionalOf(valueType), mutable: false }, (state, [key], frame) => {
       const index = getIndex(frame, state, key, keyType, kind);
-      return index === -1 ? NULL : state.values.slots[index];
+      return index === -1 ? NULL : optionalSome(state.values.slots[index], valueType);
     }),
     getPtr: method(
       'getPtr',
@@ -422,7 +434,7 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       { args: [keyType], result: optionalOf(keyType), mutable: false },
       (state, [key], frame) => {
         const index = getIndex(frame, state, key, keyType, kind);
-        return index === -1 ? NULL : state.keys.slots[index];
+        return index === -1 ? NULL : optionalSome(state.keys.slots[index], keyType);
       }
     ),
     getEntry: method(
@@ -459,6 +471,10 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
     capacity: method('capacity', { args: [], result: U32, mutable: false }, (state) => BigInt(state.capacity)),
     clearRetainingCapacity: method('clearRetainingCapacity', { args: [], result: VOID, mutable: true }, (state) => {
       state.metadata.fill(0);
+      for (let index = 0; index < state.capacity; index++) {
+        state.keys.slots[index] = undefinedValue(keyType);
+        state.values.slots[index] = undefinedValue(valueType);
+      }
       state.size = 0;
       state.available = Math.floor((state.capacity * MAX_LOAD) / 100);
       return;
