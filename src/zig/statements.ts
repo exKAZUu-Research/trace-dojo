@@ -9,6 +9,7 @@ import {
   errorSetIncludes,
   evaluateHeld,
   known,
+  knownLengthOf,
   type LocalBinding,
   mergeErrorSets,
   runtime,
@@ -262,6 +263,7 @@ export abstract class StatementCompiler extends CallCompiler {
       slot,
       type,
       isConst,
+      knownLength: isConst ? value?.knownLength : undefined,
       known: Boolean(isConst && (value?.known || value?.staticResult)),
       value: isConst ? (value?.known ? value.value : value?.staticResult?.value) : undefined,
     };
@@ -1541,7 +1543,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** How a `for` reads an array, a pointer to one, or a slice, by value or by pointer. */
-  // code-gauge-allow functionNcss 50 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionNcss 51 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private forOperand(
     compiled: TExpr,
@@ -1580,6 +1582,7 @@ export abstract class StatementCompiler extends CallCompiler {
     } else if (type.kind === 'pointer' && type.size === 'slice') {
       child = type.child;
       isConst = type.isConst;
+      staticLength = knownLengthOf(compiled);
       viewOf = (value) => {
         const slice = value as Slice;
         return { slots: slice.target, start: slice.start, length: slice.length };
@@ -2220,15 +2223,16 @@ export abstract class StatementCompiler extends CallCompiler {
     const type = operand.type;
     if (type.kind === 'error_set' && !expression.capture) {
       const handler = this.compile(expression.handler, resultType);
-      const result = runtime(
-        handler.type,
-        (frame) => {
-          operand.eval(frame);
-          return handler.eval(frame);
-        },
-        expression
-      );
-      return handler.known ? { ...result, staticResult: { value: handler.value } } : result;
+      return handler.known
+        ? this.fixedResult(operand, handler.type, handler.value, expression)
+        : runtime(
+            handler.type,
+            (frame) => {
+              operand.eval(frame);
+              return handler.eval(frame);
+            },
+            expression
+          );
     }
     if (type.kind !== 'error_union') {
       return this.error(expression, `catch はエラー共用体の値にだけ使えます（${typeName(type)} 型です）。`);

@@ -28,6 +28,7 @@ import {
 } from '../types';
 import { Cell, ErrorValue, NativeHandle, Pointer, Slice, type Value, ZArray, ZStruct } from '../values';
 import {
+  addMembers,
   compileArgs,
   expectArgs,
   fnMember,
@@ -36,6 +37,7 @@ import {
   nativeCall,
   nativeStruct,
   typeMember,
+  unavailableDeclarations,
   unavailableMember,
 } from './native';
 
@@ -54,13 +56,15 @@ export interface AllocatorState extends Record<string, unknown> {
 }
 
 export function nativeEnum(name: string, fieldNames: string[]): EnumType {
-  return {
+  const type: EnumType = {
     kind: 'enum',
     namespace: { name, decls: new Map() },
     tagType: smallestUnsigned(Math.max(fieldNames.length - 1, 0)),
     fields: fieldNames.map((field, index) => ({ name: field, value: BigInt(index) })),
     exhaustive: true,
   };
+  addMembers(type, unavailableDeclarations(name));
+  return type;
 }
 
 const CHECK = nativeEnum('heap.Check', ['ok', 'leak']);

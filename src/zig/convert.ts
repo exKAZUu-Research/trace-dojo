@@ -25,11 +25,12 @@ import type {
   UnaryOperator,
   VariableDeclaration,
 } from './ast';
-import { decodeCharacter, decodeIdentifier, decodeString, parseFloatText, parseIntegerText } from './literals';
+import { LiteralDecoder, parseFloatText, parseIntegerText } from './literals';
 
 /** Converts tree-sitter's tree of a file into the AST, rejecting the syntax this grader does not run. */
 export function convertFile(root: Node): SourceFile {
   source = root.text;
+  literals = new LiteralDecoder();
   functions = [];
   const { members, fields } = containerMembers(root);
   return { members, fields, functions };
@@ -37,6 +38,7 @@ export function convertFile(root: Node): SourceFile {
 
 /** The text of the file being converted, for checks of the spaces around operators. */
 let source = '';
+let literals = new LiteralDecoder();
 let functions: FunctionDeclaration[] = [];
 
 /** The keyword tokens that stand for values where an expression is expected. */
@@ -141,7 +143,7 @@ function functionDeclaration(node: Node): FunctionDeclaration {
   const declaration: FunctionDeclaration = {
     kind: 'fn',
     ...spanOf(node),
-    name: decodeIdentifier(nameNode),
+    name: literals.decodeIdentifier(nameNode),
     isPub: hasToken(node, 'pub'),
     isInline: hasToken(node, 'inline'),
     params: parameters(node.childForFieldName('parameters') as Node),
@@ -179,7 +181,7 @@ function parameters(node: Node): Parameter[] {
       const isAnytype = typeNode.type === 'builtin_type' && typeNode.text === 'anytype';
       return {
         ...spanOf(child),
-        name: nameNode ? decodeIdentifier(nameNode) : '_',
+        name: nameNode ? literals.decodeIdentifier(nameNode) : '_',
         type: isAnytype ? undefined : typeExpression(typeNode),
       };
     });
@@ -205,7 +207,7 @@ function variableHeader(node: Node): VariableDeclaration | undefined {
   return {
     kind: 'var',
     ...spanOf(node),
-    name: decodeIdentifier(nameNode),
+    name: literals.decodeIdentifier(nameNode),
     isConst: keyword.type === 'const',
     isPub: hasToken(node, 'pub'),
     type: typeNode ? typeExpression(typeNode) : undefined,
@@ -224,14 +226,14 @@ function containerField(node: Node): ContainerField {
   if (typeNode && nameNode) {
     return {
       ...spanOf(node),
-      name: decodeIdentifier(nameNode),
+      name: literals.decodeIdentifier(nameNode),
       type: typeExpression(typeNode),
       value,
     };
   }
   if (!nameNode) fail(node, '書き方に誤りがあります。');
   // A bare name is an enum's or a union's field, or the type of a tuple's field; the container decides which.
-  if (nameNode.type === 'identifier') return { ...spanOf(node), name: decodeIdentifier(nameNode), value };
+  if (nameNode.type === 'identifier') return { ...spanOf(node), name: literals.decodeIdentifier(nameNode), value };
   return { ...spanOf(node), type: typeExpression(nameNode), value };
 }
 
@@ -410,7 +412,7 @@ function destructure(node: Node, equals: number): Statement {
       targets.push({
         ...spanOf(first),
         declaration: {
-          name: decodeIdentifier(nameNode),
+          name: literals.decodeIdentifier(nameNode),
           isConst: keyword.type === 'const',
           type: typeNode ? typeExpression(typeNode) : undefined,
         },
@@ -471,17 +473,17 @@ export function expression(node: Node): Expression {
       return { kind: 'float', ...span, text: node.text };
     }
     case 'character': {
-      return { kind: 'character', ...span, value: decodeCharacter(node) };
+      return { kind: 'character', ...span, value: literals.decodeCharacter(node) };
     }
     case 'string':
     case 'multiline_string': {
-      return { kind: 'string', ...span, bytes: decodeString(node) };
+      return { kind: 'string', ...span, bytes: literals.decodeString(node) };
     }
     case 'boolean': {
       return { kind: 'bool', ...span, value: node.text === 'true' };
     }
     case 'identifier': {
-      return { kind: 'identifier', ...span, name: decodeIdentifier(node) };
+      return { kind: 'identifier', ...span, name: literals.decodeIdentifier(node) };
     }
     case 'builtin_type': {
       return { kind: 'builtinType', ...span, name: node.text };
@@ -492,13 +494,13 @@ export function expression(node: Node): Expression {
     case 'field_expression': {
       const member = node.childForFieldName('member') as Node;
       const object = node.childForFieldName('object');
-      if (!object) return { kind: 'enumLiteral', ...span, name: decodeIdentifier(member) };
-      const name = decodeIdentifier(member);
+      if (!object) return { kind: 'enumLiteral', ...span, name: literals.decodeIdentifier(member) };
+      const name = literals.decodeIdentifier(member);
       return intoPrefixType(expression(object), (inner) => ({ kind: 'field', ...span, object: inner, name }));
     }
     case 'error_type': {
       const name = node.namedChildren.find((child) => child.type === 'identifier') as Node;
-      return { kind: 'errorValue', ...span, name: decodeIdentifier(name) };
+      return { kind: 'errorValue', ...span, name: literals.decodeIdentifier(name) };
     }
     case 'index_expression': {
       return indexExpression(node, span);
@@ -627,7 +629,7 @@ export function expression(node: Node): Expression {
     case 'error_set_declaration': {
       const names = node.namedChildren
         .filter((child) => child.type === 'identifier')
-        .map((child) => decodeIdentifier(child));
+        .map((child) => literals.decodeIdentifier(child));
       return { kind: 'errorSetType', ...span, names };
     }
     case 'function_signature': {
@@ -823,12 +825,12 @@ function assignment(node: Node, span: Span): Expression {
 
 function blockLabel(node: Node): Label {
   const name = node.namedChildren.find((child) => child.type === 'identifier') as Node;
-  return { ...spanOf(node), name: decodeIdentifier(name) };
+  return { ...spanOf(node), name: literals.decodeIdentifier(name) };
 }
 
 function breakLabel(node: Node): Label {
   const name = node.namedChildren.find((child) => child.type === 'identifier') as Node;
-  return { ...spanOf(node), name: decodeIdentifier(name) };
+  return { ...spanOf(node), name: literals.decodeIdentifier(name) };
 }
 
 /** A labeled block or loop, or a loop or block that tree-sitter wraps in a node without a label. */
@@ -1028,7 +1030,7 @@ function payload(node: Node): Capture[] {
   for (const child of node.children) {
     if (child.type === '*') byPointer = true;
     else if (child.type === 'identifier') {
-      captures.push({ ...spanOf(child), name: decodeIdentifier(child), byPointer });
+      captures.push({ ...spanOf(child), name: literals.decodeIdentifier(child), byPointer });
       byPointer = false;
     }
   }
@@ -1088,7 +1090,7 @@ function initializer(list: Node, span: Span, type: Expression | undefined): Expr
   if (fieldNodes.length > 0) {
     const fields: FieldInit[] = fieldNodes.map((child) => ({
       ...spanOf(child),
-      name: decodeIdentifier(child.childForFieldName('name') as Node),
+      name: literals.decodeIdentifier(child.childForFieldName('name') as Node),
       value: expression(child.childForFieldName('value') as Node),
     }));
     return { kind: 'structInit', ...span, type, fields };

@@ -7,64 +7,83 @@ function fail(node: Node, message: string): never {
   throw new CompileError([{ row: node.startPosition.row, message }]);
 }
 
-/** The name an identifier denotes: its text, or the bytes of `@"..."` decoded as UTF-8. */
-export function decodeIdentifier(node: Node): string {
-  if (!node.text.startsWith('@')) return node.text;
-  const bytes = decodeQuoted(node);
-  if (bytes.length === 0) fail(node, '名前を空にはできません。');
-  if (bytes.includes(0)) fail(node, '名前に NUL 文字は使えません。');
-  return new TextDecoder().decode(new Uint8Array(bytes));
-}
+export class LiteralDecoder {
+  private allocated = 0;
 
-/** A string literal's bytes, with its escapes decoded as `std.zig.string_literal` does. */
-export function decodeString(node: Node): number[] {
-  if (node.type === 'multiline_string') {
+  decodeIdentifier(node: Node): string {
+    if (!node.text.startsWith('@')) return node.text;
+    const bytes = this.decodeQuoted(node);
+    if (bytes.length === 0) fail(node, '名前を空にはできません。');
+    if (bytes.includes(0)) fail(node, '名前に NUL 文字は使えません。');
+    return new TextDecoder().decode(new Uint8Array(bytes));
+  }
+
+  decodeString(node: Node): number[] {
+    if (node.type !== 'multiline_string') return this.decodeQuoted(node);
     const bytes: number[] = [];
     let first = true;
     for (const line of node.text.split(/\r?\n/)) {
-      const match = /^[ \t]*\\\\(.*)$/.exec(line);
-      if (!match) continue;
-      if (!first) bytes.push(10);
+      const prefix = /^[ \t]*\\\\/.exec(line);
+      if (!prefix) continue;
+      if (!first) this.appendBytes(bytes, [10]);
       first = false;
-      appendText(bytes, match[1]);
+      this.appendText(bytes, line.slice(prefix[0].length), node);
     }
     return bytes;
   }
-  return decodeQuoted(node);
-}
 
-function decodeQuoted(node: Node): number[] {
-  const bytes: number[] = [];
-  for (const part of node.namedChildren) {
-    if (part.type === 'string') return decodeQuoted(part);
-    if (part.type === 'string_content') appendText(bytes, part.text);
-    else if (part.type === 'escape_sequence') appendBytes(bytes, escapeBytes(part.text, part, true));
+  decodeCharacter(node: Node): bigint {
+    const content = node.namedChildren.find(
+      (part) => part.type === 'character_content' || part.type === 'escape_sequence'
+    );
+    if (!content) fail(node, '文字のリテラルが空です。');
+    validateRawText(content.text, content);
+    return BigInt(
+      content.type === 'escape_sequence' ? escapeValue(content.text, content) : (content.text.codePointAt(0) as number)
+    );
   }
-  return bytes;
-}
 
-function appendText(bytes: number[], text: string): void {
-  if (text.length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
-  appendBytes(bytes, new TextEncoder().encode(text));
-}
-
-function appendBytes(bytes: number[], decoded: readonly number[] | Uint8Array): void {
-  if (bytes.length + decoded.length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
-  for (const byte of decoded) bytes.push(byte);
-}
-
-/** A character literal's code point. */
-export function decodeCharacter(node: Node): bigint {
-  const content = node.namedChildren.find(
-    (part) => part.type === 'character_content' || part.type === 'escape_sequence'
-  );
-  if (!content) fail(node, '文字のリテラルが空です。');
-  if (content.type === 'escape_sequence') {
-    const value = escapeValue(content.text, content);
-    return BigInt(value);
+  private decodeQuoted(node: Node): number[] {
+    const bytes: number[] = [];
+    for (const part of node.namedChildren) {
+      if (part.type === 'string') return this.decodeQuoted(part);
+      if (part.type === 'string_content') this.appendText(bytes, part.text, part);
+      else if (part.type === 'escape_sequence') {
+        validateRawText(part.text, part);
+        this.appendBytes(bytes, escapeBytes(part.text, part, true));
+      }
+    }
+    return bytes;
   }
-  const codePoint = content.text.codePointAt(0) as number;
-  return BigInt(codePoint);
+
+  private appendText(bytes: number[], text: string, node: Node): void {
+    if (this.allocated + text.length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+    validateRawText(text, node);
+    let length = 0;
+    for (const character of text) {
+      const point = character.codePointAt(0) as number;
+      length += point <= 0x7f ? 1 : point <= 0x7_ff ? 2 : point <= 0xff_ff ? 3 : 4;
+    }
+    this.reserve(length);
+    for (const byte of new TextEncoder().encode(text)) bytes.push(byte);
+  }
+
+  private appendBytes(bytes: number[], decoded: readonly number[]): void {
+    this.reserve(decoded.length);
+    for (const byte of decoded) bytes.push(byte);
+  }
+
+  private reserve(length: number): void {
+    this.allocated += length;
+    if (this.allocated > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+  }
+}
+
+function validateRawText(text: string, node: Node): void {
+  for (let index = 0; index < text.length; index++) {
+    const code = text.codePointAt(index) as number;
+    if (code < 0x20 || code === 0x7f) fail(node, 'リテラルに、そのまま書けない制御文字があります。');
+  }
 }
 
 /** The bytes an escape sequence stands for in a string: `\u{...}` is UTF-8 encoded. */

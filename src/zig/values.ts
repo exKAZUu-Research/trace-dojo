@@ -146,7 +146,7 @@ export class Pointer {
     return new Pointer(storage, 0);
   }
 
-  private storageIdentity(): object {
+  storageIdentity(): object {
     return this.target instanceof SomeSlots || this.target instanceof SliceLength ? this.target : this.target.slots;
   }
 
@@ -228,33 +228,33 @@ export function copyValue(value: Value): Value {
  * Stores a value into a slot, copying an aggregate into the one the slot holds when both have the same shape, so that
  * pointers into the slot's aggregate see the new value.
  */
-// code-gauge-allow functionCognitiveComplexity 18 -- Handles each kind of value the operation accepts.
 export function storeInto(target: Slots, index: number, value: Value): void {
+  storeSnapshotInto(target, index, copyValue(value));
+}
+
+function storeSnapshotInto(target: Slots, index: number, value: Value): void {
   const current = target.slots[index];
   if (value instanceof ZArray && current instanceof ZArray && current.length === value.length) {
-    if (current === value) return;
     const source = value.values();
-    for (const [at, slot] of source.entries()) storeInto(current, current.offset + at, slot);
+    for (const [at, slot] of source.entries()) storeSnapshotInto(current, current.offset + at, slot);
     return;
   }
   if (value instanceof ZStruct && current instanceof ZStruct && current.slots.length === value.slots.length) {
-    if (current === value) return;
-    const source = [...value.slots];
-    for (const [at, slot] of source.entries()) storeInto(current, at, slot);
+    const source = value.slots;
+    for (const [at, slot] of source.entries()) storeSnapshotInto(current, at, slot);
     return;
   }
   if (value instanceof ZUnion && current instanceof ZUnion && current.tag === value.tag) {
-    if (current === value) return;
-    storeInto(current, 0, value.slots[0]);
+    storeSnapshotInto(current, 0, value.slots[0]);
     return;
   }
   if (value instanceof Some && current instanceof Some) {
     const payload = new Cell(current.value);
-    storeInto(payload, 0, value.value);
+    storeSnapshotInto(payload, 0, value.value);
     target.slots[index] = new Some(payload.slots[0]);
     return;
   }
-  target.slots[index] = copyValue(value);
+  target.slots[index] = value;
 }
 
 class SliceLength implements Slots {

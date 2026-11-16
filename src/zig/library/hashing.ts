@@ -1,7 +1,17 @@
 /** Zig's Wyhash (`std.hash.Wyhash`) and `std.hash.autoHash`, which decide a hash map's iteration order. */
 import { sizeOf } from '../layout';
 import type { Type } from '../types';
-import { NULL, Some, type Value, type ZArray, type ZStruct, type ZUnion } from '../values';
+import {
+  ErrorValue,
+  type FnValue,
+  NULL,
+  Pointer,
+  Some,
+  type Value,
+  type ZArray,
+  type ZStruct,
+  type ZUnion,
+} from '../values';
 
 const MASK = (1n << 64n) - 1n;
 const SECRET = [
@@ -77,50 +87,99 @@ export function wyhash(seed: bigint, input: readonly number[]): bigint {
   return mix(a ^ SECRET[0] ^ BigInt(input.length), b ^ SECRET[1]);
 }
 
-function littleEndian(value: bigint, bytes: number): number[] {
-  const result: number[] = [];
-  let remaining = value;
-  for (let index = 0; index < bytes; index++) {
-    result.push(Number(remaining & 0xffn));
-    remaining >>= 8n;
-  }
-  return result;
+export function autoHashBytes(
+  value: Value,
+  type: Type,
+  identityOf: (value: object) => bigint,
+  spend: (cost?: number) => void
+): number[] {
+  const bytes: number[] = [];
+  appendHashBytes(bytes, value, type, identityOf, spend);
+  return bytes;
 }
 
-/** The bytes that `autoHash` feeds the hasher for a key, which `Wyhash.hash` then hashes in one call. */
-export function autoHashBytes(value: Value, type: Type): number[] {
+// code-gauge-allow functionNcss 49 -- Serializes each key representation while charging work before materialization.
+// code-gauge-allow functionCognitiveComplexity 21 -- Serializes each key representation while charging work before materialization.
+function appendHashBytes(
+  bytes: number[],
+  value: Value,
+  type: Type,
+  identityOf: (value: object) => bigint,
+  spend: (cost?: number) => void
+): void {
+  spend();
   switch (type.kind) {
     case 'int': {
-      const unsigned = BigInt.asUintN(Math.max(type.bits, 1), value as bigint);
       const unique = type.bits % 8 === 0 && sizeOf(type) * 8 === type.bits;
-      return littleEndian(unsigned, unique ? sizeOf(type) : Math.ceil(type.bits / 8));
+      appendInteger(
+        bytes,
+        BigInt.asUintN(Math.max(type.bits, 1), value as bigint),
+        unique ? sizeOf(type) : Math.ceil(type.bits / 8),
+        spend
+      );
+      return;
     }
     case 'bool': {
-      return [value ? 1 : 0];
+      appendInteger(bytes, value ? 1n : 0n, 1, spend);
+      return;
     }
     case 'enum': {
       const bits = type.tagType?.bits ?? 0;
-      return littleEndian(BigInt.asUintN(Math.max(bits, 1), value as bigint), Math.max(Math.ceil(bits / 8), 0));
+      appendInteger(bytes, BigInt.asUintN(Math.max(bits, 1), value as bigint), Math.ceil(bits / 8), spend);
+      return;
     }
     case 'array': {
-      return (value as ZArray).values().flatMap((element) => autoHashBytes(element, type.child));
+      const array = value as ZArray;
+      for (let index = 0; index < array.length; index++)
+        appendHashBytes(bytes, array.get(index), type.child, identityOf, spend);
+      return;
     }
     case 'struct': {
-      return (type.fields ?? []).flatMap((field, index) => autoHashBytes((value as ZStruct).slots[index], field.type));
+      for (const [index, field] of (type.fields ?? []).entries())
+        appendHashBytes(bytes, (value as ZStruct).slots[index], field.type, identityOf, spend);
+      return;
     }
     case 'union': {
       const union = value as ZUnion;
       const field = type.fields![union.tag];
       const tag = type.tagType!;
       const tagValue = tag.fields!.find((entry) => entry.name === field.name)!.value;
-      return [...autoHashBytes(tagValue, tag), ...autoHashBytes(union.slots[0], field.type)];
+      appendHashBytes(bytes, tagValue, tag, identityOf, spend);
+      appendHashBytes(bytes, union.slots[0], field.type, identityOf, spend);
+      return;
+    }
+    case 'pointer':
+    case 'fn': {
+      const address =
+        value instanceof Pointer
+          ? (identityOf(value.storageIdentity()) << 32n) + BigInt(value.index)
+          : identityOf((value as FnValue).fn) << 32n;
+      appendInteger(bytes, address, 8, spend);
+      return;
+    }
+    case 'error_set': {
+      const name = (value as ErrorValue).name;
+      spend(name.length * 3);
+      for (const byte of new TextEncoder().encode(name)) bytes.push(byte);
+      return;
+    }
+    case 'error_union': {
+      appendHashBytes(bytes, value, value instanceof ErrorValue ? type.errorSet : type.payload, identityOf, spend);
+      return;
     }
     case 'optional': {
-      if (value === NULL) return [];
-      return autoHashBytes(value instanceof Some ? value.value : value, type.child);
+      if (value !== NULL)
+        appendHashBytes(bytes, value instanceof Some ? value.value : value, type.child, identityOf, spend);
+      return;
     }
-    default: {
-      return [];
-    }
+  }
+}
+
+function appendInteger(bytes: number[], value: bigint, count: number, spend: (cost?: number) => void): void {
+  spend(count);
+  let remaining = value;
+  for (let index = 0; index < count; index++) {
+    bytes.push(Number(remaining & 0xffn));
+    remaining >>= 8n;
   }
 }

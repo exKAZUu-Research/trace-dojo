@@ -77,9 +77,20 @@ export class Runtime {
   readonly globals: Slots[] = [];
   /** Values that native objects hold, such as a hash map's entries, reached through their handles. */
   private allocated = 0;
+  private readonly identities = new WeakMap<object, bigint>();
+  private nextIdentity = 1n;
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
+  }
+
+  identityOf(value: object): bigint {
+    let identity = this.identities.get(value);
+    if (identity === undefined) {
+      identity = this.nextIdentity++;
+      this.identities.set(value, identity);
+    }
+    return identity;
   }
 
   spend(cost = 1): void {

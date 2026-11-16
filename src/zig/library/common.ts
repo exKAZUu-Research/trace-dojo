@@ -13,7 +13,7 @@ import {
   typeName,
   USIZE,
 } from '../types';
-import { NULL, Pointer, Slice, storeInto, type Value, ZArray } from '../values';
+import { FnValue, NULL, Pointer, Slice, storeInto, type Value, ZArray } from '../values';
 import { ALLOCATOR, ALLOCATOR_ERROR, nativeEnum } from './heap';
 import { compileArgs, expectArgs, fnMember, type Member } from './native';
 
@@ -82,6 +82,7 @@ export function mutableSlice(sema: SemaApi, arg: Expression, child: Type): TExpr
 export function equalValues(a: Value, b: Value): boolean {
   if (a instanceof BigFloat && b instanceof BigFloat) return compareFloats(a, b) === 0;
   if (a instanceof Pointer && b instanceof Pointer) return a.equals(b);
+  if (a instanceof FnValue && b instanceof FnValue) return a.fn === b.fn;
   return a === b;
 }
 

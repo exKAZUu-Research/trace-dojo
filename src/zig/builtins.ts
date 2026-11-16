@@ -34,7 +34,16 @@ import {
 } from './floats';
 import { importStd } from './library/std';
 import { ZigPanic } from './runtime';
-import { copyForStorage, evaluateHeld, inMemoryCoercible, known, newArray, runtime, type TExpr } from './semaBase';
+import {
+  copyForStorage,
+  evaluateHeld,
+  inMemoryCoercible,
+  known,
+  knownLengthOf,
+  newArray,
+  runtime,
+  type TExpr,
+} from './semaBase';
 import {
   BOOL,
   COMPTIME_INT,
@@ -844,9 +853,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       return this.error(expression.args[0], `${name} の書き込み先には、変更できる配列やスライスを指定してください。`);
     if (!from) return this.error(expression.args[1], `${name} の読み込み元には、配列やスライスを指定してください。`);
     if (!inMemoryCoercible(from.child, target.child)) this.error(expression, `${name} の要素の型が一致しません。`);
-    const destinationLength =
-      target.staticLength ?? (destination.known ? target.view(destination.value).length : undefined);
-    const sourceLength = from.staticLength ?? (source.known ? from.view(source.value).length : undefined);
+    const destinationLength = knownLengthOf(destination);
+    const sourceLength = knownLengthOf(source);
     if (destinationLength !== undefined && sourceLength !== undefined && destinationLength !== sourceLength)
       this.error(expression, `コピー先の長さ ${destinationLength} と、コピー元の長さ ${sourceLength} が一致しません。`);
     const evaluateDestination = destination.eval;
@@ -858,13 +866,13 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         const out = target.view(valuesOf[0]);
         const input = from.view(valuesOf[1]);
         if (out.length !== input.length) panic(PANIC.memcpyLengths);
-        const values = input.slots.slots.slice(input.start, input.start + input.length).map(copyForStorage);
         if (
           name === '@memcpy' &&
           out.slots.slots === input.slots.slots &&
           Math.abs(out.start - input.start) < out.length
         )
           panic(PANIC.memcpyAlias);
+        const values = input.slots.slots.slice(input.start, input.start + input.length).map(copyForStorage);
         for (const [index, value] of values.entries()) storeInto(out.slots, out.start + index, value);
         return;
       },
@@ -933,7 +941,6 @@ function elementAccessor(type: Type):
   | {
       child: Type;
       isConst: boolean;
-      staticLength?: number;
       view: (value: Value) => { slots: { slots: Value[] }; start: number; length: number };
     }
   | undefined {
@@ -950,7 +957,6 @@ function elementAccessor(type: Type):
   if (type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array') {
     return {
       child: type.child.child,
-      staticLength: type.child.length,
       isConst: type.isConst,
       view: (value) => {
         const array = (value as Pointer).load() as ZArray;

@@ -21,6 +21,7 @@ import {
   VOID as VOID_TYPE,
 } from '../types';
 import { NativeHandle, type Value } from '../values';
+import { PUBLIC_STD_MEMBERS } from './publicMembers';
 
 /** A declaration's type and value, which a native namespace resolves on first use. */
 export interface Member {
@@ -51,12 +52,19 @@ export function nativeStruct(
     fields,
     native,
   };
-  addMembers(type, members);
+  addMembers(type, { ...unavailableDeclarations(name), ...members });
   return type;
 }
 
+export function unavailableDeclarations(name: string): Record<string, () => Member> {
+  const base = name.split('(')[0];
+  return Object.fromEntries(
+    (PUBLIC_STD_MEMBERS[base] ?? []).map((member) => [member, unavailableMember(`${name}.${member}`)])
+  );
+}
+
 /** Adds declarations to a native struct, which may refer to the struct itself. */
-export function addMembers(type: StructType, members: Record<string, () => Member>): void {
+export function addMembers(type: { namespace: Namespace }, members: Record<string, () => Member>): void {
   for (const [key, resolve] of Object.entries(members)) {
     let resolved: Member | undefined;
     const decl: Decl = {

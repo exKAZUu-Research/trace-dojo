@@ -13,6 +13,11 @@ export class CompilationStorage {
 export function valueSlots(type: Type): number {
   let count = 0;
   switch (type.kind) {
+    case 'int':
+    case 'float': {
+      count = Math.max(0, Math.ceil(type.bits / 64) - 1);
+      break;
+    }
     case 'array': {
       count = type.length + (type.sentinel === undefined ? 0 : 1);
       if (type.length > 0 && count <= LIMITS.maxSlots) count += type.length * valueSlots(type.child);

@@ -1154,3 +1154,125 @@ pub fn main() void { std.debug.print("{s}", .{banner}); }`;
     uncaughtException: undefined,
   });
 });
+
+test('whole aggregate stores snapshot nested overlapping array views', () => {
+  const source = `const std = @import("std"); const P = struct { x: u8 };
+pub fn main() void {
+    var a = [_]P{.{.x=1}, .{.x=2}, .{.x=3}};
+    const retained = &a[2].x;
+    a[1..3].* = a[0..2].*;
+    std.debug.print("{} {} {} {}", .{a[0].x, a[1].x, a[2].x, retained.*});
+    a[0..2].* = a[1..3].*;
+    std.debug.print("|{} {} {}", .{a[0].x, a[1].x, a[2].x});
+}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 1 2 2|1 2 2',
+    uncaughtException: undefined,
+  });
+});
+
+test('pointer keys and pointer fields hash by location without collision chains', () => {
+  const source = `const std = @import("std"); const Key = struct { pointer: *u8 };
+pub fn main(init: std.process.Init) !void {
+    var storage: [2000]u8 = undefined;
+    var pointers = std.AutoHashMap(*u8, u8).init(init.gpa);
+    defer pointers.deinit();
+    var records = std.AutoHashMap(Key, u8).init(init.gpa);
+    defer records.deinit();
+    for (0..2000) |i| {
+        try pointers.put(&storage[i], 1);
+        try records.put(.{.pointer = &storage[i]}, 2);
+    }
+    try pointers.put(&storage[0..2][1], 3);
+    std.debug.print("{} {} {} {}", .{pointers.count(), records.count(), pointers.get(&storage[1]).?, records.get(.{.pointer = &storage[1]}).?});
+}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '2000 2000 3 2',
+    uncaughtException: undefined,
+  });
+});
+
+test('known slice bounds survive pointer coercions and const aliases', () => {
+  for (const tail of [
+    'const s: []const i32 = &a; _ = s[3];',
+    'const s: []const i32 = &a; _ = s[1..4];',
+    'const s: []const i32 = &a; _ = s[4..];',
+    'const s = @as([]const i32, &a); _ = s[3];',
+    'const s: []const i32 = a[0..2]; const alias = s; _ = alias[2];',
+  ])
+    expect(executeProgram('zig', `pub fn main() void { const a = [_]i32{1,2,3}; ${tail} }`).kind).toBe('compileError');
+  expect(
+    executeProgram(
+      'zig',
+      `const std = @import("std"); pub fn main() void {
+    var a = [_]u8{1,2,3}; const s: []u8 = &a; var b: [s.len]u8 = undefined; _ = &b;
+    var dynamic: []u8 = s; dynamic.len = 1; var index: usize = 2; _ = &index; _ = dynamic[index];
+  }`
+    )
+  ).toMatchObject({ kind: 'executed', uncaughtException: 'panic: index out of bounds: index 2, len 1' });
+});
+
+test('literal decoding rejects raw control bytes while accepting escaped controls', () => {
+  for (const control of ['\t', '\u0007', '\u007F', '\r']) {
+    for (const literal of [`"a${control}b"`, `'${control}'`, `\n    \\\\a${control}b\n`]) {
+      expect(executeProgram('zig', `pub fn main() void { const value = ${literal}; _ = value; }`).kind).toBe(
+        'compileError'
+      );
+    }
+  }
+  expect(
+    executeProgram(
+      'zig',
+      String.raw`const std = @import("std"); pub fn main() void { std.debug.print("{s}", .{"a\tb\x7f"}); }`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: 'a\tb\u007F', uncaughtException: undefined });
+});
+
+test('literal storage is bounded cumulatively and resets for each compilation', () => {
+  const text = 'x'.repeat(600_000);
+  for (const source of [
+    `const a = "${text}"; const b = "${text}"; pub fn main() void {}`,
+    `const @"${text}" = 1; const @"${text}y" = 2; pub fn main() void {}`,
+  ]) {
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+  }
+  expect(executeProgram('zig', `pub fn main() void { const text = "${text}"; _ = text; }`)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+  });
+});
+
+test('wide integer arrays and hash serialization respect native resource budgets', () => {
+  expect(executeProgram('zig', wideIntegerMapProgram(100))).toMatchObject({
+    kind: 'limitExceeded',
+    limit: 'operations',
+  });
+  expect(executeProgram('zig', wideIntegerMapProgram(1000))).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+});
+
+test('native lookups compare function pointer keys by the referenced function', () => {
+  const source = `const std = @import("std"); fn f() void {}
+pub fn main(init: std.process.Init) !void {
+    var map = std.AutoHashMap(*const fn() void, u8).init(init.gpa);
+    defer map.deinit();
+    try map.put(&f, 3);
+    std.debug.print("{} {}", .{map.count(), map.get(&f).?});
+}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 3',
+    uncaughtException: undefined,
+  });
+});
+
+function wideIntegerMapProgram(count: number): string {
+  return `const std = @import("std");
+pub fn main(init: std.process.Init) !void {
+    const key: [${count}]u65535 = @splat(0);
+    var map = std.AutoHashMap(@TypeOf(key), u8).init(init.gpa);
+    defer map.deinit();
+    try map.put(key, 1);
+}`;
+}

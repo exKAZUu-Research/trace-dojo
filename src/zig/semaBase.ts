@@ -1,5 +1,5 @@
-// code-gauge-allow-file fileNcss 850 -- The file holds one layer of the compiler, whose parts share its private state.
-// code-gauge-allow-file duplicateLines 17 -- Library types repeat the same shape of method on purpose, each over its own state.
+// code-gauge-allow-file fileNcss 870 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file duplicateLines 18 -- Undefined and zero initializers share aggregate shapes but differ in scalar and optional values.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { CompilationStorage, valueSlots } from './allocation';
@@ -76,9 +76,10 @@ export interface Place {
 /** An analyzed expression: its type, its value when the compiler knows it, and the code that computes it. */
 export interface TExpr {
   readonly type: Type;
-  /** Whether the value is known at compile time, in `value`. */
+  /** Whether this expression can be replaced with `value`. */
   readonly known: boolean;
   readonly staticResult?: { value: Value };
+  readonly knownLength?: number;
   readonly value: Value;
   readonly eval: Eval;
   readonly place?: Place;
@@ -93,6 +94,7 @@ export interface LocalBinding {
   readonly slot: number;
   readonly type: Type;
   readonly isConst: boolean;
+  readonly knownLength?: number;
   /** The value of a constant that the compiler knows. */
   readonly known: boolean;
   readonly value?: Value;
@@ -796,10 +798,13 @@ export abstract class SemaBase implements SemaApi {
       if (!inMemoryCoercible(array.child, to.child)) return undefined;
       if (to.sentinel !== undefined && array.sentinel !== to.sentinel) return undefined;
       const { length } = array;
-      return this.derived(expression, to, (value) => {
-        const array = (value as Pointer).load() as ZArray;
-        return new Slice(array, array.offset, length);
-      });
+      return {
+        ...this.derived(expression, to, (value) => {
+          const array = (value as Pointer).load() as ZArray;
+          return new Slice(array, array.offset, length);
+        }),
+        knownLength: length,
+      };
     }
     return undefined;
   }
@@ -896,6 +901,21 @@ export abstract class SemaBase implements SemaApi {
     }
     const evaluators = elements.map((element) => element.eval);
     return runtime(type, (frame) => build(evaluateHeld(frame, evaluators, copyForStorage)), span);
+  }
+
+  protected fixedResult(operand: TExpr, type: Type, value: Value, span: Span = operand.span): TExpr {
+    if (operand.known || operand.local?.isConst) return known(type, value, span);
+    return {
+      ...runtime(
+        type,
+        (frame) => {
+          operand.eval(frame);
+          return value;
+        },
+        span
+      ),
+      staticResult: { value },
+    };
   }
 
   /** An expression of another type whose value a function computes from the original's. */
@@ -1125,6 +1145,16 @@ export function newArray(values: Value[], sentinel: Value | undefined): ZArray {
  * Evaluates parts in order, keeping each part's value reachable while the later ones run, so that a turtle an earlier
  * part holds stays on the board while a later part's calls record steps.
  */
+export function knownLengthOf(expression: TExpr): number | undefined {
+  const type = expression.type;
+  if (type.kind === 'array') return type.length;
+  if (type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array') return type.child.length;
+  return (
+    expression.knownLength ??
+    (expression.known && expression.value instanceof Slice ? expression.value.length : undefined)
+  );
+}
+
 export function evaluateHeld(
   frame: Frame,
   evaluators: readonly Eval[],
@@ -1162,6 +1192,8 @@ export function copyForStorage(value: Value): Value {
 
 // Undefined values ------------------------------------------------------------------------------------------------
 
+const undefinedIntegers = new WeakMap<IntType, bigint>();
+
 /** The value that `undefined` memory holds in a Debug build, which fills it with the byte 0xAA. */
 export function undefinedValue(type: Type): Value {
   valueSlots(type);
@@ -1171,10 +1203,7 @@ export function undefinedValue(type: Type): Value {
 function buildUndefinedValue(type: Type): Value {
   switch (type.kind) {
     case 'int': {
-      const bytes = Math.ceil(type.bits / 8);
-      let pattern = 0n;
-      for (let index = 0; index < bytes; index++) pattern = (pattern << 8n) | 0xaan;
-      return type.signed ? BigInt.asIntN(type.bits, pattern) : BigInt.asUintN(type.bits, pattern);
+      return undefinedInteger(type);
     }
     case 'float': {
       return floatFromPattern(type.bits);
@@ -1215,6 +1244,17 @@ function buildUndefinedValue(type: Type): Value {
 
 /** What an undefined pointer points to. */
 const UNDEFINED_STORAGE: Slots = { slots: [] };
+
+function undefinedInteger(type: IntType): bigint {
+  let value = undefinedIntegers.get(type);
+  if (value === undefined) {
+    const bits = BigInt(Math.ceil(type.bits / 8) * 8);
+    const pattern = (((1n << bits) - 1n) / 255n) * 170n;
+    value = type.signed ? BigInt.asIntN(type.bits, pattern) : BigInt.asUintN(type.bits, pattern);
+    undefinedIntegers.set(type, value);
+  }
+  return value;
+}
 
 function floatFromPattern(bits: 16 | 32 | 64 | 80 | 128): Value {
   if (bits === 16) return bitsToFloat16(0xaa_aa);

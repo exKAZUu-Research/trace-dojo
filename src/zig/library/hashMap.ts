@@ -42,7 +42,15 @@ const MINIMAL_CAPACITY = 8;
 const MAX_LOAD = 80;
 
 function hashOf(frame: Frame, key: Value, keyType: Type, kind: KeyKind): bigint {
-  const bytes = kind === 'string' ? elements(key).map((byte) => Number(byte as bigint)) : autoHashBytes(key, keyType);
+  const bytes =
+    kind === 'string'
+      ? elements(key).map((byte) => Number(byte as bigint))
+      : autoHashBytes(
+          key,
+          keyType,
+          (value) => frame.runtime.identityOf(value),
+          (cost) => frame.runtime.spend(cost)
+        );
   frame.runtime.spend(1 + bytes.length);
   return wyhash(0n, bytes);
 }
@@ -306,6 +314,7 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
     fnMember(`${map.namespace.name}.${name}`, (sema, call) => {
       sema.resolveStorage(keyType, call.span);
       sema.resolveStorage(valueType, call.span);
+      if (kind === 'auto' && options.args.includes(keyType)) validateAutoKey(sema, keyType, call.span);
       const takesAllocator = options.allocates === true && !managed;
       const expected = takesAllocator ? [ALLOCATOR, ...options.args] : options.args;
       const args = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
@@ -601,6 +610,45 @@ function mapFactory(name: string, kind: KeyKind, managed: boolean): () => Member
     }
     return known(TYPE, hashMapType(name, keyType, valueType, kind, managed), call.span);
   });
+}
+
+// code-gauge-allow functionNcss 32 -- Checks the supported key representations recursively before a hashing operation.
+function validateAutoKey(sema: SemaApi, type: Type, span: Span): void {
+  switch (type.kind) {
+    case 'void':
+    case 'int':
+    case 'bool':
+    case 'enum':
+    case 'error_set':
+    case 'fn': {
+      return;
+    }
+    case 'pointer': {
+      if (type.size === 'slice') sema.error(span, 'スライスをキーにするときは、std.StringHashMap を使ってください。');
+      return;
+    }
+    case 'optional':
+    case 'array': {
+      validateAutoKey(sema, type.child, span);
+      return;
+    }
+    case 'error_union': {
+      validateAutoKey(sema, type.payload, span);
+      return;
+    }
+    case 'struct': {
+      for (const field of type.fields ?? []) validateAutoKey(sema, field.type, span);
+      return;
+    }
+    case 'union': {
+      if (!type.tagType) sema.error(span, 'タグのない共用体は、自動ハッシュのキーにできません。');
+      for (const field of type.fields ?? []) validateAutoKey(sema, field.type, span);
+      return;
+    }
+    default: {
+      sema.error(span, `${typeName(type)} 型は、自動ハッシュのキーにできません。`);
+    }
+  }
 }
 
 export const HASH_MAP_MEMBERS: Record<string, () => Member> = {

@@ -36,6 +36,7 @@ import {
   isAnonymous,
   isType,
   known,
+  knownLengthOf,
   type LocalBinding,
   mismatch,
   NativeFn,
@@ -265,7 +266,11 @@ export abstract class ExpressionCompiler extends SemaBase {
     const { slot } = binding;
     const place: Place = { isConst: binding.isConst, locate: (frame) => new Pointer(frame, slot) };
     if (binding.known) return { ...known(binding.type, binding.value, span), place, local: binding };
-    return { ...runtime(binding.type, (frame) => frame.slots[slot], span, place), local: binding };
+    return {
+      ...runtime(binding.type, (frame) => frame.slots[slot], span, place),
+      knownLength: binding.knownLength,
+      local: binding,
+    };
   }
 
   private enumLiteral(name: string, span: Span, resultType: Type | undefined): TExpr {
@@ -300,7 +305,7 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Field access ----------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 40 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionNcss 41 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected fieldAccess(expression: ExpressionOf<'field'>): TExpr {
     const object = this.compile(expression.object);
@@ -336,7 +341,8 @@ export abstract class ExpressionCompiler extends SemaBase {
         if (type.size === 'slice') {
           if (name === 'len') {
             const evaluate = base.eval;
-            if (base.known) return known(USIZE, BigInt((base.value as Slice).length), expression);
+            const length = knownLengthOf(base);
+            if (length !== undefined) return this.fixedResult(base, USIZE, BigInt(length), expression);
             const place = base.place;
             const lengthPlace: Place | undefined = place && {
               isConst: place.isConst,
@@ -525,8 +531,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     const child = indexableChild(type);
     if (!child) return this.error(expression, `${typeName(type)} 型には、添字が使えません。`);
-    const length =
-      staticLength(type) ?? (object.known && object.value instanceof Slice ? object.value.length : undefined);
+    const length = knownLengthOf(object);
     if (
       index.known &&
       length !== undefined &&
@@ -624,7 +629,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       return this.error(expression, `${typeName(type)} 型はスライスできません。`);
     }
     const fromArray = staticLen !== undefined;
-    if (staticLen === undefined && base.known && base.value instanceof Slice) staticLen = base.value.length;
+    staticLen ??= knownLengthOf(base);
     const sentinel = expression.sentinel ? this.sentinelValue(expression.sentinel, child) : undefined;
     const limitOf = (length: number): number => length + (sourceSentinel === undefined ? 0 : 1);
     if (start.known && end?.known && (start.value as bigint) > (end.value as bigint)) {
@@ -1557,12 +1562,6 @@ export function log2IntType(type: IntType): IntType {
   let bits = 0;
   while (2 ** bits < type.bits) bits++;
   return intType(false, bits);
-}
-
-function staticLength(type: Type): number | undefined {
-  if (type.kind === 'array') return type.length;
-  if (type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array') return type.child.length;
-  return undefined;
 }
 
 function hasSentinel(type: Type): boolean {
