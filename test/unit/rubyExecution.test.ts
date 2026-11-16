@@ -12115,3 +12115,82 @@ test('Numeric-looking capture names retain explicit capability classification', 
     uncaughtException: '正規表現の特殊なキャプチャ名は、この採点環境では使えません。',
   });
 });
+
+test.each([
+  String.raw`\g<0>`,
+  String.raw`\g'0'`,
+  String.raw`a\g<0>`,
+  String.raw`a?\g<0>`,
+  String.raw`\g<0>|a`,
+  String.raw`(?:\g<0>){0}`,
+  String.raw`(?<x>\g<x>){0}`,
+  String.raw`(?<x>a|\g<x>b)`,
+  String.raw`(?<x>\g<y>)(?<y>\g<x>)`,
+  String.raw`(?<x>a{2}?\g<x>|b)`,
+  String.raw`(?<x>(?=a)\g<x>|b)`,
+  String.raw`(?<b>a?)(?<x>\k<b>\g<x>|c)`,
+  String.raw`(\g<1>)`,
+  String.raw`(?<foo!>\g<foo!>)`,
+  String.raw`(?<あ>\g<あ>)`,
+])('Nonterminating regexp recursion rejects before execution: %s', (pattern) => {
+  expect(run(`puts :before;p /${pattern}/`)).toMatchObject({ kind: 'compileError' });
+});
+
+test.each([
+  String.raw`a\g<0>?`,
+  String.raw`a\g<0>|b`,
+  String.raw`a\g<0>{0}`,
+  String.raw`(?<x>a\g<x>?)`,
+  String.raw`(?<x>a\g<x>|b)`,
+  String.raw`(?<x>a{2,2}?\g<x>|b)`,
+  String.raw`(?<b>a)(?<x>\k<b>\g<x>|c)`,
+  String.raw`(a\g<1>|b)`,
+  String.raw`(?<x>a\g<x>?){0}`,
+  String.raw`(?<foo!>a\g<foo!>|b)`,
+])('Terminating regexp recursion retains explicit capability handling: %s', (pattern) => {
+  const result = run(`puts :before;p /${pattern}/`);
+  expect(result).toMatchObject({ kind: 'executed', stdout: 'before\n' });
+  if (result.kind !== 'executed') throw new Error('Expected an execution result');
+  expect(result.uncaughtException).toMatch(/は、この採点環境では使えません。$/);
+});
+
+test('Dynamic nonterminating regexp recursion raises native source errors', () => {
+  expect(
+    run(String.raw`["\\g<0>", "\\g'0'", "a\\g<0>", "a?\\g<0>", "\\g<0>|a", "(?:\\g<0>){0}", "(?<x>\\g<x>){0}", "(?<x>a|\\g<x>b)", "(?<x>\\g<y>)(?<y>\\g<x>)", "(?<x>a{2}?\\g<x>|b)", "(?<x>(?=a)\\g<x>|b)", "(?<b>a?)(?<x>\\k<b>\\g<x>|c)", "(\\g<1>)", "(?<foo!>\\g<foo!>)", "(?<あ>\\g<あ>)"].each do |source|
+ begin;Regexp.new(source);rescue RegexpError=>e;puts e.message;end
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "never ending recursion: /\\g<0>/\nnever ending recursion: /\\g'0'/\nnever ending recursion: /a\\g<0>/\nnever ending recursion: /a?\\g<0>/\nnever ending recursion: /\\g<0>|a/\nnever ending recursion: /(?:\\g<0>){0}/\nnever ending recursion: /(?<x>\\g<x>){0}/\nnever ending recursion: /(?<x>a|\\g<x>b)/\nnever ending recursion: /(?<x>\\g<y>)(?<y>\\g<x>)/\nnever ending recursion: /(?<x>a{2}?\\g<x>|b)/\nnever ending recursion: /(?<x>(?=a)\\g<x>|b)/\nnever ending recursion: /(?<b>a?)(?<x>\\k<b>\\g<x>|c)/\nnever ending recursion: /(\\g<1>)/\nnever ending recursion: /(?<foo!>\\g<foo!>)/\nnever ending recursion: /(?<あ>\\g<あ>)/\n",
+    uncaughtException: undefined,
+  });
+});
+
+test.each([String.raw`puts :before;p /(?<=a{2}?)b/`, String.raw`puts :before;p /(?<=a{1}?)b/`])(
+  'Exact optional repeats retain Ruby lookbehind width rules: %s',
+  (source) => {
+    expect(run(source)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test('Supported empty, fixed and escaped regexp controls retain their behavior', () => {
+  expect(
+    run(String.raw`p "aab".match?(/(?<=a{2,2}?)b/)
+p "a"[/a{0}?/]
+p /\\g<0>/.match?('\g<0>')`)
+  ).toMatchObject({ kind: 'executed', stdout: 'true\n""\ntrue\n', uncaughtException: undefined });
+});
+
+test('Large regexp call graphs fail explicitly within the analysis budget', () => {
+  const count = 1000;
+  const source = Array.from({ length: count }, (_, index) =>
+    index === count - 1 ? `(?<g${index}>a)` : String.raw`(?<g${index}>\g<g${index + 1}>)`
+  ).join('');
+  expect(run(`puts :before;p /${source}/`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'before\n',
+    uncaughtException: '複雑な再帰構造の正規表現は、この採点環境では使えません。',
+  });
+});

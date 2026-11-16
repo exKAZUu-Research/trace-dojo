@@ -4,22 +4,26 @@ import {
   type LookaroundAssertionNode,
   type Node as SourceNode,
   parse as parseOniguruma,
+  type RegexNode,
 } from 'oniguruma-parser/parser';
 import { type Token, tokenize } from 'oniguruma-parser/tokenizer';
+import { traverse } from 'oniguruma-parser/traverser';
 
 import { ExecutionLimitError } from '../interpreter/limits';
 import { hostRegexpCaptureNames } from './regexpCaptureNames';
 import { decodeRegexpByteEscape, regexpByteEscape, RegexpEncodingError } from './regexpEscapes';
 import { regexpLexicalSource } from './regexpLexicalSource';
 import { regexpPropertyNames } from './regexpProperties';
+import { validateRegexpRecursion } from './regexpRecursion';
 import { UnsupportedFeatureError } from './runtime';
 
 export function validateRegexpSourceSyntax(source: string, extended: boolean, binary = false): void {
-  let root: SourceNode;
+  let root: RegexNode;
   let nestingReference = false;
   try {
     ({ root, nestingReference } = parseSourceRegexp(source, extended, binary));
     validateSourceReferences(root);
+    validateRegexpRecursion(root);
   } catch (error) {
     if (error instanceof Error && error.message === 'Quantifier value unsupported in Oniguruma')
       throw new RegexpEncodingError('too big number for repeat range');
@@ -57,7 +61,7 @@ function parseSourceRegexp(
   source: string,
   extended: boolean,
   binary = false
-): { root: SourceNode; nestingReference: boolean } {
+): { root: RegexNode; nestingReference: boolean } {
   const normalized = normalizeRubyRegexpEscapes(source, extended, binary);
   const tokens = tokenize(normalized, { flags: extended ? 'x' : '' }).tokens;
   validateSourceTokens(tokens);
@@ -68,7 +72,28 @@ function parseSourceRegexp(
     skipBackrefValidation: true,
     skipPropertyNameValidation: true,
   });
+  normalizeExactOptionalRepeats(root, tokens);
   return { root, nestingReference: aliased.nestingReference };
+}
+
+function normalizeExactOptionalRepeats(root: RegexNode, tokens: Token[]): void {
+  const quantifiers = tokens.filter((token) => token.type === 'Quantifier');
+  let index = 0;
+  traverse(root, {
+    Quantifier: {
+      exit({ node }) {
+        const token = quantifiers[index++];
+        if (!token) throw new UnsupportedFeatureError('正規表現の量指定子の検証');
+        if (!/^\{\d+\}\?$/.test(token.raw) || node.min === 0) return;
+        const repeated: typeof node = { ...node, kind: 'greedy' };
+        node.kind = 'greedy';
+        node.min = 0;
+        node.max = 1;
+        node.body = repeated;
+      },
+    },
+  });
+  if (index !== quantifiers.length) throw new UnsupportedFeatureError('正規表現の量指定子の検証');
 }
 
 function validateSourceTokens(tokens: Token[]): void {
