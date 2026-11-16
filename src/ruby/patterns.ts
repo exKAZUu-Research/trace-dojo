@@ -203,10 +203,14 @@ function* matchHash(pattern: Extract<Pattern, { k: 'hash' }>, value: Value, fram
         hash
       );
     }
+  }
+  for (const pair of pattern.pairs) {
+    const entry = yield* hashGet(hash, sym(pair.key));
+    const item = entry?.value ?? NIL;
     if (pair.pattern) {
-      if (!(yield* matchPattern(pair.pattern, entry.value, frame))) return false;
+      if (!(yield* matchPattern(pair.pattern, item, frame))) return false;
     } else if (pair.target) {
-      bind(pair.target, entry.value, frame);
+      bind(pair.target, item, frame);
     }
   }
   if (pattern.rest === 'nil' && hash.map.size !== pattern.pairs.length) {

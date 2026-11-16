@@ -246,6 +246,7 @@ function normalizedRegexpEscape(
   binary: boolean
 ): { text: string; length: number } {
   const next = source[start + 1];
+  if (next === 'k' && (inClass || !"<'".includes(source[start + 2] ?? '\0'))) return { text: 'k', length: 2 };
   if (next === 'p' || next === 'P') {
     const property = /^\\[pP]\{(\^?)([^}]*)\}/.exec(source.slice(start));
     if (property) {

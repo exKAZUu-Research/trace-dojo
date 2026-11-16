@@ -600,7 +600,7 @@ function padOffset(value: string, width: number | undefined, flag: string): stri
   if (flag === '_') {
     const body = value.slice(1).replace(/^0/, '');
     const compact = `${value[0]}${body}`;
-    return compact.padStart(width ?? value.length, ' ');
+    return compact.padStart(Math.max(width ?? value.length, value.length), ' ');
   }
   return `${value[0]}${value.slice(1).padStart(target - 1, '0')}`;
 }

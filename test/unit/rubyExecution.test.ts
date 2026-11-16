@@ -11174,13 +11174,13 @@ test('Regexp property spellings use the parser Unicode canonical-name map', () =
     run(String.raw`['HexDigit','Hex-Digit','ASCIIHexDigit','ASCIIHEXDIGIT','SoftDotted','DashPunctuation','NoncharacterCodePoint','Latin','Canadian_Aboriginal','LowercaseLetter','XID_Start'].each do |name|
  source="\\p{#{name}}"
  r=Regexp.new(source)
- p [name,['f','x','i','-','\uFDD0','\u1401'].map{|s|r.match?(s)}]
+ p [name,['f','x','i','-',"\uFDD0","\u1401"].map{|s|r.match?(s)}]
 end
 `)
   ).toMatchObject({
     kind: 'executed',
     stdout:
-      '["HexDigit", [true, false, false, false, true, true]]\n["Hex-Digit", [true, false, false, false, true, true]]\n["ASCIIHexDigit", [true, false, false, false, true, true]]\n["ASCIIHEXDIGIT", [true, false, false, false, true, true]]\n["SoftDotted", [false, false, true, false, false, false]]\n["DashPunctuation", [false, false, false, true, false, false]]\n["NoncharacterCodePoint", [false, false, false, false, false, false]]\n["Latin", [true, true, true, false, true, true]]\n["Canadian_Aboriginal", [false, false, false, false, false, false]]\n["LowercaseLetter", [true, true, true, false, true, true]]\n["XID_Start", [true, true, true, false, true, true]]\n',
+      '["HexDigit", [true, false, false, false, false, false]]\n["Hex-Digit", [true, false, false, false, false, false]]\n["ASCIIHexDigit", [true, false, false, false, false, false]]\n["ASCIIHEXDIGIT", [true, false, false, false, false, false]]\n["SoftDotted", [false, false, true, false, false, false]]\n["DashPunctuation", [false, false, false, true, false, false]]\n["NoncharacterCodePoint", [false, false, false, false, true, false]]\n["Latin", [true, true, true, false, false, false]]\n["Canadian_Aboriginal", [false, false, false, false, false, true]]\n["LowercaseLetter", [true, true, true, false, false, false]]\n["XID_Start", [true, true, true, false, false, true]]\n',
     uncaughtException: undefined,
   });
 });
@@ -11195,4 +11195,65 @@ test.each([
   String.raw`(?<a>a)(?<=\k<a>)`,
 ])('source syntax completes before regexp capability checks: %s', (source) => {
   expect(run(`puts :before;p /${source}/`)).toMatchObject({ kind: 'compileError' });
+});
+
+test('Valid unsupported backreference spellings do not masquerade as source syntax errors', () => {
+  for (const source of [String.raw`(?<a>x)\ka`, String.raw`[\k]`, String.raw`(?<a>x)\k'a'`]) {
+    expect(run(`puts :before;p /${source}/`)).toMatchObject({
+      kind: 'executed',
+      stdout: 'before\n',
+      uncaughtException: expect.stringContaining('は、この採点環境では使えません。'),
+    });
+  }
+  expect(run(String.raw`puts :before;p /\k(/`)).toMatchObject({ kind: 'compileError' });
+  expect(run(String.raw`p /(?<a>x)\k<a>/.match('xx')[0]`)).toMatchObject({
+    kind: 'executed',
+    stdout: '"xx"\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Hash patterns validate all keys before matching values and preserve late value lookup', () => {
+  expect(
+    run(String.raw`begin
+ case {a:1};in {a:2,b:1};end
+rescue =>e;p e.class,e.message;end
+begin
+ case {x:1};in {x:{a:2},b:1};end
+rescue =>e;p e.class,e.message;end
+x=nil
+begin
+ {a:1} => {a:x,b:y}
+rescue =>e;p e.class,x;end
+h={a:1,b:2}
+calls=[]
+module G;end
+G.define_singleton_method(:===){|v|calls<<v;h[:b]=3;true}
+case h;in {a:G,b:3};p :matched;end
+p calls
+calls.clear
+case {a:1};in {a:G,b:2};p :bad;else;p :missing;end
+p calls
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'NoMatchingPatternKeyError\n"{a: 1}: key not found: :b"\nNoMatchingPatternKeyError\n"{x: 1}: key not found: :b"\nNoMatchingPatternKeyError\nnil\n:matched\n[1]\n:missing\n[]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Space-padded time zones retain the native minimum offset width', () => {
+  expect(
+    run(String.raw`['+00:00','+09:00','-00:30','+01:02:03'].each do |offset|
+ t=Time.at(0).getlocal(offset)
+ p t.strftime('%_1z|%_3z|%_z|%_8z|%_1:z|%_3::z|%_1:::z')
+end
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '" +000| +000| +000|    +000| +0:00| +0:00:00| +0"\n" +900| +900| +900|    +900| +9:00| +9:00:00| +9"\n" -030| -030| -030|    -030| -0:30| -0:30:00| -0:30"\n" +102| +102| +102|    +102| +1:02| +1:02:03| +1:02:03"\n',
+    uncaughtException: undefined,
+  });
 });

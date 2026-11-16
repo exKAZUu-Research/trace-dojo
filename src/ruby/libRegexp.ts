@@ -547,6 +547,8 @@ function translateEscape(
       return `\\${negated ? 'P' : 'p'}{${name}}`;
     }
     case 'k': {
+      if (inClass || !"<'".includes(source[index + 1] ?? '\0')) throw unsupportedSyntax(String.raw`括弧を伴わない\k`);
+      if (source[index + 1] === "'") throw unsupportedSyntax('引用符で囲んだ名前の後方参照');
       if (/^<\d+>/.test(source.slice(index + 1))) throw unsupportedSyntax('番号付き後方参照');
       return String.raw`\k`;
     }
