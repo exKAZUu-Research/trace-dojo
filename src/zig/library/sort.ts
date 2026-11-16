@@ -61,7 +61,6 @@ export function sorter(name: string, algorithm: SortAlgorithm): () => Member {
 }
 
 /** Functions of `(T, items, context, f)` that read the items with a function of the context and elements. */
-// code-gauge-allow duplicateLines 15 -- Reader and range-query registrations share setup but generate different search loops.
 function reader(
   name: string,
   elementCount: 1 | 2,
@@ -144,7 +143,6 @@ function extremum(items: Slice, call: (args: Value[]) => Value, frame: Frame, ty
 }
 
 /** `equalRange(T, items, context, compareFn)`: the bounds of the items the function finds equal. */
-// code-gauge-allow duplicateLines 15 -- Reader and range-query registrations share setup but generate different search loops.
 function equalRangeMember(): Member {
   return generic('std.sort.equalRange', 4, (sema, call, type, [itemsArg, contextArg, fnArg]) => {
     const items = constSlice(sema, itemsArg, type);

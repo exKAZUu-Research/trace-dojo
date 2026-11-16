@@ -1,11 +1,19 @@
-// code-gauge-allow-file fileNcss 924 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 960 -- The file holds one layer of the compiler, whose parts share its private state.
 // code-gauge-allow-file duplicateLines 18 -- Undefined and zero initializers share aggregate shapes but differ in scalar and optional values.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { CompilationStorage, valueSlots } from './allocation';
 import { PANIC, panic } from './arith';
 import { isDiscardName } from './ast';
-import type { Container, ContainerMember, Expression, FunctionDeclaration, SourceFile, Span } from './ast';
+import type {
+  Container,
+  ContainerMember,
+  Expression,
+  ExpressionOf,
+  FunctionDeclaration,
+  SourceFile,
+  Span,
+} from './ast';
 import { markRuntimeStorage } from './comptimeMemory';
 import {
   type AnyFloat,
@@ -194,6 +202,7 @@ export abstract class SemaBase implements SemaApi {
   /** The container-level variables the program uses, as the trace shows them. */
   protected readonly globalVariables: { name: string; type: Type; cell: Slots }[] = [];
   private anonymousCount = 0;
+  private readonly indexedFields = new WeakMap<readonly { name: string }[], ReadonlyMap<string, number>>();
   /** How many structs' fields are being resolved, during which function bodies wait to compile. */
   protected resolvingFields = 0;
 
@@ -457,6 +466,18 @@ export abstract class SemaBase implements SemaApi {
     }
     void span;
     return fields;
+  }
+
+  protected fieldIndexes(fields: readonly { name: string }[]): ReadonlyMap<string, number> {
+    let indexes = this.indexedFields.get(fields);
+    if (indexes) return indexes;
+    const created = new Map<string, number>();
+    for (const [index, field] of fields.entries()) {
+      this.compilationBudget.spend();
+      created.set(field.name, index);
+    }
+    this.indexedFields.set(fields, created);
+    return created;
   }
 
   /** Resolves the fields of the structs and unions a value of `type` holds in place, which its undefined value needs. */
@@ -915,20 +936,51 @@ export abstract class SemaBase implements SemaApi {
       );
       return this.aggregate(to, elements, span, (values) => new ZStruct(values));
     }
+    const targetIndexes = this.fieldIndexes(targetFields);
+    const sourceIndexes = this.fieldIndexes(sourceFields);
     for (const field of sourceFields) {
-      if (!targetFields.some((target) => target.name === field.name)) {
+      this.compilationBudget.spend();
+      if (!targetIndexes.has(field.name)) {
         this.error(span, `構造体 ${typeName(to)} には、フィールド「${field.name}」がありません。`);
       }
     }
     const elements = targetFields.map((field) => {
-      const index = sourceFields.findIndex((source) => source.name === field.name);
-      if (index === -1) {
+      this.compilationBudget.spend();
+      const index = sourceIndexes.get(field.name);
+      if (index === undefined) {
         if (!field.hasDefault) this.error(span, `フィールド「${field.name}」の値がありません。`);
         return known(field.type, field.defaultValue, span);
       }
       return this.coerce(this.tupleElement(expression, index, sourceFields[index], span), field.type, span);
     });
     return this.aggregate(to, elements, span, (values) => new ZStruct(values));
+  }
+
+  protected structInitializerPlan(
+    expression: ExpressionOf<'structInit'>,
+    type: StructType
+  ): { position: number; field: StructField; value: Expression | undefined }[] {
+    const fields = this.structFields(type, expression);
+    const indexes = this.fieldIndexes(fields);
+    const seen = new Set<string>();
+    const plan = expression.fields.map<{ position: number; field: StructField; value: Expression | undefined }>(
+      (init) => {
+        this.compilationBudget.spend();
+        const position = indexes.get(init.name);
+        if (position === undefined)
+          this.error(init, `${typeName(type)} 型には、フィールド「${init.name}」がありません。`);
+        if (seen.has(init.name)) this.error(init, `フィールド「${init.name}」を2回初期化しています。`);
+        seen.add(init.name);
+        return { position, field: fields[position], value: init.value };
+      }
+    );
+    for (const [position, field] of fields.entries()) {
+      this.compilationBudget.spend();
+      if (seen.has(field.name)) continue;
+      if (!field.hasDefault) this.error(expression, `フィールド「${field.name}」の値がありません。`);
+      plan.push({ position, field, value: undefined });
+    }
+    return plan;
   }
 
   protected nativeDefault(type: StructType, span: Span, operand?: TExpr): TExpr {

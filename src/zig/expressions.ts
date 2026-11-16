@@ -420,7 +420,7 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   protected structField(base: TExpr, type: StructType, name: string, span: Span): TExpr {
     const fields = this.structFields(type, span);
-    let index = fields.findIndex((field) => field.name === name);
+    let index = this.fieldIndexes(fields).get(name) ?? -1;
     if (index === -1 && type.isTuple && /^\d+$/.test(name)) index = Number(name);
     const field = fields[index] as StructField | undefined;
     if (!field) {
@@ -1385,7 +1385,6 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Initializers ----------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 38 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected structInit(expression: ExpressionOf<'structInit'>, resultType: Type | undefined): TExpr {
     const type = expression.type ? this.compileType(expression.type) : resultType && unwrapResult(resultType);
@@ -1407,28 +1406,15 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     if (expression.fields.length === 0 && type.native && this.structFields(type, expression).length === 0)
       return this.nativeDefault(type, expression);
-    const fields = this.structFields(type, expression);
-    for (const init of expression.fields) {
-      if (!fields.some((field) => field.name === init.name)) {
-        this.error(init, `${typeName(type)} 型には、フィールド「${init.name}」がありません。`);
-      }
-    }
-    const order = [
-      ...expression.fields.map((init) => fields.findIndex((field) => field.name === init.name)),
-      ...fields.flatMap((field, index) => (expression.fields.some((init) => init.name === field.name) ? [] : [index])),
-    ];
-    const elements = order.map((position) => {
-      const field = fields[position];
-      const init = expression.fields.find((each) => each.name === field.name);
-      if (!init) {
-        if (!field.hasDefault) this.error(expression, `フィールド「${field.name}」の値がありません。`);
-        return known(field.type, field.defaultValue, expression);
-      }
-      return this.coerce(this.compile(init.value, field.type), field.type, init.value);
-    });
+    const plan = this.structInitializerPlan(expression, type);
+    const elements = plan.map(({ field, value }) =>
+      value
+        ? this.coerce(this.compile(value, field.type), field.type, value)
+        : known(field.type, field.defaultValue, expression)
+    );
     return this.aggregate(type, elements, expression, (values) => {
       const slots: Value[] = [];
-      for (const [index, position] of order.entries()) slots[position] = values[index];
+      for (const [index, { position }] of plan.entries()) slots[position] = values[index];
       return new ZStruct(slots);
     });
   }

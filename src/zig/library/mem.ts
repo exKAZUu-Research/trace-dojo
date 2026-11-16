@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 577 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 578 -- Groups the related standard library operations that share this module.
 // code-gauge-allow-file duplicateLines 25 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
@@ -351,10 +351,16 @@ const MEMBERS: Record<string, () => Member> = {
   eql: generic('std.mem.eql', 3, (sema, call, type, [a, b]) => {
     const left = constSlice(sema, a, type);
     const right = constSlice(sema, b, type);
-    return computed(BOOL, [left, right], call.span, ([x, y]) => {
-      const xs = elements(x);
-      const ys = elements(y);
-      return xs.length === ys.length && xs.every((value, index) => equalValues(value, ys[index]));
+    return computed(BOOL, [left, right], call.span, ([x, y], frame) => {
+      const a = x as Slice,
+        b = y as Slice;
+      if (a.lengthValue !== b.lengthValue) return false;
+      const first = storageLocation(a.target.slots, a.start),
+        second = storageLocation(b.target.slots, b.start);
+      if (type.kind !== 'float' && first.storage === second.storage && first.index === second.index) return true;
+      const equal = comparisonBudget(sema, frame);
+      for (let index = 0; index < a.length; index++) if (!equal(a.get(index), b.get(index))) return false;
+      return true;
     });
   }),
   startsWith: sliceSearch('std.mem.startsWith', 'slice', BOOL, (haystack, needle, equal) =>
@@ -586,10 +592,10 @@ const MEMBERS: Record<string, () => Member> = {
   replaceScalar: generic('std.mem.replaceScalar', 4, (sema, call, type, [sliceArg, matchArg, replacementArg]) => {
     const slice = mutableSlice(sema, sliceArg, type);
     const [match, replacement] = compileArgs(sema, [matchArg, replacementArg], [type, type]);
-    return computed(VOID, [slice, match, replacement], call.span, ([value, from, to]) => {
+    return computed(VOID, [slice, match, replacement], call.span, ([value, from, to], frame) => {
       const target = value as Slice;
-      for (let index = 0; index < target.length; index++)
-        if (equalValues(target.get(index), from)) target.set(index, to);
+      const equal = comparisonBudget(sema, frame);
+      for (let index = 0; index < target.length; index++) if (equal(target.get(index), from)) target.set(index, to);
       return;
     });
   }),

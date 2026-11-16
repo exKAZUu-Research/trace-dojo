@@ -3342,3 +3342,55 @@ test('constant results select control-flow branches without erasing condition ef
     uncaughtException: undefined,
   });
 });
+
+test('indexed struct initialization and coercion preserve source order and defaults', () => {
+  const source = `const std=@import("std");const S=struct{a:u8=9,b:u8,c:u8=7};pub fn main()void{var s:S=.{.b=2};s=.{.b=s.a,.a=4};const v=.{.b=@as(u8,3),.a=@as(u8,8),.c=@as(u8,6)};const w:S=v;std.debug.print("{} {} {}|{} {} {}",.{s.a,s.b,s.c,w.a,w.b,w.c});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '4 9 7|8 3 6',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['typed', 'coerce', 'store'])('large %s struct matching uses indexed field positions', (mode) => {
+  const n = 3000;
+  const fields = Array.from({ length: n }, (_, index) => `f${index}:u8`).join(',');
+  const values = Array.from({ length: n }, (_, index) => `.f${n - 1 - index}=@as(u8,${index % 251})`).join(',');
+  const statement =
+    mode === 'typed'
+      ? `const x=S{${values}};`
+      : mode === 'coerce'
+        ? `const v=.{${values}};const x:S=v;`
+        : `var x:S=undefined;x=.{${values}};`;
+  const source = `const std=@import("std");const S=struct{${fields}};pub fn main()void{${statement}std.debug.print("{} {}",.{x.f0,x.f${n - 1}});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: `${(n - 1) % 251} 0`,
+    uncaughtException: undefined,
+  });
+});
+
+test('union switch captures use declared tag values rather than field positions', () => {
+  const source = `const std=@import("std");const Tag=enum(u16){a=19,b=401,c=67};const U=union(Tag){a:u8,b:i16,c:u8};pub fn main()void{var u:U=.{.b=9};_=&u;switch(u){.a,.c=>|x|std.debug.print("{}",.{x}),.b=>|x|std.debug.print("{}:{}|",.{@TypeOf(x),x})}switch(u){inline else=>|x,tag|std.debug.print("{}:{s}",.{@TypeOf(x),@tagName(tag)})}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'i16:9|i16:b',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['eql', 'replaceScalar'])('native %s scans charge every visited element', (method) => {
+  const setup = method === 'eql' ? 'var b:[300000]u8=@splat(7);_=&b;' : '';
+  const operation = method === 'eql' ? '_=std.mem.eql(u8,&a,&b);' : 'std.mem.replaceScalar(u8,&a,7,8);';
+  const source = `const std=@import("std");pub fn main()void{var a:[300000]u8=@splat(7);_=&a;${setup}for(0..4) |_|{${operation}}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('memory equality retains the reference self-address shortcut except for floats', () => {
+  const source = `const std=@import("std");pub fn main()void{const a:[300000]u8=@splat(7);for(0..4) |_|{_=std.mem.eql(u8,&a,&a);}var f=[_]f64{std.math.nan(f64)};_=&f;std.debug.print("{}",.{std.mem.eql(f64,&f,&f)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'false',
+    uncaughtException: undefined,
+  });
+});

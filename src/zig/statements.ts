@@ -720,23 +720,12 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private fieldStores(value: ExpressionOf<'structInit'>, type: Extract<Type, { kind: 'struct' }>): ResultStore {
-    const fields = this.structFields(type, value);
-    for (const init of value.fields) {
-      if (!fields.some((field) => field.name === init.name))
-        this.error(init, `${typeName(type)} 型には、フィールド「${init.name}」がありません。`);
-    }
-    const seen = new Set<string>();
-    const stores = value.fields.map((init) => {
-      if (seen.has(init.name)) this.error(init, `フィールド「${init.name}」を2回初期化しています。`);
-      seen.add(init.name);
-      const position = fields.findIndex((field) => field.name === init.name);
-      return { position, store: this.slotStore(init.value, fields[position].type) };
-    });
-    for (const [position, field] of fields.entries()) {
-      if (seen.has(field.name)) continue;
-      if (!field.hasDefault) this.error(value, `フィールド「${field.name}」の値がありません。`);
-      stores.push({ position, store: (_frame, holder, index) => storeInto(holder, index, field.defaultValue) });
-    }
+    const stores = this.structInitializerPlan(value, type).map(({ position, field, value: initializer }) => ({
+      position,
+      store: initializer
+        ? this.slotStore(initializer, field.type)
+        : (((_frame, holder, index) => storeInto(holder, index, field.defaultValue)) as ResultStore),
+    }));
     return (frame, holder, index) => {
       const struct = holder.slots[index] as ZStruct;
       for (const { position, store } of stores) store(frame, struct, position);
@@ -1821,6 +1810,18 @@ export abstract class StatementCompiler extends CallCompiler {
     const unionFields = union ? this.unionFields(union) : undefined;
     if (union && !union.tagType) this.error(expression.operand, 'タグのない union は、switch で分けられません。');
     const tagType: Type = union ? (union.tagType as EnumType) : operandType;
+    const enumTags = union ? this.enumFields(tagType as EnumType) : undefined;
+    const tagsByName = enumTags ? this.fieldIndexes(enumTags) : undefined;
+    const fieldsByTag = new Map<unknown, { name: string; type: Type }>();
+    if (unionFields && enumTags) {
+      const fieldsByName = this.fieldIndexes(unionFields);
+      for (const tag of enumTags) {
+        this.compilationBudget.spend();
+        const index = fieldsByName.get(tag.name);
+        if (index !== undefined) fieldsByTag.set(tag.value, unionFields[index]);
+      }
+    }
+
     if (
       operandType.kind === 'pointer' ||
       operandType.kind === 'optional' ||
@@ -1845,7 +1846,8 @@ export abstract class StatementCompiler extends CallCompiler {
     const keyOf = (value: Value): unknown => {
       if (union) {
         const field = unionFields?.[(value as ZUnion).tag];
-        return (tagType as EnumType).fields?.find((tag) => tag.name === field?.name)?.value;
+        const index = field ? tagsByName?.get(field.name) : undefined;
+        return index === undefined ? undefined : enumTags?.[index].value;
       }
       if (value instanceof ErrorValue) return value.name;
       return value;
@@ -1879,6 +1881,7 @@ export abstract class StatementCompiler extends CallCompiler {
           tagType,
           union,
           unionFields,
+          fieldForTag: (key) => fieldsByTag.get(key),
           resultType: target.resultType,
           asStatement,
           keyOf,
@@ -2014,6 +2017,7 @@ export abstract class StatementCompiler extends CallCompiler {
       tagType: Type;
       union: Extract<Type, { kind: 'union' }> | undefined;
       unionFields: { name: string; type: Type }[] | undefined;
+      fieldForTag: (key: unknown) => { name: string; type: Type } | undefined;
       resultType: Type | undefined;
       asStatement: boolean;
       keyOf: (value: Value) => unknown;
@@ -2021,11 +2025,9 @@ export abstract class StatementCompiler extends CallCompiler {
       skipped: boolean;
     }
   ): unknown {
-    const { operand, operandType, tagType, union, unionFields, resultType, asStatement, keyOf, seen } = context;
-    const fieldForTag = (key: unknown): { name: string; type: Type } | undefined =>
-      unionFields?.find((field) =>
-        (tagType as EnumType).fields?.some((tag) => tag.value === key && tag.name === field.name)
-      );
+    this.compilationBudget.spend();
+    const { operand, operandType, tagType, union, unionFields, fieldForTag, resultType, asStatement, keyOf, seen } =
+      context;
     const values: unknown[] = [];
     const ranges: [bigint, bigint][] = [];
     const isUnnamed = each.items.some((item) => item.value.kind === 'identifier' && isDiscardName(item.value));
@@ -2071,7 +2073,10 @@ export abstract class StatementCompiler extends CallCompiler {
     // The capture's type: a union's payload, or the operand's value.
     const captureFor = (keys: unknown[]): Type => {
       if (!union || !unionFields) return operandType;
-      const types = keys.map((key) => fieldForTag(key)?.type ?? VOID);
+      const types = keys.map((key) => {
+        this.compilationBudget.spend();
+        return fieldForTag(key)?.type ?? VOID;
+      });
       if (types.some((type) => type !== types[0])) {
         this.error(each, 'この枝の値の型がそろわないので受け取れません（inline else を使ってください）。');
       }
@@ -2152,6 +2157,7 @@ export abstract class StatementCompiler extends CallCompiler {
         }
       >();
       for (const key of keys) {
+        this.compilationBudget.spend();
         const tagValue = known(tagType, key as Value, each);
         inline.set(key, compileBody(captureFor([key]), tagValue));
       }
@@ -2168,7 +2174,10 @@ export abstract class StatementCompiler extends CallCompiler {
     }
     const keys = each.isElse ? this.remainingKeys(tagType, seen, each, true) : values;
     if (each.isElse && union && each.capture) {
-      const types = keys.map((key) => fieldForTag(key)?.type ?? VOID);
+      const types = keys.map((key) => {
+        this.compilationBudget.spend();
+        return fieldForTag(key)?.type ?? VOID;
+      });
       if (types.some((type) => type !== types[0]))
         this.error(each, 'else の枝の値の型がそろわないので受け取れません（inline else を使ってください）。');
     }
@@ -2206,6 +2215,7 @@ export abstract class StatementCompiler extends CallCompiler {
     else if (tagType.kind === 'error_set' && tagType.names) all = [...tagType.names];
     else if (lenient) return [];
     else return this.error(span, 'inline else は、enum・union・bool・エラー集合の switch にだけ書けます。');
+    this.compilationBudget.spend(all.length);
     return all.filter((key) => !seen.has(key));
   }
 
