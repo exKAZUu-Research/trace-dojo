@@ -500,8 +500,38 @@ zipWith4 :: (a -> b -> c -> d -> e) -> [a] -> [b] -> [c] -> [d] -> [e]
 zipWith4 z (a:as') (b:bs) (c:cs) (d:ds) = z a b c d : zipWith4 z as' bs cs ds
 zipWith4 _ _ _ _ _ = []
 
-lookupDefault :: Eq a => b -> a -> [(a, b)] -> b
-lookupDefault d k xs = fromMaybe d (lookup k xs)
+zip5 :: [a] -> [b] -> [c] -> [d] -> [e] -> [(a, b, c, d, e)]
+zip5 = zipWith5 (\a b c d e -> (a, b, c, d, e))
+
+zipWith5 :: (a -> b -> c -> d -> e -> f) -> [a] -> [b] -> [c] -> [d] -> [e] -> [f]
+zipWith5 z (a:as') (b:bs) (c:cs) (d:ds) (e:es) = z a b c d e : zipWith5 z as' bs cs ds es
+zipWith5 _ _ _ _ _ _ = []
+
+zip6 :: [a] -> [b] -> [c] -> [d] -> [e] -> [f] -> [(a, b, c, d, e, f)]
+zip6 = zipWith6 (\a b c d e f -> (a, b, c, d, e, f))
+
+zipWith6 :: (a -> b -> c -> d -> e -> f -> g) -> [a] -> [b] -> [c] -> [d] -> [e] -> [f] -> [g]
+zipWith6 z (a:as') (b:bs) (c:cs) (d:ds) (e:es) (f:fs) = z a b c d e f : zipWith6 z as' bs cs ds es fs
+zipWith6 _ _ _ _ _ _ _ = []
+
+zip7 :: [a] -> [b] -> [c] -> [d] -> [e] -> [f] -> [g] -> [(a, b, c, d, e, f, g)]
+zip7 = zipWith7 (\a b c d e f g -> (a, b, c, d, e, f, g))
+
+zipWith7 :: (a -> b -> c -> d -> e -> f -> g -> h) -> [a] -> [b] -> [c] -> [d] -> [e] -> [f] -> [g] -> [h]
+zipWith7 z (a:as') (b:bs) (c:cs) (d:ds) (e:es) (f:fs) (g:gs) = z a b c d e f g : zipWith7 z as' bs cs ds es fs gs
+zipWith7 _ _ _ _ _ _ _ _ = []
+
+unzip4 :: [(a, b, c, d)] -> ([a], [b], [c], [d])
+unzip4 xs = (map (\(a, _, _, _) -> a) xs, map (\(_, b, _, _) -> b) xs, map (\(_, _, c, _) -> c) xs, map (\(_, _, _, d) -> d) xs)
+
+unzip5 :: [(a, b, c, d, e)] -> ([a], [b], [c], [d], [e])
+unzip5 xs = (map (\(a, _, _, _, _) -> a) xs, map (\(_, b, _, _, _) -> b) xs, map (\(_, _, c, _, _) -> c) xs, map (\(_, _, _, d, _) -> d) xs, map (\(_, _, _, _, e) -> e) xs)
+
+unzip6 :: [(a, b, c, d, e, f)] -> ([a], [b], [c], [d], [e], [f])
+unzip6 xs = (map (\(a, _, _, _, _, _) -> a) xs, map (\(_, b, _, _, _, _) -> b) xs, map (\(_, _, c, _, _, _) -> c) xs, map (\(_, _, _, d, _, _) -> d) xs, map (\(_, _, _, _, e, _) -> e) xs, map (\(_, _, _, _, _, f) -> f) xs)
+
+unzip7 :: [(a, b, c, d, e, f, g)] -> ([a], [b], [c], [d], [e], [f], [g])
+unzip7 xs = (map (\(a, _, _, _, _, _, _) -> a) xs, map (\(_, b, _, _, _, _, _) -> b) xs, map (\(_, _, c, _, _, _, _) -> c) xs, map (\(_, _, _, d, _, _, _) -> d) xs, map (\(_, _, _, _, e, _, _) -> e) xs, map (\(_, _, _, _, _, f, _) -> f) xs, map (\(_, _, _, _, _, _, g) -> g) xs)
 
 -- Data.Bits
 
@@ -544,6 +574,21 @@ instance Bits Integer where
   clearBit x i = x .&. complement (shiftL 1 i)
   complementBit x i = x ${BT}xor${BT} shiftL 1 i
   popCount x = fromInteger (primitive "integerPopCount" x)
+  bit i = shiftL 1 i
+  zeroBits = 0
+
+instance Bits Word where
+  (.&.) = primitive "wordAnd"
+  (.|.) = primitive "wordOr"
+  xor = primitive "wordXor"
+  complement = primitive "wordComplement"
+  shiftL x n = primitive "wordShiftL" x (toInteger n)
+  shiftR x n = primitive "wordShiftR" x (toInteger n)
+  testBit x i = (x .&. shiftL 1 i) /= 0
+  setBit x i = x .|. shiftL 1 i
+  clearBit x i = x .&. complement (shiftL 1 i)
+  complementBit x i = x ${BT}xor${BT} shiftL 1 i
+  popCount x = fromInteger (primitive "wordPopCount" x)
   bit i = shiftL 1 i
   zeroBits = 0
 

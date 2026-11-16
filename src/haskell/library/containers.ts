@@ -267,6 +267,9 @@ instance Eq a => Eq (Set a) where
 instance Ord a => Ord (Set a) where
   compare a b = compare (toAscList a) (toAscList b)
 
+instance (Read a, Ord a) => Read (Set a) where
+  readsPrec d = readParen (d > 10) (\r -> [(fromList xs, t) | ("fromList", s) <- lex r, (xs, t) <- reads s])
+
 instance Show a => Show (Set a) where
   showsPrec p xs = showParen (p > 10) (showString "fromList " . shows (toAscList xs))
 
@@ -687,6 +690,9 @@ instance (Eq k, Eq a) => Eq (Map k a) where
 
 instance (Ord k, Ord v) => Ord (Map k v) where
   compare m1 m2 = compare (toAscList m1) (toAscList m2)
+
+instance (Ord k, Read k, Read e) => Read (Map k e) where
+  readsPrec d = readParen (d > 10) (\r -> [(fromList xs, t) | ("fromList", s) <- lex r, (xs, t) <- reads s])
 
 instance (Show k, Show a) => Show (Map k a) where
   showsPrec d m = showParen (d > 10) (showString "fromList " . shows (toList m))

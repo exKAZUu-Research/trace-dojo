@@ -139,15 +139,7 @@ export type Decl =
   | { kind: 'fixity'; assoc: 'infix' | 'infixl' | 'infixr'; prec: number; ops: Name[]; span: Span }
   | { kind: 'funClause'; name: Name; args: Pat[]; rhs: Rhs; span: Span }
   | { kind: 'patBind'; pat: Pat; rhs: Rhs; span: Span }
-  | {
-      kind: 'data';
-      name: Name;
-      params: Name[];
-      cons: ConDecl[];
-      deriving: QName[];
-      derivingSpan?: Span;
-      span: Span;
-    }
+  | { kind: 'data'; name: Name; params: Name[]; cons: ConDecl[]; deriving: QName[]; derivingSpan?: Span; span: Span }
   | { kind: 'typeSyn'; name: Name; params: Name[]; type: TypeExpr; span: Span }
   | { kind: 'class'; context: Constraint[]; name: Name; param: Name; decls: Decl[]; span: Span }
   | { kind: 'instance'; context: Constraint[]; cls: QName; type: TypeExpr; decls: Decl[]; span: Span };

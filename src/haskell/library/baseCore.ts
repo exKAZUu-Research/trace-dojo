@@ -436,6 +436,51 @@ instance Integral Integer where
   divMod x y = (div x y, mod x y)
   toInteger x = x
 
+instance Eq Word where
+  (==) = primitive "wordEq"
+
+instance Ord Word where
+  (<) = primitive "wordLt"
+  (<=) = primitive "wordLe"
+  x > y = y < x
+  x >= y = y <= x
+  compare = primitive "wordCompare"
+
+instance Num Word where
+  (+) = primitive "wordAdd"
+  (-) = primitive "wordSub"
+  (*) = primitive "wordMul"
+  negate = primitive "wordNegate"
+  abs x = x
+  signum = primitive "wordSignum"
+  fromInteger = primitive "integerToWord"
+
+instance Real Word where
+  toRational x = toInteger x :% 1
+
+instance Integral Word where
+  quot = primitive "wordQuot"
+  rem = primitive "wordRem"
+  div = primitive "wordQuot"
+  mod = primitive "wordRem"
+  quotRem x y = (quot x y, rem x y)
+  divMod x y = (quot x y, rem x y)
+  toInteger = primitive "intToInteger"
+
+instance Bounded Word where
+  minBound = 0
+  maxBound = 18446744073709551615
+
+instance Enum Word where
+  succ x = if x == maxBound then errorWithoutStackTrace "Enum.succ{Word}: tried to take ${BT}succ' of last tag in enumeration" else x + 1
+  pred x = if x == minBound then errorWithoutStackTrace "Enum.pred{Word}: tried to take ${BT}pred' of first tag in enumeration" else x - 1
+  toEnum n = if n < 0 then errorWithoutStackTrace ("Enum.toEnum{Word}: tag (" ++ show n ++ ") is outside of enumeration's range (0,18446744073709551615)") else fromInteger (toInteger n)
+  fromEnum x = fromInteger (toInteger x)
+  enumFrom x = map fromInteger (enumFromTo (toInteger x) 18446744073709551615)
+  enumFromTo x y = map fromInteger (enumFromTo (toInteger x) (toInteger y))
+  enumFromThen x y = map fromInteger (enumFromThenTo (toInteger x) (toInteger y) (if y >= x then 18446744073709551615 else 0))
+  enumFromThenTo x1 x2 y = map fromInteger (enumFromThenTo (toInteger x1) (toInteger x2) (toInteger y))
+
 instance Num Double where
   (+) = primitive "doubleAdd"
   (-) = primitive "doubleSub"

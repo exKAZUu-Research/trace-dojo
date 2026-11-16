@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 827 -- The Core generator covers every construct of the language in one pass over shared state.
 import {
   CHAR_TYPE,
   CONS_CON,
@@ -9,6 +10,7 @@ import {
   NIL_CON,
   tupleCon,
   UNIT_CON,
+  WORD_TYPE,
 } from './builtinTypes';
 import type { CaseCore, Core, FunctionInfo, GlobalDef, IODoCore, IOStmt, VisibleVar } from './core';
 import {
@@ -151,6 +153,7 @@ export class Codegen {
   }
 
   /** Registers how a module's instance's dictionary is built. */
+  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch fills one part of a dictionary: methods, defaults, and superclasses.
   compileInstance(info: InstanceInfo, bindings: RBinding[]): void {
     for (const binding of bindings) {
       const fun = binding as Extract<RBinding, { k: 'fun' }>;
@@ -332,6 +335,8 @@ export class Codegen {
     return isIOType(resultAfter(type, binding.clauses[0].pats.length));
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Local functions and pattern bindings need separate slot set-ups in one recursive group.
+  // code-gauge-allow functionNcss 31 -- Local functions and pattern bindings need separate slot set-ups in one recursive group.
   private compileLocalGroup(group: RBindGroup): { index: number; expr: Core }[] {
     const binds: { index: number; expr: Core }[] = [];
     const slots = new Map<RBinding, number[]>();
@@ -551,6 +556,7 @@ export class Codegen {
   // -------------------------------------------------------------------------------------------------------------
   // Expressions
 
+  // code-gauge-allow functionNcss 58 -- One short case per expression kind, each delegating to a helper.
   compileExpr(expr: RExpr): Core {
     switch (expr.k) {
       case 'var': {
@@ -650,6 +656,8 @@ export class Codegen {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 25 -- Each branch is one kind of variable reference: local, global, method, constructor, or primitive.
+  // code-gauge-allow functionNcss 31 -- Each branch is one kind of variable reference: local, global, method, constructor, or primitive.
   private compileVar(expr: Extract<RExpr, { k: 'var' }>): Core {
     const { ref } = expr;
     let head: Core;
@@ -880,7 +888,7 @@ export class Codegen {
             ? {
                 k: 'app',
                 fn: this.methodOf(stmt.fail, support.monadFail(), 'fail'),
-                args: [{ k: 'str', value: `Pattern match failure in \`do' block at ${sourceSpanText(stmt.pat.span)}` }],
+                args: [{ k: 'str', value: `Pattern match failure in 'do' block at ${sourceSpanText(stmt.pat.span)}` }],
               }
             : { k: 'error', message: 'Pattern match failure', kind: 'patternMatch' };
           return { k: 'lam', arity: 1, size: frame.size, body: this.matchPlan(plan, rest, fail) } as Core;
@@ -891,6 +899,7 @@ export class Codegen {
   }
 
   /** Generates an `IO` block whose statements record steps, with the variables each statement sees. */
+  // code-gauge-allow functionNcss 31 -- The statement kinds share the per-statement trace data computed here.
   private compileIODo(expr: Extract<RExpr, { k: 'do' }>, binding?: { row: number; storesAnswer: boolean }): IODoCore {
     const savedVisible = this.visible.length;
     const entryVisible = this.snapshotVisible();
@@ -921,7 +930,7 @@ export class Codegen {
             const plan = this.planPattern(stmt.pat, slot, true);
             const fail: Core = {
               k: 'error',
-              message: `user error (Pattern match failure in \`do' block at ${sourceSpanText(stmt.pat.span)})`,
+              message: `user error (Pattern match failure in 'do' block at ${sourceSpanText(stmt.pat.span)})`,
               kind: 'error',
             };
             matcher = this.matchPlan(plan, { k: 'con', con: UNIT_CON, args: [] }, fail);
@@ -945,13 +954,7 @@ export class Codegen {
       }
     }
     this.visible.length = savedVisible;
-    return {
-      k: 'iodo',
-      stmts,
-      bindingRow: binding?.row,
-      bindingStoresAnswer: binding?.storesAnswer,
-      entryVisible,
-    };
+    return { k: 'iodo', stmts, bindingRow: binding?.row, bindingStoresAnswer: binding?.storesAnswer, entryVisible };
   }
 
   /**
@@ -1109,6 +1112,7 @@ export class Codegen {
   }
 
   /** A numeric literal: a constant for the standard types, else `fromInteger` or `fromRational` of it. */
+  // code-gauge-allow functionCognitiveComplexity 21 -- Each branch is one literal kind with its overloaded or fixed type.
   private literalCore(
     lit: Extract<RPat, { k: 'lit' }>['lit'],
     negative: boolean,
@@ -1123,6 +1127,7 @@ export class Codegen {
       const value = negative ? -lit.value : lit.value;
       if (typeEntity === INTEGER_TYPE) return { k: 'lit', value };
       if (typeEntity === INT_TYPE) return { k: 'lit', value: BigInt.asIntN(64, value) };
+      if (typeEntity === WORD_TYPE) return { k: 'lit', value: BigInt.asUintN(64, value) };
       if (typeEntity === DOUBLE_TYPE) return { k: 'lit', value: Number(value) };
       if (typeEntity === FLOAT_TYPE) return { k: 'lit', value: Math.fround(Number(value)) };
       const support = this.options.support;
@@ -1295,7 +1300,7 @@ export function isScalarType(type: Type): boolean {
   const { head, args } = splitApp(type);
   if (head.tag !== 'tcon') return false;
   const entity = head.entity;
-  if ([INT_TYPE, INTEGER_TYPE, DOUBLE_TYPE, FLOAT_TYPE, CHAR_TYPE].includes(entity)) return true;
+  if ([INT_TYPE, INTEGER_TYPE, WORD_TYPE, DOUBLE_TYPE, FLOAT_TYPE, CHAR_TYPE].includes(entity)) return true;
   if (entity.name === 'Bool' && entity.module === 'Base') return true;
   if (entity.special === 'list' && args.length === 1) {
     const elem = splitApp(args[0]).head;

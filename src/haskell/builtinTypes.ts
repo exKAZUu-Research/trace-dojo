@@ -20,15 +20,7 @@ function primType(name: string, arity: number, special?: TypeEntity['special']):
 
 function addConstructor(type: TypeEntity, name: string, fieldTypes: Type[], isInfix = false): ConInfo {
   const entity: ValueEntity = { id: nextId(), name, module: BUILTIN_MODULE, sort: 'con' };
-  const con: ConInfo = {
-    entity,
-    type,
-    name,
-    tag: type.cons.length,
-    arity: fieldTypes.length,
-    isInfix,
-    fieldTypes,
-  };
+  const con: ConInfo = { entity, type, name, tag: type.cons.length, arity: fieldTypes.length, isInfix, fieldTypes };
   entity.con = con;
   type.cons.push(con);
   return con;
@@ -38,6 +30,7 @@ const gen = (index: number): Type => ({ tag: 'tgen', index });
 
 export const INT_TYPE = primType('Int', 0);
 export const INTEGER_TYPE = primType('Integer', 0);
+export const WORD_TYPE = primType('Word', 0);
 export const DOUBLE_TYPE = primType('Double', 0);
 export const FLOAT_TYPE = primType('Float', 0);
 export const CHAR_TYPE = primType('Char', 0);
@@ -81,4 +74,13 @@ export function tupleCon(size: number): ConInfo {
   return tupleType(size).cons[0];
 }
 
-export const PRIMITIVE_TYPES = [INT_TYPE, INTEGER_TYPE, DOUBLE_TYPE, FLOAT_TYPE, CHAR_TYPE, IO_TYPE, TURTLE_TYPE];
+export const PRIMITIVE_TYPES = [
+  INT_TYPE,
+  INTEGER_TYPE,
+  DOUBLE_TYPE,
+  FLOAT_TYPE,
+  CHAR_TYPE,
+  IO_TYPE,
+  TURTLE_TYPE,
+  WORD_TYPE,
+];

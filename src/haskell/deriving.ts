@@ -141,55 +141,13 @@ function fieldVars(builder: Builder, con: ConInfo, prefix: string): LocalVar[] {
 }
 
 function deriveEq(builder: Builder, cons: ConInfo[]): RClause[] {
-  const clauses = cons.map((con) => {
-    const xs = fieldVars(builder, con, 'a');
-    const ys = fieldVars(builder, con, 'b');
-    const comparisons = xs.map((x, index) => builder.call('==', builder.local(x), builder.local(ys[index])));
-    const body =
-      comparisons.length === 0
-        ? builder.conNamed('True')
-        : builder.foldRight(comparisons, (comparison, rest) => builder.call('&&', comparison, rest));
-    return builder.clause(
-      [
-        builder.pcon(
-          con,
-          xs.map((x) => builder.pvar(x))
-        ),
-        builder.pcon(
-          con,
-          ys.map((y) => builder.pvar(y))
-        ),
-      ],
-      body
-    );
-  });
+  const clauses = sameConClauses(builder, cons, '==', 'True', '&&');
   if (cons.length !== 1) clauses.push(builder.clause([builder.wild(), builder.wild()], builder.conNamed('False')));
   return clauses;
 }
 
 function deriveCompare(builder: Builder, cons: ConInfo[]): RClause[] {
-  const clauses = cons.map((con) => {
-    const xs = fieldVars(builder, con, 'a');
-    const ys = fieldVars(builder, con, 'b');
-    const comparisons = xs.map((x, index) => builder.call('compare', builder.local(x), builder.local(ys[index])));
-    const body =
-      comparisons.length === 0
-        ? builder.conNamed('EQ')
-        : builder.foldRight(comparisons, (comparison, rest) => builder.call('thenCmp', comparison, rest));
-    return builder.clause(
-      [
-        builder.pcon(
-          con,
-          xs.map((x) => builder.pvar(x))
-        ),
-        builder.pcon(
-          con,
-          ys.map((y) => builder.pvar(y))
-        ),
-      ],
-      body
-    );
-  });
+  const clauses = sameConClauses(builder, cons, 'compare', 'EQ', 'thenCmp');
   if (cons.length > 1) {
     const a = builder.newVar('a');
     const b = builder.newVar('b');
@@ -206,6 +164,29 @@ function deriveCompare(builder: Builder, cons: ConInfo[]): RClause[] {
   }
   if (cons.length === 0) clauses.push(builder.clause([builder.wild(), builder.wild()], builder.conNamed('EQ')));
   return clauses;
+}
+
+/**
+ * A clause for each constructor matching two values built by it, combining `method` applied to each pair of fields
+ * by `combine` from the right, or `empty` for a constructor without fields.
+ */
+function sameConClauses(builder: Builder, cons: ConInfo[], method: string, empty: string, combine: string): RClause[] {
+  return cons.map((con) => {
+    const xs = fieldVars(builder, con, 'a');
+    const ys = fieldVars(builder, con, 'b');
+    const comparisons = xs.map((x, index) => builder.call(method, builder.local(x), builder.local(ys[index])));
+    const body =
+      comparisons.length === 0
+        ? builder.conNamed(empty)
+        : builder.foldRight(comparisons, (comparison, rest) => builder.call(combine, comparison, rest));
+    const patterns = [xs, ys].map((vars) =>
+      builder.pcon(
+        con,
+        vars.map((variable) => builder.pvar(variable))
+      )
+    );
+    return builder.clause(patterns, body);
+  });
 }
 
 function isOperator(name: string): boolean {
@@ -283,6 +264,8 @@ function deriveReadClause(builder: Builder, cons: ConInfo[]): RClause {
 }
 
 /** One constructor's reader, which reads tokens and fields in sequence through `readsBind`. */
+// code-gauge-allow functionCognitiveComplexity 28 -- The branches follow the Haskell report's rules for reading prefix, infix, and record constructors.
+// code-gauge-allow functionNcss 39 -- The branches follow the Haskell report's rules for reading prefix, infix, and record constructors.
 function deriveReadAlternative(builder: Builder, con: ConInfo, d: LocalVar): RExpr {
   const xs = fieldVars(builder, con, 'a');
   const steps: ({ kind: 'token'; text: string } | { kind: 'field'; prec: number; local: LocalVar })[] = [];

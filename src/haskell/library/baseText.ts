@@ -46,6 +46,9 @@ instance Show Int where
 instance Show Integer where
   showsPrec p n r = if n < 0 && p > 6 then '(' : integerShow n ++ (')' : r) else integerShow n ++ r
 
+instance Show Word where
+  showsPrec _ n r = primitive "wordShow" n ++ r
+
 instance Show Double where
   showsPrec p x = showSignedFloat showFloat p x
   showList = showListWith (showsPrec 0)
@@ -427,6 +430,12 @@ instance Read Int where
 
 instance Read Integer where
   readsPrec p = readSignedNumber p convInteger negate
+
+instance Read Word where
+  readsPrec p = readSignedNumber p (fmap fromInteger . convInteger) negate
+
+instance (Integral a, Read a) => Read (Ratio a) where
+  readsPrec p = readParen (p > 7) (\r -> [(x % y, u) | (x, s) <- readsPrec 8 r, ("%", t) <- lex s, (y, u) <- readsPrec 8 t])
 
 instance Read Double where
   readsPrec p = readSignedNumber p convFractional negate

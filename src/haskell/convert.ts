@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 762 -- The syntax-tree conversion covers every node kind of the grammar in one pass.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type { CompileError } from '../interpreter/diagnostics';
@@ -215,7 +216,12 @@ function rejectPragmas(root: Node): void {
     const found = root.descendantsOfType(type)[0];
     if (found) throw unsupported(found);
   }
+  const unicode = root.descendantsOfType(UNICODE_TOKENS)[0];
+  if (unicode) throw unsupportedError(spanOf(unicode), `Unicode の記号 ${unicode.type}（UnicodeSyntax）`);
 }
+
+/** The Unicode forms of `->`, `<-`, `::`, `=>`, and `forall`, which GHC accepts only with UnicodeSyntax. */
+const UNICODE_TOKENS = ['→', '←', '∷', '⇒', '∀', '⊸', '★'];
 
 function moduleName(node: Node): string {
   return node.text.replaceAll(/\s+/g, '').replace(/\.$/, '');
@@ -504,6 +510,7 @@ function convertLocalBinds(node: Node | undefined): Decl[] {
   return namedChildren(node).flatMap((child) => convertDecl(child));
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Each branch rejects one unsupported form of a data declaration.
 function convertData(node: Node): Decl {
   for (const name of ['context', 'forall', 'kind', 'head']) {
     const child = field(node, name);
@@ -579,6 +586,8 @@ function typeParams(node: Node): Name[] {
   });
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Each branch is one constructor form: prefix, infix, or record.
+// code-gauge-allow functionNcss 34 -- Each branch is one constructor form: prefix, infix, or record.
 function convertConstructor(node: Node): ConDecl {
   for (const name of ['context', 'forall']) {
     const child = field(node, name);
@@ -779,6 +788,8 @@ function convertQuantifiedType(node: Node): TypeExpr {
   return convertType(node);
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- One case per type node kind of the grammar.
+// code-gauge-allow functionNcss 58 -- One case per type node kind of the grammar.
 function convertType(node: Node): TypeExpr {
   const span = spanOf(node);
   if (node.type === 'prefix_tuple' && isLibrary) {
@@ -799,10 +810,8 @@ function convertType(node: Node): TypeExpr {
       return { kind: 'tvar', name: node.text, span };
     }
     case 'apply': {
-      const constructor = field(node, 'constructor') ?? field(node, 'function');
-      const argument = required(node, 'argument');
-      if (!constructor) throw syntaxError(span, '書き方に誤りがあります。');
-      return { kind: 'tapp', fn: convertType(constructor), arg: convertType(argument), span };
+      const constructor = field(node, 'constructor') ?? required(node, 'function');
+      return { kind: 'tapp', fn: convertType(constructor), arg: convertType(required(node, 'argument')), span };
     }
     case 'function': {
       const parameter = required(node, 'parameter');
@@ -814,9 +823,7 @@ function convertType(node: Node): TypeExpr {
     }
     case 'list': {
       const elements = fields(node, 'element');
-      if (elements.length !== 1) {
-        throw unsupportedError(span, elements.length === 0 ? '型の [] の前置き' : "昇格したリストの型（'[a, b]）");
-      }
+      if (elements.length !== 1) throw unsupportedError(span, "昇格したリストの型（'[a, b]）");
       return { kind: 'tlist', elem: convertType(elements[0]), span };
     }
     case 'tuple': {
@@ -860,6 +867,7 @@ function convertType(node: Node): TypeExpr {
 // ---------------------------------------------------------------------------------------------------------------
 // Expressions
 
+// code-gauge-allow functionNcss 59 -- One short case per expression node kind of the grammar.
 export function convertExpr(node: Node): Expr {
   rejectUnsupported(node);
   const span = spanOf(node);
@@ -894,56 +902,18 @@ export function convertExpr(node: Node): Expr {
       if (!inner) throw syntaxError(span, '書き方に誤りがあります。');
       return { kind: 'paren', expr: convertExpr(inner), span };
     }
-    case 'tuple': {
-      const elements = fields(node, 'element');
-      const commas = node.children.filter((child) => child?.type === ',').length;
-      if (elements.length !== commas + 1) throw unsupportedError(span, 'タプルの節（TupleSections）');
-      return { kind: 'tuple', elems: elements.map(convertExpr), span };
+    case 'tuple':
+    case 'list':
+    case 'arithmetic_sequence':
+    case 'list_comprehension': {
+      return convertCollection(node, span);
     }
     case 'unit': {
       return { kind: 'con', name: { name: '()', span }, span };
     }
-    case 'list': {
-      return { kind: 'list', elems: fields(node, 'element').map(convertExpr), span };
-    }
-    case 'arithmetic_sequence': {
-      const step = field(node, 'step');
-      const to = field(node, 'to');
-      return {
-        kind: 'arith',
-        from: convertExpr(required(node, 'from')),
-        next: step ? convertExpr(step) : undefined,
-        to: to ? convertExpr(to) : undefined,
-        span,
-      };
-    }
-    case 'list_comprehension': {
-      const qualifiersNodes = fields(node, 'qualifiers');
-      if (qualifiersNodes.length !== 1) throw unsupportedError(span, '並列の内包表記（ParallelListComp）');
-      return {
-        kind: 'comprehension',
-        expr: convertExpr(required(node, 'expression')),
-        quals: fields(qualifiersNodes[0], 'qualifier').map(convertQualifier),
-        span,
-      };
-    }
-    case 'left_section': {
-      return {
-        kind: 'leftSection',
-        left: convertExpr(required(node, 'left_operand')),
-        op: convertOperator(required(node, 'operator')),
-        span,
-      };
-    }
+    case 'left_section':
     case 'right_section': {
-      const operator = unnamedFieldChildren(node)[0];
-      if (!operator) throw syntaxError(span, '書き方に誤りがあります。');
-      return {
-        kind: 'rightSection',
-        op: convertOperator(operator),
-        right: convertExpr(required(node, 'right_operand')),
-        span,
-      };
+      return convertSection(node, span);
     }
     case 'lambda': {
       const patterns = namedChildren(required(node, 'patterns')).map(convertPattern);
@@ -958,24 +928,9 @@ export function convertExpr(node: Node): Expr {
         span,
       };
     }
-    case 'case': {
-      const scrutinee = unnamedFieldChildren(node)[0];
-      if (!scrutinee) throw syntaxError(span, '書き方に誤りがあります。');
-      const alternatives = field(node, 'alternatives');
-      return {
-        kind: 'case',
-        scrutinee: convertExpr(scrutinee),
-        alts: alternatives ? fields(alternatives, 'alternative').map(convertAlternative) : [],
-        span,
-      };
-    }
+    case 'case':
     case 'do': {
-      const doModule = namedChildren(node).find((child) => child.type === 'do_module');
-      if (doModule) throw unsupported(doModule);
-      if (hasToken(node, 'mdo')) throw unsupportedError(span, 'mdo（RecursiveDo）');
-      const statements = fields(node, 'statement').map(convertStatement);
-      if (statements.length === 0) throw syntaxError(span, 'do の中に文がありません。');
-      return { kind: 'do', stmts: statements, span };
+      return convertBlock(node, span);
     }
     case 'let_in': {
       return {
@@ -998,6 +953,111 @@ export function convertExpr(node: Node): Expr {
       throw syntaxError(span, '書き方に誤りがあります。');
     }
   }
+}
+
+function convertSection(node: Node, span: Span): Expr {
+  if (node.type === 'left_section') {
+    return {
+      kind: 'leftSection',
+      left: convertExpr(required(node, 'left_operand')),
+      op: convertOperator(required(node, 'operator')),
+      span,
+    };
+  }
+  const operator = unnamedFieldChildren(node)[0];
+  if (!operator) throw syntaxError(span, '書き方に誤りがあります。');
+  return {
+    kind: 'rightSection',
+    op: convertOperator(operator),
+    right: convertExpr(required(node, 'right_operand')),
+    span,
+  };
+}
+
+function convertCollection(node: Node, span: Span): Expr {
+  switch (node.type) {
+    case 'tuple': {
+      const elements = fields(node, 'element');
+      const commas = node.children.filter((child) => child?.type === ',').length;
+      if (elements.length !== commas + 1) throw unsupportedError(span, 'タプルの節（TupleSections）');
+      return { kind: 'tuple', elems: elements.map(convertExpr), span };
+    }
+    case 'list': {
+      return { kind: 'list', elems: fields(node, 'element').map(convertExpr), span };
+    }
+    case 'arithmetic_sequence': {
+      const step = field(node, 'step');
+      const to = field(node, 'to');
+      return {
+        kind: 'arith',
+        from: convertExpr(required(node, 'from')),
+        next: step ? convertExpr(step) : undefined,
+        to: to ? convertExpr(to) : undefined,
+        span,
+      };
+    }
+    case 'list_comprehension': {
+      const qualifiersNodes = fields(node, 'qualifiers');
+      if (qualifiersNodes.length !== 1) throw unsupportedError(span, '並列の内包表記（ParallelListComp）');
+      return {
+        kind: 'comprehension',
+        expr: convertExpr(required(node, 'expression')),
+        quals: fields(qualifiersNodes[0], 'qualifier').map(convertStatement),
+        span,
+      };
+    }
+    default: {
+      throw syntaxError(span, '書き方に誤りがあります。');
+    }
+  }
+}
+
+function convertBlock(node: Node, span: Span): Expr {
+  switch (node.type) {
+    case 'case': {
+      const scrutinee = unnamedFieldChildren(node)[0];
+      if (!scrutinee) throw syntaxError(span, '書き方に誤りがあります。');
+      const alternatives = field(node, 'alternatives');
+      if (!alternatives || fields(alternatives, 'alternative').length === 0) {
+        throw unsupportedError(span, '選択肢のない case（EmptyCase）');
+      }
+      return {
+        kind: 'case',
+        scrutinee: convertExpr(scrutinee),
+        alts: alternatives ? fields(alternatives, 'alternative').map(convertAlternative) : [],
+        span,
+      };
+    }
+    case 'do': {
+      const doModule = namedChildren(node).find((child) => child.type === 'do_module');
+      if (doModule) throw unsupported(doModule);
+      if (hasToken(node, 'mdo')) throw unsupportedError(span, 'mdo（RecursiveDo）');
+      const statements = fields(node, 'statement').map(convertStatement);
+      if (statements.length === 0) throw syntaxError(span, 'do の中に文がありません。');
+      return { kind: 'do', stmts: statements, span };
+    }
+    default: {
+      throw syntaxError(span, '書き方に誤りがあります。');
+    }
+  }
+}
+
+function convertRecordPattern(node: Node, span: Span): Pat {
+  const con = convertPattern(required(node, 'constructor'));
+  if (con.kind !== 'pcon' || con.args.length > 0) throw syntaxError(span, '書き方に誤りがあります。');
+  const fieldPatterns = fields(node, 'field').map((fieldNode) => {
+    rejectUnsupported(fieldNode);
+    const wildcard = namedChildren(fieldNode).find((child) => child.type === 'wildcard');
+    if (wildcard) throw unsupportedError(spanOf(wildcard), 'レコードのワイルドカード（RecordWildCards）');
+    const pattern = field(fieldNode, 'pattern');
+    if (!pattern) throw unsupportedError(spanOf(fieldNode), 'フィールド名だけのレコードのパターン（NamedFieldPuns）');
+    return {
+      field: qualifiedName(required(fieldNode, 'field')).name,
+      pat: convertPattern(pattern),
+      span: spanOf(fieldNode),
+    };
+  });
+  return { kind: 'precord', con: con.con, fields: fieldPatterns, span };
 }
 
 function convertRecordExpr(node: Node): Expr {
@@ -1025,49 +1085,23 @@ function convertAlternative(node: Node): Alt {
   return { pat: convertPattern(required(node, 'pattern')), rhs: convertRhs(node, '->'), span: spanOf(node) };
 }
 
+/** Converts a statement of a `do` block or a qualifier of a list comprehension. */
 function convertStatement(node: Node): Stmt {
   rejectUnsupported(node);
   const span = spanOf(node);
   switch (node.type) {
-    case 'exp': {
+    case 'exp':
+    case 'boolean': {
       return { kind: 'exp', expr: convertExpr(namedChildren(node)[0] ?? node), span };
     }
-    case 'bind': {
-      if (!field(node, 'arrow')) {
+    case 'bind':
+    case 'generator': {
+      if (node.type === 'bind' && !field(node, 'arrow')) {
         throw syntaxError(span, 'do の中で束縛するには、let か <- を使ってください。');
       }
       const patternNode = field(node, 'pattern') ?? field(node, 'name');
       if (!patternNode) throw syntaxError(span, '書き方に誤りがあります。');
-      return {
-        kind: 'bind',
-        pat: convertPattern(patternNode),
-        expr: convertExpr(required(node, 'expression')),
-        span,
-      };
-    }
-    case 'let': {
-      return { kind: 'let', decls: convertLocalBinds(field(node, 'binds')), span };
-    }
-    default: {
-      throw syntaxError(span, '書き方に誤りがあります。');
-    }
-  }
-}
-
-function convertQualifier(node: Node): Stmt {
-  rejectUnsupported(node);
-  const span = spanOf(node);
-  switch (node.type) {
-    case 'generator': {
-      return {
-        kind: 'bind',
-        pat: convertPattern(required(node, 'pattern')),
-        expr: convertExpr(required(node, 'expression')),
-        span,
-      };
-    }
-    case 'boolean': {
-      return { kind: 'exp', expr: convertExpr(namedChildren(node)[0] ?? node), span };
+      return { kind: 'bind', pat: convertPattern(patternNode), expr: convertExpr(required(node, 'expression')), span };
     }
     case 'let': {
       return { kind: 'let', decls: convertLocalBinds(field(node, 'binds')), span };
@@ -1120,6 +1154,7 @@ function convertLiteral(node: Node): Literal {
 // ---------------------------------------------------------------------------------------------------------------
 // Patterns
 
+// code-gauge-allow functionNcss 52 -- One short case per pattern node kind of the grammar.
 export function convertPattern(node: Node): Pat {
   rejectUnsupported(node);
   const span = spanOf(node);
@@ -1179,20 +1214,7 @@ export function convertPattern(node: Node): Pat {
       };
     }
     case 'record': {
-      const constructor = required(node, 'constructor');
-      const con = convertPattern(constructor);
-      if (con.kind !== 'pcon' || con.args.length > 0) throw syntaxError(span, '書き方に誤りがあります。');
-      const fieldPatterns = fields(node, 'field').map((fieldNode) => {
-        rejectUnsupported(fieldNode);
-        const wildcard = namedChildren(fieldNode).find((child) => child.type === 'wildcard');
-        if (wildcard) throw unsupportedError(spanOf(wildcard), 'レコードのワイルドカード（RecordWildCards）');
-        const fieldName = required(fieldNode, 'field');
-        const pattern = field(fieldNode, 'pattern');
-        if (!pattern)
-          throw unsupportedError(spanOf(fieldNode), 'フィールド名だけのレコードのパターン（NamedFieldPuns）');
-        return { field: qualifiedName(fieldName).name, pat: convertPattern(pattern), span: spanOf(fieldNode) };
-      });
-      return { kind: 'precord', con: con.con, fields: fieldPatterns, span };
+      return convertRecordPattern(node, span);
     }
     case 'infix_chain': {
       return { kind: 'pchain', items: chainItems(node, convertPattern), span };

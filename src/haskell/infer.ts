@@ -1,9 +1,23 @@
+// code-gauge-allow-file fileNcss 677 -- The type checker keeps its inference rules beside the substitution state they share.
 import { CHAR_TYPE, FUNCTION_TYPE, LIST_TYPE, tupleCon } from './builtinTypes';
 import { type ClassEnv, entailByGivens, hasConstructorHead, isSubclassOf, predsEqual } from './classEnv';
+import { dependencyOrder } from './dependencies';
 import type { ClassEntity, ConInfo, DictParam, Evidence, EvidenceHole, TypeEntity, ValueEntity } from './entities';
 import { compileError } from './errors';
 import { TypePrinter } from './prettyType';
-import type { Binder, LocalVar, RBindGroup, RBinding, RExpr, RPat, RRhs, RSigType, RStmt, RType, VarRef } from './rast';
+import type {
+  Binder,
+  RBindGroup,
+  RBinding,
+  RExpr,
+  RFieldBind,
+  RPat,
+  RRhs,
+  RSigType,
+  RStmt,
+  RType,
+  VarRef,
+} from './rast';
 import type { Span } from './syntax';
 import {
   defaultKind,
@@ -157,6 +171,7 @@ export class Checker {
    * Reduces the wanted constraints by instances until each has a type variable at its head, then splits them into
    * those about the binding being generalized (retained) and those about enclosing ones (deferred).
    */
+  // code-gauge-allow functionCognitiveComplexity 19 -- Context reduction follows the steps of the Haskell report in one loop.
   simplify(holes: EvidenceHole[], outerLevel: number): { retained: EvidenceHole[]; deferred: EvidenceHole[] } {
     const retained: EvidenceHole[] = [];
     const deferred: EvidenceHole[] = [];
@@ -274,20 +289,9 @@ export class Checker {
 
   /** Converts a signature into a scheme, quantifying its type variables in order of appearance. */
   sigToScheme(sig: RSigType, fixed?: { name: string; type: Type }): Scheme {
-    const names: string[] = [];
-    const collect = (type: RType): void => {
-      if (type.k === 'var') {
-        if (type.name !== fixed?.name && !names.includes(type.name)) names.push(type.name);
-      } else if (type.k === 'app') {
-        collect(type.fn);
-        collect(type.arg);
-      } else if (type.k === 'fun') {
-        collect(type.from);
-        collect(type.to);
-      }
-    };
-    collect(sig.type);
-    for (const constraint of sig.context) collect(constraint.type);
+    const names = typeVarNames([sig.type, ...sig.context.map((constraint) => constraint.type)]).filter(
+      (name) => name !== fixed?.name
+    );
     const kinds: Kind[] = names.map(() => freshKindVar());
     const vars = new Map<string, Type>(names.map((name, index) => [name, { tag: 'tgen', index }]));
     const varKinds = new Map<string, Kind>(names.map((name, index) => [name, kinds[index]]));
@@ -333,64 +337,75 @@ export class Checker {
       }
       case 'con':
       case 'app': {
-        const args: RType[] = [];
-        let head: RType = type;
-        while (head.k === 'app') {
-          args.unshift(head.arg);
-          head = head.fn;
-        }
-        if (head.k === 'con' && head.entity.sort === 'synonym') {
-          const entity = head.entity;
-          if (args.length < entity.arity) {
-            typeError(type.span, `型シノニム ${entity.name} には ${entity.arity} 個の型引数が要ります。`);
-          }
-          const synonymArgs = args.slice(0, entity.arity).map((arg) => this.convertTypeKind(arg, vars, varKinds));
-          const paramKinds = synonymParamKinds(entity);
-          for (const [index, arg] of synonymArgs.entries()) {
-            if (!unifyKinds(arg.kind, paramKinds[index])) {
-              typeError(args[index].span, `型の種類（カインド）が合いません（${entity.name} の型引数）。`);
-            }
-          }
-          let result: Type = instantiateType(
-            entity.synonym as Type,
-            synonymArgs.map((arg) => arg.type)
-          );
-          let kind = kindOfType(result);
-          for (const arg of args.slice(entity.arity)) {
-            const converted = this.convertTypeKind(arg, vars, varKinds);
-            const resultKind = freshKindVar();
-            if (!unifyKinds(kind, kindArrow(converted.kind, resultKind))) {
-              typeError(type.span, '型の種類（カインド）が合いません。型引数が多すぎます。');
-            }
-            result = tap(result, converted.type);
-            kind = resultKind;
-          }
-          return { type: result, kind };
-        }
-        const headConverted =
-          head.k === 'con'
-            ? { type: tcon(head.entity) as Type, kind: head.entity.kind }
-            : this.convertTypeKind(head, vars, varKinds);
-        let result = headConverted.type;
-        let kind = headConverted.kind;
-        for (const arg of args) {
-          const converted = this.convertTypeKind(arg, vars, varKinds);
-          const resultKind = freshKindVar();
-          if (!unifyKinds(kind, kindArrow(converted.kind, resultKind))) {
-            const pruned = pruneKind(kind);
-            typeError(
-              arg.span,
-              pruned.tag === 'star'
-                ? '型の種類（カインド）が合いません。型引数をとらない型に、型引数を書いています。'
-                : '型の種類（カインド）が合いません。'
-            );
-          }
-          result = tap(result, converted.type);
-          kind = resultKind;
-        }
-        return { type: result, kind };
+        return this.convertAppliedType(type, vars, varKinds);
       }
     }
+  }
+
+  /** Converts a type constructor applied to arguments, expanding a synonym at its head. */
+  private convertAppliedType(
+    type: RType,
+    vars: ReadonlyMap<string, Type>,
+    varKinds: ReadonlyMap<string, Kind>
+  ): { type: Type; kind: Kind } {
+    const args: RType[] = [];
+    let head: RType = type;
+    while (head.k === 'app') {
+      args.unshift(head.arg);
+      head = head.fn;
+    }
+    if (head.k === 'con' && head.entity.sort === 'synonym') {
+      const entity = head.entity;
+      if (args.length < entity.arity) {
+        typeError(type.span, `型シノニム ${entity.name} には ${entity.arity} 個の型引数が要ります。`);
+      }
+      const synonymArgs = args.slice(0, entity.arity).map((arg) => this.convertTypeKind(arg, vars, varKinds));
+      const paramKinds = synonymParamKinds(entity);
+      for (const [index, arg] of synonymArgs.entries()) {
+        if (!unifyKinds(arg.kind, paramKinds[index])) {
+          typeError(args[index].span, `型の種類（カインド）が合いません（${entity.name} の型引数）。`);
+        }
+      }
+      const expanded = instantiateType(
+        entity.synonym as Type,
+        synonymArgs.map((arg) => arg.type)
+      );
+      return this.applyTypeArgs(
+        { type: expanded, kind: kindOfType(expanded) },
+        args.slice(entity.arity),
+        vars,
+        varKinds
+      );
+    }
+    const converted =
+      head.k === 'con'
+        ? { type: tcon(head.entity) as Type, kind: head.entity.kind }
+        : this.convertTypeKind(head, vars, varKinds);
+    return this.applyTypeArgs(converted, args, vars, varKinds);
+  }
+
+  private applyTypeArgs(
+    head: { type: Type; kind: Kind },
+    args: RType[],
+    vars: ReadonlyMap<string, Type>,
+    varKinds: ReadonlyMap<string, Kind>
+  ): { type: Type; kind: Kind } {
+    let { type: result, kind } = head;
+    for (const arg of args) {
+      const converted = this.convertTypeKind(arg, vars, varKinds);
+      const resultKind = freshKindVar();
+      if (!unifyKinds(kind, kindArrow(converted.kind, resultKind))) {
+        typeError(
+          arg.span,
+          pruneKind(kind).tag === 'star'
+            ? '型の種類（カインド）が合いません。型引数をとらない型に、型引数を書いています。'
+            : '型の種類（カインド）が合いません。'
+        );
+      }
+      result = tap(result, converted.type);
+      kind = resultKind;
+    }
+    return { type: result, kind };
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -427,6 +442,7 @@ export class Checker {
     this.unify(actual, expected, expr.span, context);
   }
 
+  // code-gauge-allow functionNcss 54 -- One short case per expression kind, each delegating to a helper.
   private inferExprInner(expr: RExpr): Type {
     switch (expr.k) {
       case 'var': {
@@ -439,27 +455,10 @@ export class Checker {
         return this.inferLiteral(expr);
       }
       case 'app': {
-        const fnType_ = this.inferExpr(expr.fn);
-        const fn = prune(fnType_);
-        const { head, args } = splitApp(fn);
-        if (head.tag === 'tcon' && head.entity === FUNCTION_TYPE && args.length === 2) {
-          this.checkExpr(expr.arg, args[0], argumentContext(expr.fn));
-          return args[1];
-        }
-        const argType = this.inferExpr(expr.arg);
-        const result = this.freshVar();
-        this.unify(fn, fnType(argType, result), expr.span, '関数の適用');
-        return result;
+        return this.inferApp(expr);
       }
       case 'lambda': {
-        const paramTypes = expr.pats.map((pat) => {
-          const type = this.freshVar();
-          this.inferPat(pat, type);
-          return type;
-        });
-        let result = this.inferExpr(expr.body);
-        for (const paramType of paramTypes.toReversed()) result = fnType(paramType, result);
-        return result;
+        return this.inferLambda(expr);
       }
       case 'let': {
         this.inferBindGroup(expr.binds, false);
@@ -472,20 +471,13 @@ export class Checker {
         return type;
       }
       case 'case': {
-        const scrutineeType = this.inferExpr(expr.scrutinee);
-        const result = this.freshVar();
-        for (const alt of expr.alts) {
-          this.inferPat(alt.pat, scrutineeType);
-          this.checkRhs(alt.rhs, result);
-        }
-        return result;
+        return this.inferCase(expr);
       }
       case 'do': {
         return this.inferDo(expr);
       }
       case 'tuple': {
-        const con = tupleCon(expr.elems.length);
-        return tap(tcon(con.type), ...expr.elems.map((elem) => this.inferExpr(elem)));
+        return tap(tcon(tupleCon(expr.elems.length).type), ...expr.elems.map((elem) => this.inferExpr(elem)));
       }
       case 'list': {
         const elem = this.freshVar();
@@ -494,9 +486,7 @@ export class Checker {
       }
       case 'arith': {
         const elem = this.freshVar();
-        this.checkExpr(expr.from, elem);
-        if (expr.next) this.checkExpr(expr.next, elem);
-        if (expr.to) this.checkExpr(expr.to, elem);
+        for (const part of [expr.from, expr.next, expr.to]) if (part) this.checkExpr(part, elem);
         expr.evidence = this.want({ cls: this.builtins.enum, type: elem }, expr.span, '範囲の式');
         return listOf(elem);
       }
@@ -505,13 +495,7 @@ export class Checker {
         return listOf(this.inferExpr(expr.expr));
       }
       case 'rsection': {
-        const opType = this.inferExpr(expr.op);
-        const a = this.freshVar();
-        const b = this.freshVar();
-        const c = this.freshVar();
-        this.unify(opType, fnType(a, fnType(b, c)), expr.op.span);
-        this.checkExpr(expr.right, b);
-        return fnType(a, c);
+        return this.inferRightSection(expr);
       }
       case 'typed': {
         const scheme = this.sigToScheme(expr.sig);
@@ -520,28 +504,78 @@ export class Checker {
       }
       case 'recordCon': {
         const { type, fieldTypes } = this.instantiateCon(expr.con, expr.span);
-        for (const fieldBind of expr.fields) {
-          const position = fieldBind.field.positions.get(expr.con) as number;
-          this.checkExpr(fieldBind.value, fieldTypes[position], `フィールド ${fieldBind.field.name}`);
-        }
+        this.checkFields(expr.fields, expr.con, fieldTypes);
         return type;
       }
       case 'recordUpdate': {
-        const target = this.inferExpr(expr.expr);
-        const owner = expr.fields[0].field.type;
-        const cons = owner.cons.filter((con) => expr.fields.every((fieldBind) => fieldBind.field.positions.has(con)));
-        if (cons.length === 0 || !expr.fields.every((fieldBind) => fieldBind.field.type === owner)) {
-          typeError(expr.span, 'これらのフィールドをすべて持つ構成子がありません。');
-        }
-        expr.cons = cons;
-        const { type, fieldTypes } = this.instantiateCon(cons[0], expr.span);
-        this.unify(target, type, expr.expr.span, 'レコードの更新');
-        for (const fieldBind of expr.fields) {
-          const position = fieldBind.field.positions.get(cons[0]) as number;
-          this.checkExpr(fieldBind.value, fieldTypes[position], `フィールド ${fieldBind.field.name}`);
-        }
-        return type;
+        return this.inferRecordUpdate(expr);
       }
+    }
+  }
+
+  private inferLambda(expr: Extract<RExpr, { k: 'lambda' }>): Type {
+    const paramTypes = expr.pats.map((pat) => {
+      const type = this.freshVar();
+      this.inferPat(pat, type);
+      return type;
+    });
+    let result = this.inferExpr(expr.body);
+    for (const paramType of paramTypes.toReversed()) result = fnType(paramType, result);
+    return result;
+  }
+
+  private inferCase(expr: Extract<RExpr, { k: 'case' }>): Type {
+    const scrutineeType = this.inferExpr(expr.scrutinee);
+    const result = this.freshVar();
+    for (const alt of expr.alts) {
+      this.inferPat(alt.pat, scrutineeType);
+      this.checkRhs(alt.rhs, result);
+    }
+    return result;
+  }
+
+  private inferApp(expr: Extract<RExpr, { k: 'app' }>): Type {
+    const fn = prune(this.inferExpr(expr.fn));
+    const { head, args } = splitApp(fn);
+    if (head.tag === 'tcon' && head.entity === FUNCTION_TYPE && args.length === 2) {
+      this.checkExpr(expr.arg, args[0], argumentContext(expr.fn));
+      return args[1];
+    }
+    const argType = this.inferExpr(expr.arg);
+    const result = this.freshVar();
+    this.unify(fn, fnType(argType, result), expr.span, '関数の適用');
+    return result;
+  }
+
+  /** `(op e)`, which is `\x -> op x e`. */
+  private inferRightSection(expr: Extract<RExpr, { k: 'rsection' }>): Type {
+    const opType = this.inferExpr(expr.op);
+    const a = this.freshVar();
+    const b = this.freshVar();
+    const c = this.freshVar();
+    this.unify(opType, fnType(a, fnType(b, c)), expr.op.span);
+    this.checkExpr(expr.right, b);
+    return fnType(a, c);
+  }
+
+  private inferRecordUpdate(expr: Extract<RExpr, { k: 'recordUpdate' }>): Type {
+    const target = this.inferExpr(expr.expr);
+    const owner = expr.fields[0].field.type;
+    const cons = owner.cons.filter((con) => expr.fields.every((fieldBind) => fieldBind.field.positions.has(con)));
+    if (cons.length === 0 || !expr.fields.every((fieldBind) => fieldBind.field.type === owner)) {
+      typeError(expr.span, 'これらのフィールドをすべて持つ構成子がありません。');
+    }
+    expr.cons = cons;
+    const { type, fieldTypes } = this.instantiateCon(cons[0], expr.span);
+    this.unify(target, type, expr.expr.span, 'レコードの更新');
+    this.checkFields(expr.fields, cons[0], fieldTypes);
+    return type;
+  }
+
+  private checkFields(fields: readonly RFieldBind[], con: ConInfo, fieldTypes: readonly Type[]): void {
+    for (const fieldBind of fields) {
+      const position = fieldBind.field.positions.get(con) as number;
+      this.checkExpr(fieldBind.value, fieldTypes[position], `フィールド ${fieldBind.field.name}`);
     }
   }
 
@@ -575,6 +609,7 @@ export class Checker {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- The statement kinds share the monad type threaded through the block.
   private inferDo(expr: Extract<RExpr, { k: 'do' }>): Type {
     const needsMonad = expr.stmts.some(
       (stmt, index) => stmt.k === 'bind' || (stmt.k === 'exp' && index < expr.stmts.length - 1)
@@ -637,6 +672,7 @@ export class Checker {
   // -------------------------------------------------------------------------------------------------------------
   // Patterns
 
+  // code-gauge-allow functionNcss 36 -- One short case per pattern kind.
   inferPat(pat: RPat, type: Type): void {
     switch (pat.k) {
       case 'var': {
@@ -750,22 +786,7 @@ export class Checker {
     this.level++;
     const saved = this.wanted;
     this.wanted = [];
-    const monoTypes = new Map<RBinding, Type>();
-    for (const binding of bindings) {
-      const type = this.freshVar();
-      monoTypes.set(binding, type);
-      if (binding.k === 'fun') this.setMono(binding.binder, type);
-    }
-    for (const binding of bindings) {
-      if (binding.k === 'pat') {
-        // A pattern binding's variables are monomorphic within the group.
-        this.inferPat(binding.pat, monoTypes.get(binding) as Type);
-        for (const [index, local] of binding.binders.entries()) {
-          const global = binding.globals?.[index];
-          if (global) this.globalMono.set(global, local.type as Type);
-        }
-      }
-    }
+    const monoTypes = this.assignMonoTypes(bindings);
     for (const binding of bindings) {
       const type = monoTypes.get(binding) as Type;
       if (binding.k === 'pat') this.checkRhs(binding.rhs, type);
@@ -775,6 +796,44 @@ export class Checker {
     const inner = this.wanted;
     this.wanted = saved;
     const { retained, deferred } = this.simplify(inner, outer);
+    const kept = this.keepGeneralizable(bindings, monoTypes, retained, deferred, outer);
+    const params = this.makeDictParams(kept);
+    for (const binding of bindings) this.generalizeBinding(binding, monoTypes.get(binding) as Type, params, outer);
+    this.wanted.push(...deferred);
+  }
+
+  /** Gives each binding of a group a monomorphic type, which its own and its group's uses see while inferring. */
+  private assignMonoTypes(bindings: RBinding[]): Map<RBinding, Type> {
+    const monoTypes = new Map<RBinding, Type>();
+    for (const binding of bindings) {
+      const type = this.freshVar();
+      monoTypes.set(binding, type);
+      if (binding.k === 'fun') {
+        this.setMono(binding.binder, type);
+        continue;
+      }
+      this.inferPat(binding.pat, type);
+      for (const [index, local] of binding.binders.entries()) {
+        const global = binding.globals?.[index];
+        if (global) this.globalMono.set(global, local.type as Type);
+      }
+    }
+    return monoTypes;
+  }
+
+  /**
+   * The constraints a group generalizes over. The monomorphism restriction (a pattern binding or one without
+   * arguments) and an ambiguous variable (one the types do not mention) defer theirs to the enclosing binding, which
+   * may default them.
+   */
+  // code-gauge-allow functionCognitiveComplexity 19 -- The monomorphism restriction and defaulting decide together which predicates stay.
+  private keepGeneralizable(
+    bindings: RBinding[],
+    monoTypes: ReadonlyMap<RBinding, Type>,
+    retained: EvidenceHole[],
+    deferred: EvidenceHole[],
+    outer: number
+  ): EvidenceHole[] {
     const restricted = bindings.some((binding) => binding.k === 'pat' || binding.clauses[0].pats.length === 0);
     const bindingTypes = new Set<TVar>();
     for (const binding of bindings) {
@@ -786,32 +845,31 @@ export class Checker {
     const kept: EvidenceHole[] = [];
     for (const hole of retained) {
       const vars = [...typeVarsOf(hole.pred.type)].filter((variable) => variable.level > outer);
-      if (restricted || vars.some((variable) => !bindingTypes.has(variable))) {
-        for (const variable of vars) variable.level = outer;
-        deferred.push(hole);
-      } else {
+      if (!restricted && vars.every((variable) => bindingTypes.has(variable))) {
         kept.push(hole);
+        continue;
+      }
+      for (const variable of vars) variable.level = outer;
+      deferred.push(hole);
+    }
+    return kept;
+  }
+
+  private generalizeBinding(binding: RBinding, monoType: Type, params: DictParam[], outer: number): void {
+    binding.dictParams = params;
+    if (binding.k === 'fun') {
+      setBinderScheme(binding.binder, this.generalize(monoType, params, outer));
+      if (binding.binder.kind === 'global') this.globalMono.delete(binding.binder.entity);
+      return;
+    }
+    for (const [index, local] of binding.binders.entries()) {
+      local.scheme = this.generalize(local.type as Type, params, outer);
+      const global = binding.globals?.[index];
+      if (global) {
+        global.scheme = local.scheme;
+        this.globalMono.delete(global);
       }
     }
-    const params = this.makeDictParams(kept);
-    for (const binding of bindings) {
-      binding.dictParams = params;
-      if (binding.k === 'pat') {
-        for (const [index, local] of binding.binders.entries()) {
-          local.scheme = this.generalize(local.type as Type, params, outer);
-          const global = binding.globals?.[index];
-          if (global) {
-            global.scheme = local.scheme;
-            this.globalMono.delete(global);
-          }
-        }
-      } else {
-        const scheme = this.generalize(monoTypes.get(binding) as Type, params, outer);
-        setBinderScheme(binding.binder, scheme);
-        if (binding.binder.kind === 'global') this.globalMono.delete(binding.binder.entity);
-      }
-    }
-    this.wanted.push(...deferred);
   }
 
   private setMono(binder: Binder, type: Type): void {
@@ -950,157 +1008,20 @@ export function isFailable(pat: RPat): boolean {
   }
 }
 
-/** Orders implicitly typed bindings into strongly connected components, each after those it depends on. */
-function dependencyOrder(bindings: RBinding[]): RBinding[][] {
-  const owner = new Map<LocalVar | ValueEntity, number>();
-  for (const [index, binding] of bindings.entries()) {
-    if (binding.k === 'fun') {
-      owner.set(binding.binder.kind === 'local' ? binding.binder.local : binding.binder.entity, index);
-    } else {
-      for (const local of binding.binders) owner.set(local, index);
-      for (const global of binding.globals ?? []) owner.set(global, index);
-    }
-  }
-  const edges = bindings.map((binding) => {
-    const refs = new Set<number>();
-    collectBindingRefs(binding, (key) => {
-      const target = owner.get(key);
-      if (target !== undefined) refs.add(target);
-    });
-    return [...refs];
-  });
-  // Tarjan's algorithm, which emits components in reverse topological order: dependencies first.
-  const indexOf = Array.from({ length: bindings.length }, () => -1);
-  const lowLink = Array.from({ length: bindings.length }, () => 0);
-  const onStack = Array.from({ length: bindings.length }, () => false);
-  const stack: number[] = [];
-  const result: RBinding[][] = [];
-  let counter = 0;
-  const strongConnect = (node: number): void => {
-    indexOf[node] = counter;
-    lowLink[node] = counter;
-    counter++;
-    stack.push(node);
-    onStack[node] = true;
-    for (const next of edges[node]) {
-      if (indexOf[next] < 0) {
-        strongConnect(next);
-        lowLink[node] = Math.min(lowLink[node], lowLink[next]);
-      } else if (onStack[next]) {
-        lowLink[node] = Math.min(lowLink[node], indexOf[next]);
-      }
-    }
-    if (lowLink[node] === indexOf[node]) {
-      const component: RBinding[] = [];
-      for (;;) {
-        const member = stack.pop() as number;
-        onStack[member] = false;
-        component.push(bindings[member]);
-        if (member === node) break;
-      }
-      result.push(component.toSorted((a, b) => bindings.indexOf(a) - bindings.indexOf(b)));
+/** The type variables the written types mention, in order of appearance. */
+export function typeVarNames(types: readonly RType[]): string[] {
+  const names: string[] = [];
+  const collect = (type: RType): void => {
+    if (type.k === 'var') {
+      if (!names.includes(type.name)) names.push(type.name);
+    } else if (type.k === 'app') {
+      collect(type.fn);
+      collect(type.arg);
+    } else if (type.k === 'fun') {
+      collect(type.from);
+      collect(type.to);
     }
   };
-  for (let node = 0; node < bindings.length; node++) if (indexOf[node] < 0) strongConnect(node);
-  return result;
-}
-
-function collectBindingRefs(binding: RBinding, visit: (key: LocalVar | ValueEntity) => void): void {
-  if (binding.k === 'pat') {
-    collectRhsRefs(binding.rhs, visit);
-    return;
-  }
-  for (const clause of binding.clauses) collectRhsRefs(clause.rhs, visit);
-}
-
-function collectRhsRefs(rhs: RRhs, visit: (key: LocalVar | ValueEntity) => void): void {
-  for (const binding of rhs.where.bindings) collectBindingRefs(binding, visit);
-  if (rhs.body.k === 'plain') {
-    collectExprRefs(rhs.body.expr, visit);
-    return;
-  }
-  for (const branch of rhs.body.branches) {
-    for (const guard of branch.guards) {
-      if (guard.k === 'bool') collectExprRefs(guard.expr, visit);
-      else for (const binding of guard.binds.bindings) collectBindingRefs(binding, visit);
-    }
-    collectExprRefs(branch.expr, visit);
-  }
-}
-
-export function collectExprRefs(expr: RExpr, visit: (key: LocalVar | ValueEntity) => void): void {
-  switch (expr.k) {
-    case 'var': {
-      visit(expr.ref.kind === 'local' ? expr.ref.local : expr.ref.entity);
-      break;
-    }
-    case 'con':
-    case 'lit': {
-      break;
-    }
-    case 'app': {
-      collectExprRefs(expr.fn, visit);
-      collectExprRefs(expr.arg, visit);
-      break;
-    }
-    case 'lambda': {
-      collectExprRefs(expr.body, visit);
-      break;
-    }
-    case 'let': {
-      for (const binding of expr.binds.bindings) collectBindingRefs(binding, visit);
-      collectExprRefs(expr.body, visit);
-      break;
-    }
-    case 'if': {
-      collectExprRefs(expr.cond, visit);
-      collectExprRefs(expr.ifTrue, visit);
-      collectExprRefs(expr.ifFalse, visit);
-      break;
-    }
-    case 'case': {
-      collectExprRefs(expr.scrutinee, visit);
-      for (const alt of expr.alts) collectRhsRefs(alt.rhs, visit);
-      break;
-    }
-    case 'do':
-    case 'comp': {
-      const stmts = expr.k === 'do' ? expr.stmts : expr.quals;
-      for (const stmt of stmts) {
-        if (stmt.k === 'let') for (const binding of stmt.binds.bindings) collectBindingRefs(binding, visit);
-        else collectExprRefs(stmt.expr, visit);
-      }
-      if (expr.k === 'comp') collectExprRefs(expr.expr, visit);
-      break;
-    }
-    case 'tuple':
-    case 'list': {
-      for (const elem of expr.elems) collectExprRefs(elem, visit);
-      break;
-    }
-    case 'arith': {
-      collectExprRefs(expr.from, visit);
-      if (expr.next) collectExprRefs(expr.next, visit);
-      if (expr.to) collectExprRefs(expr.to, visit);
-      break;
-    }
-    case 'rsection': {
-      collectExprRefs(expr.op, visit);
-      collectExprRefs(expr.right, visit);
-      break;
-    }
-    case 'typed': {
-      collectExprRefs(expr.expr, visit);
-      break;
-    }
-    case 'recordCon': {
-      for (const field of expr.fields) collectExprRefs(field.value, visit);
-      break;
-    }
-    case 'recordUpdate': {
-      collectExprRefs(expr.expr, visit);
-      for (const field of expr.fields) collectExprRefs(field.value, visit);
-      break;
-    }
-  }
+  for (const type of types) collect(type);
+  return names;
 }

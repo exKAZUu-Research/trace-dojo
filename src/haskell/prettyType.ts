@@ -27,6 +27,7 @@ export class TypePrinter {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Each branch is one of GHC's type printing forms: lists, tuples, functions, and applications.
   private showApp(type: Type, precedence: number): string {
     const { head, args } = splitApp(type);
     if (head.tag === 'tcon') {

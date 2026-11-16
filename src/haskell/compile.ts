@@ -1,4 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
+import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { PRIMITIVE_TYPES, TURTLE_TYPE, UNIT_TYPE } from './builtinTypes';
 import { ClassEnv } from './classEnv';
 import { Codegen, type CodegenSupport, globalOf } from './codegen';
@@ -42,40 +43,73 @@ function primitiveExports(): ExportTable {
 }
 
 function compileLibrary(): Library {
-  const internal = new Map<string, CompiledModuleInfo>();
-  const env = new ClassEnv();
-  let base: RModule | undefined;
-  const baseValue = (name: string): ValueEntity => {
-    const entity = base?.exports.values.get(name);
+  const compiler = new LibraryCompiler();
+  for (const { name, source } of LIBRARY_SOURCES) compiler.compileModule(name, source);
+  compiler.markPrintfResults();
+  for (const [name, what] of Object.entries(UNSUPPORTED_VALUES)) compiler.baseValue(name).unsupported = what;
+  return {
+    modules: compiler.publicModules(),
+    env: compiler.env,
+    builtins: compiler.builtins,
+    support: compiler.support,
+    derivingSupport: (name) => compiler.baseValue(name),
+    weakValues: compiler.turtleValues(),
+    weakTypes: new Map([['Turtle', TURTLE_TYPE]]),
+    negate: () => compiler.baseValue('negate'),
+  };
+}
+
+/** The Turtle API's values, which every program sees unless it defines the names itself. */
+const TURTLE_VALUE_NAMES = [
+  'newTurtle',
+  'newTurtleAt',
+  'newTurtleWithColor',
+  ...Object.values(TURTLE_METHOD_NAMES).flat(),
+];
+
+/** Compiles the library's modules in order, the first of which (Base) defines what the compiler refers to. */
+class LibraryCompiler {
+  readonly env = new ClassEnv();
+  private readonly internal = new Map<string, CompiledModuleInfo>();
+  private base: RModule | undefined;
+  readonly builtins = makeBuiltins(
+    (name) => this.baseType(name),
+    (name) => this.baseClass(name)
+  );
+
+  readonly support: CodegenSupport = {
+    value: (name) => this.baseValue(name),
+    boolType: () => this.baseType('Bool'),
+    monad: () => this.baseClass('Monad'),
+    monadFail: () => this.baseClass('MonadFail'),
+    num: () => this.baseClass('Num'),
+    fractional: () => this.baseClass('Fractional'),
+    eq: () => this.baseClass('Eq'),
+    enumClass: () => this.baseClass('Enum'),
+    ratioCon: () => this.baseType('Ratio').cons[0],
+  };
+
+  baseValue(name: string): ValueEntity {
+    const entity = this.base?.exports.values.get(name);
     if (!entity) throw new Error(`The library has no ${name}`);
     return entity;
-  };
-  const baseType = (name: string): TypeEntity => {
-    const entry = base?.exports.types.get(name);
+  }
+
+  baseType(name: string): TypeEntity {
+    const entry = this.base?.exports.types.get(name);
     if (entry?.entity.kind !== 'type') throw new Error(`The library has no type ${name}`);
     return entry.entity.entity;
-  };
-  const baseClass = (name: string): ClassEntity => {
-    const entry = base?.exports.types.get(name);
+  }
+
+  baseClass(name: string): ClassEntity {
+    const entry = this.base?.exports.types.get(name);
     if (entry?.entity.kind !== 'class') throw new Error(`The library has no class ${name}`);
     return entry.entity.entity;
-  };
-  const builtins = makeBuiltins(baseType, baseClass);
-  const support: CodegenSupport = {
-    value: baseValue,
-    boolType: () => baseType('Bool'),
-    monad: () => baseClass('Monad'),
-    monadFail: () => baseClass('MonadFail'),
-    num: () => baseClass('Num'),
-    fractional: () => baseClass('Fractional'),
-    eq: () => baseClass('Eq'),
-    enumClass: () => baseClass('Enum'),
-    ratioCon: () => baseType('Ratio').cons[0],
-  };
-  const ambient = [primitiveExports()];
-  for (const { name, source } of LIBRARY_SOURCES) {
+  }
+
+  compileModule(name: string, source: string): void {
     try {
-      compileLibraryModule(name, source);
+      this.compileModuleSource(name, source);
     } catch (error) {
       if (!(error instanceof CompileError)) throw error;
       const lines = source.split('\n');
@@ -83,99 +117,101 @@ function compileLibrary(): Library {
       throw new Error(`The library module ${name} failed to compile:\n${detail}`);
     }
   }
-  function compileLibraryModule(name: string, source: string): void {
+
+  private compileModuleSource(name: string, source: string): void {
     const parsed = parseHaskell(source, name, true);
     const renamed = renameModule(parsed, {
-      modules: internal,
+      modules: this.internal,
       implicitPrelude: false,
-      ambient,
+      ambient: [primitiveExports()],
       ownShadowsImports: true,
     });
     if (name === 'Base') {
-      base = renamed;
-      setPrimitiveTypes(baseType('Bool').cons, baseType('Ordering').cons);
+      this.base = renamed;
+      setPrimitiveTypes(this.baseType('Bool').cons, this.baseType('Ordering').cons);
     }
-    const checked = typecheckModule(renamed, { env, builtins, isProgram: false, derivingSupport: baseValue });
-    const codegen = new Codegen({ support, isProgram: false });
+    const checked = typecheckModule(renamed, {
+      env: this.env,
+      builtins: this.builtins,
+      isProgram: false,
+      derivingSupport: (support) => this.baseValue(support),
+    });
+    const codegen = new Codegen({ support: this.support, isProgram: false });
     codegen.compileTopBindings(renamed.values);
     for (const instance of checked.instances) codegen.compileInstance(instance.info, instance.bindings);
     for (const binding of checked.defaults) codegen.compileDefault(binding);
-    internal.set(name, {
+    this.internal.set(name, {
       name,
       exports: renamed.exports,
       instances: checked.instances.map((instance) => instance.info),
     });
   }
-  // `printf`'s result in IO is `IO ()`, which the instance `(a ~ ()) => PrintfType (IO a)` tells the type checker.
-  const printfType = internal.get('Text.Printf.Internal')?.exports.types.get('PrintfType');
-  if (printfType?.entity.kind === 'class') {
-    for (const instance of env.instancesOf(printfType.entity.entity)) {
-      if (instance.head.tag === 'tap' && instance.head.fn.tag === 'tcon' && instance.head.fn.entity.name === 'IO') {
-        instance.equalities = [[0, tcon(UNIT_TYPE)]];
+
+  /** `printf`'s result in IO is `IO ()`, which the instance `(a ~ ()) => PrintfType (IO a)` tells the type checker. */
+  markPrintfResults(): void {
+    for (const className of ['PrintfType', 'HPrintfType']) {
+      const printfType = this.internal.get('Text.Printf.Internal')?.exports.types.get(className);
+      if (printfType?.entity.kind !== 'class') continue;
+      for (const instance of this.env.instancesOf(printfType.entity.entity)) {
+        const head = instance.head;
+        if (head.tag === 'tap' && head.fn.tag === 'tcon' && head.fn.entity.name === 'IO') {
+          instance.equalities = [[0, tcon(UNIT_TYPE)]];
+        }
       }
     }
   }
-  for (const [name, what] of Object.entries(UNSUPPORTED_VALUES)) baseValue(name).unsupported = what;
-  const modules = new Map<string, CompiledModuleInfo>();
-  for (const [name, spec] of Object.entries(PUBLIC_MODULES)) {
-    const source = internal.get(spec.from) as CompiledModuleInfo;
-    const exports = emptyExports();
-    for (const valueName of spec.values) {
-      const entity = source.exports.values.get(valueName);
-      if (!entity) throw new Error(`${spec.from} has no ${valueName} for ${name}`);
-      exports.values.set(valueName, entity);
+
+  /** The modules a program may import, each re-exporting part of a library module. */
+  publicModules(): Map<string, CompiledModuleInfo> {
+    const modules = new Map<string, CompiledModuleInfo>();
+    for (const [name, spec] of Object.entries(PUBLIC_MODULES)) {
+      const source = this.internal.get(spec.from) as CompiledModuleInfo;
+      const exports = emptyExports();
+      for (const valueName of spec.values) {
+        const entity = source.exports.values.get(valueName);
+        if (!entity) throw new Error(`${spec.from} has no ${valueName} for ${name}`);
+        exports.values.set(valueName, entity);
+      }
+      for (const [typeName, children] of spec.types) exportType(exports, source, typeName, children, name);
+      modules.set(name, { name, exports, instances: [] });
     }
-    for (const [typeName, children] of spec.types) {
-      const primitive = PRIMITIVE_TYPES.find((type) => type.name === typeName);
-      const entry = primitive
-        ? { entity: { kind: 'type', entity: primitive } as TypeLike, children: [] }
-        : source.exports.types.get(typeName);
-      if (!entry) throw new Error(`${spec.from} has no type ${typeName} for ${name}`);
-      const selected =
-        children === 'all'
-          ? entry.children
-          : children === 'none'
-            ? []
-            : entry.children.filter((child) => children.includes(child.name));
-      exports.types.set(typeName, { entity: entry.entity, children: selected });
-      for (const child of selected) exports.values.set(child.name, child);
+    return modules;
+  }
+
+  turtleValues(): Map<string, ValueEntity> {
+    const values = new Map<string, ValueEntity>();
+    for (const name of TURTLE_VALUE_NAMES) {
+      const entity = this.baseValue(name);
+      entity.weak = true;
+      values.set(name, entity);
     }
-    modules.set(name, { name, exports, instances: [] });
+    return values;
   }
-  const weakValues = new Map<string, ValueEntity>();
-  for (const name of [
-    'newTurtle',
-    'newTurtleAt',
-    'newTurtleWithColor',
-    'forward',
-    '前に進む',
-    'backward',
-    '後に戻る',
-    'turnRight',
-    '右を向く',
-    'turnLeft',
-    '左を向く',
-    'canMoveForward',
-    '前に進めるか',
-    '前のマスが塗られているか',
-    'remove',
-  ]) {
-    const entity = baseValue(name);
-    entity.weak = true;
-    weakValues.set(name, entity);
-  }
-  return {
-    modules,
-    env,
-    builtins,
-    support,
-    derivingSupport: baseValue,
-    weakValues,
-    weakTypes: new Map([['Turtle', TURTLE_TYPE]]),
-    negate: () => baseValue('negate'),
-  };
 }
 
+function exportType(
+  exports: ExportTable,
+  source: CompiledModuleInfo,
+  typeName: string,
+  children: 'all' | 'none' | string[],
+  moduleName: string
+): void {
+  const primitive = PRIMITIVE_TYPES.find((type) => type.name === typeName);
+  const entry = primitive
+    ? { entity: { kind: 'type', entity: primitive } as TypeLike, children: [] }
+    : source.exports.types.get(typeName);
+  if (!entry) throw new Error(`The library has no type ${typeName} for ${moduleName}`);
+  const selected =
+    children === 'all'
+      ? entry.children
+      : children === 'none'
+        ? []
+        : entry.children.filter((child) => children.includes(child.name));
+  exports.types.set(typeName, { entity: entry.entity, children: selected });
+  for (const child of selected) exports.values.set(child.name, child);
+}
+
+// code-gauge-allow functionNcss 34 -- One lookup per built-in entity the checker needs.
 function makeBuiltins(type: (name: string) => TypeEntity, cls: (name: string) => ClassEntity): Builtins {
   const standard = [
     'Eq',

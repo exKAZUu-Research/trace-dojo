@@ -90,6 +90,7 @@ const PRELUDE: PublicModule = {
     ['ReadS', 'none'],
     ['FilePath', 'none'],
     ['IOError', 'none'],
+    ['Word', 'none'],
     ['Rational', 'none'],
     ['Eq', 'all'],
     ['Ord', 'all'],
@@ -228,6 +229,16 @@ const DATA_LIST_VALUES = [
   'findIndex',
   'findIndices',
   'zip4',
+  'zip5',
+  'zip6',
+  'zip7',
+  'zipWith5',
+  'zipWith6',
+  'zipWith7',
+  'unzip4',
+  'unzip5',
+  'unzip6',
+  'unzip7',
   'zipWith4',
   'nub',
   'delete',
@@ -413,11 +424,7 @@ const SET_VALUES = [
 /** The modules a program may import, by name. */
 export const PUBLIC_MODULES: Record<string, PublicModule> = {
   Prelude: PRELUDE,
-  'Data.List': {
-    from: 'Base',
-    types: [['Foldable', 'none']],
-    values: DATA_LIST_VALUES,
-  },
+  'Data.List': { from: 'Base', types: [['Foldable', 'none']], values: DATA_LIST_VALUES },
   'Data.Char': {
     from: 'Base',
     types: [
@@ -481,11 +488,7 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
     types: [['Either', 'all']],
     values: ['either', 'lefts', 'rights', 'partitionEithers', 'isLeft', 'isRight', 'fromLeft', 'fromRight'],
   },
-  'Data.Function': {
-    from: 'Base',
-    types: [],
-    values: ['id', 'const', '.', 'flip', '$', '&', 'on', 'fix'],
-  },
+  'Data.Function': { from: 'Base', types: [], values: ['id', 'const', '.', 'flip', '$', '&', 'on', 'fix'] },
   'Data.Ord': {
     from: 'Base',
     types: [
@@ -495,16 +498,8 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
     ],
     values: ['comparing', 'clamp', 'getDown'],
   },
-  'Data.Tuple': {
-    from: 'Base',
-    types: [],
-    values: ['fst', 'snd', 'curry', 'uncurry', 'swap'],
-  },
-  'Data.Bool': {
-    from: 'Base',
-    types: [['Bool', 'all']],
-    values: ['&&', '||', 'not', 'otherwise', 'bool'],
-  },
+  'Data.Tuple': { from: 'Base', types: [], values: ['fst', 'snd', 'curry', 'uncurry', 'swap'] },
+  'Data.Bool': { from: 'Base', types: [['Bool', 'all']], values: ['&&', '||', 'not', 'otherwise', 'bool'] },
   'Data.Foldable': {
     from: 'Base',
     types: [['Foldable', 'all']],
@@ -536,11 +531,7 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
     types: [['Traversable', 'all']],
     values: ['for', 'forM', 'mapAccumL', 'mapAccumR'],
   },
-  'Data.Functor': {
-    from: 'Base',
-    types: [['Functor', 'all']],
-    values: ['<$>', '<&>', '$>', 'void'],
-  },
+  'Data.Functor': { from: 'Base', types: [['Functor', 'all']], values: ['<$>', '<&>', '$>', 'void'] },
   'Control.Monad': {
     from: 'Base',
     types: [
@@ -609,11 +600,7 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
       'readDec',
     ],
   },
-  'Data.Bits': {
-    from: 'Base',
-    types: [['Bits', 'all']],
-    values: [],
-  },
+  'Data.Bits': { from: 'Base', types: [['Bits', 'all']], values: [] },
   'Data.Ratio': {
     from: 'Base',
     types: [
@@ -672,10 +659,11 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
     from: 'Text.Printf.Internal',
     types: [
       ['PrintfType', 'none'],
+      ['HPrintfType', 'none'],
       ['PrintfArg', 'none'],
       ['IsChar', 'none'],
     ],
-    values: ['printf'],
+    values: ['printf', 'hPrintf'],
   },
 };
 

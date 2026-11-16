@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 999 -- The renamer resolves every construct of the language against one scope structure.
 import { CONS_CON, FUNCTION_TYPE, LIST_TYPE, NIL_CON, tupleCon, tupleType, UNIT_CON, UNIT_TYPE } from './builtinTypes';
 import {
   type ClassEntity,
@@ -120,10 +121,13 @@ const NEGATE_FIXITY: Fixity = { assoc: 'infixl', prec: 6 };
 class Candidates<T> {
   readonly map = new Map<string, T[]>();
 
+  /** @param identity What makes two items the same, such as the entity a type's entry wraps. */
+  constructor(private readonly identity: (item: T) => unknown = (item) => item) {}
+
   add(name: string, item: T): void {
     const list = this.map.get(name);
     if (!list) this.map.set(name, [item]);
-    else if (!list.includes(item)) list.push(item);
+    else if (!list.some((other) => this.identity(other) === this.identity(item))) list.push(item);
   }
 
   get(name: string): T[] {
@@ -135,7 +139,7 @@ class Candidates<T> {
 class GlobalScope {
   readonly values = new Candidates<ValueEntity>();
   readonly qualifiedValues = new Map<string, Candidates<ValueEntity>>();
-  readonly types = new Candidates<TypeLike>();
+  readonly types = new Candidates<TypeLike>((item) => item.entity);
   readonly qualifiedTypes = new Map<string, Candidates<TypeLike>>();
   readonly moduleAliases = new Set<string>();
 
@@ -161,7 +165,7 @@ class GlobalScope {
     this.moduleAliases.add(qualifier);
     let candidates = this.qualifiedTypes.get(qualifier);
     if (!candidates) {
-      candidates = new Candidates();
+      candidates = new Candidates<TypeLike>((item) => item.entity);
       this.qualifiedTypes.set(qualifier, candidates);
     }
     candidates.add(name, entity);
@@ -250,6 +254,7 @@ class Renamer {
     for (const imp of imports) this.importOne(imp);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 23 -- Each branch is one form of an import declaration: qualified, aliased, listed, or hiding.
   private importOne(imp: Import): void {
     const info = this.options.modules.get(imp.module);
     if (!info) {
@@ -289,6 +294,7 @@ class Renamer {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch is one form of an import item.
   private selectImportItem(exports: ExportTable, item: ImportItem, imp: Import, into: ExportTable): void {
     const { name } = item.name;
     if (item.kind === 'value') {
@@ -328,6 +334,7 @@ class Renamer {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch is one form of an export item.
   private buildExports(): ExportTable {
     const table = emptyExports();
     if (!this.module.exports) {
@@ -374,6 +381,7 @@ class Renamer {
   // -------------------------------------------------------------------------------------------------------------
   // Top-level declarations
 
+  // code-gauge-allow functionCognitiveComplexity 22 -- Each branch is one kind of type declaration.
   private declareTypes(decls: Decl[]): void {
     for (const decl of decls) {
       if (decl.kind === 'data' || decl.kind === 'typeSyn') {
@@ -519,6 +527,7 @@ class Renamer {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 21 -- Fixities apply to values, constructors, and class methods alike.
   private applyTopFixities(decls: Decl[]): void {
     const seen = new Set<string>();
     const apply = (
@@ -578,6 +587,8 @@ class Renamer {
     });
   }
 
+  // code-gauge-allow functionCognitiveComplexity 22 -- Class declarations combine signatures, defaults, and fixities.
+  // code-gauge-allow functionNcss 35 -- Class declarations combine signatures, defaults, and fixities.
   private renameClass(decl: Extract<Decl, { kind: 'class' }>): void {
     const like = this.ownTypes.get(decl.name.name) as { kind: 'class'; entity: ClassEntity };
     const entity = like.entity;
@@ -717,6 +728,8 @@ class Renamer {
   }
 
   /** Renames a `let` or `where` group, whose names scope over the group itself and `scope`'s new child. */
+  // code-gauge-allow functionCognitiveComplexity 29 -- Local declarations combine signatures, fixities, and bindings in one scope.
+  // code-gauge-allow functionNcss 37 -- Local declarations combine signatures, fixities, and bindings in one scope.
   renameLocalDecls(decls: Decl[], parent: LocalScope): { group: RBindGroup; scope: LocalScope } {
     const scope = new LocalScope(parent);
     for (const decl of decls) {
@@ -785,6 +798,7 @@ class Renamer {
   // -------------------------------------------------------------------------------------------------------------
   // Expressions
 
+  // code-gauge-allow functionNcss 56 -- One short case per expression kind.
   renameExpr(expr: Expr, scope: LocalScope): RExpr {
     const { span } = expr;
     switch (expr.kind) {
@@ -806,22 +820,9 @@ class Renamer {
       case 'chain': {
         return this.renameExpr(this.resolveChain(expr.items, scope, span), scope);
       }
-      case 'binop': {
-        const op = this.renameOperator(expr.op, scope);
-        const left = this.renameExpr(expr.left, scope);
-        const right = this.renameExpr(expr.right, scope);
-        const inner = {
-          k: 'app',
-          fn: op,
-          arg: left,
-          span: { ...span, endRow: op.span.endRow, endCol: op.span.endCol },
-        } as RExpr;
-        return { k: 'app', fn: inner, arg: right, span };
-      }
+      case 'binop':
       case 'neg': {
-        const negate = this.options.negate?.() ?? this.lookupValue({ name: 'negate', span }, true);
-        const fn: RExpr = { k: 'var', ref: { kind: 'global', entity: negate }, name: 'negate', span };
-        return { k: 'app', fn, arg: this.renameExpr(expr.expr, scope), span };
+        return this.renameOperatorApplication(expr, scope);
       }
       case 'lambda': {
         const binders = new Map<string, LocalVar>();
@@ -906,6 +907,26 @@ class Renamer {
     }
   }
 
+  /** `a op b` as `op a b`, and `-x` as Prelude's `negate x` whatever the program's scope holds. */
+  private renameOperatorApplication(expr: Extract<Expr, { kind: 'binop' | 'neg' }>, scope: LocalScope): RExpr {
+    const { span } = expr;
+    if (expr.kind === 'neg') {
+      const negate = this.options.negate?.() ?? this.lookupValue({ name: 'negate', span }, true);
+      const fn: RExpr = { k: 'var', ref: { kind: 'global', entity: negate }, name: 'negate', span };
+      return { k: 'app', fn, arg: this.renameExpr(expr.expr, scope), span };
+    }
+    const op = this.renameOperator(expr.op, scope);
+    const left = this.renameExpr(expr.left, scope);
+    const right = this.renameExpr(expr.right, scope);
+    const inner: RExpr = {
+      k: 'app',
+      fn: op,
+      arg: left,
+      span: { ...span, endRow: op.span.endRow, endCol: op.span.endCol },
+    };
+    return { k: 'app', fn: inner, arg: right, span };
+  }
+
   private renameFieldBinds(fields: FieldBind[], scope: LocalScope, cons: ConInfo[] | undefined): RFieldBind[] {
     const seen = new Set<string>();
     return fields.map((fieldBind) => {
@@ -978,6 +999,8 @@ class Renamer {
   }
 
   /** Resolves an operator chain by the Haskell report's algorithm, which also places prefix minus. */
+  // code-gauge-allow functionCognitiveComplexity 30 -- The operator precedence algorithm of the Haskell report, including negation, reads best as one routine.
+  // code-gauge-allow functionNcss 39 -- The operator precedence algorithm of the Haskell report, including negation, reads best as one routine.
   private resolveChain(items: ChainItem<Expr>[], scope: LocalScope, span: Span): Expr {
     const tokens = items;
     let position = 0;
@@ -1033,6 +1056,8 @@ class Renamer {
     return result;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 28 -- The operator precedence algorithm of the Haskell report reads best as one routine.
+  // code-gauge-allow functionNcss 32 -- The operator precedence algorithm of the Haskell report reads best as one routine.
   private resolvePatChain(items: ChainItem<Pat>[], span: Span): Pat {
     let position = 0;
     const parseOperand = (): Pat => {
@@ -1077,6 +1102,8 @@ class Renamer {
   // -------------------------------------------------------------------------------------------------------------
   // Patterns
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- One short case per pattern kind.
+  // code-gauge-allow functionNcss 44 -- One short case per pattern kind.
   renamePat(pat: Pat, binders: Map<string, LocalVar>): RPat {
     const { span } = pat;
     switch (pat.kind) {
@@ -1237,6 +1264,9 @@ class Renamer {
     if (found.length === 1) return found[0];
     const text = describeName(name);
     if (found.length === 0) {
+      if (what === 'value' && name.name.startsWith('_') && !name.qualifier) {
+        throw unsupportedError(name.span, `型の穴（${name.name}）`);
+      }
       const role = what === 'type' ? '型・クラスの名前' : isOperatorName(name.name) ? '演算子' : '名前';
       throw compileError(name.span, `${role} ${text} がスコープにありません。`);
     }
@@ -1335,6 +1365,8 @@ interface RawBinding {
 }
 
 /** Groups adjacent clauses of the same function into one binding, as Haskell requires them to be adjacent. */
+// code-gauge-allow functionCognitiveComplexity 29 -- Grouping clauses into bindings checks each of GHC's conditions on adjacent clauses.
+// code-gauge-allow functionNcss 35 -- Grouping clauses into bindings checks each of GHC's conditions on adjacent clauses.
 function groupBindings(decls: Decl[]): RawBinding[] {
   const bindings: RawBinding[] = [];
   const seen = new Set<string>();

@@ -10,7 +10,7 @@ import {
   type ValueEntity,
 } from './entities';
 import { compileError, unsupportedError } from './errors';
-import { type Builtins, Checker, newDictParam, typeError, typeParamKinds } from './infer';
+import { type Builtins, Checker, newDictParam, typeError, typeParamKinds, typeVarNames } from './infer';
 import { TypePrinter } from './prettyType';
 import type { RBinding, RType } from './rast';
 import type { RClassDecl, RDataDecl, RInstanceDecl, RModule, RSynonymDecl } from './rename';
@@ -80,6 +80,8 @@ export function typecheckModule(module: RModule, options: TypecheckOptions): Typ
 // ---------------------------------------------------------------------------------------------------------------
 // Kinds
 
+// code-gauge-allow functionCognitiveComplexity 22 -- Kind inference covers data types, synonyms, and classes in one dependency-ordered pass.
+// code-gauge-allow functionNcss 43 -- Kind inference covers data types, synonyms, and classes in one dependency-ordered pass.
 function inferKinds(checker: Checker, module: RModule): void {
   const dataParamKinds = new Map<TypeEntity, Kind[]>();
   for (const decl of module.dataDecls) {
@@ -249,18 +251,7 @@ interface DeclaredInstance {
 }
 
 function declareInstance(checker: Checker, decl: RInstanceDecl, moduleName: string): DeclaredInstance {
-  const names: string[] = [];
-  const collect = (type: RType): void => {
-    if (type.k === 'var' && !names.includes(type.name)) names.push(type.name);
-    else if (type.k === 'app') {
-      collect(type.fn);
-      collect(type.arg);
-    } else if (type.k === 'fun') {
-      collect(type.from);
-      collect(type.to);
-    }
-  };
-  collect(decl.type);
+  const names = typeVarNames([decl.type]);
   const kinds: Kind[] = names.map(() => freshKindVar());
   const vars = new Map<string, Type>(names.map((name, index) => [name, { tag: 'tgen', index }]));
   const varKinds = new Map<string, Kind>(names.map((name, index) => [name, kinds[index]]));
@@ -474,6 +465,7 @@ function checkDefaults(checker: Checker, decl: RClassDecl): RBinding[] {
 // ---------------------------------------------------------------------------------------------------------------
 // Deriving
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Each branch checks one condition GHC places on a derivable class.
 function deriveInstances(checker: Checker, module: RModule, options: TypecheckOptions): DeclaredInstance[] {
   const pending: { decl: RDataDecl; cls: ClassEntity; info: InstanceInfo; span: Span }[] = [];
   for (const decl of module.dataDecls) {

@@ -1,9 +1,8 @@
-import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
-import type { DisplayNode, TraceItemVariable, TraceScalar } from '../problems/trace';
+import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { CHAR_TYPE, CONS_CON, NIL_CON, UNIT_CON } from './builtinTypes';
 import { compileProgram } from './compile';
 import { runProgram } from './run';
@@ -11,7 +10,6 @@ import { DisplayAbort, Runtime, type TraceFrame } from './runtime';
 import { prune, splitApp, type Type } from './types';
 import { ConValue, Dict, HaskellException, isFunction, isIOAction, type Slot, TurtleValue, type Value } from './values';
 
-// code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceHaskellProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileProgram(program, new Set(trace.atomicAnnotations.keys()));
   const runtime = new Runtime(input);
@@ -33,6 +31,7 @@ export function traceHaskellProgram(program: string, trace: TraceOptions, input?
 }
 
 /** The variables a frame's running statement sees: its parameters and the variables bound before it, in order. */
+// code-gauge-allow functionCognitiveComplexity 18 -- Variables come from each trace context with shadowing and record fields applied.
 function variablesOf(runtime: Runtime, frame: TraceFrame): TraceVariables {
   const variables: TraceVariables = { vars: {}, referenceVars: {} };
   const context = frame.contexts.at(-1);
@@ -143,6 +142,7 @@ function traceInt(value: bigint): number | bigint {
   return Number.isSafeInteger(number) ? number : value;
 }
 
+// code-gauge-allow functionCognitiveComplexity 20 -- One branch per kind of value shown as a scalar.
 function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Scalar | typeof NOT_SCALAR {
   if (depth > 20) return NOT_SCALAR;
   if (typeof value === 'bigint') return traceInt(value);
@@ -170,6 +170,7 @@ function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Sc
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows Nothing as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
+// code-gauge-allow functionCognitiveComplexity 20 -- One branch per kind of value shown as a node.
 function displayNodeOf(runtime: Runtime, value: Value, type: Type, depth: number): DisplayNode | undefined {
   if (depth > 20) return { kind: 'value', value: '…' };
   if (typeof value === 'bigint') return { kind: 'value', value: traceInt(value) };
@@ -184,22 +185,31 @@ function displayNodeOf(runtime: Runtime, value: Value, type: Type, depth: number
   if (!(value instanceof ConValue) || isHidden(value, type)) return undefined;
   const con = value.con;
   if (con.type.name === 'Bool' && con.type.module === 'Base') return { kind: 'value', value: con.tag === 1 };
-  if (con === CONS_CON || con === NIL_CON) {
-    const items = listItems(runtime, value);
-    if (!items) return { kind: 'value', value: '…' };
-    if (isStringType(type, value)) return { kind: 'value', value: charsOf(items) };
-    const entries: Record<string, DisplayNode> = {};
-    for (const [index, item] of items.entries()) {
-      entries[index] = displayNodeOf(runtime, item, elementType(type, 0), depth + 1) ?? NULL_NODE;
-    }
-    return { kind: 'array', entries };
-  }
+  if (con === CONS_CON || con === NIL_CON) return listNodeOf(runtime, value, type, depth);
   if (con.type.name === 'Maybe' && con.type.module === 'Base') {
+    // A Maybe shows as what it holds, or as null, as a Java reference does.
     if (con.name === 'Nothing') return NULL_NODE;
     const inner = forceForDisplay(runtime, value.fields[0]);
     return inner === undefined ? undefined : displayNodeOf(runtime, inner, elementType(type, 0), depth + 1);
   }
   if (value.fields.length === 0) return { kind: 'value', value: con.name };
+  return dataNodeOf(runtime, value, type, depth);
+}
+
+function listNodeOf(runtime: Runtime, value: ConValue, type: Type, depth: number): DisplayNode {
+  const items = listItems(runtime, value);
+  if (!items) return { kind: 'value', value: '…' };
+  if (isStringType(type, value)) return { kind: 'value', value: charsOf(items) };
+  const entries: Record<string, DisplayNode> = {};
+  for (const [index, item] of items.entries()) {
+    entries[index] = displayNodeOf(runtime, item, elementType(type, 0), depth + 1) ?? NULL_NODE;
+  }
+  return { kind: 'array', entries };
+}
+
+/** A tuple shows as an array, and a constructor with fields as an object of them, by name in a record. */
+function dataNodeOf(runtime: Runtime, value: ConValue, type: Type, depth: number): DisplayNode {
+  const { con } = value;
   const entries: Record<string, DisplayNode> = {};
   const isTuple = con.type.special === 'tuple';
   for (const [index, field] of value.fields.entries()) {
@@ -211,9 +221,3 @@ function displayNodeOf(runtime: Runtime, value: Value, type: Type, depth: number
   }
   return { kind: isTuple ? 'array' : 'object', entries };
 }
-
-export function traceScalar(value: TraceScalar): TraceScalar {
-  return value;
-}
-
-void ExecutionLimitError;

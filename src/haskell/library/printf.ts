@@ -21,6 +21,9 @@ instance IsChar Char where
 instance PrintfArg Int where
   formatArg x = UInteger (toInteger x) 18446744073709551616
 
+instance PrintfArg Word where
+  formatArg x = UInteger (toInteger x) 0
+
 instance PrintfArg Integer where
   formatArg x = UInteger x 0
 
@@ -47,6 +50,21 @@ instance PrintfType (IO a) where
 
 instance (PrintfArg a, PrintfType r) => PrintfType (a -> r) where
   spr fmts args = \a -> spr fmts (formatArg a : args)
+
+class HPrintfType t where
+  hspr :: Handle -> String -> [UPrintf] -> t
+
+instance HPrintfType (IO a) where
+  hspr h fmts args = printfHPutStr h (uprintf fmts (reverse args))
+
+instance (PrintfArg a, HPrintfType r) => HPrintfType (a -> r) where
+  hspr h fmts args = \a -> hspr h fmts (formatArg a : args)
+
+printfHPutStr :: Handle -> String -> IO a
+printfHPutStr = primitive "hPutStr"
+
+hPrintf :: HPrintfType r => Handle -> String -> r
+hPrintf h fmts = hspr h fmts []
 
 printfPutStr :: String -> IO a
 printfPutStr = primitive "putStr"

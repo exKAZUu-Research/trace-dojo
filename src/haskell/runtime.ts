@@ -6,7 +6,8 @@ import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { FunctionInfo, GlobalDef } from './core';
 import type { InstanceInfo } from './entities';
 import { markReachable } from './gc';
-import { Machine, type TraceContext } from './machine';
+import type { TraceContext } from './ioBlocks';
+import { Machine } from './machine';
 import { Dict, type Env, type Slot, Thunk } from './values';
 
 /** Stops evaluating a value for a trace's display, which leaves the value as it was. */

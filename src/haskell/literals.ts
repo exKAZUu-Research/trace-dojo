@@ -117,6 +117,7 @@ function readChars(body: string, span: Span, isString: boolean): { chars: string
   return { chars, end: index };
 }
 
+// code-gauge-allow functionCognitiveComplexity 23 -- One branch per escape form of the Haskell report.
 function readEscape(body: string, index: number, span: Span): { code: number; length: number } {
   const next = body[index];
   if (next in SINGLE_ESCAPES) return { code: SINGLE_ESCAPES[next], length: 1 };
