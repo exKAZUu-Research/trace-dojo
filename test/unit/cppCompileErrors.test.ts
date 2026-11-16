@@ -33,6 +33,19 @@ test.each([
   ['a const variable without an initializer', 'int main() {\n  const int x; }', 1],
   ['an abstract class as a parameter type', 'struct A { virtual void h() = 0; };\nvoid g(A a) {}', 1],
   ['an int argument between double and bool', 'void f(double) {}\nvoid f(bool) {}\nint main() {\n  f(1); }', 3],
+  ['a chained comparison', 'int main() { int a = 1;\n  bool b = 0 < a < 2; }', 1],
+  ['sizeof of void', 'int main() {\n  int n = sizeof(void); }', 1],
+  ['auto deduced as different types', 'int main() {\n  auto x = 1, y = 2.0; }', 1],
+  [
+    'an override of what() without noexcept',
+    '#include <exception>\nstruct E : std::exception {\n  const char* what() const override { return "e"; } };',
+    2,
+  ],
+  [
+    'a qualified call of an undefined pure virtual function',
+    'struct A { virtual void f() = 0; };\nstruct B : A { void f() override {\n  A::f(); } };\nint main() { B b; b.f(); }',
+    2,
+  ],
 ])('the interpreter rejects %s', (_, program, row) => {
   const execution = executeProgram('cpp', program.includes('int main') ? program : `${program}\nint main() {}`);
   expect(execution).toMatchObject({ kind: 'compileError', diagnostics: [{ row }] });

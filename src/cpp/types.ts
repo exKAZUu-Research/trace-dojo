@@ -118,6 +118,8 @@ export interface FunctionInfo {
   isDestructor: boolean;
   isOverride: boolean;
   isFinal: boolean;
+  /** Whether the function is `noexcept`, which only the library's functions are. */
+  isNoexcept?: boolean;
   access: Access;
   row: number;
   /** Whether a call counts as one step of the caller, as `// atomic` on its header marks. */
@@ -456,21 +458,42 @@ export function alignOf(type: Type): number {
 }
 
 /** The size and alignment of a class's objects, laid out as the Itanium C++ ABI lays them out. */
-function classLayout(cls: ClassInfo): { size: number; align: number } {
-  if (cls.library) return { size: cls.library.size, align: cls.library.align };
+function classLayout(cls: ClassInfo): { size: number; align: number; dataSize: number } {
+  if (cls.library) return { size: cls.library.size, align: cls.library.align, dataSize: cls.library.size };
   let offset = cls.isPolymorphic && !cls.base?.isPolymorphic ? 8 : 0;
   let align = offset > 0 ? 8 : 1;
   if (cls.base) {
     const base = classLayout(cls.base);
     // An empty base takes no room (the empty base optimization).
-    offset = base.size === 1 && cls.base.fields.length === 0 && !cls.base.isPolymorphic ? offset : base.size;
+    if (cls.base.fields.length > 0 || cls.base.isPolymorphic) {
+      // The members of a derived class reuse the tail padding of a base that is not POD.
+      offset = Math.ceil(offset / base.align) * base.align + (isPodForLayout(cls.base) ? base.size : base.dataSize);
+    }
     align = Math.max(align, base.align);
   }
   for (const field of cls.ownFields) {
-    const fieldAlign = alignOf(field.type);
-    offset = Math.ceil(offset / fieldAlign) * fieldAlign + sizeOf(field.type);
+    // A reference member takes the room of a pointer, though `sizeof` of a reference type is that of its referent.
+    const type = field.type.kind === 'reference' ? pointerTo(field.type.to) : field.type;
+    const fieldAlign = alignOf(type);
+    offset = Math.ceil(offset / fieldAlign) * fieldAlign + sizeOf(type);
     align = Math.max(align, fieldAlign);
   }
   const size = Math.ceil(offset / align) * align;
-  return { size: size === 0 ? 1 : size, align };
+  return { size: size === 0 ? 1 : size, align, dataSize: offset };
+}
+
+/** Whether the ABI lays out a class as POD, which arm64 macOS decides by the C++11 definition ([class]p10). */
+function isPodForLayout(cls: ClassInfo): boolean {
+  if (cls.library) return cls.library.kind === 'array' && isPodType(cls.library.args[0]);
+  if (cls.isPolymorphic || cls.constructors.length > 0 || cls.destructor) return false;
+  // A standard-layout class declares all its data members in one class of its hierarchy, with the same access.
+  if (cls.base && (!isPodForLayout(cls.base) || (cls.base.fields.length > 0 && cls.ownFields.length > 0))) return false;
+  const [first] = cls.fields;
+  return cls.fields.every((field) => field.access === first.access && !field.initializer && isPodType(field.type));
+}
+
+function isPodType(type: Type): boolean {
+  if (type.kind === 'array') return isPodType(type.of);
+  if (type.kind === 'class') return isPodForLayout(type.cls);
+  return type.kind !== 'reference';
 }

@@ -7,7 +7,7 @@ import type { Library } from './library/registry';
 import { invoke, makeEach, newObject, virtualKey, zeroOf } from './objectCompiler';
 import { type CompiledFunction, type Eval, type Exec, type Frame, RETURN } from './runtime';
 import { type Entity, FunctionContext, type Scope } from './scopes';
-import { bindsDirectly, endScope, StatementCompiler } from './statementCompiler';
+import { type AutoDeduction, bindsDirectly, endScope, StatementCompiler } from './statementCompiler';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
   type Access,
@@ -76,7 +76,7 @@ export class Compiler extends StatementCompiler {
     if (!mainFunction) return this.error(0, 'main 関数の本体がありません。');
     if (main.functions.length > 1) return this.error(mainFunction.row, 'main 関数はオーバーロードできません。');
     for (const [fn, row] of this.usedFunctions) {
-      if (!fn.isDefined && !fn.native && !fn.isPure) {
+      if (!fn.isDefined && !fn.native) {
         this.error(row, `関数 ${fn.displayName} は宣言だけで、定義（本体）がありません。`);
       }
     }
@@ -523,10 +523,7 @@ export class Compiler extends StatementCompiler {
         const key = virtualKey(fn);
         const overridden = cls.base ? this.findVirtual(cls.base, key) : undefined;
         if (overridden) {
-          if (!sameType(unqualified(overridden.ret), unqualified(fn.ret)) && !covariant(overridden.ret, fn.ret)) {
-            this.error(fn.row, `${fn.displayName} の戻り値の型が、上書きする ${overridden.displayName} と違います。`);
-          }
-          if (overridden.isFinal) this.error(fn.row, `${overridden.displayName} は final なので上書きできません。`);
+          this.checkOverrider(fn, overridden);
           fn.isVirtual = true;
         } else if (fn.isOverride) {
           this.error(fn.row, `override を付けた ${name} は、親クラスの仮想関数を上書きしていません。`);
@@ -554,6 +551,19 @@ export class Compiler extends StatementCompiler {
       if (!cls.isDefaultConstructorDeleted) cls.implicitDefault = this.implicitDefaultConstructor(cls);
     }
     cls.operations = this.classOperations(cls, userCopy);
+  }
+
+  private checkOverrider(fn: FunctionInfo, overridden: FunctionInfo): void {
+    if (!sameType(unqualified(overridden.ret), unqualified(fn.ret)) && !covariant(overridden.ret, fn.ret)) {
+      this.error(fn.row, `${fn.displayName} の戻り値の型が、上書きする ${overridden.displayName} と違います。`);
+    }
+    if (overridden.isFinal) this.error(fn.row, `${overridden.displayName} は final なので上書きできません。`);
+    if (overridden.isNoexcept) {
+      this.error(
+        fn.row,
+        `${overridden.displayName} は noexcept なので、上書きする ${fn.displayName} にも noexcept が要ります（noexcept は、この採点環境では使えません）。`
+      );
+    }
   }
 
   private findVirtual(cls: ClassInfo, key: string): FunctionInfo | undefined {
@@ -1026,13 +1036,15 @@ export class Compiler extends StatementCompiler {
           scope.names.set(param.name, { kind: 'local', local, isReference: type.kind === 'reference' });
         }
       }
+      // The grammar gives a constructor's function-try-block no `body` field.
+      if (node.children.some((child) => child.type === 'try_statement'))
+        return this.unsupported(node.row, '関数の try ブロック');
       const body = fieldOf(node, 'body');
       if (!body) {
         if (node.children.some((child) => child.type === 'default_method_clause'))
           this.unsupported(node.row, '= default');
         return this.error(node.row, `${fn.displayName} の本体を書いてください。`);
       }
-      if (body.type === 'try_statement') return this.unsupported(node.row, '関数の try ブロック');
       const initializerList = node.children.find((child) => child.type === 'field_initializer_list');
       const memberInit = fn.isConstructor && cls ? this.memberInitialization(cls, fn, initializerList) : undefined;
       if (!fn.isConstructor && initializerList) {
@@ -1101,22 +1113,17 @@ export class Compiler extends StatementCompiler {
 
   private globalDeclaration(node: Syntax): void {
     const typeNode = fieldOf(node, 'type');
-    if (
-      typeNode &&
-      (typeNode.type === 'class_specifier' || typeNode.type === 'struct_specifier') &&
-      fieldOf(typeNode, 'body')
-    ) {
-      this.classSpecifierType(typeNode);
-    }
     const declarators = fieldsOf(node, 'declarator');
     if (declarators.length === 0) {
       if (typeNode?.type === 'class_specifier' || typeNode?.type === 'struct_specifier') {
-        if (!fieldOf(typeNode, 'body')) this.classSpecifierType(typeNode);
+        this.classSpecifierType(typeNode);
         return;
       }
       return this.error(node.row, '宣言する名前を書いてください。');
     }
+    // The specified type defines the class of `struct P { ... } origin;`.
     const base = this.specifiedType(node);
+    let firstDeduced: AutoDeduction | undefined;
     for (const written of declarators) {
       const declarator = this.variableOrFunctionDeclarator(base, written);
       const declared = this.applyDeclarator(base, declarator);
@@ -1128,7 +1135,13 @@ export class Compiler extends StatementCompiler {
         this.staticMemberDefinition(declared.nameNode, declared.type, declarator);
         continue;
       }
-      this.globalVariable(node, declarator, declared.name as string, declared.type);
+      const name = declared.name as string;
+      const type = this.globalVariable(declarator, name, declared.type);
+      firstDeduced = this.checkAutoDeduction(
+        firstDeduced,
+        isAuto(declared.type) ? { name, type } : undefined,
+        declarator.row
+      );
     }
   }
 
@@ -1175,13 +1188,14 @@ export class Compiler extends StatementCompiler {
     }
   }
 
-  private globalVariable(node: Syntax, declarator: Syntax, name: string, declaredType: Type): void {
+  private globalVariable(declarator: Syntax, name: string, declaredType: Type): Type {
     if (this.globalScope.names.has(name)) return this.error(declarator.row, `${name} はすでに宣言されています。`);
     const value = declarator.type === 'init_declarator' ? fieldOf(declarator, 'value') : undefined;
     let type = declaredType;
     if (type.kind === 'reference') return this.unsupported(declarator.row, '関数の外の参照の変数');
     if (isAuto(type)) {
       if (!value || value.type === 'initializer_list' || value.type === 'argument_list') {
+        this.rejectInitializerListDeduction(declarator, value);
         return this.error(declarator.row, `auto の変数 ${name} には、= のあとに初期値を書いてください。`);
       }
       type = this.deduceAuto(type, this.compileExpression(value), declarator.row);
@@ -1197,7 +1211,7 @@ export class Compiler extends StatementCompiler {
     }
     this.globalScope.names.set(name, { kind: 'global', global, isReference: false, constant });
     this.initializeGlobal(global, type, value, declarator.row, true);
-    void node;
+    return type;
   }
 
   declareStaticStorage(
@@ -1647,7 +1661,6 @@ export class Compiler extends StatementCompiler {
     }
     const length = Number(expr.constant);
     if (length < 0) return this.error(size.row, '配列の大きさは負にできません。');
-    if (length === 0) return this.error(size.row, '大きさが 0 の配列は作れません。');
     return length;
   }
 

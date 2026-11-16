@@ -227,6 +227,11 @@ function pointerConversion(
   const fromTarget = from.kind === 'pointer' ? from.to : from.kind === 'array' ? from.of : undefined;
   if (!fromTarget) return undefined;
   const apply = (e: Expr): Expr => ({ ...host.rvalue(e), type: to });
+  // clang++ converts a string literal to `char *` with only a warning, ranking it below every other conversion, even
+  // a user-defined one or an ellipsis; writing through the pointer stops the program.
+  if (expr.literalBytes !== undefined && sameType(to.to, { kind: 'int', name: 'char' })) {
+    return sequence(Rank.UserDefined + 2, apply);
+  }
   if (isConstType(fromTarget) && !isConstType(to.to)) return undefined;
   const addsQualification = !isConstType(fromTarget) && isConstType(to.to);
   if (sameType(unqualified(fromTarget), unqualified(to.to), false)) {

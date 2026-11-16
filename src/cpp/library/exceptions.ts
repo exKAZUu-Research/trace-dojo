@@ -43,13 +43,16 @@ export function exceptionClasses(stringType: () => Type): Map<string, ClassInfo>
     return cls;
   };
   const exception = define('exception', undefined, false);
-  const what = native(
-    'what',
-    [],
-    CONST_CHAR_PTR,
-    (_args, { self }) => new Ptr(cStringStore((self as CObject).message ?? 'std::exception'), 0),
-    { isConst: true, isVirtual: true }
-  );
+  const what = {
+    ...native(
+      'what',
+      [],
+      CONST_CHAR_PTR,
+      (_args, { self }) => new Ptr(cStringStore((self as CObject).message ?? 'std::exception'), 0),
+      { isConst: true, isVirtual: true }
+    ),
+    isNoexcept: true,
+  };
   addMethod(exception, what);
   exception.virtuals.set('what()const', what);
   const logic = define('logic_error', exception, true);
