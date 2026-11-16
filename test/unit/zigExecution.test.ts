@@ -2878,3 +2878,68 @@ test.each(['std.AutoHashMap(u8,u8)', 'std.Io.Writer', 'std.Random'])(
     );
   }
 );
+
+test.each([
+  ['u8', '5', 'i8', '-1'],
+  ['u64', '7', 'i32', '-2'],
+  ['u32', '5', 'i16', '-1'],
+])('mixed known integers choose one peer type: %s and %s', (first, a, second, b) => {
+  const source = `const std=@import("std");pub fn main()void{const a:${first}=${a};const b:${second}=${b};std.debug.print("{}",.{a+b});}`;
+  expect(executeProgram('zig', source).kind).toBe('compileError');
+});
+
+test('known mixed integer peer selection preserves signed-first ties and wider signed types', () => {
+  const source = `const std=@import("std");pub fn main()void{const a:i8=-1;const b:u8=5;const c:i64=-2;const d:u32=7;std.debug.print("{} {}",.{a+b,c+d});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '4 5',
+    uncaughtException: undefined,
+  });
+});
+
+test('anytype type arguments specialize dependent values and returned containers by identity', () => {
+  const source = `const std=@import("std");fn show(t:anytype)void{std.debug.print("{} ",.{t});}fn zero(T:anytype)T{return 0;}fn Box(T:anytype)type{return struct{x:T};}pub fn main()void{show(u8);show(i32);const A=Box(u8);const B=Box(u16);const a=A{.x=3};const b=B{.x=4};std.debug.print("{} {} {}",.{zero(u8),a.x,b.x});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'u8 i32 0 3 4',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['==', 'false false'],
+  ['!=', 'false true'],
+])('comparison %s retains the first temporary turtle through the second operand', (operator, output) => {
+  const source = `const std=@import("std");fn first(a:std.mem.Allocator)!*Turtle{const p=try a.create(Turtle);p.*=Turtle.init(0,1);return p;}fn second(a:std.mem.Allocator)!*Turtle{const p=try a.create(Turtle);p.*=Turtle.init(0,0);std.debug.print("{} ",.{p.canMoveForward()});return p;}pub fn main(init:std.process.Init)!void{const same=(try first(init.gpa))${operator}(try second(init.gpa));std.debug.print("{}",.{same});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: output,
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['==', '!='])('direct tagged union %s is rejected, including optional payloads', (operator) => {
+  for (const type of ['U', '?U']) {
+    const source = `const std=@import("std");const U=union(enum){a:u8,b:u8};pub fn main()void{const x:${type}=U{.a=1};const y:${type}=U{.a=2};std.debug.print("{}",.{x${operator}y});}`;
+    expect(executeProgram('zig', source).kind).toBe('compileError');
+  }
+});
+
+test('concatenation snapshots array values before later operand mutations', () => {
+  const source = `const std=@import("std");const S=struct{x:u8};fn other(a:*[1]S)[1]S{a[0].x=9;return .{.{.x=3}};}pub fn main()void{var a=[_]S{.{.x=1}};const b=a++other(&a);std.debug.print("{} {} {}",.{b[0].x,b[1].x,a[0].x});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 3 9',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'if(std.mem.eql(u8,"a","a")){}else{const z:u8=300;_=z;}',
+  'const r=if(std.mem.eql(u8,"a","a")) @as(u8,1) else "x";_=r;',
+  'switch(std.mem.count(u8,"aa","a")){2=>{},else=>{const z:u8=300;_=z;}}',
+  'while(std.mem.eql(u8,"a","b")){const z:u8=300;_=z;}',
+  "const b=std.ascii.isDigit('5');if(b){}else{const z:u8=300;_=z;}",
+])('runtime native conditions retain all branch checks: %s', (body) => {
+  expect(executeProgram('zig', `const std=@import("std");pub fn main()void{${body}}`).kind).toBe('compileError');
+});

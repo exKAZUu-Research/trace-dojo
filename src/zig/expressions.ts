@@ -31,6 +31,7 @@ import { asFloat, comparisonTest, isArithmeticType, isIntegerType, isZero, sign 
 import { type Frame, Jump, withHeldValues } from './runtime';
 import {
   addDecls,
+  copyForFrame,
   copyForStorage,
   evaluateHeld,
   FnRef,
@@ -921,7 +922,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- Keeps one operation of the interpreter in one place.
-  // code-gauge-allow functionNcss 39 -- Keeps operand coercion and comparison validation together.
+  // code-gauge-allow functionNcss 41 -- Keeps operand coercion and comparison validation together.
   private comparison(expression: ExpressionOf<'binary'>): TExpr {
     const { operator } = expression;
     let left = this.compile(expression.left);
@@ -970,7 +971,14 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (left.known && right.known) return known(BOOL, test(compare(left.value, right.value)), expression);
     const evaluateLeft = left.eval;
     const evaluateRight = right.eval;
-    return runtime(BOOL, (frame) => test(compare(evaluateLeft(frame), evaluateRight(frame))), expression);
+    return runtime(
+      BOOL,
+      (frame) => {
+        const [left, right] = evaluateHeld(frame, [evaluateLeft, evaluateRight]);
+        return test(compare(left, right));
+      },
+      expression
+    );
   }
 
   /** A function comparing two values of a type: negative, zero, or positive, or NaN when unordered. */
@@ -1000,10 +1008,6 @@ export abstract class ExpressionCompiler extends SemaBase {
       }
       case 'enum_literal': {
         return (a, b) => (a === b ? 0 : 1);
-      }
-      case 'union': {
-        if (ordered || !type.tagType) this.error(span, `${typeName(type)} 型の値は比べられません。`);
-        return (a, b) => ((a as ZUnion).tag === (b as ZUnion).tag ? 0 : 1);
       }
       case 'pointer': {
         if (ordered || type.size === 'slice') this.error(span, `${typeName(type)} 型の値は、== で比べられません。`);
@@ -1278,8 +1282,8 @@ export abstract class ExpressionCompiler extends SemaBase {
       return a.viaPointer ? new Pointer(new Constant(array), 0) : array;
     };
     if (left.known && right.known) return known(resultType, build(a.read(left.value), b.read(right.value)), expression);
-    const evaluateLeft = left.eval;
-    const evaluateRight = right.eval;
+    const evaluateLeft = (frame: Frame): Value => copyForFrame(frame, left.eval(frame), left.type);
+    const evaluateRight = (frame: Frame): Value => copyForFrame(frame, right.eval(frame), right.type);
     return runtime(
       resultType,
       (frame) => {

@@ -142,7 +142,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps one operation of the interpreter in one place.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps one operation of the interpreter in one place.
   private callDeclaration(
     ref: FnRef,
     receiver: TExpr | undefined,
@@ -179,10 +179,10 @@ export abstract class CallCompiler extends BuiltinCompiler {
     const instance = this.instantiate(ref, argTypes, expression, args);
     void resultType;
     for (const [index, arg] of args.entries()) {
-      if (declaredTypes[index] === undefined && isComptimeOnly(arg.type) && (arg.type.kind === 'type' || !arg.known)) {
+      if (declaredTypes[index] === undefined && isComptimeOnly(arg.type) && !arg.known) {
         this.error(
           params[index],
-          'anytype の引数に、コンパイルのときだけの値（型や comptime_int など）を渡すことは、この採点環境では使えません。'
+          'anytype のコンパイルのときだけの引数は、コンパイルのときに値が決まっていなければなりません。'
         );
       }
     }

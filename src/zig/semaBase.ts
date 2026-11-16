@@ -1038,17 +1038,14 @@ export abstract class SemaBase implements SemaApi {
     if (a.kind === 'int' && b.kind === 'int') {
       if (intWidens(a, b)) return b;
       if (intWidens(b, a)) return a;
-      // Known values may fit the other type.
-      const fitsIn = (type: IntType): boolean =>
-        all.every(
-          (expression) =>
-            expression.type.kind !== 'int' ||
-            intWidens(expression.type, type) ||
-            (expression.known && fitsInt(expression.value as bigint, type))
-        );
-      if (fitsIn(a)) return a;
-      if (fitsIn(b)) return b;
-      return undefined;
+      const selected = a.bits >= b.bits ? a : b;
+      const fits = all.every(
+        (expression) =>
+          expression.type.kind !== 'int' ||
+          intWidens(expression.type, selected) ||
+          (expression.known && fitsInt(expression.value as bigint, selected))
+      );
+      return fits ? selected : undefined;
     }
     if (a.kind === 'float' && b.kind === 'float') return a.bits >= b.bits ? a : b;
     if ((a.kind === 'int' && b.kind === 'float') || (a.kind === 'float' && b.kind === 'int')) {

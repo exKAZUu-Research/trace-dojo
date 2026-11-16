@@ -201,7 +201,7 @@ class BufferMemory {
     return value;
   }
 
-  // code-gauge-allow functionNcss 44 -- Encodes each scalar representation and transparent wrapper into shared bytes.
+  // code-gauge-allow functionNcss 45 -- Encodes each scalar representation and transparent wrapper into shared bytes.
   // code-gauge-allow functionCognitiveComplexity 23 -- Encodes each scalar representation and transparent wrapper into shared bytes.
   private write(type: Type, offset: number, value: Value, packed?: number): void {
     if (type.kind === 'array' || type.kind === 'struct' || type.kind === 'union') {
