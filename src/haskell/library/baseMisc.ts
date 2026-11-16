@@ -41,7 +41,7 @@ putChar :: Char -> IO ()
 putChar c = putStr [c]
 
 ioError :: IOError -> IO a
-ioError (IOError message) = primitive "ioError" message
+ioError err = return () >>= \_ -> case err of IOError message -> primitive "ioError" message
 
 userError :: String -> IOError
 userError message = IOError ("user error (" ++ message ++ ")")
@@ -372,7 +372,9 @@ groupBy _ [] = []
 groupBy eq (x:xs) = let (ys, zs) = span (eq x) xs in (x : ys) : groupBy eq zs
 
 partition :: (a -> Bool) -> [a] -> ([a], [a])
-partition p xs = (filter p xs, filter (not . p) xs)
+partition _ [] = ([],[])
+partition p (x:xs) = let (yes,no) = partition p xs
+                     in if p x then (x:yes,no) else (yes,x:no)
 
 intersperse :: a -> [a] -> [a]
 intersperse _ [] = []
@@ -477,7 +479,7 @@ unfoldr f b0 = case f b0 of
   Just (a, b) -> a : unfoldr f b
   Nothing -> []
 
-data Accum s a = Accum (s -> (s,a))
+data Accum s a = Accum !(s -> (s,a))
 
 runAccum :: Accum s a -> s -> (s,a)
 runAccum (Accum f) = f
@@ -489,7 +491,7 @@ instance Applicative (Accum s) where
   pure x = Accum (\s -> (s,x))
   Accum f <*> Accum g = Accum (\s -> let (s1,h) = f s; (s2,x) = g s1 in (s2,h x))
 
-data AccumR s a = AccumR (s -> (s,a))
+data AccumR s a = AccumR !(s -> (s,a))
 
 runAccumR :: AccumR s a -> s -> (s,a)
 runAccumR (AccumR f) = f
@@ -536,16 +538,20 @@ zipWith7 z (a:as') (b:bs) (c:cs) (d:ds) (e:es) (f:fs) (g:gs) = z a b c d e f g :
 zipWith7 _ _ _ _ _ _ _ _ = []
 
 unzip4 :: [(a, b, c, d)] -> ([a], [b], [c], [d])
-unzip4 xs = (map (\(a, _, _, _) -> a) xs, map (\(_, b, _, _) -> b) xs, map (\(_, _, c, _) -> c) xs, map (\(_, _, _, d) -> d) xs)
+unzip4 [] = ([],[],[],[])
+unzip4 ((a,b,c,d):xs) = let (as,bs,cs,ds) = unzip4 xs in (a:as,b:bs,c:cs,d:ds)
 
 unzip5 :: [(a, b, c, d, e)] -> ([a], [b], [c], [d], [e])
-unzip5 xs = (map (\(a, _, _, _, _) -> a) xs, map (\(_, b, _, _, _) -> b) xs, map (\(_, _, c, _, _) -> c) xs, map (\(_, _, _, d, _) -> d) xs, map (\(_, _, _, _, e) -> e) xs)
+unzip5 [] = ([],[],[],[],[])
+unzip5 ((a,b,c,d,e):xs) = let (as,bs,cs,ds,es) = unzip5 xs in (a:as,b:bs,c:cs,d:ds,e:es)
 
 unzip6 :: [(a, b, c, d, e, f)] -> ([a], [b], [c], [d], [e], [f])
-unzip6 xs = (map (\(a, _, _, _, _, _) -> a) xs, map (\(_, b, _, _, _, _) -> b) xs, map (\(_, _, c, _, _, _) -> c) xs, map (\(_, _, _, d, _, _) -> d) xs, map (\(_, _, _, _, e, _) -> e) xs, map (\(_, _, _, _, _, f) -> f) xs)
+unzip6 [] = ([],[],[],[],[],[])
+unzip6 ((a,b,c,d,e,f):xs) = let (as,bs,cs,ds,es,fs) = unzip6 xs in (a:as,b:bs,c:cs,d:ds,e:es,f:fs)
 
 unzip7 :: [(a, b, c, d, e, f, g)] -> ([a], [b], [c], [d], [e], [f], [g])
-unzip7 xs = (map (\(a, _, _, _, _, _, _) -> a) xs, map (\(_, b, _, _, _, _, _) -> b) xs, map (\(_, _, c, _, _, _, _) -> c) xs, map (\(_, _, _, d, _, _, _) -> d) xs, map (\(_, _, _, _, e, _, _) -> e) xs, map (\(_, _, _, _, _, f, _) -> f) xs, map (\(_, _, _, _, _, _, g) -> g) xs)
+unzip7 [] = ([],[],[],[],[],[],[])
+unzip7 ((a,b,c,d,e,f,g):xs) = let (as,bs,cs,ds,es,fs,gs) = unzip7 xs in (a:as,b:bs,c:cs,d:ds,e:es,f:fs,g:gs)
 
 -- Data.Bits
 

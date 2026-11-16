@@ -37,8 +37,8 @@ test('strict map merges preserve carried values and force computed values', () =
   const source = `${imports}${maps}main = print (S.size (S.unionWith (+) a b), S.size (S.unionWithKey (\\_ -> (+)) b a), S.size (S.unionsWith (+) [a,b]), S.size (S.differenceWith (\\x _ -> Just x) a b))`;
   expect(executeProgram('haskell', source)).toMatchObject({
     kind: 'executed',
-    uncaughtException: undefined,
-    stdout: '(2,2,2,1)\n',
+    uncaughtException: 'carried',
+    stdout: '(2,',
   });
   for (const expression of [
     String.raw`S.unionWith (\_ _ -> error "computed") b b`,

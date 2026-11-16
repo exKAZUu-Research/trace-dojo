@@ -350,7 +350,7 @@ singleton :: a -> [a]
 singleton x = [x]
 
 (!!) :: [a] -> Int -> a
-xs !! n = if n < 0 then errorWithoutStackTrace "Prelude.!!: negative index" else nth xs n
+xs !! n = n ${BT}seq${BT} xs ${BT}seq${BT} if n < 0 then errorWithoutStackTrace "Prelude.!!: negative index" else nth xs n
   where nth [] _ = errorWithoutStackTrace "Prelude.!!: index too large"
         nth (y:ys) k = if k == 0 then y else nth ys (k - 1)
 
@@ -461,7 +461,9 @@ drop n xs = if n <= 0 then xs else case xs of
   (_:ys) -> drop (n - 1) ys
 
 splitAt :: Int -> [a] -> ([a], [a])
-splitAt n xs = (take n xs, drop n xs)
+splitAt n xs = if n <= 0 then ([],xs) else case xs of
+  [] -> ([],[])
+  y:ys -> let (front,back) = splitAt (n-1) ys in (y:front,back)
 
 takeWhile :: (a -> Bool) -> [a] -> [a]
 takeWhile _ [] = []
@@ -507,10 +509,12 @@ zipWith3 z (a:as) (b:bs) (c:cs) = z a b c : zipWith3 z as bs cs
 zipWith3 _ _ _ _ = []
 
 unzip :: [(a, b)] -> ([a], [b])
-unzip xs = (map fst xs, map snd xs)
+unzip [] = ([],[])
+unzip ((a,b):xs) = let (as,bs) = unzip xs in (a:as,b:bs)
 
 unzip3 :: [(a, b, c)] -> ([a], [b], [c])
-unzip3 xs = (map (\(a, _, _) -> a) xs, map (\(_, b, _) -> b) xs, map (\(_, _, c) -> c) xs)
+unzip3 [] = ([],[],[])
+unzip3 ((a,b,c):xs) = let (as,bs,cs) = unzip3 xs in (a:as,b:bs,c:cs)
 
 lines :: String -> [String]
 lines "" = []
@@ -535,7 +539,7 @@ unwords (w:ws) = w ++ ' ' : unwords ws
 
 -- Foldable and Traversable
 
-data FoldEndo a = FoldEndo (a -> a)
+data FoldEndo a = FoldEndo !(a -> a)
 
 runFoldEndo :: FoldEndo a -> a -> a
 runFoldEndo (FoldEndo f) = f
@@ -750,7 +754,10 @@ rights :: [Either a b] -> [b]
 rights x = [a | Right a <- x]
 
 partitionEithers :: [Either a b] -> ([a], [b])
-partitionEithers xs = (lefts xs, rights xs)
+partitionEithers [] = ([],[])
+partitionEithers (x:xs) = let (ls,rs) = partitionEithers xs in case x of
+  Left a -> (a:ls,rs)
+  Right b -> (ls,b:rs)
 
 isLeft :: Either a b -> Bool
 isLeft (Left _) = True

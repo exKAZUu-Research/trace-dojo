@@ -171,7 +171,7 @@ formatOne spec@(Spec minus plus space zero alt width prec c) u = case u of
       Just w -> let n = w - length s in
         if n <= 0 then s
         else if minus then s ++ replicate n ' '
-        else if zero && numeric && zeroPadding then zeroPad n s
+        else if zero && (not numeric || zeroPadding) then (if numeric then zeroPad n s else replicate n '0' ++ s)
         else replicate n ' ' ++ s
     zeroPad n (sign:rest) | sign ${BT}elem${BT} "+- " = sign : zeroPad n rest
     zeroPad n ('0':base:rest) | base ${BT}elem${BT} "xXbB" = '0' : base : replicate n '0' ++ rest

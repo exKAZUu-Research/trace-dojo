@@ -148,7 +148,7 @@ export type Decl =
 
 export interface ImportItem {
   kind: 'value' | 'type';
-  name: Name;
+  name: QName;
   /** For a type or class: `undefined` for the name alone, `'all'` for `(..)`, or the listed constructors and fields. */
   children?: 'all' | Name[];
 }

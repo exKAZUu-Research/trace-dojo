@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 775 -- The syntax-tree conversion covers every node kind of the grammar in one pass.
+// code-gauge-allow-file fileNcss 800 -- The syntax-tree conversion covers every node kind of the grammar in one pass.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type { CompileError } from '../interpreter/diagnostics';
@@ -78,8 +78,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   newtype_constructor: 'newtype',
   or_pattern: 'or パターン',
   pattern_synonym: 'パターンシノニム',
-  projection: 'レコードのドット記法（OverloadedRecordDot）',
-  projection_selector: 'レコードのドット記法（OverloadedRecordDot）',
   promoted: '昇格した構成子（DataKinds）',
   rec: 'rec ブロック（RecursiveDo）',
   role_annotation: '型の役割の注釈（type role）',
@@ -231,7 +229,7 @@ function convertExports(header: Node): ImportItem[] | undefined {
   const exportsNode = field(header, 'exports');
   if (!exportsNode) return undefined;
   for (const child of namedChildren(exportsNode)) rejectUnsupported(child);
-  return fields(exportsNode, 'export').map(convertImportItem);
+  return fields(exportsNode, 'export').map((node) => convertImportItem(node, true));
 }
 
 function convertImport(node: Node): Import {
@@ -247,20 +245,21 @@ function convertImport(node: Node): Import {
     qualified: hasToken(node, 'qualified'),
     alias: aliasNode ? moduleName(aliasNode) : undefined,
     hiding: hasToken(node, 'hiding') || (namesNode !== undefined && hasToken(namesNode, 'hiding')),
-    items: namesNode ? fields(namesNode, 'name').map(convertImportItem) : undefined,
+    items: namesNode ? fields(namesNode, 'name').map((node) => convertImportItem(node)) : undefined,
     span: spanOf(node),
   };
 }
 
-function convertImportItem(node: Node): ImportItem {
+function convertImportItem(node: Node, exporting = false): ImportItem {
+  const nameOf = (name: Node): QName => (exporting ? qualifiedName(name).name : plainName(name));
   const namespace = field(node, 'namespace');
   if (namespace) throw unsupported(namespace);
   const variable = field(node, 'variable');
   const operator = field(node, 'operator');
   const type = field(node, 'type');
   const constructor = field(node, 'constructor');
-  if (variable) return { kind: 'value', name: plainName(variable) };
-  if (operator) return { kind: 'value', name: plainName(operator) };
+  if (variable) return { kind: 'value', name: nameOf(variable) };
+  if (operator) return { kind: 'value', name: nameOf(operator) };
   const typeNode = type ?? constructor;
   if (!typeNode) throw syntaxError(spanOf(node), '書き方に誤りがあります。');
   const childrenNode = field(node, 'children');
@@ -272,7 +271,7 @@ function convertImportItem(node: Node): ImportItem {
       ? 'all'
       : elements.map((element) => plainName(element));
   }
-  return { kind: 'type', name: plainName(typeNode), children };
+  return { kind: 'type', name: nameOf(typeNode), children };
 }
 
 /** The name a node spells, without parentheses around an operator. */
@@ -903,18 +902,12 @@ export function convertExpr(node: Node): Expr {
   rejectUnsupported(node);
   const span = spanOf(node);
   switch (node.type) {
-    case 'variable': {
-      if (node.text === '_') throw unsupportedError(span, '型の穴（_）');
-      return { kind: 'var', name: { name: node.text, span }, span };
-    }
-    case 'constructor': {
-      return { kind: 'con', name: { name: node.text, span }, span };
-    }
+    case 'variable':
+    case 'constructor':
     case 'qualified':
     case 'prefix_id':
     case 'parenthesized_name': {
-      const { name, isConstructor } = qualifiedName(node);
-      return isConstructor || name.name.startsWith(':') ? { kind: 'con', name, span } : { kind: 'var', name, span };
+      return convertNameExpression(node, span);
     }
     case 'literal': {
       return { kind: 'lit', lit: convertLiteral(namedChildren(node)[0] ?? node), span };
@@ -923,10 +916,20 @@ export function convertExpr(node: Node): Expr {
       const fn = required(node, 'function');
       const argument = required(node, 'argument');
       rejectUnsupported(argument);
-      return { kind: 'app', fn: convertExpr(fn), arg: convertExpr(argument), span };
+      return applyExpression(convertExpr(fn), convertExpr(argument), span);
+    }
+    case 'projection':
+    case 'projection_selector': {
+      return convertComposition(node, span);
     }
     case 'operator_chain': {
-      return { kind: 'chain', items: chainItems(node, convertExpr), span };
+      return {
+        kind: 'chain',
+        items: chainItems(node, convertExpr).flatMap((item) =>
+          item.kind === 'operand' ? expressionItems(item.value) : [item]
+        ),
+        span,
+      };
     }
     case 'parens': {
       const inner = field(node, 'expression');
@@ -984,6 +987,47 @@ export function convertExpr(node: Node): Expr {
       throw syntaxError(span, '書き方に誤りがあります。');
     }
   }
+}
+
+function convertNameExpression(node: Node, span: Span): Expr {
+  if (node.text === '_') throw unsupportedError(span, '型の穴（_）');
+  const { name, isConstructor } = qualifiedName(node);
+  return isConstructor || name.name.startsWith(':') ? { kind: 'con', name, span } : { kind: 'var', name, span };
+}
+
+function expressionItems(expr: Expr): ChainItem<Expr>[] {
+  return expr.kind === 'chain' ? expr.items : [{ kind: 'operand', value: expr }];
+}
+
+function applyExpression(fn: Expr, arg: Expr, span: Span): Expr {
+  if (fn.kind !== 'chain') return { kind: 'app', fn, arg, span };
+  const items = [...fn.items];
+  const last = items.pop();
+  if (!last || last.kind !== 'operand') throw syntaxError(span, '書き方に誤りがあります。');
+  items.push({ kind: 'operand', value: { kind: 'app', fn: last.value, arg, span } });
+  return { kind: 'chain', items, span };
+}
+
+function convertComposition(node: Node, span: Span): Expr {
+  const dots = node.children.filter((child): child is Node => child?.type === '.');
+  const names = fields(node, 'field').map((fieldNode): Expr => ({
+    kind: 'var',
+    name: qualifiedName(fieldNode).name,
+    span: spanOf(fieldNode),
+  }));
+  const target = field(node, 'expression');
+  const items: ChainItem<Expr>[] = target ? expressionItems(convertExpr(target)) : expressionItems(names.shift()!);
+  for (const [index, name] of names.entries()) {
+    const dot = dots[target ? index : index + 1]!;
+    items.push(
+      { kind: 'operator', op: { name: '.', isConstructor: false, span: spanOf(dot) } },
+      { kind: 'operand', value: name }
+    );
+  }
+  const expr: Expr = { kind: 'chain', items, span };
+  return target
+    ? expr
+    : { kind: 'rightSection', op: { name: '.', isConstructor: false, span: spanOf(dots[0]!) }, right: expr, span };
 }
 
 function convertSection(node: Node, span: Span): Expr {
@@ -1224,7 +1268,7 @@ export function convertPattern(node: Node): Pat {
       const inner = field(node, 'pattern');
       if (!inner) throw syntaxError(span, '書き方に誤りがあります。');
       if (inner.type === 'signature') throw unsupportedError(span, 'パターンの型シグネチャ');
-      return convertPattern(inner);
+      return { ...convertPattern(inner), span };
     }
     case 'tuple': {
       const elements = fields(node, 'element');

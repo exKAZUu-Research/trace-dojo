@@ -161,3 +161,44 @@ test.each([
     uncaughtException: expect.stringMatching(new RegExp(`Non-exhaustive patterns in function ${name}$`)),
   });
 });
+
+test.each([
+  ['main=do\nprint 1', 1],
+  ['main=do\n  print 1 >> do\n  print 2', 2],
+  ['main=do\n  let f=do\n      print 2\n  f', 2],
+  ['main=do\n  if True then print 1 else do\n  print 2', 2],
+  ['main=do\n  print [1,\n  2]', 2],
+  ['main=do\n  print(foldr (+) 0\n  [1,2])', 2],
+  ['main=print [1,\n2]', 1],
+  ['f default x=default+x\nmain=print(f 1 2)', 0],
+  ['main=let foreign=1 in print foreign', 0],
+  ['main=let forall=1 in print forall', 0],
+])('GHC layout and reserved identifiers produce syntax errors: %s', (source, row) => {
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row, message: '書き方に誤りがあります。' }],
+  });
+});
+
+test.each([
+  ['module Main(main,M.fromMaybe) where\nimport qualified Data.Maybe as M\nmain=print 1', '1\n'],
+  ['module Main(main,M.Maybe(..)) where\nimport qualified Data.Maybe as M\nmain=print 1', '1\n'],
+  ['main=do {print [1,\n2]}', '[1,2]\n'],
+  ['main=do\n  print [1,\n    2]', '[1,2]\n'],
+  ['main=print(map(show.fst)[(1,2::Int)])', '["1"]\n'],
+  ['main=print(length.show $ 12345)', '5\n'],
+  ['main=print(sum.map (*2) $ [1,2])', '6\n'],
+  ['main=print((.succ) (+1) 1)', '3\n'],
+  ['main=print((succ.succ) 1)', '3\n'],
+])('supported syntax retains GHC meaning: %s', (source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test('ambiguous imports exclude origins from other qualified scopes', () => {
+  const source =
+    'import qualified Data.List as L\nfilter p xs = [x | x <- xs, p x]\nmain=print(filter even [1,2::Int])';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: 'filter が、Prelude.filter と Main.filter のどれを指すか決まりません。' }],
+  });
+});

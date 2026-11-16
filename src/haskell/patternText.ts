@@ -17,7 +17,7 @@ export function surfacePatternText(pat: Pat): PatternText {
     case 'plit': {
       const literal = pat.lit;
       if (literal.kind === 'string' || literal.kind === 'char') return literal;
-      return `${pat.negative ? '-' : ''}${literal.value}`;
+      return `${pat.negative ? '-' : ''}${literal.kind === 'frac' ? literal.text : literal.value}`;
     }
     case 'ptuple': {
       return ['(', separated(pat.elems.map(surfacePatternText)), ')'];

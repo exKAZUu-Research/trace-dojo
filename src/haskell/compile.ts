@@ -129,7 +129,7 @@ class LibraryCompiler {
     });
     if (name === 'Base') {
       this.base = renamed;
-      this.baseType('Down').cons[0].isNewtype = true;
+      for (const name of ['Down', 'Accum', 'AccumR', 'FoldEndo']) this.baseType(name).cons[0].isNewtype = true;
       setPrimitiveTypes(this.baseType('Bool').cons, this.baseType('Ordering').cons);
     }
     const checked = typecheckModule(renamed, {

@@ -646,9 +646,7 @@ define('readFloatText', 1, [], ([text], runtime) => {
   if (!match) return tuple(0n, 1n);
   const digits = BigInt(`${match[1]}${match[2] ?? ''}`);
   const exponent = (match[3] ? Number(match[3]) : 0) - (match[2]?.length ?? 0);
-  if (exponent > 100_000 || exponent < -100_000) {
-    return exponent > 0 ? tuple(digits === 0n ? 0n : 10n ** 400n, 1n) : tuple(0n, 1n);
-  }
+  runtime.spend(Math.abs(exponent));
   return exponent >= 0 ? tuple(digits * 10n ** BigInt(exponent), 1n) : tuple(digits, 10n ** BigInt(-exponent));
 });
 define('readHexText', 1, [], ([text], runtime) => BigInt(`0x${forceString(text, runtime)}`));

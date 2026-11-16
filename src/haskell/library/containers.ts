@@ -238,7 +238,7 @@ findIndex x s = case lookupIndex x s of
   Nothing -> errorWithoutStackTrace "Set.findIndex: element is not in the set"
 
 lookupIndex :: Ord a => a -> Set a -> Maybe Int
-lookupIndex x = go 0
+lookupIndex x tree = x ${BT}seq${BT} go 0 tree
   where go _ STip = Nothing
         go offset (SBin _ y l r) = case compare x y of
           LT -> go offset l
@@ -261,16 +261,16 @@ splitMember :: Ord a => a -> Set a -> (Set a, Bool, Set a)
 splitMember x s = (filter (< x) s, member x s, filter (> x) s)
 
 lookupLT :: Ord a => a -> Set a -> Maybe a
-lookupLT x = nearest (\y -> y < x) False
+lookupLT x tree = x ${BT}seq${BT} (nearest (\y -> y < x) False) tree
 
 lookupGT :: Ord a => a -> Set a -> Maybe a
-lookupGT x = nearest (\y -> y > x) True
+lookupGT x tree = x ${BT}seq${BT} (nearest (\y -> y > x) True) tree
 
 lookupLE :: Ord a => a -> Set a -> Maybe a
-lookupLE x = nearest (\y -> y <= x) False
+lookupLE x tree = x ${BT}seq${BT} (nearest (\y -> y <= x) False) tree
 
 lookupGE :: Ord a => a -> Set a -> Maybe a
-lookupGE x = nearest (\y -> y >= x) True
+lookupGE x tree = x ${BT}seq${BT} (nearest (\y -> y >= x) True) tree
 
 instance Eq a => Eq (Set a) where
   a == b = size a == size b && toAscList a == toAscList b
@@ -707,7 +707,7 @@ elemAt i m = if i < 0 || i >= size m then errorWithoutStackTrace "Map.elemAt: in
           GT -> at (n - size l - 1) r
 
 lookupIndex :: Ord k => k -> Map k a -> Maybe Int
-lookupIndex k = go 0
+lookupIndex k tree = k ${BT}seq${BT} go 0 tree
   where go _ Tip = Nothing
         go offset (Bin _ key _ l r) = case compare k key of
           LT -> go offset l
@@ -729,16 +729,16 @@ splitAt :: Int -> Map k a -> (Map k a, Map k a)
 splitAt n m = (take n m, drop n m)
 
 lookupLT :: Ord k => k -> Map k v -> Maybe (k, v)
-lookupLT k = nearest (\key -> key < k) False
+lookupLT k tree = k ${BT}seq${BT} (nearest (\key -> key < k) False) tree
 
 lookupGT :: Ord k => k -> Map k v -> Maybe (k, v)
-lookupGT k = nearest (\key -> key > k) True
+lookupGT k tree = k ${BT}seq${BT} (nearest (\key -> key > k) True) tree
 
 lookupLE :: Ord k => k -> Map k v -> Maybe (k, v)
-lookupLE k = nearest (\key -> key <= k) False
+lookupLE k tree = k ${BT}seq${BT} (nearest (\key -> key <= k) False) tree
 
 lookupGE :: Ord k => k -> Map k v -> Maybe (k, v)
-lookupGE k = nearest (\key -> key >= k) True
+lookupGE k tree = k ${BT}seq${BT} (nearest (\key -> key >= k) True) tree
 
 split :: Ord k => k -> Map k a -> (Map k a, Map k a)
 split k m = (filterWithKey (\k' _ -> k' < k) m, filterWithKey (\k' _ -> k' > k) m)
@@ -799,7 +799,38 @@ mapAccumRWithKey f a m = let (b, xs) = B.mapAccumR (\acc (k,x) -> let (next,y) =
                        in (b,fromDistinctAscList xs)
 
 splitLookup :: Ord k => k -> Map k a -> (Map k a,Maybe a,Map k a)
-splitLookup k m = let (l,r) = split k m in (l,lookup k m,r)
+splitLookup k m = k ${BT}seq${BT} case m of
+  Tip -> (Tip,Nothing,Tip)
+  Bin _ key x l r -> case compare k key of
+    EQ -> (l,Just x,r)
+    LT -> case splitLookup k l of
+      (lt,found,gt) -> let right = link key x gt r in right ${BT}seq${BT} (lt,found,right)
+    GT -> case splitLookup k r of
+      (lt,found,gt) -> let left = link key x l lt in left ${BT}seq${BT} (left,found,gt)
+
+link :: k -> a -> Map k a -> Map k a -> Map k a
+link k x Tip r = insertMin k x r
+link k x l Tip = insertMax k x l
+link k x l@(Bin sl kl xl ll lr) r@(Bin sr kr xr rl rr) =
+  if 3 * sl < sr then balance kr xr (link k x l rl) rr
+  else if 3 * sr < sl then balance kl xl ll (link k x lr r)
+  else bin k x l r
+
+insertMin :: k -> a -> Map k a -> Map k a
+insertMin k x Tip = singleton k x
+insertMin k x (Bin _ key y l r) = balance key y (insertMin k x l) r
+
+insertMax :: k -> a -> Map k a -> Map k a
+insertMax k x Tip = singleton k x
+insertMax k x (Bin _ key y l r) = balance key y l (insertMax k x r)
+
+link2 :: Map k a -> Map k a -> Map k a
+link2 Tip r = r
+link2 l Tip = l
+link2 l@(Bin sl kl xl ll lr) r@(Bin sr kr xr rl rr) =
+  if 3 * sl < sr then balance kr xr (link2 l rl) rr
+  else if 3 * sr < sl then balance kl xl ll (link2 lr r)
+  else glue l r
 
 updateWithKey :: Ord k => (k -> a -> Maybe a) -> k -> Map k a -> Map k a
 updateWithKey f k = update (f k) k
@@ -958,13 +989,20 @@ unionWith :: Ord k => (a -> a -> a) -> Map k a -> Map k a -> Map k a
 unionWith f = unionWithKey (\_ x y -> f x y)
 
 unionWithKey :: Ord k => (k -> a -> a -> a) -> Map k a -> Map k a -> Map k a
-unionWithKey f a b = b ${BT}seq${BT} a ${BT}seq${BT} L.fromDistinctAscList (go (L.toAscList a) (L.toAscList b))
-  where go [] ys = ys
-        go xs [] = xs
-        go xs@((kx, x) : xt) ys@((ky, y) : yt) = case compare kx ky of
-          LT -> (kx, x) : go xt ys
-          GT -> (ky, y) : go xs yt
-          EQ -> let z = f kx x y in z ${BT}seq${BT} (kx, z) : go xt yt
+unionWithKey _ a L.Tip = a
+unionWithKey f a (L.Bin _ k x L.Tip L.Tip) = insertCarried (\key old new -> f key old new) k x a
+unionWithKey f (L.Bin _ k x L.Tip L.Tip) b = insertCarried (\key old new -> f key new old) k x b
+unionWithKey _ L.Tip b = b
+unionWithKey f (L.Bin _ k x l r) b = case L.splitLookup k b of
+  (bl,found,br) -> let y = case found of Nothing -> x; Just z -> f k x z
+                  in y ${BT}seq${BT} L.link k y (unionWithKey f l bl) (unionWithKey f r br)
+
+insertCarried :: Ord k => (k -> a -> a -> a) -> k -> a -> Map k a -> Map k a
+insertCarried _ k x L.Tip = k ${BT}seq${BT} x ${BT}seq${BT} L.singleton k x
+insertCarried f k x (L.Bin size key y l r) = case compare k key of
+  LT -> L.balance key y (insertCarried f k x l) r
+  GT -> L.balance key y l (insertCarried f k x r)
+  EQ -> let z = f key y x in z ${BT}seq${BT} L.Bin size key z l r
 
 unionsWith :: (Foldable f, Ord k) => (a -> a -> a) -> f (Map k a) -> Map k a
 unionsWith f = B.foldl' (unionWith f) L.empty
@@ -976,11 +1014,18 @@ intersectionWithKey :: Ord k => (k -> a -> b -> c) -> Map k a -> Map k b -> Map 
 intersectionWithKey f a b = forceValues (L.intersectionWithKey f a b)
 
 differenceWith :: Ord k => (a -> b -> Maybe a) -> Map k a -> Map k b -> Map k a
-differenceWith f a b = L.fromDistinctAscList [(k, z) | (k, x) <- L.toAscList a, Just z <- [case L.lookup k b of
-  Nothing -> Just x
-  Just y -> case f x y of
-    Nothing -> Nothing
-    Just z -> z ${BT}seq${BT} Just z]]
+differenceWith _ a L.Tip = a
+differenceWith _ L.Tip _ = L.Tip
+differenceWith f (L.Bin _ k x l r) b = case L.splitLookup k b of
+  (bl,found,br) -> let left = differenceWith f l bl
+                       right = differenceWith f r br
+                       result = case found of Nothing -> Just x; Just y -> f x y
+                   in right ${BT}seq${BT} left ${BT}seq${BT} case result of
+                     Nothing -> L.link2 left right
+                     Just z -> case found of
+                       Nothing -> L.link k z left right
+                       Just _ -> z ${BT}seq${BT} L.link k z left right
+
 mapAccum :: (a -> b -> (a,c)) -> a -> Map k b -> (a,Map k c)
 mapAccum f = mapAccumWithKey (\a _ x -> f a x)
 

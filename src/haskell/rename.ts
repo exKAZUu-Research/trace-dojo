@@ -200,7 +200,7 @@ export function renameModule(module: Module, options: RenameOptions): RModule {
 class Renamer {
   private readonly scope = new GlobalScope();
   private readonly ownValues = new Map<string, ValueEntity>();
-  private readonly importOrigins = new Map<object, Set<string>>();
+  private readonly importOrigins = new Map<object, Map<string | undefined, Set<string>>>();
   private readonly ownTypes = new Map<string, TypeLike>();
   private readonly ownTypeChildren = new Map<TypeLike, ValueEntity[]>();
   private readonly dataDecls: RDataDecl[] = [];
@@ -282,22 +282,38 @@ class Renamer {
 
   private importTable(table: ExportTable, qualifier: string | undefined, unqualified: boolean, source?: string): void {
     for (const [name, entity] of table.values) {
-      if (source) this.addImportOrigin(entity, source);
+      this.addImportOrigins(entity, source, qualifier, unqualified);
       if (unqualified) this.scope.addValue(undefined, name, entity);
       if (qualifier !== undefined) this.scope.addValue(qualifier, name, entity);
     }
     for (const [name, entry] of table.types) {
-      if (source) this.addImportOrigin(entry.entity.entity, source);
+      this.addImportOrigins(entry.entity.entity, source, qualifier, unqualified);
       if (unqualified) this.scope.addType(undefined, name, entry.entity);
       if (qualifier !== undefined) this.scope.addType(qualifier, name, entry.entity);
     }
   }
 
-  private addImportOrigin(entity: object, source: string): void {
-    let origins = this.importOrigins.get(entity);
+  private addImportOrigins(
+    entity: object,
+    source: string | undefined,
+    qualifier: string | undefined,
+    unqualified: boolean
+  ): void {
+    if (!source) return;
+    if (unqualified) this.addImportOrigin(entity, source, undefined);
+    if (qualifier !== undefined) this.addImportOrigin(entity, source, qualifier);
+  }
+
+  private addImportOrigin(entity: object, source: string, qualifier: string | undefined): void {
+    let scopes = this.importOrigins.get(entity);
+    if (!scopes) {
+      scopes = new Map();
+      this.importOrigins.set(entity, scopes);
+    }
+    let origins = scopes.get(qualifier);
     if (!origins) {
       origins = new Set();
-      this.importOrigins.set(entity, origins);
+      scopes.set(qualifier, origins);
     }
     origins.add(source);
   }
@@ -363,12 +379,12 @@ class Renamer {
     }
     for (const item of this.module.exports) {
       if (item.kind === 'value') {
-        const entity = this.lookupValue({ name: item.name.name, span: item.name.span }, false);
+        const entity = this.lookupValue(item.name, false);
         table.values.set(item.name.name, entity);
         continue;
       }
-      const entry = this.lookupType({ name: item.name.name, span: item.name.span });
-      const all = this.childrenOf(entry);
+      const entry = this.lookupType(item.name);
+      const all = this.childrenOf(entry, item.name.qualifier);
       const children =
         item.children === 'all'
           ? all
@@ -383,7 +399,7 @@ class Renamer {
     return table;
   }
 
-  private childrenOf(entry: TypeLike): ValueEntity[] {
+  private childrenOf(entry: TypeLike, qualifier?: string): ValueEntity[] {
     const own = this.ownTypeChildren.get(entry);
     if (own) return own;
     const children =
@@ -393,7 +409,12 @@ class Renamer {
             ...entry.entity.cons.map((con) => con.entity),
             ...[...entry.entity.fields.values()].map((field) => field.entity),
           ];
-    return children.filter((child) => this.scope.values.get(child.name).includes(child));
+    return children.filter((child) =>
+      (qualifier
+        ? (this.scope.qualifiedValues.get(qualifier)?.get(child.name) ?? [])
+        : this.scope.values.get(child.name)
+      ).includes(child)
+    );
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -1030,7 +1051,7 @@ class Renamer {
   // Patterns
 
   renamePat(pat: Pat, binders: Map<string, LocalVar>): RPat {
-    return { ...this.renamePatCore(pat, binders), surface: pat };
+    return { ...this.renamePatCore(pat, binders), span: pat.span, surface: pat };
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- One short case per pattern kind.
@@ -1211,7 +1232,9 @@ class Renamer {
     }
     const sources = found
       .flatMap((entity) =>
-        [...(this.importOrigins.get(originOf(entity)) ?? [entity.module])].map((source) => `${source}.${entity.name}`)
+        [...(this.importOrigins.get(originOf(entity))?.get(name.qualifier) ?? [entity.module])].map(
+          (source) => `${source}.${entity.name}`
+        )
       )
       .join(' と ');
     throw compileError(name.span, `${text} が、${sources} のどれを指すか決まりません。`);

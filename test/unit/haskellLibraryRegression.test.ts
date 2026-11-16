@@ -139,3 +139,72 @@ test.each([
     uncaughtException: expect.stringContaining(`Non-exhaustive patterns in ${pattern}`),
   });
 });
+
+test.each(['Data.Set', 'Data.Map'])('%s ordered searches demand keys on empty trees', (module) => {
+  for (const operation of ['lookupLT', 'lookupLE', 'lookupGT', 'lookupGE', 'lookupIndex', 'findIndex']) {
+    const empty = module === 'Data.Map' ? '(C.empty::C.Map Int Int)' : 'C.empty';
+    const source = `import qualified ${module} as C\nmain=print(C.${operation} (undefined::Int) ${empty})`;
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: '',
+      uncaughtException: 'Prelude.undefined',
+    });
+  }
+});
+
+test.each([
+  [String.raw`M.differenceWith (\x _ -> Just x) M.empty (error "second"::M.Map Int Int)`, 'second'],
+  [
+    String.raw`M.differenceWith (\x _ -> Just x) (error "first"::M.Map Int Int) (error "second"::M.Map Int Int)`,
+    'second',
+  ],
+  [String.raw`M.unionWithKey (\k _ _ -> error(show k)) a a`, '2'],
+  [String.raw`M.unionWithKey (\k x _ -> if k==2 then x else error(show k)) a a`, '1'],
+  [String.raw`M.differenceWith (\x _ -> Just(error(show x))) a a`, '3'],
+])('strict map merges preserve containers traversal order: %s', (operation, uncaughtException) => {
+  const source = `import qualified Data.Map.Strict as M\na=M.fromList[(i,i)|i <- [1..3::Int]]\nmain=print(M.size(${operation}))`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
+});
+
+test.each([
+  ['import Data.List\nmain=print(take 5(snd(mapAccumL (\\s x -> (s+x,s)) 0 [1..])))', '[0,1,3,6,10]\n'],
+  ['import Data.List\nmain=print(take 3(snd(mapAccumR (\\s x -> (s,x*2)) 0 [1..])))', '[2,4,6]\n'],
+  [
+    'import Data.Foldable\ndata Box a=Box [a]\ninstance Foldable Box where foldMap f (Box xs)=foldMap f xs\nmain=print(take 3(toList(Box [1..])))',
+    '[1,2,3]\n',
+  ],
+  [
+    'import Data.Foldable\ndata Box a=Box [a]\ninstance Foldable Box where foldMap f (Box xs)=foldMap f xs\nmain=print(head(toList(Box (1:undefined))))',
+    '1\n',
+  ],
+  [
+    'import Text.Printf\nmain=printf "[%05s][%05c][%06.2d][%05v][%05.1s]" "ab" \'x\' (7::Int) "hi" "xyz"',
+    '[000ab][0000x][    07][000hi][0000x]',
+  ],
+  ['main=ioError undefined `seq` ioError(error "bad") `seq` putStrLn "ok"', 'ok\n'],
+  ['main=print(fst(splitAt 1 (1:undefined::[Int])))', '[1]\n'],
+  ['main=print(take 1(fst(unzip ((1,2):undefined::[(Int,Int)]))))', '[1]\n'],
+  ['import Data.List\nmain=print(take 1(fst(partition odd (1:undefined::[Int]))))', '[1]\n'],
+  [
+    'import Numeric\nmain=print(fst(head(readFloat "1e100001"::[(Rational,String)]))==1e400,fst(head(readFloat "1e-100001"::[(Rational,String)]))==0)',
+    '(False,False)\n',
+  ],
+])('standard library demand preserves lazy results: %s', (source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test.each([
+  'main=print((undefined::[Int])!!(-1))',
+  'main=print(splitAt undefined [1::Int] `seq` 1)',
+  'main=print(splitAt 1 (undefined::[Int]) `seq` 1)',
+  'main=print(unzip(undefined::[(Int,Int)]) `seq` 1)',
+  'import Data.List\nmain=print(unzip3(undefined::[(Int,Int,Int)]) `seq` 1)',
+  'import Data.List\nmain=print(unzip7(undefined::[(Int,Int,Int,Int,Int,Int,Int)]) `seq` 1)',
+  'import Data.Either\nmain=print(partitionEithers[undefined::Either Int Int] `seq` 1)',
+])('standard library operations demand their initial input: %s', (source) => {
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: 'Prelude.undefined',
+  });
+});
