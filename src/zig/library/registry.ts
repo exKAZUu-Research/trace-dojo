@@ -5,7 +5,9 @@ import { fmtNamespace } from './fmtlib';
 import { HASH_MAP_MEMBERS } from './hashMap';
 import { mathNamespace } from './math';
 import { memNamespace } from './mem';
-import { fnMember, nativeStruct } from './native';
+import { enumsNamespace, metaNamespace, PRIORITY_QUEUE, unicodeNamespace } from './misc';
+import { fnMember } from './native';
+import { randomNamespace } from './random';
 import { sortNamespace } from './sort';
 import { registerLazy } from './std';
 
@@ -14,22 +16,25 @@ registerLazy('fmt', () => ({ type: TYPE, value: fmtNamespace() }));
 registerLazy('ascii', () => ({ type: TYPE, value: asciiNamespace() }));
 registerLazy('math', () => ({ type: TYPE, value: mathNamespace() }));
 registerLazy('sort', () => ({ type: TYPE, value: sortNamespace() }));
+registerLazy('unicode', () => ({ type: TYPE, value: unicodeNamespace() }));
+registerLazy('meta', () => ({ type: TYPE, value: metaNamespace() }));
+registerLazy('enums', () => ({ type: TYPE, value: enumsNamespace() }));
+registerLazy('Random', () => ({ type: TYPE, value: randomNamespace() }));
 registerLazy('ArrayList', arrayListFactory());
+registerLazy('PriorityQueue', PRIORITY_QUEUE);
 for (const [name, member] of Object.entries(HASH_MAP_MEMBERS)) registerLazy(name, member);
 
-/** Library modules not yet implemented, which report that they are unavailable. */
-for (const name of ['unicode', 'meta', 'enums', 'Random', 'array_hash_map']) {
-  registerLazy(name, () => ({ type: TYPE, value: nativeStruct(`std.${name}`, {}) }));
-}
-for (const name of [
-  'AutoArrayHashMapUnmanaged',
-  'StringArrayHashMapUnmanaged',
-  'PriorityQueue',
-  'DoublyLinkedList',
-  'SinglyLinkedList',
-]) {
+/** Library members that this grader does not run, with what learners call them. */
+const UNAVAILABLE: Record<string, string> = {
+  array_hash_map: '挿入の順を保つハッシュマップ（std.array_hash_map）',
+  AutoArrayHashMapUnmanaged: '挿入の順を保つハッシュマップ（std.AutoArrayHashMapUnmanaged）',
+  StringArrayHashMapUnmanaged: '挿入の順を保つハッシュマップ（std.StringArrayHashMapUnmanaged）',
+  DoublyLinkedList: '侵入型の連結リスト（std.DoublyLinkedList。@fieldParentPtr が要る）',
+  SinglyLinkedList: '侵入型の連結リスト（std.SinglyLinkedList。@fieldParentPtr が要る）',
+};
+for (const [name, what] of Object.entries(UNAVAILABLE)) {
   registerLazy(
     name,
-    fnMember(`std.${name}`, (sema, call) => sema.error(call.span, `std.${name} はまだ使えません。`))
+    fnMember(`std.${name}`, (sema, call) => sema.error(call.span, `${what}は、この採点環境では使えません。`))
   );
 }

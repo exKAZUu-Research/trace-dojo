@@ -672,7 +672,9 @@ export abstract class SemaBase implements SemaApi {
       return known(to, this.knownFunctionValue(expression, span), span);
     }
     if (from.kind !== 'pointer') return undefined;
-    if (from.isConst && !to.isConst) return undefined;
+    // A pointer to an empty array has nothing to write, so it coerces to a slice of variables.
+    const empty = from.size === 'one' && from.child.kind === 'array' && from.child.length === 0;
+    if (from.isConst && !to.isConst && !empty) return undefined;
     if (from.size === to.size) {
       if (!inMemoryCoercible(from.child, to.child)) return undefined;
       if (to.sentinel !== undefined && from.sentinel !== to.sentinel) return undefined;

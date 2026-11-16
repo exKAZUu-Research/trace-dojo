@@ -55,7 +55,7 @@ export function importStd(): StructType {
     StringHashMapUnmanaged: lazyMember('StringHashMapUnmanaged'),
     AutoArrayHashMapUnmanaged: lazyMember('AutoArrayHashMapUnmanaged'),
     StringArrayHashMapUnmanaged: lazyMember('StringArrayHashMapUnmanaged'),
-    array_hash_map: typeMember(() => lazyNamespace('array_hash_map')),
+    array_hash_map: lazyMember('array_hash_map'),
     PriorityQueue: lazyMember('PriorityQueue'),
     DoublyLinkedList: lazyMember('DoublyLinkedList'),
     SinglyLinkedList: lazyMember('SinglyLinkedList'),
@@ -368,7 +368,13 @@ function writerOf(sema: SemaApi, call: NativeCall): (frame: Parameters<TExpr['ev
     return (frame) => ((evaluate(frame) as Pointer).load() as NativeHandle).state as WriterState;
   }
   if (type === WRITER) {
-    return sema.error(call.span, 'std.Io.Writer のメソッドは、ポインタ（&w.interface）を通して呼び出してください。');
+    // A method that takes `*Writer` takes the address of a writer variable or field.
+    const address = sema.addressOf(receiver);
+    if (address.type.kind === 'pointer' && address.type.isConst) {
+      return sema.error(call.span, '定数の std.Io.Writer には書き込めません（var で宣言してください）。');
+    }
+    const locate = address.eval;
+    return (frame) => ((locate(frame) as Pointer).load() as NativeHandle).state as WriterState;
   }
   return sema.error(call.span, `${typeName(type)} 型には、このメソッドがありません。`);
 }
