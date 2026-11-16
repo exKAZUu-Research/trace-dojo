@@ -478,3 +478,68 @@ test.each(['Data.Map', 'Data.Map.Strict'])('key sets preserve map shape and payl
     )
   ).toMatchObject({ kind: 'executed', stdout: '[1]\n', uncaughtException: undefined });
 });
+
+test.each(['Data.Set', 'Data.Map', 'Data.Map.Strict'])(
+  'fromList builders retain ascending-prefix and fallback tree order in %s',
+  (module) => {
+    const builders =
+      module === 'Data.Set'
+        ? ['fromList']
+        : ['fromList', 'fromListWith const', String.raw`fromListWithKey (\_ -> const)`];
+    for (const [keys, expected] of [
+      ['[1..5]', '4'],
+      ['[1..11]', '8'],
+      ['[1,2,3,4,5,2,0,6]', '2'],
+      ['[1,2,3,2,4,5]', '2'],
+    ]) {
+      const entries = module === 'Data.Set' ? `map K (${keys}::[Int])` : `[(K k,())|k<-(${keys}::[Int])]`;
+      for (const builder of builders) {
+        const source = `import qualified ${module} as M\ndata K=K Int deriving(Eq,Show)\ninstance Ord K where\n compare(K x)(K y)=if x == -999 then error(show y) else compare x y\nmain=print(M.member(K(-999))(M.${builder}(${entries})))`;
+        expect(executeProgram('haskell', source)).toMatchObject({
+          kind: 'executed',
+          stdout: '',
+          uncaughtException: expected,
+        });
+      }
+    }
+  }
+);
+
+test.each([
+  ['M.fromList[(error "key",error "value")]', 'value'],
+  ['M.fromListWith const [(error "key",error "value")]', 'key'],
+  [String.raw`M.fromListWithKey (\_ -> const) [(error "key",error "value")]`, 'key'],
+  ['M.fromList[(1,error "first"),(1,2)]', 'first'],
+  ['M.fromListWith const [(1,1),(1,error "new")]', 'new'],
+])('strict list builder payload demand matches GHC: %s', (expression, uncaughtException) => {
+  expect(
+    executeProgram('haskell', `import qualified Data.Map.Strict as M\nmain=print(M.size(${expression}::M.Map Int Int))`)
+  ).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
+});
+
+test.each(['Data.Map', 'Data.Map.Strict'])(
+  'list builder combinations retain incoming keys through fallback in %s',
+  (module) => {
+    const source = `import qualified ${module} as M\ndata K=K Int Char deriving Show\ninstance Eq K where K x _ == K y _ = x==y\ninstance Ord K where compare(K x _)(K y _)=compare x y\nmain=print(M.toList(M.fromListWithKey (\\(K _ c) new old -> c:new++old) [(K 1 'a',"A"),(K 1 'b',"B"),(K 0 'c',"C"),(K 1 'd',"D")] ))`;
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: `[(K 0 'c',"C"),(K 1 'd',"dDbBA")]\n`,
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('strict combining builders skip discarded new payloads while lazy builders defer combinations', () => {
+  expect(
+    executeProgram(
+      'haskell',
+      'import qualified Data.Map.Strict as M\nmain=print(M.elems(M.fromListWith (flip const)[(1,1::Int),(1,error "new")]))'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '[1]\n', uncaughtException: undefined });
+  expect(
+    executeProgram(
+      'haskell',
+      'import qualified Data.Map as M\nmain=print(M.size(M.fromListWith (error "combine")[(1,1::Int),(1,2)]))'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '1\n', uncaughtException: undefined });
+});

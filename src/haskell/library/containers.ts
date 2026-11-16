@@ -101,8 +101,23 @@ deleteFindMax (SBin _ x l STip) = (x, l)
 deleteFindMax (SBin _ x l r) = case deleteFindMax r of (m, r') -> (m, balance x l r')
 deleteFindMax STip = (errorWithoutStackTrace "Set.deleteFindMax: can not return the maximal element of an empty set", STip)
 
+data OrderedSetStack a = SetPush !a !(Set a) !(OrderedSetStack a) | SetEnd
+
+data SetBuilder a = SetAscending !(OrderedSetStack a) | SetBuilt !(Set a)
+
 fromList :: Ord a => [a] -> Set a
-fromList = B.foldl' (\t x -> insert x t) STip
+fromList xs = finish (B.foldl' next (SetAscending SetEnd) xs)
+  where
+    next builder y = y ${BT}seq${BT} case builder of
+      SetBuilt tree -> SetBuilt (insert y tree)
+      SetAscending stack -> case stack of
+        SetEnd -> SetAscending (pushOrderedSet False stack y)
+        SetPush x l rest -> case compare y x of
+          LT -> SetBuilt (insert y (finishOrderedSet False STip stack))
+          EQ -> SetAscending (SetPush y l rest)
+          GT -> SetAscending (pushOrderedSet False stack y)
+    finish (SetBuilt tree) = tree
+    finish (SetAscending stack) = finishOrderedSet False STip stack
 
 fromAscList :: Eq a => [a] -> Set a
 fromAscList xs = fromDistinctAscList (B.map B.last (group xs))
@@ -110,23 +125,27 @@ fromAscList xs = fromDistinctAscList (B.map B.last (group xs))
 fromDistinctAscList :: [a] -> Set a
 fromDistinctAscList = buildOrderedSet False
 
-data OrderedSetStack a = SetPush !a !(Set a) !(OrderedSetStack a) | SetEnd
-
 buildOrderedSet :: Bool -> [a] -> Set a
-buildOrderedSet descending xs = finish STip (B.foldl' next SetEnd xs)
-  where next (SetPush x STip rest) y = y ${BT}seq${BT} joinStack rest 1 (singleton x) y
-        next stack x = x ${BT}seq${BT} SetPush x STip stack
-        joinStack (SetPush x l@(SBin leftSize _ _ _) rest) rightSize r y =
-          if leftSize == rightSize then
-            let count = leftSize + rightSize + 1
-                tree = if descending then SBin count x r l else SBin count x l r
-            in joinStack rest count tree y
-          else SetPush y r (SetPush x l rest)
-        joinStack stack _ r y = SetPush y r stack
-        finish tree SetEnd = tree
-        finish tree (SetPush x subtree rest) =
-          let nextTree = if descending then link x tree subtree else link x subtree tree
-          in nextTree ${BT}seq${BT} finish nextTree rest
+buildOrderedSet descending xs = finishOrderedSet descending STip (B.foldl' (pushOrderedSet descending) SetEnd xs)
+
+pushOrderedSet :: Bool -> OrderedSetStack a -> a -> OrderedSetStack a
+pushOrderedSet descending (SetPush x STip rest) y = y ${BT}seq${BT} joinOrderedSet descending rest 1 (singleton x) y
+pushOrderedSet _ stack x = x ${BT}seq${BT} SetPush x STip stack
+
+joinOrderedSet :: Bool -> OrderedSetStack a -> Int -> Set a -> a -> OrderedSetStack a
+joinOrderedSet descending (SetPush x l@(SBin leftSize _ _ _) rest) rightSize r y =
+  if leftSize == rightSize then
+    let count = leftSize + rightSize + 1
+        tree = if descending then SBin count x r l else SBin count x l r
+    in joinOrderedSet descending rest count tree y
+  else SetPush y r (SetPush x l rest)
+joinOrderedSet _ stack _ r y = SetPush y r stack
+
+finishOrderedSet :: Bool -> Set a -> OrderedSetStack a -> Set a
+finishOrderedSet _ tree SetEnd = tree
+finishOrderedSet descending tree (SetPush x subtree rest) =
+  let nextTree = if descending then link x tree subtree else link x subtree tree
+  in nextTree ${BT}seq${BT} finishOrderedSet descending nextTree rest
 
 toList :: Set a -> [a]
 toList = toAscList
@@ -494,13 +513,16 @@ insert kx x tree = kx ${BT}seq${BT} go tree
       EQ -> Bin sz kx x l r
 
 insertWith :: Ord k => (a -> a -> a) -> k -> a -> Map k a -> Map k a
-insertWith f kx x tree = kx ${BT}seq${BT} go tree
+insertWith = insertWithUsing False
+
+insertWithUsing :: Ord k => Bool -> (a -> a -> a) -> k -> a -> Map k a -> Map k a
+insertWithUsing strict f kx x tree = kx ${BT}seq${BT} go tree
   where
-    go Tip = singleton kx x
+    go Tip = forceValue strict x (singleton kx x)
     go (Bin sy ky y l r) = case compare kx ky of
       LT -> balance ky y (go l) r
       GT -> balance ky y l (go r)
-      EQ -> Bin sy kx (f x y) l r
+      EQ -> let combined = f x y in forceValue strict combined (Bin sy kx combined l r)
 
 insertWithKey :: Ord k => (k -> a -> a -> a) -> k -> a -> Map k a -> Map k a
 insertWithKey f kx x m = insertWith (f kx) kx x m
@@ -606,14 +628,34 @@ deleteFindMax (Bin _ k x l Tip) = ((k, x), l)
 deleteFindMax (Bin _ k x l r) = case deleteFindMax r of (km, r') -> (km, balance k x l r')
 deleteFindMax Tip = (errorWithoutStackTrace "Map.deleteFindMax: can not return the maximal element of an empty map", Tip)
 
+data OrderedMapStack k a = MapPush !k a !(Map k a) !(OrderedMapStack k a) | MapEnd
+
+data MapBuilder k a = MapAscending !(OrderedMapStack k a) | MapBuilt !(Map k a)
+
 fromList :: Ord k => [(k, a)] -> Map k a
-fromList = B.foldl' (\t (k, x) -> insert k x t) Tip
+fromList = buildListMap False (\_ new _ -> new)
 
 fromListWith :: Ord k => (a -> a -> a) -> [(k, a)] -> Map k a
-fromListWith f = B.foldl' (\t (k, x) -> insertWith f k x t) Tip
+fromListWith f = buildListMap False (\_ -> f)
 
 fromListWithKey :: Ord k => (k -> a -> a -> a) -> [(k, a)] -> Map k a
-fromListWithKey f = B.foldl' (\t (k, x) -> insertWith (f k) k x t) Tip
+fromListWithKey = buildListMap False
+
+buildListMap :: Ord k => Bool -> (k -> a -> a -> a) -> [(k,a)] -> Map k a
+buildListMap strict combine xs = finish (B.foldl' next (MapAscending MapEnd) xs)
+  where
+    next builder (key,value) = key ${BT}seq${BT} case builder of
+      MapBuilt tree -> MapBuilt (insertWithUsing strict (combine key) key value tree)
+      MapAscending stack -> case stack of
+        MapEnd -> push stack key value
+        MapPush k x l rest -> case compare key k of
+          LT -> MapBuilt (insertWithUsing strict (combine key) key value (finishOrderedMap False Tip stack))
+          EQ -> let combined = combine key value x
+                in forceValue strict combined (MapAscending (MapPush key combined l rest))
+          GT -> push stack key value
+    push stack key value = forceValue strict value (MapAscending (pushOrderedMap False stack key value))
+    finish (MapBuilt tree) = tree
+    finish (MapAscending stack) = finishOrderedMap False Tip stack
 
 fromAscList :: Eq k => [(k, a)] -> Map k a
 fromAscList xs = fromDistinctAscList (combine xs)
@@ -623,23 +665,28 @@ fromAscList xs = fromDistinctAscList (combine xs)
 fromDistinctAscList :: [(k, a)] -> Map k a
 fromDistinctAscList = buildOrderedMap False
 
-data OrderedMapStack k a = MapPush !k a !(Map k a) !(OrderedMapStack k a) | MapEnd
-
 buildOrderedMap :: Bool -> [(k,a)] -> Map k a
-buildOrderedMap descending xs = finish Tip (B.foldl' next MapEnd xs)
-  where next (MapPush k x Tip rest) (key,y) = key ${BT}seq${BT} joinStack rest 1 (singleton k x) key y
-        next stack (k,x) = k ${BT}seq${BT} MapPush k x Tip stack
-        joinStack (MapPush k x l@(Bin leftSize _ _ _ _) rest) rightSize r key y =
-          if leftSize == rightSize then
-            let count = leftSize + rightSize + 1
-                tree = if descending then Bin count k x r l else Bin count k x l r
-            in joinStack rest count tree key y
-          else MapPush key y r (MapPush k x l rest)
-        joinStack stack _ r k x = MapPush k x r stack
-        finish tree MapEnd = tree
-        finish tree (MapPush k x subtree rest) =
-          let nextTree = if descending then link k x tree subtree else link k x subtree tree
-          in nextTree ${BT}seq${BT} finish nextTree rest
+buildOrderedMap descending xs = finishOrderedMap descending Tip (B.foldl' next MapEnd xs)
+  where next stack (k,x) = pushOrderedMap descending stack k x
+
+pushOrderedMap :: Bool -> OrderedMapStack k a -> k -> a -> OrderedMapStack k a
+pushOrderedMap descending (MapPush k x Tip rest) key y = key ${BT}seq${BT} joinOrderedMap descending rest 1 (singleton k x) key y
+pushOrderedMap _ stack k x = k ${BT}seq${BT} MapPush k x Tip stack
+
+joinOrderedMap :: Bool -> OrderedMapStack k a -> Int -> Map k a -> k -> a -> OrderedMapStack k a
+joinOrderedMap descending (MapPush k x l@(Bin leftSize _ _ _ _) rest) rightSize r key y =
+  if leftSize == rightSize then
+    let count = leftSize + rightSize + 1
+        tree = if descending then Bin count k x r l else Bin count k x l r
+    in joinOrderedMap descending rest count tree key y
+  else MapPush key y r (MapPush k x l rest)
+joinOrderedMap _ stack _ r k x = MapPush k x r stack
+
+finishOrderedMap :: Bool -> Map k a -> OrderedMapStack k a -> Map k a
+finishOrderedMap _ tree MapEnd = tree
+finishOrderedMap descending tree (MapPush k x subtree rest) =
+  let nextTree = if descending then link k x tree subtree else link k x subtree tree
+  in nextTree ${BT}seq${BT} finishOrderedMap descending nextTree rest
 
 toList :: Map k a -> [(k, a)]
 toList = toAscList
@@ -1203,9 +1250,7 @@ insert :: Ord k => k -> a -> Map k a -> Map k a
 insert k x m = k ${BT}seq${BT} x ${BT}seq${BT} L.insert k x m
 
 insertWith :: Ord k => (a -> a -> a) -> k -> a -> Map k a -> Map k a
-insertWith f k x m = case L.lookup k m of
-  Nothing -> insert k x m
-  Just y -> insert k (f x y) m
+insertWith = L.insertWithUsing True
 
 insertWithKey :: Ord k => (k -> a -> a -> a) -> k -> a -> Map k a -> Map k a
 insertWithKey f k = insertWith (f k) k
@@ -1223,13 +1268,14 @@ alter :: Ord k => (Maybe a -> Maybe a) -> k -> Map k a -> Map k a
 alter = L.alterUsing True
 
 fromList :: Ord k => [(k, a)] -> Map k a
-fromList = B.foldl' (\t (k, x) -> insert k x t) L.empty
+fromList xs = L.fromList (B.map forcePair xs)
+  where forcePair (k,x) = x ${BT}seq${BT} (k,x)
 
 fromListWith :: Ord k => (a -> a -> a) -> [(k, a)] -> Map k a
-fromListWith f = B.foldl' (\t (k, x) -> insertWith f k x t) L.empty
+fromListWith f = L.buildListMap True (\_ -> f)
 
 fromListWithKey :: Ord k => (k -> a -> a -> a) -> [(k, a)] -> Map k a
-fromListWithKey f = B.foldl' (\t (k, x) -> insertWith (f k) k x t) L.empty
+fromListWithKey = L.buildListMap True
 
 fromAscList :: Eq k => [(k, a)] -> Map k a
 fromAscList xs = L.fromDistinctAscList (reverse (collapseOrdered xs))
