@@ -253,14 +253,14 @@ export type NativeResult = Value | Generator<unknown, Value, unknown>;
  * A method written in TypeScript: `self`, the positional arguments, the block, and the keyword arguments when the
  * method takes keywords (otherwise they arrive as a trailing Hash, as Ruby passes them to methods without keywords).
  */
-export type NativeFn = (
+export type NativeFn = ((
   // oxlint-disable-next-line typescript/no-explicit-any -- Each native method narrows self to its class's representation.
   self: any,
   args: Value[],
   block: RProc | undefined,
   keywords: RHash | undefined,
   used: boolean
-) => NativeResult;
+) => NativeResult) & { nativeIdentity?: object };
 
 export type MethodBody =
   | { kind: 'user'; def: MethodDef; cref: RClass[] }

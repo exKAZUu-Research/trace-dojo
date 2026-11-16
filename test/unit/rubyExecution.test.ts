@@ -11043,3 +11043,50 @@ test.each([
     diagnostics: [{ message: '条件式内の正規表現リテラル（$_ の暗黙の参照）は、この採点環境では使えません。' }],
   });
 });
+
+test('Time aliases retain bodies, identity and nanosecond precision', () => {
+  expect(
+    run(String.raw`t=Time.at(Rational(-1234567891,1000000000)).utc
+p t.tv_sec,t.tv_usec,t.tv_nsec,t.ctime,t.asctime,t.isdst,t.dst?
+[:tv_sec,:tv_usec,:tv_nsec,:ctime,:isdst].zip([:to_i,:usec,:nsec,:asctime,:dst?]).each do |a,b|
+ p [t.method(a)==t.method(b),t.method(a).hash==t.method(b).hash,t.method(a).arity,t.method(a).owner]
+end
+class Time
+ def to_i;99;end
+end
+p t.to_i,t.tv_sec
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '-2\n765432\n765432109\n"Wed Dec 31 23:59:58 1969"\n"Wed Dec 31 23:59:58 1969"\nfalse\nfalse\n[true, true, 0, Time]\n[true, true, 0, Time]\n[true, true, 0, Time]\n[true, true, 0, Time]\n[true, true, 0, Time]\n99\n-2\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('Runtime regexp properties share source validation and native diagnostics', () => {
+  expect(
+    run(String.raw`['\\p{Foo}','[\\p{Nope}]','\\P{^Imaginary}','\\p{foo_bar}'].each do |source|
+ begin
+  Regexp.new(source)
+ rescue RegexpError => error
+  puts error.message
+ end
+end
+p Regexp.new('\\p{Alpha}').match?('A')
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'invalid character property name {Foo}: /\\p{Foo}/\ninvalid character property name {Nope}: /[\\p{Nope}]/\ninvalid character property name {Imaginary}: /\\P{^Imaginary}/\ninvalid character property name {foo_bar}: /\\p{foo_bar}/\ntrue\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['iso8601', 'xmlschema'])('unavailable Time aliases preserve their own diagnostic: %s', (name) => {
+  expect(run(`t=Time.new(2024);p t.method(:iso8601)==t.method(:xmlschema);t.${name}`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\n',
+    uncaughtException: `Time#${name} は、この採点環境では使えません。`,
+  });
+});

@@ -834,23 +834,25 @@ for (const [index, day] of DAYS.entries()) {
 }
 def(
   'Time',
-  'usec',
+  ['usec', 'tv_usec'],
   0,
   (self: RObject) => (((dataOf(self).nanoseconds % 1_000_000_000n) + 1_000_000_000n) % 1_000_000_000n) / 1000n
 );
 def(
   'Time',
-  'nsec',
+  ['nsec', 'tv_nsec'],
   0,
   (self: RObject) => ((dataOf(self).nanoseconds % 1_000_000_000n) + 1_000_000_000n) % 1_000_000_000n
 );
+def('Time', ['asctime', 'ctime'], 0, (self: RObject) => str(strftime(dataOf(self), '%a %b %e %T %Y')));
+def('Time', ['dst?', 'isdst'], 0, () => false);
 def('Time', 'zone', 0, (self: RObject) => zoneName(dataOf(self)));
 def('Time', ['utc_offset', 'gmt_offset', 'gmtoff'], 0, (self: RObject) => {
   const data = dataOf(self);
   return data.exactOffset ?? (Number.isInteger(data.offset) ? BigInt(data.offset) : floatToRational(data.offset));
 });
 def('Time', ['utc?', 'gmt?'], 0, (self: RObject) => dataOf(self).zone === 'utc');
-def('Time', 'to_i', 0, (self: RObject) => floorDivide(dataOf(self).nanoseconds, 1_000_000_000n));
+def('Time', ['to_i', 'tv_sec'], 0, (self: RObject) => floorDivide(dataOf(self).nanoseconds, 1_000_000_000n));
 def('Time', 'to_f', 0, (self: RObject) => {
   const data = dataOf(self);
   if (data.remainderNumerator === 0n) return Number(data.nanoseconds) / 1_000_000_000;

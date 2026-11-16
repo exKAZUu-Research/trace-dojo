@@ -221,7 +221,8 @@ function methodBodyIdentity(method: RMethod, owner: RClass): object {
   const { body } = method;
   if (body.kind !== 'native') return body;
   const canonical = findCoreMethod(method.nativeIdentityOwner ?? owner, method.name);
-  return canonical?.body.kind === 'native' ? canonical.body.fn : body.fn;
+  const fn = canonical?.body.kind === 'native' ? canonical.body.fn : body.fn;
+  return fn.nativeIdentity ?? fn;
 }
 
 function reflectedCallable(method: RMethod, owner: RClass): RMethod {

@@ -69,7 +69,8 @@ function validateSourceTokens(tokens: Token[]): void {
     }
     if (token.type === 'CharacterSet' && token.kind === 'property') {
       const name = (token.value ?? '').replaceAll(/[-_ ]/g, '').toLowerCase();
-      if (!regexpPropertyNames.has(name)) throw new SyntaxError('invalid character property name');
+      if (!regexpPropertyNames.has(name))
+        throw new RegexpEncodingError(`invalid character property name {${token.value ?? ''}}`);
     }
   }
 }
