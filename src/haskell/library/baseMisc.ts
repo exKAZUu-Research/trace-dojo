@@ -616,7 +616,7 @@ instance Bits Integer where
   complement = primitive "integerComplement"
   shiftL x n = primitive "integerShiftL" x (toInteger n)
   shiftR x n = primitive "integerShiftR" x (toInteger n)
-  testBit x i = (x .&. shiftL 1 i) /= 0
+  testBit = primitive "integerTestBit"
   setBit x i = x .|. shiftL 1 i
   clearBit x i = x .&. complement (shiftL 1 i)
   complementBit x i = x ${BT}xor${BT} shiftL 1 i

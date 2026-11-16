@@ -393,3 +393,27 @@ test.each([
     uncaughtException,
   });
 });
+
+test('Integer bit queries avoid index-sized masks and retain sign extension', () => {
+  const source =
+    'import Data.Bits\nmain=do\n  print(length[i|i<-[1..200::Int],testBit(1::Integer)(1000000+i)])\n  print(testBit(-1::Integer)100000000,testBit(1::Integer)(maxBound::Int),testBit(-2::Integer)(maxBound::Int),testBit(1::Integer)(-1))\n  print([testBit(-3::Integer)i|i<-[0..4]])';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '0\n(True,False,True,False)\n[True,False,True,True,True]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['error "value"::Integer', '(-1)', 'value'],
+  ['error "value"::Integer', 'error "index"', 'value'],
+  ['0::Integer', 'error "index"', 'index'],
+  ['1::Int', '(-1)', 'arithmetic overflow'],
+  ['1::Word', '(-1)', 'arithmetic overflow'],
+])('bit queries preserve argument demand: %s at %s', (value, index, uncaughtException) => {
+  expect(executeProgram('haskell', `import Data.Bits\nmain=print(testBit(${value})(${index}))`)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException,
+  });
+});

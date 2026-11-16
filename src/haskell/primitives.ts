@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 507 -- The primitive table lists every built-in operation the Haskell library calls.
+// code-gauge-allow-file fileNcss 515 -- The primitive table lists every built-in operation the Haskell library calls.
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { CONS_CON, tupleCon, UNIT_CON } from './builtinTypes';
 import type { ConInfo } from './entities';
@@ -252,6 +252,14 @@ define('integerShiftL', 2, [1], ([a, b], runtime) => {
 define('integerShiftR', 2, [1], ([a, b], runtime) => {
   const count = shiftCount(b as bigint);
   return (runtime.machine.force(a) as bigint) >> count;
+});
+strict('integerTestBit', 2, ([a, b], runtime) => {
+  const value = a as bigint;
+  const index = b as bigint;
+  if (index < 0n) return bool(false);
+  const shifted = value >> index;
+  runtime.spend(Math.ceil(hexDigits(shifted) / 16));
+  return bool((shifted & 1n) !== 0n);
 });
 strict('integerPopCount', 1, ([a]) => {
   const value = a as bigint;
