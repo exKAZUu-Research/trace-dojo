@@ -1,6 +1,14 @@
-import { expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
+
+// The interpreter's clock stands still in these tests, so that the program, not the load of the host, decides each one.
+beforeEach(() => {
+  vi.spyOn(performance, 'now').mockReturnValue(0);
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function steps(language: 'cpp' | 'java', program: string): { vars: Record<string, unknown>; board: string }[] {
   return traceProgram(language, program, program).traceItems.map(({ vars, board }) => ({

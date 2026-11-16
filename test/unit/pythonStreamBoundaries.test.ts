@@ -1,6 +1,14 @@
-import { expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
+
+// The interpreter's clock stands still in these tests, so that the program, not the load of the host, decides each one.
+beforeEach(() => {
+  vi.spyOn(performance, 'now').mockReturnValue(0);
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 test('BytesIO line batching stops at its hint and preserves incremental writes before failure', () => {
   const program = `import io
