@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import { executeProgram, type ProgramExecution } from '../../src/interpreter/program';
@@ -14463,3 +14465,25 @@ test.each(nativeProtocolRegressions)(
     expect(run(source)).toMatchObject(expected);
   }
 );
+
+test('Repeated native Unicode comparisons return within the process deadline', () => {
+  const entry = new URL('../../src/interpreter/program.ts', import.meta.url).href;
+  const programs = [
+    'r=/s/i;s="ß";500.times{r.match?(s)};puts :done',
+    'r=/[s]/i;s="ß";500.times{r.match?(s)};puts :done',
+    '500.times{ /s/i.match?("ß"); /s/i.match?("ßx") };puts :done',
+  ];
+  const source = `import {executeProgram} from ${JSON.stringify(entry)};
+    for (const program of ${JSON.stringify(programs)}) {
+      const result = executeProgram('ruby', program);
+      if (result.kind !== 'executed' || result.uncaughtException) throw new Error(JSON.stringify(result));
+      process.stdout.write(result.stdout);
+    }`;
+  expect(
+    execFileSync('bun', ['--eval', source], {
+      encoding: 'utf8',
+      timeout: 4000,
+      killSignal: 'SIGKILL',
+    })
+  ).toBe('done\ndone\ndone\n');
+});
