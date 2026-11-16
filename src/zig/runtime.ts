@@ -4,6 +4,7 @@ import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { FunctionInstance } from './functions';
+import { createUtf8Decoder } from './utf8';
 import {
   NativeHandle,
   Pointer,
@@ -72,7 +73,7 @@ export class Runtime {
   readonly world = new TurtleWorld();
   readonly steps = new StepTracker();
   readonly frames: Frame[] = [];
-  private readonly outputDecoders = [new TextDecoder(), new TextDecoder()];
+  private readonly outputDecoders = [createUtf8Decoder(), createUtf8Decoder()];
   /** The storage of container-level variables, which garbage collection starts from. */
   readonly globals: Slots[] = [];
   /** Values that native objects hold, such as a hash map's entries, reached through their handles. */

@@ -15,6 +15,7 @@ import {
   shortestDecimal,
 } from './floats';
 import { type EnumType, type StructField, type Type, typeName, type UnionType } from './types';
+import { decodeUtf8 } from './utf8';
 import {
   type EnumLiteral,
   ErrorValue,
@@ -119,7 +120,7 @@ export function parseFormat(format: readonly number[], argNames: readonly string
   }
   if (used.size !== argNames.length) {
     const missing = argNames.length - used.size;
-    const text = bytesText(format);
+    const text = decodeUtf8(format);
     throw new FormatError(missing === 1 ? `unused argument in '${text}'` : `${missing} unused arguments in '${text}'`);
   }
   return segments;
@@ -160,7 +161,7 @@ function parsePlaceholder(bytes: readonly number[]): {
       i++;
       const start = i;
       while (i < bytes.length && bytes[i] !== 0x5d) i++;
-      const name = bytesText(bytes.slice(start, i));
+      const name = decodeUtf8(bytes.slice(start, i));
       if (peek(0) !== 0x5d) throw new FormatError('Expected closing ]');
       i++;
       return { kind: 'named', name };
@@ -175,7 +176,7 @@ function parsePlaceholder(bytes: readonly number[]): {
   const arg = parseSpecifier();
   const specStart = i;
   while (i < bytes.length && bytes[i] !== 0x3a) i++;
-  const spec = bytesText(bytes.slice(specStart, i));
+  const spec = decodeUtf8(bytes.slice(specStart, i));
   const colon = char();
   if (colon !== undefined && colon !== 0x3a)
     throw new FormatError(`expected : or }, found '${String.fromCodePoint(colon)}'`);
@@ -972,8 +973,4 @@ function hexFloatDigits(big: BigFloat, bits: FloatBits, upper: boolean, precisio
 function appendBytes(out: number[], bytes: readonly number[]): void {
   checkOutputSize(out.length + bytes.length);
   for (const byte of bytes) out.push(byte);
-}
-
-function bytesText(bytes: readonly number[]): string {
-  return new TextDecoder().decode(new Uint8Array(bytes));
 }

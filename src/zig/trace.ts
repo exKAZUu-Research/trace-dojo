@@ -12,6 +12,7 @@ import { parseZig } from './parse';
 import { type Frame, Runtime } from './runtime';
 import { UNASSIGNED } from './semaBase';
 import type { Type } from './types';
+import { decodeUtf8 } from './utf8';
 import {
   ErrorValue,
   NativeHandle,
@@ -151,7 +152,7 @@ function scalarOf(value: Value, type: Type): Scalar | typeof NOT_SCALAR {
       return scalarOf(value, type.payload);
     }
     case 'pointer': {
-      if (isString(type)) return new TextDecoder().decode(new Uint8Array(stringBytes(value, type).map(Number)));
+      if (isString(type)) return decodeUtf8(stringBytes(value, type).map(Number));
       if (type.size === 'slice' && hasScalarElements(type.child)) {
         return (value as Slice).values().map((item) => toArrayItem(scalarOf(item, type.child)));
       }

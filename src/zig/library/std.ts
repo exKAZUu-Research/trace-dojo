@@ -18,6 +18,7 @@ import {
   USIZE,
   VOID,
 } from '../types';
+import { decodeUtf8 } from '../utf8';
 import { ErrorValue, NativeHandle, Pointer, Slice, type Value, ZArray, ZStruct } from '../values';
 import { ALLOCATOR, allocatorMembers, heapNamespace } from './heap';
 import {
@@ -33,7 +34,7 @@ import {
   typeMember,
   unavailableMember,
 } from './native';
-import { compilePrint, decodeOutput, printInto, PrintWriteError } from './print';
+import { compilePrint, printInto, PrintWriteError } from './print';
 import { bufferedBytes, flushWriter, WRITER, type WriterState, writerState, writerValue, writeTo } from './writer';
 
 let std: StructType | undefined;
@@ -170,10 +171,10 @@ const DEBUG = nativeStruct('std.debug', {
           print(frame, state);
         } catch (error) {
           if (error instanceof PrintWriteError)
-            return panic(decodeOutput(buffer.values().map(Number)) + '(msg truncated)');
+            return panic(decodeUtf8(buffer.values().map(Number)) + '(msg truncated)');
           throw error;
         }
-        return panic(decodeOutput(bufferedBytes(state)));
+        return panic(decodeUtf8(bufferedBytes(state)));
       },
       call.span
     );

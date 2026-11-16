@@ -20,6 +20,7 @@ import {
   USIZE,
   VOID,
 } from '../types';
+import { decodeUtf8 } from '../utf8';
 import {
   ErrorValue,
   FnValue,
@@ -315,7 +316,7 @@ const META: Record<string, () => Member> = {
     const fields = sema.enumFields(type);
     const text = constSlice(sema, textArg, U8);
     return computed(optionalOf(type), [text], call.span, ([value]) => {
-      const name = new TextDecoder().decode(new Uint8Array(byteNumbers(value)));
+      const name = decodeUtf8(byteNumbers(value));
       return fields.find((field) => field.name === name)?.value ?? NULL;
     });
   }),

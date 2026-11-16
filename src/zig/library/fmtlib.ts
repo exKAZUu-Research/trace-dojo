@@ -15,6 +15,7 @@ import {
   U8,
   U64,
 } from '../types';
+import { decodeUtf8 } from '../utf8';
 import { ErrorValue, Slice, type Value } from '../values';
 import { allocating, allocatorArg, computed, constSlice, elements, generic, mutableSlice, newSlice } from './common';
 import { allocatorState, ERROR_OUT_OF_MEMORY, reserveNativeAllocation } from './heap';
@@ -84,7 +85,7 @@ function parseInt(bytes: number[], base: number, type: IntType): Value {
 /** `std.fmt.parseFloat`: decimal or hexadecimal digits with `_`, `inf`, or `nan`, rounded to the type. */
 // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function parseFloat(bytes: number[], type: Extract<Type, { kind: 'float' }>): Value {
-  const text = new TextDecoder().decode(new Uint8Array(bytes));
+  const text = decodeUtf8(bytes);
   const match = /^([+-]?)(.*)$/s.exec(text) as RegExpExecArray;
   const negative = match[1] === '-';
   const body = match[2];

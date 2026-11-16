@@ -167,8 +167,3 @@ function writeFormatted(frame: Frame, destination: WriterState, bytes: readonly 
   const result = writeTo(frame, destination, bytes);
   if (result instanceof ErrorValue) throw new PrintWriteError(result);
 }
-
-/** Decodes bytes written to a stream as UTF-8, as a terminal shows them. */
-export function decodeOutput(bytes: readonly number[]): string {
-  return new TextDecoder().decode(new Uint8Array(bytes));
-}

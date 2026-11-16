@@ -2156,3 +2156,59 @@ test.each([
     uncaughtException: undefined,
   });
 });
+
+test('UTF-8 BOM data survives separate and split output streams', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var buffer:[1]u8=undefined;var w=std.Io.File.stdout().writer(init.io,&buffer);try w.interface.writeByte(0xef);try w.interface.flush();std.debug.print("\\xef",.{});try w.interface.writeByte(0xbb);try w.interface.flush();std.debug.print("\\xbb\\xbferr",.{});try w.interface.writeByte(0xbf);try w.interface.writeAll("out");try w.interface.flush();}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '\uFEFFout',
+    stderr: '\uFEFFerr',
+    uncaughtException: undefined,
+  });
+});
+
+test('BOM-prefixed data stays present during numeric parsing and import validation', () => {
+  const source = `const std=@import("std");pub fn main()void{_=std.fmt.parseFloat(f64,"\\xef\\xbb\\xbf1.5") catch |e|{std.debug.print("{s}",.{@errorName(e)});return;};}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'InvalidCharacter',
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('zig', `const std=@import("\\xef\\xbb\\xbfstd");pub fn main()void{_=std;}`).kind).toBe(
+    'compileError'
+  );
+});
+
+test.each([
+  'const e:A=A.Two;const r:B=@errorCast(e);',
+  'const e:A!u8=A.Two;const r:B!u8=@errorCast(e);',
+  'const e:anyerror=error.Two;const r:B=@errorCast(e);',
+  'const e:u8=7;const r:B!u8=@errorCast(e);',
+  'const e:A!u8=A.One;const r:B=@errorCast(e);',
+  'const e:A!u8=7;const r:B!u16=@errorCast(e);',
+])('error casts validate known errors and operand types before execution: %s', (body) => {
+  const source = `const std=@import("std");const A=error{One,Two};const B=error{One,Three};pub fn main()void{std.debug.print("pre|",.{});${body}std.debug.print("{any}",.{r});}`;
+  expect(executeProgram('zig', source).kind).toBe('compileError');
+});
+
+test.each([
+  { body: 'const e:A=A.One;const r:B=@errorCast(e);', output: 'error.One' },
+  { body: 'const e:A!u8=7;const r:B!u8=@errorCast(e);', output: '7' },
+  { body: 'const e:A=A.One;const r:B!u8=@errorCast(e);', output: 'error.One' },
+])('valid known error casts retain their error or payload: $body', ({ body, output }) => {
+  const source = `const std=@import("std");const A=error{One,Two};const B=error{One,Three};pub fn main()void{${body}std.debug.print("{any}",.{r});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: output,
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['anyerror', 'error{One,Two}!u8'])('dynamic error casts retain their runtime panic for %s', (inputType) => {
+  const source = `const std=@import("std");const B=error{One,Three};fn cast(value:${inputType})${inputType.includes('!') ? 'B!u8' : 'B'}{return @errorCast(value);}pub fn main()void{std.debug.print("before|",.{});_=cast(error.Two)${inputType.includes('!') ? ' catch 0' : ''};}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'before|',
+    uncaughtException: 'panic: unexpected error code, found error.Two',
+  });
+});

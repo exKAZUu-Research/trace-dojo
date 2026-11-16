@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 629 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 642 -- The file holds one layer of the compiler, whose parts share its private state.
 import {
   checkShiftAmount,
   divCeil,
@@ -64,6 +64,7 @@ import {
   VOID,
   wrapInt,
 } from './types';
+import { decodeUtf8 } from './utf8';
 import { ErrorValue, Pointer, Slice, storeInto, type Value, ZArray, ZStruct, ZUnion } from './values';
 
 /** Builtins of stages C and D, which this grader rejects with the stage's message. */
@@ -403,24 +404,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         return this.derived(operand, CONST_U8, (value) => bytesSlice((value as ErrorValue).name));
       }
       case '@errorCast': {
-        const target = resultType;
-        if (!target || (target.kind !== 'error_set' && target.kind !== 'error_union')) {
-          return this.error(expression, '@errorCast には、結果の型が要ります。');
-        }
-        const operand = this.compile(args[0]);
-        const names = target.kind === 'error_set' ? target.names : target.errorSet.names;
-        return {
-          ...operand,
-          type: target,
-          eval: (frame) => {
-            const value = operand.eval(frame);
-            if (value instanceof ErrorValue && names && !names.has(value.name))
-              panic(`unexpected error code, found error.${value.name}`);
-            return value;
-          },
-          known: false,
-          place: undefined,
-        };
+        return this.errorCast(expression, resultType);
       }
       case '@unionInit': {
         const type = this.compileType(args[0]);
@@ -468,10 +452,36 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Validates error-set membership in the phase where the operand is known.
+  private errorCast(expression: ExpressionOf<'builtinCall'>, target: Type | undefined): TExpr {
+    if (!target || (target.kind !== 'error_set' && target.kind !== 'error_union'))
+      return this.error(expression, '@errorCast には、結果の型が要ります。');
+    const operand = this.compile(expression.args[0]);
+    if (operand.type.kind !== 'error_set' && operand.type.kind !== 'error_union')
+      return this.error(expression, '@errorCast には、エラー集合かエラー共用体の値を渡してください。');
+    if (operand.type.kind === 'error_union') {
+      if (target.kind !== 'error_union') return this.error(expression, 'エラー共用体をエラー集合には変換できません。');
+      if (operand.type.payload !== target.payload)
+        return this.error(expression, '@errorCast のエラー共用体のペイロードの型は、同じにしてください。');
+    }
+    const names = target.kind === 'error_set' ? target.names : target.errorSet.names;
+    const rejected = (value: Value): value is ErrorValue =>
+      value instanceof ErrorValue && names !== undefined && !names.has(value.name);
+    if (operand.known) {
+      if (rejected(operand.value))
+        return this.error(expression, `${typeName(target)} には、error.${operand.value.name} は含まれていません。`);
+      return known(target, operand.value, expression);
+    }
+    return this.derived(operand, target, (value) => {
+      if (rejected(value)) panic(`unexpected error code, found error.${value.name}`);
+      return value;
+    });
+  }
+
   private importBuiltin(expression: ExpressionOf<'builtinCall'>): TExpr {
     const [path] = expression.args;
     if (path.kind !== 'string') return this.error(expression, '@import の引数は、文字列のリテラルにしてください。');
-    const name = new TextDecoder().decode(new Uint8Array(path.bytes));
+    const name = decodeUtf8(path.bytes);
     if (name === 'std') return known(TYPE, importStd(), expression);
     if (name === 'builtin' || name === 'root')
       return this.error(expression, `@import("${name}") は、この採点環境では使えません。`);
@@ -937,7 +947,7 @@ export function bytesSlice(text: string): Slice {
 
 /** The text of a byte slice or a pointer to a byte array, decoded as UTF-8. */
 export function bytesToText(value: Value): string {
-  return new TextDecoder().decode(new Uint8Array(byteValues(value).map(Number)));
+  return decodeUtf8(byteValues(value).map(Number));
 }
 
 export function byteValues(value: Value): bigint[] {
