@@ -937,7 +937,10 @@ map f = mapWithKey (\_ x -> f x)
 mapWithKey :: (k -> a -> b) -> Map k a -> Map k b
 mapWithKey _ L.Tip = L.Tip
 mapWithKey f (L.Bin size k x l r) =
-  let y = f k x in y ${BT}seq${BT} L.Bin size k y (mapWithKey f l) (mapWithKey f r)
+  let y = f k x
+      right = mapWithKey f r
+      left = mapWithKey f l
+  in y ${BT}seq${BT} right ${BT}seq${BT} left ${BT}seq${BT} L.Bin size k y left right
 
 traverseWithKey :: Applicative t => (k -> a -> t b) -> Map k a -> t (Map k b)
 traverseWithKey f m = fmap forceValues (L.traverseWithKey f m)

@@ -90,3 +90,52 @@ test.each(['Data.Set', 'Data.Map'])('%s searches follow balanced-tree paths with
     });
   }
 });
+
+test('Down preserves lazy newtype matching and strict payload WHNF', () => {
+  const source = `import Data.Ord
+main = do
+  print (fmap (const 1) (undefined :: Down Int),Down (const 1) <*> (undefined :: Down Int))
+  print (case undefined :: Down Int of Down _ -> (1::Int))
+  print ((undefined :: Down Int) { getDown = 1 })`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '(Down 1,Down 1)\n1\nDown 1\n',
+  });
+  expect(
+    executeProgram('haskell', 'import Data.Ord\nmain = Down (error "payload" :: Int) `seq` putStrLn "ok"')
+  ).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: 'payload' });
+});
+
+test('readIO parses only when its action executes', () => {
+  const source = 'main = (readIO undefined :: IO Int) `seq` (readIO (error "input") :: IO Bool) `seq` putStrLn "ok"';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: 'ok\n',
+  });
+  expect(
+    executeProgram('haskell', 'main = putStr "before " >> (readIO (error "input") :: IO Int) >>= print')
+  ).toMatchObject({ kind: 'executed', stdout: 'before ', uncaughtException: 'input' });
+});
+
+test.each([
+  [String.raw`M.map (\x -> if x == 2 then x else error (show x))`, 3, '3'],
+  [String.raw`M.mapWithKey (\k x -> if k == 4 then x else error (show k))`, 7, '6'],
+])('strict map transformations visit root/right/left: %s', (transform, size, uncaughtException) => {
+  const source = `import qualified Data.Map.Strict as M\nmain = print (M.size (${transform} (M.fromList [(i,i) | i <- [1..${size} :: Int]])))`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
+});
+
+test.each([
+  ['main=print (let ((x:xs):ys)=([]::[[Int]]) in x)', '(x : xs) : ys'],
+  [String.raw`main=print (let ['\SOH',x]="" in x)`, String.raw`['\SOH', x]`],
+  [String.raw`main=print (let ['\NUL',x]="" in x)`, String.raw`['\NUL', x]`],
+  [String.raw`main=print (let ["\128\&0",x]=[] in length x)`, String.raw`["\128\&0", x]`],
+])('pattern diagnostics retain Haskell syntax: %s', (source, pattern) => {
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: expect.stringContaining(`Non-exhaustive patterns in ${pattern}`),
+  });
+});

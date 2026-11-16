@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 864 -- The Core generator covers every construct of the language in one pass over shared state.
+// code-gauge-allow-file fileNcss 878 -- The Core generator covers every construct of the language in one pass over shared state.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   CHAR_TYPE,
@@ -26,7 +26,7 @@ import {
   type ValueEntity,
 } from './entities';
 import { TailCall } from './machine';
-import { surfacePatternText } from './patternText';
+import { type PatternText, surfacePatternText } from './patternText';
 import { primitiveNamed, rationalToFloat } from './primitives';
 import type { LocalVar, RAlt, RBindGroup, RBinding, RClause, RExpr, RGuard, RPat, RRhs, RStmt } from './rast';
 import { type DictBuilders, dictBuilders, type Runtime } from './runtime';
@@ -407,10 +407,14 @@ export class Codegen {
     const savedVisible = this.visible.length;
     try {
       const plan = this.planPattern(pat, slot, false);
+      const message: PatternText = [
+        `${sourceSpanText(span)}: Non-exhaustive patterns in `,
+        pat.surface ? surfacePatternText(pat.surface) : patternText(pat),
+      ];
       const fail: Core = {
-        k: 'error',
-        message: `${sourceSpanText(span)}: Non-exhaustive patterns in ${patternText(pat)}`,
-        kind: 'patternMatch',
+        k: 'app',
+        fn: { k: 'prim', prim: primitiveNamed('patternMatchError') },
+        args: [this.compilePatternText(message)],
       };
       return this.matchPlan(plan, this.localRef(target), fail);
     } finally {
@@ -418,6 +422,26 @@ export class Codegen {
       for (const [key, value] of saved) this.frame.slots.set(key, value);
       this.visible.length = savedVisible;
     }
+  }
+
+  private compilePatternText(text: PatternText): Core {
+    if (typeof text === 'string') return { k: 'str', value: text };
+    if (Array.isArray(text)) {
+      let result: Core = { k: 'str', value: '' };
+      for (let index = text.length - 1; index >= 0; index--) {
+        result = {
+          k: 'app',
+          fn: { k: 'global', global: this.supportGlobal('++') },
+          args: [this.compilePatternText(text[index]!), result],
+        };
+      }
+      return result;
+    }
+    return {
+      k: 'app',
+      fn: { k: 'global', global: this.supportGlobal(text.kind === 'char' ? 'patternCharText' : 'patternStringText') },
+      args: [{ k: text.kind === 'char' ? 'lit' : 'str', value: text.value }],
+    };
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -451,24 +475,28 @@ export class Codegen {
 
   /** Assigns slots to a pattern's variables and its constructors' fields, before the code that uses them. */
   private planPattern(pat: RPat, slot: number, visible: boolean): Plan {
+    if (pat.k === 'var' || pat.k === 'as') {
+      this.frame.slots.set(pat.local, slot);
+      if (visible) this.visible.push({ local: pat.local, frame: this.frame, slot });
+    }
     switch (pat.k) {
       case 'var': {
-        this.frame.slots.set(pat.local, slot);
-        if (visible) this.visible.push({ local: pat.local, frame: this.frame, slot });
         return { k: 'any' };
       }
       case 'wild': {
         return { k: 'any' };
       }
       case 'as': {
-        this.frame.slots.set(pat.local, slot);
-        if (visible) this.visible.push({ local: pat.local, frame: this.frame, slot });
         return this.planPattern(pat.pat, slot, visible);
       }
       case 'lit': {
         return { k: 'lit', pat, slot };
       }
       case 'con': {
+        if (pat.con.isNewtype) {
+          const fieldSlot = this.frame.alloc();
+          return { k: 'newtype', slot, fieldSlot, inner: this.planPattern(pat.args[0], fieldSlot, visible) };
+        }
         const fieldSlots: number[] = [];
         const fields: Plan[] = [];
         for (const arg of pat.args) {
@@ -493,6 +521,22 @@ export class Codegen {
       }
       case 'lit': {
         return this.matchLiteral(plan.pat as Extract<RPat, { k: 'lit' }>, plan.slot, success, fail);
+      }
+      case 'newtype': {
+        return {
+          k: 'let',
+          binds: [
+            {
+              index: plan.fieldSlot,
+              expr: {
+                k: 'app',
+                fn: { k: 'prim', prim: primitiveNamed('newtypeField') },
+                args: [{ k: 'local', depth: 0, index: plan.slot }],
+              },
+            },
+          ],
+          body: this.matchPlan(plan.inner, success, fail),
+        };
       }
       case 'con': {
         let inner = success;
@@ -777,6 +821,8 @@ export class Codegen {
   }
 
   private compileRecordUpdate(expr: Extract<RExpr, { k: 'recordUpdate' }>): Core {
+    const newtype = expr.cons?.find((con) => con.isNewtype);
+    if (newtype) return this.construct(newtype, [this.compileExpr(expr.fields[0].value)]);
     const slot = this.frame.alloc();
     const target = this.compileExpr(expr.expr);
     const values = expr.fields.map((field) => {
@@ -1203,6 +1249,7 @@ export class Codegen {
 type Plan =
   | { k: 'any' }
   | { k: 'lit'; pat: RPat; slot: number }
+  | { k: 'newtype'; slot: number; fieldSlot: number; inner: Plan }
   | { k: 'con'; con: ConInfo; slot: number; fieldSlots: number[]; fields: Plan[] };
 
 function binderKey(binding: Extract<RBinding, { k: 'fun' }>): LocalVar | ValueEntity {
@@ -1348,7 +1395,6 @@ export function isScalarType(type: Type): boolean {
 }
 
 function patternText(pat: RPat): string {
-  if (pat.surface) return surfacePatternText(pat.surface);
   switch (pat.k) {
     case 'var': {
       return pat.local.name;

@@ -667,10 +667,7 @@ instance FiniteBits Bool where
 
 -- Data.Ord
 
-data Down a = Down a
-
-getDown :: Down a -> a
-getDown (Down a) = a
+data Down a = Down { getDown :: !a }
 
 instance Eq a => Eq (Down a) where
   Down a == Down b = a == b
@@ -806,7 +803,7 @@ readLn :: Read a => IO a
 readLn = unsupportedIO
 
 readIO :: Read a => String -> IO a
-readIO s = case [x | (x, t) <- reads s, ("", "") <- lex t] of
+readIO s = return () >>= \_ -> case [x | (x, t) <- reads s, ("", "") <- lex t] of
   [x] -> return x
   [] -> fail "Prelude.readIO: no parse"
   _ -> fail "Prelude.readIO: ambiguous parse"

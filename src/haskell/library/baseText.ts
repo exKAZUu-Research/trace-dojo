@@ -97,6 +97,12 @@ instance Show Char where
   showsPrec _ c = showChar '\'' . showLitChar c . showChar '\''
   showList cs = showChar '"' . showLitString cs . showChar '"'
 
+patternCharText :: Char -> String
+patternCharText = show
+
+patternStringText :: String -> String
+patternStringText = show
+
 showLitString :: String -> ShowS
 showLitString [] s = s
 showLitString ('"' : cs) s = showString "\\\"" (showLitString cs s)

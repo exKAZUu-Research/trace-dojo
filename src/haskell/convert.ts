@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 769 -- The syntax-tree conversion covers every node kind of the grammar in one pass.
+// code-gauge-allow-file fileNcss 775 -- The syntax-tree conversion covers every node kind of the grammar in one pass.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type { CompileError } from '../interpreter/diagnostics';
@@ -612,23 +612,37 @@ function convertConstructor(node: Node): ConDecl {
       };
     }
     case 'record': {
-      const nameNode = required(inner, 'name');
-      const fieldsNode = field(inner, 'fields');
-      const fieldTypes: TypeExpr[] = [];
-      const fieldNames: Name[] = [];
-      for (const fieldNode of fieldsNode ? fields(fieldsNode, 'field') : []) {
-        const type = convertFieldType(required(fieldNode, 'type'));
-        for (const nameNode2 of fields(fieldNode, 'name')) {
-          fieldNames.push(plainName(nameNode2));
-          fieldTypes.push(type);
-        }
-      }
-      return { name: plainName(nameNode), fields: fieldTypes, fieldNames, isInfix: false, span: spanOf(inner) };
+      return convertRecordConstructor(inner);
     }
     default: {
       throw syntaxError(spanOf(inner), '書き方に誤りがあります。');
     }
   }
+}
+
+function convertRecordConstructor(node: Node): ConDecl {
+  const nameNode = required(node, 'name');
+  const fieldsNode = field(node, 'fields');
+  const fieldTypes: TypeExpr[] = [];
+  const fieldNames: Name[] = [];
+  const strictFields: number[] = [];
+  for (const fieldNode of fieldsNode ? fields(fieldsNode, 'field') : []) {
+    const typeNode = required(fieldNode, 'type');
+    const type = convertFieldType(typeNode);
+    for (const nameNode2 of fields(fieldNode, 'name')) {
+      if (isStrictField(typeNode)) strictFields.push(fieldTypes.length);
+      fieldNames.push(plainName(nameNode2));
+      fieldTypes.push(type);
+    }
+  }
+  return {
+    name: plainName(nameNode),
+    fields: fieldTypes,
+    fieldNames,
+    ...(strictFields.length > 0 ? { strictFields } : {}),
+    isInfix: false,
+    span: spanOf(node),
+  };
 }
 
 function convertPrefixConstructor(node: Node): ConDecl {
