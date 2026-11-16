@@ -54,6 +54,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   readonly steps = new StepTracker();
   readonly frames: TraceFrame[] = [];
   readonly machine: Machine;
+  readonly displayAborted = new WeakSet<Thunk>();
   private readonly globals = new Map<GlobalDef, Slot>();
   private readonly dictCache = new Map<InstanceInfo, Dict>();
   private allocated = 0;
@@ -64,11 +65,10 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   }
 
   spend(cost = 1): void {
-    this.budget.spend(cost);
     if (this.displayRemaining !== undefined) {
       this.displayRemaining -= cost;
       if (this.displayRemaining < 0) throw new DisplayAbort();
-    }
+    } else this.budget.spend(cost);
   }
 
   private displayRemaining: number | undefined;
@@ -78,7 +78,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     const saved = this.displayRemaining;
     this.displayRemaining = operations;
     try {
-      return run();
+      return this.budget.excludingTime(run);
     } finally {
       this.displayRemaining = saved;
     }
@@ -94,6 +94,10 @@ export class Runtime implements TracedRuntime<TraceFrame> {
 
   /** Counts slots a run allocates, bounding its memory. */
   allocate(count: number): void {
+    if (this.displayRemaining !== undefined) {
+      this.spend(count);
+      return;
+    }
     this.allocated += count;
     if (this.allocated > LIMITS.maxSlots * 8) throw new ExecutionLimitError('operations');
   }

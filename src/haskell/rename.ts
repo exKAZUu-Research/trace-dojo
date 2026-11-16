@@ -668,7 +668,14 @@ class Renamer {
         renamed.sig = sigs.get(binding.names[0].name);
         return renamed;
       }
-      return this.renamePatBinding(binding, scope, (name) => this.ownValues.get(name.name) as ValueEntity);
+      const renamed = this.renamePatBinding(binding, scope, (name) => this.ownValues.get(name.name) as ValueEntity);
+      renamed.patSigs = new Map(
+        renamed.binders.flatMap((local) => {
+          const sig = sigs.get(local.name);
+          return sig ? [[local, sig] as const] : [];
+        })
+      );
+      return renamed;
     });
     return { bindings };
   }

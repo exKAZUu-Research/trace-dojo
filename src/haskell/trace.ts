@@ -8,7 +8,17 @@ import { compileProgram } from './compile';
 import { runProgram } from './run';
 import { DisplayAbort, Runtime, type TraceFrame } from './runtime';
 import { prune, splitApp, type Type } from './types';
-import { ConValue, Dict, HaskellException, isFunction, isIOAction, type Slot, TurtleValue, type Value } from './values';
+import {
+  ConValue,
+  Dict,
+  HaskellException,
+  isFunction,
+  isIOAction,
+  type Slot,
+  Thunk,
+  TurtleValue,
+  type Value,
+} from './values';
 
 export function traceHaskellProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileProgram(program, new Set(trace.atomicAnnotations.keys()));
@@ -62,10 +72,12 @@ const DISPLAY_OPERATIONS = 20_000;
 
 /** Evaluates a value for display, leaving it unevaluated when that fails or takes too long. */
 function forceForDisplay(runtime: Runtime, slot: Slot): Value | undefined {
+  if (slot instanceof Thunk && slot.state !== 'done' && runtime.displayAborted.has(slot)) return;
   return runtime.withDisplayBudget(DISPLAY_OPERATIONS, () => {
     try {
       return runtime.machine.force(slot);
     } catch (error) {
+      if (error instanceof DisplayAbort && slot instanceof Thunk) runtime.displayAborted.add(slot);
       if (error instanceof HaskellException || error instanceof DisplayAbort) return;
       throw error;
     }

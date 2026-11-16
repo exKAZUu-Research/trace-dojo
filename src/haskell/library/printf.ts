@@ -82,12 +82,14 @@ uprintf "" [] = ""
 uprintf "" (_:_) = perror "formatting string ended prematurely"
 uprintf ('%':'%':cs) us = '%' : uprintf cs us
 uprintf ('%':_) [] = perror "argument list ended prematurely"
-uprintf ('%':cs) (u:us) = case parseSpec cs of
-  (spec, rest) -> formatOne spec u ++ uprintf rest us
+uprintf ('%':cs) us = case parseSpec cs us of
+  (spec, rest, args) -> case args of
+    [] -> perror "argument list ended prematurely"
+    (u:remaining) -> formatOne spec u ++ uprintf rest remaining
 uprintf (c:cs) us = c : uprintf cs us
 
-parseSpec :: String -> (Spec, String)
-parseSpec s0 = flags False False False False False s0
+parseSpec :: String -> [UPrintf] -> (Spec, String, [UPrintf])
+parseSpec s0 args = flags False False False False False s0
   where
     flags minus plus space zero alt s = case s of
       ('-':r) -> flags True plus space zero alt r
@@ -95,15 +97,25 @@ parseSpec s0 = flags False False False False False s0
       (' ':r) -> flags minus plus True zero alt r
       ('0':r) -> flags minus plus space True alt r
       ('#':r) -> flags minus plus space zero True r
-      _ -> let (w, r1) = span isDigit s
-               width = if null w then Nothing else Just (read w)
-               (prec, r2) = case r1 of
-                 ('.':r) -> let (p, r') = span isDigit r in (Just (if null p then 0 else read p), r')
-                 _ -> (Nothing, r1)
-               r3 = dropWhile (\c -> c ${BT}elem${BT} "hlLqjzt") r2
-           in case r3 of
-                (c:r4) -> (Spec minus plus space zero alt width prec c, r4)
-                [] -> perror "formatting string ended prematurely"
+      _ -> case dimension s args of
+        (width, r1, args1) -> case precision r1 args1 of
+          (prec, r2, args2) ->
+            let r3 = dropWhile (\c -> c ${BT}elem${BT} "hlLqjzt") r2
+                left = minus || maybe False (< 0) width
+                width' = fmap abs width
+            in case r3 of
+                 (c:r4) -> (Spec left plus space zero alt width' prec c, r4, args2)
+                 [] -> perror "formatting string ended prematurely"
+    dimension ('*':r) us = case us of
+      [] -> perror "argument list ended prematurely"
+      (u:rest) -> (Just (dynamicNumber u), r, rest)
+    dimension s us = let (ds, rest) = span isDigit s in (if null ds then Nothing else Just (read ds), rest, us)
+    precision ('.':r) us = case dimension r us of
+      (p, rest, remaining) -> (Just (maybe 0 id p), rest, remaining)
+    precision s us = (Nothing, s, us)
+    dynamicNumber (UInteger n _) = fromInteger n
+    dynamicNumber (UChar c) = ord c
+    dynamicNumber _ = perror "bad formatting char 'd'"
 
 formatOne :: Spec -> UPrintf -> String
 formatOne spec@(Spec minus plus space zero alt width prec c) u = case u of

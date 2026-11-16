@@ -131,7 +131,9 @@ foldl _ z STip = z
 foldl f z (SBin _ x l r) = foldl f (f (foldl f z l) x) r
 
 foldr' :: (a -> b -> b) -> b -> Set a -> b
-foldr' = foldr
+foldr' f z s = z ${BT}seq${BT} case s of
+  STip -> z
+  SBin _ x l r -> foldr' f (f x $! foldr' f z r) l
 
 foldl' :: (b -> a -> b) -> b -> Set a -> b
 foldl' f z s = B.foldl' f z (toAscList s)
@@ -494,7 +496,9 @@ foldl _ z Tip = z
 foldl f z (Bin _ _ x l r) = foldl f (f (foldl f z l) x) r
 
 foldr' :: (a -> b -> b) -> b -> Map k a -> b
-foldr' = foldr
+foldr' f z m = z ${BT}seq${BT} case m of
+  Tip -> z
+  Bin _ _ x l r -> foldr' f (f x $! foldr' f z r) l
 
 foldl' :: (b -> a -> b) -> b -> Map k a -> b
 foldl' f z m = B.foldl' f z (elems m)
@@ -508,7 +512,9 @@ foldlWithKey _ z Tip = z
 foldlWithKey f z (Bin _ kx x l r) = foldlWithKey f (f (foldlWithKey f z l) kx x) r
 
 foldrWithKey' :: (k -> a -> b -> b) -> b -> Map k a -> b
-foldrWithKey' = foldrWithKey
+foldrWithKey' f z m = z ${BT}seq${BT} case m of
+  Tip -> z
+  Bin _ k x l r -> foldrWithKey' f (f k x $! foldrWithKey' f z r) l
 
 foldlWithKey' :: (a -> k -> b -> a) -> a -> Map k b -> a
 foldlWithKey' f z m = B.foldl' (\acc (k, x) -> f acc k x) z (toAscList m)
@@ -823,7 +829,7 @@ traverseWithKey :: Applicative t => (k -> a -> t b) -> Map k a -> t (Map k b)
 traverseWithKey f m = fmap forceValues (L.traverseWithKey f m)
 
 mapKeysWith :: Ord k2 => (a -> a -> a) -> (k1 -> k2) -> Map k1 a -> Map k2 a
-mapKeysWith c f m = forceValues (L.mapKeysWith c f m)
+mapKeysWith c f m = fromListWith c [(f k, x) | (k, x) <- L.toAscList m]
 
 mapMaybe :: (a -> Maybe b) -> Map k a -> Map k b
 mapMaybe f m = forceValues (L.mapMaybe f m)
@@ -832,13 +838,19 @@ mapMaybeWithKey :: (k -> a -> Maybe b) -> Map k a -> Map k b
 mapMaybeWithKey f m = forceValues (L.mapMaybeWithKey f m)
 
 unionWith :: Ord k => (a -> a -> a) -> Map k a -> Map k a -> Map k a
-unionWith f a b = forceValues (L.unionWith f a b)
+unionWith f = unionWithKey (\_ x y -> f x y)
 
 unionWithKey :: Ord k => (k -> a -> a -> a) -> Map k a -> Map k a -> Map k a
-unionWithKey f a b = forceValues (L.unionWithKey f a b)
+unionWithKey f a b = b ${BT}seq${BT} a ${BT}seq${BT} L.fromDistinctAscList (go (L.toAscList a) (L.toAscList b))
+  where go [] ys = ys
+        go xs [] = xs
+        go xs@((kx, x) : xt) ys@((ky, y) : yt) = case compare kx ky of
+          LT -> (kx, x) : go xt ys
+          GT -> (ky, y) : go xs yt
+          EQ -> let z = f kx x y in z ${BT}seq${BT} (kx, z) : go xt yt
 
 unionsWith :: Ord k => (a -> a -> a) -> [Map k a] -> Map k a
-unionsWith f ms = forceValues (L.unionsWith f ms)
+unionsWith f = B.foldl' (unionWith f) L.empty
 
 intersectionWith :: Ord k => (a -> b -> c) -> Map k a -> Map k b -> Map k c
 intersectionWith f a b = forceValues (L.intersectionWith f a b)
@@ -847,5 +859,9 @@ intersectionWithKey :: Ord k => (k -> a -> b -> c) -> Map k a -> Map k b -> Map 
 intersectionWithKey f a b = forceValues (L.intersectionWithKey f a b)
 
 differenceWith :: Ord k => (a -> b -> Maybe a) -> Map k a -> Map k b -> Map k a
-differenceWith f a b = forceValues (L.differenceWith f a b)
+differenceWith f a b = L.fromDistinctAscList [(k, z) | (k, x) <- L.toAscList a, Just z <- [case L.lookup k b of
+  Nothing -> Just x
+  Just y -> case f x y of
+    Nothing -> Nothing
+    Just z -> z ${BT}seq${BT} Just z]]
 `;

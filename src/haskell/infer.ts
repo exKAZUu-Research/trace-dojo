@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 677 -- The type checker keeps its inference rules beside the substitution state they share.
+// code-gauge-allow-file fileNcss 697 -- The type checker keeps its inference rules beside the substitution state they share.
 import { CHAR_TYPE, FUNCTION_TYPE, LIST_TYPE, tupleCon } from './builtinTypes';
 import { type ClassEnv, entailByGivens, hasConstructorHead, isSubclassOf, predsEqual } from './classEnv';
 import { dependencyOrder } from './dependencies';
@@ -566,10 +566,25 @@ export class Checker {
       typeError(expr.span, 'これらのフィールドをすべて持つ構成子がありません。');
     }
     expr.cons = cons;
-    const { type, fieldTypes } = this.instantiateCon(cons[0], expr.span);
-    this.unify(target, type, expr.expr.span, 'レコードの更新');
-    this.checkFields(expr.fields, cons[0], fieldTypes);
-    return type;
+    const input = this.instantiateCon(cons[0], expr.span);
+    const output = this.instantiateCon(cons[0], expr.span);
+    this.unify(target, input.type, expr.expr.span, 'レコードの更新');
+    const inputArgs = splitApp(input.type).args;
+    const outputArgs = splitApp(output.type).args;
+    for (const con of cons) {
+      const updated = new Set(expr.fields.map((field) => field.field.positions.get(con)));
+      for (const [position, fieldType] of con.fieldTypes.entries()) {
+        if (updated.has(position)) continue;
+        this.unify(
+          instantiateType(fieldType, inputArgs),
+          instantiateType(fieldType, outputArgs),
+          expr.span,
+          'レコードの更新'
+        );
+      }
+    }
+    this.checkFields(expr.fields, cons[0], output.fieldTypes);
+    return output.type;
   }
 
   private checkFields(fields: readonly RFieldBind[], con: ConInfo, fieldTypes: readonly Type[]): void {
@@ -813,6 +828,13 @@ export class Checker {
         continue;
       }
       this.inferPat(binding.pat, type);
+      for (const [local, sig] of binding.patSigs ?? []) {
+        const scheme = this.sigToScheme(sig);
+        if (scheme.preds.length > 0) {
+          typeError(sig.span, 'パターン束縛の型シグネチャの制約は、単相性制限と両立しません。');
+        }
+        this.unify(local.type as Type, this.instantiate(scheme, sig.span, local.name).type, sig.span);
+      }
       for (const [index, local] of binding.binders.entries()) {
         const global = binding.globals?.[index];
         if (global) this.globalMono.set(global, local.type as Type);
@@ -864,6 +886,15 @@ export class Checker {
     }
     for (const [index, local] of binding.binders.entries()) {
       local.scheme = this.generalize(local.type as Type, params, outer);
+      const sig = binding.patSigs?.get(local);
+      if (sig) {
+        const inferred = local.scheme;
+        const declared = this.sigToScheme(sig);
+        this.checkAgainstScheme(declared, sig.span, (type) =>
+          this.unify(this.instantiate(inferred, sig.span, local.name).type, type, sig.span)
+        );
+        local.scheme = declared;
+      }
       const global = binding.globals?.[index];
       if (global) {
         global.scheme = local.scheme;
