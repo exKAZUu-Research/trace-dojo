@@ -77,7 +77,6 @@ export class Runtime {
   private readonly outputDecoders = [createUtf8Decoder(), createUtf8Decoder()];
   /** The storage of container-level variables, which garbage collection starts from. */
   readonly globals: Slots[] = [];
-  /** Values that native objects hold, such as a hash map's entries, reached through their handles. */
   private allocated = 0;
   private readonly identities = new WeakMap<object, bigint>();
   private nextIdentity = 1n;
@@ -178,7 +177,6 @@ function pushChildren(item: object, stack: unknown[], turtles: Set<unknown>): vo
   }
 }
 
-/** Running out of the slots a run may allocate, which ends it as Zig's allocator failing would not: see Notes. */
 export class OutOfMemory extends Error {
   constructor() {
     super('out of memory');

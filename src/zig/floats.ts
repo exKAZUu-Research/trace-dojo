@@ -401,12 +401,14 @@ export function parseFloatLiteral(text: string, bits: FloatBits): BigFloat {
   if (!match) return new BigFloat(false, 'nan', 0n, 0);
   const whole = match[1] ?? '';
   const fraction = match[2] ?? '';
-  const digits = BigInt(`${whole}${fraction}` || '0');
-  const decimalExponent = Number(match[3] ?? '0') - fraction.length;
-  // Exponents far outside any format round to zero or infinity.
-  if (digits === 0n) return BigFloat.zero();
-  if (decimalExponent > 10_000) return new BigFloat(false, 'inf', 0n, 0);
-  if (decimalExponent < -10_000) return BigFloat.zero();
+  const significand = `${whole}${fraction}`.replace(/^0+/, '');
+  if (!significand) return BigFloat.zero();
+  const significant = significand.replace(/0+$/, '');
+  const decimalExponent = Number(match[3] ?? '0') - fraction.length + significand.length - significant.length;
+  const magnitude = significant.length + decimalExponent;
+  if (magnitude > 10_000) return new BigFloat(false, 'inf', 0n, 0);
+  if (magnitude < -10_000) return BigFloat.zero();
+  const digits = BigInt(significant);
   return decimalExponent >= 0
     ? roundRational(false, digits * 10n ** BigInt(decimalExponent), 1n, format)
     : roundRational(false, digits, 10n ** BigInt(-decimalExponent), format);

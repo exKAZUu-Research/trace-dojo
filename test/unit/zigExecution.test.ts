@@ -3394,3 +3394,40 @@ test('memory equality retains the reference self-address shortcut except for flo
     uncaughtException: undefined,
   });
 });
+
+test.each(['1.' + '0'.repeat(10_001), '1' + '0'.repeat(10_001) + 'e-10001', '0.' + '0'.repeat(10_001) + '1e10002'])(
+  'long decimal spellings retain their full magnitude (%#)',
+  (spelling) => {
+    const source = `const std=@import("std");pub fn main()void{std.debug.print("{d} {d}",.{@as(f128,${spelling}),std.fmt.parseFloat(f128,"${spelling}") catch 0});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '1 1',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('identifier byte identities survive lookup, tag names, fields, and formatting', () => {
+  const source = String.raw`const std=@import("std");const E=enum{@"\xff",@"\u{fffd}",@"\xef\xbb\xbf",@"a\xffb"};const U=union(E){@"\xff":u8,@"\u{fffd}":u8,@"\xef\xbb\xbf":u8,@"a\xffb":u8};pub fn main()void{const a=std.meta.stringToEnum(E,"\xff").?;const b=std.meta.stringToEnum(E,"\u{fffd}").?;const u=@unionInit(U,"\xff",7);std.debug.print("{} {} {} {} {} {}",.{a!=b,std.mem.eql(u8,@tagName(a),"\xff"),std.mem.eql(u8,std.enums.tagName(E,a).?,"\xff"),std.meta.stringToEnum(E,"\xfe")==null,u.@"\xff",std.meta.stringToEnum(E,"a\xffb").?==E.@"a\xffb"});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true true true true 7 true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['0xFE-1', '0xAE+1', '0x1E-2', '0xe-1', '0xBE+0xE'])(
+  'hexadecimal e cannot be followed immediately by a sign: %s',
+  (value) => {
+    expect(executeProgram('zig', `pub fn main()void{const x=${value};_=x;}`)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test('hexadecimal signs retain ordinary spaced and decimal-exponent expressions', () => {
+  expect(
+    executeProgram(
+      'zig',
+      'const std=@import("std");pub fn main()void{std.debug.print("{} {} {}",.{0xFE - 1,0x1e5+1,1e-3});}'
+    )
+  ).toMatchObject({ kind: 'executed', stderr: '253 486 0.001', uncaughtException: undefined });
+});

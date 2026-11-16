@@ -474,9 +474,11 @@ export function expression(node: Node): Expression {
   }
   switch (node.type) {
     case 'integer': {
+      checkNumberBoundary(node);
       return { kind: 'integer', ...span, value: parseIntegerText(node.text, node) };
     }
     case 'float': {
+      checkNumberBoundary(node);
       parseFloatText(node.text, node);
       return { kind: 'float', ...span, text: node.text };
     }
@@ -791,6 +793,12 @@ function rangeParts(node: Node): RangeParts | undefined {
 
 function isSpace(char: string): boolean {
   return /\s/.test(char);
+}
+
+function checkNumberBoundary(node: Node): void {
+  const next = source[node.endIndex];
+  if (/^0x[\da-f_]*e$/i.test(node.text) && (next === '+' || next === '-'))
+    fail(node, `16進数の e の直後には ${next} を書けません。`);
 }
 
 /** Zig's parser rejects a binary operator with a space on one side only, such as `a+ b`. */

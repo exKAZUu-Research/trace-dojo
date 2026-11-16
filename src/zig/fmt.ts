@@ -15,7 +15,7 @@ import {
   shortestDecimal,
 } from './floats';
 import { type EnumType, type StructField, type Type, typeName, type UnionType } from './types';
-import { decodeUtf8 } from './utf8';
+import { decodeUtf8, encodeIdentifierText } from './utf8';
 import {
   type EnumLiteral,
   ErrorValue,
@@ -706,7 +706,7 @@ export function stringBytes(value: Value, type: Type): bigint[] {
 }
 
 export function utf8(text: string): number[] {
-  return [...new TextEncoder().encode(text)];
+  return encodeIdentifierText(text);
 }
 
 function hexDigits(byte: number, upper: boolean): number[] {

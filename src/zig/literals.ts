@@ -2,7 +2,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { decodeUtf8 } from './utf8';
+import { decodeIdentifierBytes } from './utf8';
 
 function fail(node: Node, message: string): never {
   throw new CompileError([{ row: node.startPosition.row, message }]);
@@ -30,7 +30,7 @@ export class LiteralDecoder {
     const bytes = this.decodeQuoted(node);
     if (bytes.length === 0) fail(node, '名前を空にはできません。');
     if (bytes.includes(0)) fail(node, '名前に NUL 文字は使えません。');
-    return decodeUtf8(bytes);
+    return decodeIdentifierBytes(bytes);
   }
 
   decodeString(node: Node): number[] {

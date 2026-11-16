@@ -1,6 +1,7 @@
 /** Zig's Wyhash (`std.hash.Wyhash`) and `std.hash.autoHash`, which decide a hash map's iteration order. */
 import { sizeOf } from '../layout';
 import type { Type } from '../types';
+import { encodeIdentifierText } from '../utf8';
 import {
   ErrorValue,
   type FnValue,
@@ -160,7 +161,7 @@ function appendHashBytes(
     case 'error_set': {
       const name = (value as ErrorValue).name;
       spend(name.length * 3);
-      for (const byte of new TextEncoder().encode(name)) bytes.push(byte);
+      for (const byte of encodeIdentifierText(name)) bytes.push(byte);
       return;
     }
     case 'error_union': {

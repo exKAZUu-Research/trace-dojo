@@ -22,7 +22,7 @@ import {
   USIZE,
   VOID,
 } from '../types';
-import { decodeUtf8 } from '../utf8';
+import { decodeIdentifierBytes, encodeIdentifierText } from '../utf8';
 import {
   ErrorValue,
   FnValue,
@@ -333,7 +333,7 @@ const META: Record<string, () => Member> = {
     const fields = sema.enumFields(type);
     const text = constSlice(sema, textArg, U8);
     return computed(optionalOf(type), [text], call.span, ([value]) => {
-      const name = decodeUtf8(byteNumbers(value));
+      const name = decodeIdentifierBytes(byteNumbers(value));
       return fields.find((field) => field.name === name)?.value ?? NULL;
     });
   }),
@@ -359,7 +359,7 @@ const ENUMS: Record<string, () => Member> = {
     return computed(optionalOf(CONST_U8_SLICE), [value], call.span, ([tag]) => {
       const field = fields.find((each) => each.value === tag);
       if (!field) return NULL;
-      return newSlice([...new TextEncoder().encode(field.name)].map(BigInt));
+      return newSlice(encodeIdentifierText(field.name).map(BigInt));
     });
   }),
   fromInt: fnMember('std.enums.fromInt', (sema, call) => {

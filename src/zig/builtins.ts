@@ -68,7 +68,7 @@ import {
   VOID,
   wrapInt,
 } from './types';
-import { decodeUtf8 } from './utf8';
+import { decodeIdentifierBytes, decodeUtf8, encodeIdentifierText } from './utf8';
 import { ErrorValue, Pointer, Slice, storageOverlaps, storeInto, type Value, ZArray, ZStruct, ZUnion } from './values';
 
 /** Builtins of stages C and D, which this grader rejects with the stage's message. */
@@ -433,7 +433,9 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       case '@unionInit': {
         const type = this.compileType(args[0]);
         if (type.kind !== 'union') return this.error(args[0], '@unionInit の最初の引数は union の型にしてください。');
-        const fieldName = bytesToText(this.knownValue(this.compile(args[1], CONST_U8), 'フィールドの名前'));
+        const fieldName = decodeIdentifierBytes(
+          byteValues(this.knownValue(this.compile(args[1], CONST_U8), 'フィールドの名前')).map(Number)
+        );
         const fields = this.unionFields(type);
         const index = fields.findIndex((field) => field.name === fieldName);
         if (index === -1)
@@ -973,7 +975,7 @@ export const CONST_U8: Type = sliceOf(U8, true);
 
 /** A string's UTF-8 bytes as a slice of constants. */
 export function bytesSlice(text: string): Slice {
-  const bytes = [...new TextEncoder().encode(text)].map(BigInt);
+  const bytes = encodeIdentifierText(text).map(BigInt);
   return new Slice(new ZArray([...bytes, 0n], 0, bytes.length, true), 0, bytes.length);
 }
 
