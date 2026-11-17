@@ -1,6 +1,6 @@
-// code-gauge-allow-file fileNcss 415 -- Machine states and frames share one evaluator stack.
-import { CONS_CON, IO_TYPE, NIL_CON } from './builtinTypes';
-import type { CaseCore, Core } from './core';
+// code-gauge-allow-file fileNcss 433 -- Machine states and frames share one evaluator stack.
+import { CONS_CON, NIL_CON } from './builtinTypes';
+import type { CaseCore, Core, IODoCore } from './core';
 import type { TypeHint } from './displayTypeHints';
 import { constructorFieldHint, slotTypeHint, thunkTypeHint, typedSlot } from './displayTypes';
 import type { ConInfo } from './entities';
@@ -8,7 +8,6 @@ import { type DoFrame, finishMatch, markTailSelfCall, runBlock, statementDone, u
 import type { Primitive } from './primitives';
 import { RecursionBudget } from './recursionBudget';
 import type { Runtime } from './runtime';
-import { splitApp } from './types';
 import {
   Closure,
   ConValue,
@@ -20,6 +19,7 @@ import {
   IOPrim,
   IOReturn,
   IOThen,
+  isIOAction,
   Partial,
   PrimFn,
   type Slot,
@@ -42,7 +42,7 @@ export type Frame =
   | { k: 'charCase'; core: Extract<Core, { k: 'charCase' }>; env: Env }
   | { k: 'method'; index: number }
   | { k: 'super'; index: number }
-  | { k: 'monadChoice'; core: Extract<Core, { k: 'monadChoice' }>; env: Env }
+  | { k: 'deferredDo'; io: IODoCore; env: Env; ordinary: Slot }
   | { k: 'prim'; prim: Primitive; args: Slot[]; position: number }
   | { k: 'runIO' }
   | { k: 'ioBind'; next: Slot }
@@ -230,7 +230,7 @@ export class Machine {
   }
 
   /** Evaluates one node of code: a value returns, and other nodes push what they continue with. */
-  // code-gauge-allow functionNcss 53 -- One short case per kind of code node.
+  // code-gauge-allow functionNcss 57 -- One short case per kind of code node.
   private stepEval(state: RunState): void {
     const { code, env } = state;
     switch (code.k) {
@@ -285,9 +285,14 @@ export class Machine {
         state.code = code.dict;
         return;
       }
-      case 'monadChoice': {
-        this.stack.push({ k: 'monadChoice', core: code, env: env as Env });
-        state.code = code.dict;
+      case 'deferredDo': {
+        if (this.consumerRunsIO()) {
+          state.returnValue(new IODo(code.io, env as Env));
+        } else {
+          const ordinary = this.makeSlot(code.ordinary, env);
+          this.stack.push({ k: 'deferredDo', io: code.io, env: env as Env, ordinary });
+          state.enter(ordinary);
+        }
         return;
       }
       case 'dict': {
@@ -306,10 +311,21 @@ export class Machine {
     }
   }
 
-  /** Enters a slot: a value returns, and a pending thunk is evaluated with a frame that updates it. */
+  private consumerRunsIO(): boolean {
+    for (let index = this.stack.length - 1; index >= 0; index--) {
+      this.runtime.spend();
+      const frame = this.stack[index];
+      if (frame.k !== 'update') return frame.k === 'runIO';
+    }
+    return false;
+  }
+
   private stepEnter(state: RunState): void {
-    const slot = untypedSlot(state.value);
+    const entered = state.value;
+    const slot = untypedSlot(entered);
     state.value = slot;
+    if (slot instanceof Thunk && slot.state === 'evaluating') throw this.runtime.evaluationLimitError();
+    this.inheritTypeHint(entered);
     if (!(slot instanceof Thunk)) {
       state.mode = 'return';
       return;
@@ -318,7 +334,6 @@ export class Machine {
       state.returnValue(slot.value as Value);
       return;
     }
-    if (slot.state === 'evaluating') throw this.runtime.evaluationLimitError();
     this.runtime.spend();
     this.squeezeUpdateFrame(slot);
     slot.state = 'evaluating';
@@ -344,17 +359,15 @@ export class Machine {
   }
 
   /**
-   * Drops the update frame on top of the stack, if any, when a thunk is entered: the thunk it updates takes the entered
+   * Drops the update frame on top of the stack, if any, when an expression is entered: the thunk it updates takes the entered
    * thunk's value, as GHC's stack squeezing does. Without it, a loop whose each step ends by entering the next step's
-   * thunk (such as `seq n (go (n + 1))`) keeps a frame per step.
+   * thunk (such as `seq n (go (n + 1))`) keeps a frame per step. Indirection updates remain
+   * to memoize resolved aliases.
    */
   private squeezeUpdateFrame(entered: Thunk): void {
     const top = this.stack.at(-1);
     if (top?.k !== 'update') return;
-    if (this.runtime.steps.recorder) {
-      const hint = thunkTypeHint(top.thunk);
-      hint.value = slotTypeHint(entered, hint.value);
-    }
+    if (entered.target) return;
     top.thunk.redirect(entered);
     this.stack.pop();
   }
@@ -449,9 +462,9 @@ export class Machine {
         state.enter(frame.k === 'method' ? dict.methods[frame.index] : dict.supers[frame.index]);
         return false;
       }
-      case 'monadChoice': {
-        const head = splitApp((state.value as Dict).instance.head).head;
-        state.evaluate(head.tag === 'tcon' && head.entity === IO_TYPE ? frame.core.io : frame.core.other, frame.env);
+      case 'deferredDo': {
+        this.inheritTypeHint(frame.ordinary);
+        if (isIOAction(state.value as Value)) state.returnValue(new IODo(frame.io, frame.env));
         return false;
       }
       case 'prim': {
@@ -473,6 +486,13 @@ export class Machine {
         throw new Error(`A value returned to an IO frame (${frame.k})`);
       }
     }
+  }
+
+  private inheritTypeHint(slot: Slot): void {
+    const top = this.stack.at(-1);
+    if (!this.runtime.steps.recorder || top?.k !== 'update') return;
+    const hint = thunkTypeHint(top.thunk);
+    hint.value = slotTypeHint(slot, hint.value);
   }
 
   private scrutineeDisplayType(code: Core, env: Env | undefined): TypeHint | undefined {

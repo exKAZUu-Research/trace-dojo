@@ -107,7 +107,7 @@ export class Codegen {
   private frame: FrameScope = this.rootFrame;
   private visible = OrderedMap<string, VisibleBinding>();
   private readonly recursion = new RecursionBudget();
-  private readonly untracedMonads = new Set<DictParam>();
+  private readonly untracedDoTypes = new Set<object>();
   /** The dictionary parameters of the bindings whose bodies are being generated, for their recursive uses. */
   private readonly ownDictParams = new Map<LocalVar | ValueEntity, DictParam[]>();
   readonly claimedAtomicRows = new Set<number>();
@@ -947,24 +947,24 @@ export class Codegen {
 
   private compileDo(expr: Extract<RExpr, { k: 'do' }>, binding?: { row: number; names: string[] }): Core {
     if (this.options.isProgram && expr.type && isIOType(expr.type)) return this.compileIODo(expr, binding);
-    if (!expr.monad) {
-      // A block of `let` statements and one expression needs no monad: it is a `let` expression.
-      return this.compileLetChain(expr.stmts, 0);
+    const head = expr.type ? splitApp(expr.type).head : undefined;
+    const key = head?.tag === 'tcon' ? head.entity : (head ?? expr);
+    if (!this.options.isProgram || head?.tag === 'tcon' || this.untracedDoTypes.has(key)) {
+      return this.compileOrdinaryDo(expr);
     }
-    let evidence = resolveEvidence(expr.monad);
-    while (evidence.kind === 'super') evidence = resolveEvidence(evidence.of);
-    const param = evidence.kind === 'param' ? evidence.param : undefined;
-    if (!this.options.isProgram || evidence.kind === 'instance' || (param && this.untracedMonads.has(param))) {
-      return this.compileMonadic(expr.stmts, 0, expr.monad);
-    }
-    let other: Core;
-    if (param) this.untracedMonads.add(param);
+    this.untracedDoTypes.add(key);
+    let ordinary: Core;
     try {
-      other = this.compileMonadic(expr.stmts, 0, expr.monad);
+      ordinary = this.compileOrdinaryDo(expr);
     } finally {
-      if (param) this.untracedMonads.delete(param);
+      this.untracedDoTypes.delete(key);
     }
-    return { k: 'monadChoice', dict: this.compileEvidence(expr.monad), io: this.compileIODo(expr, binding), other };
+    if (this.options.traceTypes) ordinary.displayType = expr.type;
+    return { k: 'deferredDo', ordinary, io: this.compileIODo(expr, binding) };
+  }
+
+  private compileOrdinaryDo(expr: Extract<RExpr, { k: 'do' }>): Core {
+    return expr.monad ? this.compileMonadic(expr.stmts, 0, expr.monad) : this.compileLetChain(expr.stmts, 0);
   }
 
   private compileLetChain(stmts: readonly RStmt[], index: number): Core {

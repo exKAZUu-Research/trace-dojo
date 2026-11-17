@@ -328,3 +328,17 @@ main = print (${operation} (Two (error "first" :: Int) 2))`;
     });
   }
 );
+
+test.each([
+  [
+    'and(replicate 1000 True),or(replicate 1000 False),all (>=0)[1..1000::Int],any (==1000)[1..1000::Int]',
+    '(True,False,True,True)\n',
+  ],
+  ['and(replicate 10000 True)', 'True\n'],
+])('Boolean folds retain bounded work through newtype indirections: %s', (expression, stdout) => {
+  expect(executeProgram('haskell', `main=print(${expression})`)).toMatchObject({
+    kind: 'executed',
+    stdout,
+    uncaughtException: undefined,
+  });
+});

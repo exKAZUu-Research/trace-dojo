@@ -89,8 +89,8 @@ function childCodes(code: Core): [Core, boolean][] {
     case 'dict': {
       return outer(code.args);
     }
-    case 'monadChoice': {
-      return outer([code.dict, code.io, code.other]);
+    case 'deferredDo': {
+      return outer([code.ordinary, code.io]);
     }
     case 'method':
     case 'super': {
@@ -181,13 +181,14 @@ function pushRoots(runtime: Runtime, push: Push): void {
   for (const frame of runtime.machine.stack) pushStackFrame(frame, scannedEnvs, push);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- One branch per kind of evaluator frame that holds values.
+// code-gauge-allow functionCognitiveComplexity 19 -- One branch per kind of evaluator frame that holds values.
 function pushStackFrame(frame: Frame, scannedEnvs: Set<Env>, push: Push): void {
   if (frame.k === 'update' && frame.code) pushRefs(freeVarsOf(frame.code), frame.env, push);
   else if (frame.k === 'apply' || frame.k === 'prim') for (const arg of frame.args) push(arg);
   else if (frame.k === 'ioBind' || frame.k === 'ioThen') push(frame.next);
   else if (frame.k === 'do') push(frame.result);
-  else if (frame.k === 'case' || frame.k === 'charCase' || frame.k === 'monadChoice') {
+  else if (frame.k === 'case' || frame.k === 'charCase' || frame.k === 'deferredDo') {
+    if (frame.k === 'deferredDo') push(frame.ordinary);
     for (let current: Env | undefined = frame.env; current && !scannedEnvs.has(current); current = current.parent) {
       scannedEnvs.add(current);
       for (const slot of current.slots) push(slot);

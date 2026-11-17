@@ -753,7 +753,10 @@ fromSet = fromSetUsing False
 fromSetUsing :: Bool -> (k -> a) -> S.Set k -> Map k a
 fromSetUsing _ _ S.STip = Tip
 fromSetUsing strict f (S.SBin count k l r) =
-  let x = f k in forceValue strict x (Bin count k x (fromSetUsing strict f l) (fromSetUsing strict f r))
+  let x = f k
+      right = fromSetUsing strict f r
+      left = fromSetUsing strict f l
+  in forceValue strict x (right ${BT}seq${BT} left ${BT}seq${BT} Bin count k x left right)
 
 foldr :: (a -> b -> b) -> b -> Map k a -> b
 foldr _ z Tip = z

@@ -32,7 +32,7 @@ export type Core = (
   | { k: 'prim'; prim: Primitive }
   | { k: 'method'; dict: Core; index: number }
   | { k: 'super'; dict: Core; index: number }
-  | { k: 'monadChoice'; dict: Core; io: Core; other: Core }
+  | { k: 'deferredDo'; ordinary: Core; io: IODoCore }
   | { k: 'dict'; instance: InstanceInfo; args: Core[] }
   | { k: 'error'; message: string; kind: 'error' | 'patternMatch' }
   | IODoCore

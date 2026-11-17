@@ -741,3 +741,121 @@ main = do
   expect(inferred.finalVars).toEqual(annotated.finalVars);
   expect(inferred.finalTurtles).toEqual(annotated.finalTurtles);
 });
+
+test.each(['action', 'let n = 1 :: Int\n  action'])(
+  'retains inferred IO do metadata without a Monad dictionary: %s',
+  (body) => {
+    const record = (signature: string): ReturnType<typeof traceProgram> => {
+      const source = `${signature}
+helper action = do
+  ${body}
+main = do
+  t <- newTurtle
+  helper (forward t)`;
+      return traceProgram('haskell', source, source);
+    };
+    const inferred = record('');
+    const annotated = record('helper :: IO () -> IO ()');
+    expect(inferred.finalTurtles[0]?.y).toBe(1);
+    expect(inferred.traceItems).toEqual(annotated.traceItems);
+  }
+);
+
+test('retains generic IO metadata after its action is forced as a pure value', () => {
+  const [inferred, annotated] = ['', 'helper :: IO () -> IO ()'].map((signature) => {
+    const source = `${signature}
+helper action = do
+  let n = 1 :: Int
+  action
+main = do
+  t <- newTurtle
+  let action = helper (forward t)
+  action \`seq\` pure ()
+  action`;
+    return traceProgram('haskell', source, source);
+  });
+  expect(inferred.finalTurtles[0]?.y).toBe(1);
+  expect(inferred.traceItems).toEqual(annotated.traceItems);
+});
+
+test('selects generic do behavior independently for pure values and IO calls', () => {
+  const source = `helper value = do
+  let n = 1 :: Int
+  value
+main = do
+  let m = helper (Just (2 :: Int))
+  let xs = helper [3,4 :: Int]
+  let x = helper (5 :: Int)
+  print (m,xs,x)
+  t <- newTurtle
+  helper (forward t)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('(Just 2,[3,4],5)\n');
+  expect(result.finalTurtles[0]?.y).toBe(1);
+  expect(
+    result.traceItems
+      .filter(({ callLines }) => callLines.length > 0)
+      .map(({ line, vars, turtles }) => [line, vars.n, turtles[0]?.y])
+  ).toEqual([
+    [2, 1, 0],
+    [3, 1, 1],
+  ]);
+});
+
+test('generic do metadata preserves ordinary pure demand and lazy fields', () => {
+  const source = `helper value = do
+  let unused = error "unused" :: Int
+  value
+main = print (take 1 (helper [7,error "tail" :: Int]), fst (helper (8 :: Int,error "field" :: Int)), helper (Just (undefined :: Int)) \`seq\` True)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('([7],8,True)\n');
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.traceItems).toHaveLength(2);
+});
+
+test('forcing a generic do action as a pure value preserves construction exceptions', () => {
+  const source = `helper action = do
+  let n = 1 :: Int
+  action
+main = print (helper (error "construction" :: IO ()) \`seq\` True)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('');
+  expect(result.uncaughtException).toBe('construction');
+  expect(result.traceItems).toHaveLength(1);
+});
+
+test.each([
+  ['(1.2345678 :: Float)', '1.2345678\n'],
+  ['"x"', '"x"\n'],
+])('retains instantiated display types through pure generic do: %s', (value, stdout) => {
+  const source = `idDo value = do
+  value
+record value = do
+  let copy = idDo value
+  print copy
+main = record ${value}`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe(stdout);
+  const displayed = result.traceItems.filter(({ vars }) => Object.hasOwn(vars, 'copy'));
+  expect(displayed).toHaveLength(2);
+  for (const { vars, referenceVars } of displayed) {
+    expect(vars.copy).toEqual(vars.value);
+    expect(referenceVars.copy).toEqual(referenceVars.value);
+  }
+});
+
+test('retains scalar binding steps for a generic single-expression do lambda', () => {
+  const source = `import Control.Monad
+repeatEach action values = forM_ values $ \\n -> do
+  action n
+main = repeatEach print [1,1 :: Int]`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('1\n1\n');
+  expect(result.traceItems.map(({ line, vars }) => [line, vars.n])).toEqual([
+    [0, undefined],
+    [2, 1],
+    [3, 1],
+    [2, 1],
+    [3, 1],
+  ]);
+});
