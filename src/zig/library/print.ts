@@ -53,6 +53,7 @@ import {
 
 export interface PreparedPrint {
   args: ZStruct;
+  type: Type;
   write: (destination?: WriterState) => number[];
 }
 
@@ -108,6 +109,7 @@ export function compilePrint(sema: SemaApi, formatArg: Expression, argsArg: Expr
     const args = copyForFrame(frame, evaluate(frame), type) as ZStruct;
     return {
       args,
+      type,
       write: (suppliedDestination) => {
         const destination = suppliedDestination ?? bufferingWriter();
         return withHeldValues(

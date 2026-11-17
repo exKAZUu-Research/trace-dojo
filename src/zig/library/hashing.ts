@@ -1,6 +1,6 @@
 /** Zig's Wyhash (`std.hash.Wyhash`) and `std.hash.autoHash`, which decide a hash map's iteration order. */
 import { physicalBytes } from '../bufferMemory';
-import { bitSizeOf, sizeOf } from '../layout';
+import { bitSizeOf, hasResolvedLayout, sizeOf } from '../layout';
 import type { Type } from '../types';
 import { encodeIdentifierText } from '../utf8';
 import {
@@ -15,6 +15,14 @@ import {
   type ZStruct,
   type ZUnion,
 } from '../values';
+
+interface HashProofState {
+  active: Set<Type>;
+  completed: Map<Type, boolean>;
+}
+
+const physicalHashLayouts = new WeakMap<Type, boolean>();
+const emptyHashes = new WeakMap<Type, boolean>();
 
 const MASK = (1n << 64n) - 1n;
 const SECRET = [
@@ -189,8 +197,11 @@ function appendHashBytes(
   }
 }
 
-function emptyHash(type: Type, spend: (cost?: number) => void): boolean {
-  spend();
+function emptyHash(type: Type, spend: (cost?: number) => void, state?: HashProofState): boolean {
+  return queryHashType(type, spend, emptyHashes, emptyHashResult, state);
+}
+
+function emptyHashResult(type: Type, spend: (cost?: number) => void, state: HashProofState): boolean {
   switch (type.kind) {
     case 'void': {
       return true;
@@ -202,10 +213,10 @@ function emptyHash(type: Type, spend: (cost?: number) => void): boolean {
       return (type.tagType?.bits ?? 0) === 0;
     }
     case 'array': {
-      return type.length === 0n || emptyHash(type.child, spend);
+      return type.length === 0n || emptyHash(type.child, spend, state);
     }
     case 'struct': {
-      return (type.fields ?? []).every((field) => emptyHash(field.type, spend));
+      return (type.fields ?? []).every((field) => emptyHash(field.type, spend, state));
     }
     default: {
       return false;
@@ -221,14 +232,17 @@ function hashAddress(value: Value, identityOf: (value: object) => bigint): bigin
   return identityOf((value as FnValue).fn) << 32n;
 }
 
-export function hasPhysicalHashLayout(type: Type, spend: (cost?: number) => void): boolean {
-  spend();
+export function hasPhysicalHashLayout(type: Type, spend: (cost?: number) => void, state?: HashProofState): boolean {
+  return queryHashType(type, spend, physicalHashLayouts, physicalHashLayout, state);
+}
+
+function physicalHashLayout(type: Type, spend: (cost?: number) => void, state: HashProofState): boolean {
   switch (type.kind) {
     case 'int': {
       return sizeOf(type) * 8 === type.bits;
     }
     case 'enum': {
-      return type.tagType !== undefined && hasPhysicalHashLayout(type.tagType, spend);
+      return type.tagType !== undefined && hasPhysicalHashLayout(type.tagType, spend, state);
     }
     case 'pointer': {
       return type.size !== 'slice';
@@ -237,26 +251,49 @@ export function hasPhysicalHashLayout(type: Type, spend: (cost?: number) => void
       return type.child.kind === 'pointer' && type.child.size !== 'slice';
     }
     case 'array': {
-      return hasPhysicalHashLayout(type.child, spend);
+      return hasPhysicalHashLayout(type.child, spend, state);
     }
     case 'struct': {
       spend(type.fields?.length ?? 0);
       const fields = (type.fields ?? []).filter((field) => field.comptimeValue === undefined);
       if (type.layout === 'packed') return sizeOf(type) * 8 === bitSizeOf(type);
       return (
-        fields.every((field) => hasPhysicalHashLayout(field.type, spend)) &&
+        fields.every((field) => hasPhysicalHashLayout(field.type, spend, state)) &&
         sizeOf(type) === fields.reduce((sum, field) => sum + sizeOf(field.type), 0)
       );
     }
     case 'union': {
       return (type.fields ?? []).every(
-        (field) => sizeOf(field.type) === sizeOf(type) && hasPhysicalHashLayout(field.type, spend)
+        (field) => sizeOf(field.type) === sizeOf(type) && hasPhysicalHashLayout(field.type, spend, state)
       );
     }
     // Compiler error IDs are unavailable, so error-containing keys retain field hashing.
     default: {
       return false;
     }
+  }
+}
+
+function queryHashType(
+  type: Type,
+  spend: (cost?: number) => void,
+  cache: WeakMap<Type, boolean>,
+  compute: (type: Type, spend: (cost?: number) => void, state: HashProofState) => boolean,
+  state?: HashProofState
+): boolean {
+  state ??= { active: new Set(), completed: new Map() };
+  spend();
+  const cached = cache.get(type) ?? state.completed.get(type);
+  if (cached !== undefined) return cached;
+  if (state.active.has(type)) return false;
+  state.active.add(type);
+  try {
+    const result = compute(type, spend, state);
+    state.completed.set(type, result);
+    if (hasResolvedLayout(type)) cache.set(type, result);
+    return result;
+  } finally {
+    state.active.delete(type);
   }
 }
 

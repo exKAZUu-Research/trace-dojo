@@ -36,7 +36,6 @@ import { asFloat, comparisonTest, isArithmeticType, isIntegerType, isZero, sign 
 import { type Frame, Jump, withHeldValues } from './runtime';
 import {
   addDecls,
-  copyForFrame,
   copyForStorage,
   evaluateHeld,
   FnRef,
@@ -56,6 +55,7 @@ import {
   staticResultOf,
   type TExpr,
   undefinedValue,
+  valueEvaluators,
 } from './semaBase';
 import { singleValueOf } from './singleValue';
 import {
@@ -723,10 +723,15 @@ export abstract class ExpressionCompiler extends SemaBase {
     const access = this.elementAccess(type);
     const locate = (frame: Frame): { slots: Slots; position: number } => {
       const value = evaluateObject(frame);
-      return withHeldValues(frame, [value], () => {
-        const position = index.eval(frame) as bigint;
-        return access(base.read(value), position);
-      });
+      return withHeldValues(
+        frame,
+        [value],
+        () => {
+          const position = index.eval(frame) as bigint;
+          return access(base.read(value), position);
+        },
+        [base.operand.type]
+      );
     };
     const staticSource = object.known
       ? object.value
@@ -918,7 +923,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         ? new Slice(target, from, toValue - fromValue)
         : new Pointer(new Constant(new ZArray(target.slots, from, toValue - fromValue, sentinel !== undefined)), 0);
     };
-    const evaluators = operands.map((operand) => operand.eval);
+    const evaluators = valueEvaluators(operands, false);
     return {
       ...runtime(resultType, (frame) => render(evaluateHeld(frame, evaluators)), expression),
       staticResult:
@@ -1560,14 +1565,13 @@ export abstract class ExpressionCompiler extends SemaBase {
       (!b.viaPointer || isConstantData(staticResultOf(right)?.value));
     if (left.known && right.known && readable)
       return known(resultType, build(a.read(left.value), b.read(right.value)), expression);
-    const evaluateLeft = (frame: Frame): Value => copyForFrame(frame, left.eval(frame), left.type);
-    const evaluateRight = (frame: Frame): Value => copyForFrame(frame, right.eval(frame), right.type);
+    const evaluators = valueEvaluators([left, right]);
     return {
       ...runtime(
         resultType,
         (frame) => {
           frame.runtime.reserveStorage(valueSlots(arrayType));
-          const values = evaluateHeld(frame, [evaluateLeft, evaluateRight]);
+          const values = evaluateHeld(frame, evaluators);
           return build(a.read(values[0]), b.read(values[1]));
         },
         expression

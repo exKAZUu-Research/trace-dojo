@@ -33,7 +33,8 @@ export class Jump {
     readonly kind: 'break' | 'continue' | 'return',
     /** The block or loop it leaves, or the function for a return. */
     readonly target: object,
-    readonly value: Value
+    readonly value: Value,
+    readonly type?: Type
   ) {}
 }
 

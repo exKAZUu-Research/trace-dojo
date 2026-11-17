@@ -491,13 +491,29 @@ export function isComptimeOnly(type: Type, seen = new Set<Type>()): boolean {
   }
 }
 
+interface IntegerBounds {
+  minimum: bigint;
+  maximum: bigint;
+}
+
+const integerBounds = new WeakValueMap<IntType, IntegerBounds>();
+
 export function minInt(type: IntType): bigint {
-  return type.signed && type.bits > 0 ? -(1n << BigInt(type.bits - 1)) : 0n;
+  return boundsOf(type).minimum;
 }
 
 export function maxInt(type: IntType): bigint {
-  if (type.bits === 0) return 0n;
-  return type.signed ? (1n << BigInt(type.bits - 1)) - 1n : (1n << BigInt(type.bits)) - 1n;
+  return boundsOf(type).maximum;
+}
+
+function boundsOf(type: IntType): IntegerBounds {
+  let bounds = integerBounds.get(type);
+  if (!bounds) {
+    const limit = type.bits === 0 ? 0n : 1n << BigInt(type.bits - (type.signed ? 1 : 0));
+    bounds = { minimum: type.signed ? -limit : 0n, maximum: type.bits === 0 ? 0n : limit - 1n };
+    integerBounds.set(type, bounds);
+  }
+  return bounds;
 }
 
 export function fitsInt(value: bigint, type: IntType): boolean {

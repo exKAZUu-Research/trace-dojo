@@ -409,7 +409,9 @@ export abstract class StatementCompiler extends CallCompiler {
       return {
         store: (frame: Frame): void => {
           const pointer = locate(frame);
-          withHeldValues(frame, [pointer], () => storeInto(pointer.target, pointer.index, evaluate(frame)));
+          withHeldValues(frame, [pointer], () => storeInto(pointer.target, pointer.index, evaluate(frame)), [
+            pointerTo(place.type, place.place.isConst),
+          ]);
         },
       };
     });
@@ -583,7 +585,9 @@ export abstract class StatementCompiler extends CallCompiler {
       return {
         exec: this.simple(row, onlyCalls, (frame) => {
           const pointer = place.locate(frame);
-          withHeldValues(frame, [pointer], () => storeInto(pointer.target, pointer.index, evaluate(frame)));
+          withHeldValues(frame, [pointer], () => storeInto(pointer.target, pointer.index, evaluate(frame)), [
+            pointerTo(type, place.isConst),
+          ]);
         }),
         noreturn: value.type.kind === 'noreturn',
       };
@@ -677,7 +681,9 @@ export abstract class StatementCompiler extends CallCompiler {
     const locate = place.locate;
     return (frame) => {
       const pointer = locate(frame);
-      withHeldValues(frame, [pointer], () => store(frame, pointer.target, pointer.index));
+      withHeldValues(frame, [pointer], () => store(frame, pointer.target, pointer.index), [
+        pointerTo(type, place.isConst),
+      ]);
     };
   }
 
@@ -830,7 +836,7 @@ export abstract class StatementCompiler extends CallCompiler {
           expression
         );
         const evaluate = copyJumpValue(operand);
-        return (frame) => new Jump('continue', id, evaluate(frame));
+        return (frame) => new Jump('continue', id, evaluate(frame), operand.type);
       }
       return () => new Jump('continue', id, undefined);
     }
@@ -849,7 +855,8 @@ export abstract class StatementCompiler extends CallCompiler {
     };
     target.breaks.push(site);
     if (target.resultType) site.final = site.value;
-    return (frame) => new Jump('break', id, copyJumpValue(site.final ?? site.value)(frame));
+    return (frame) =>
+      new Jump('break', id, copyJumpValue(site.final ?? site.value)(frame), (site.final ?? site.value).type);
   }
 
   private returnMaker(expression: ExpressionOf<'return'>): (frame: Frame) => Jump {
@@ -864,7 +871,7 @@ export abstract class StatementCompiler extends CallCompiler {
     this.recordErrors(value.type, value);
     value = this.coerce(value, returnType, expression.value);
     const evaluate = copyJumpValue(value);
-    return (frame) => new Jump('return', target, evaluate(frame));
+    return (frame) => new Jump('return', target, evaluate(frame), value.type);
   }
 
   protected growsErrorSet(set: ErrorSetType): boolean {
@@ -2660,14 +2667,19 @@ function unwrapParens(expression: Expression): Expression {
 
 function runDefers(frame: Frame, mark: number, completion: Jump | undefined, fnTarget: object | undefined): void {
   const error = completion && isErrorReturn(completion, fnTarget) ? completion.value : undefined;
-  withHeldValues(frame, completion ? [completion.value] : [], () => {
-    while (frame.defers.length > mark) {
-      const deferred = frame.defers.pop();
-      if (!deferred) break;
-      if (deferred.isErrdefer && error === undefined) continue;
-      deferred.run(frame);
-    }
-  });
+  withHeldValues(
+    frame,
+    completion ? [completion.value] : [],
+    () => {
+      while (frame.defers.length > mark) {
+        const deferred = frame.defers.pop();
+        if (!deferred) break;
+        if (deferred.isErrdefer && error === undefined) continue;
+        deferred.run(frame);
+      }
+    },
+    completion?.type ? [completion.type] : undefined
+  );
 }
 
 function isErrorReturn(jump: Jump, fnTarget: object | undefined): boolean {

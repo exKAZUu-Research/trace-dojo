@@ -8240,3 +8240,63 @@ test('counted totals reject overflow between discarded bytes and a modified publ
     uncaughtException: 'panic: integer overflow',
   });
 });
+
+test.each([
+  [7, 2, false],
+  [5, 3, false],
+  [19, 2, true],
+  [12, 3, true],
+] as const)(
+  'hash-layout proofs reuse shared type graphs of depth %s and fanout %s (void leaf %s)',
+  (depth, fanout, withVoid) => {
+    const definitions = Array.from(
+      { length: depth },
+      (_, i) =>
+        `const S${i + 1}=struct{${Array.from({ length: fanout }, (_, field) => `${String.fromCodePoint(97 + field)}:S${i}`).join(',')}};`
+    ).join('');
+    const source = `const std=@import("std");const S0=struct{${withVoid ? 'v:void' : ''}};${definitions}pub fn main(init:std.process.Init)!void{const a:[1]S${depth}=undefined;var m=std.AutoHashMap([1]S${depth},u8).init(init.gpa);defer m.deinit();try m.put(a,1);try m.put(a,2);std.debug.print("{}:{}",.{m.count(),m.get(a).?});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '1:2',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['a[probe()]', 'p[probe()]', 's[probe()]', 'a[probe()..][0]', 's[probe()..][0]'])(
+  'indexed and sliced locations retain reference-free root types: %s',
+  (expression) => {
+    const source = `const std=@import("std");fn probe()usize{const t=Turtle.init();for(0..20)|_|{_=t.canMoveForward();}return 0;}pub fn main()void{var a:[100000]u8=@splat(1);_=&a;${expression.startsWith('p[') ? 'const p=&a;' : expression.startsWith('s[') ? 'const s:[]u8=&a;' : ''}const x=${expression};std.debug.print("{}",.{x});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '1',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['([_]Turtle{Turtle.init(0,1)})[probe()]', '(&[_]Turtle{Turtle.init(0,1)})[probe()..]'])(
+  'indexed and sliced temporary turtle locations remain alive: %s',
+  (expression) => {
+    const source = `const std=@import("std");fn probe()usize{const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});return 0;}pub fn main()void{const x=${expression};_=x;}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'false',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('deferred turtle queries skip primitive pending return values', () => {
+  const source = `const std=@import("std");fn make()[100000]u8{defer{const t=Turtle.init();for(0..20)|_|{_=t.canMoveForward();}}return @splat(1);}pub fn main()void{const a=make();std.debug.print("{}",.{a[0]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '1', uncaughtException: undefined });
+});
+
+test('deferred turtle queries retain turtle-containing pending return values', () => {
+  const source = `const std=@import("std");fn make()[1]Turtle{defer{const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});}return .{Turtle.init(0,1)};}pub fn main()void{const a=make();_=a;}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'false',
+    uncaughtException: undefined,
+  });
+});

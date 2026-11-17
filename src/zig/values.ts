@@ -398,15 +398,15 @@ export function zeroArrayElement(value: ZArray): { value: Value } | undefined {
   return zeroArrayValues.get(value.slots);
 }
 
-export function copyZeroArray(value: ZArray, copy: (value: Value) => Value): ZArray | undefined {
+export function copyZeroArray(value: ZArray): ZArray | undefined {
   const element = zeroArrayElement(value);
-  return element ? zeroArray(value.lengthValue, value.hasSentinel, copy(element.value)) : undefined;
+  return element ? zeroArray(value.lengthValue, value.hasSentinel, element.value) : undefined;
 }
 
 /** A copy of a value whose aggregates are fresh, since Zig copies arrays, structs, and unions by value. */
 export function copyValue(value: Value): Value {
   if (value instanceof ZArray) {
-    const virtual = copyZeroArray(value, copyValue);
+    const virtual = copyZeroArray(value);
     if (virtual) return virtual;
     const copied = value.values(value.hasSentinel).map((slot) => copyValue(slot));
     return new ZArray(copied, 0, value.lengthValue, value.hasSentinel);

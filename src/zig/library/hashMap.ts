@@ -787,8 +787,22 @@ function mapFactory(name: string, kind: KeyKind, managed: boolean): () => Member
   });
 }
 
-// code-gauge-allow functionNcss 37 -- Checks the supported key representations recursively before a hashing operation.
-function validateAutoKey(sema: SemaApi, type: Type, span: Span, rejectSlices = true): void {
+// code-gauge-allow functionNcss 45 -- Validates each key representation once per slice policy before hashing.
+function validateAutoKey(
+  sema: SemaApi,
+  type: Type,
+  span: Span,
+  rejectSlices = true,
+  seen = new Map<boolean, Set<Type>>()
+): void {
+  sema.spendCompilation();
+  let visited = seen.get(rejectSlices);
+  if (!visited) {
+    visited = new Set();
+    seen.set(rejectSlices, visited);
+  }
+  if (visited.has(type)) return;
+  visited.add(type);
   if (hasPhysicalHashLayout(type, (cost) => sema.spendCompilation(cost))) return;
   switch (type.kind) {
     case 'void':
@@ -805,24 +819,24 @@ function validateAutoKey(sema: SemaApi, type: Type, span: Span, rejectSlices = t
       return;
     }
     case 'array': {
-      if (type.length !== 0n) validateAutoKey(sema, type.child, span, false);
+      if (type.length !== 0n) validateAutoKey(sema, type.child, span, false, seen);
       return;
     }
     case 'optional': {
-      validateAutoKey(sema, type.child, span, false);
+      validateAutoKey(sema, type.child, span, false, seen);
       return;
     }
     case 'error_union': {
-      validateAutoKey(sema, type.payload, span, false);
+      validateAutoKey(sema, type.payload, span, false, seen);
       return;
     }
     case 'struct': {
-      for (const field of type.fields ?? []) validateAutoKey(sema, field.type, span, rejectSlices);
+      for (const field of type.fields ?? []) validateAutoKey(sema, field.type, span, rejectSlices, seen);
       return;
     }
     case 'union': {
       if (!type.tagType) sema.error(span, 'タグのない共用体は、自動ハッシュのキーにできません。');
-      for (const field of type.fields ?? []) validateAutoKey(sema, field.type, span, rejectSlices);
+      for (const field of type.fields ?? []) validateAutoKey(sema, field.type, span, rejectSlices, seen);
       return;
     }
     default: {

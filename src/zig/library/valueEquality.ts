@@ -1,6 +1,7 @@
 import type { Span } from '../ast';
 import { packedValuesEqual } from '../bufferMemory';
 import type { SemaApi } from '../semaBase';
+import { singleValueOf } from '../singleValue';
 import type { Type } from '../types';
 import {
   ErrorValue,
@@ -52,9 +53,10 @@ export function validateEquality(sema: SemaApi, type: Type, span: Span, seen = n
   validatedTypes.add(type);
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Dispatches each value representation through the same typed comparison budget.
+// code-gauge-allow functionCognitiveComplexity 30 -- Dispatches each value representation through the same typed comparison budget.
 export function valuesEqual(type: Type | undefined, a: Value, b: Value, spend: () => void): boolean {
   spend();
+  if ((type?.kind === 'struct' || type?.kind === 'union') && singleValueOf(type, spend)) return true;
   if ((type?.kind === 'struct' || type?.kind === 'union') && type.layout === 'packed')
     return packedValuesEqual(type, a, b);
   if (type?.kind === 'optional') {

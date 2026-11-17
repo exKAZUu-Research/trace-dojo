@@ -569,50 +569,60 @@ function defineMembers(type: StructType, child: Type): void {
         (frame) => ({ receiver: list(frame) }),
         (state, [allocator], frame) => {
           const prepared = print.prepare(frame);
-          return withHeldValues(frame, [prepared.args], () => {
-            const received = listOf(state.receiver, child, frame);
-            received.allocator = allocatorState(allocator);
-            if (!ensureTotalCapacity(frame, received, received.items.length + print.formatLength, child))
-              return ERROR_OUT_OF_MEMORY;
-            const owner = received.struct;
-            received.struct = new ZStruct(owner.slots.map(copyForStorage));
-            storeInto(owner, 0, new Slice(new ZArray([]), 0, 0));
-            owner.slots[1] = 0n;
-            const destination: WriterState = {
-              fd: undefined,
-              buffer: new Slice(received.items.target, received.items.start, received.capacity),
-              end: received.items.length,
-              capacity: received.capacity,
-              growth: new NativeHandle('writerGrowth', {
-                grow: (frame: Frame, writer: WriterState, end: number) => {
-                  setLength(received, writer.end);
-                  if (!ensureTotalCapacity(frame, received, end + 1, child)) return false;
-                  writer.buffer = new Slice(received.items.target, received.items.start, received.capacity);
-                  writer.capacity = received.capacity;
-                  return true;
+          return withHeldValues(
+            frame,
+            [prepared.args],
+            () => {
+              const received = listOf(state.receiver, child, frame);
+              received.allocator = allocatorState(allocator);
+              if (!ensureTotalCapacity(frame, received, received.items.length + print.formatLength, child))
+                return ERROR_OUT_OF_MEMORY;
+              const owner = received.struct;
+              received.struct = new ZStruct(owner.slots.map(copyForStorage));
+              storeInto(owner, 0, new Slice(new ZArray([]), 0, 0));
+              owner.slots[1] = 0n;
+              const destination: WriterState = {
+                fd: undefined,
+                buffer: new Slice(received.items.target, received.items.start, received.capacity),
+                end: received.items.length,
+                capacity: received.capacity,
+                growth: new NativeHandle('writerGrowth', {
+                  grow: (frame: Frame, writer: WriterState, end: number) => {
+                    setLength(received, writer.end);
+                    if (!ensureTotalCapacity(frame, received, end + 1, child)) return false;
+                    writer.buffer = new Slice(received.items.target, received.items.start, received.capacity);
+                    writer.capacity = received.capacity;
+                    return true;
+                  },
+                }),
+              };
+              return withHeldValues(
+                frame,
+                [received.struct],
+                () => {
+                  let completed = false;
+                  try {
+                    prepared.write(destination);
+                    completed = true;
+                    return;
+                  } catch (error) {
+                    if (error instanceof PrintWriteError) {
+                      completed = true;
+                      return ERROR_OUT_OF_MEMORY;
+                    }
+                    throw error;
+                  } finally {
+                    if (completed) {
+                      setLength(received, destination.end);
+                      for (const [index, value] of received.struct.slots.entries()) storeInto(owner, index, value);
+                    }
+                  }
                 },
-              }),
-            };
-            return withHeldValues(frame, [received.struct], () => {
-              let completed = false;
-              try {
-                prepared.write(destination);
-                completed = true;
-                return;
-              } catch (error) {
-                if (error instanceof PrintWriteError) {
-                  completed = true;
-                  return ERROR_OUT_OF_MEMORY;
-                }
-                throw error;
-              } finally {
-                if (completed) {
-                  setLength(received, destination.end);
-                  for (const [index, value] of received.struct.slots.entries()) storeInto(owner, index, value);
-                }
-              }
-            });
-          });
+                [type]
+              );
+            },
+            [prepared.type]
+          );
         }
       );
     });

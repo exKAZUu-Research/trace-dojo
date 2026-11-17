@@ -55,6 +55,7 @@ import {
   type SemaApi,
   staticResultOf,
   type TExpr,
+  valueEvaluators,
 } from './semaBase';
 import { singleValueOf } from './singleValue';
 import {
@@ -991,12 +992,11 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     const sourceLength = knownLengthOf(source);
     if (destinationLength !== undefined && sourceLength !== undefined && destinationLength !== sourceLength)
       this.error(expression, `コピー先の長さ ${destinationLength} と、コピー元の長さ ${sourceLength} が一致しません。`);
-    const evaluateDestination = destination.eval;
-    const evaluateSource = source.eval;
+    const evaluators = valueEvaluators([destination, source], false);
     return runtime(
       VOID,
       (frame) => {
-        const valuesOf = evaluateHeld(frame, [evaluateDestination, evaluateSource]);
+        const valuesOf = evaluateHeld(frame, evaluators);
         const out = target.view(valuesOf[0]);
         const input = from.view(valuesOf[1]);
         if (out.length !== input.length) panic(PANIC.memcpyLengths);
@@ -1028,12 +1028,11 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     const value = this.coerce(this.compile(expression.args[1], target.child), target.child, expression.args[1]);
     this.resolveStorage(target.child, expression);
     const cost = transferCost(target.child);
-    const evaluateDestination = destination.eval;
-    const evaluateValue = value.eval;
+    const evaluators = valueEvaluators([destination, value], false);
     return runtime(
       VOID,
       (frame) => {
-        const [destination, value] = evaluateHeld(frame, [evaluateDestination, evaluateValue]);
+        const [destination, value] = evaluateHeld(frame, evaluators);
         const out = target.view(destination);
         if (sizeOf(target.child) === 0) return;
         frame.runtime.spend(cost);

@@ -22,12 +22,17 @@ export function blockSorter(
   const predicate = fnType([args[1].type, element, element], BOOL);
   const comparison = new FnValue(
     nativeFunction('std.sort.block.compare', [...predicate.params], BOOL, (args, caller) =>
-      withHeldValues(caller, args, () => {
-        const lt = compareWithTransfers(compare, caller, args, transferCost);
-        const gt = compareWithTransfers(compare, caller, [args[0], args[2], args[1]], transferCost);
-        if (lt && gt) panic(PANIC.unreachable);
-        return lt;
-      })
+      withHeldValues(
+        caller,
+        args,
+        () => {
+          const lt = compareWithTransfers(compare, caller, args, transferCost);
+          const gt = compareWithTransfers(compare, caller, [args[0], args[2], args[1]], transferCost);
+          if (lt && gt) panic(PANIC.unreachable);
+          return lt;
+        },
+        predicate.params
+      )
     )
   );
   const fn = sema.libraryFunction(file, element, 'block', [args[0].type, args[1].type, predicate], span, {

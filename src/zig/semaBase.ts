@@ -1617,7 +1617,7 @@ function copyStoredValue(
   const copy = (child: Value, type?: Type): Value => copyStoredValue(child, reserve, type, spend);
   if (value instanceof ZArray) {
     const child = type?.kind === 'array' ? type.child : undefined;
-    const virtual = copyZeroArray(value, (value) => copy(value, child));
+    const virtual = copyZeroArray(value);
     if (virtual) return virtual;
     const length = value.length + (value.hasSentinel ? 1 : 0);
     reserve?.(length);

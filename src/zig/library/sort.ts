@@ -1,7 +1,7 @@
 import { type Frame, withHeldValues } from '../runtime';
 import { copyForFrame, known, type SemaApi } from '../semaBase';
-import { BOOL, fnType, optionalOf, type StructType, type Type, typeName, USIZE, VOID } from '../types';
-import { FnValue, NULL, optionalSome, Slice, type Value, ZStruct } from '../values';
+import { arrayOf, BOOL, fnType, optionalOf, type StructType, type Type, typeName, USIZE, VOID } from '../types';
+import { FnValue, NULL, optionalSome, Slice, type Value, ZArray, ZStruct } from '../values';
 import { blockSorter } from './blockSort';
 import {
   compareScalars,
@@ -134,20 +134,25 @@ function subSlice(items: Slice, start: bigint, end: bigint): Slice {
 
 function extremum(items: Slice, call: (args: Value[]) => Value, frame: Frame, type: Type, maximum: boolean): Value {
   if (items.length === 0) return NULL;
-  const saved = new ZStruct([copyForFrame(frame, items.get(0), type), undefined]);
-  return withHeldValues(frame, [saved], () => {
-    let best = 0;
-    for (let index = 1; index < items.length; index++) {
-      saved.slots[1] = copyForFrame(frame, items.get(index), type);
-      const args = maximum ? [saved.slots[0], saved.slots[1]] : [saved.slots[1], saved.slots[0]];
-      if (call(args) as boolean) {
-        saved.slots[0] = saved.slots[1];
-        best = index;
+  const saved = new ZArray([copyForFrame(frame, items.get(0), type), undefined]);
+  return withHeldValues(
+    frame,
+    [saved],
+    () => {
+      let best = 0;
+      for (let index = 1; index < items.length; index++) {
+        saved.slots[1] = copyForFrame(frame, items.get(index), type);
+        const args = maximum ? [saved.slots[0], saved.slots[1]] : [saved.slots[1], saved.slots[0]];
+        if (call(args) as boolean) {
+          saved.slots[0] = saved.slots[1];
+          best = index;
+        }
+        saved.slots[1] = undefined;
       }
-      saved.slots[1] = undefined;
-    }
-    return BigInt(best);
-  });
+      return BigInt(best);
+    },
+    [arrayOf(2, type)]
+  );
 }
 
 /** `equalRange(T, items, context, compareFn)`: the bounds of the items the function finds equal. */
