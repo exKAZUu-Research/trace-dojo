@@ -676,9 +676,14 @@ export class Relations {
    */
   private lacksWeakTypeProperty(source: Type, target: Type, relation: Relation): boolean {
     if (relation !== 'assignable' || !isWeakCheckedSource(source)) return false;
-    // An intersection drops its empty object members, as `Config & {}` is `Config`.
+    // An intersection drops its empty object literal members, as `Config & {}` is `Config`, but not an empty interface
+    // such as `ThisType<any>`, which keeps `PropertyDescriptor & ThisType<any>` from being weak.
     const members =
-      target.kind === 'intersection' ? target.types.filter((member) => !this.isEmptyObjectType(member)) : [target];
+      target.kind === 'intersection'
+        ? target.types.filter(
+            (member) => !(member.kind === 'object' && member.objectKind === 'anonymous' && this.hasNoMembers(member))
+          )
+        : [target];
     if (members.length === 0 || !members.every((member) => member.kind === 'object' && member.objectKind !== 'mapped'))
       return false;
     const targetStructures = members.map((member) => this.c.structureOf(member));

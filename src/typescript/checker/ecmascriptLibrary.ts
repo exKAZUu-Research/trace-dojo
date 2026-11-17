@@ -435,6 +435,14 @@ interface ArrayConstructor {
     readonly prototype: any[];
 }
 declare var Array: ArrayConstructor;
+interface TypedPropertyDescriptor<T> {
+    enumerable?: boolean;
+    configurable?: boolean;
+    writable?: boolean;
+    value?: T;
+    get?: () => T;
+    set?: (value: T) => void;
+}
 declare type PromiseConstructorLike = new <T>(executor: (resolve: (value: T | PromiseLike<T>) => void, reject: (reason?: any) => void) => void) => PromiseLike<T>;
 interface PromiseLike<T> {
     then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): PromiseLike<TResult1 | TResult2>;
@@ -476,6 +484,10 @@ type Parameters<T extends (...args: any) => any> = T extends (...args: infer P) 
 type ConstructorParameters<T extends abstract new (...args: any) => any> = T extends abstract new (...args: infer P) => any ? P : never;
 type ReturnType<T extends (...args: any) => any> = T extends (...args: any) => infer R ? R : any;
 type InstanceType<T extends abstract new (...args: any) => any> = T extends abstract new (...args: any) => infer R ? R : any;
+interface ThisType<T> {}
+interface WeakKeyTypes {
+    object: object;
+}
 type WeakKey = WeakKeyTypes[keyof WeakKeyTypes];
 interface String {
     localeCompare(that: string, locales?: string | string[], options?: Intl.CollatorOptions): number;
@@ -1132,6 +1144,9 @@ interface ReadonlyArray<T> {
     toSpliced(start: number, deleteCount: number, ...items: T[]): T[];
     toSpliced(start: number, deleteCount?: number): T[];
     with(index: number, value: T): T[];
+}
+interface WeakKeyTypes {
+    symbol: symbol;
 }
 interface ObjectConstructor {
     groupBy<K extends PropertyKey, T>(
