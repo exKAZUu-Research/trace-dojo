@@ -8300,3 +8300,60 @@ test('deferred turtle queries retain turtle-containing pending return values', (
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ['const p=try g.alloc(u8,2);p[0]=7;p[1]=9;g.free(p);', '170 170 42 0'],
+  ['const a=try g.alloc(u8,3);a[0]=97;a[1]=98;a[2]=0;const p=a[0..2:0];g.free(p);', '170 170 170 0'],
+  ['const a=try g.alloc(u8,1);a[0]=0;const p=a[0..0:0];g.free(p);', '170 42 42 0'],
+])('allocator free poisons the freed bytes and sentinel: %s', (body, expected) => {
+  const source = `const std=@import("std");pub fn main()!void{var b:[16]u8=@splat(42);var f=std.heap.FixedBufferAllocator.init(&b);const g=f.allocator();${body}std.debug.print("{} {} {} {}",.{b[0],b[1],b[2],f.end_index});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
+
+test('allocator destroy retains the raw fixed-buffer free behavior', () => {
+  const source = `const std=@import("std");pub fn main()!void{var b:[16]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&b);const g=f.allocator();const p=try g.create(u32);p.*=0x01020304;g.destroy(p);std.debug.print("{} {} {} {} {}",.{b[0],b[1],b[2],b[3],f.end_index});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '4 3 2 1 0',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['d:6', '1', '     ', '1|1'],
+  ['x', '"abc"', '61626', '1|3'],
+  ['any', '[_]u8{1,2,3}', '{ 1, 2, 3 }', '0|'],
+])('ordinary file writers preserve formatted {%s} write boundaries', (format, value, stdout, stderr) => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var b:[4]u8=undefined;var w=std.Io.File.stdout().writer(init.io,&b);try w.interface.print("{${format}}",.{${value}});std.debug.print("{}|{s}",.{w.interface.end,w.interface.buffered()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stdout,
+    stderr,
+    uncaughtException: undefined,
+  });
+});
+
+test.each([false, true])('allocator owner references skip byte-only backing (retained %s)', (retained) => {
+  const setup = retained
+    ? 'const g=f.allocator();const data=try g.alloc(u8,1);data[0]=9;'
+    : 'const data=try f.allocator().alloc(u8,1);data[0]=9;';
+  const source = `const std=@import("std");pub fn main()!void{var bytes:[50000]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);${setup}const t=Turtle.init();var n:usize=0;for(0..20)|_|{if(t.canMoveForward())n+=1;}std.debug.print("{} {}",.{n,data[0]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '20 9',
+    uncaughtException: undefined,
+  });
+});
+
+test('writer header references skip byte-only backing during turtle queries', () => {
+  const source = `const std=@import("std");pub fn main()!void{var bytes:[50000]u8=undefined;var w=std.Io.Writer.fixed(&bytes);try w.writeAll("x");const t=Turtle.init();var n:usize=0;for(0..20)|_|{if(t.canMoveForward())n+=1;}std.debug.print("{} {}",.{n,w.end});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '20 1',
+    uncaughtException: undefined,
+  });
+});

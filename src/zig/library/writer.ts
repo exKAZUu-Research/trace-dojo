@@ -5,7 +5,16 @@ import { byteValues } from '../builtins';
 import type { FormatOutput } from '../fmt';
 import type { Frame } from '../runtime';
 import { sliceOf, type StructType, U8, USIZE } from '../types';
-import { ErrorValue, NativeHandle, Pointer, Slice, type Value, ZArray, ZStruct } from '../values';
+import {
+  ErrorValue,
+  NativeHandle,
+  Pointer,
+  registerNativeReferences,
+  Slice,
+  type Value,
+  ZArray,
+  ZStruct,
+} from '../values';
 import { nativeStruct } from './native';
 
 export const WRITER: StructType = nativeStruct(
@@ -31,7 +40,14 @@ export interface WriterState extends Record<string, unknown> {
   growth?: NativeHandle;
 }
 
-export class CountingFormatOutput implements FormatOutput {
+export class WriterWriteError extends Error {
+  constructor(readonly value: ErrorValue) {
+    super(value.name);
+    this.name = 'WriterWriteError';
+  }
+}
+
+export class WriterFormatOutput implements FormatOutput {
   length = 0;
 
   constructor(
@@ -47,6 +63,12 @@ export class CountingFormatOutput implements FormatOutput {
   writeView(length: number, get: (index: number) => number): void {
     if (length === 0) return;
     const state = this.destination;
+    if (!isDiscardingWriter(state)) {
+      const result = writeTo(this.frame, state, { length, get });
+      if (result instanceof ErrorValue) throw new WriterWriteError(result);
+      this.length += length;
+      return;
+    }
     const end = writerEndAfter(state, BigInt(length));
     this.frame.runtime.spend(length);
     const prefix = end <= state.capacity ? Array.from({ length }, (_, index) => get(index)) : [];
@@ -57,6 +79,11 @@ export class CountingFormatOutput implements FormatOutput {
   writeChunks(length: number, get: (index: number) => number, chunkSize: number): void {
     if (length === 0) return;
     const state = this.destination;
+    if (!isDiscardingWriter(state)) {
+      for (let start = 0; start < length; start += chunkSize)
+        this.writeView(Math.min(chunkSize, length - start), (index) => get(start + index));
+      return;
+    }
     const initialEnd = writerEnd(state);
     writerEndAfter(state, BigInt(Math.min(length, chunkSize)));
     if (initialEnd + BigInt(length) <= BigInt(state.capacity)) return this.writeView(length, get);
@@ -77,6 +104,7 @@ export class CountingFormatOutput implements FormatOutput {
   }
 
   checkSize(length: number): void {
+    if (!isDiscardingWriter(this.destination)) return checkOutputSize(length);
     const extra = Math.max(0, length - this.length);
     this.frame.runtime.spend(extra > LIMITS.maxOperations - this.frame.runtime.budget.spent ? extra : 0);
   }
@@ -169,6 +197,7 @@ export function writerState(value: Value, pointer?: Pointer): WriterState {
 }
 
 function bindWriterState(state: WriterState, header: ZStruct): void {
+  registerNativeReferences(state, () => [{ value: header, type: WRITER }]);
   headers.set(state, header);
   states.set(header, state);
   for (const [index, name] of ['buffer', 'end', 'fd', 'capacity', 'growth'].entries()) {
@@ -212,15 +241,18 @@ export function bufferingWriter(): WriterState {
   return { fd: undefined, buffer: new Slice(new ZArray([]), 0, 0), end: 0, capacity: Infinity };
 }
 
-// code-gauge-allow functionNcss 31 -- Keeps growth, drain, and buffered writes in their observable order.
-export function writeTo(frame: Frame, state: WriterState, bytes: readonly number[]): Value {
+type WriteBytes = readonly number[] | { length: number; get: (index: number) => number };
+
+// code-gauge-allow functionNcss 33 -- Keeps growth, drain, and buffered writes in their observable order.
+export function writeTo(frame: Frame, state: WriterState, bytes: WriteBytes): Value {
+  const get = 'get' in bytes ? bytes.get : (index: number): number => bytes[index];
   frame.runtime.spend();
   const end = writerEndAfter(state, BigInt(bytes.length));
   if (end > state.capacity && state.growth) {
     const drain = state.growth.state.drain as
       | ((frame: Frame, writer: WriterState, bytes: readonly number[]) => Value)
       | undefined;
-    if (drain) return drain(frame, state, bytes);
+    if (drain) return drain(frame, state, materializeBytes(frame, bytes));
     const grow = state.growth.state.grow as (frame: Frame, writer: WriterState, end: number) => boolean;
     if (!grow(frame, state, end)) return ErrorValue.of('WriteFailed');
   }
@@ -228,22 +260,28 @@ export function writeTo(frame: Frame, state: WriterState, bytes: readonly number
     if (state.fd === undefined) {
       const available = writerRemaining(state);
       frame.runtime.spend(available);
-      for (let index = 0; index < available; index++) state.buffer.set(state.end + index, BigInt(bytes[index]));
+      for (let index = 0; index < available; index++) state.buffer.set(state.end + index, BigInt(get(index)));
       state.end += available;
       return ErrorValue.of('WriteFailed');
     }
     frame.runtime.spend(state.end + bytes.length);
-    frame.runtime.writeOutput(state.fd, [...bufferedBytes(frame, state), ...bytes]);
+    frame.runtime.writeOutput(state.fd, [...bufferedBytes(frame, state), ...materializeBytes(frame, bytes)]);
     state.end = 0;
     return undefined;
   }
   if (!Number.isFinite(state.capacity)) checkOutputSize(end);
   frame.runtime.spend(bytes.length);
-  for (const [index, byte] of bytes.entries()) state.buffer.set(state.end + index, BigInt(byte));
+  for (let index = 0; index < bytes.length; index++) state.buffer.set(state.end + index, BigInt(get(index)));
   state.end = end;
   if (!Number.isFinite(state.capacity))
     state.buffer = new Slice(state.buffer.target, state.buffer.start, Math.max(state.buffer.length, end));
   return undefined;
+}
+
+function materializeBytes(frame: Frame, bytes: WriteBytes): readonly number[] {
+  if (!('get' in bytes)) return bytes;
+  frame.runtime.spend(bytes.length);
+  return Array.from({ length: bytes.length }, (_, index) => bytes.get(index));
 }
 
 export function flushWriter(frame: Frame, state: WriterState): void {

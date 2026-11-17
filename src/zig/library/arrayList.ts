@@ -53,7 +53,8 @@ import {
   nativeStruct,
   structReceiver,
 } from './native';
-import { compilePrint, PrintWriteError } from './print';
+import { compilePrint } from './print';
+import { WriterWriteError } from './writer';
 import type { WriterState } from './writer';
 
 const SAFETY_STATE = nativeEnum('debug.SafetyLock.State', ['unlocked', 'locked']);
@@ -606,7 +607,7 @@ function defineMembers(type: StructType, child: Type): void {
                     completed = true;
                     return;
                   } catch (error) {
-                    if (error instanceof PrintWriteError) {
+                    if (error instanceof WriterWriteError) {
                       completed = true;
                       return ERROR_OUT_OF_MEMORY;
                     }

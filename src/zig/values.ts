@@ -343,7 +343,20 @@ export class FnValue {
   ) {}
 }
 
-/** A value that the grader implements natively, such as a turtle, an allocator, or a writer. */
+export interface NativeReference {
+  value: unknown;
+  type?: Type;
+}
+
+const nativeReferences = new WeakMap<object, (spend: () => void) => Iterable<NativeReference>>();
+
+export function registerNativeReferences(
+  state: object,
+  references: (spend: () => void) => Iterable<NativeReference>
+): void {
+  nativeReferences.set(state, references);
+}
+
 export class NativeHandle {
   constructor(
     readonly kind: string,
@@ -351,8 +364,12 @@ export class NativeHandle {
     private readonly logicalReferences?: (spend: () => void) => Iterable<unknown>
   ) {}
 
-  references(spend: () => void): Iterable<unknown> {
-    return this.logicalReferences ? this.logicalReferences(spend) : Object.values(this.state);
+  *references(spend: () => void): Iterable<NativeReference> {
+    const typed = nativeReferences.get(this.state);
+    if (typed) yield* typed(spend);
+    else
+      for (const value of this.logicalReferences ? this.logicalReferences(spend) : Object.values(this.state))
+        yield { value };
   }
 }
 

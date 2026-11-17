@@ -1,5 +1,6 @@
 import { LIMITS } from '../interpreter/limits';
 import { bindBufferMemory } from './bufferMemory';
+import { spendMemory } from './memoryAccounting';
 import { type Frame, StackOverflow } from './runtime';
 import type { Type } from './types';
 import { NativeHandle, NULL, type Pointer, type Slice, type Slots, storageLocation, ZArray, ZStruct } from './values';
@@ -53,12 +54,7 @@ export function reserveAllocatorBytes(
   const owner = state?.owner?.load();
   const prior = previous ? allocationOf(previous) : undefined;
   if (length === 0) {
-    if (prior?.region) {
-      frame.runtime.spend(prior.region.length);
-      for (let index = 0; index < prior.region.length; index++)
-        prior.region.buffer.set(prior.region.offset + index, 0xaan);
-    }
-    if (previous) freeAllocatorMemory(state, previous);
+    if (previous) freeAllocatedMemory(state, previous);
     return { complete: () => {} };
   }
   if (owner instanceof ZStruct && state?.name === 'fixed') {
@@ -120,6 +116,20 @@ export function freeAllocatorMemory(state: AllocatorState | undefined, memory: o
     }
   }
   record.live = false;
+}
+
+export function freeAllocatedMemory(state: AllocatorState | undefined, memory: object): void {
+  poisonAllocatorBytes(memory);
+  freeAllocatorMemory(state, memory);
+}
+
+export function poisonAllocatorBytes(memory: object, offset = 0, length?: number): void {
+  const record = allocationOf(memory);
+  const region = record?.region;
+  if (!record?.live || !region) return;
+  const count = length ?? region.length - offset;
+  spendMemory(count);
+  for (let index = 0; index < count; index++) region.buffer.set(region.offset + offset + index, 0xaan);
 }
 
 export function deinitArena(frame: Frame, arena: ZStruct): void {

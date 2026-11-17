@@ -175,12 +175,13 @@ export class TurtleReachability {
     push: Push,
     turtles: Set<unknown>
   ): void {
-    if (!(value instanceof ZStruct && type.fields && !type.native && !type.namespace.internal)) {
+    if (!(value instanceof ZStruct && type.fields && !type.namespace.internal)) {
       if (value && typeof value === 'object') this.children(value, push, turtles);
       return;
     }
     for (const [index, field] of type.fields.entries())
       push(field.comptimeValue ? field.comptimeValue.value : value.slots[index], field.type);
+    for (let index = type.fields.length; index < value.slots.length; index++) push(value.slots[index]);
   }
 
   private sequence(value: ZArray | Slice, child: Type, push: Push): void {
@@ -203,7 +204,7 @@ export class TurtleReachability {
     else if (item instanceof Some) push(item.value);
     else if (item instanceof NativeHandle) {
       if (item.state.turtle) turtles.add(item.state.turtle);
-      for (const value of item.references(() => this.spend())) push(value);
+      for (const { value, type } of item.references(() => this.spend())) push(value, type);
     } else if (Array.isArray(item)) {
       for (const value of item) push(value);
     } else if ('slots' in item && Array.isArray((item as Slots).slots)) {

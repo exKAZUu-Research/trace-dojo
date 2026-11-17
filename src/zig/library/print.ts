@@ -12,7 +12,7 @@ import {
   type Segment,
   type TypeInfo,
 } from '../fmt';
-import { type Frame, withHeldValues, ZigPanic } from '../runtime';
+import { type Frame, withHeldValues } from '../runtime';
 import { copyForFrame, known, runtime, type SemaApi } from '../semaBase';
 import {
   arrayOf,
@@ -43,11 +43,11 @@ import {
 import {
   bufferedBytes,
   bufferingWriter,
-  CountingFormatOutput,
-  isDiscardingWriter,
   WRITER,
+  WriterFormatOutput,
   writerPointer,
   type WriterState,
+  WriterWriteError,
   writeTo,
 } from './writer';
 
@@ -160,7 +160,7 @@ export function printInto(frame: Frame, destination: WriterState, print: Compile
     print(frame, destination);
     return undefined;
   } catch (error) {
-    if (error instanceof PrintWriteError) return error.value;
+    if (error instanceof WriterWriteError) return error.value;
     throw error;
   }
 }
@@ -220,7 +220,7 @@ function formatMethod(sema: SemaApi, type: Type, span: Span): FormatMethod {
   return (frame, value, state) => {
     const writer = writerPointer(state);
     const result = fn.call(frame, [byPointer ? new Pointer({ slots: [value] }, 0) : value, writer]);
-    if (result instanceof ErrorValue) throw new PrintWriteError(result);
+    if (result instanceof ErrorValue) throw new WriterWriteError(result);
   };
 }
 
@@ -232,14 +232,6 @@ export function typeInfo(sema: SemaApi, span: Span): TypeInfo {
   };
 }
 
-export class PrintWriteError extends Error {
-  constructor(readonly value: ErrorValue) {
-    super(value.name);
-    this.name = 'PrintWriteError';
-  }
-}
-
-// code-gauge-allow functionCognitiveComplexity 24 -- Expands parsed segments and writes partial output before a formatting panic.
 // code-gauge-allow functionParameterCount 7 -- The formatter shares one writer, its frame, and the parsed argument context.
 function appendSegments(
   frame: Frame,
@@ -265,22 +257,13 @@ function appendSegments(
     if (segment.spec === 'f') {
       formatWithMethod(segment.arg, argValue(segment.arg));
     } else {
-      const bytes: number[] | CountingFormatOutput = isDiscardingWriter(destination)
-        ? new CountingFormatOutput(frame, destination)
-        : [];
-      try {
-        printValue(bytes, segment.spec, options, argValue(segment.arg), fields[segment.arg].type as Type, info);
-      } catch (error) {
-        if (error instanceof ZigPanic) writeFormatted(frame, destination, bytes);
-        throw error;
-      }
-      writeFormatted(frame, destination, bytes);
+      const output = new WriterFormatOutput(frame, destination);
+      printValue(output, segment.spec, options, argValue(segment.arg), fields[segment.arg].type as Type, info);
     }
   }
 }
 
-function writeFormatted(frame: Frame, destination: WriterState, bytes: readonly number[] | CountingFormatOutput): void {
-  if (bytes instanceof CountingFormatOutput) return;
+function writeFormatted(frame: Frame, destination: WriterState, bytes: readonly number[]): void {
   const result = writeTo(frame, destination, bytes);
-  if (result instanceof ErrorValue) throw new PrintWriteError(result);
+  if (result instanceof ErrorValue) throw new WriterWriteError(result);
 }

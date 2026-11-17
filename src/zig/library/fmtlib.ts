@@ -33,8 +33,8 @@ import {
 } from './common';
 import { allocatorState, ERROR_OUT_OF_MEMORY, nativeEnum } from './heap';
 import { compileArgs, expectArgs, fnMember, type Member, nativeCall, nativeStruct, typeMember } from './native';
-import { compilePrint, PrintWriteError } from './print';
-import { discardedBytes, discardingWriter, type WriterState } from './writer';
+import { compilePrint } from './print';
+import { discardedBytes, discardingWriter, type WriterState, WriterWriteError } from './writer';
 
 const CASE = nativeEnum('fmt.Case', ['lower', 'upper']);
 const PARSE_INT_ERRORS = errorSetOf(['Overflow', 'InvalidCharacter']);
@@ -223,7 +223,7 @@ const MEMBERS: Record<string, () => Member> = {
         try {
           print(frame, state);
         } catch (error) {
-          if (error instanceof PrintWriteError) return ErrorValue.of('NoSpaceLeft');
+          if (error instanceof WriterWriteError) return ErrorValue.of('NoSpaceLeft');
           throw error;
         }
         return new Slice(target.target, target.start, state.end);
@@ -243,7 +243,7 @@ const MEMBERS: Record<string, () => Member> = {
         prepared.write(writer);
         return ownWriterSlice(frame, allocator, writer);
       } catch (error) {
-        if (error instanceof PrintWriteError) return ERROR_OUT_OF_MEMORY;
+        if (error instanceof WriterWriteError) return ERROR_OUT_OF_MEMORY;
         throw error;
       } finally {
         freeWriter(allocator, writer);
@@ -261,7 +261,7 @@ const MEMBERS: Record<string, () => Member> = {
           print(frame, writer);
           return discardedBytes(writer);
         } catch (error) {
-          if (error instanceof PrintWriteError) panic(PANIC.unreachable);
+          if (error instanceof WriterWriteError) panic(PANIC.unreachable);
           throw error;
         }
       },

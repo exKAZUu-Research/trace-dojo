@@ -39,7 +39,7 @@ import {
   typeMember,
   unavailableMember,
 } from './native';
-import { compilePrint, printInto, PrintWriteError } from './print';
+import { compilePrint, printInto } from './print';
 import {
   bufferedBytes,
   bufferedSlice,
@@ -54,6 +54,7 @@ import {
   type WriterState,
   writerState,
   writerValue,
+  WriterWriteError,
   writeTo,
 } from './writer';
 
@@ -158,7 +159,7 @@ const DEBUG = nativeStruct('std.debug', {
         try {
           print(frame, state);
         } catch (error) {
-          if (!(error instanceof PrintWriteError)) throw error;
+          if (!(error instanceof WriterWriteError)) throw error;
         } finally {
           flushWriter(frame, state);
         }
@@ -187,7 +188,7 @@ const DEBUG = nativeStruct('std.debug', {
         try {
           print(frame, state);
         } catch (error) {
-          if (error instanceof PrintWriteError)
+          if (error instanceof WriterWriteError)
             return panic(decodeUtf8(writerBytes(frame, buffer)) + '(msg truncated)');
           throw error;
         }

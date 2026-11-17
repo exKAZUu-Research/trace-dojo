@@ -4,7 +4,9 @@ import {
   arenaCapacity,
   bindAllocatorBytes,
   deinitArena,
-  freeAllocatorMemory as freeMemory,
+  freeAllocatedMemory as freeMemory,
+  freeAllocatorMemory,
+  poisonAllocatorBytes,
   reserveAllocatorBytes,
   resetArena,
 } from '../allocatorStorage';
@@ -43,6 +45,7 @@ import {
   NativeHandle,
   NULL,
   Pointer,
+  registerNativeReferences,
   Slice,
   type Value,
   ZArray,
@@ -242,10 +245,19 @@ function freeMember(name: 'free' | 'destroy', size: 'slice' | 'one'): () => Memb
     const allocator = allocatorOf(sema, call);
     const [memory] = expectArgs(sema, call, 1, name);
     const compiled = size === 'slice' ? allocatedSlice(sema, memory).expression : sema.compile(memory);
-    if (compiled.type.kind !== 'pointer' || compiled.type.size !== size)
-      sema.error(memory, `${name} に渡すメモリの型が違います。`);
+    const type = compiled.type;
+    if (type.kind !== 'pointer' || type.size !== size)
+      return sema.error(memory, `${name} に渡すメモリの型が違います。`);
+    const child = type.child;
     return nativeStateCall(VOID, [compiled], call.span, allocator, (state, [value]) => {
-      freeMemory(state, size === 'slice' ? (value as Slice).target : (value as Pointer).target);
+      if (name === 'free') {
+        const slice = value as Slice;
+        const stride = sizeOf(child);
+        const length = Number(slice.lengthValue) * stride;
+        if (length === 0) return;
+        poisonAllocatorBytes(slice.target, slice.start * stride, length);
+      }
+      freeAllocatorMemory(state, size === 'slice' ? (value as Slice).target : (value as Pointer).target);
       return;
     });
   });
@@ -316,9 +328,11 @@ function allocatorInstanceType(
         (sema, call) => {
           expectArgs(sema, call, 0, 'allocator');
           const owner = instancePointer(sema, call, type);
-          return nativeCall(ALLOCATOR, [owner], call.span, ([pointer]) =>
-            handle('allocator', { name: kind, owner: pointer as Pointer })
-          );
+          return nativeCall(ALLOCATOR, [owner], call.span, ([pointer]) => {
+            const state = { name: kind, owner: pointer as Pointer };
+            registerNativeReferences(state, () => [{ value: pointer, type: owner.type }]);
+            return handle('allocator', state);
+          });
         },
         () => ({ type: fnType([pointerTo(type, false)], ALLOCATOR), receiver: true })
       ),
