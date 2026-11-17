@@ -383,7 +383,10 @@ export class MemberChecker {
   private indexedTypeAt(access: IndexAccess, objectType: Type, indexType: Type): Type {
     if (isAnyLike(objectType)) return anyType;
     const index = regularOf(indexType);
-    if (index.kind === 'typeParameter' || index.kind === 'keyof' || objectType.kind === 'typeParameter') {
+    if (
+      ['typeParameter', 'keyof', 'conditional', 'indexedAccess'].includes(index.kind) ||
+      objectType.kind === 'typeParameter'
+    ) {
       return this.c.typeOperators.indexedAccess(objectType, index);
     }
     if (index.kind === 'literal' && (typeof index.value === 'string' || typeof index.value === 'number')) {

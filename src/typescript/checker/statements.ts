@@ -578,7 +578,10 @@ export class StatementChecker {
     return implied && this.c.arrayType(implied);
   }
 
-  /** The type of the keys a `for...in` loop takes, reporting an object that is a primitive. */
+  /**
+   * The type of the keys a `for...in` loop takes, reporting an object that is a primitive: `Extract<keyof T, string>`
+   * for a generic object `T`, as it can index `T`, and `string` otherwise.
+   */
   private forInKeyType(right: TreeNode, rightType: Type): Type {
     const object = regularOf(rightType);
     if (
@@ -590,7 +593,28 @@ export class StatementChecker {
         'for...in 文の右辺は、any 型、オブジェクト型、型パラメーターのいずれかでなければいけません。'
       );
     }
-    return stringType;
+    const keys = this.genericKeys(this.c.relations.removeNullish(object));
+    if (!keys) return stringType;
+    const extract = this.c.libraryBinder.moduleScope.lookupType('Extract') as Sym;
+    const [type, union] = this.c.signatures.typeParametersOfSymbol(extract);
+    return this.c.instantiate(
+      this.c.typeNodes.declaredTypeOf(extract),
+      new Map([
+        [type.id, keys],
+        [union.id, stringType],
+      ])
+    );
+  }
+
+  /**
+   * `keyof object` when TypeScript leaves it a type parameter or a deferred `keyof`: for an instantiable type or a mapped
+   * type over generic keys.
+   */
+  private genericKeys(object: Type): Type | undefined {
+    if (['typeParameter', 'indexedAccess', 'conditional'].includes(object.kind))
+      return this.c.typeOperators.keyofType(object);
+    const mapped = object.kind === 'object' && !object.mapped?.nameType ? object.mapped?.constraint : undefined;
+    return mapped?.kind === 'typeParameter' || mapped?.kind === 'keyof' ? mapped : undefined;
   }
 
   /** Declares the variables of a loop's `const`, `let`, or `var` head. */

@@ -1,0 +1,9 @@
+(4,5): error TS2322: Type 'number' is not assignable to type 'string'.
+(14,30): error TS2322: Type 'string' is not assignable to type 'keyof T'.
+  Type 'string' is not assignable to type '"a"'.
+(17,30): error TS2322: Type 'string' is not assignable to type '"a"'.
+(20,54): error TS2322: Type 'T[Extract<keyof T, string>]' is not assignable to type 'string'.
+  Type 'T[string]' is not assignable to type 'string'.
+    Type 'number' is not assignable to type 'string'.
+(23,30): error TS2322: Type 'string' is not assignable to type 'keyof T'.
+  Type 'string' is not assignable to type '"a"'.

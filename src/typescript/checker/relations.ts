@@ -115,9 +115,11 @@ export class Relations {
     if (s.kind === 'typeParameter') {
       return (t.kind === 'typeParameter' && s.id === t.id) || this.constraintRelated(s, t, relation);
     }
+    if (s.kind === 'indexedAccess' || s.kind === 'keyof' || s.kind === 'conditional') {
+      if (this.genericSourceRelated(s, t, relation)) return true;
+      if (t.kind !== 'typeParameter') return false;
+    }
     if (t.kind === 'typeParameter') return relation === 'comparable' && this.constraintAdmits(s, t);
-    if (s.kind === 'indexedAccess' || s.kind === 'keyof' || s.kind === 'conditional')
-      return this.genericSourceRelated(s, t, relation);
     if (t.kind === 'indexedAccess' && !this.isGeneric(t.objectType)) {
       // Writing `o[k]` with a generic key must suit the property of every key the constraint allows.
       const keys = this.c.baseConstraint(t.indexType);
