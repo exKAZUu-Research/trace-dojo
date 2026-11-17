@@ -30,6 +30,7 @@ import type {
   RType,
   VarRef,
 } from './rast';
+import { RecursionBudget } from './recursionBudget';
 import type {
   Alt,
   Constraint,
@@ -197,6 +198,7 @@ export function renameModule(module: Module, options: RenameOptions): RModule {
 }
 
 class Renamer {
+  private readonly recursion = new RecursionBudget();
   private readonly scope = new GlobalScope();
   private readonly ownValues = new Map<string, ValueEntity>();
   private readonly importOrigins = new Map<object, Map<string | undefined, Set<string>>>();
@@ -840,8 +842,12 @@ class Renamer {
   // -------------------------------------------------------------------------------------------------------------
   // Expressions
 
-  // code-gauge-allow functionNcss 57 -- One short case per expression kind.
   renameExpr(expr: Expr, scope: LocalScope): RExpr {
+    return this.recursion.run(() => this.renameExprCore(expr, scope));
+  }
+
+  // code-gauge-allow functionNcss 57 -- One short case per expression kind.
+  private renameExprCore(expr: Expr, scope: LocalScope): RExpr {
     const { span } = expr;
     switch (expr.kind) {
       case 'var': {
@@ -1051,7 +1057,7 @@ class Renamer {
   // Patterns
 
   renamePat(pat: Pat, binders: Map<string, LocalVar>): RPat {
-    return { ...this.renamePatCore(pat, binders), span: pat.span, surface: pat };
+    return this.recursion.run(() => ({ ...this.renamePatCore(pat, binders), span: pat.span, surface: pat }));
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- One short case per pattern kind.

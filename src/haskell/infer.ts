@@ -19,6 +19,7 @@ import type {
   RType,
   VarRef,
 } from './rast';
+import { RecursionBudget } from './recursionBudget';
 import type { Span } from './syntax';
 import {
   defaultKind,
@@ -87,6 +88,7 @@ export function typeError(span: Span, message: string): never {
 
 /** Infers and checks types, recording the class evidence that code generation passes as dictionaries. */
 export class Checker {
+  private readonly recursion = new RecursionBudget();
   level = 0;
   wanted: EvidenceHole[] = [];
   /** The types of globals whose binding group is being inferred, before they have schemes. */
@@ -438,7 +440,7 @@ export class Checker {
   }
 
   inferExpr(expr: RExpr): Type {
-    const type = this.inferExprInner(expr);
+    const type = this.recursion.run(() => this.inferExprInner(expr));
     expr.type = type;
     return type;
   }
@@ -695,52 +697,59 @@ export class Checker {
   // -------------------------------------------------------------------------------------------------------------
   // Patterns
 
-  // code-gauge-allow functionNcss 38 -- Pattern typing keeps binder updates and literal dictionaries in one exhaustive dispatch.
-  inferPat(pat: RPat, type: Type): void {
-    switch (pat.k) {
-      case 'var': {
-        pat.local.type = type;
-        break;
-      }
-      case 'wild': {
-        break;
-      }
-      case 'as': {
-        pat.local.type = type;
-        this.inferPat(pat.pat, type);
-        break;
-      }
-      case 'lit': {
-        pat.type = type;
-        switch (pat.lit.kind) {
-          case 'int': {
-            pat.num = this.want({ cls: this.builtins.num, type }, pat.span, `リテラル ${pat.lit.value}`);
-            pat.eq = this.want({ cls: this.builtins.eq, type }, pat.span, 'リテラルのパターン');
-            break;
-          }
-          case 'frac': {
-            pat.num = this.want({ cls: this.builtins.fractional, type }, pat.span, `リテラル ${pat.lit.text}`);
-            pat.eq = this.want({ cls: this.builtins.eq, type }, pat.span, 'リテラルのパターン');
-            break;
-          }
-          case 'char': {
-            this.unify(tcon(CHAR_TYPE), type, pat.span);
-            break;
-          }
-          case 'string': {
-            this.unify(listOf(tcon(CHAR_TYPE)), type, pat.span);
-            pat.eq = this.want({ cls: this.builtins.eq, type }, pat.span, 'リテラルのパターン');
-            break;
-          }
+  // code-gauge-allow functionNcss 43 -- Iterative pattern typing preserves binder order and literal dictionaries in one dispatch.
+  inferPat(pattern: RPat, expected: Type): void {
+    const pending = [{ pat: pattern, type: expected }];
+    while (pending.length > 0) {
+      const { pat, type } = pending.pop() as { pat: RPat; type: Type };
+      switch (pat.k) {
+        case 'var': {
+          pat.local.type = type;
+          break;
         }
-        if (pat.negative) pat.negate = this.want({ cls: this.builtins.num, type }, pat.span, '負のリテラルのパターン');
-        break;
-      }
-      case 'con': {
-        const { type: conType, fieldTypes } = this.instantiateCon(pat.con, pat.span);
-        this.unify(conType, type, pat.span, `構成子 ${pat.con.name} のパターン`);
-        for (const [index, arg] of pat.args.entries()) this.inferPat(arg, fieldTypes[index]);
-        break;
+        case 'wild': {
+          break;
+        }
+        case 'as': {
+          pat.local.type = type;
+          pending.push({ pat: pat.pat, type });
+          break;
+        }
+        case 'lit': {
+          pat.type = type;
+          switch (pat.lit.kind) {
+            case 'int': {
+              pat.num = this.want({ cls: this.builtins.num, type }, pat.span, `リテラル ${pat.lit.value}`);
+              pat.eq = this.want({ cls: this.builtins.eq, type }, pat.span, 'リテラルのパターン');
+              break;
+            }
+            case 'frac': {
+              pat.num = this.want({ cls: this.builtins.fractional, type }, pat.span, `リテラル ${pat.lit.text}`);
+              pat.eq = this.want({ cls: this.builtins.eq, type }, pat.span, 'リテラルのパターン');
+              break;
+            }
+            case 'char': {
+              this.unify(tcon(CHAR_TYPE), type, pat.span);
+              break;
+            }
+            case 'string': {
+              this.unify(listOf(tcon(CHAR_TYPE)), type, pat.span);
+              pat.eq = this.want({ cls: this.builtins.eq, type }, pat.span, 'リテラルのパターン');
+              break;
+            }
+          }
+          if (pat.negative)
+            pat.negate = this.want({ cls: this.builtins.num, type }, pat.span, '負のリテラルのパターン');
+          break;
+        }
+        case 'con': {
+          const { type: conType, fieldTypes } = this.instantiateCon(pat.con, pat.span);
+          this.unify(conType, type, pat.span, `構成子 ${pat.con.name} のパターン`);
+          for (let index = pat.args.length - 1; index >= 0; index--) {
+            pending.push({ pat: pat.args[index], type: fieldTypes[index] });
+          }
+          break;
+        }
       }
     }
   }

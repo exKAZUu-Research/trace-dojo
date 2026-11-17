@@ -1,5 +1,6 @@
 import type { Fixity } from './entities';
 import { compileError } from './errors';
+import { RecursionBudget } from './recursionBudget';
 import type { ChainItem, Expr, Operator, Pat, Span } from './syntax';
 
 export const DEFAULT_FIXITY: Fixity = { assoc: 'infixl', prec: 9 };
@@ -33,8 +34,9 @@ export function sectionOperand(
 
 /** Resolves an operator chain by the Haskell report's algorithm, which also places prefix minus. */
 // code-gauge-allow functionCognitiveComplexity 30 -- The operator precedence algorithm of the Haskell report, including negation, reads best as one routine.
-// code-gauge-allow functionNcss 39 -- The operator precedence algorithm of the Haskell report, including negation, reads best as one routine.
+// code-gauge-allow functionNcss 40 -- The operator precedence algorithm of the Haskell report, including negation, reads best as one routine.
 export function resolveExprChain(items: ChainItem<Expr>[], span: Span, fixityOf: (op: Operator) => Fixity): Expr {
+  const recursion = new RecursionBudget();
   const tokens = items;
   let position = 0;
   const fixityAt = (item: ChainItem<Expr>): Fixity => (item.kind === 'operator' ? fixityOf(item.op) : NEGATE_FIXITY);
@@ -46,7 +48,7 @@ export function resolveExprChain(items: ChainItem<Expr>[], span: Span, fixityOf:
         throw compileError(token.span, `前置きの - は、${op1Name} の後に括弧なしでは書けません。`);
       }
       position++;
-      const operand = parseNeg(NEGATE_FIXITY, '-');
+      const operand = recursion.run(() => parseNeg(NEGATE_FIXITY, '-'));
       const negated: Expr = {
         kind: 'neg',
         expr: operand,
@@ -73,7 +75,7 @@ export function resolveExprChain(items: ChainItem<Expr>[], span: Span, fixityOf:
       }
       if (op1.prec > op2.prec || (op1.prec === op2.prec && op1.assoc === 'infixl')) return current;
       position++;
-      const right = parseNeg(op2, token.op.name);
+      const right = recursion.run(() => parseNeg(op2, token.op.name));
       current = {
         kind: 'binop',
         op: token.op,
@@ -89,8 +91,9 @@ export function resolveExprChain(items: ChainItem<Expr>[], span: Span, fixityOf:
 }
 
 // code-gauge-allow functionCognitiveComplexity 28 -- The operator precedence algorithm of the Haskell report reads best as one routine.
-// code-gauge-allow functionNcss 32 -- The operator precedence algorithm of the Haskell report reads best as one routine.
+// code-gauge-allow functionNcss 33 -- The operator precedence algorithm of the Haskell report reads best as one routine.
 export function resolvePatChain(items: ChainItem<Pat>[], span: Span, conFixity: (op: Operator) => Fixity): Pat {
+  const recursion = new RecursionBudget();
   let position = 0;
   const parseOperand = (): Pat => {
     const token = items[position];
@@ -117,7 +120,7 @@ export function resolvePatChain(items: ChainItem<Pat>[], span: Span, conFixity: 
       }
       if (op1.prec > op2.prec || (op1.prec === op2.prec && op1.assoc === 'infixl')) return current;
       position++;
-      const right = parse1(op2, token.op.name, parseOperand());
+      const right = recursion.run(() => parse1(op2, token.op.name, parseOperand()));
       current = {
         kind: 'pcon',
         con: token.op,

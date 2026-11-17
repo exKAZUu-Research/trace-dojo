@@ -817,7 +817,7 @@ test('compiler work limits contain expanding diagnostics and constraints and res
   }
 });
 
-test('type synonym dependencies compile or report cycles without overflowing Node', { timeout: 30_000 }, () => {
+test('compiler and native evaluation recursion remain bounded under Node', { timeout: 30_000 }, () => {
   const bundle = execFileSync(
     'bun',
     ['build', 'test/helpers/haskellCompilerNode.ts', '--target=node', '--packages=external'],
@@ -828,7 +828,29 @@ test('type synonym dependencies compile or report cycles without overflowing Nod
     encoding: 'utf8',
     timeout: 30_000,
   });
-  const results = z.array(z.object({ kind: z.string() }).passthrough()).parse(JSON.parse(output));
+  const resultSchema = z.object({ kind: z.string() }).passthrough();
+  const {
+    synonyms: results,
+    chains,
+    native,
+    recovery,
+  } = z
+    .object({
+      synonyms: z.array(resultSchema),
+      chains: z.array(resultSchema),
+      native: z.array(resultSchema),
+      recovery: resultSchema,
+    })
+    .parse(JSON.parse(output));
+  expect(chains).toHaveLength(9);
+  expect(chains[5]).toMatchObject({ kind: 'executed', stdout: '0\n' });
+  expect(chains[6]).toMatchObject({ kind: 'executed', stdout: '1001\n' });
+  expect(chains[0]).toMatchObject({ kind: 'executed', stdout: '100\n' });
+  expect(chains.at(-1)).toMatchObject({ kind: 'executed', stdout: '1\n' });
+  for (const result of [...chains.slice(1, 5), chains[7], ...native])
+    expect(result).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  expect(native).toHaveLength(4);
+  expect(recovery).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: 'stop' });
   expect(results).toHaveLength(4);
   for (const index of [0, 2]) {
     expect(results[index]).toMatchObject({ kind: 'executed', stdout: '1\n' });

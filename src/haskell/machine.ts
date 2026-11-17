@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 401 -- Machine states and frames share one evaluator stack.
 import { CONS_CON, NIL_CON } from './builtinTypes';
 import type { CaseCore, Core } from './core';
 import type { TypeHint } from './displayTypeHints';
@@ -5,6 +6,7 @@ import { constructorFieldHint, slotTypeHint, thunkTypeHint, typedSlot } from './
 import type { ConInfo } from './entities';
 import { type DoFrame, finishMatch, markTailSelfCall, runBlock, statementDone, unwindBlock } from './ioBlocks';
 import type { Primitive } from './primitives';
+import { RecursionBudget } from './recursionBudget';
 import type { Runtime } from './runtime';
 import {
   Closure,
@@ -103,6 +105,7 @@ export type PrimResult = Slot | TailCall;
  * Evaluation may nest (a primitive forcing a value), each level running until the stack returns to its base.
  */
 export class Machine {
+  private readonly nativeCalls = new RecursionBudget();
   readonly stack: Frame[] = [];
 
   constructor(readonly runtime: Runtime) {}
@@ -174,8 +177,12 @@ export class Machine {
     return typedSlot(new Thunk(code, env), code.displayType);
   }
 
-  // code-gauge-allow functionNcss 35 -- The main loop dispatches on the machine mode and handles limits and exceptions in one place.
   private run(start: RunStart): Slot {
+    return this.nativeCalls.run(() => this.runCore(start));
+  }
+
+  // code-gauge-allow functionNcss 35 -- The main loop dispatches on the machine mode and handles limits and exceptions in one place.
+  private runCore(start: RunStart): Slot {
     const { stack } = this;
     const base = stack.length;
     stack.push({ k: 'base' });
