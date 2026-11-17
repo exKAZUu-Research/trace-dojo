@@ -4,7 +4,7 @@ export const PRINTF_SOURCE = String.raw`module Text.Printf.Internal where
 
 import Base
 
-data UPrintf = UInteger Integer Integer | UChar Char | UString String | UDouble Double | UFloat Float
+data UPrintf = UInteger Integer Integer Char | UChar Char | UString String | UDouble Double | UFloat Float
 
 class PrintfArg a where
   formatArg :: a -> UPrintf
@@ -18,13 +18,13 @@ instance IsChar Char where
   fromChar c = c
 
 instance PrintfArg Int where
-  formatArg x = UInteger (toInteger x) 18446744073709551616
+  formatArg x = UInteger (toInteger x) 18446744073709551616 'd'
 
 instance PrintfArg Word where
-  formatArg x = UInteger (toInteger x) 0
+  formatArg x = UInteger (toInteger x) 0 'u'
 
 instance PrintfArg Integer where
-  formatArg x = UInteger x 0
+  formatArg x = UInteger x 0 'd'
 
 instance PrintfArg Double where
   formatArg x = UDouble x
@@ -100,10 +100,10 @@ parseSpec s0 args = flags False False False False False s0
         (width, r1, args1) -> case precision r1 args1 of
           (prec, r2, args2) ->
             let (mods,r3) = case args2 of
-                  (UInteger _ _:_) -> modifier r2
+                  (UInteger _ _ _:_) -> modifier r2
                   (UChar _:_) -> modifier r2
                   _ -> ("",r2)
-                left = minus || maybe False (< 0) width
+                left = maybe minus (\w -> w < 0 || minus) width
                 width' = fmap abs width
             in case r3 of
                  (c:r4) -> (Spec left plus space zero alt width' prec mods c, r4, args2)
@@ -121,30 +121,30 @@ parseSpec s0 args = flags False False False False False s0
     precision ('.':r) us = case dimension r us of
       (p, rest, remaining) -> (Just (maybe 0 id p), rest, remaining)
     precision s us = (Nothing, s, us)
-    dynamicNumber (UInteger n _) = fromInteger n
+    dynamicNumber (UInteger n _ _) = fromInteger n
     dynamicNumber (UChar c) = ord c
     dynamicNumber _ = perror "bad formatting char 'd'"
 
 formatOne :: Spec -> UPrintf -> String
-formatOne spec@(Spec minus plus space zero alt width prec mods c) u = case u of
-  UInteger n bound -> case c of
-    'd' -> pad True (signed n (digitsMin (show (abs n))))
-    'i' -> pad True (signed n (digitsMin (show (abs n))))
-    'v' -> pad True (signed n (digitsMin (show (abs n))))
-    'u' -> pad True (digitsMin (show (unsigned n bound)))
-    'x' -> pad True (prefixAlt "0x" (digitsMin (showIntAtBase 16 intToDigit (unsigned n bound) "")))
-    'X' -> pad True (prefixAlt "0X" (map toUpper (digitsMin (showIntAtBase 16 intToDigit (unsigned n bound) ""))))
-    'o' -> pad True (prefixAlt "0" (digitsMin (showIntAtBase 8 intToDigit (unsigned n bound) "")))
-    'b' -> pad True (prefixAlt "0b" (digitsMin (showIntAtBase 2 intToDigit (unsigned n bound) "")))
-    'c' -> if null mods then pad False [chr (fromInteger n)] else perror "illegal char conversion"
+formatOne spec@(Spec minus plus space zero alt width prec mods c) u = integralWidth ${BT}seq${BT} case u of
+  UInteger n bound def -> case c of
+    'd' -> field True (signed (n < 0) (digitsMin (show (abs n))))
+    'i' -> field True (signed (n < 0) (digitsMin (show (abs n))))
+    'v' -> formatOne (Spec minus plus space zero alt width prec mods def) u
+    'u' -> radix n bound 10 ""
+    'x' -> radix n bound 16 "0x"
+    'X' -> map toUpper (radix n bound 16 "0x")
+    'o' -> radix n bound 8 "0"
+    'b' -> radix n bound 2 "0b"
+    'c' -> charValue n
     _ -> badChar
   UChar ch -> case c of
-    'c' -> charValue ch
-    'v' -> charValue ch
-    _ -> formatOne spec (UInteger (toInteger (ord ch)) 0)
+    'c' -> charValue (toInteger (ord ch))
+    'v' -> charValue (toInteger (ord ch))
+    _ -> formatOne spec (UInteger (toInteger (ord ch)) 0 'd')
   UString str -> case c of
-    's' -> pad False (maybe str (\p -> take p str) prec)
-    'v' -> pad False (maybe str (\p -> take p str) prec)
+    's' -> field False ("", maybe str (\p -> take p str) prec)
+    'v' -> field False ("", maybe str (\p -> take p str) prec)
     _ -> badChar
   UDouble d -> formatReal d
   UFloat d -> formatReal d
@@ -153,13 +153,31 @@ formatOne spec@(Spec minus plus space zero alt width prec mods c) u = case u of
     formatReal d = case c of
       'v' -> formatOne (Spec minus plus space zero alt width prec mods 'g') u
       _ -> if c ${BT}elem${BT} "eEfFgG"
-             then pad True (signedDouble d (caseConvert (showFn (toLower c) (abs d))))
+             then field True (signed (d < 0 || isNegativeZero d) (caseConvert (showFn (toLower c) (abs d))))
              else badChar
     badChar = perror ("bad formatting char " ++ show c)
     digitsMin ds = case prec of
       Just p -> if p == 0 && ds == "0" then "" else replicate (p - length ds) '0' ++ ds
       Nothing -> ds
-    charValue ch = if null mods then pad False [ch] else perror "illegal char conversion"
+    charValue n = if n >= 0 && n <= 1114111 && maybe True (const False) prec && null mods
+      then field False ("", [chr (fromInteger n)]) else perror "illegal char conversion"
+    integralWidth = case u of
+      UInteger _ _ _ -> forceWidth
+      UChar _ -> forceWidth
+      _ -> ()
+    forceWidth = case prec of
+      Nothing -> ()
+      Just _ -> maybe () (\w -> w ${BT}seq${BT} ()) width
+    radix n bound base prefix = field True parts
+      where converted = unsigned n bound
+            ds = digitsMin (showIntAtBase base intToDigit converted "")
+            pre = if alt && n /= 0 then prefix else ""
+            parts = case pre of
+              "" -> converted ${BT}seq${BT} ("", ds)
+              "0" -> case ds of
+                ('0':_) -> ("", ds)
+                _ -> (pre, ds)
+              _ -> (pre, ds)
     unsigned n bound = if n < 0 then
       let offset = case mods of
             "hh" -> 256
@@ -171,9 +189,7 @@ formatOne spec@(Spec minus plus space zero alt width prec mods c) u = case u of
           converted = n + offset
       in if offset > 0 && converted >= 0 then converted else perror "bad argument"
       else n
-    prefixAlt p ds = if alt && not (null ds) && ds /= "0" && not (p == "0" && head ds == '0') then p ++ ds else ds
-    signed n ds = if n < 0 then '-' : ds else if plus then '+' : ds else if space then ' ' : ds else ds
-    signedDouble d ds = if d < 0 || isNegativeZero d then '-' : ds else if plus then '+' : ds else if space then ' ' : ds else ds
+    signed negative ds = if negative then ("-",ds) else (if plus then "+" else if space then " " else "",ds)
     caseConvert = if isUpper c then map toUpper else id
     showFn ch x = case ch of
       'e' -> showEFloat prec x ""
@@ -185,13 +201,14 @@ formatOne spec@(Spec minus plus space zero alt width prec mods c) u = case u of
       _ -> case prec of
         Nothing -> True
         Just _ -> False
-    pad numeric s = case width of
-      Nothing -> s
-      Just w -> if w <= length s then s else let n = w - length s in
-        if minus then s ++ replicate n ' '
-        else if zero && (not numeric || zeroPadding) then (if numeric then zeroPad n s else replicate n '0' ++ s)
-        else replicate n ' ' ++ s
-    zeroPad n (sign:rest) | sign ${BT}elem${BT} "+- " = sign : zeroPad n rest
-    zeroPad n ('0':base:rest) | base ${BT}elem${BT} "xXbB" = '0' : base : replicate n '0' ++ rest
-    zeroPad n s = replicate n '0' ++ s
+    field numeric (prefix, ds) =
+      let zeros = not minus && zero && (not numeric || zeroPadding)
+          natural = length prefix + length ds
+          fill = case width of
+            Just w -> if w > natural then replicate (w - natural) (if zeros then '0' else ' ') else ""
+            Nothing -> ""
+      in if minus then prefix ++ ds ++ fill
+         else if zeros then prefix ++ fill ++ ds
+         else fill ++ prefix ++ ds
+
 `;

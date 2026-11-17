@@ -586,7 +586,7 @@ export const KNOWN_LIBRARY_VALUES: Record<string, readonly string[]> = {
     'max',
     'min',
   ],
-  'Data.Tuple': ['MkSolo', 'curry', 'fst', 'getSolo', 'snd', 'swap', 'uncurry'],
+  'Data.Tuple': ['MkSolo', 'Solo', 'curry', 'fst', 'getSolo', 'snd', 'swap', 'uncurry'],
   'Data.Bool': ['&&', 'False', 'True', 'bool', 'not', 'otherwise', '||'],
   'Data.Foldable': [
     'all',
@@ -1277,7 +1277,7 @@ export const KNOWN_LIBRARY_TYPE_CHILDREN: Record<string, readonly string[]> = {
   Newline: ['LF', 'CRLF'],
   NewlineMode: ['NewlineMode', 'inputNL', 'outputNL'],
   SeekMode: ['AbsoluteSeek', 'RelativeSeek', 'SeekFromEnd'],
-  Solo: ['MkSolo'],
+  Solo: ['MkSolo', 'Solo'],
   WrappedArrow: ['WrapArrow', 'unwrapArrow'],
   WrappedMonad: ['WrapMonad', 'unwrapMonad'],
   Xor: ['Xor', 'getXor'],
