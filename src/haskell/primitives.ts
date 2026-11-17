@@ -80,18 +80,6 @@ export function listOf(items: readonly Slot[]): Value {
   return result;
 }
 
-/** Forces a whole list, returning its elements (unevaluated). */
-export function forceList(slot: Slot, runtime: Runtime): Slot[] {
-  const items: Slot[] = [];
-  let current = runtime.machine.force(slot) as ConValue;
-  while (current.con === CONS_CON) {
-    items.push(current.fields[0]);
-    current = runtime.machine.force(current.fields[1]) as ConValue;
-    runtime.spend();
-  }
-  return items;
-}
-
 export function forceString(slot: Slot, runtime: Runtime): string {
   let text = '';
   let current = runtime.machine.force(slot) as ConValue;

@@ -1,5 +1,5 @@
 import type { ClassEntity, Evidence, InstanceInfo, TypeEntity } from './entities';
-import { couldMatch, matchType, type Pred, prune, splitApp, type Type, typesEqual, typeVarsOf } from './types';
+import { couldMatch, matchType, type Pred, splitApp, type Type, typesEqual, typeVarsOf } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 
 /** The instances visible to a module: the library's, and the module's own. */
@@ -122,8 +122,4 @@ function superclassPath(cls: ClassEntity, ancestor: ClassEntity): number[] | und
 
 export function predsEqual(a: Pred, b: Pred): boolean {
   return a.cls === b.cls && typesEqual(a.type, b.type);
-}
-
-export function zonkPred(pred: Pred): Pred {
-  return { cls: pred.cls, type: prune(pred.type) };
 }

@@ -152,8 +152,3 @@ export type RBinding =
 export interface RBindGroup {
   bindings: RBinding[];
 }
-
-export function bindingName(binding: RBinding): string {
-  if (binding.k === 'pat') return binding.binders.map((binder) => binder.name).join(', ');
-  return binding.binder.kind === 'local' ? binding.binder.local.name : binding.binder.entity.name;
-}

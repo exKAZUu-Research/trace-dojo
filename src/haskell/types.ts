@@ -242,10 +242,6 @@ export interface Scheme {
   type: Type;
 }
 
-export function monoScheme(type: Type): Scheme {
-  return { kinds: [], preds: [], type };
-}
-
 export function instantiateType(type: Type, args: readonly Type[]): Type {
   return mapType(type, (node) => (node.tag === 'tgen' ? args[node.index] : node));
 }

@@ -84,7 +84,3 @@ export class TypePrinter {
     return name;
   }
 }
-
-export function showType(type: Type): string {
-  return new TypePrinter().show(type);
-}

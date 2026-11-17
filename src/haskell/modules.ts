@@ -18,8 +18,3 @@ export interface CompiledModuleInfo {
   exports: ExportTable;
   instances: InstanceInfo[];
 }
-
-/** Why a name or module the environment knows cannot be used, for the message that rejects it. */
-export interface UnsupportedInfo {
-  what: string;
-}

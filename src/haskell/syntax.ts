@@ -166,7 +166,3 @@ export interface Module {
   decls: Decl[];
   span: Span;
 }
-
-export function spanUnion(first: Span, last: Span): Span {
-  return { row: first.row, col: first.col, endRow: last.endRow, endCol: last.endCol };
-}
