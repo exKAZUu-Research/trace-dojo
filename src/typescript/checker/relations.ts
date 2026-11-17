@@ -34,6 +34,8 @@ type KeyKind = 'string' | 'number' | 'symbol';
 const MAX_RELATION_DEPTH = 100;
 const EXPANDING_SOURCE = 1;
 const EXPANDING_TARGET = 2;
+const INTERSECTION_SOURCE = 1;
+const INTERSECTION_TARGET = 2;
 /** How many times a recursive type may recur in a comparison stack before TypeScript stops expanding it. */
 const MAX_RECURSION_IDENTITY_COUNT = 3;
 
@@ -59,21 +61,24 @@ export class Relations {
     return this.isRelated(a, b, 'comparable') || this.isRelated(b, a, 'comparable');
   }
 
-  /** With `checkWeak` false, as for a member of an intersection target, skips the check of a weak target type. */
-  isRelated(source: Type, target: Type, relation: Relation, checkWeak = true): boolean {
+  /**
+   * With `INTERSECTION_TARGET` in `state`, as for a member of an intersection target, skips the check of a weak target
+   * type; with `INTERSECTION_SOURCE`, as for a member of an intersection source, infers no index signature.
+   */
+  isRelated(source: Type, target: Type, relation: Relation, state = 0): boolean {
     if (source === target) return true;
     this.c.budget.spend();
-    const key = `${relation}${checkWeak ? '' : '-member'}:${source.id}:${target.id}`;
+    const key = `${relation}-${state}:${source.id}:${target.id}`;
     const cached = this.cache.get(key);
     if (cached !== undefined) return cached;
     if (this.assumed.has(key)) return true;
-    if (isLeaf(source) && isLeaf(target)) return this.structuredRelated(source, target, relation, checkWeak);
+    if (isLeaf(source) && isLeaf(target)) return this.structuredRelated(source, target, relation, state);
     // TypeScript gives up here with "Excessive stack depth comparing types" (TS2321).
     if (this.sourceStack.length >= MAX_RELATION_DEPTH) return false;
     this.assumed.add(key);
     let result: boolean;
     try {
-      result = this.nestedRelated(source, target, relation, checkWeak);
+      result = this.nestedRelated(source, target, relation, state);
     } finally {
       this.assumed.delete(key);
     }
@@ -82,7 +87,7 @@ export class Relations {
   }
 
   /** Compares structured types on the comparison stacks, as TypeScript's `recursiveTypeRelatedTo` does. */
-  private nestedRelated(source: Type, target: Type, relation: Relation, checkWeak: boolean): boolean {
+  private nestedRelated(source: Type, target: Type, relation: Relation, state: number): boolean {
     const saved = this.expanding;
     this.sourceStack.push(source);
     this.targetStack.push(target);
@@ -94,7 +99,7 @@ export class Relations {
       // Both sides keep expanding the same recursive types, so TypeScript assumes the relation holds.
       return (
         this.expanding === (EXPANDING_SOURCE | EXPANDING_TARGET) ||
-        this.structuredRelated(source, target, relation, checkWeak)
+        this.structuredRelated(source, target, relation, state)
       );
     } finally {
       this.sourceStack.pop();
@@ -132,19 +137,20 @@ export class Relations {
 
   // code-gauge-allow functionCognitiveComplexity 24 -- Follows TypeScript's order of checks for each kind of type.
   // code-gauge-allow functionNcss 32 -- Follows TypeScript's order of checks for each kind of type.
-  private structuredRelated(source: Type, target: Type, relation: Relation, checkWeak: boolean): boolean {
+  private structuredRelated(source: Type, target: Type, relation: Relation, state: number): boolean {
     const s = regularOf(source);
     const t = regularOf(target);
     const trivial = this.trivialRelation(s, t);
     if (trivial !== undefined) return trivial;
-    if (s.kind === 'union') return this.unionSourceRelated(s, t, relation, checkWeak);
-    if (checkWeak && this.lacksWeakTypeProperty(s, t, relation)) return false;
+    if (s.kind === 'union') return this.unionSourceRelated(s, t, relation, state);
+    if (!(state & INTERSECTION_TARGET) && this.lacksWeakTypeProperty(s, t, relation)) return false;
     if (t.kind === 'union') return this.relatedToUnion(s, t, relation);
     // TypeScript checks a weak intersection as a whole, so a member whose properties are all optional need not share one.
-    if (t.kind === 'intersection') return t.types.every((member) => this.isRelated(s, member, relation, false));
+    if (t.kind === 'intersection')
+      return t.types.every((member) => this.isRelated(s, member, relation, state | INTERSECTION_TARGET));
     if (s.kind === 'intersection') {
-      if (s.types.some((member) => this.isRelated(member, t, relation))) return true;
-      return t.kind === 'object' && this.objectRelated(s, t, relation);
+      if (s.types.some((member) => this.isRelated(member, t, relation, state | INTERSECTION_SOURCE))) return true;
+      return t.kind === 'object' && this.objectRelated(s, t, relation, state);
     }
     if (s.kind === 'typeParameter') return this.typeParameterRelated(s, t, relation);
     if (s.kind === 'indexedAccess' || s.kind === 'keyof' || s.kind === 'conditional') {
@@ -154,7 +160,7 @@ export class Relations {
     if (t.kind === 'typeParameter') return relation === 'comparable' && this.constraintAdmits(s, t);
     if (t.kind === 'indexedAccess') return this.relatedToIndexedAccess(s, t, relation);
     if (t.kind === 'keyof' || t.kind === 'conditional') return false;
-    return this.relatedToConcrete(s, t, relation);
+    return this.relatedToConcrete(s, t, relation, state);
   }
 
   private typeParameterRelated(s: TypeParameter, t: Type, relation: Relation): boolean {
@@ -226,10 +232,10 @@ export class Relations {
     return constraint !== s && this.isRelated(constraint, t, relation);
   }
 
-  private unionSourceRelated(s: UnionType, t: Type, relation: Relation, checkWeak: boolean): boolean {
+  private unionSourceRelated(s: UnionType, t: Type, relation: Relation, state: number): boolean {
     return relation === 'comparable'
-      ? s.types.some((member) => this.isRelated(member, t, relation, checkWeak))
-      : s.types.every((member) => this.isRelated(member, t, relation, checkWeak));
+      ? s.types.some((member) => this.isRelated(member, t, relation, state))
+      : s.types.every((member) => this.isRelated(member, t, relation, state));
   }
 
   /** The relation that holds whatever the types' structures are, if any. */
@@ -255,7 +261,7 @@ export class Relations {
     return s.kind === 'object' && this.isRelatedToDiscriminatedUnion(s, t.types, relation);
   }
 
-  private relatedToConcrete(s: Type, t: Type, relation: Relation): boolean {
+  private relatedToConcrete(s: Type, t: Type, relation: Relation, state: number): boolean {
     switch (t.kind) {
       case 'intrinsic': {
         return this.intrinsicTarget(s, t.name, relation);
@@ -283,7 +289,7 @@ export class Relations {
         return relation === 'comparable' && isIntrinsic(s, 'string');
       }
       case 'object': {
-        return this.relatedToObject(s, t, relation);
+        return this.relatedToObject(s, t, relation, state);
       }
       default: {
         return false;
@@ -291,7 +297,7 @@ export class Relations {
     }
   }
 
-  private relatedToObject(s: Type, t: ObjectType, relation: Relation): boolean {
+  private relatedToObject(s: Type, t: ObjectType, relation: Relation, state: number): boolean {
     if (s.kind === 'intrinsic') {
       if (['null', 'undefined', 'void', 'unknown'].includes(s.name)) return false;
       // `object` has the members of `Object`.
@@ -304,9 +310,9 @@ export class Relations {
     }
     if (s.kind === 'literal' || s.kind === 'intrinsic' || s.kind === 'templateLiteral' || s.kind === 'stringMapping') {
       // A primitive has the members of its boxing interface.
-      return this.isEmptyObjectType(t) || this.objectRelated(s, t, relation);
+      return this.isEmptyObjectType(t) || this.objectRelated(s, t, relation, state);
     }
-    return s.kind === 'object' && this.objectRelated(s, t, relation);
+    return s.kind === 'object' && this.objectRelated(s, t, relation, state);
   }
 
   /**
@@ -465,7 +471,7 @@ export class Relations {
     });
   }
 
-  private objectRelated(source: Type, target: ObjectType, relation: Relation): boolean {
+  private objectRelated(source: Type, target: ObjectType, relation: Relation, state = 0): boolean {
     if (target.objectKind === 'mapped') {
       const { mapped } = target;
       // Every property of a mapped type that adds `?` is optional, so an object without members holds what it does.
@@ -490,9 +496,9 @@ export class Relations {
       this.propertiesRelated(source, sourceStructure, targetStructure, relation) &&
       this.signaturesRelated(sourceStructure.callSignatures, targetStructure.callSignatures, relation) &&
       this.signaturesRelated(sourceStructure.constructSignatures, targetStructure.constructSignatures, relation) &&
-      (!stringIndex || this.indexRelated(sourceStructure, source, stringIndex.type, 'string', relation)) &&
-      (!numberIndex || this.indexRelated(sourceStructure, source, numberIndex.type, 'number', relation)) &&
-      (!symbolIndex || this.indexRelated(sourceStructure, source, symbolIndex.type, 'symbol', relation))
+      (!stringIndex || this.indexRelated(sourceStructure, source, stringIndex.type, 'string', relation, state)) &&
+      (!numberIndex || this.indexRelated(sourceStructure, source, numberIndex.type, 'number', relation, state)) &&
+      (!symbolIndex || this.indexRelated(sourceStructure, source, symbolIndex.type, 'symbol', relation, state))
     );
   }
 
@@ -622,11 +628,13 @@ export class Relations {
     source: Type,
     target: Type,
     keyKind: KeyKind,
-    relation: Relation
+    relation: Relation,
+    state: number
   ): boolean {
     const sourceIndex = applicableIndex(structure, keyKind);
     if (sourceIndex) return this.isRelated(sourceIndex.type, target, relation);
-    if (!hasInferableIndex(source, structure)) return false;
+    // TypeScript infers no index signature for a member of an intersection, only for the intersection as a whole.
+    if (state & INTERSECTION_SOURCE || !this.hasInferableIndex(source, structure)) return false;
     for (const [name, property] of structure.properties) {
       if (!isNameOfKind(name, keyKind)) continue;
       if (property.isMethod && source.kind === 'object' && source.objectKind !== 'anonymous') continue;
@@ -634,6 +642,19 @@ export class Relations {
       if (!this.isRelated(type, target, relation)) return false;
     }
     return true;
+  }
+
+  /**
+   * Whether the properties of a type satisfy an index signature, as TypeScript's `isObjectTypeWithInferableIndex`
+   * decides: an object literal's and a type literal's do; a primitive's, a callable's, a class's, and an interface's do
+   * not, and an intersection's do when every member's do.
+   */
+  private hasInferableIndex(source: Type, structure: Structure): boolean {
+    if (source.kind === 'intersection')
+      return source.types.every((member) => this.hasInferableIndex(member, this.c.structureOf(member)));
+    if (structure.callSignatures.length > 0 || structure.constructSignatures.length > 0) return false;
+    if (source.kind !== 'object') return false;
+    return (source.objectKind !== 'interface' && source.objectKind !== 'reference') || !!source.isLiteral;
   }
 
   /**
@@ -856,17 +877,6 @@ function hasSignatures(structure: Structure): boolean {
 
 function isLeaf(type: Type): boolean {
   return type.kind === 'intrinsic' || type.kind === 'literal';
-}
-
-/**
- * Whether the properties of a type satisfy an index signature, as TypeScript's `isObjectTypeWithInferableIndex`
- * decides: an object literal's and a type literal's do; a primitive's, a callable's, a class's, and an interface's do not.
- */
-function hasInferableIndex(source: Type, structure: Structure): boolean {
-  if (structure.callSignatures.length > 0 || structure.constructSignatures.length > 0) return false;
-  if (source.kind === 'intersection') return true;
-  if (source.kind !== 'object') return false;
-  return (source.objectKind !== 'interface' && source.objectKind !== 'reference') || !!source.isLiteral;
 }
 
 function isOptionalMappedType(type: Type): boolean {
