@@ -162,6 +162,7 @@ export class Codegen {
 
   /** Registers how a module's instance's dictionary is built. */
   // code-gauge-allow functionCognitiveComplexity 18 -- Each branch fills one part of a dictionary: methods, defaults, and superclasses.
+  // code-gauge-allow functionNcss 31 -- Method/default builders and superclass frames share the registered dictionary construction plan.
   compileInstance(info: InstanceInfo, bindings: RBinding[], sourceDefined = false): void {
     for (const binding of bindings) {
       const fun = binding as Extract<RBinding, { k: 'fun' }>;
@@ -206,6 +207,7 @@ export class Codegen {
           );
         };
       }),
+      superclassSlots: superCodes.reduce((count, { size }) => count + size, 0),
       supers: superCodes.map(({ code, size }) => (_runtime: Runtime, _dict: Dict, args: Slot[]) => {
         const env = new Env(size, undefined);
         for (const [index, arg] of args.entries()) env.slots[index] = arg;

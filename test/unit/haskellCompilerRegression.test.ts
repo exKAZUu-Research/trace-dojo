@@ -975,3 +975,27 @@ test.each([' ', '\t', '\n', '\v', '\f', '\r', ' \t\r\n\v\f '])('ASCII source str
     uncaughtException: undefined,
   });
 });
+
+test('contextual dictionaries stop at execution limits within a bounded Node heap', { timeout: 30_000 }, () => {
+  const bundle = execFileSync(
+    'bun',
+    ['build', 'test/helpers/haskellDictionaryMemory.ts', '--target=node', '--packages=external'],
+    { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
+  );
+  const output = execFileSync('node', ['--max-old-space-size=512', '--input-type=module'], {
+    input: bundle,
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  const results = z
+    .array(
+      z.object({
+        name: z.string(),
+        finite: z.object({ kind: z.literal('executed'), stdout: z.string() }),
+        infinite: z.object({ kind: z.literal('limitExceeded'), limit: z.enum(['operations', 'time']) }),
+      })
+    )
+    .parse(JSON.parse(output));
+  expect(results).toHaveLength(5);
+  for (const result of results) expect(result.finite.stdout, result.name).toBe('1\n');
+});

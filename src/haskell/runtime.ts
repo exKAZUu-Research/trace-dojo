@@ -157,22 +157,22 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   }
 }
 
-/**
- * Builds an instance's dictionary: each method from the instance's implementation applied to the context's
- * dictionaries, or from the class's default applied to the dictionary itself.
- */
 function createDict(runtime: Runtime, instance: InstanceInfo, args: Slot[]): Dict {
+  const builders = dictBuilders.get(instance);
+  if (!builders) throw new Error(`The instance ${instance.cls.name} has no code`);
+  const slots = 1 + args.length + builders.methods.length + builders.supers.length + builders.superclassSlots;
+  runtime.spend(slots);
+  runtime.allocate(slots);
   const methods: Slot[] = [];
   const supers: Slot[] = [];
   const dict = new Dict(instance, methods, supers, args);
-  const builders = dictBuilders.get(instance);
-  if (!builders) throw new Error(`The instance ${instance.cls.name} has no code`);
   for (const build of builders.methods) methods.push(build(runtime, dict, args));
   for (const build of builders.supers) supers.push(build(runtime, dict, args));
   return dict;
 }
 
 export interface DictBuilders {
+  superclassSlots: number;
   methods: ((runtime: Runtime, dict: Dict, args: Slot[]) => Slot)[];
   supers: ((runtime: Runtime, dict: Dict, args: Slot[]) => Slot)[];
 }
